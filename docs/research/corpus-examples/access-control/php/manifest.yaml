@@ -32,8 +32,26 @@
     FIX_START/FIX_END block (left in place, inactive) shows the real
     corrected version: validates the id, reads $_SESSION['user_id'], and
     adds "AND o.user_id = ?" to the query for non-admins.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms the WHERE clause (line 22) has no user_id/session
+    predicate, matching the claimed CWE-639/862 gap; the commented-out
+    FIX_START block is inert (never executed). Static check: `php -l`
+    parses clean. Semgrep run with a local custom rule file (registry
+    packs p/php etc. are unreachable -- semgrep.dev:443 is blocked by this
+    environment's egress policy, confirmed via curl 403; same restriction
+    already noted elsewhere in this corpus for cwe.mitre.org) confirms the
+    raw-concat SQLi taint rule fires on line 24's mysqli_query() (the
+    file's own separately-noted, non-focal SQLi concern) and the
+    ownership-filter heuristic rule does NOT fire anywhere in the file --
+    consistent with "no ownership check" for this entry's own CWE-639/862
+    claim. Psalm taint analysis was not available (not installed; npm/pip-
+    style package installs are blocked by this environment's egress
+    policy) and eslint-plugin-security does not apply to PHP; no dynamic
+    run attempted (the fragment `require_once 'config.php'` and depends on
+    a live mysqli connection/session/DB schema not present in this
+    excerpt -- not a standalone-runnable harness).
   cwe: [CWE-639, CWE-862]
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
@@ -56,8 +74,20 @@
     an authenticated user can complete or manipulate another user's order
     by supplying its id (also raw string interpolation; SQLi is a separate
     concern not the focus here).
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review: lines 5-20 fetch/update the order and cart/product rows
+    keyed only on `$order_id`/`$_SESSION['USER_ID']` with no check that the
+    order belongs to that session's user -- matches the CWE-639/862 claim.
+    Semgrep (local custom rule, registry blocked -- see vulnerable-1.php's
+    entry for the confirmed cwe.mitre.org-pattern network restriction)
+    fires the raw-concat SQLi taint rule on every mysqli_query() call in
+    the file, confirming the noted separate SQLi concern; no ownership-
+    filter heuristic hit anywhere, consistent with the missing check.
+    No psalm-taint (not installed, blocked by egress policy). No dynamic
+    run: depends on `utility/utility.php`, a live `$con` connection and
+    `$_SESSION` state not present in this excerpt.
   cwe: [CWE-639, CWE-862]
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
@@ -79,8 +109,19 @@
     $order_id and $_SESSION['user_id'] as bind params — the ownership
     check is enforced inside the query itself, not as a separate
     after-the-fact comparison.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 24's `Database::fetchOne("... WHERE id = ?
+    AND user_id = ?", [$order_id, $_SESSION['user_id']])` -- ownership is
+    enforced in the query itself, matching the pattern. `php -l` parses
+    clean. Semgrep (local custom rule; registry blocked, see
+    vulnerable-1.php's entry) fires the parameterized-query INFO rule on
+    lines 23/33 and the ownership-filter heuristic on line 24, and does
+    NOT fire the raw-concat SQLi rule anywhere -- consistent with a clean
+    parameterized, ownership-scoped query. No psalm-taint (unavailable).
+    No dynamic run: depends on `backend/Database.php` and a live
+    `$_SESSION`, not present in this excerpt.
   cwe: [CWE-639, CWE-862]
   suggested_op: ownership_query_filter
   suggested_sink_family: db_row_by_id_lookup
@@ -103,8 +144,19 @@
     the SELECT explicitly ANDs "user_id = " . $_SESSION['user_id'] onto the
     WHERE clause, and treats a zero-row result as "Order not found" before
     allowing the cancel action to proceed.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 20's `WHERE id = $order_id AND user_id = "
+    . $_SESSION['user_id']` -- ownership check present, matching the
+    pattern and the entry's own note that the query is raw-interpolated
+    (a separate, out-of-scope SQLi concern). `php -l` parses clean.
+    Semgrep (local custom rule; registry blocked, see vulnerable-1.php's
+    entry) fires both the ownership-filter heuristic (line 20) and the
+    raw-concat SQLi rule (lines 20, 37) -- exactly the two things this
+    entry's own notes/pattern claim: correct access control, imperfect
+    SQL hygiene. No psalm-taint (unavailable). No dynamic run: depends on
+    `includes/config.php`/`functions.php` and a live `$conn`/`$_SESSION`.
   cwe: [CWE-639, CWE-862]
   suggested_op: ownership_query_filter
   suggested_sink_family: db_row_by_id_lookup

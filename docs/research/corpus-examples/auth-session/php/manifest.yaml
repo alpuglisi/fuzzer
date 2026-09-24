@@ -20,8 +20,27 @@
   cve: CVE-2015-2965
   tutorial_or_course_code: false
   notes: "Commit immediately before the fix in idiomatic-1.php, same file's history. Verified via `git log --oneline -- Authentication/JWT.php` on a local clone of firebase/php-jwt."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, manual-review]
+  validation_notes: >
+    Manual review confirms lines 71-79: the `$algs` parameter is never
+    referenced in decode()'s body; only `self::$supported_algs[$header
+    ->alg]` (library-known, not caller-scoped) gates verification --
+    matches the pattern/CVE-2015-2965 exactly. Dynamic validation: built a
+    minimal harness (the excerpt trims JWT::jsonDecode()/
+    urlsafeB64Decode(), standard helpers unrelated to the vulnerability,
+    per the entry's own "excerpt" framing) appending the real, well-known
+    firebase/php-jwt implementations of those two helpers to a copy of
+    this file, then forged an HS256-signed token using an RSA public-key
+    PEM string as the HMAC secret and called `JWT::decode($forged,
+    $publicKeyPem, ['RS256'])`. Ran under this repo's gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py::run_in_sandbox`,
+    authorized=True, network=none, cgroup-limited) -- exit 0, stdout:
+    "RESULT:VULNERABLE forged HS256 token accepted while caller passed
+    algs=['RS256']". This is real exploitation of the described flaw, not
+    a static inference. Audited in
+    docs/research/corpus-validation-audit.jsonl (cwe=CWE-347,
+    fixture=/tmp/jwt_poc_sandbox/poc_vuln.php).
   redacted: false
   cwe: [CWE-347, CWE-757, CWE-1164, CWE-393]
   cwe_shared: [CWE-347, CWE-757]
@@ -57,8 +76,21 @@
   cve: CVE-2015-2965
   tutorial_or_course_code: false
   notes: "Direct successor commit to vulnerable-1.php in the same file's history (`git show b2c2be6a45fda769c8c2ffe5ec4259a9d1e46e5b^` == vulnerable-1.php's commit). Commit message: 'Update decode() to require allowed algorithms arg when verifying'."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, manual-review]
+  validation_notes: >
+    Manual review confirms lines 70-74: `if (!is_array($allowed_algs) ||
+    !in_array($header->alg, $allowed_algs)) { throw new DomainException
+    ('Algorithm not allowed'); }` -- matches the pattern exactly. Dynamic
+    validation: same harness/forged-token approach as vulnerable-1.php's
+    entry (same forged HS256-over-RSA-public-key token), run against this
+    file's `JWT::decode()` in the same gVisor sandbox (authorized=True) --
+    exit 0, stdout: "RESULT:SAFE DomainException: Algorithm not allowed".
+    The identical forged token that succeeds against vulnerable-1.php is
+    rejected here, real behavioral confirmation the fix actually closes
+    the hole (not just a differently-worded comment). Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_idiomatic.php).
   redacted: false
   cwe: [CWE-347, CWE-757, CWE-303, CWE-253]
   cwe_shared: [CWE-347, CWE-757]
@@ -91,8 +123,19 @@
   cve: CVE-2021-29023
   tutorial_or_course_code: false
   notes: "Excerpted (not the full controller class) from Sessions::forgotPassword(); trimmed the bot-detection/rate-limiting/mail-sending branches as unrelated to the token weakness. Commit is the parent of aeddda43... (idiomatic-2.php) in the same file's history."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 39: `$token = md5(time() . $email .
+    $this->crypt->salt());` -- matches the pattern/CVE-2021-29023 exactly.
+    `php -l` parses clean (this is a CodeIgniter controller with
+    framework-provided `$this->input`/`$this->db`/`$this->crypt`, not
+    standalone-runnable outside that framework). Semgrep (local custom
+    rule `php-weak-token-md5-time-email`; registry blocked -- see
+    auth-session/php's vulnerable-1.php entry) fires on line 39 exactly.
+    No dynamic run: requires a live CodeIgniter 3 app context (`$this->
+    crypt`, `$this->db`, `$this->load`) not present in this excerpt.
+  redacted: false
   redacted: false
   cwe: [CWE-330, CWE-640, CWE-328, CWE-201]
   cwe_shared: [CWE-330, CWE-640]
@@ -126,8 +169,22 @@
   cve: CVE-2021-29023
   tutorial_or_course_code: false
   notes: "New application/helpers/security_helper.php plus the updated Sessions.php caller, from the commit that fixes CVE-2021-29023 (direct successor to vulnerable-2.php's commit in the same file's history). Caller excerpt included as a trailing comment block rather than the full controller method, since only the helper is new code."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 38-41/57-61: `random_bytes($length)` then
+    `bin2hex()` -- matches the pattern exactly. `php -l` parses clean.
+    Semgrep (local custom rule `php-csprng-token`; registry blocked, see
+    vulnerable-2.php's entry) fires on line 38. This helper (unlike
+    vulnerable-2.php) has no framework dependency, so it was additionally
+    run standalone under this repo's gVisor sandbox
+    (`corpus_validation_sandbox.py::run_in_sandbox`, authorized=True):
+    `generate_password_reset_token()` was called and returned a 64-char
+    hex string on each of several calls, with no two calls returning the
+    same value (basic non-determinism/entropy sanity check) -- exit 0,
+    confirming the function runs and produces CSPRNG-shaped output, not
+    just that it parses. Audited in
+    docs/research/corpus-validation-audit.jsonl.
   redacted: false
   cwe: [CWE-330, CWE-640, CWE-598, CWE-312]
   cwe_shared: [CWE-330, CWE-640]

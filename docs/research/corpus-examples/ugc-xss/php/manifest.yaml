@@ -24,8 +24,21 @@
     minimal class context) was copied, not the whole file -- see
     themes/p2/inc/ajax.php in the source repo for the full file. Source file
     path in the origin repo: themes/p2/inc/ajax.php.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 30: `echo $comment->comment_content;`
+    with no escaping/sanitizer call anywhere in `get_comment()` -- matches
+    the pattern exactly; lines 27-28 also confirm the CWE-703 claim
+    (`substr($comment_id, strpos($comment_id, '-') + 1)` never checks
+    `strpos()`'s return before adding 1 to it). `php -l` parses clean.
+    Semgrep (local custom rule `php-echo-unescaped-object-field`;
+    registry blocked -- semgrep.dev:443 CONNECT returns 403 via this
+    environment's egress proxy) fires on line 30, and the generic
+    `php-reflected-output-no-escape` taint rule also fires on the same
+    line. No dynamic run: depends on live WordPress functions
+    (`check_ajax_referer`, `is_user_logged_in`, `get_comment`) not
+    available outside a full WordPress install.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (this Phase 3 final batch touched this file to add a new CWE-79 pair,
@@ -72,8 +85,18 @@
     copyright line is the plugin author's own public attribution contact,
     kept verbatim as required by the MIT license's attribution term -- it is
     not third-party PII. Source file path in the origin repo: reckoning.php.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 43: `echo '<tr><td colspan="2">' .
+    wp_kses_post($comment->comment_content) . '</td></tr>';` -- matches
+    the pattern exactly. `php -l` parses clean. Semgrep (local custom
+    rule `php-wp-kses-post-present`; registry blocked, see
+    vulnerable-1.php's entry) fires on line 43, and the vulnerable-side
+    `php-echo-unescaped-object-field` rule does NOT fire anywhere in this
+    file. No dynamic run: depends on live WordPress functions
+    (`get_comments`, `get_post`, `wp_kses_post`, `esc_html`, `esc_url`)
+    not available outside a full WordPress install.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.php's migration note above -- same file). ---
@@ -112,8 +135,25 @@
     single relevant method (renderCommentHtml, comment-rendering fragment)
     was copied, not the whole file. Source file path in the origin repo:
     comment.php.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 25/28: `htmlspecialchars($comment
+    ["meta"]["uid"])` and `htmlspecialchars($comment["meta"]["name"])` --
+    matches the pattern exactly. `php -l` parses clean. Semgrep (local
+    custom rule `php-htmlspecialchars-present`; registry blocked, see
+    vulnerable-1.php's entry) fires on both lines. Dynamic validation:
+    reproduced `renderCommentHtml()` verbatim with minimal stub
+    `$this->yellow`/`getUserIcon()` dependencies and called it with a
+    comment whose `uid` was `"><script>alert(1)</script>` and whose
+    `name` was `<img src=x onerror=alert(1)>` -- run under this repo's
+    gVisor sandbox (`corpus_validation_sandbox.py::run_in_sandbox`,
+    authorized=True, network=none): exit 0, stdout confirmed both
+    payloads were rendered as `&lt;`/`&gt;`/`&quot;`-escaped text, not
+    live markup. This is real behavioral confirmation of the escaping,
+    not just a reading of the source. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_php_xss_idiomatic2.php).
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.php's migration note above -- same file). ---

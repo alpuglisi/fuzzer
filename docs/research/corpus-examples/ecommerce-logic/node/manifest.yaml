@@ -31,8 +31,21 @@
     template -- see vulnerable-2.js and vulnerable-3.js, different teams,
     same license/copyright line, genuinely different code). Source file
     path in the origin repo: server/api/checkout.js.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 12-13: `stripe.charges.create({amount:
+    req.body.price, ...})` -- matches the pattern exactly, no server-side
+    price lookup anywhere in the route. `node --check` parses clean.
+    Semgrep (local custom rule `js-stripe-client-price`; registry blocked
+    -- semgrep.dev:443 CONNECT returns 403 via this environment's egress
+    proxy) fires on line 12. eslint-plugin-security not installed (npm
+    registry blocked) -- not needed, the custom rule already gives
+    concrete confirmation of this exact shape. No dynamic run: depends on
+    a live `STRIPE_SECRET_KEY`/Stripe API (network egress + real/test
+    Stripe account), out of scope for this lab-only offline validation
+    pass; the business-logic flaw (trusting a client-posted amount) is
+    fully demonstrated statically without needing a live charge.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
   # NOTE: researched from trained knowledge, not a live MITRE lookup --
@@ -74,8 +87,15 @@
     match against the unredacted source and found nothing in the redacted
     copy actually committed here. Source file path in the origin repo:
     server/api/cart.js.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 71-78: `stripe.charges.create({amount:
+    req.body.price, ...})` inside the `/charge` route -- matches the
+    pattern. `node --check` parses clean. Semgrep (local custom rule
+    `js-stripe-client-price`; registry blocked, see vulnerable-1.js's
+    entry) fires on line 73. No dynamic run: same live-Stripe-API/network
+    dependency reason as vulnerable-1.js's entry.
   redacted: true
   cwe_shared: [CWE-840, CWE-20]
   cwe_unique: [CWE-798, CWE-522]
@@ -112,8 +132,15 @@
     (stripe-access-token rule) confirmed the match against the unredacted
     source and found nothing in the redacted copy actually committed
     here. Source file path in the origin repo: server/api/orders.js.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 8-15: `stripe.charges.create({amount:
+    req.body.price, ...})` -- matches the pattern. `node --check` parses
+    clean. Semgrep (local custom rule `js-stripe-client-price`; registry
+    blocked, see vulnerable-1.js's entry) fires on line 10. No dynamic
+    run: same live-Stripe-API/network dependency reason as vulnerable-1.js's
+    entry.
   redacted: true
   cwe_shared: [CWE-840, CWE-20]
   cwe_unique: [CWE-190, CWE-1173]
@@ -145,8 +172,20 @@
     contains order-finalization and address-lookup helpers not relevant
     to this entry's pattern). Source file path in the origin repo:
     controllers/paymentController.js.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 26-65: `totalAmount` is accumulated from
+    `item.productId.salePrice ?? item.productId.price` (DB-populated
+    field) times quantity, plus `cart.cargoFee`, and only that computed
+    `totalAmount` reaches `stripe.paymentIntents.create({amount: Math.round
+    (totalAmount * 100), ...})` -- no `req.body` price field is ever read.
+    `node --check` parses clean. Semgrep (local custom rule
+    `js-stripe-server-computed-amount`; registry blocked, see
+    vulnerable-1.js's entry) fires on line 64, and the vulnerable-side
+    `js-stripe-client-price` rule does NOT fire anywhere in this file.
+    No dynamic run: depends on a live Mongoose/MongoDB connection and
+    Stripe API, out of scope for this offline validation pass.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
   cwe_unique: [CWE-703, CWE-704]
@@ -182,8 +221,19 @@
     larger router file (product listing, category browsing, and other
     unrelated routes were omitted for size). Source file path in the
     origin repo: routes/index.js.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 41-59 (accumulating `product.price`,
+    read from `Product.findById`, into `cart.totalCost`/`cart.items[...]
+    .price`, never from `req.body`) and lines 96-100 (`stripe.
+    paymentIntents.create({amount: cart.totalCost * 100, ...})`) --
+    matches the pattern exactly, including the "accumulate-at-add-time"
+    vs. idiomatic-1.js's "recompute-at-charge-time" distinction. `node
+    --check` parses clean. Semgrep (local custom rule
+    `js-stripe-server-computed-amount`; registry blocked, see
+    vulnerable-1.js's entry) fires on line 96. No dynamic run: depends on
+    a live Mongoose/MongoDB connection, session store, and Stripe API.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
   cwe_unique: [CWE-476, CWE-390]

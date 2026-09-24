@@ -39,8 +39,28 @@
     Multiple parallel Flask examples of "URL id -> ORM lookup with no
     filter_by(user_id=current_user.id)/ownership check", contrasted inline
     against the corrected filter_by(...) form for the same route shape.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [bandit, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms the file's content matches the pattern exactly
+    (lines 15-67: parallel VULNERABLE/SAFE Flask snippets covering
+    get_or_404, db.session.get, and Flask-RESTful Resource shapes, each
+    missing/having a filter_by(user_id=...) or equivalent). `py_compile`
+    parses clean. Bandit reports zero findings, which is the CORRECT
+    result here, not a gap: per this entry's own QUALITY CAVEAT, the file
+    is a prompt-library string constant (`FLASK_IDOR_PROMPT = """..."""`)
+    -- the vulnerable/safe snippets are markdown text inside a Python
+    string literal, not executable statements bandit's AST-based analysis
+    ever sees, so "no issues identified" is expected, not a failed check.
+    Semgrep (local custom rule set; registry blocked -- semgrep.dev:443
+    CONNECT returns 403 from this environment's egress proxy) matched its
+    ownership-filter text-regex heuristic against the embedded "SAFE"
+    snippets on lines 10/28 (it operates on raw text, so it does see
+    inside the string), corroborating that the contrasted safe form is
+    present as documented. No dynamic run: there is no executable route
+    to run (illustrative text, not live code), consistent with the
+    manufactured idiomatic-1-altered.py counterpart's own design-choice
+    note about this same oddity.
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6). NOTE:
   # this entry's CWE research was done from trained knowledge, not a live
@@ -92,8 +112,25 @@
     line items) since that route's actor is the supplier, not the buyer -
     included to show the same access-control idiom applied to two
     different "ownership" relations on the same object.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [bandit, manual-review]
+  validation_notes: >
+    Manual review confirms lines 11-56 exactly: confirm_payment (line 15)
+    and confirm_completion (line 48) both check `order.user_id !=
+    current_user.id`; confirm_shipping (lines 29-32) checks supplier
+    ownership across `order.purchases` -- matches the pattern precisely.
+    `py_compile` parses clean. Bandit reports zero findings (expected --
+    no memory-safety/crypto/injection issue is being claimed here, only
+    the presence of ownership checks). The local semgrep custom rule set
+    (registry blocked, see vulnerable-1.py's entry) did not match its
+    ownership-filter heuristic here since it only looks for
+    `filter_by(...user_id...)`/`user_id = current_user`, and this file's
+    idiom is `!=`-comparison-then-early-return rather than a query-level
+    filter -- a real limitation of that quick regex heuristic, noted
+    honestly rather than claimed as a semgrep confirmation; manual review
+    is the controlling evidence here and is unambiguous. No dynamic run:
+    depends on `db`/`models.Order`/a live Flask-Login session not present
+    in this excerpt.
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-203, CWE-1050]
   cwe_rationale: >

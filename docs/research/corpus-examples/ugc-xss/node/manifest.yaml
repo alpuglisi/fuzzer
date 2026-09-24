@@ -24,8 +24,23 @@
     gitment is a real, widely-embedded GitHub-Issues-backed comment widget.
     Source file path in the origin repo: src/theme/default.js
     (renderComments function).
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 27/44: `commentItem.innerHTML =
+    \`...${comment.body_html}...\`` with no sanitizer call anywhere in
+    the function -- matches the pattern exactly; lines 28/33/37 also
+    confirm the CWE-1022 claim (`comment.user.html_url` interpolated raw
+    into `href`/`title` attributes with no URL-scheme validation). `node
+    --check` parses clean. Semgrep (local custom rule `js-xss-innerhtml`;
+    registry blocked -- semgrep.dev:443 CONNECT returns 403 via this
+    environment's egress proxy) fires on line 27. eslint-plugin-security
+    not installed (npm registry blocked) -- not needed here, the custom
+    rule already confirms the exact sink. No dynamic run: `dompurify`/
+    `jsdom` are not installed in this environment (npm install blocked),
+    so a live DOM-insertion PoC can't be run; the sink shape itself
+    (unconditional `innerHTML` assignment of unsanitized server data) is
+    unambiguous from static reading alone.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (this Phase 3 final batch touched this file to add a new CWE-79 pair,
@@ -72,8 +87,22 @@
     independent second instance of the same anti-pattern in a different,
     still-maintained codebase. Source file path in the origin repo:
     src/component/comment.jsx (render method).
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 27-32: `dangerouslySetInnerHTML={{
+    __html: comment.body_html }}` with no sanitizer call anywhere in the
+    render method -- matches the pattern exactly. Semgrep (local custom
+    rule `jsx-dangerously-set-innerhtml-raw`; registry blocked, see
+    vulnerable-1.js's entry) fires on line 27, confirming the sink lacks
+    a `DOMPurify.sanitize()` wrapper (contrast idiomatic-1.jsx, where the
+    equivalent sanitized-side rule fires instead). Plain `node --check`
+    cannot parse this file (JSX requires a transform Node doesn't do
+    natively -- confirmed: `node --check` on this file fails with
+    "Unexpected token '<'"), so semgrep's own tree-sitter-based JSX
+    parsing (which succeeded with zero parse errors) is the structural
+    check used here instead. No dynamic run: `dompurify`/`jsdom`/`react`
+    are not installed in this environment (npm install blocked).
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.js's migration note above -- same file). ---
@@ -107,8 +136,22 @@
   notes: >
     Real Q&A-style app (answers with threaded comments). Source file path in
     the origin repo: frontend/src/Riverflow/AnswerList.jsx.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 33: `dangerouslySetInnerHTML={{ __html:
+    DOMPurify.sanitize(comment.body) }}` -- matches the pattern exactly.
+    Semgrep (local custom rule `jsx-dangerously-set-innerhtml-sanitized`;
+    registry blocked, see vulnerable-1.js's entry) fires on line 33, and
+    the vulnerable-side `jsx-dangerously-set-innerhtml-raw` rule does NOT
+    fire anywhere in this file. Semgrep's JSX parse of this file
+    succeeded with zero errors (same structural-check substitute for
+    `node --check` as vulnerable-2.js's entry, since this is also a
+    `.jsx` file). No dynamic run: `dompurify`/`react` are not installed
+    in this environment (npm install blocked), so an actual sanitized-vs-
+    raw DOM-insertion comparison against a live DOMPurify can't be run
+    here; DOMPurify's own upstream test suite is the appropriate place
+    for that, not this corpus-fragment excerpt.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.js's migration note above -- same file). ---

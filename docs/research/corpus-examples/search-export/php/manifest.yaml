@@ -23,8 +23,24 @@
   license: "GPL-3.0 (copyleft -- smallest illustrative fragment kept per the plan's copyleft handling rule, not a full-file copy; upstream file is a2b2.php)"
   pattern: "multi-branch $_GET-driven filter builds a raw-concat WHERE clause reused unparameterized across 3 separate queries (count, page listing, running-balance subquery) in the same request"
   notes: "Beyond-trivial shape: one tainted filter value threaded through multiple sinks, not a single one-shot concat. Fragment extracted from a much larger page (a2b2.php); trimmed to the filter-building + 3 query sites only, consistent with GPLv3's 'smallest fragment' handling."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 21-51: `$where` is built from
+    `$_GET['f']` via raw string concatenation and reused unparameterized
+    across the count query (line 34), page listing (line 37-43), and
+    running-balance subquery (line 47-50) -- matches the pattern exactly.
+    `php -l` parses clean. Semgrep (local custom rule
+    `php-sqli-raw-concat`; registry blocked -- semgrep.dev:443 CONNECT
+    returns 403 via this environment's egress proxy) fires on lines 38
+    and 48 (the two `mysqli_query($database->dblink, "...")` call sites
+    with a `$where`-interpolated string argument; the third, the count
+    query on line 34, uses a `.`-concatenated string the taint rule's
+    exact `mysqli_query($CONN, $QUERY)` shape doesn't structurally match
+    but which is the same `$where`-interpolation confirmed by the
+    identical manual read). No dynamic run: depends on a live
+    `$database`/`$session` object and `TB_PREFIX` constant from the full
+    TravianZ app context, not present in this excerpt.
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. NOTE: researched from trained knowledge,
@@ -56,8 +72,24 @@
   license: "MIT (LICENSE file present; repo also states MIT in its README)"
   pattern: "search+filter+course params concatenated into a WHERE clause via `sanitize()` (htmlspecialchars/strip_tags only -- an XSS mitigation, NOT SQL escaping), then reused for both the paginated listing AND a CSV export ($_GET['export']=csv) -- exactly the search+export combined shape this cell targets. A separate bulk-delete path in the same file also concatenates raw POSTed IDs into a `WHERE id IN (...)` clause."
   notes: "Confirmed sanitize() (config.php) is `htmlspecialchars(strip_tags(trim($data)))` -- does not escape SQL metacharacters, so the WHERE-clause concatenation is genuinely SQLi-vulnerable despite the app calling a 'sanitize' function on every input. Full file copied (small, single-purpose page)."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 7-19: `$search`/`$filter`/`$course` are
+    passed through `sanitize()` (an XSS-only helper per the entry's own
+    already-confirmed note) and then raw-concatenated into `$where`, and
+    lines 22-23/45/47 reuse that same `$where` string for both the CSV
+    export and the paginated listing -- matches the "search+export
+    combined shape" claim exactly. Lines 36-39 confirm the separate
+    bulk-delete path: `$ids_str = implode(',', $ids)` (each element
+    intval-cast, so not itself SQLi, but with no ownership check) feeds
+    `WHERE id IN ($ids_str)` -- matches the CWE-862 unique claim. `php -l`
+    parses clean. Semgrep (local custom rule `php-sqli-raw-concat`;
+    registry blocked, see vulnerable-1.php's entry) fires on lines 23,
+    39, 45, 47 (the `$where`/`$ids_str`-interpolated query strings). No
+    dynamic run: depends on a live `$conn` connection and `config.php`
+    (which defines `sanitize()`/`requireAdmin()`/`logActivity()`) not
+    present in this excerpt.
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
@@ -90,8 +122,25 @@
   license: MIT
   pattern: "DOMDocument::loadXML() on raw user-supplied XML body ($_POST['xml']) with LIBXML_NOENT set, enabling external entity resolution (XXE, CWE-611) -- representative of the XML-report/import-parsing sink the assignment calls out (XXE in report/export template or import pipelines), kept generic since this cell did not turn up a real, permissively-licensed production report/export pipeline reaching this exact sink."
   notes: "Repo is a small, purpose-built collection of individually-licensed vulnerable-PHP teaching snippets (MIT), not a report-export application itself -- labeled here as a tutorial/reference example per the plan's tutorial-code labeling requirement, illustrating the XXE half of this cell's CWE list (CWE-89/943/611/1336) since a real, license-clean XXE-in-report-generation example was not found within this collection pass."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 8: `$doc->loadXML($xml, LIBXML_NOENT)` --
+    matches the pattern exactly. `php -l` parses clean; this is genuinely
+    the whole file and standalone-runnable. Semgrep (local custom rule
+    `php-xxe-loadxml-noent`; registry blocked -- semgrep.dev:443 CONNECT
+    returns 403 via this environment's egress proxy) fires on line 8.
+    Dynamic validation: reproduced this exact call verbatim with a
+    crafted XML payload declaring an external entity pointing at a
+    fixture file (`file:///tmp/jwt_poc_sandbox/xxe_dir/secret.txt`), run
+    under this repo's gVisor sandbox
+    (`corpus_validation_sandbox.py::run_in_sandbox`, authorized=True,
+    network=none): exit 0, stdout confirmed the entity was resolved and
+    the fixture file's contents were substituted into the parsed output
+    ("RESULT:VULNERABLE XXE succeeded, leaked file contents: ... TOP
+    SECRET xxe file contents"). This is real exploitation of the
+    described flaw. Audited in docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_xxe_vuln.php).
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
@@ -188,8 +237,26 @@
   license: Apache-2.0
   pattern: "category+search filters run through mysqli_real_escape_string() before being concatenated into a WHERE clause -- the 'escaped concat' idiom, contrasted with vulnerable-1.php/vulnerable-2.php's raw (unescaped) concat of the same shape."
   notes: "Same code shape as the vulnerable pair (string-built WHERE clause, not a query-builder/ORM) but with the values escaped before concatenation -- illustrates the idiomatic-but-still-fragile intermediate step real codebases take before adopting parameter binding, rather than a fully parameterized ideal. redacted: true -- this file hardcoded a live-looking DB host/username/password (mysqli_connect(...)); gitleaks flagged it and the three constants were replaced with REDACTED_DB_* placeholders before first commit, per the plan's 'scrub before first commit, not after' rule."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 22-29: both `$_GET['category']` and
+    `$_GET['search']` are passed through `mysqli_real_escape_string($link,
+    ...)` before being concatenated into `$where_clause` -- matches the
+    "escaped concat" pattern exactly, contrasted with vulnerable-1.php/
+    vulnerable-2.php's unescaped concat. `php -l` parses clean. Semgrep
+    (local custom rule `php-escaped-concat-sqli`; registry blocked, see
+    vulnerable-1.php's entry) fires on lines 23 and 28, confirming the
+    escaping call sites. Semgrep's generic `php-sqli-raw-concat` taint
+    rule also fires on lines 33/45 (the later `mysqli_query($link, $sql)`
+    calls using the already-escaped `$where_clause`) -- a known false-
+    positive of that heuristic (it can't see the earlier
+    `mysqli_real_escape_string()` step two variables upstream), noted
+    honestly per the "no silent pass" rule rather than silently omitted;
+    manual review of the actual escape-then-concat data flow is the
+    controlling evidence. No dynamic run: depends on a live MySQL
+    connection (config uses real, if redacted, DB credentials) not
+    appropriate to stand up for this validation pass.
   redacted: true
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---

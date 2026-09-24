@@ -660,8 +660,33 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       full reasoning. This sandbox does not itself validate any real
       corpus entry (see the still-unchecked "all pairs validated" item
       below) — it only makes that step possible.
-- [ ] Phase 3: all pairs validated (report as "N of M", per "Validated data
-      only reaches lab-generation-facing files" — never rounded up)
+- [x] Phase 3: all pairs validated (report as "N of M", per "Validated data
+      only reaches lab-generation-facing files" — never rounded up) —
+      195 of 195 manifest entries across all 18 real-collected-plus-
+      manufactured manifest files (`access-control`, `auth-session`,
+      `ecommerce-logic`, `file-handling`, `header-injection`,
+      `insecure-deserialization`, `mass-assignment`, `search-export`,
+      `ssrf`, `ssti`, `ugc-xss`, `webhook-signature`, each `node`/`php`/
+      `python` where applicable) now carry `validated: true`. The final
+      63 (the real, Phase-2-collected entries that were still `false`
+      going into this pass — `access-control`/`auth-session`/
+      `ecommerce-logic`/`file-handling`/`search-export`/`ugc-xss`) were
+      closed out in `CC-LAB-0230` (2026-09-24): semgrep (local custom
+      rule files, since the registry and semgrep.dev are unreachable
+      from this environment) plus bandit for static confirmation, and
+      gVisor-sandboxed dynamic execution for 15 of the 63 where a real
+      harness was buildable without fabricating the mechanism under
+      test; `psalm-taint`/`eslint-security` recorded as genuinely
+      unavailable (network-blocked installs) rather than claimed. All 63
+      claims were confirmed accurate against the actual source; none
+      needed correction. Two pre-existing, out-of-scope gaps surfaced by
+      this pass and deliberately left unfixed (per direct instruction —
+      not this task's job): `access-control/php`'s 4 entries still carry
+      the legacy flat `cwe:` field (a Phase-3-CWE-mapping gap, not a
+      validation gap), and `check-corpus-cwe-coverage.sh` surfaces
+      dozens of pre-existing cross-file `cwe_unique` collisions across
+      manifests this pass happened to touch (touching a manifest makes
+      the hook re-check every entry in it against the whole corpus).
 - [x] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
       (accepted/renamed/merged into `lab/safety_matrix.yaml`) — audited
       2026-09-23 against the now-CWE-complete corpus (all 12 wave-1

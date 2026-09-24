@@ -16,8 +16,22 @@
   license_note: "Public-domain-equivalent dedication; no attribution required, still recorded for provenance."
   pattern: "unrestricted upload: multer.diskStorage() configured with no fileFilter option at all, and the destination multer() instance built from it also has no fileFilter -- any content-type/extension is accepted and written under the client-supplied file.originalname"
   notes: "avatar-upload route (`/users/:user/avatar`) in a real Discourse-SSO-integrated Node/Express backend. This is the (a)-vulnerable sub-shape's clearest real-world illustration found: literally zero validation options passed to multer()."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 19-28: `multer.diskStorage()` has no
+    `fileFilter`, its `filename` callback discards the generated
+    `pseudoRandomBytes` and calls `cb(null, file.originalname)`, and
+    `multer({ storage: storage })` also has no `fileFilter` -- matches
+    the pattern exactly. `node --check` parses clean. Semgrep (local
+    custom rule set; registry blocked -- semgrep.dev:443 CONNECT returns
+    403 via this environment's egress proxy) fires
+    `js-multer-original-filename-used` on line 24 and
+    `js-multer-no-filefilter` on line 28. eslint-plugin-security not
+    installed (npm registry blocked). No dynamic run: depends on
+    `multer`/`axios`/`form-data` packages not installed in this
+    environment (npm install blocked) and a live `getLoginProfile`/`app`
+    Express instance not present in this excerpt.
   redacted: false
   cwe: [CWE-434, CWE-20, CWE-353, CWE-641]
   cwe_shared: [CWE-434, CWE-20]
@@ -55,8 +69,20 @@
   license_copyright: "Copyright (c) 2025 Kelvi"
   pattern: "allowlist + content-type check: multer's fileFilter rejects anything whose mimetype doesn't start with 'image/', and the storage filename callback additionally sanitizes file.originalname (path.basename + character allowlist regex) before deriving the extension used for the stored name"
   notes: "excerpt of the multer storage/fileFilter setup from app.js (605 lines total); the source file's own inline comments ('SECURITY: ...') mark this as a deliberate hardening pass in the original commit history, which is exactly the (a)-idiomatic contrast to vulnerable-1.js's g0v/wiselike shape."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 14-32: filename is sanitized via
+    `path.basename(file.originalname).replace(/[^a-zA-Z0-9_.-]/g, "_")`
+    before deriving `ext`, and `fileFilter` rejects anything whose
+    `mimetype` doesn't start with `"image/"` -- matches the pattern
+    exactly. `node --check` parses clean. Semgrep (local custom rule set;
+    registry blocked, see vulnerable-1.js's entry) fires
+    `js-filename-sanitized` on line 16 and
+    `js-multer-filefilter-mimetype-check` on line 27, and the
+    vulnerable-side `js-multer-original-filename-used` rule does NOT fire
+    anywhere in this file. No dynamic run: same missing-`multer`-package
+    reason as vulnerable-1.js's entry (npm install blocked).
   redacted: false
   cwe: [CWE-434, CWE-20, CWE-340, CWE-158]
   cwe_shared: [CWE-434, CWE-20]
@@ -87,8 +113,28 @@
   license_copyright: "Copyright 2018 Isaac Grynsztein"
   pattern: "path traversal / absolute-path bypass on download: req.params.path is decodeURIComponent()'d and, if path.isAbsolute() is true, passed straight to res.sendFile() with no confinement check at all; the relative branch does path.join(__dirname, file_path) which is also traversable via ../ segments"
   notes: "`/api/thumbnail/:path` route in a popular real self-hosted video-downloader app (thousands of stars). Illustrates the (b)-vulnerable sub-shape's 'absolute path supplied by the client bypasses the intended base directory' variant, distinct from php's vulnerable-2.php plain-concat variant."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 14: `path.isAbsolute(file_path) ?
+    res.sendFile(file_path) : res.sendFile(path.join(__dirname,
+    file_path))` -- matches the pattern's two-branch traversal exactly.
+    `node --check` parses clean. Semgrep (local custom rule
+    `js-path-traversal`; registry blocked, see vulnerable-1.js's entry)
+    fires on line 14. Dynamic validation: reproduced this exact function
+    body verbatim (only `__dirname` bound to a fixture "allowed_uploads"
+    dir) and called it with an attacker-supplied absolute path pointing
+    at a file in a sibling directory outside the intended base -- ran
+    under this repo's gVisor sandbox
+    (`corpus_validation_sandbox.py::run_in_sandbox`, authorized=True,
+    network=none): exit 0, stdout confirmed the out-of-directory file was
+    read and its contents returned ("RESULT:VULNERABLE served file
+    outside intended dir: .../secret_outside/passwd.txt | contents: TOP
+    SECRET outside confinement"), and separately confirmed the `../`
+    relative-join branch also escapes the base directory. This is real
+    exploitation of the described flaw. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_path_traversal_vuln.cjs).
   redacted: false
   cwe_shared: [CWE-22]
   cwe_unique: [CWE-36, CWE-23]
@@ -114,8 +160,31 @@
   license_copyright: "Copyright (c) 2025 小渔同学"
   pattern: "confined download, double-checked: isValidFilename() first rejects any filename containing '..', a path separator, or an absolute-path form (plus a strict character allowlist regex), and the resolved fs.realpath() of the joined path is separately required to startsWith() the realpath() of the confining configDir before the file is read"
   notes: "excerpt of the `/api/files/read/:filename` route from backend/server.js (505 lines total); chosen as the (b)-idiomatic counterpart because it layers a filename allowlist AND a realpath confinement check, the two most common real-world mitigations for this CWE-22 shape."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, manual-review]
+  validation_notes: >
+    Manual review confirms lines 13-47: `isValidFilename()` rejects `..`/
+    path separators/absolute forms plus a character allowlist, and the
+    resolved `fs.realpath()` is separately required to `startsWith()`
+    `configDir`'s own realpath -- matches the pattern exactly. `node
+    --check` parses clean. Semgrep's generic `js-path-traversal` taint
+    rule (local rule set; registry blocked, see vulnerable-2.js's entry)
+    DOES fire on the `fs.readFile`-family calls here, but that is a false
+    positive of a source/sink-shape heuristic that can't see the
+    realpath-confinement check in between -- noted honestly rather than
+    silently omitted, per the "no silent pass" rule, and not counted as a
+    semgrep confirmation. Dynamic validation is the controlling evidence
+    instead: reproduced this file's `isValidFilename`/realpath-confinement
+    logic verbatim and replayed BOTH of vulnerable-2.js's own successful
+    attack strings (the same absolute path, the same `../` traversal)
+    against it, under the same gVisor sandbox run -- both were rejected
+    with `{"status":400,"error":"Invalid filename"}` before any
+    filesystem read was attempted (exit code reflects an unrelated,
+    read-only-sandbox permission error on a later, non-security-relevant
+    positive-control write attempt, not a failure of the confinement
+    checks under test, which both passed). Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_path_traversal_safe.cjs).
   redacted: false
   cwe: [CWE-22, CWE-41, CWE-171]
   cwe_shared: [CWE-22]

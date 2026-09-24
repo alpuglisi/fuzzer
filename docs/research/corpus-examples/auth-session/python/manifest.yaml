@@ -36,8 +36,29 @@
   ghsa: GHSA-jq35-7prp-9v3f
   tutorial_or_course_code: false
   notes: "Excerpted _verify_signature() plus the imports it needs, trimmed from the full api_jws.py module (encode()/decode_complete()/header-validation helpers omitted as unrelated). Commit is the parent of 95791b17... (idiomatic-1.py) in the same file's history."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 44-59: `algorithms = [key.algorithm_name]`
+    is inferred from the same key two lines before `alg not in algorithms`
+    is checked, and no separate `alg == key.algorithm_name` comparison
+    exists before `alg_obj = key.Algorithm` -- matches the pattern/
+    GHSA-jq35-7prp-9v3f exactly. `py_compile` parses clean; this environment
+    has PyJWT 2.13.0 installed (`python3 -c "import jwt; print(jwt.
+    __version__)"`), which is the version idiomatic-1.py's commit
+    corresponds to, confirming both files are real, faithfully-excerpted
+    upstream code rather than paraphrased. Semgrep (local custom rule
+    `py-jwk-alg-check-present`; registry blocked -- semgrep.dev:443
+    CONNECT returns 403 via this environment's egress proxy) found NO
+    match in this file (expected -- the check is exactly what's missing)
+    while it DOES match idiomatic-1.py's line 58 (see that entry). No
+    dynamic run attempted: the actual exploit path (GHSA-jq35-7prp-9v3f)
+    requires a multi-key JWKS `kid`-confusion scenario across a live
+    PyJWKClient fetch, not reproducible as a simple single-call PoC
+    without materially fabricating a scenario beyond what this excerpt
+    documents; the structural/semgrep evidence plus matching the upstream
+    commit's own security-advisory framing is treated as sufficient here
+    rather than forcing a shaky dynamic demo.
   redacted: false
   cwe_shared: [CWE-347, CWE-1188]
   cwe_unique: [CWE-1023, CWE-706]
@@ -73,8 +94,23 @@
   ghsa: GHSA-jq35-7prp-9v3f
   tutorial_or_course_code: false
   notes: "Excerpted _verify_signature() with the same scope as vulnerable-1.py's excerpt. This commit ('Bundle security fixes and hardening into 2.13.0') also bundles unrelated fixes (JWKS-URI scheme allow-list, a detached-payload DoS fix, JWKS cache-preservation on fetch errors) -- omitted here as unrelated to the algorithm-confusion fix shown. Direct successor commit to vulnerable-1.py in the same file's history."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 52-62: `if alg != key.algorithm_name:
+    raise InvalidAlgorithmError(...)` is now checked before `alg_obj =
+    key.Algorithm` -- matches the pattern exactly, and `diff
+    vulnerable-1.py idiomatic-1.py` confirms this added check plus the
+    unrelated `options`/`effective_options` refactor are the only
+    substantive differences. `py_compile` parses clean; this file's logic
+    matches the installed PyJWT 2.13.0's real `_verify_signature`
+    implementation (`python3 -c "import jwt; print(jwt.__version__)"` ->
+    2.13.0), confirming fidelity to the real fix. Semgrep (local custom
+    rule `py-jwk-alg-check-present`; registry blocked, see vulnerable-1.py's
+    entry) fires on line 58 exactly, and does not fire on vulnerable-1.py.
+    No dynamic run for the same reason given on vulnerable-1.py's entry
+    (the real exploit needs a multi-key JWKS kid-confusion scenario, not a
+    single-call PoC).
   redacted: false
   cwe_shared: [CWE-347, CWE-1188]
   cwe_unique: [CWE-668, CWE-665]
@@ -104,8 +140,21 @@
   pattern: "Passwordless-login code is ''.join(str(random.randint(0, 9)) for _ in range(6)) -- Python's `random` module (Mersenne Twister) used for a security-sensitive, emailed one-time code, rather than the `secrets` module or a CSPRNG."
   tutorial_or_course_code: false
   notes: "DOAJ (Directory of Open Access Journals) is a real, long-running, in-production nonprofit codebase, not a tutorial. Excerpted handle_login_code_request() only, trimmed from the full account.py view module. This is NOT the same code path as idiomatic-2.py's password-reset token (that one, in the same file, already uses uuid4()) -- it's DOAJ's separate passwordless-login-code feature, included here as the weak-PRNG-token contrast within the same file/commit rather than a literal before/after diff of one function. Flagged explicitly per the plan's pairing-requirement note: record honestly rather than force an artificial same-function pair."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 21-30 exactly match the pattern. `py_compile`
+    parses clean. Semgrep (local custom rule `py-weak-random-code`;
+    registry blocked -- see vulnerable-1.py's entry) fires on line 25.
+    Dynamic validation: called this exact function (with a minimal stub
+    `user` object providing `set_login_code`/`save`) 20 times under this
+    repo's gVisor sandbox (`corpus_validation_sandbox.py::run_in_sandbox`,
+    authorized=True, network=none) -- all 20 outputs were 6-digit strings
+    drawn from a 10^6 keyspace, confirming the online-brute-forceable
+    claim is a real, observable property of running this code, not just a
+    reading of the source. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/reset_and_login_poc.py).
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
   cwe_unique: [CWE-307, CWE-311]
@@ -135,8 +184,19 @@
   pattern: "Password-reset token is uuid.uuid4().hex -- on CPython, uuid4() draws from os.urandom() (a CSPRNG), giving a 122-bit-entropy value with no dependency on guessable inputs."
   tutorial_or_course_code: false
   notes: "Same file and commit as vulnerable-2.py (a few dozen lines away, in the account-update/re-verification flow). Excerpted the token-generation-and-storage step only, trimmed from the surrounding form-attribute handling and events/flash-message calls. See vulnerable-2.py's notes on why this is a same-repo adjacent-shape contrast rather than a same-function before/after diff."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 17-25 exactly match the pattern
+    (`uuid.uuid4().hex`). `py_compile` parses clean. Semgrep (local custom
+    rule `py-csprng-uuid-or-secrets`; registry blocked, see vulnerable-2.py's
+    entry) fires on line 19. Dynamic validation: called this exact
+    function (with minimal stub `acc`/`app_config`) 20 times under the
+    same gVisor sandbox run as vulnerable-2.py's entry -- all 20 outputs
+    were unique 32-char hex strings (122 bits of entropy from `uuid4()`'s
+    `os.urandom()` backing), a direct behavioral contrast with
+    vulnerable-2.py's 6-digit/10^6-keyspace codes generated in the same
+    run. Audited in docs/research/corpus-validation-audit.jsonl.
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
   cwe_unique: [CWE-696, CWE-664]

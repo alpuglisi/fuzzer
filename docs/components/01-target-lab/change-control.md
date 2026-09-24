@@ -3,6 +3,105 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0230 — Validate the 63 remaining real-collected corpus entries (63 of 63) across access-control/auth-session/ecommerce-logic/file-handling/search-export/ugc-xss (2026-09-24)
+- Change: per `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Pair generation"/
+  validation methodology, ran the two-step validation (structural
+  confirmation that the pattern/cwe_rationale claim matches the actual
+  code, then a behavioral or static-tool check per the plan's tool list)
+  against all 63 `validated: false` real, collected-in-Phase-2 entries
+  (not the already-`validated: true` manufactured pairs) across 18
+  manifest files: `access-control/{node,php,python}` (4,4,2),
+  `auth-session/{node,php,python}` (4,4,4), `ecommerce-logic/{node,php,
+  python}` (5,2,3), `file-handling/{node,php,python}` (4,4,4),
+  `search-export/{node,php,python}` (3,4,3), `ugc-xss/{node,php,python}`
+  (3,3,3). Tool availability confirmed at the start: `semgrep` and
+  `bandit` installed; `psalm` (PHP taint) and `eslint-plugin-security`
+  (Node) NOT installed and could not be installed (npm/pip registry
+  access blocked by this environment's egress policy, same restriction
+  already logged for `semgrep.dev`'s registry — confirmed via `curl`
+  returning a 403 from the egress proxy on `CONNECT semgrep.dev:443`).
+  Where the plan calls for those specific tools, fell back to `semgrep`
+  (via ~40 hand-written local custom rule files, since the registry packs
+  `p/security-audit`/`p/php`/etc. are also unreachable) plus
+  `manual-review`, recorded honestly rather than claiming an unavailable
+  tool ran. For genuinely standalone-runnable fragments (or where a
+  minimal harness could be built without fabricating the mechanism under
+  test), also exercised the vulnerable/idiomatic sides dynamically via
+  `fuzzlab/tools/corpus_validation_sandbox.py::run_in_sandbox`
+  (`authorized=True`, gVisor, network=none) — 15 of the 63 entries got a
+  real dynamic confirmation this way (forged JWTs accepted/rejected,
+  path-traversal payloads served/blocked, XXE entity resolution
+  succeeding/failing, weak-vs-CSPRNG token generation compared, a
+  Jinja2 `|safe` XSS payload rendered live vs. autoescaped, an
+  HTML-escaping comparison, and a `hasattr()`-allowlist type-confusion
+  reproduction); the remaining 48 were static-only (semgrep custom rule
+  and/or bandit, layered with manual-review), each with an honest note
+  on why a dynamic run wasn't attempted (missing framework/package
+  context this environment can't install, or — for two ecommerce-logic
+  TOCTOU/race-condition entries — a mechanism that genuinely needs
+  concurrent multi-request contention against a live DB, not a
+  single-process sandbox run). All 63 entries' claims were confirmed
+  accurate against the actual source; none needed correction ("no silent
+  pass" — no entry's pattern/cwe text was found to misdescribe its code).
+  Every entry got `validated: true`, a `validated_by:` list drawn from
+  the `dynamic|semgrep|bandit|manual-review` vocabulary (`psalm-taint`/
+  `eslint-security` never claimed, per their confirmed unavailability),
+  and a `validation_notes:` field recording exactly what ran and what it
+  found. No `cwe`/`cwe_shared`/`cwe_unique`/`cwe_rationale` field was
+  touched by this change.
+- Impact (other components / project): corpus-research reference
+  material only (`docs/research/corpus-examples/*/manifest.yaml`) —
+  read by future generator/labgen planning work as illustrative pairs,
+  never served by the lab app itself and not wired into
+  `lab/safety_matrix.yaml` by this change (per the plan's own "validated
+  data only reaches lab-generation-facing files" rule, this pass makes
+  these 63 entries *eligible* for a future such handoff, but does not
+  perform one). Nothing under `lab/` or the generator was read or
+  touched. No impact on any other component.
+- Risk (level; mitigation or accepted-risk justification): low. This
+  change only edits `docs/research/corpus-examples/*/manifest.yaml`
+  (adding `validated`/`validated_by`/`validation_notes` fields) plus this
+  change-control entry, `CHANGELOG.md`, and
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Status section. One accepted-risk
+  note: running `check-corpus-cwe-coverage.sh` after this change (required
+  since it touched all 18 manifests) surfaces pre-existing state this
+  change did not create or touch: `access-control/php`'s 4 entries still
+  carry the legacy flat `cwe:` field with no `cwe_unique:`/`cwe_shared:`
+  split (a Phase-3-CWE-mapping gap, not a validation gap), and dozens of
+  pre-existing cross-file `cwe_unique` collisions exist across manifests
+  this change happened to touch (touching a manifest makes the hook
+  re-check every entry in it against the whole corpus, not just the
+  entries actually edited). Per direct instruction for this pass ("if you
+  spot a pre-existing collision unrelated to your task, leave it and
+  mention it rather than scope-creeping into fixing it"), none of these
+  were touched — flagged here and in the final report instead. The hook
+  therefore exits non-zero on this branch; that non-zero is pre-existing
+  CWE-assignment debt, not a defect this change introduced.
+- Deliverables:
+  - [x] All 63 target entries validated (`validated: true` +
+        `validated_by:` + `validation_notes:`) — 63 of 63, done.
+  - [x] Local custom semgrep rule files (PHP/JS-TS/Python; registry
+        unreachable) written and run against every entry with a
+        syntactic sink shape — done.
+  - [x] `bandit` run against every Python entry — done (0 false
+        positives/negatives against the known-correct pairing; its
+        dedicated `B610:django_extra_used` rule independently confirmed
+        `search-export/python/vulnerable-1.py`'s CWE-89 claim).
+  - [x] `php -l` / `node --check` / `py_compile` structural parse checks
+        on every entry (or, for two bare-method PHP excerpts and JSX
+        files `node --check` can't parse, a minimal class-wrapper harness
+        / semgrep's own tree-sitter JSX parse used instead) — done.
+  - [x] Dynamic gVisor-sandboxed validation for the 15 entries where a
+        harness was genuinely buildable without fabricating the
+        mechanism under test — done, all recorded in
+        `docs/research/corpus-validation-audit.jsonl`.
+  - [x] `docs/VULN_CORPUS_EXPANSION_PLAN.md` Status line updated to "63
+        of 63 pairs validated" and checked — done.
+  - [ ] Effectiveness: pending — a future session should spot-check a
+        sample of the 63 `validation_notes:` entries (especially the 15
+        dynamic ones) before this corpus material is acted on for a real
+        `lab/safety_matrix.yaml`/module-template handoff.
+
 ### CC-LAB-0229 — Manufacture final 10 corpus pairs (insecure-deserialization/search-export/ssrf/ssti/ugc-xss/webhook-signature), closing out the manufacturing plan + migrate node/php/python manifests to cwe_shared/cwe_unique + fix 3 pre-existing cross-file CWE collisions (2026-09-24)
 - Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
   table, manufactured one additional pair for each of the plan's final 10

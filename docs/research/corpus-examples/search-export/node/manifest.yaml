@@ -20,8 +20,25 @@
   license: Apache-2.0
   pattern: "ORM/query-builder MISUSE, not raw-concat-everywhere: `filterColumns` values are correctly parameter-bound ($1, $2, ... via a `values` array) into the WHERE clause, but `req.query.sort_field`/`req.query.sort_dir` are interpolated RAW into the ORDER BY clause with no allowlist check against the same QUERY_DICTIONARY the filter path already validates against -- a classic 'half the query is parameterized, the sort/order field is forgotten' real-world SQLi bug shape (ORDER-BY injection), exactly the 'beyond the trivial case' shape this cell's assignment note asked to prioritize."
   notes: "Salesforce's own open-source package-manager tool; large, real production codebase (not a tutorial). The same bug shape (safe WHERE param-binding + unsafe raw ORDER BY concat) recurs across sibling files in this repo (api/orggroups.js, api/packages.js, api/upgrades.js, api/licenses.js, api/filters.js) -- only orgs.js was collected as the representative example per the plan's 'stop early once additional candidates re-show the same shape' guidance."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 81-133: `filterColumns` push
+    `$${values.length}`-style bound placeholders into `whereParts` (real
+    parameterization), while line 130's `sort = \`ORDER BY ${orderByField
+    || "id"} ${orderByDir || "desc"}\`` interpolates the request-derived
+    sort field/direction raw into the final query string with no
+    allowlist check against `QUERY_DICTIONARY` -- matches the pattern
+    exactly (half-parameterized query, ORDER BY forgotten). `node --check`
+    parses clean. Semgrep (local custom rule `js-orderby-raw-interpolation`;
+    registry blocked -- semgrep.dev:443 CONNECT returns 403 via this
+    environment's egress proxy) fires on line 130, and the `values`-array
+    WHERE-clause parameterization is separately confirmed by the
+    `js-sqli-parameterized` INFO rule firing on the `db.query(...,
+    values)` calls. No dynamic run: depends on a live PostgreSQL
+    connection (`../util/pghelper`) and several sibling modules (`./
+    filters`, `../api/orggroups`, `../api/sfdcconn`) not present in this
+    excerpt.
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. NOTE: researched from trained knowledge,
@@ -70,8 +87,27 @@
   license: MIT
   pattern: "SSTI in a PDF/HTML report-generation pipeline (CWE-1336): user-authored report-editor content (`elementObj.content`) is compiled AS a Handlebars template via `extendedHandlebars.compile(content)` (with `@handlebars/allow-prototype-access` enabled, widening the blast radius) and then executed against the report's data object, rather than being treated as literal template data."
   notes: "File trimmed from the upstream ~3080-line api.report.server.controller.js to the imports plus the single `_getElement` function that contains the SSTI-relevant compile/execute call, per the source-quality bar (the full file is a real production report builder, not a disk dump, but copying all ~3000 lines for one illustrative sink would bloat this corpus well past its per-example intent). No license-clean idiomatic counterpart (e.g. the same app rendering user content as data into a FIXED precompiled template) was found in this repo within this collection pass -- recorded as the vulnerable-only half of this shape; see php/manifest.yaml's XXE entry for the same kind of one-sided coverage on a different CWE in this cell."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 36/78-79: `extendedHandlebars =
+    allowInsecurePrototypeAccess(Handlebars)` and `const template =
+    extendedHandlebars.compile(content)` where `content` is
+    `elementObj.content` (user-editor-authored, not a fixed template) --
+    matches the pattern/CWE-1336 exactly; the imported `escapeHtml`/
+    `sanitizeHtml` helper is indeed never called anywhere in
+    `_getElement()`'s "p" branch (confirmed via
+    `grep -n escapeHtml vulnerable-2.js`, only the definition and export
+    lines match), confirming the CWE-79 unique claim. `node --check`
+    parses clean. Semgrep (local custom rule
+    `js-handlebars-compile-user-content`; registry blocked, see
+    vulnerable-1.js's entry) fires on line 78. No dynamic run: `handlebars`/
+    `@handlebars/allow-prototype-access`/`sanitize-html` are not installed
+    in this environment (npm install blocked by egress policy), so this
+    excerpt cannot actually be executed; this entry's own notes already
+    record it as the vulnerable-only half of this shape (no idiomatic
+    counterpart in this cell), so no comparative dynamic check applies
+    either.
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
@@ -182,8 +218,24 @@
   license: "MIT (declared explicitly in the repository's own README under a 'Licença' section: 'Distribuído sob a licença MIT'; no separate LICENSE file is present in the repo, so this is a declared-in-documentation license rather than a GitHub-detected LICENSE file, per the plan's 'no LICENSE file AND no license declared' skip condition -- a license IS declared here, so this repo was not skipped)"
   pattern: "multi-field book-search endpoint (title/author/category/publisher/language/year/availability) builds a `where[]` array of `knex.raw()`-compatible placeholder fragments ('col LIKE ?', 'col = ?') with a parallel `params[]` array, joined with ' AND ' and passed through knex.raw(sql, params) -- every user-controlled value stays a bound parameter even though the WHERE clause itself is assembled dynamically from up to 6 optional filters."
   notes: "Directly contrasts with vulnerable-1.js's mixed pattern: this file parameterizes EVERY dynamic piece of the query (filters AND the LIMIT/OFFSET values), including no unparameterized sort/order field (ordering is fixed: `ORDER BY l.titulo`), avoiding the exact gap vulnerable-1.js has."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 15-59: every `where.push(...)` fragment
+    uses a `?` placeholder with the matching value pushed onto `params[]`
+    (never string-interpolated into the SQL text), `ORDER BY l.titulo` is
+    a fixed literal (no field/direction taken from the request at all),
+    and `LIMIT ? OFFSET ?` is also parameter-bound -- matches the pattern
+    exactly, and directly avoids vulnerable-1.js's own gap. `node --check`
+    parses clean. Semgrep (local custom rule set; registry blocked, see
+    vulnerable-1.js's entry) found NO `js-orderby-raw-interpolation` hit
+    anywhere in this file (the vulnerable-side rule), confirming the
+    absence of the flaw; the file's `?`-placeholder style isn't matched
+    by the JS `js-sqli-parameterized` INFO rule (which targets a
+    different driver-call shape), so that rule is not claimed here --
+    manual line-by-line confirmation of every dynamic value's binding is
+    the controlling evidence. No dynamic run: depends on a live
+    `../database`/knex DB connection not present in this excerpt.
   redacted: false
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---

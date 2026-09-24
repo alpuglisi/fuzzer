@@ -35,8 +35,25 @@
   ghsa: GHSA-8cf7-32gw-wr33
   tutorial_or_course_code: false
   notes: "Full, unmodified verify.js at the commit immediately before the fix in idiomatic-1.js, same file's history. This is the library's own module, not example/tutorial code -- it's the dependency millions of Node auth stacks import directly."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 120-140: `if (!hasSignature &&
+    !options.algorithms) { options.algorithms = ['none']; }` followed by
+    `jws.verify(jwtString, decodedToken.header.alg, secretOrPublicKey)` --
+    exactly the documented CVE-2015-9235/GHSA-8cf7-32gw-wr33 alg:none
+    behavior. `node --check` parses clean. Semgrep (local custom rule
+    `js-jwt-alg-none-default`; registry blocked -- semgrep.dev:443 CONNECT
+    returns 403 via this environment's egress proxy, same restriction
+    already documented for cwe.mitre.org elsewhere in this corpus) fires
+    on line 123 exactly. eslint-plugin-security not installed (npm
+    registry blocked) -- not needed here since the custom semgrep rule
+    already gives concrete confirmation. No dynamic PoC run: this
+    module's own `jws` dependency is not installed in this environment
+    (npm install blocked), so the library cannot actually be exercised
+    end-to-end here; the GHSA advisory ID already on this entry is
+    independent, pre-existing confirmation of exploitability.
+  redacted: false
   redacted: false
   cwe_shared: [CWE-347, CWE-1188]
   cwe_unique: [CWE-636, CWE-807]
@@ -72,8 +89,21 @@
   ghsa: GHSA-8cf7-32gw-wr33
   tutorial_or_course_code: false
   notes: "Full, unmodified verify.js at the direct successor commit to vulnerable-1.js in the same file's history (`git show 834503...^` == vulnerable-1.js's commit). Diff between the two files is exactly one changed line (`git diff` confirmed locally)."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review + `diff vulnerable-1.js idiomatic-1.js` confirms exactly
+    one changed line, matching the entry's own claim: line 120-121 now
+    `return done(new JsonWebTokenError('please specify "none" in
+    "algorithms" to verify unsigned tokens'));` instead of the silent
+    `options.algorithms = ['none']` assignment. `node --check` parses
+    clean. Semgrep (local custom rule `js-jwt-alg-none-requires-optin`;
+    registry blocked, see vulnerable-1.js's entry) fires on line 121
+    exactly, and the vulnerable-side rule (`js-jwt-alg-none-default`) does
+    NOT fire on this file -- confirming the fix removed exactly the
+    claimed unsafe default. No dynamic run for the same `jws`-dependency-
+    unavailable reason as vulnerable-1.js.
+  redacted: false
   redacted: false
   cwe_shared: [CWE-347, CWE-1188]
   cwe_unique: [CWE-758, CWE-704]
@@ -105,8 +135,21 @@
   pattern: "express-session `secret` (the HMAC key that signs the session-ID cookie) is Math.random().toString(36).substring(2) -- a non-cryptographic PRNG output used as a security-critical secret."
   tutorial_or_course_code: true
   notes: "HubSpot's own official OAuth quickstart/reference sample (real README, actively maintained, last pushed within the plan's recency window). Excerpted the session middleware setup only; the surrounding OAuth token-exchange and HubSpot API-call code was omitted as unrelated to the session-secret weakness."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 26: `secret: Math.random().toString(36)
+    .substring(2)` inside the `session({...})` config -- matches the
+    pattern exactly. `node --check` parses clean. Semgrep (local custom
+    rule `js-weak-random-secret`; registry blocked, see auth-session
+    node/vulnerable-1.js's entry) fires on line 26 exactly. No dynamic
+    run: `express-session`/`dotenv` are not installed (npm install
+    blocked by egress policy), so this excerpt cannot be started as a
+    live server; the CWE-330/338 claim itself does not depend on runtime
+    behavior (Math.random()'s non-cryptographic nature is a
+    library/language fact, not something that needs to be observed at
+    runtime to confirm).
+  redacted: false
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
   cwe_unique: [CWE-1391, CWE-323]
@@ -135,8 +178,18 @@
   pattern: "express-session `secret` (and the cookie-parser signing secret) is crypto.randomBytes(...).toString('hex') -- Node's CSPRNG -- instead of Math.random()."
   tutorial_or_course_code: true
   notes: "Auth0's own official blog-companion sample repo for an OIDC web-app walkthrough. Not the same repo as vulnerable-2.js (no naturally-occurring before/after commit pair was found for the HubSpot sample), so this is a cross-repo contrast of the same shape rather than a same-file before/after diff -- both sides are real, independently-published, currently-maintained code. Excerpted the session/cookie-parser setup only."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 22/25: `cookieParser(crypto.randomBytes
+    (16).toString('hex'))` and `secret: crypto.randomBytes(32)
+    .toString('hex')` -- both CSPRNG-derived, matching the pattern. `node
+    --check` parses clean. Semgrep (local custom rule `js-csprng-secret`;
+    registry blocked, see vulnerable-1.js's entry) fires on both lines 22
+    and 25, and the vulnerable-side `js-weak-random-secret` rule does NOT
+    fire anywhere in this file. No dynamic run: `express-session`/
+    `cookie-parser`/`body-parser` are not installed (npm blocked).
+  redacted: false
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
   cwe_unique: [CWE-614, CWE-1321]

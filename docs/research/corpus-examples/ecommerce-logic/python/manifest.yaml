@@ -37,8 +37,19 @@
     once additional candidates are just re-showing the same
     implementation shape" guidance. Source file path in the origin repo:
     POSserver/payment/views.py.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 17-22: `stripe.Charge.create(amount=
+    request.POST.get("amount", ""), currency=request.POST.get("currency",
+    ""), ...)` -- matches the pattern exactly, no server-side order/cart
+    lookup anywhere in the view. `py_compile` parses clean. Bandit reports
+    zero findings (expected -- this is a business-logic trust issue, not
+    a memory-safety/crypto/subprocess pattern bandit targets). Semgrep
+    (local custom rule `py-stripe-client-amount`; registry blocked --
+    semgrep.dev:443 CONNECT returns 403 via this environment's egress
+    proxy) fires on line 17. No dynamic run: depends on a live Stripe API
+    key/network call, out of scope for this offline validation pass.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
   # NOTE: researched from trained knowledge, not a live MITRE lookup --
@@ -80,8 +91,26 @@
     shopping_payment/successful_payment views not relevant to this
     entry's pattern). Source file path in the origin repo:
     cart/views.py.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 26/54-55: `coupon.is_valid()` is checked,
+    then (after unrelated cart/discount work) `coupon.usage_count += 1`
+    followed by `coupon.save()`, with no `select_for_update()`,
+    `F()` expression, or `transaction.atomic()` anywhere in the function
+    -- matches the pattern/CWE-362/367 exactly. `py_compile` parses clean.
+    Bandit reports zero findings (expected -- a TOCTOU business-logic
+    race is not in bandit's rule set). Semgrep (local custom rule
+    `py-coupon-plain-increment-no-lock`; registry blocked, see
+    vulnerable-1.py's entry) fires on line 54, and the safe-pattern rule
+    `py-select-for-update-present` does NOT fire anywhere in this file --
+    confirming the missing lock. No dynamic run: demonstrating the actual
+    race needs concurrent requests against a live, lockable Django/DB
+    setup under real contention, not reproducible as a single-process
+    gVisor-sandboxed script; static + manual confirmation of the missing
+    synchronization primitive is the practical evidence for this TOCTOU
+    class (same reasoning as ecommerce-logic/php's vulnerable-1.php
+    entry).
   redacted: false
   cwe_shared: [CWE-362, CWE-367]
   cwe_unique: [CWE-662, CWE-664]
@@ -127,8 +156,21 @@
     pattern; process_order()/process_payment() were chosen as the
     clearest, most self-contained illustration). Source file path in the
     origin repo: orders/views.py.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 20-41 (`order.total` computed from
+    `cart.subtotal`/shipping/tax inside `transaction.atomic()`, order
+    items priced from `cart_item.product.price`) and lines 69-70
+    (`stripe.PaymentIntent.create(amount=int(order.total * 100), ...)`)
+    -- matches the pattern exactly, no `request.POST` amount field
+    anywhere. `py_compile` parses clean. Bandit reports zero findings
+    (expected). Semgrep (local custom rule `py-stripe-server-computed-
+    amount`; registry blocked, see vulnerable-1.py's entry) fires on line
+    69, and the vulnerable-side `py-stripe-client-amount` rule does NOT
+    fire anywhere in this file. No dynamic run: depends on a live
+    Django ORM/DB session and Stripe API, out of scope for this offline
+    pass.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
   cwe_unique: [CWE-681, CWE-696]

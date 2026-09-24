@@ -14,8 +14,23 @@
   license_copyright: "Copyright (c) 2017 Great Developers"
   pattern: "unrestricted upload: uploaded 'photo' (a compressed images archive) is move_uploaded_file()'d with no extension or content-type check at all; the sibling .csv upload only does a weak strrchr()-based extension check on the original filename before moving it, then shells out (tar/unzip) on it"
   notes: "real certificate-generation web app (not a synthetic PoC); mirrors puppy-fort-factory's own unrestricted-upload shape (CWE-434). Full file copied (149 lines) -- kept whole since the vulnerable upload and the immediately-following unzip/shell_exec use of the uploaded file are one continuous flow."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 45: `move_uploaded_file($_FILES["photo"]
+    ["tmp_name"], "$id/$file")` with no extension/MIME check at all
+    beforehand, and lines 23-30's `.csv` sibling using only a weak
+    `strrchr($csv,".")` string check -- matches the pattern exactly, and
+    lines 53/57's `exec("tar -zxvf $file")`/`exec("unzip $file")` on the
+    uploaded, attacker-named `$file` confirm the CWE-78 unique claim.
+    `php -l` parses clean. Semgrep (local custom rule set; registry
+    blocked -- semgrep.dev:443 CONNECT returns 403 via this environment's
+    egress proxy) fires `php-move-uploaded-no-check`/
+    `php-unrestricted-upload` on lines 31 and 45. No dynamic run: depends
+    on a live `library/odf.php`/`$_SESSION`/`unoconv` binary and real
+    filesystem side effects (mkdir/exec/tar/unzip) not appropriate to
+    actually execute even sandboxed, since the point under test (missing
+    upload validation) is already fully evidenced statically.
   redacted: false
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
   # NOTE: researched from trained knowledge, not a live MITRE lookup --
@@ -50,8 +65,23 @@
   license_copyright: "Copyright (c) 2026 Robert Isoski and WonderCMS contributors"
   pattern: "allowlist + content-type check: extension checked against a fixed $allowedExtensions list AND the real MIME type (via finfo/mime_content_type) checked against a fixed $allowedMimeTypes list, both required before move_uploaded_file()"
   notes: "excerpt of WonderCMS::uploadFileAction() from the CMS's single-file index.php (3830 lines total) -- only the upload-validation method was copied, not the whole file, per Phase 2's 'not a bare copy of the whole thing when a fragment illustrates the shape' spirit. Filename is also defanged via basename()+str_replace() against traversal sequences before use."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 124-141: extension checked against
+    `$allowedExtensions`, real MIME type (finfo/mime_content_type)
+    checked against `$allowedMimeTypes`, both required
+    (`!in_array($mimeType, ...) || !in_array($ext, ...)`) before
+    `move_uploaded_file()` -- matches the pattern exactly. `php -l` on
+    the bare excerpt fails only because it's a method with no enclosing
+    class (expected, per the file's own header note); wrapping it in a
+    minimal harness class confirms it parses clean otherwise. Semgrep
+    (local custom rule set on the wrapped harness; registry blocked, see
+    vulnerable-1.php's entry) fires `php-mime-allowlist-check` on the
+    `in_array($mimeType, ...)` line, confirming the real-MIME-check
+    claim. No dynamic run: depends on live `$_FILES`/`$this->alert`/
+    `$this->redirect`/`$this->filesPath` framework context not present
+    in this excerpt.
   redacted: false
   cwe_shared: [CWE-434]
   cwe_unique: [CWE-352, CWE-538]
@@ -78,8 +108,24 @@
   license_note: "Copyleft -- kept as the smallest illustrative fragment (this IS the whole file: 3 lines of actual code plus the required GPL header/attribution). Do not use as the seed of a non-GPL emitter template without carrying this license forward."
   pattern: "classic reflected path traversal on download: readfile('images/'.$_GET['file']) with zero validation/canonicalization of the user-supplied filename; Content-Disposition header also echoes $_GET['file'] unescaped"
   notes: "download.php in Pixidou, an open-source AJAX image editor. Copyright header (incl. author's published contact email) is preserved verbatim as required by the GPL's notice-preservation term -- this is the author's own deliberate public attribution, not incidental PII, so it was not redacted."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 31-33: `readfile('images/'.$_GET['file'])`
+    with zero validation -- matches the pattern exactly. `php -l` parses
+    clean (this is genuinely the whole file). Semgrep (local custom rule
+    `php-readfile-unvalidated-get`; registry blocked -- semgrep.dev:443
+    CONNECT returns 403 via this environment's egress proxy) fires on
+    line 33. Dynamic validation: reproduced these exact 3 lines verbatim
+    (rebasing the relative `images/` dir to a fixture directory) with
+    `$_GET['file'] = '../secret_outside/passwd.txt'`, run under this
+    repo's gVisor sandbox (`corpus_validation_sandbox.py::run_in_sandbox`,
+    authorized=True, network=none): exit 0, stdout confirmed the
+    out-of-directory file's contents were read and output
+    ("RESULT:VULNERABLE readfile returned: TOP SECRET php outside images
+    dir"). This is real exploitation of the described flaw. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_php_vuln2.php).
   redacted: false
   cwe_shared: [CWE-22]
   cwe_unique: [CWE-200, CWE-676]
@@ -108,8 +154,26 @@
   license_copyright: "Copyright (c) 2024 Serenity Share"
   pattern: "confined download: resolves the target file's realpath() and requires it to start with the share directory's own realpath() (strpos(...) !== 0 check) before readfile(); basename() also applied to the filename used in the Content-Disposition header"
   notes: "excerpt of the $_GET['file'] download branch from share.php (689 lines total) in a self-hosted file-sharing app -- only the validation+readfile branch was copied, not the surrounding share-management/session code."
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 31-34: `strpos(realpath($filepath),
+    realpath($sharePath)) !== 0` gates the later `readfile($filepath)` --
+    matches the pattern exactly. `php -l` parses clean. Semgrep (local
+    custom rule `php-realpath-confinement-present`; registry blocked, see
+    vulnerable-2.php's entry) fires on line 32. Dynamic validation:
+    reproduced this file's exact metadata-lookup + realpath-confinement +
+    readfile logic against the same fixture directory used for
+    vulnerable-2.php's PoC, and replayed the identical `../secret_outside/
+    passwd.txt` traversal attempt that succeeded against vulnerable-2.php
+    -- run under the same gVisor sandbox (authorized=True): exit 0,
+    stdout "attempt traversal: DENIED: File not found or access denied."
+    while a legitimate in-directory filename ("attempt legit: SERVED:
+    legit image bytes") still succeeded, confirming the confinement check
+    actually blocks the same real attack it's claimed to block, not just
+    that the code reads correctly. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_php_safe2.php).
   redacted: false
   cwe_shared: [CWE-22]
   cwe_unique: [CWE-59, CWE-1188]

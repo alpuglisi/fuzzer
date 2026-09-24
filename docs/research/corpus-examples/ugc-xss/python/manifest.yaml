@@ -27,8 +27,32 @@
     mistake it for production-derived prevalence evidence. Source file path
     in the origin repo: app/routes/xss.py (insecure() route) plus
     templates/xss/insecure.html.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [dynamic, manual-review]
+  validation_notes: >
+    Manual review confirms lines 32-37 (`comment = request.form.get(
+    'comment', '')` inserted unsanitized via a parameterized `INSERT`,
+    which correctly avoids SQLi but does nothing for XSS) and the
+    template comment block at lines 58-63 (`{{ comment[0] | safe }}`) --
+    matches the pattern exactly; line 33's `session.get('user_id', 1)`
+    also confirms the CWE-453 claim. `py_compile` parses clean. Bandit
+    reports zero findings (expected -- bandit has no rule for a
+    template-level `|safe` filter, which lives in the docstring/comment-
+    documented template fragment, not executable Python bandit's AST
+    analysis inspects). Dynamic validation: reproduced this exact
+    template fragment shape (`{{ comment | safe }}`) with a real Jinja2
+    `Template` (Jinja2 3.1.6 is installed in this environment) and
+    rendered it with a `<script>` payload, run under this repo's gVisor
+    sandbox (`corpus_validation_sandbox.py::run_in_sandbox`,
+    authorized=True, network=none): exit 0, stdout confirmed the
+    `<script>` tag was rendered live/unescaped
+    ("VULN (|safe) output: ...<script>alert(document.cookie)</script>...").
+    This is real behavioral confirmation of Jinja2's actual `|safe`
+    semantics, not just a reading of the source. Audited in
+    docs/research/corpus-validation-audit.jsonl
+    (fixture=/tmp/jwt_poc_sandbox/poc_jinja_safe_vs_default.py). No
+    dynamic run of the Flask route itself: depends on
+    `..models.database.get_db_connection` not present in this excerpt.
   redacted: false
   cwe: [CWE-79, CWE-116, CWE-489, CWE-453]
   cwe_shared: [CWE-79, CWE-116]
@@ -72,8 +96,25 @@
     good()/bad() pair. Same dual-license note and tutorial_or_course_project
     flag as vulnerable-1.py applies. Source file path in the origin repo:
     app/routes/xss.py (secure() route) plus templates/xss/secure.html.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 30: `comment = bleach.clean(comment,
+    tags=['b', 'i', 'em', 'strong'], strip=True)` before the same
+    parameterized `INSERT`, and the template fragment comment (lines
+    55-59) confirms the `| safe` render shape is unchanged -- matches
+    the pattern exactly (the safety comes entirely from sanitizing on
+    ingest, not from changing the render step). `py_compile` parses
+    clean. Bandit reports zero findings. Semgrep (local custom rule
+    `py-bleach-clean-present`; registry blocked -- semgrep.dev:443
+    CONNECT returns 403 via this environment's egress proxy) fires on
+    line 30. No dynamic run: `bleach` is not installed in this
+    environment (pip install blocked by egress policy -- confirmed via
+    `python3 -c "import bleach"` raising ModuleNotFoundError), so this
+    specific sanitizer call cannot actually be executed here; the Jinja2
+    `|safe`-rendering half of this pair's mechanism was independently,
+    dynamically confirmed via vulnerable-1.py's entry (same template
+    shape, same file).
   redacted: false
   cwe: [CWE-79, CWE-116, CWE-183, CWE-85]
   cwe_shared: [CWE-79, CWE-116]
@@ -116,8 +157,20 @@
     instance of the same bleach.clean()-on-ingest idiom, at much larger
     scale/maturity. Source file path in the origin repo:
     backend/models/postgis/task.py (TaskHistory.set_comment_action).
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 24: `clean_comment = bleach.clean(comment)`
+    -- matches the pattern exactly (default allowlist, no custom
+    tags/strip args unlike idiomatic-1.py). `py_compile` parses clean.
+    Bandit reports zero findings. Semgrep (local custom rule
+    `py-bleach-clean-present`; registry blocked, see idiomatic-1.py's
+    entry) fires on line 24. No dynamic run: `bleach` is not installed in
+    this environment (pip install blocked by egress policy), so this
+    call cannot actually be executed here; the mechanism itself
+    (bleach's default allowlist) is the same library call already
+    confirmed present in idiomatic-1.py's entry, just with different
+    arguments.
   redacted: false
   cwe: [CWE-79, CWE-116, CWE-1188, CWE-86]
   cwe_shared: [CWE-79, CWE-116]

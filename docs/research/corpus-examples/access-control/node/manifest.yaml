@@ -23,8 +23,24 @@
     own comment (lines 12-15, left in as-collected) documents the exact fix
     inline: "take user id from session instead of from URL param" — a
     same-file contrastive note, though not a separate runnable fixed file.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [manual-review]
+  validation_notes: >
+    Manual review confirms lines 16-23: `userId` is destructured from
+    `req.params` (not `req.session`) and passed straight into
+    `allocationsDAO.getByUserIdAndThreshold`, with the correct fix left
+    commented out at lines 12-15 -- matches the pattern/CWE-561 claim
+    exactly. `node --check` parses clean (structural check). Semgrep
+    (local custom rule set, `js-security.yml`; semgrep.dev registry
+    packs are unreachable -- confirmed via curl, CONNECT to
+    semgrep.dev:443 returns 403 from the egress proxy) found no findings
+    here, which is expected: this is a pure missing-ownership-check logic
+    bug, not a syntactic sink/source shape a generic rule set targets; no
+    "no silent pass" concern since the claim was never that a generic
+    tool would catch it. eslint-plugin-security not installed (npm
+    registry blocked by egress policy) and not applicable to this claim
+    anyway. No dynamic run: this is a bare handler function, not a
+    runnable server (no `app.listen`/route registration in the excerpt).
   cwe: [CWE-639, CWE-862, CWE-20, CWE-561]
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-20, CWE-561]
@@ -63,8 +79,19 @@
     check before rendering a barcode image keyed directly off the URL's
     :id — forced browsing / IDOR via an unauthenticated, unchecked object
     reference.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [manual-review]
+  validation_notes: >
+    Manual review confirms lines 17-20: the route has no auth middleware
+    argument (contrast idiomatic-2.js's `auth` third argument) and no
+    ownership check, rendering the barcode straight off `req.params.id` --
+    matches the pattern/CWE-287 claim exactly. `node --check` parses
+    clean. Semgrep (local custom rule set; registry blocked, see
+    vulnerable-1.js's entry) found no findings, expected for this
+    missing-middleware/missing-check shape. eslint-plugin-security not
+    installed (npm registry blocked). No dynamic run: depends on the
+    `barcode-generator` package (not installed, npm blocked) and an
+    Express router instance not present in this trimmed excerpt.
   cwe: [CWE-639, CWE-862, CWE-287, CWE-799]
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-287, CWE-799]
@@ -102,8 +129,23 @@
     `decoded.userId !== requestedId`, returning 403 "IDOR attempt blocked"
     before any data lookup happens — ownership is verified from the
     authenticated token, not trusted from the URL.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms lines 44-51: `decoded.userId !== requestedId`
+    is checked before any DB read, and line 58's `res.status(200).json
+    (user)` returns the full in-memory user object including `password`/
+    `secret_data` -- matches both the CWE-639/862 (present, correct) and
+    CWE-213 (over-broad response) claims. `node --check` parses clean.
+    Semgrep (local custom rule set; registry blocked, see vulnerable-1.js's
+    entry) fires `js-jwt-alg-none-or-hardcoded-secret` on both line 44
+    (`jwt.verify`) and line 69 (`jwt.sign`), confirming the CWE-321
+    hard-coded-key claim precisely. eslint-plugin-security not installed
+    (npm registry blocked); not otherwise needed here since semgrep's
+    taint-independent literal-secret rule already confirmed the specific
+    claim. Dynamic run not attempted: `express`/`jsonwebtoken` are not
+    installed in this environment (`npm install` blocked by egress
+    policy), so this full Express app cannot actually be started.
   cwe: [CWE-639, CWE-862, CWE-213, CWE-321]
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-213, CWE-321]
@@ -140,8 +182,21 @@
     `ticket.ownedBy.email !== req.session.passport.user` before rendering
     it, returning 403 Forbidden on a mismatch — both authentication and an
     object-ownership check are present.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [manual-review]
+  validation_notes: >
+    Manual review confirms lines 13-20 (`auth` middleware redirecting
+    unauthenticated callers) and lines 22-31 (the case-sensitive
+    `ticket.ownedBy.email !== req.session.passport.user` check, 403 on
+    mismatch) -- matches the pattern and the CWE-178 claim (the `!==`
+    comparison is indeed exact-string, case-sensitive) exactly. `node
+    --check` parses clean. Semgrep (local custom rule set; registry
+    blocked, see vulnerable-1.js's entry) found no findings -- expected,
+    since this entry's own unique CWEs (178, 311) are a correctness-of-a-
+    present-check nuance and a session-storage-at-rest concern, neither
+    a syntactic pattern this rule set targets. No dynamic run: depends on
+    `../models/Ticket` (Mongoose model) and a live session/Passport.js
+    stack not present in this excerpt.
   cwe: [CWE-639, CWE-862]
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-178, CWE-311]

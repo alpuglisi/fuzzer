@@ -43,8 +43,26 @@
     validation steps (server/expiry/class/per-account usage-cap checks) in
     between that only widen the race window without re-reading or locking
     uses_left.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [semgrep, manual-review]
+  validation_notes: >
+    Manual review confirms line 40: `UPDATE DmN_Gift_Codes SET uses_left =
+    uses_left - 1 WHERE code = '...'` -- no `uses_left > 0` bound and no
+    transaction/lock around this statement and the earlier `checkCode()`
+    read (line 15/52-54) -- matches the pattern/CWE-362/367/841 exactly.
+    `php -l` parses clean. Semgrep (local custom rule
+    `php-unconditional-decrement-no-guard`; registry blocked --
+    semgrep.dev:443 CONNECT returns 403 via this environment's egress
+    proxy) fires on line 40 exactly, confirming the missing guard
+    textually as well as by manual reading. No dynamic run: demonstrating
+    the actual race requires concurrent requests against a live,
+    lockable DB under real contention (this environment's gVisor sandbox
+    runs one isolated, network-less process per invocation, not a
+    concurrent multi-request scenario against a shared DB state) --
+    static + manual confirmation of the missing atomic guard is the
+    practical evidence for a TOCTOU class like this one, consistent with
+    the plan's own fallback-to-static guidance where a live exploit
+    harness isn't practical.
   redacted: false
   cwe_shared: [CWE-840]
   cwe_unique: [CWE-362, CWE-367, CWE-667]
@@ -88,8 +106,25 @@
     Product_model before building the PayPal request, which is exactly
     why process() (not add()) is the idiomatic-shape excerpt kept here.
     Source file path in the origin repo: application/controllers/cart.php.
-  validated: false
-  validated_by: []
+  validated: true
+  validated_by: [manual-review]
+  validation_notes: >
+    Manual review confirms lines 31-46/75-87: `$product =
+    $this->Product_model->get_product_details($item_id)` (DB lookup keyed
+    on the posted item id only) feeds `$subtotal`/`$this->total`, and the
+    PayPal `PAYMENTREQUEST_0_AMT`/`ITEMAMT` fields are built from
+    `$this->total`/`$this->grand_total` -- never a client-posted price or
+    total field; `grep -n "input->post"` confirms the only posted values
+    used are item id/qty/address fields, never a price/amount/total key.
+    `php -l` parses clean. No PHP custom semgrep rule in this pass targets
+    this file's shape (a string-built PayPal NVP request, not a
+    parameterized-query or Stripe-SDK call), so semgrep is deliberately
+    not claimed here -- per the "no silent pass"/no-collapsing-checks
+    rule, only manual-review is listed since it is the check that
+    actually ran and confirmed the claim. No dynamic run: requires a live
+    CodeIgniter framework context (`$this->input`/`$this->config`/
+    `$this->session`/`Product_model`) and a live PayPal API endpoint, out
+    of scope for this offline pass.
   redacted: false
   cwe_shared: [CWE-840]
   cwe_unique: [CWE-1339, CWE-573]

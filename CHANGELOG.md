@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus Phase 3 validation — 63 of 63 real-collected pairs validated)
+- Docs (research corpus): validated all 63 remaining `validated: false`
+  real-collected (Phase 2) entries across access-control, auth-session,
+  ecommerce-logic, file-handling, search-export and ugc-xss's node/php/
+  python manifests, per `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s
+  validation methodology — semgrep (via local custom rule files, since
+  the registry and semgrep.dev are unreachable from this environment)
+  and bandit for static confirmation, plus gVisor-sandboxed dynamic
+  execution (`fuzzlab/tools/corpus_validation_sandbox.py`) for 15 of the
+  63 where a real harness could be built without fabricating the
+  mechanism under test. `psalm`/`eslint-plugin-security` noted as
+  genuinely unavailable (network-blocked package installs) rather than
+  claimed. All 63 entries' claims were confirmed accurate; none needed
+  correction. `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Status line updated
+  to "63 of 63 pairs validated" (checked). See `CC-LAB-0230`. Flagged,
+  not fixed (pre-existing, out of this task's scope): `access-control/
+  php`'s 4 entries still carry the legacy flat `cwe:` field, and
+  `check-corpus-cwe-coverage.sh` surfaces dozens of pre-existing
+  cross-file `cwe_unique` collisions across manifests this pass happened
+  to touch.
+
 ## 2026-09-24 (vuln-corpus manufactured pairs, final 10 groups — closes out the manufacturing plan)
 - Docs (research corpus): manufactured one additional pair per the final
   10 (cell, CWE) groups from `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s
