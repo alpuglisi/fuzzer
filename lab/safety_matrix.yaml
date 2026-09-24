@@ -488,13 +488,18 @@ entries:
   # matching this file's existing preference for parameterization as the
   # only fully-neutralising SQL-string-literal transform (manual escaping
   # misses non-string contexts and has documented multi-byte-encoding edge
-  # cases). `orm_raw_escape_hatch` and `template_compile_user_content` are
-  # each a lone vulnerable-side (`no_effect`) row: the corpus's idiomatic
-  # twins for those two shapes route around the sink entirely (parameterize
-  # or avoid it) rather than proposing a same-family secure transform, so
-  # neither family has a `neutralises` row yet — the same "vulnerable-only
-  # coverage, secure twin later" situation L-P3.3c-G6 and L-P1.2b's own
-  # additions started from.
+  # cases). `orm_raw_escape_hatch` is a lone vulnerable-side (`no_effect`)
+  # row: the corpus's idiomatic twin for that shape routes around the sink
+  # entirely (parameterizes) rather than proposing a same-family secure
+  # transform, so that family has no `neutralises` row yet — the same
+  # "vulnerable-only coverage, secure twin later" situation L-P3.3c-G6 and
+  # L-P1.2b's own additions started from. `template_compile_user_content`
+  # now DOES have a same-family secure twin (`template_precompiled_fixed`,
+  # below) — docs/research/corpus-examples/search-export/node/manifest.yaml's
+  # idiomatic-2-altered.js, manufactured to close exactly this gap; added
+  # here since the manifest's own `suggested_op` was never previously acted
+  # on into this file (a stale note in that manifest, predating this row,
+  # still says the gap is open — the note is superseded by this row).
   - op: orm_order_by_unvalidated
     sink_family: sql_order_by_clause
     effect: no_effect
@@ -512,6 +517,10 @@ entries:
   - op: template_compile_user_content
     sink_family: template_render_pipeline
     effect: no_effect
+  - op: template_precompiled_fixed
+    sink_family: template_render_pipeline
+    effect: neutralises
+    neutralizes: [server_template_injection]
   - op: xml_external_entities_enabled
     sink_family: xml_parse_input
     effect: no_effect

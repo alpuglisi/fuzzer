@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (lab/safety_matrix.yaml — act on search-export/node's stale template_precompiled_fixed suggested_op)
+- The generator's safety matrix was missing a `neutralises` row
+  (`template_precompiled_fixed`/`template_render_pipeline`) that the
+  corpus's own `idiomatic-2-altered.js` had already proposed via
+  `suggested_op` when it was manufactured to close a previously-noted gap
+  — the manifest's gap note was never updated and the matrix row was
+  never added, so both were out of sync with reality. Fixed both
+  (CC-LAB-0232). Docs/matrix-bookkeeping only.
+
 ## 2026-09-24 (vuln-corpus CWE bookkeeping — migrate access-control/php's legacy `cwe:` field + resolve 76 cross-file cwe_unique collisions)
 - Docs (research corpus): the prior validation pass (CC-LAB-0230) was the
   first to touch all 18 corpus manifests together, which surfaced a

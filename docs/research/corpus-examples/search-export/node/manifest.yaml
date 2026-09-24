@@ -120,14 +120,13 @@
                                                      # template-engine compile/
                                                      # execute step in a
                                                      # report/export pipeline
-  # No idiomatic/secure counterpart was collected for this shape (see this
-  # entry's own notes above) -- there is currently no safe-twin row to pair
-  # against template_compile_user_content at template_render_pipeline; a
-  # future secure counterpart would compile a FIXED, developer-authored
-  # template once and pass user content only as template *data* (e.g. an
-  # op like `template_precompiled_fixed` / `template_user_content_as_data`),
-  # but that shape was not found in this collection pass, so no
-  # suggested_op is proposed for it here -- noted as a gap, not invented.
+  # UPDATE: this gap is now closed. idiomatic-2-altered.js below (manufactured
+  # per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md) supplies exactly the
+  # secure counterpart this note originally said was missing: a FIXED,
+  # developer-authored template compiled once, with user content passed only
+  # as template *data*. Its `template_precompiled_fixed` op is now a real
+  # `neutralises` row in `lab/safety_matrix.yaml`, paired against this
+  # entry's own `template_compile_user_content` at `template_render_pipeline`.
 
 - file: idiomatic-2-altered.js
   role: idiomatic

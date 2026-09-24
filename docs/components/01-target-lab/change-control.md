@@ -3,6 +3,37 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0232 — Act on search-export/node's stale `template_precompiled_fixed` suggested_op into `lab/safety_matrix.yaml` (2026-09-24)
+- Change: `docs/research/corpus-examples/search-export/node/manifest.yaml`'s
+  `vulnerable-2.js` entry carried a note (from the original Phase 2
+  collection pass) saying no idiomatic/secure counterpart existed for its
+  `template_compile_user_content` op at `template_render_pipeline`, so no
+  `neutralises` row could be proposed. That gap was actually closed later
+  when `idiomatic-2-altered.js` was manufactured (per
+  `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`) with exactly the missing
+  shape and its own `suggested_op: template_precompiled_fixed` -- but that
+  proposal was never carried into `lab/safety_matrix.yaml`, and the
+  original manifest note was never updated to say the gap had closed,
+  leaving both out of sync with reality. Fixed both: added
+  `template_precompiled_fixed` / `template_render_pipeline` /
+  `effect: neutralises` / `neutralizes: [server_template_injection]` to
+  `lab/safety_matrix.yaml` (paired against the existing
+  `template_compile_user_content` `no_effect` row at the same sink
+  family), updated that file's own header comment describing the
+  `template_compile_user_content` family's prior lone-vulnerable-side
+  status, and rewrote the stale note in the corpus manifest itself to
+  point at the now-real safety_matrix row instead of describing a gap
+  that no longer exists.
+- Verification: `python -c "import yaml; yaml.safe_load(...)"` on both
+  edited files; `pytest -k safety_matrix -m "not slow"` (6 passed, 2
+  skipped, matches baseline); `check-corpus-cwe-coverage.sh` exits 0
+  (no `cwe_*` fields touched by this change); full non-slow suite run
+  separately to confirm no regression.
+- Scope: `lab/safety_matrix.yaml`,
+  `docs/research/corpus-examples/search-export/node/manifest.yaml`.
+  Documentation/matrix-bookkeeping only -- no generator/emitter code
+  changed, no new pairs added.
+
 ### CC-LAB-0231 — CWE-bookkeeping-only pass: migrate access-control/php's 4 legacy `cwe:` entries and resolve the 78-line cross-file cwe_unique collision backlog surfaced by CC-LAB-0230 (2026-09-24)
 - Change: CC-LAB-0230 was the first pass to touch all 18 corpus manifests
   (`access-control`/`auth-session`/`ecommerce-logic`/`file-handling`/
