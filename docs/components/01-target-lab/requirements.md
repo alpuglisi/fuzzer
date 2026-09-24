@@ -5606,6 +5606,26 @@ lane) can submit a payload as
   not present in this session's toolset (checked via `ToolSearch` before
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0199`.
+- **FR-LAB-155** *(Puppy Fort Factory gets a homepage, shared nav, and GET
+  form pages for its POST-only browser endpoints; `php_laravel`; `CC-LAB-0237`,
+  2026-09-24).* Every generated `php_laravel` app now serves `GET /` as a
+  real HTML homepage (branded header, deterministic nav to every page) via a
+  shared Blade layout, and a `GET` page for each previously form-less POST
+  endpoint (`/login.php`, `/register.php`, `/contact.php`,
+  `/newsletter.php`, `/edit_profile.php`,
+  `/edit_profile.labgen-plrp-0401.php`) that renders the matching form and
+  submits to the existing POST route unchanged. A `/catalog` page lists
+  every registered `GET` route so generic covering-array cells with no
+  ground-truth case stay reachable without pretending to be a product page.
+  This layer (`app/Http/Controllers/Site/SiteController.php`, `resources/
+  views/layouts/site.blade.php`, `resources/views/site/*.blade.php`,
+  `routes/site.php`) is purely additive: it never reads or renders a
+  generated cell controller, so no cell's `rendering`, `sink_context`, or
+  ground-truth label changes. First step of `docs/LAB_BROWSABLE_APPS_PLAN.md`
+  Lane 1 (`CC-LAB-0237`); the remaining Lane 1 scope (an `--app` flag to
+  split CircleFeed/Huddle Hub/Booking into their own apps, and converting
+  the JSON-responding browser endpoints to real HTML with ground-truth
+  updates) is not yet done.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

@@ -3,6 +3,57 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0237 — Browsable labs Lane 1 step 1: Puppy Fort Factory homepage, shared nav, and GET form pages (2026-09-24, FR-LAB-155, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
+- Change: added a hand-authored presentational layer to the `php_laravel`
+  skeleton, entirely additive and never touching a generated cell controller:
+  `resources/views/layouts/site.blade.php` (shared header/nav/footer, inline
+  CSS, no external assets), `resources/views/site/*.blade.php` (homepage,
+  login/register/contact/newsletter/edit-profile forms, catalog),
+  `app/Http/Controllers/Site/SiteController.php` (renders those views; its
+  `catalog()` action enumerates `Route::getRoutes()` at request time rather
+  than a hand-maintained list, so it stays accurate as cells change), and a
+  new, non-generated `routes/site.php` registering `GET /`, `GET /catalog`,
+  and a GET form page for each of the site's existing POST-only browser
+  endpoints (`/login.php`, `/register.php`, `/contact.php`,
+  `/newsletter.php`, `/edit_profile.php`,
+  `/edit_profile.labgen-plrp-0401.php`) at the same URL as the existing POST
+  route (method-distinct, no collision). `RouteAccumulator._HEADER`
+  (`route_accumulator.py`) now emits `require __DIR__.'/site.php';` before
+  the per-cell fragments, so `routes/web.php` loads it on every assembled
+  app; the accumulator's own determinism/collision logic (sorted-by-cell-id
+  fragments, `DuplicateRouteError`) is untouched, since `site.php` is not a
+  fragment.
+- Why: `docs/LAB_BROWSABLE_APPS_PLAN.md`'s step 1 (PFF presentation-only:
+  homepage, layout, GET forms, `/catalog`) — the labs had no homepage and no
+  form to submit from a browser (survey in that plan). Scoped to
+  presentation only, per the user's "Go ahead" on the narrowed 3-step
+  breakdown: no cell's `rendering`/`sink_context`/ground truth changes, and
+  no vulnerable controller was read or edited to build this layer.
+- Verification: `php -l` clean on `routes/site.php` and `SiteController.php`.
+  `pytest tests/test_labgen_emitter.py tests/test_labgen_php_laravel.py
+  tests/test_labgen_php_laravel_harder_shapes.py
+  tests/test_labgen_conformance_tier1.py -m "not slow"` — 101 passed, 2
+  deselected. Assembled a real build (`python -m fuzzlab.labgen.assemble
+  --out /tmp/pff-app`), ran a real `composer install` + `artisan migrate`
+  (SQLite) + `artisan serve`, and fetched every new page for real: `/`,
+  `/login.php`, `/register.php`, `/contact.php`, `/newsletter.php`,
+  `/catalog`, `/edit_profile.php`, `/edit_profile.labgen-plrp-0401.php` all
+  returned 200 with the shared layout and the expected form/links; the
+  homepage and login-form HTML were inspected directly. Pre-existing
+  DB-backed cell pages (`products.php`, `product.php`, `blog_post.php`,
+  `search.php`) 500'd only because this scratch boot used a bare SQLite file
+  with no `products`/`posts` tables (they need the real
+  MariaDB/`lab/sql/schema.sql`-backed harness `live_boot.py` already
+  provides) — confirmed via `storage/logs/laravel.log`
+  (`no such table: products`), not a regression from this change.
+- Scope: `.../skeleton/resources/views/layouts/site.blade.php`,
+  `.../skeleton/resources/views/site/*.blade.php`,
+  `.../skeleton/app/Http/Controllers/Site/SiteController.php`,
+  `.../skeleton/routes/site.php`, `route_accumulator.py`. Remaining Lane 1
+  scope (app-split via an `--app` flag; JSON→HTML endpoint conversion +
+  ground-truth updates; navigability acceptance test) is tracked in
+  `docs/LAB_BROWSABLE_APPS_PLAN.md` and not yet done.
+
 ### CC-LAB-0236 — Fix grey-box `db_fault`: capture the controller `QueryException` via a Laravel `report()` hook, not a middleware `catch` (2026-09-24, BUG-0049/PA-0051)
 - Change: the `FzlCoverage` middleware
   (`fuzzlab/labgen/emitters/php_laravel/stack/skeleton/app/Http/Middleware/

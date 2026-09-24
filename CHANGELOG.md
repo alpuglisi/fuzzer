@@ -4,6 +4,23 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (Lane 1 step 1 — Puppy Fort Factory homepage, nav, and GET form pages, CC-LAB-0237/FR-LAB-155)
+- Added a hand-authored, purely presentational site layer to the `php_laravel`
+  skeleton so PFF is navigable in a browser: a shared Blade layout with a
+  branded header/nav/footer (`resources/views/layouts/site.blade.php`), a
+  homepage at `/`, GET form pages for the site's previously form-less POST
+  endpoints (`/login.php`, `/register.php`, `/contact.php`,
+  `/newsletter.php`, `/edit_profile.php`, `/edit_profile.labgen-plrp-0401.php`),
+  and a `/catalog` page that lists every registered GET route so generic
+  covering-array cells stay reachable. Registered from a new, non-generated
+  `routes/site.php` required at the top of the generated `routes/web.php`
+  (`RouteAccumulator._HEADER`), so it never collides with or reorders the
+  per-cell fragments and adds no PHP logic to any vulnerable controller
+  (`SiteController` never reads cell code; `sink_context`/`rendering`/ground
+  truth for every existing cell are unchanged). First of the 3 narrowed steps
+  under `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 1; the app-split (`--app`
+  flag) and the JSON→HTML endpoint conversion are still pending.
+
 ## 2026-09-24 (docs/LAB_BROWSABLE_APPS_PLAN.md — plan to make every lab app browsable)
 - Added the plan for making the generated labs renderable and navigable in a
   browser. A survey found no app with a working HTML homepage, mostly

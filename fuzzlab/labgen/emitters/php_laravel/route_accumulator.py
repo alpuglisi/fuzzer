@@ -83,6 +83,14 @@ _HEADER = (
     "\n"
     "use Illuminate\\Support\\Facades\\Route;\n"
     "\n"
+    "// Hand-authored homepage/nav/form pages (docs/LAB_BROWSABLE_APPS_PLAN.md\n"
+    "// step 1) -- a fixed, non-generated file, never touched by the\n"
+    "// accumulator. Required first so the per-cell fragments below can still\n"
+    "// register their own routes at the same paths under a different HTTP\n"
+    "// method (e.g. this file's GET /login.php form vs. a cell's POST\n"
+    "// /login.php) without a collision.\n"
+    "require __DIR__.'/site.php';\n"
+    "\n"
 )
 
 
