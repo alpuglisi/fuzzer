@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (docs/LAB_BROWSABLE_APPS_PLAN.md — plan to make every lab app browsable)
+- Added the plan for making the generated labs renderable and navigable in a
+  browser. A survey found no app with a working HTML homepage, mostly
+  JSON/fragment responses, POST-only endpoints with no form page, only PFF
+  reachable outside tests, and CircleFeed/Huddle Hub/Booking merged into PFF
+  under `/cell/*` URLs. Per the user's decisions: convert browser-facing
+  endpoints to real HTML pages in a shared per-app layout, keep genuine APIs
+  as JSON behind real client pages, split out the three merged apps, and give
+  every app its own loopback compose service. It defines a shared design
+  contract, a crawl-from-`/` navigability acceptance test, a
+  detection-must-not-regress rule, and 7 lanes with pre-assigned bookkeeping
+  IDs (PA-0031).
+
 ## 2026-09-24 (crawler scope fix — follow the target's own host, not only loopback)
 
 - Fixed **BUG-0050** (CRAWL, CC-CRAWL-0008, PA-0052, FR-CRAWL-7): `fuzzlab crawl`
