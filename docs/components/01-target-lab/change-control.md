@@ -3,6 +3,105 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0227 — Manufacture 7 auth-session corpus pairs + migrate node/python manifests to cwe_shared/cwe_unique (2026-09-24)
+- Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
+  table, manufactured one additional pair for each of the 7 `auth-session`
+  (cell, CWE) groups that had a natural pair but were still below the
+  floor of 2: `auth-session/node` CWE-347 (`vulnerable-3-altered.js`/
+  `idiomatic-3-altered.js` — RS256-public-key-reused-as-HMAC-secret
+  algorithm confusion) and CWE-330/CWE-338 (`vulnerable-4-altered.js`/
+  `idiomatic-4-altered.js` — `Date.now()+Math.random()` password-reset
+  token); `auth-session/php` CWE-347/CWE-757 (`vulnerable-3-altered.php`/
+  `idiomatic-3-altered.php` — hand-rolled verifier trusting the header's
+  own `alg`, including `none`), CWE-330/CWE-640
+  (`vulnerable-4-altered.php`/`idiomatic-4-altered.php` —
+  `md5(uniqid(rand(),true))` reset token), and CWE-287/CWE-613/CWE-863
+  (`vulnerable-session-role-recheck-1-altered.php`/
+  `idiomatic-session-role-recheck-1-altered.php` — a privilege-downgrade-
+  not-rechecked-mid-session variant, plain-PHP-session idiom, distinct
+  from the existing natural pair's Laravel-middleware blocked-account
+  shape); `auth-session/python` CWE-347 (`vulnerable-3-altered.py`/
+  `idiomatic-3-altered.py` — same hand-rolled alg-none-trust mechanism as
+  the PHP pair, different stack) and CWE-330/CWE-338
+  (`vulnerable-4-altered.py`/`idiomatic-4-altered.py` — `random.random()`
+  hashed into a Django-style "remember me" token). All 7 are genuinely
+  distinct third sub-variants of their group's mechanism (different
+  framework/library idiom), not near-duplicates of the existing natural
+  pair, per direct instruction. 14 new files total, all self-contained
+  (stdlib-only: Node `crypto`, core PHP hash functions, Python
+  `hmac`/`hashlib`/`secrets`) so none require an external JWT/session
+  package to exercise. Also, since adding entries to the node and python
+  manifests required `.claude/hooks/check-corpus-cwe-coverage.sh` to
+  re-check every entry in those files, migrated all 8 pre-existing
+  `auth-session/node` and `auth-session/python` entries from the legacy
+  flat `cwe:` field to `cwe_shared:`/`cwe_unique:`/`cwe_rationale:` (the
+  `auth-session/php` manifest's 6 pre-existing entries were already on
+  the new schema from a prior pass and were left unchanged). Across all
+  28 entries now in the 3 touched manifests, 56 `cwe_unique` IDs were
+  assigned, checked by hand for cross-entry duplication (the hook's own
+  collision rule) before running the hook, then confirmed by actually
+  running it.
+- Impact (other components / project): corpus-research reference material
+  only (`docs/research/corpus-examples/auth-session/`) — read by future
+  generator/labgen work as illustrative pairs, never served by the lab
+  app itself and not wired into `lab/safety_matrix.yaml` by this change
+  (that hookup is its own future FUZZ/LAB change per the site-architecture
+  plan's "Step 8 handoff", unchanged here). No impact on any other
+  component.
+- Risk (level; mitigation or accepted-risk justification): low. The new
+  files are inert reference text, not executed by any pipeline outside
+  corpus-validation tooling. One accepted-risk note stated plainly: the
+  CWE-migration/assignment research (both the 8 migrated legacy entries
+  and all `cwe_unique`/`cwe_shared` choices on the 14 new entries) was
+  done from trained knowledge, not a live `cwe.mitre.org` lookup, since
+  this environment's egress proxy blocks that domain (see `ERROR_LOG.md`,
+  2026-09-22 entry — a prior batch already confirmed and logged the
+  block; not re-logged here) — every rationale in this pass should be
+  spot-checked against MITRE by a session with that access before being
+  treated as authoritative.
+- Deliverables:
+  - [x] 14 manufactured files (4 Node/JS, 6 PHP, 4 Python) across 7 pairs
+        — done.
+  - [x] Static validation: `node --check` / `php -l` / `python3 -m
+        py_compile` on every new file (14 of 14 clean); `bandit` on the 4
+        new Python files (correctly flags `vulnerable-4-altered.py`'s
+        `random.random()` as CWE-330, silent on the other 3 — 1
+        legitimate finding, 0 false positives/negatives against the
+        known-correct pairing) — done.
+  - [x] Dynamic-execution differential validation via
+        `fuzzlab/tools/corpus_validation_sandbox.py` (`run_in_sandbox`,
+        `authorized=True`, gVisor confirmed available in this
+        environment via `sandbox_available()` returning `True` — a
+        different environment than the prior CC-LAB-0226 pass, which had
+        no gVisor) for all 7 groups: forged/malicious input accepted by
+        the vulnerable side and rejected by the idiomatic side in every
+        case (RS256-pubkey-as-HMAC-secret forged token; predictable
+        timestamp-prefixed reset tokens; alg:none forged tokens in PHP
+        and Python; clock-derived `uniqid()` reset tokens;
+        privilege-downgrade session bypass in PHP) — **7 of 7 groups
+        confirmed**, reported honestly (not rounded up from a partial
+        run: the first pass hit 5 of 7 due to two PHP test-harness bugs
+        of this change's own making — requiring both same-named-function
+        files into one process — fixed by splitting those two checks
+        into separate single-file invocations, after which all 7
+        passed).
+  - [x] `.claude/hooks/check-corpus-cwe-coverage.sh` run against the
+        staged changes: exits 0 (verified after the full 56-ID
+        cross-entry collision check was done by hand first, then
+        confirmed live) — done.
+  - [x] `>= 5 vulnerable`/`>= 5 idiomatic` per-cell floor (aggregated
+        across `auth-session/node`+`php`+`python`): was already 7/7
+        before this pass (no gap), now 14/14 — done, no additional pairs
+        needed beyond the 7 assigned groups.
+  - [x] `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` "Not yet done"
+        section updated to record these 7 groups as done — done.
+- Effectiveness (assessed 2026-09-24): all 7 groups pass static and
+  dynamic differential validation; the mechanical CWE-coverage hook
+  passes; full non-slow test suite stays green (see this change's commit
+  for the exact pass/skip counts). Not yet independently re-verified by a
+  session with live `cwe.mitre.org` access, per the accepted-risk note
+  above.
+
 ### CC-LAB-0226 — Manufacture 5 worst-gap corpus pairs + migrate touched manifests to cwe_shared/cwe_unique (2026-09-24)
 - Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s "Worst gaps"
   list, manufactured the missing side for 5 (cell, CWE) groups with zero

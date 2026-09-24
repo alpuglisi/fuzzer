@@ -253,3 +253,216 @@
   suggested_op: login_time_only_check   # proposed as new, paired with
                              # per_request_status_revalidation above
   suggested_sink_family: session_authorization_state
+
+# --- manufactured pairs added per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# gap analysis: auth-session/php CWE-347/CWE-757 (gap=1), auth-session/php
+# CWE-330/CWE-640 (gap=1), auth-session/php CWE-287/CWE-613/CWE-863 (gap=1).
+# All three groups already had one natural pair each above; these are
+# genuinely distinct third variants (different sub-mechanism/framework
+# idiom), not near-duplicates. Self-contained (core PHP functions only), no
+# external JWT/session package required. Dynamic-execution differential
+# validated via fuzzlab/tools/corpus_validation_sandbox.py (gVisor,
+# authorized=True) -- see this manifest's own change-control entry
+# (CC-LAB-0227) for the "N of M" result.
+
+- file: vulnerable-3-altered.php
+  role: vulnerable
+  derived_from: idiomatic-3-altered.php
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: verify_token() dispatches on the token's own header `alg` claim, including an 'alg: none' branch that performs no cryptographic check at all -- distinct from vulnerable-1.php's dead-$algs-parameter shape."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-347/CWE-757 group (natural pair: vulnerable-1.php/idiomatic-1.php,
+    real firebase/php-jwt dead-parameter history). This is a hand-rolled
+    verifier where the header's own `alg` claim, not a caller-pinned
+    expectation, decides how (or whether) to verify. Dynamic-execution
+    differential (a forged alg:none token with an empty signature segment
+    is accepted by verify_token() here) confirmed via `run_in_sandbox` --
+    see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757]
+  cwe_unique: [CWE-345, CWE-306]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-347 (Improper Verification of
+    Cryptographic Signature); CWE-757 (Selection of Less-Secure Algorithm
+    During Negotiation) -- the attacker-supplied header directly selects
+    a weaker (here, absent) verification path.
+    Unique to this entry: CWE-345 (Insufficient Verification of Data
+    Authenticity) -- the specific mechanism (a `switch ($header['alg'])`
+    keyed directly on attacker-controlled JSON) is distinct enough from
+    the shared class's general framing to warrant its own narrower ID;
+    CWE-306 (Missing Authentication for Critical Function) -- the `case
+    'none': break;` arm performs literally zero authentication for that
+    code path, not merely a weak one, for what is otherwise this
+    function's one job.
+  suggested_op: jwt_alg_none_dispatch
+  suggested_sink_family: jwt_signature_verification
+
+- file: idiomatic-3-altered.php
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: verify_token() pins EXPECTED_ALG='HS256' before ever inspecting the token, so a token's own alg claim (including 'none') can never select a weaker or absent check."
+  notes: >
+    Manufactured counterpart to vulnerable-3-altered.php -- differs only
+    in the verification mechanism. Dynamic-execution differential
+    confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757, CWE-613]
+  cwe_unique: [CWE-1287, CWE-397]
+  cwe_rationale: >
+    Shared: CWE-347/CWE-757 as above; CWE-613 (Insufficient Session
+    Expiration) added to this pair's shared set because `verify_token()`
+    never inspects any expiry claim in the payload, so a token that
+    passes the (now-correct) signature check is treated as valid
+    indefinitely -- a property of this whole pair's design, not unique to
+    one side.
+    Unique to this entry: CWE-1287 (Improper Validation of Specified Type
+    of Input) -- `explode('.', $token)` is destructured into exactly
+    three variables via PHP list assignment with no check that exactly
+    three segments were produced, so a malformed 1- or 2-part token
+    yields silently-undefined offsets rather than a clean rejection;
+    CWE-397 (Declaration of Throws for Generic Exception) -- every
+    distinct failure reason (`unsupported alg`, `invalid signature`, the
+    caller's own rejected-algorithm message) is raised as a bare
+    `Exception`, giving calling code no way to distinguish a malformed
+    request from a genuine forged-token attempt for security monitoring.
+  suggested_op: jwt_alg_pinned
+  suggested_sink_family: jwt_signature_verification
+
+- file: vulnerable-4-altered.php
+  role: vulnerable
+  derived_from: idiomatic-4-altered.php
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: generate_reset_token() returns md5(uniqid((string) rand(), true)) -- a different, extremely common weak-token idiom (uniqid+rand+md5) than vulnerable-2.php's md5(time().email.salt())."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-330/CWE-640 group (natural pair: vulnerable-2.php/idiomatic-2.php,
+    real InvoicePlane CVE-2021-29023 history). Dynamic-execution
+    differential (uniqid()'s clock-derived prefix shown recoverable
+    across two calls; the CSPRNG-based idiomatic construction shows no
+    such correlation) confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-640]
+  cwe_unique: [CWE-341, CWE-1241]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-330 (Use of Insufficiently
+    Random Values); CWE-640 (Weak Password Recovery Mechanism for
+    Forgotten Password), since this is specifically a reset token.
+    Unique to this entry: CWE-341 (Predictable from Observable State) --
+    `uniqid()` is derived from the system clock (seconds + microseconds),
+    an externally-observable/approximable value (e.g. via response
+    timing or server logs), unlike vulnerable-2.php's use of the target's
+    own email address; CWE-1241 (Use of Predictable Algorithm in Random
+    Number Generator) -- PHP's `rand()` is documented (since PHP 7) as an
+    alias for `mt_rand()`, a Mersenne Twister whose output is fully
+    predictable once enough of its state is observed, an independent
+    weakness from the md5 hash it feeds into.
+  suggested_op: predictable_token_source
+  suggested_sink_family: session_token_generation
+
+- file: idiomatic-4-altered.php
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: generate_reset_token() returns bin2hex(random_bytes(32)) -- a CSPRNG, with no dependency on the system clock or a non-cryptographic PRNG."
+  notes: >
+    Manufactured counterpart to vulnerable-4-altered.php -- differs only
+    in the token-generation mechanism. Dynamic-execution differential
+    confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-640]
+  cwe_unique: [CWE-703, CWE-1188]
+  cwe_rationale: >
+    Shared: see vulnerable-4-altered.php's cwe_rationale above.
+    Unique to this entry: CWE-703 (Improper Check or Handling of
+    Exceptional Conditions) -- `random_bytes()` throws an `Exception` if
+    it cannot gather sufficient entropy from the OS source, and this
+    function has no try/catch or fallback around that call, so a genuine
+    CSPRNG failure surfaces as an uncaught exception rather than a
+    controlled, safe failure path; CWE-1188 (Insecure Default
+    Initialization of a Resource) -- the byte length (32) is a literal
+    embedded directly in the return statement with no override
+    mechanism, so every caller gets exactly this default with no
+    config-level way to change it without editing source.
+  suggested_op: csprng_token
+  suggested_sink_family: session_token_generation
+
+- file: vulnerable-session-role-recheck-1-altered.php
+  role: vulnerable
+  derived_from: idiomatic-session-role-recheck-1-altered.php
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: require_admin() authorizes purely from $_SESSION['role'], captured once at login -- a privilege downgrade (e.g. admin demoted to user) mid-session is never noticed, distinct from the firefly pair's blocked-account shape and framework (plain PHP session reads vs. Laravel middleware)."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-287/CWE-613/CWE-863 group (natural pair: idiomatic-firefly-
+    blocked-check-1.php/vulnerable-firefly-blocked-check-1.php, real
+    Firefly III per-request blocked-account recheck). Dynamic-execution
+    differential (a session captured with role=admin but demoted to
+    'user' in the authoritative store is still let through by this
+    function; the idiomatic counterpart denies it) confirmed via
+    `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-613, CWE-287, CWE-863]
+  cwe_unique: [CWE-653, CWE-284]
+  cwe_rationale: >
+    Shared (this pair's core class, same as the firefly pair): CWE-613
+    (Insufficient Session Expiration); CWE-287 (Improper Authentication);
+    CWE-863 (Incorrect Authorization).
+    Unique to this entry: CWE-653 (Insufficient Compartmentalization) --
+    the authorization decision and the "is this role information still
+    current" concern are conflated into a single trusted value
+    ($_SESSION['role']), with no separation between authentication data
+    captured at login and a freshness/revocation check; CWE-284 (Improper
+    Access Control) -- the function's only access-control input is a
+    value the *caller's own earlier login* wrote, with no path at all
+    (not even an optional one, unlike idiomatic-session-role-recheck-1-
+    altered.php) to consult a current, authoritative source.
+  suggested_op: login_time_only_check
+  suggested_sink_family: session_authorization_state
+
+- file: idiomatic-session-role-recheck-1-altered.php
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_project: false
+  pattern: "manufactured: require_admin() re-fetches the current, authoritative role via an injected callback on every call instead of trusting $_SESSION."
+  notes: >
+    Manufactured counterpart to vulnerable-session-role-recheck-1-
+    altered.php -- differs only in the authorization mechanism. Dynamic-
+    execution differential confirmed via `run_in_sandbox` -- see
+    CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-613, CWE-287, CWE-863]
+  cwe_unique: [CWE-476, CWE-209]
+  cwe_rationale: >
+    Shared: see vulnerable-session-role-recheck-1-altered.php's
+    cwe_rationale above.
+    Unique to this entry: CWE-476 (NULL Pointer Dereference) -- `
+    $fetch_current_role($session['user_id'] ?? null)` passes `null`
+    straight through to the callback with no guard clause when
+    `user_id` is absent from the session array, on the assumption the
+    callback always handles a null id gracefully; CWE-209 (Generation of
+    Error Message Containing Sensitive Information) -- if the injected
+    callback's own lookup fails (e.g. a database exception), this
+    function has no try/catch around the call, so a raw backend
+    exception can propagate straight out of an authorization check.
+  suggested_op: per_request_role_revalidation
+  suggested_sink_family: session_authorization_state

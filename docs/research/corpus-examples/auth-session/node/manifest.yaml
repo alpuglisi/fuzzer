@@ -1,12 +1,29 @@
 # auth-session / node -- Phase 2 corpus (docs/VULN_CORPUS_EXPANSION_PLAN.md)
 #
-# Cell status: fully populated (2 matched vulnerable/idiomatic pairs, 4 files; floor is 2,
-# target 3-5). Covers two of the three vulnerability shapes named in this cell's assignment
-# (JWT alg:none acceptance; weak/predictable session-token/secret generation). No Node
-# example was collected for the third named shape (password-reset-token flow not bound to
-# session/expiry) -- collection stopped at 4 files once the two strongest, best-verified
-# real pairs were in hand, per the plan's 3-5-with-floor-2 target; a reset-token-flow pair
-# is a candidate for a follow-up pass rather than padding this cell with a weaker source.
+# Cell status: 4 natural files (2 matched vulnerable/idiomatic pairs) plus, per
+# docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's gap analysis (auth-session/node
+# CWE-347: natural=1, floor=2, gap=1; auth-session/node CWE-330/CWE-338: natural=1,
+# floor=2, gap=1), one manufactured pair added per group (vulnerable-3-altered.js/
+# idiomatic-3-altered.js for CWE-347; vulnerable-4-altered.js/idiomatic-4-altered.js
+# for CWE-330/CWE-338) -- see those entries' own notes for the distinct sub-variant
+# each illustrates relative to this cell's natural pairs. Covers two of the three
+# vulnerability shapes named in this cell's assignment (JWT alg:none acceptance;
+# weak/predictable session-token/secret generation). No Node example was collected
+# for the third named shape (password-reset-token flow not bound to session/expiry)
+# -- collection stopped at 4 natural files once the two strongest, best-verified
+# real pairs were in hand, per the plan's 3-5-with-floor-2 target; a reset-token-flow
+# pair is a candidate for a follow-up pass rather than padding this cell with a
+# weaker source.
+#
+# All entries below migrated from the legacy flat `cwe:` field to
+# `cwe_shared:`/`cwe_unique:`/`cwe_rationale:` per PA-0033 /
+# docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6, at the same time the
+# manufactured pairs were added (both new entries touched this manifest file, which
+# is what the mechanical check aggregates over). CWE research for this migration was
+# done from trained knowledge, not a live cwe.mitre.org lookup -- that domain is
+# blocked by this environment's egress proxy (see ERROR_LOG.md, 2026-09-22 entry) --
+# and should be spot-checked by a session with that access before being treated as
+# authoritative.
 
 - file: vulnerable-1.js
   role: vulnerable
@@ -21,7 +38,27 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe_shared: [CWE-347, CWE-1188]
+  cwe_unique: [CWE-636, CWE-807]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-347 (Improper Verification of
+    Cryptographic Signature) is the primary weakness; CWE-1188 (Insecure
+    Default Initialization of a Resource) applies to both entries because
+    the certificate/public-key-string heuristic at line ~127
+    (`options.algorithms = secretOrPublicKey.toString().includes('BEGIN
+    CERTIFICATE') ... : HS_ALGS`) that infers an allow-list when the
+    caller passes none is unchanged by the fix and present in both files.
+    Unique to this entry: CWE-636 (Not Failing Securely) -- the exact
+    branch `if (!hasSignature && !options.algorithms) { options.algorithms
+    = ['none']; }` treats a *missing* signature (which should fail
+    closed) as a reason to succeed, rather than to reject; CWE-807
+    (Reliance on Untrusted Inputs in a Security Decision) -- the allow-
+    list this branch installs is derived from a property of the token
+    itself (`hasSignature`), so the security-relevant allow-list a later
+    check (`options.algorithms.indexOf(decodedToken.header.alg)`) relies
+    on was populated using information already influenced by the
+    untrusted token being verified, not purely from caller-supplied
+    trusted configuration.
   suggested_op: jwt_alg_none_default
   suggested_sink_family: jwt_signature_verification
 
@@ -38,7 +75,24 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe_shared: [CWE-347, CWE-1188]
+  cwe_unique: [CWE-758, CWE-704]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above -- the same
+    certificate/public-key-string heuristic (CWE-1188) is unchanged in
+    this fixed file.
+    Unique to this entry, grounded in code this fix leaves unchanged:
+    CWE-758 (Reliance on Undefined, Unspecified, or Implementation-
+    Defined Behavior) -- `options.algorithms` is still inferred by
+    checking whether `secretOrPublicKey.toString()` merely *contains* the
+    substring 'BEGIN CERTIFICATE'/'BEGIN PUBLIC KEY'/'BEGIN RSA PUBLIC
+    KEY', a fragile textual heuristic rather than a robust key-type check;
+    CWE-704 (Incorrect Type Conversion or Cast) -- that same line calls
+    `.toString()` on `secretOrPublicKey` (whose declared type spans
+    strings, Buffers, and KeyObjects) and then makes a security-relevant
+    algorithm-family decision from the substring content of whatever that
+    conversion happens to produce, with no check that the conversion
+    actually yielded a meaningful PEM-like string.
   suggested_op: jwt_none_alg_opt_in
   suggested_sink_family: jwt_signature_verification
 
@@ -54,7 +108,21 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330, CWE-338]
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-1391, CWE-323]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-330 (Use of Insufficiently
+    Random Values); CWE-338 (Use of Cryptographically Weak PRNG), since
+    `Math.random()` is explicitly named.
+    Unique to this entry: CWE-1391 (Use of Weak Credentials) -- this
+    `secret` functions as the credential that authorizes every session-ID
+    cookie `express-session` signs, generated with far less effective
+    entropy than the HMAC scheme assumes; CWE-323 (Reusing a Nonce, Key
+    or Key Pair in Encryption/Signing) -- the single value computed once,
+    inline, at `session({ secret: Math.random()... })` is reused to sign
+    every session for the entire process's uptime, so a single successful
+    guess/recovery of this one weak value (not a per-session value)
+    compromises every session the process ever issues.
   suggested_op: weak_prng_token
   suggested_sink_family: session_token_generation
 
@@ -70,6 +138,162 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330, CWE-338]
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-614, CWE-1321]
+  cwe_rationale: >
+    Shared: see vulnerable-2.js's cwe_rationale above.
+    Unique to this entry, grounded in code specific to this excerpt (not
+    present in vulnerable-2.js): CWE-614 (Sensitive Cookie in HTTPS
+    Session Without 'Secure' Attribute) -- `session({ secret: ...,
+    resave: false, saveUninitialized: false })` passes no `cookie: {
+    secure: true }` option, so express-session's own default (not
+    Secure-flagged) applies to the session cookie this strong secret
+    signs; CWE-1321 (Improperly Controlled Modification of Object
+    Prototype Attributes ('Prototype Pollution')) -- this excerpt also
+    configures `bodyParser.urlencoded({ extended: true })`, which routes
+    parsing through the `qs` library's nested/bracket-notation parser, a
+    well-documented historical prototype-pollution vector when unpatched
+    versions are in the dependency tree.
+  suggested_op: csprng_token
+  suggested_sink_family: session_token_generation
+
+# --- manufactured pairs added per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# gap analysis (auth-session/node CWE-347: gap=1; auth-session/node
+# CWE-330/CWE-338: gap=1). Both groups already had one natural pair each above;
+# these are genuinely distinct third variants (different sub-mechanism/library
+# idiom), not near-duplicates of the natural pairs, per the manufacturing
+# task's own instruction. Self-contained (Node stdlib `crypto` only), no
+# external JWT/session package required. Dynamic-execution differential
+# validated via fuzzlab/tools/corpus_validation_sandbox.py (gVisor,
+# authorized=True) -- see this manifest's own change-control entry
+# (CC-LAB-0227) for the "N of M" result.
+
+- file: vulnerable-3-altered.js
+  role: vulnerable
+  derived_from: idiomatic-3-altered.js
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: verifyToken() dispatches on the token's own header `alg` claim -- when alg=HS256, it reuses the RSA *public* key (non-secret by design) as the HMAC *secret*, so anyone who knows the public key can forge an HS256-signed token this verifier accepts (CWE-347/CWE-757 algorithm confusion, RS256-vs-HS256 shape -- distinct from vulnerable-1.js's alg:none-by-default shape)."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-347 group (natural pair: vulnerable-1.js/idiomatic-1.js, real
+    node-jsonwebtoken alg:none-default history). Self-contained (Node
+    `crypto` stdlib only). Dynamic-execution differential (real RSA
+    keypair generated at runtime, legitimate RS256 token accepted by
+    both, forged HS256-signed-with-public-key token accepted only by the
+    vulnerable side) confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757]
+  cwe_unique: [CWE-522, CWE-290]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-347 (Improper Verification of
+    Cryptographic Signature); CWE-757 (Selection of Less-Secure Algorithm
+    During Negotiation) -- the token's own header selects a weaker
+    verification path (a symmetric HMAC check) than the asymmetric
+    RS256 the key material was actually meant for.
+    Unique to this entry: CWE-522 (Insufficiently Protected Credentials)
+    -- the code treats `rsaPublicKeyPem` (explicitly a *public* key,
+    handed to every relying party by design) as if it were a protected
+    HMAC secret when `header.alg === 'HS256'`; CWE-290 (Authentication
+    Bypass by Spoofing) -- the practical consequence is that an attacker
+    who knows only the public key (never a secret) can spoof a validly-
+    verified token for any identity/role, without ever learning any
+    actual secret.
+  suggested_op: jwt_rs256_hs256_confusion
+  suggested_sink_family: jwt_signature_verification
+
+- file: idiomatic-3-altered.js
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: verifyToken() pins EXPECTED_ALG='RS256' before ever inspecting the token, so the token's own alg claim can never select which key material/algorithm family verifies it."
+  notes: >
+    Manufactured counterpart to vulnerable-3-altered.js -- differs only
+    in the verification mechanism (algorithm pinned by the caller vs.
+    read from the token). Dynamic-execution differential confirmed via
+    `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757]
+  cwe_unique: [CWE-613, CWE-20]
+  cwe_rationale: >
+    Shared: see vulnerable-3-altered.js's cwe_rationale above.
+    Unique to this entry, grounded in latent gaps this fix does not
+    close: CWE-613 (Insufficient Session Expiration) -- `verifyToken()`
+    never inspects `payload.exp`/`payload.nbf` at all, so a token that
+    passes the (now-correct) signature check is treated as valid
+    indefinitely; CWE-20 (Improper Input Validation) -- `token.split('.')`
+    is destructured into exactly three variables with no check that the
+    split actually produced three segments, so a malformed 1- or 2-part
+    token surfaces as an uncaught exception from a later `Buffer.from`
+    call rather than a clean, intentional rejection.
+  suggested_op: jwt_alg_pinned
+  suggested_sink_family: jwt_signature_verification
+
+- file: vulnerable-4-altered.js
+  role: vulnerable
+  derived_from: idiomatic-4-altered.js
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: generateResetToken() returns Date.now().toString(36) + Math.random().toString(36).slice(2) -- a password-reset-token generator (distinct purpose from vulnerable-2.js's session-secret weakness) built from a coarse timestamp plus a non-cryptographic PRNG."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-330/CWE-338 group (natural pair: vulnerable-2.js/idiomatic-2.js,
+    a session *secret*). This targets a different token purpose (a
+    password-reset token) with a different construction. Dynamic-
+    execution differential (two tokens generated back-to-back share an
+    8-character predictable prefix; idiomatic tokens share none) confirmed
+    via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-340, CWE-200]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-330; CWE-338 (Math.random() is
+    explicitly Node's documented non-cryptographic PRNG).
+    Unique to this entry: CWE-340 (Generation of Predictable Numbers or
+    Identifiers) -- combining a coarse, externally-observable/
+    approximable timestamp with a non-CSPRNG output is a textbook
+    predictable-identifier construction; CWE-200 (Exposure of Sensitive
+    Information to an Unauthorized Actor) -- `Date.now().toString(36)` is
+    concatenated as a literal, undisguised prefix of the token string
+    itself, so anyone who merely observes one issued token (e.g. in a
+    referrer header or log line) can directly recover the exact server-
+    side timestamp it was minted at.
+  suggested_op: predictable_token_source
+  suggested_sink_family: session_token_generation
+
+- file: idiomatic-4-altered.js
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: generateResetToken() returns crypto.randomBytes(32).toString('hex') -- Node's CSPRNG, with no timestamp or non-cryptographic PRNG involved."
+  notes: >
+    Manufactured counterpart to vulnerable-4-altered.js -- differs only
+    in the token-generation mechanism. Dynamic-execution differential
+    confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-400, CWE-547]
+  cwe_rationale: >
+    Shared: see vulnerable-4-altered.js's cwe_rationale above.
+    Unique to this entry: CWE-400 (Uncontrolled Resource Consumption) --
+    `crypto.randomBytes()`'s synchronous form blocks Node's single event
+    loop until enough OS entropy is available; calling it on a hot
+    request path (e.g. many concurrent password-reset requests) can
+    serialize/stall unrelated requests, a documented Node.js caveat for
+    this exact API used this exact way; CWE-547 (Use of Hard-coded,
+    Security-relevant Constant) -- the byte length `32` is embedded
+    directly as a literal in the return statement rather than a named,
+    centrally-configurable constant, so a future policy change (e.g. to
+    48 bytes) requires finding and editing every call site individually.
   suggested_op: csprng_token
   suggested_sink_family: session_token_generation

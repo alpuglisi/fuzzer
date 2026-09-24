@@ -96,9 +96,26 @@ The 5 worst-gap groups above (`access-control/python` x2 sub-groups,
 `search-export/php`) are now done — see `CC-LAB-0226` in
 `docs/components/01-target-lab/change-control.md` for the full record
 (6 manufactured files, validation results, and the CWE-schema/pairs-floor
-migration a mid-task correction added to scope). The remaining ~28
-(cell, CWE) groups elsewhere in the gap-analysis table above (the smaller,
-gap=1 groups) are separate follow-up work, not touched by this pass.
+migration a mid-task correction added to scope).
+
+The 7 `auth-session` groups above (`auth-session/node` CWE-347 and
+CWE-330/CWE-338; `auth-session/php` CWE-347/CWE-757, CWE-330/CWE-640, and
+CWE-287/CWE-613/CWE-863; `auth-session/python` CWE-347 and
+CWE-330/CWE-338) are now done — see `CC-LAB-0227` in
+`docs/components/01-target-lab/change-control.md` for the full record (7
+manufactured pairs / 14 files, each a genuinely distinct third
+sub-variant of its group's mechanism, not a near-duplicate of the
+existing natural pair; static + dynamic (gVisor sandbox) validation
+results; and the full `cwe_shared`/`cwe_unique` migration of the 8
+pre-existing node/python entries that were still on the legacy flat
+`cwe:` field, done at the same time since touching those manifest files
+required it). `auth-session`'s combined vulnerable/idiomatic floor
+(aggregated across node+php+python) was already at 7/7 before this pass
+and is now 14/14 — well clear of the >= 5 floor.
+
+The remaining ~21 (cell, CWE) groups elsewhere in the gap-analysis table
+above (the smaller, gap=1 groups outside `auth-session`) are separate
+follow-up work, not touched by this pass.
 
 ## Execution options (pick one when scheduling this work)
 

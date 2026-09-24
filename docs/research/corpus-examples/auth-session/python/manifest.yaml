@@ -10,6 +10,21 @@
 # rather than a naturally-broken version of the reset token itself; see that entry's notes.
 # Collection stopped at 4 files once these two pairs were verified, per the plan's
 # 3-5-with-floor-2 target, rather than continuing to search for a closer-fitting pair.
+#
+# Per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's gap analysis (auth-session/python
+# CWE-347: natural=1, floor=2, gap=1; auth-session/python CWE-330/CWE-338: natural=1,
+# floor=2, gap=1), one manufactured pair added per group below (vulnerable-3-altered.py/
+# idiomatic-3-altered.py for CWE-347; vulnerable-4-altered.py/idiomatic-4-altered.py for
+# CWE-330/CWE-338) -- see those entries' own notes for the distinct sub-variant each
+# illustrates relative to this cell's natural pairs.
+#
+# All entries below migrated from the legacy flat `cwe:` field to
+# `cwe_shared:`/`cwe_unique:`/`cwe_rationale:` per PA-0033 /
+# docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6, at the same time the
+# manufactured pairs were added. CWE research for this migration was done from trained
+# knowledge, not a live cwe.mitre.org lookup -- that domain is blocked by this
+# environment's egress proxy (see ERROR_LOG.md, 2026-09-22 entry) -- and should be
+# spot-checked by a session with that access before being treated as authoritative.
 
 - file: vulnerable-1.py
   role: vulnerable
@@ -24,7 +39,27 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe_shared: [CWE-347, CWE-1188]
+  cwe_unique: [CWE-1023, CWE-706]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-347 (Improper Verification of
+    Cryptographic Signature) is the primary weakness; CWE-1188 (Insecure
+    Default Initialization of a Resource) applies to both entries because
+    `key_length_msg` handling (`if self.options.get
+    ("enforce_minimum_key_length", False): raise ... else: warnings.warn
+    (...)`) defaults to a lenient, warn-only response to an insufficient
+    key length and is unchanged by the fix.
+    Unique to this entry: CWE-1023 (Incomplete Comparison with Missing
+    Factors) -- `algorithms = [key.algorithm_name]` is inferred from the
+    very key being verified two lines above the check
+    `alg not in algorithms`, so that comparison is missing the one
+    factor (an independently-sourced, caller-controlled expectation)
+    that would make it meaningful; CWE-706 (Use of Incorrectly-Resolved
+    Name or Reference) -- the algorithm actually used to verify
+    (`alg_obj = key.Algorithm`) is resolved from the key object, while a
+    separate, textually-identical-looking `alg` is resolved from the
+    untrusted token header, and this function never confirms the two
+    resolutions agree before using the former.
   suggested_op: jwt_alg_unchecked
   suggested_sink_family: jwt_signature_verification
 
@@ -41,7 +76,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe_shared: [CWE-347, CWE-1188]
+  cwe_unique: [CWE-668, CWE-665]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above -- the same
+    lenient `enforce_minimum_key_length` default is unchanged in this
+    fixed file.
+    Unique to this entry, grounded in this fix's own new code: CWE-668
+    (Exposure of Resource to Wrong Sphere) -- the new check's exception
+    message, `f"Token algorithm {alg!r} does not match the key's
+    algorithm {key.algorithm_name!r}"`, embeds the key's own configured
+    algorithm identity directly into text that can propagate to a remote
+    caller if this exception surfaces in an HTTP error response; CWE-665
+    (Improper Initialization) -- the method signature's `key: ... = ""`
+    default means a caller who forgets to pass `key` silently proceeds
+    with an empty-string key rather than an explicit, fail-fast error at
+    the call boundary.
   suggested_op: jwt_alg_allowlist
   suggested_sink_family: jwt_signature_verification
 
@@ -57,7 +107,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330, CWE-338]
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-307, CWE-311]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-330 (Use of Insufficiently
+    Random Values); CWE-338 (Use of Cryptographically Weak PRNG), since
+    Python's `random` module (Mersenne Twister) is explicitly named.
+    Unique to this entry, grounded in this excerpt's own stated scope:
+    CWE-307 (Improper Restriction of Excessive Authentication Attempts)
+    -- this entry's own notes already flag "no visible rate-limit" on
+    the verification endpoint for a 6-digit (1-in-a-million) code, so a
+    weak code combined with no observed throttling in this excerpt is an
+    online-brute-force path; CWE-311 (Missing Encryption of Sensitive
+    Data) -- `user.set_login_code(code, timeout=LOGIN_CODE_TIMEOUT)`
+    passes the raw 6-digit code straight to storage with no hashing step
+    visible in this excerpt, unlike how a password would normally be
+    persisted.
   suggested_op: weak_prng_token
   suggested_sink_family: session_token_generation
 
@@ -73,6 +138,162 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330, CWE-338]
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-696, CWE-664]
+  cwe_rationale: >
+    Shared: see vulnerable-2.py's cwe_rationale above.
+    Unique to this entry, grounded in code specific to this excerpt (not
+    present in vulnerable-2.py): CWE-696 (Incorrect Behavior Order) --
+    `acc.clear_password()` executes first, unconditionally, before the
+    reset token is generated, stored (`acc.set_reset_token(...)`), and
+    saved -- if `acc.save()` or the (omitted) email-send step fails
+    afterward, the account is left with no usable password and no
+    delivered reset token; CWE-664 (Improper Control of a Resource
+    Through its Lifetime) -- the account's password resource is put into
+    a cleared/invalid state without the function first confirming its
+    replacement (a valid, deliverable reset token) actually exists.
+  suggested_op: csprng_token
+  suggested_sink_family: session_token_generation
+
+# --- manufactured pairs added per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# gap analysis (auth-session/python CWE-347: gap=1; auth-session/python
+# CWE-330/CWE-338: gap=1). Both groups already had one natural pair each above;
+# these are genuinely distinct third variants ("same class, different stack"
+# per this cell's own assignment relative to the node/php hand-rolled-JWT and
+# remember-me-token manufactured pairs), not near-duplicates of the natural
+# pairs. Self-contained (stdlib `hmac`/`hashlib`/`secrets` only), no external
+# JWT package required. Dynamic-execution differential validated via
+# fuzzlab/tools/corpus_validation_sandbox.py (gVisor, authorized=True) -- see
+# this manifest's own change-control entry (CC-LAB-0227) for the "N of M"
+# result.
+
+- file: vulnerable-3-altered.py
+  role: vulnerable
+  derived_from: idiomatic-3-altered.py
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: verify_token() dispatches on the token's own header `alg` claim, including an 'alg: none' branch that performs no cryptographic check at all -- a hand-rolled verifier, distinct from vulnerable-1.py's real PyJWK-specific algorithm-inference bug."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-347 group (natural pair: vulnerable-1.py/idiomatic-1.py, real
+    PyJWT PyJWK algorithm-inference history). This is the same class of
+    bug as php's vulnerable-3-altered.php (a hand-rolled verifier
+    trusting the header's own alg claim, including 'none'), in a
+    different language stack, per this cell's own assignment ("same
+    class, different stack"). Dynamic-execution differential (a forged
+    alg:none token accepted by verify_token() here, rejected by the
+    idiomatic counterpart) confirmed via `run_in_sandbox` -- see
+    CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757]
+  cwe_unique: [CWE-693, CWE-1288]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-347 (Improper Verification of
+    Cryptographic Signature); CWE-757 (Selection of Less-Secure Algorithm
+    During Negotiation) -- the attacker-supplied header directly selects
+    a weaker (here, absent) verification path.
+    Unique to this entry: CWE-693 (Protection Mechanism Failure) -- the
+    `if/elif/else` dispatch is the function's *only* protection
+    mechanism, and it fails open specifically for the 'none' arm rather
+    than for a coding accident elsewhere; CWE-1288 (Improper Validation
+    of Consistency within Input) -- `verify_token()` has no parameter at
+    all for a caller-supplied expected algorithm, so there is no
+    independent value the token's own `alg` claim could ever be checked
+    for consistency against.
+  suggested_op: jwt_alg_none_dispatch
+  suggested_sink_family: jwt_signature_verification
+
+- file: idiomatic-3-altered.py
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: verify_token() pins EXPECTED_ALG='HS256' before ever inspecting the token, so a token's own alg claim (including 'none') can never select a weaker or absent check."
+  notes: >
+    Manufactured counterpart to vulnerable-3-altered.py -- differs only
+    in the verification mechanism. Dynamic-execution differential
+    confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-757]
+  cwe_unique: [CWE-1284, CWE-573]
+  cwe_rationale: >
+    Shared: see vulnerable-3-altered.py's cwe_rationale above.
+    Unique to this entry, grounded in latent gaps this fix does not
+    close: CWE-1284 (Improper Validation of Specified Quantity in Input)
+    -- `token.split(".")` is unpacked into exactly three variables with
+    no check that the split actually produced three segments, so a
+    malformed token surfaces as an uncaught `ValueError` from the
+    unpacking itself rather than a clean, intentional rejection; CWE-573
+    (Improper Following of Specification by Caller) -- the function
+    silently assumes every caller always passes a well-formed
+    three-segment JWT string per spec, without itself enforcing that
+    precondition before acting on it.
+  suggested_op: jwt_alg_pinned
+  suggested_sink_family: jwt_signature_verification
+
+- file: vulnerable-4-altered.py
+  role: vulnerable
+  derived_from: idiomatic-4-altered.py
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: generate_remember_me_token() hashes a random.random() draw with SHA-256 to build a 'remember me' cookie token -- a different token purpose and framework idiom (Django-style custom auth backend) than vulnerable-2.py's passwordless-login digits."
+  notes: >
+    Manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics", as a third, distinct sub-variant of this cell's
+    CWE-330/CWE-338 group (natural pair: vulnerable-2.py/idiomatic-2.py,
+    real DOAJ login-code history). Dynamic-execution differential
+    (seeding Python's module-level `random` PRNG to the same state
+    before two calls reproduces the identical token; the idiomatic
+    `secrets`-based token shows no such reproducibility) confirmed via
+    `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-916, CWE-336]
+  cwe_rationale: >
+    Shared (this pair's core class): CWE-330; CWE-338 (Python's `random`
+    module -- Mersenne Twister -- is explicitly named).
+    Unique to this entry: CWE-916 (Use of Password Hash With Insufficient
+    Computational Effort) -- a single fast SHA-256 hash is used to
+    "launder" a low-entropy `random.random()` draw into a fixed-length
+    token, the same insufficient-effort-over-weak-input shape CWE-916
+    describes for password hashing; CWE-336 (Same Seed in Pseudo-Random
+    Number Generator) -- this function never (re)seeds `random` itself,
+    so if the hosting process seeds the module-level generator once at
+    startup (a common pattern), every token this function ever produces
+    for the process's lifetime is a deterministic function of that one
+    startup seed plus call order.
+  suggested_op: weak_prng_token
+  suggested_sink_family: session_token_generation
+
+- file: idiomatic-4-altered.py
+  role: idiomatic
+  license: N/A (manufactured)
+  tutorial_or_course_code: false
+  pattern: "manufactured: generate_remember_me_token() returns secrets.token_hex(32) -- a CSPRNG (os.urandom-backed), drawing entropy directly instead of hashing a predictable seed."
+  notes: >
+    Manufactured counterpart to vulnerable-4-altered.py -- differs only
+    in the token-generation mechanism. Dynamic-execution differential
+    confirmed via `run_in_sandbox` -- see CC-LAB-0227.
+  validated: true
+  validated_by: [manual-review, static-analysis, dynamic-sandbox]
+  redacted: false
+  cwe_shared: [CWE-330, CWE-338]
+  cwe_unique: [CWE-710, CWE-1059]
+  cwe_rationale: >
+    Shared: see vulnerable-4-altered.py's cwe_rationale above.
+    Unique to this entry: CWE-710 (Improper Adherence to Coding
+    Standards) -- this security-sensitive function carries no docstring,
+    type hints, or stated contract (e.g. expected caller-side storage or
+    rotation policy for the value it returns); CWE-1059 (Insufficient
+    Technical Documentation) -- there is no documentation anywhere
+    alongside this function specifying the required lifetime, storage
+    form, or invalidation policy for a "remember me" token, leaving
+    correct usage entirely to each caller's own judgment.
   suggested_op: csprng_token
   suggested_sink_family: session_token_generation

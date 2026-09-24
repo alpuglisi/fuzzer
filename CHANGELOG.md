@@ -4,6 +4,29 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus manufactured pairs, 7 auth-session groups + node/python CWE-schema migration)
+- Docs (research corpus): manufactured one additional pair per `auth-session`
+  (cell, CWE) group per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap
+  table — `auth-session/node` CWE-347 and CWE-330/CWE-338, `auth-session/php`
+  CWE-347/CWE-757, CWE-330/CWE-640, and CWE-287/CWE-613/CWE-863,
+  `auth-session/python` CWE-347 and CWE-330/CWE-338 — 7 pairs / 14 new files,
+  each a genuinely distinct third sub-variant (different framework/library
+  idiom) of its group's existing natural pair, not a near-duplicate.
+  Static (syntax/lint/bandit) and dynamic (gVisor sandbox,
+  `fuzzlab/tools/corpus_validation_sandbox.py`, `authorized=True`)
+  differential validation: 7 of 7 groups confirmed dynamically (vulnerable
+  side accepts/allows the forged input; idiomatic side rejects it). Also
+  migrated all 8 pre-existing `auth-session/node` and `auth-session/python`
+  entries from the legacy flat `cwe:` field to `cwe_shared:`/`cwe_unique:`/
+  `cwe_rationale:` (touching those manifests to add the new pairs required
+  it per `.claude/hooks/check-corpus-cwe-coverage.sh`'s per-file
+  aggregation) — 56 total `cwe_unique` CWE IDs assigned across all
+  28 entries in the 3 manifests, all mutually distinct (checked by hand
+  against the mechanical hook's cross-entry collision rule, then confirmed
+  by actually running the hook). `auth-session`'s combined
+  vulnerable/idiomatic floor (aggregated node+php+python) goes from 7/7 to
+  14/14. See `CC-LAB-0227`.
+
 ## 2026-09-24 (vuln-corpus manufactured pairs, 5 worst-gap groups + CWE-coverage/pairs-floor migration)
 - Docs (research corpus): manufactured the missing side of the 5 worst-gap
   (cell, CWE) pairs identified in `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`
