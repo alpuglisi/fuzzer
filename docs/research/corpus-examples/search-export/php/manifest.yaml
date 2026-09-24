@@ -139,7 +139,7 @@
   validated_by: [semgrep-custom-rule, php-lint, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-611]
-  cwe_unique: [CWE-665, CWE-441]
+  cwe_unique: [CWE-665, CWE-918]
   cwe_rationale: >
     CWE-665 (Improper Initialization): this fix's safety rests entirely
     on the ABSENCE of the LIBXML_NOENT flag rather than an affirmative,
@@ -147,11 +147,22 @@
     handling is left at its implementation default instead of being
     positively configured, so a future edit that adds LIBXML_NOENT back
     (e.g. "why isn't my entity substituting") would silently reopen the
-    hole with no test catching it. CWE-441 (Unintended Proxy or
-    Intermediary ('Confused Deputy')): LIBXML_NONET specifically defends
-    against the SSRF-flavored variant of this bug, where the XML parser
-    itself is made to act as a proxy fetching internal/network resources
-    on the attacker's behalf via a network-scheme SYSTEM entity.
+    hole with no test catching it. CWE-918 (Server-Side Request Forgery):
+    LIBXML_NONET specifically defends against the SSRF-flavored variant
+    of this bug, where the XML parser itself is made to act as a proxy
+    fetching internal/network resources on the attacker's behalf via a
+    network-scheme SYSTEM entity.
+    (Originally recorded as CWE-441 -- Unintended Proxy or Intermediary,
+    'Confused Deputy' -- until this Phase 3 final batch's own cross-file
+    run of `check-corpus-cwe-coverage.sh` surfaced a pre-existing
+    collision with insecure-deserialization/python's
+    vulnerable-job-cache-pickle-3.py entry, which also claimed CWE-441 as
+    unique; reassigned here to CWE-918, which fits this entry's own
+    described mechanism -- an XML parser forced to fetch a
+    network-scheme SYSTEM entity on the attacker's behalf -- at least as
+    precisely as CWE-441 did, per the same collision-fix class already
+    applied once before in CC-LAB-0228 for ecommerce-logic's
+    CWE-841/CWE-1339 collision.)
   suggested_op: xml_external_entities_disabled   # new op: the direct fix
                                                   # counterpart to
                                                   # vulnerable-3.php's
@@ -207,3 +218,82 @@
                                                # same quoted-literal WHERE
                                                # position as the vulnerable
                                                # pair above
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 3 of 10). Closes this cell's remaining CWE-89 gap (distinct
+# from vulnerable-3.php/idiomatic-3-altered.php, which cover this same
+# cell's CWE-611 XXE group): a PDO-based product-search endpoint, still
+# built by string interpolation -- the well-documented real-world
+# misconception that merely switching to PDO makes a query safe -- vs.
+# PDO's own prepare()/bindParam() API used correctly.
+
+- file: vulnerable-4-altered.php
+  role: vulnerable
+  derived_from: vulnerable-1.php
+  manufactured: true
+  license: n/a (manufactured, representative of a real, documented PDO misuse; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 3 of 10). Genuinely
+    distinct third variant from vulnerable-1.php/vulnerable-2.php's
+    mysqli raw-concat/sanitize() shape and idiomatic-1.php's
+    mysqli_real_escape_string() shape: PDO is in use, but the query text
+    is still built by direct string interpolation instead of PDO's own
+    bound-parameter API.
+  pattern: "`$pdo->query(\"...WHERE category = '$category' AND name LIKE '%$search%'...\")` -- both dynamic values interpolated directly into the SQL text before reaching PDO::query()."
+  validated: true
+  validated_by: [php-lint, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-269, CWE-522]
+  cwe_rationale: >
+    Shared (this cell's core class, see vulnerable-1.php above): CWE-89.
+    Unique: CWE-269 (Improper Privilege Management) -- flagged generally:
+    nothing in this fragment establishes what privilege level (public,
+    authenticated, admin) is actually required to reach this search
+    endpoint at all. CWE-522 (Insufficiently Protected Credentials) --
+    flagged generally: the PDO DSN/username/password this endpoint's
+    database connection depends on aren't shown as sourced from a
+    protected secret store anywhere in this excerpt.
+  suggested_op: raw_concat   # PDO in use, but still string-interpolated --
+                              # functionally the "no transform at all"
+                              # shape already covered by the existing
+                              # raw_concat rows, just via PDO::query()
+                              # instead of mysqli
+  suggested_sink_family: sql_string_literal   # existing family; reused
+
+- file: idiomatic-4-altered.php
+  role: idiomatic
+  derived_from: vulnerable-4-altered.php
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-4-altered.php's real PDO structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 3 of 10).
+    Minimal-pair discipline: identical PDO connection setup, identical
+    inputs, identical output shape. The ONLY mechanism difference is the
+    query construction: PDO's own prepare()/execute() named-placeholder
+    binding for both dynamic values, instead of string interpolation.
+  pattern: "`$stmt = $pdo->prepare(\"...WHERE category = :category AND name LIKE :search...\"); $stmt->execute(['category' => $category, 'search' => '%'.$search.'%']);` -- both dynamic values bound as query parameters."
+  validated: true
+  validated_by: [php-lint, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-404, CWE-272]
+  cwe_rationale: >
+    Shared: see vulnerable-4-altered.php above.
+    Unique, flagged generally as residual concerns of this
+    prepare()/execute() mitigation rather than defects it fails to
+    address for its own stated purpose: CWE-404 (Improper Resource
+    Shutdown or Release) -- neither the prepared statement nor the PDO
+    connection object is explicitly closed/unset after use, relying
+    entirely on PHP's own garbage collection and request-end teardown;
+    CWE-272 (Least Privilege Violation) -- flagged generally: nothing
+    here confirms the database user this PDO connection authenticates as
+    is restricted to read-only/SELECT privileges on the `products` table,
+    which is all this search endpoint actually needs.
+  suggested_op: param_bind   # existing op; reused -- the driver-level
+                              # counterpart to search-export/python's
+                              # psycopg2 param_bind and this cell's own
+                              # ORM-level param_bind entries
+  suggested_sink_family: sql_string_literal   # existing family; reused

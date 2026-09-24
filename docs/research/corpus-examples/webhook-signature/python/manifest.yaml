@@ -55,3 +55,113 @@
     value only, ignoring how that value was derived) instantiates.
   suggested_op: naive_string_compare
   suggested_sink_family: webhook_signature_verification
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 10 of 10, closing out this manufacturing plan). Genuinely
+# distinct third variant from the pair above: both files here use
+# hmac.compare_digest() CORRECTLY -- the mechanism difference is what
+# bytes the signature is computed OVER (the real raw request body vs. a
+# re-serialized reconstruction of the parsed JSON), a real, well-documented
+# webhook-verification pitfall independent of the comparison-function
+# choice.
+
+- file: idiomatic-4-altered.py
+  role: idiomatic
+  derived_from: idiomatic-hmac-compare-digest-3.py
+  manufactured: true
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "hmac.new(secret, raw_body, sha256) computed over the raw bytes actually received, BEFORE any JSON parsing -- Stripe's and GitHub's own webhook-verification documentation both explicitly instruct verifying against the raw body, never a re-serialized copy of the parsed payload"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 10 of 10, the final
+    group closing out this plan). A genuinely distinct sub-scenario from
+    idiomatic-hmac-compare-digest-3.py/vulnerable-hmac-naive-equality-3.py:
+    both files in THIS pair use hmac.compare_digest() correctly; the
+    difference is exclusively what bytes are hashed.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-294, CWE-330]
+  cwe_rationale: >
+    Shared (this cell's core class, see idiomatic-hmac-compare-digest-3.py's
+    own cwe_rationale above): CWE-347, CWE-345.
+    Unique, flagged generally as residual concerns of this raw-bytes-
+    verification mechanism rather than defects it fails to address for
+    its own stated purpose: CWE-294 (Authentication Bypass by
+    Capture-replay) -- verifying against the exact originally-signed
+    bytes proves authenticity of THIS payload, but nothing here checks
+    whether this exact valid payload/signature pair has already been
+    submitted once before (no timestamp/nonce tracking), so a captured
+    valid webhook delivery could be replayed; CWE-330 (Use of
+    Insufficiently Random Values) -- flagged generally as a residual
+    concern for whatever process originally generates/rotates
+    `webhook_secret`, not shown in this excerpt.
+  suggested_op: raw_body_hmac_verify   # new op: genuinely distinct from
+                                        # constant_time_compare -- the
+                                        # differentiator here is WHAT is
+                                        # hashed (raw bytes vs. reparsed
+                                        # JSON), not the comparison
+                                        # function, which both entries in
+                                        # this pair use identically
+  suggested_sink_family: webhook_signature_verification   # existing
+                                                            # family; reused
+
+- file: vulnerable-4-altered.py
+  role: vulnerable
+  derived_from: idiomatic-4-altered.py
+  manufactured: true
+  license: "N/A (synthetic -- represents a real, documented webhook-verification pitfall: Stripe's and GitHub's own docs both warn to verify the raw body, never a re-serialized copy of the parsed payload)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: json.loads(raw_body) FIRST, then hmac.new(secret, json.dumps(payload).encode(), sha256) -- the signature is checked against a re-serialized reconstruction of the parsed data, not the bytes actually received"
+  notes: >
+    Manufactured per Phase 3's 'Pair generation' methodology. Minimal-pair
+    discipline: identical function signature, identical
+    hmac.compare_digest() comparison call as idiomatic-4-altered.py -- the
+    ONLY mechanism difference is which bytes are hashed and when parsing
+    happens relative to that.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-436, CWE-444]
+  cwe_rationale: >
+    Shared: see idiomatic-4-altered.py above.
+    Unique: CWE-436 (Interpretation Conflict) -- many distinct byte
+    sequences (different key order, whitespace, duplicate keys where the
+    last one wins, numeric-vs-string representations) all parse to the
+    identical Python dict, so `json.dumps(json.loads(raw_body))` treats
+    all of them as interchangeable even though they are not the bytes
+    that were actually signed -- two different parties (the original
+    signer and this verifier) can end up with two different
+    interpretations of "the data that was authenticated." CWE-444
+    (Improper Neutralization of Special Elements used in an HTTP Header,
+    'HTTP Request/Response Smuggling') -- flagged generally by close
+    analogy: this is the same "parsing differential between what was
+    verified and what was actually acted on" root shape that request-
+    smuggling vulnerabilities exploit at the HTTP-framing layer, applied
+    here to JSON re-serialization instead of an HTTP front-end/back-end
+    parser disagreement.
+  suggested_op: reserialized_json_hmac_verify   # new op: the direct
+                                                  # counterpart to
+                                                  # idiomatic-4-altered.py's
+                                                  # raw_body_hmac_verify
+  suggested_sink_family: webhook_signature_verification   # existing
+                                                            # family; reused
+  validation_note: >
+    Dynamically validated end-to-end in the gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py`, `run_in_sandbox`,
+    authorized=True): a legitimate raw payload `raw_A =
+    b'{"amount": 999}'` was signed to produce `sig_A`. A second, byte-
+    different payload `raw_B = b'{"amount":    999}'` (identical parsed
+    value, different whitespace) was then presented to both functions
+    together with `sig_A`. idiomatic-4-altered.py raised `ValueError`
+    ("Invalid webhook signature") -- correctly rejecting bytes that
+    differ from what was actually signed. This file returned
+    `{'amount': 999}` with NO exception, accepting `raw_B` under a
+    signature that was never computed over `raw_B`'s own bytes --
+    confirming the re-serialization step is what lets a modified payload
+    pass a signature check intended for a different one.

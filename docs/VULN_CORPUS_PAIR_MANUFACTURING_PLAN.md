@@ -136,9 +136,49 @@ collisions (`CWE-841`, `CWE-1339`) between `ecommerce-logic/php` and
 `ecommerce-logic/python` that this pass's own cross-file run of
 `check-corpus-cwe-coverage.sh` surfaced).
 
-The remaining ~11 (cell, CWE) groups elsewhere in the gap-analysis table
-above (the smaller, gap=1 groups outside `auth-session` and this batch's
-10 groups) are separate follow-up work, not touched by this pass.
+The remaining 10 (cell, CWE) groups elsewhere in the gap-analysis table
+above (`insecure-deserialization/python` CWE-20/CWE-502;
+`search-export/node` CWE-89, distinct from the CWE-1336 group
+`CC-LAB-0226` already closed; `search-export/php` CWE-89, distinct from
+the CWE-611 group `CC-LAB-0226` already closed; `search-export/python`
+CWE-89; `ssrf/python` CWE-20/CWE-441/CWE-918; `ssti/python`
+CWE-1336/CWE-94; `ugc-xss/node` CWE-79; `ugc-xss/php` CWE-79;
+`ugc-xss/python` CWE-116/CWE-79; `webhook-signature/python`
+CWE-345/CWE-347) are now done — see `CC-LAB-0229` in
+`docs/components/01-target-lab/change-control.md` for the full record
+(10 manufactured pairs / 20 files, each a genuinely distinct third
+sub-variant of its group's mechanism — a different framework/library
+idiom or sub-scenario, not a near-duplicate of the existing natural
+pair; static (syntax-check + manual-review) always, plus dynamic
+gVisor-sandbox validation for the 5 groups whose mechanism needed no
+live external service (`insecure-deserialization/python`'s YAML pair,
+`ssti/python`'s SandboxedEnvironment pair, `webhook-signature/python`'s
+raw-vs-reserialized-JSON pair, and `ugc-xss/php`'s and
+`ugc-xss/python`'s pairs), reported honestly as "N of M"; static-only
+for the 5 groups needing a live DB/network connection or an
+unavailable npm package this environment's egress policy blocks
+(`search-export/node`'s Sequelize pair, `search-export/php`'s PDO
+pair, `search-export/python`'s psycopg2 pair, `ssrf/python`'s
+getaddrinfo pair — real DNS/dual-stack control unavailable — and
+`ugc-xss/node`'s markdown-it pair — `markdown-it`/`sequelize` are not
+installed and this environment's egress policy blocks the npm
+registry); the full `cwe_shared`/`cwe_unique` migration of the 9
+pre-existing entries across `search-export/python`, `ugc-xss/node`, and
+`ugc-xss/php` that were still on the legacy flat `cwe:` field, plus a
+same-batch fix of three pre-existing cross-file `cwe_unique` collisions
+(`CWE-838` between `search-export/node` and `ugc-xss/python`; `CWE-704`
+between `search-export/node` and `ssrf/python`; `CWE-441` between
+`search-export/php` and `insecure-deserialization/python`) that this
+pass's own cross-file run of `check-corpus-cwe-coverage.sh` surfaced.
+
+**This closes out this plan: all 33 (cell, CWE) groups / 39 manufactured
+pairs in the gap-analysis table above are now done**, across the four
+batches recorded in `CC-LAB-0226` (5 worst-gap groups), `CC-LAB-0227`
+(7 `auth-session` groups), `CC-LAB-0228` (10 `ecommerce-logic`/
+`file-handling`/`header-injection` groups), and `CC-LAB-0229` (this
+batch's final 10 groups). The corresponding `docs/VULN_CORPUS_EXPANSION_PLAN.md`
+Status-section item ("Phase 3: manufactured pairs generated") is checked
+off accordingly.
 
 ## Execution options (pick one when scheduling this work)
 

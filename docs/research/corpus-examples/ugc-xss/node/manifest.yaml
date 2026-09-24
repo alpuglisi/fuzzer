@@ -27,7 +27,26 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (this Phase 3 final batch touched this file to add a new CWE-79 pair,
+  # and the corpus-CWE-coverage hook requires every entry in a touched
+  # manifest to meet the current standard). NOTE: researched from trained
+  # knowledge, not a live MITRE lookup -- cwe.mitre.org is blocked by this
+  # environment's egress proxy (see ERROR_LOG.md's 2026-09-22 entry). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1022, CWE-501]
+  cwe_rationale: >
+    Shared: CWE-79 (Cross-site Scripting) is the primary weakness; CWE-116
+    (Improper Encoding or Escaping of Output) is its listed parent.
+    Unique: CWE-1022 (Use of Web Link to Untrusted Target) --
+    `comment.user.html_url` is interpolated raw as an `href` attribute
+    (and again inside a `title` attribute) with no validation that it's
+    even an http(s) URL, a second, independent injection point in this
+    same template literal beyond `body_html`. CWE-501 (Trust Boundary
+    Violation) -- this entire render path treats whatever the GitHub
+    Issues API returned as already-safe HTML with no sanitization step
+    anywhere client-side, a trust-boundary assumption that the API
+    response itself is the security boundary.
   suggested_op: raw_concat   # no sanitizer anywhere in the render path before
                              # the innerHTML assignment -- same "no transform"
                              # shape as the existing raw_concat rows; reused
@@ -56,7 +75,23 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (see vulnerable-1.js's migration note above -- same file). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1021, CWE-668]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique: CWE-1021 (Improper Restriction of Rendered UI Layers or
+    Frames) -- flagged generally: since the entire `comment.body_html`
+    value is attacker-influenced markup rendered via
+    dangerouslySetInnerHTML with no restriction on embeddable content,
+    nothing here would stop an attacker-authored `<iframe>` from being
+    embedded either, a related but distinct risk from the `<script>`-
+    style payloads this pair otherwise focuses on. CWE-668 (Exposure of
+    Resource to Wrong Sphere) -- `dangerouslySetInnerHTML` exposes raw
+    DOM-insertion capability (normally outside React's own controlled
+    virtual-DOM sphere) directly to comment data sourced from an external
+    API, with nothing narrowing that exposure back down before use.
   suggested_op: raw_concat   # dangerouslySetInnerHTML with no sanitizer call
                              # -- same shape as vulnerable-1.js, reused
   suggested_sink_family: html_body   # same reasoning as vulnerable-1.js above
@@ -75,7 +110,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (see vulnerable-1.js's migration note above -- same file). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1333, CWE-799]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique, flagged generally as residual concerns of this DOMPurify
+    mitigation rather than defects it fails to address for its own
+    stated purpose: CWE-1333 (Inefficient Regular Expression Complexity)
+    -- DOMPurify's own sanitization internals rely on regex-based
+    tag/attribute detection, so an adversarially crafted comment body is
+    a documented class of DoS surface distinct from the XSS this call
+    is meant to prevent; CWE-799 (Improper Control of Interaction
+    Frequency) -- flagged generally: nothing shown here rate-limits how
+    often a given user can submit a new answer/comment before it reaches
+    this sanitize-then-render pipeline, not shown in this excerpt.
   suggested_op: dompurify_sanitize   # DOMPurify.sanitize() is a distinct
                              # allowlist-sanitizer mechanism not currently in
                              # the matrix (the matrix's only HTML-body
@@ -84,3 +134,81 @@
                              # proposed as new
   suggested_sink_family: html_body   # same dangerouslySetInnerHTML sink
                              # position as vulnerable-2.js
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 7 of 10). Genuinely distinct third variant: a server-
+# rendered Markdown comment pipeline using markdown-it, contrasting its
+# own documented `html` constructor option (default `false`) rather than
+# a raw-echo-vs-DOMPurify contrast.
+
+- file: vulnerable-3-altered.js
+  role: vulnerable
+  derived_from: vulnerable-1.js
+  manufactured: true
+  license: n/a (manufactured, representative of a real, documented markdown-it misconfiguration; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 7 of 10). A
+    genuinely distinct sub-scenario from vulnerable-1.js/vulnerable-2.js
+    (raw innerHTML/dangerouslySetInnerHTML of an unsanitized comment) and
+    idiomatic-1.jsx (DOMPurify.sanitize()): a server-rendered Markdown
+    comment pipeline using markdown-it, with its own documented `html`
+    option explicitly enabled.
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-16, CWE-909]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique: CWE-16 (Configuration) -- `html: true` is an explicit
+    configuration choice that deviates from markdown-it's own documented
+    safe default, made once at module load with no per-call override or
+    review gate. CWE-909 (Missing Initialization of Resource) -- the
+    MarkdownIt instance is constructed once with this non-default option
+    and reused for every comment render, so the insecure configuration
+    is baked into the module's shared initialization rather than a
+    per-render decision.
+  suggested_op: markdown_it_html_enabled   # new op: genuinely distinct
+                                             # from raw_concat/
+                                             # dompurify_sanitize -- a
+                                             # real Markdown library's own
+                                             # documented `html` option
+                                             # left enabled
+  suggested_sink_family: html_body   # existing family; reused
+
+- file: idiomatic-3-altered.js
+  role: idiomatic
+  derived_from: vulnerable-3-altered.js
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3-altered.js's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 7 of 10).
+    Minimal-pair discipline: identical import, identical
+    renderCommentBody() shape. The ONLY mechanism difference is the
+    `html` constructor option: `false` (markdown-it's own documented
+    default) instead of `true`.
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-601, CWE-407]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique, flagged generally as residual concerns of this `html: false`
+    mitigation rather than defects it fails to address for its own
+    stated purpose: CWE-601 (URL Redirection to Untrusted Site, 'Open
+    Redirect') -- markdown-it's own link-rendering can still emit a
+    `javascript:`-scheme or otherwise untrusted-target link from
+    ordinary Markdown link syntax (`[text](url)`) unless a custom
+    `validateLink` override is configured, which this file does not do;
+    CWE-407 (Inefficient Algorithmic Complexity) -- markdown-it's own
+    tokenizer is regex/state-machine based, so an adversarially crafted
+    comment body remains a documented DoS surface independent of the
+    `html` option this fix addresses.
+  suggested_op: markdown_it_html_disabled   # new op: the direct fix
+                                              # counterpart to
+                                              # vulnerable-3-altered.js's
+                                              # markdown_it_html_enabled
+  suggested_sink_family: html_body   # existing family; reused

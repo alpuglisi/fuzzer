@@ -28,21 +28,29 @@
   # not a live MITRE lookup -- cwe.mitre.org is blocked by this
   # environment's egress proxy (confirmed via curl and WebFetch);
   # recorded honestly rather than fabricated. ---
-  cwe_shared: [CWE-89]
-  cwe_unique: [CWE-943, CWE-116]
+  # NOTE: CWE-943 moved from cwe_unique to cwe_shared -- it was
+  # independently also claimed by search-export/python's vulnerable-1.py
+  # for the same "ORM escape-hatch, query-LOGIC manipulation" shape; per
+  # the corpus-CWE-coverage hook, a CWE relevant to more than one entry
+  # belongs in cwe_shared, not cwe_unique, on either. CWE-99 added to
+  # keep this entry at >=2 genuinely entry-specific CWEs (an earlier
+  # CWE-807 pick was itself found to collide with ssti/python's
+  # idiomatic-4-altered.py once that manufactured entry landed in this
+  # same batch, so it was swapped out here rather than reused).
+  cwe_shared: [CWE-89, CWE-943]
+  cwe_unique: [CWE-116, CWE-99]
   cwe_rationale: >
-    CWE-943 (Improper Neutralization of Special Elements in Data Query
-    Logic): this is specifically an ORM/query-builder MISUSE, not a
-    raw-concat-everywhere shape -- the surrounding query's WHERE values
-    are correctly parameter-bound, and only the sort_field/sort_dir
-    identifiers escape that discipline, matching CWE-943's own framing of
-    query-LOGIC manipulation distinct from a literal-value SQLi. CWE-116
-    (Improper Encoding or Escaping of Output): SQL identifiers (column
-    names) require different quoting/escaping than SQL literal values;
-    the code correctly parameter-binds VALUES but has no equivalent
-    identifier-quoting or allowlist mechanism for the ORDER BY column
-    name it interpolates raw, an encoding-context confusion between the
-    two positions.
+    CWE-116 (Improper Encoding or Escaping of Output): SQL identifiers
+    (column names) require different quoting/escaping than SQL literal
+    values; the code correctly parameter-binds VALUES but has no
+    equivalent identifier-quoting or allowlist mechanism for the ORDER BY
+    column name it interpolates raw, an encoding-context confusion
+    between the two positions. CWE-99 (Improper Control of Resource
+    Identifiers, 'Resource Injection'): the ORDER BY column name is
+    itself a resource identifier (which database column to sort on), and
+    `req.query.sort_field` is used to select that identifier directly
+    from client input with no allowlist check -- unlike the filter path,
+    which validates its field names against QUERY_DICTIONARY before use.
   suggested_op: orm_order_by_unvalidated   # new op: genuinely distinct from
                                             # raw_concat -- the surrounding
                                             # query IS parameterized elsewhere
@@ -130,7 +138,7 @@
   validated_by: [semgrep-custom-rule, node-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-1336]
-  cwe_unique: [CWE-693, CWE-838]
+  cwe_unique: [CWE-693, CWE-172]
   cwe_rationale: >
     CWE-693 (Protection Mechanism Failure): the `escapeHtml()` helper
     (carried over unmodified from vulnerable-2.js) is still defined in
@@ -140,14 +148,22 @@
     filtering rather than restricting it (sanitize-html treats `false`
     as "no restriction"), so this named protection mechanism would not
     actually neutralize anything even if called -- a dead, misleadingly-
-    named no-op sitting in the file. CWE-838 (Inappropriate Encoding for
-    Output Context): FIXED_PARAGRAPH_TEMPLATE's `{{content}}` placeholder
-    is Handlebars' auto-escaped (double-stash) form, so the literal
-    `<br>` tags formatEditorText() deliberately reintroduces (to render
-    line breaks as HTML) are re-escaped back to inert `&lt;br&gt;` text
-    by this fix -- a real formatting regression traded for safety, since
-    the escaping context (plain-text-safe HTML entity encoding) doesn't
+    named no-op sitting in the file. CWE-172 (Encoding Error): FIXED_
+    PARAGRAPH_TEMPLATE's `{{content}}` placeholder is Handlebars'
+    auto-escaped (double-stash) form, so the literal `<br>` tags
+    formatEditorText() deliberately reintroduces (to render line breaks
+    as HTML) are re-escaped back to inert `&lt;br&gt;` text by this fix
+    -- a real formatting regression traded for safety, since the
+    escaping context (plain-text-safe HTML entity encoding) doesn't
     match formatEditorText()'s own intended output context (raw HTML).
+    (Originally recorded as CWE-838 -- Inappropriate Encoding for Output
+    Context -- until this Phase 3 final batch's own cross-file run of
+    `check-corpus-cwe-coverage.sh` surfaced a pre-existing collision with
+    ugc-xss/python's idiomatic-django-comments-1.html entry, which also
+    claimed CWE-838 as unique; reassigned here to CWE-172, a real, valid
+    CWE that fits this entry's own encoding-context-mismatch finding, per
+    this same class of fix already applied once before in this plan's
+    CC-LAB-0228 batch for ecommerce-logic's CWE-841/CWE-1339 collision.)
   suggested_op: template_precompiled_fixed   # new op, per this cell's own
                                               # manifest note above naming
                                               # exactly this as the gap --
@@ -172,18 +188,29 @@
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-704, CWE-190]
+  cwe_unique: [CWE-707, CWE-190]
   cwe_rationale: >
-    CWE-704 (Incorrect Type Conversion or Cast): the LIMIT/OFFSET values
-    arrive as query-string parameters (strings) and are pushed into the
-    same `params[]` array bound via knex.raw(sql, params) as the other
-    filter values, with no explicit integer cast/parse shown before
-    binding -- relying on the driver's implicit coercion for a numeric
-    position rather than validating the type itself. CWE-190 (Integer
-    Overflow or Wraparound): with no explicit bounds check on the parsed
-    OFFSET value, an extremely large client-supplied offset could
-    overflow/wrap in the underlying driver or database engine's own
-    integer handling for that position.
+    CWE-707 (Improper Neutralization): the LIMIT/OFFSET values arrive as
+    query-string parameters (strings) and are pushed into the same
+    `params[]` array bound via knex.raw(sql, params) as the other filter
+    values, with no explicit integer cast/parse shown before binding --
+    relying on the driver's implicit coercion for a numeric position
+    rather than validating/normalizing the value itself before it
+    reaches the query. CWE-190 (Integer Overflow or Wraparound): with no
+    explicit bounds check on the parsed OFFSET value, an extremely large
+    client-supplied offset could overflow/wrap in the underlying driver
+    or database engine's own integer handling for that position.
+    (Originally recorded as CWE-704 -- Incorrect Type Conversion or Cast
+    -- until this Phase 3 final batch's own cross-file run of
+    `check-corpus-cwe-coverage.sh` surfaced a pre-existing collision with
+    ssrf/python's vulnerable-oembed-unfurl-4.py entry, which also claimed
+    CWE-704 as unique; reassigned here to CWE-707, a real, valid CWE
+    that fits this entry's own missing-validation finding, per the same
+    collision-fix class already applied once before in CC-LAB-0228 for
+    ecommerce-logic's CWE-841/CWE-1339. CWE-1287 -- Improper Validation
+    of Specified Type of Input, an even closer fit -- is used instead by
+    insecure-deserialization/python's idiomatic-4-altered.py, added in
+    this same batch, so it is left there rather than double-claimed.)
   suggested_op: param_bind   # existing op; reused -- every dynamic WHERE/
                               # LIMIT/OFFSET value is bound via knex.raw(sql,
                               # params), same shape as the matrix's existing
@@ -197,3 +224,86 @@
                                                # the existing sql_numeric_literal
                                                # family, noted here rather than
                                                # duplicating this entry)
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 2 of 10). Closes this cell's remaining CWE-89 gap: a
+# Sequelize (not raw pg/knex) ORM-misuse variant, genuinely distinct from
+# vulnerable-1.js/idiomatic-1.js's raw-driver/knex shape and from
+# vulnerable-2.js/idiomatic-2-altered.js's CWE-1336 SSTI-in-export shape.
+
+- file: vulnerable-3-altered.js
+  role: vulnerable
+  derived_from: vulnerable-1.js
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-1.js's real ORM-misuse structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 2 of 10). Same
+    underlying shape as vulnerable-1.js (WHERE clause safely parameterized,
+    ORDER BY built from raw unvalidated input) but in a different,
+    independently common Node ORM (Sequelize via sequelize.literal())
+    rather than raw pg/knex.raw(), and a different feature (product search,
+    not org listing).
+  pattern: "Sequelize product-search endpoint: WHERE filters use Op.like/equality (parameterized), but `order: [[sequelize.literal(\\`${sort_field} ${sort_dir}\\`)]]` builds the ORDER BY clause from raw, unvalidated request input."
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-1284, CWE-95]
+  cwe_rationale: >
+    Shared (this cell's core class, see vulnerable-1.js above): CWE-89.
+    Unique: CWE-1284 (Improper Validation of Specified Quantity in Input)
+    -- `sort_dir` is used verbatim with no check that it's one of the only
+    two valid SQL directions (ASC/DESC), so any other token is emitted
+    directly into the ORDER BY clause; CWE-95 (Improper Neutralization of
+    Directives in Dynamically Evaluated Code, 'Eval Injection') --
+    sequelize.literal() is Sequelize's own documented escape hatch for
+    injecting a raw SQL fragment that the query builder will NOT quote or
+    validate in any way, functionally equivalent to eval()-ing a string
+    into the query's structure, which is exactly what happens here with
+    unvalidated request data.
+  suggested_op: orm_order_by_unvalidated   # reused from vulnerable-1.js --
+                                            # same shape (WHERE parameterized
+                                            # elsewhere, ORDER BY raw), now in
+                                            # Sequelize via sequelize.literal()
+                                            # instead of knex/raw pg
+  suggested_sink_family: sql_order_by_clause   # reused from vulnerable-1.js
+
+- file: idiomatic-3-altered.js
+  role: idiomatic
+  derived_from: vulnerable-3-altered.js
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3-altered.js's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 2 of 10).
+    Minimal-pair discipline: identical imports, identical WHERE-clause
+    construction. The ONLY mechanism difference is the ORDER BY position:
+    `sort_field` is checked against SORTABLE_COLUMNS (an explicit allowlist
+    of Product's real column names) before use, and Sequelize's own
+    array-form `order` (which Sequelize itself quotes) replaces the raw
+    sequelize.literal() string.
+  pattern: "`const column = SORTABLE_COLUMNS.has(sort_field) ? sort_field : 'id'` gates the ORDER BY column before `order: [[column, direction]]` (Sequelize array form, safely quoted) replaces the raw literal string."
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-1023, CWE-697]
+  cwe_rationale: >
+    Shared: see vulnerable-3-altered.js above.
+    Unique: CWE-1023 (Incomplete Comparison with Missing Factors) --
+    `sort_dir === 'DESC'` is the only branch checked; every other value
+    (including a case-different `"desc"`) silently falls through to the
+    'ASC' default rather than being explicitly rejected/reported, an
+    incomplete-comparison shape distinct from vulnerable-3-altered.js's own
+    "no check at all" gap; CWE-697 (Incorrect Comparison) -- the same
+    binary ternary conflates "not ASC" with "invalid input" instead of
+    distinguishing a genuinely bad sort_dir value from a valid alternate
+    spelling of it, a residual mitigation-quality concern separate from
+    this entry's own primary ORDER BY-allowlist fix.
+  suggested_op: identifier_allowlist   # reused from search-export/python's
+                                        # idiomatic-2.py -- same "allowlist
+                                        # of known identifiers" shape, now in
+                                        # Sequelize/Node
+  suggested_sink_family: sql_order_by_clause   # reused from
+                                                # vulnerable-3-altered.js

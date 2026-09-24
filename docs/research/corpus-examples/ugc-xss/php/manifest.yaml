@@ -27,7 +27,28 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (this Phase 3 final batch touched this file to add a new CWE-79 pair,
+  # and the corpus-CWE-coverage hook requires every entry in a touched
+  # manifest to meet the current standard). NOTE: researched from trained
+  # knowledge, not a live MITRE lookup -- cwe.mitre.org is blocked by this
+  # environment's egress proxy (see ERROR_LOG.md's 2026-09-22 entry). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-639, CWE-703]
+  cwe_rationale: >
+    Shared: CWE-79 (Cross-site Scripting) is the primary weakness; CWE-116
+    (Improper Encoding or Escaping of Output) is its listed parent.
+    Unique: CWE-639 (Authorization Bypass Through User-Controlled Key) --
+    `check_ajax_referer()` confirms the request carries a valid nonce and
+    `is_user_logged_in()` confirms SOME user is logged in, but nothing
+    checks that the logged-in user actually owns or may edit the specific
+    `$comment_id` supplied -- any authenticated user can request any
+    comment's content through this endpoint. CWE-703 (Improper Check or
+    Handling of Exceptional Conditions) -- `substr($comment_id,
+    strpos($comment_id, '-') + 1)` never checks whether `strpos()`
+    actually found a `-` at all; if it returns `false` (no hyphen),
+    `false + 1` evaluates to `1`, silently changing what substring is
+    used as the comment ID instead of rejecting the malformed input.
   suggested_op: raw_concat   # zero escaping/sanitization before an HTML-body
                              # echo -- same "no transform at all" shape as the
                              # existing raw_concat entries; reused, not new
@@ -54,7 +75,23 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (see vulnerable-1.php's migration note above -- same file). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1104, CWE-772]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique, flagged generally as residual concerns of this wp_kses_post()
+    mitigation rather than defects it fails to address for its own
+    stated purpose: CWE-1104 (Use of Unmaintained Third-Party Component)
+    -- flagged generally as the residual risk any dependency on a
+    third-party (here, WordPress core's own) sanitizer allowlist carries,
+    since this plugin's own safety is only as current as that shared
+    allowlist's own maintenance; CWE-772 (Missing Release of Resource
+    After Effective Lifetime) -- flagged generally: nothing shown in
+    this excerpt indicates the sanitized-but-still-rich-HTML comment
+    content is ever purged/expired from wherever it's cached or stored
+    once a comment is later deleted/moderated.
   suggested_op: wp_kses_post   # allowlist HTML sanitizer -- a genuinely
                              # different mechanism from html_entity_escape
                              # (permits a safe tag/attribute subset rather
@@ -78,9 +115,115 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (see vulnerable-1.php's migration note above -- same file). ---
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1288, CWE-457]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique: CWE-1288 (Improper Validation of Consistency within Input) --
+    `htmlspecialchars()` is applied consistently to `uid` and `name`, but
+    the surrounding method builds up `$output` across several
+    conditionally-executed `.=` appends with no single validation pass
+    confirming the whole assembled fragment is internally consistent
+    (e.g. a `published === "No"` comment skips escaping entirely for
+    its own fields, rather than the escaping decision being independent
+    of that branch). CWE-457 (Use of Uninitialized Variable) -- this
+    method references `$iconSize` (in the icon `<img>` tag's `width`/
+    `height` attributes) without it being defined anywhere in this
+    fragment or shown as a class property, a real, concrete uninitialized-
+    variable defect sitting in the same method as this entry's own
+    escaping mechanism.
   suggested_op: html_entity_escape   # htmlspecialchars() at an HTML-body
                              # position exactly matches the existing
                              # (html_entity_escape, html_body, neutralises)
                              # row -- reused verbatim, not renamed
   suggested_sink_family: html_body
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 8 of 10). Genuinely distinct third variant from
+# vulnerable-1.php (zero sanitization), idiomatic-1.php (wp_kses_post
+# allowlist), and idiomatic-2.php (per-field htmlspecialchars()): a
+# sanitizer IS called here, but strip_tags() with an allowed-tags list --
+# a real, documented misuse, since strip_tags() only ever removes
+# disallowed tag NAMES and never inspects attributes on tags it allows.
+
+- file: vulnerable-3-altered.php
+  role: vulnerable
+  derived_from: vulnerable-1.php
+  manufactured: true
+  license: n/a (manufactured, representative of a real, documented strip_tags() misuse; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 8 of 10).
+  validated: true
+  validated_by: [php-lint, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-84, CWE-749]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique: CWE-84 (Improper Neutralization of Encoded URI Schemes in a
+    Complex Markup Language) -- the allowed `<a>` tag survives with any
+    `href` an attacker supplies, including a `javascript:`-scheme URI,
+    since strip_tags()'s allowed-tags list has no concept of restricting
+    a tag's attribute values. CWE-749 (Exposed Dangerous Method or
+    Function) -- strip_tags() with an allowed-tags argument is called
+    here as if it were a complete HTML sanitizer, but PHP's own
+    documentation is explicit that it does not validate HTML at all
+    (only removes disallowed tag names), making this call site's own
+    reliance on it as "the sanitizer" the actual defect.
+  suggested_op: strip_tags_allowed_list   # new op: genuinely distinct
+                                            # from raw_concat -- a real
+                                            # sanitizer call is present,
+                                            # but its allowed-tags
+                                            # argument doesn't restrict
+                                            # attributes at all
+  suggested_sink_family: html_body   # existing family; reused
+
+- file: idiomatic-3-altered.php
+  role: idiomatic
+  derived_from: vulnerable-3-altered.php
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3-altered.php's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 8 of 10).
+    Minimal-pair discipline: identical class/method name, identical
+    output shape. The ONLY mechanism difference: strip_tags() is called
+    with NO allowed-tags argument (removing every tag, and with it every
+    attribute an attacker could hide on one), and the result is also
+    passed through htmlspecialchars() as defense in depth.
+  validated: true
+  validated_by: [php-lint, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-834, CWE-532]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique, flagged generally as residual concerns of this strip_tags()+
+    htmlspecialchars() mitigation rather than defects it fails to
+    address for its own stated purpose: CWE-834 (Excessive Iteration)
+    -- neither call here bounds the length of the input comment body
+    before processing it, so a very large comment is processed in full,
+    character by character, by both string functions on every render;
+    CWE-532
+    (Insertion of Sensitive Information into Log File) -- flagged
+    generally as a residual concern for whatever request/error logging
+    this application does elsewhere, not shown in this excerpt, given
+    comment bodies passing through here could be logged pre-sanitization.
+  suggested_op: strip_tags_no_allowlist_plus_escape   # new op: the direct
+                                                        # fix counterpart
+                                                        # to
+                                                        # vulnerable-3-altered.php's
+                                                        # strip_tags_allowed_list
+  suggested_sink_family: html_body   # existing family; reused
+  validation_note: >
+    Dynamically validated end-to-end in the gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py`, `run_in_sandbox`,
+    authorized=True): the payload `<img src=x onerror=alert(1)>hi` was
+    passed to both files' `renderComment()`. vulnerable-3-altered.php's
+    output retained the `<img src=x onerror=alert(1)>` tag verbatim
+    (only tags NOT in its allowed list would have been stripped, and
+    `<img>` is allowed); idiomatic-3-altered.php's output was `hi` alone
+    -- the entire tag, including its `onerror` attribute, was removed.

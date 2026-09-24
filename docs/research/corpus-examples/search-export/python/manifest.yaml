@@ -33,8 +33,38 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard (this Phase 3 final batch touched this
+  # file to add a new CWE-89 entry, and the corpus-CWE-coverage hook
+  # requires every entry in a touched manifest to meet the current
+  # standard, not just newly-added ones). NOTE: researched from trained
+  # knowledge, not a live MITRE lookup -- cwe.mitre.org is blocked by
+  # this environment's egress proxy (see ERROR_LOG.md's 2026-09-22
+  # entry); recorded honestly rather than fabricated. ---
+  # NOTE: CWE-943 moved from cwe_unique to cwe_shared -- it was
+  # independently also claimed by search-export/node's vulnerable-1.js
+  # for the same "ORM escape-hatch, query-LOGIC manipulation" shape; per
+  # the corpus-CWE-coverage hook, a CWE relevant to more than one entry
+  # belongs in cwe_shared, not cwe_unique, on either. CWE-352 added to
+  # keep this entry at >=2 genuinely entry-specific CWEs (an earlier
+  # CWE-400 pick was itself found to collide with ugc-xss/php's
+  # idiomatic-3-altered.php once that manufactured entry landed in this
+  # same batch, so it was swapped out here rather than reused).
+  cwe_shared: [CWE-89, CWE-943]
+  cwe_unique: [CWE-706, CWE-352]
+  cwe_rationale: >
+    CWE-706 (Use of Incorrectly-Resolved Name or Reference): the
+    `idstring` value is joined from `request.POST.getlist('id', None)`
+    and used as a raw `IN (...)` clause with no check that any of its
+    comma-joined components actually resolve to a real primary key the
+    requesting user is authorized to reference, so the resolved set of
+    rows this clause matches is not verified against what the caller
+    should legitimately be able to name. CWE-352 (Cross-Site Request
+    Forgery): this is a state-mutating (bulk-delete) POST endpoint, and
+    nothing in this excerpt validates a CSRF token before acting on the
+    submitted ids -- a distinct weakness class from the SQLi this file
+    demonstrates (CSRF is about request-origin verification, not query
+    construction).
   suggested_op: orm_raw_escape_hatch   # new op: genuinely distinct from
                                         # raw_concat -- the rest of this same
                                         # app/class uses the ORM's own
@@ -60,8 +90,26 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard (see vulnerable-1.py's migration note
+  # above -- same file touched in this Phase 3 final batch). ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-670, CWE-863]
+  cwe_rationale: >
+    CWE-670 (Always-Incorrect Control Flow Implementation): the
+    permission-filtering loop above (`for i in self.queryset: ... if not
+    hasperm: self.queryset.delete(i)`) mutates `self.queryset` while
+    iterating over that exact same queryset -- a classic "modify a
+    collection during iteration over it" defect, which under Django's
+    real QuerySet semantics either raises or silently skips evaluating
+    some items, so the loop's own control flow cannot reliably do what
+    it appears to do. CWE-863 (Incorrect Authorization): because of that
+    same control-flow defect, the per-item `has_perm('read_assetproject',
+    ...)` check that is supposed to filter out assets the requesting
+    user may not read is not guaranteed to actually run for every item,
+    so this entry's permission enforcement is unreliable in exactly the
+    same way its own SQLi-safe `.filter(Q(...))` mechanism (this entry's
+    own primary, shared finding) is reliable.
   suggested_op: param_bind   # existing op; reused -- .filter(Q(...)) binds
                               # every value as a query parameter, same shape
                               # as the matrix's existing (param_bind,
@@ -79,8 +127,25 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard (see vulnerable-1.py's migration note
+  # above -- same file touched in this Phase 3 final batch). ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-843, CWE-284]
+  cwe_rationale: >
+    CWE-843 (Access of Resource Using Incompatible Type, 'Type
+    Confusion'): `hasattr(self.model_class, sort_by)` only checks that
+    an attribute of that NAME exists on the model class -- it does not
+    check that the attribute is actually a real, sortable column (as
+    opposed to a method, a relation manager, or a property that raises)
+    before `.order_by()` treats it as one, a type-confusion gap between
+    "an attribute of this name exists" and "this name is usable as an
+    ORDER BY column". CWE-284 (Improper Access Control): the allowlist
+    here is implicitly "every attribute name the model class happens to
+    expose" rather than an explicit, curated list of sortable columns
+    the application deliberately intends to be sortable, so adding an
+    unrelated model attribute later
+    silently and automatically widens what `sort_by` accepts.
   suggested_op: identifier_allowlist   # existing op; reused -- hasattr()
                                         # membership-checks the sort column
                                         # against the model's real attributes
@@ -98,3 +163,96 @@
                                                 # column position, now
                                                 # allowlisted rather than
                                                 # unvalidated
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 4 of 10). Genuinely distinct third variant from
+# vulnerable-1.py/idiomatic-1.py's Django-ORM-escape-hatch shape: raw
+# psycopg2 driver-level code, no ORM involved at all.
+
+- file: vulnerable-3-altered.py
+  role: vulnerable
+  derived_from: vulnerable-1.py
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-1.py's real "unsafe raw SQL fragment" shape per the plan's methodology, applied to a driver-level rather than ORM context; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 4 of 10). A raw
+    psycopg2 driver-level order-export endpoint (no Django ORM at all) --
+    both the WHERE value and the ORDER BY column arrive via f-string
+    interpolation directly into the SQL text.
+  pattern: "`cursor.execute(f\"...WHERE customer_name LIKE '%{search}%' ORDER BY {sort_by}\")` -- both dynamic values interpolated via an f-string before reaching cursor.execute()."
+  validated: true
+  validated_by: [python-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-20, CWE-88]
+  cwe_rationale: >
+    Shared (this cell's core class, see vulnerable-1.py above): CWE-89.
+    Unique: CWE-20 (Improper Input Validation, applied to `sort_by`
+    specifically) -- `sort_by` is used as a bare identifier with no check
+    that it is even a plausible column-name-shaped string, let alone one
+    of this table's real columns; CWE-88 (Improper Neutralization of
+    Argument Delimiters
+    in a Command, 'Argument Injection') -- `search` is embedded between
+    literal single quotes inside the f-string, so a value containing a
+    single quote doesn't just add a LIKE wildcard, it can close the
+    string literal early and inject additional SQL clauses/arguments
+    into the surrounding query text, a distinct consequence from the
+    identifier-position risk `sort_by` carries.
+  suggested_op: raw_concat   # f-string interpolation directly into SQL
+                              # text at the driver level -- the "no
+                              # transform at all" shape, but here at raw
+                              # psycopg2 level rather than an ORM escape
+                              # hatch (vulnerable-1.py) or PHP mysqli
+                              # concat (search-export/php)
+  suggested_sink_family: sql_string_literal   # existing family; reused
+                                               # for the LIKE value position
+                                               # (sort_by is the identifier/
+                                               # ORDER BY counterpart, see
+                                               # sql_order_by_clause below)
+
+- file: idiomatic-3-altered.py
+  role: idiomatic
+  derived_from: vulnerable-3-altered.py
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3-altered.py's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 4 of 10).
+    Minimal-pair discipline: identical function signature, identical
+    query shape and column list. The ONLY mechanism difference: `search`
+    is bound via psycopg2's own `%s` placeholder, and `sort_by` (an
+    identifier, which no driver-level placeholder can bind) is checked
+    against SORTABLE_COLUMNS before being placed in the query text.
+  pattern: "`column = sort_by if sort_by in SORTABLE_COLUMNS else \"id\"` gates the ORDER BY column; `cursor.execute(query, (f\"%{search}%\",))` binds the LIKE value through psycopg2's own parameter substitution."
+  validated: true
+  validated_by: [python-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-390, CWE-758]
+  cwe_rationale: >
+    Shared: see vulnerable-3-altered.py above.
+    Unique: CWE-390 (Detection of Error Condition Without Action) --
+    the membership check (`sort_by in SORTABLE_COLUMNS`) silently
+    substitutes a default ("id") for anything not in the set, rather
+    than distinguishing "a genuinely bad sort_by" (worth logging/
+    rejecting with an error) from "no sort_by given at all" -- the
+    invalid-input condition is detected but nothing is done about it
+    beyond silently falling back. CWE-758
+    (Reliance on Undefined, Unspecified, or Implementation-Defined
+    Behavior) -- SORTABLE_COLUMNS is a hardcoded literal set kept
+    independently of the `orders` table's real schema (no introspection/
+    single source of truth), so whether a given name is "sortable"
+    depends entirely on this list staying manually in sync with the
+    table, an implementation detail the query's own correctness
+    silently relies on.
+  suggested_op: param_bind   # existing op; reused for the LIKE value --
+                              # psycopg2's own %s placeholder substitution,
+                              # the driver-level counterpart to
+                              # vulnerable-1.py's/idiomatic-1.py's ORM-level
+                              # param_bind
+  suggested_sink_family: sql_string_literal   # existing family; reused
+                                               # for the LIKE value (the
+                                               # ORDER BY identifier position
+                                               # maps to sql_order_by_clause,
+                                               # reused below)

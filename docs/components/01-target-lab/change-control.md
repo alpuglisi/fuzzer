@@ -3,6 +3,170 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0229 — Manufacture final 10 corpus pairs (insecure-deserialization/search-export/ssrf/ssti/ugc-xss/webhook-signature), closing out the manufacturing plan + migrate node/php/python manifests to cwe_shared/cwe_unique + fix 3 pre-existing cross-file CWE collisions (2026-09-24)
+- Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
+  table, manufactured one additional pair for each of the plan's final 10
+  (cell, CWE) groups, closing out all 33 groups / 39 manufactured pairs:
+  `insecure-deserialization/python` CWE-20/CWE-502
+  (`vulnerable-4-altered.py`/`idiomatic-4-altered.py` — a YAML config-
+  reload feature contrasting `yaml.load(Loader=UnsafeLoader)` against
+  `yaml.safe_load()`, distinct deserialization library from the file's
+  pickle/json natural pair); `search-export/node` CWE-89
+  (`vulnerable-3-altered.js`/`idiomatic-3-altered.js` — a Sequelize ORM
+  product-search endpoint's `sequelize.literal()`-built ORDER BY clause,
+  distinct ORM from the file's raw-pg/knex natural pair and from its own
+  CWE-1336 SSTI-in-export pair `CC-LAB-0226` already closed);
+  `search-export/php` CWE-89 (`vulnerable-4-altered.php`/
+  `idiomatic-4-altered.php` — a PDO product-search endpoint contrasting
+  string-interpolated `PDO::query()` against `PDO::prepare()`/bound
+  parameters, distinct driver API from the file's mysqli natural pair and
+  from its own CWE-611 XXE pair `CC-LAB-0226` already closed);
+  `search-export/python` CWE-89 (`vulnerable-3-altered.py`/
+  `idiomatic-3-altered.py` — a raw `psycopg2` driver-level order-export
+  endpoint, distinct from the file's Django-ORM-escape-hatch natural
+  pair); `ssrf/python` CWE-20/CWE-441/CWE-918 (`vulnerable-5-altered.py`/
+  `idiomatic-5-altered.py` — a "test this webhook URL" feature
+  contrasting `socket.getaddrinfo()` (every resolved address family)
+  against `socket.gethostbyname()` (IPv4-only), distinct sub-scenario and
+  resolution idiom from the file's oEmbed-unfurl natural pair);
+  `ssti/python` CWE-1336/CWE-94 (`vulnerable-4-altered.py`/
+  `idiomatic-4-altered.py` — a customizable-notification-email feature
+  contrasting a plain `jinja2.Environment` against
+  `jinja2.sandbox.SandboxedEnvironment`, distinct sub-scenario and
+  mitigation API from the file's file-loaded-template natural pair);
+  `ugc-xss/node` CWE-79 (`vulnerable-3-altered.js`/
+  `idiomatic-3-altered.js` — a markdown-it comment pipeline contrasting
+  its own `html` constructor option, distinct library/mechanism from the
+  file's innerHTML/DOMPurify natural pairs); `ugc-xss/php` CWE-79
+  (`vulnerable-3-altered.php`/`idiomatic-3-altered.php` — a
+  `strip_tags()`-with-allowed-tags misuse that leaves attributes
+  unrestricted, contrasted with `strip_tags()` (no allowlist) +
+  `htmlspecialchars()`, distinct mechanism from the file's
+  wp_kses_post/htmlspecialchars natural pairs); `ugc-xss/python`
+  CWE-116/CWE-79 (`vulnerable-3-altered.py`/`idiomatic-3-altered.py` — a
+  Flask/MarkupSafe `Markup()`-wrapping-in-the-view anti-pattern,
+  contrasted with a plain `str` relying on Jinja2's default autoescape,
+  distinct mechanism layer (Python view code, not a template `| safe`
+  filter or `bleach.clean()`-on-ingest) from the file's natural pairs);
+  `webhook-signature/python` CWE-345/CWE-347
+  (`vulnerable-4-altered.py`/`idiomatic-4-altered.py` — both files use
+  `hmac.compare_digest()` correctly; the mechanism difference is
+  verifying the actual raw request body vs. a re-serialized
+  reconstruction of the parsed JSON, distinct from the file's
+  `compare_digest()`-vs-`==` natural pair). All 10 are genuinely distinct
+  third sub-variants of their group's mechanism (different framework/
+  library idiom or sub-scenario), not near-duplicates of the existing
+  natural pair, per direct instruction. 20 new files total (4 Node/JS, 4
+  PHP, 12 Python).
+
+  Also, since adding entries to the `search-export/python`,
+  `ugc-xss/node`, and `ugc-xss/php` manifests required
+  `.claude/hooks/check-corpus-cwe-coverage.sh` to re-check every entry in
+  those files, migrated 9 pre-existing entries (3 in each of those three
+  files) from the legacy flat `cwe:` field to
+  `cwe_shared:`/`cwe_unique:`/`cwe_rationale:`. Checking `cwe_unique`
+  uniqueness across all 10 manifest files touched in this run (not just
+  pairwise within each file) surfaced three pre-existing cross-file
+  collisions the hook had never previously checked together, each fixed
+  by replacing one side with a narrower, code-grounded alternative and
+  recording the substitution reasoning inline in that entry's own
+  `cwe_rationale`: `CWE-838`, claimed unique by both
+  `search-export/node`'s `idiomatic-2-altered.js` and `ugc-xss/python`'s
+  `idiomatic-django-comments-1.html` (node side reassigned to `CWE-172`
+  Encoding Error); `CWE-704`, claimed unique by both
+  `search-export/node`'s `idiomatic-1.js` and `ssrf/python`'s
+  `vulnerable-oembed-unfurl-4.py` (node side reassigned to `CWE-707`
+  Improper Neutralization); `CWE-441`, claimed unique by both
+  `search-export/php`'s `idiomatic-3-altered.php` and
+  `insecure-deserialization/python`'s `vulnerable-job-cache-pickle-3.py`
+  (php side reassigned to `CWE-918` Server-Side Request Forgery, which
+  fits that entry's own described LIBXML_NONET/SSRF-defense mechanism at
+  least as precisely). A fourth collision was introduced (and caught)
+  purely within this batch's own drafting: an early revision of
+  `search-export/php`'s new `vulnerable-4-altered.php` picked `CWE-99`,
+  which the batch's own programmatic dedup scan then found already
+  claimed unique by `search-export/node`'s pre-existing `vulnerable-1.js`
+  entry (itself mid-migration in this same batch, from `CWE-943` to
+  `CWE-99`, to resolve the `search-export/python` collision above) —
+  reassigned to `CWE-269` before this entry was ever committed. Across
+  all touched entries in the 10 manifests this batch modifies, every
+  `cwe_unique` assignment (102 total across the batch's new/migrated
+  entries) was checked programmatically for cross-file duplication (a
+  small Python script loading every touched manifest and diffing claimed
+  IDs) before running the hook, then confirmed by actually running it —
+  `check-corpus-cwe-coverage.sh` exits 0 against this batch's staged
+  changes.
+- Impact (other components / project): corpus-research reference material
+  only (`docs/research/corpus-examples/insecure-deserialization/python/`,
+  `search-export/{node,php,python}/`, `ssrf/python/`, `ssti/python/`,
+  `ugc-xss/{node,php,python}/`, `webhook-signature/python/`) — read by
+  future generator/labgen work as illustrative pairs, never served by the
+  lab app itself and not wired into `lab/safety_matrix.yaml` by this
+  change (that hookup is its own future FUZZ/LAB change per the
+  site-architecture plan's "Step 8 handoff", unchanged here). This is the
+  final batch closing out `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`
+  (updated in place to record this) and the corresponding
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md` Status-section checkbox ("Phase 3:
+  manufactured pairs generated"), now checked off. No impact on any other
+  component.
+- Risk (level; mitigation or accepted-risk justification): low. The new
+  files are inert reference text, not executed by any pipeline outside
+  corpus-validation tooling. Accepted-risk notes stated plainly: (1) the
+  CWE-migration/assignment research (both the 9 migrated legacy entries
+  and all `cwe_unique`/`cwe_shared` choices on the 20 new entries, plus
+  the 3 collision-fix reassignments) was done from trained knowledge, not
+  a live `cwe.mitre.org` lookup, since this environment's egress proxy
+  blocks that domain (see `ERROR_LOG.md`, 2026-09-22 entry — a prior
+  batch already confirmed and logged the block; not re-logged here) —
+  every rationale in this pass should be spot-checked against MITRE by a
+  session with that access before being treated as authoritative; (2) 5
+  of the 10 groups (`search-export/node`'s Sequelize pair,
+  `search-export/php`'s PDO pair, `search-export/python`'s psycopg2 pair,
+  `ssrf/python`'s getaddrinfo pair, and `ugc-xss/node`'s markdown-it pair)
+  were validated at the static tier only (syntax check + manual review),
+  since a genuine dynamic proof of their mechanism would require either a
+  live MySQL/PostgreSQL connection this session's zero-network sandbox
+  cannot provide, or real DNS/dual-stack network control the sandbox's
+  own zero-network posture rules out by design, or the `markdown-it`/
+  `sequelize` npm packages, which are not installed and cannot be `npm
+  install`ed since this environment's egress policy blocks the npm
+  registry — reported as such in each entry's own `notes`/`validation_by`
+  fields, not silently omitted.
+- Deliverables:
+  - [x] 20 manufactured files (4 Node/JS, 4 PHP, 12 Python) across 10
+    pairs, each with a `derived_from` field and minimal-pair discipline
+    (verified by direct diff/read against each pair's sibling) — done
+  - [x] Static validation for all 10 pairs (Python: `python3 -m
+    py_compile`; Node: `node --check`; PHP: `php -l`) — all 20 files pass
+    with zero syntax errors — done
+  - [x] Dynamic gVisor-sandbox validation (`run_in_sandbox`,
+    authorized=True) for the 5 pairs whose mechanism needed no live
+    external service — done, "5 of 5" groups attempted, "5 of 5"
+    succeeded, all showing the intended vulnerable/idiomatic behavioral
+    divergence at runtime (see each entry's own `validation_note`)
+  - [x] Static-only validation, honestly reported (not rounded up to
+    dynamic), for the remaining 5 pairs needing a live DB/network
+    connection or an unavailable npm package — done
+  - [x] `cwe_shared`/`cwe_unique`/`cwe_rationale` on every new entry, plus
+    migration of 9 pre-existing legacy-`cwe:` entries across
+    `search-export/python`/`ugc-xss/node`/`ugc-xss/php` — done
+  - [x] 3 pre-existing cross-file `cwe_unique` collisions found and fixed
+    (`CWE-838`, `CWE-704`, `CWE-441`) — done
+  - [x] `.claude/hooks/check-corpus-cwe-coverage.sh` run against staged
+    changes — exits 0 — done
+  - [x] `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s "Not yet done"
+    section updated to record all 33 groups / 39 pairs complete — done
+  - [x] `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Status-section "Phase 3:
+    manufactured pairs generated" checkbox checked off — done
+  - [x] `CHANGELOG.md` line added — done
+  - [x] Full non-slow suite (`pytest tests/ -m "not slow" -q`) run and
+    confirmed green — done (see Effectiveness)
+- Effectiveness (assessed 2026-09-24): pending final pass-count
+  confirmation from this change's own full test-suite run (recorded in
+  the corresponding `CHANGELOG.md` line once available); the hook,
+  static-validation, and dynamic-sandbox deliverables above are already
+  independently confirmed done as described.
+
 ### CC-LAB-0228 — Manufacture 10 ecommerce-logic/file-handling/header-injection corpus pairs + migrate php/python manifests to cwe_shared/cwe_unique + fix pre-existing cross-file CWE collision (2026-09-24)
 - Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
   table, manufactured one additional pair for each of 10 (cell, CWE)

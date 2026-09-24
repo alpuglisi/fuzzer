@@ -52,3 +52,108 @@
     place.
   suggested_op: unrestricted_pickle_loads
   suggested_sink_family: object_deserialization
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 1 of 10). Genuinely distinct third variant from the
+# pickle.loads() pair above: a YAML-based config-reload feature, using
+# PyYAML's own documented safe/unsafe loader distinction rather than
+# pickle's opcode stream.
+
+- file: idiomatic-4-altered.py
+  role: idiomatic
+  derived_from: idiomatic-job-cache-json-3.py
+  manufactured: true
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "yaml.safe_load() plus an explicit type check on task_name -- PyYAML's own documented-safe entry point, which restricts the accepted tag set to plain built-in data types only"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 1 of 10). Same
+    overall shape as idiomatic-job-cache-json-3.py/
+    vulnerable-job-cache-pickle-3.py (a cache-backed payload parsed then
+    type-checked) but a genuinely distinct sub-scenario (admin-authored
+    config reload, not a background job payload) and a distinct
+    deserialization library (PyYAML, not json/pickle), contrasting
+    yaml.safe_load() against yaml.load(Loader=UnsafeLoader) rather than
+    json.loads() against pickle.loads().
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-1287, CWE-841]
+  cwe_rationale: >
+    Shared (this cell's core class, see idiomatic-job-cache-json-3.py's
+    own cwe_rationale above): CWE-502, CWE-20.
+    Unique: CWE-1287 (Improper Validation of Specified Type of Input) --
+    only `task_name`'s type is checked after parsing; nothing validates
+    the type of any other key the parsed config dict may contain before
+    the caller uses it. CWE-841 (Improper Enforcement of Behavioral
+    Workflow) -- the function's own contract implies "parse, then
+    validate, then use," but nothing enforces that a caller can't reach
+    into the returned dict for a field this function never validates at
+    all, skipping the validation step of that workflow for every field
+    except `task_name`.
+  suggested_op: yaml_safe_load_type_check   # new op: genuinely distinct
+                                              # from json_loads_type_check
+                                              # -- a different
+                                              # deserialization library
+                                              # with its own documented
+                                              # safe/unsafe loader split
+  suggested_sink_family: object_deserialization   # existing family; reused
+
+- file: vulnerable-4-altered.py
+  role: vulnerable
+  derived_from: idiomatic-4-altered.py
+  manufactured: true
+  license: "N/A (synthetic -- represents PyYAML's own documented real risk: yaml.load()/UnsafeLoader resolves Python-object-construction tags that can invoke arbitrary callables during parsing)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: yaml.load(raw_bytes, Loader=yaml.UnsafeLoader) -- PyYAML's own documentation states UnsafeLoader 'should not be used to parse untrusted or unauthenticated input'"
+  notes: >
+    Manufactured per Phase 3's 'Pair generation' methodology; the
+    `!!python/object/apply:` tag-driven code-execution mechanism cited is
+    real and documented in PyYAML's own documentation, not invented.
+    Minimal-pair discipline: identical function name/signature and
+    identical post-parse type check as idiomatic-4-altered.py -- the ONLY
+    mechanism difference is the loader (yaml.safe_load() vs.
+    yaml.load(Loader=yaml.UnsafeLoader)).
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-94, CWE-96]
+  cwe_rationale: >
+    Shared: see idiomatic-4-altered.py above.
+    Unique: CWE-94 (Improper Control of Generation of Code, 'Code
+    Injection') -- a `!!python/object/apply:os.system` (or any other
+    callable) tag in the parsed bytes invokes that callable DURING
+    yaml.load() itself, before this function's own post-parse type check
+    ever runs, dynamically executing attacker-supplied code as a direct
+    side effect of parsing. CWE-96 (Improper Neutralization of Directives
+    in Statically Saved Code, 'Static Code Injection') -- the malicious
+    directive is embedded directly in the YAML config text itself (a
+    config file/webhook payload/synced-repo artifact), not injected via a
+    separate runtime input channel, the same "attacker-controlled
+    directives saved alongside legitimate config" shape CWE-96 describes,
+    distinct from CWE-94's broader dynamic-execution framing.
+  suggested_op: unsafe_yaml_load   # new op: genuinely distinct from
+                                    # unrestricted_pickle_loads -- a
+                                    # different library's own unsafe
+                                    # entry point (UnsafeLoader), not
+                                    # pickle's opcode stream
+  suggested_sink_family: object_deserialization   # existing family; reused
+  validation_note: >
+    Dynamically validated end-to-end in the gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py`, `run_in_sandbox`,
+    authorized=True): a crafted `!!python/object/apply:os.system
+    ['touch /tmp/pwned_by_yaml']` payload was passed to both this file's
+    `load_job_config()` and idiomatic-4-altered.py's. idiomatic-4-altered.py
+    raised `yaml.constructor.ConstructorError` before any code ran (the
+    tag was never even resolved); this file's `os.system()` call executed
+    during `yaml.load()` itself -- confirmed by the target file actually
+    existing in the sandbox's ephemeral filesystem afterward -- even
+    though the function itself then also raised (a `ValueError` from the
+    post-parse type check, since `os.system()`'s integer return value
+    isn't a dict), proving the code execution happens as a side effect of
+    parsing, strictly before and independent of that later type check.

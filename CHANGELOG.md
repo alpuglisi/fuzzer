@@ -4,6 +4,37 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus manufactured pairs, final 10 groups — closes out the manufacturing plan)
+- Docs (research corpus): manufactured one additional pair per the final
+  10 (cell, CWE) groups from `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s
+  gap table — `insecure-deserialization/python` CWE-20/CWE-502 (YAML
+  UnsafeLoader vs. safe_load), `search-export/node` CWE-89 (Sequelize
+  ORDER BY misuse), `search-export/php` CWE-89 (PDO string-interpolation
+  vs. bound parameters), `search-export/python` CWE-89 (raw psycopg2),
+  `ssrf/python` CWE-20/CWE-441/CWE-918 (getaddrinfo vs. gethostbyname),
+  `ssti/python` CWE-1336/CWE-94 (SandboxedEnvironment vs. plain
+  Environment), `ugc-xss/node` CWE-79 (markdown-it `html` option),
+  `ugc-xss/php` CWE-79 (strip_tags allowed-tags-with-attributes misuse),
+  `ugc-xss/python` CWE-116/CWE-79 (Flask `Markup()`-in-view anti-pattern),
+  `webhook-signature/python` CWE-345/CWE-347 (raw-body vs. reserialized-
+  JSON HMAC verification) — 10 pairs / 20 files (4 Node/JS, 4 PHP, 12
+  Python), each a distinct third sub-variant (different framework/
+  library idiom or sub-scenario) rather than a near-duplicate of the
+  existing natural pair. This is the FINAL batch: all 33 (cell, CWE)
+  groups / 39 manufactured pairs in the plan's gap-analysis table are now
+  done, closing out `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Phase 3:
+  manufactured pairs generated" Status item. Static validation
+  (syntax-check + manual review) for all 10 pairs; dynamic gVisor-sandbox
+  validation for the 5 pairs whose mechanism needed no live external
+  service, "5 of 5" succeeded; static-only, honestly reported for the
+  other 5 (live DB/network or an unavailable npm package required).
+  Also migrated 9 pre-existing legacy-`cwe:` entries across
+  `search-export/python`/`ugc-xss/node`/`ugc-xss/php` to
+  `cwe_shared`/`cwe_unique`, and fixed 3 pre-existing cross-file
+  `cwe_unique` collisions (`CWE-838`, `CWE-704`, `CWE-441`) this batch's
+  own cross-file run of `check-corpus-cwe-coverage.sh` surfaced. See
+  `CC-LAB-0229` in `docs/components/01-target-lab/change-control.md`.
+
 ## 2026-09-24 (vuln-corpus manufactured pairs, 10 ecommerce-logic/file-handling/header-injection groups + php/python CWE-schema migration + cross-file collision fix)
 - Docs (research corpus): manufactured one additional pair per 10 more
   (cell, CWE) groups from `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s

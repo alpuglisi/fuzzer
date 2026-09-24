@@ -55,3 +55,100 @@
     and never re-verified across any redirect hops it follows.
   suggested_op: unchecked_url_fetch
   suggested_sink_family: server_side_http_fetch
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 5 of 10). Genuinely distinct third variant from the oEmbed-
+# unfurl pair above: a "test this outgoing webhook URL" settings feature,
+# contrasting socket.getaddrinfo() (every resolved address, all families)
+# against socket.gethostbyname() (IPv4-only, single result) rather than
+# oEmbed's own contrast (checked vs. entirely absent).
+
+- file: idiomatic-5-altered.py
+  role: idiomatic
+  derived_from: idiomatic-oembed-unfurl-4.py
+  manufactured: true
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "socket.getaddrinfo(hostname, None) resolved to every A/AAAA record, each checked with ipaddress' is_private/is_loopback/is_link_local/is_reserved, before requests.post(..., allow_redirects=False)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 5 of 10). Same
+    scheme-allowlist + private-IP-block + no-redirect shape as
+    idiomatic-oembed-unfurl-4.py, but a different real feature (a SaaS
+    "test this webhook URL" settings action, not a chat-link unfurl) and
+    a different, more thorough Python resolution idiom
+    (socket.getaddrinfo(), every resolved address family) contrasted with
+    vulnerable-5-altered.py's socket.gethostbyname() (IPv4-only, first
+    result).
+  validated: true
+  validated_by: [python-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-367, CWE-346]
+  cwe_rationale: >
+    Shared (this cell's core class, see idiomatic-oembed-unfurl-4.py's own
+    cwe_rationale above): CWE-918, CWE-20, CWE-441.
+    Unique: CWE-367 (Time-of-Check Time-of-Use, 'TOCTOU') -- even checking
+    every resolved address at call time doesn't guarantee the subsequent
+    requests.post() reconnects to one of those same addresses; a DNS
+    record with a very short TTL could change between this function's own
+    getaddrinfo() call and the connection requests/urllib3 makes
+    moments later. CWE-346 (Origin Validation Error) -- the check
+    validates that resolved ADDRESSES aren't private/reserved, but never
+    validates anything about the hostname's own registrable
+    domain/origin (e.g. a webhook URL pointing at an attacker-controlled
+    public domain is accepted just as readily as one pointing at the
+    customer's own legitimate endpoint).
+  suggested_op: getaddrinfo_all_families_allowlist   # new op: genuinely
+                                                       # distinct from
+                                                       # scheme_and_resolved_ip_allowlist
+                                                       # -- checks every
+                                                       # resolved address
+                                                       # family, not a
+                                                       # single gethostbyname()
+                                                       # result
+  suggested_sink_family: server_side_http_fetch   # existing family; reused
+
+- file: vulnerable-5-altered.py
+  role: vulnerable
+  derived_from: idiomatic-5-altered.py
+  manufactured: true
+  license: "N/A (synthetic -- represents a real, documented class of incomplete SSRF mitigation: an IPv4-only resolution check on a dual-stack-capable HTTP client)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: socket.gethostbyname(parsed.hostname) -- IPv4-only, single result -- instead of socket.getaddrinfo()"
+  notes: >
+    Manufactured per Phase 3's 'Pair generation' methodology. Minimal-pair
+    discipline: identical scheme check, identical requests.post() call
+    shape as idiomatic-5-altered.py -- the ONLY mechanism difference is
+    the resolution/validation step.
+  validated: true
+  validated_by: [python-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-923, CWE-171]
+  cwe_rationale: >
+    Shared: see idiomatic-5-altered.py above.
+    Unique: CWE-923 (Improper Restriction of Communication Channel to
+    Intended Endpoints) -- the address this function actually VERIFIES
+    (gethostbyname()'s single IPv4 result) is not guaranteed to be the
+    address the subsequent requests.post() actually CONNECTS to on a
+    dual-stack host, so the communication channel's real endpoint is not
+    reliably the one this check restricted. CWE-171 (Cleansing,
+    Canonicalization, and Comparison Errors) -- gethostbyname()'s
+    IPv4-only return value is compared against private/loopback/
+    link-local ranges with no canonicalization step for the hostname's
+    OTHER address family records at all, an incomplete canonicalization
+    of "every address this hostname could resolve to" before the
+    security-relevant comparison runs.
+  suggested_op: gethostbyname_ipv4_only_allowlist   # new op: the direct
+                                                      # counterpart to
+                                                      # idiomatic-5-altered.py's
+                                                      # getaddrinfo_all_families_allowlist
+                                                      # -- same allowlist
+                                                      # logic, applied to
+                                                      # only one resolved
+                                                      # address instead of
+                                                      # every one
+  suggested_sink_family: server_side_http_fetch   # existing family; reused

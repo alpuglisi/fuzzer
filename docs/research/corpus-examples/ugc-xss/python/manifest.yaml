@@ -241,3 +241,103 @@
                              # already covered by the existing raw_concat
                              # rows; reused
   suggested_sink_family: html_body
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 9 of 10, closing out this manufacturing plan's ugc-xss/
+# python gap). Genuinely distinct third variant: the flaw is entirely on
+# the PYTHON side (Flask/Jinja2's own Markup() class wrapping a value in
+# the VIEW, not a template-side `| safe` filter or a bleach.clean()-on-
+# ingest idiom).
+
+- file: vulnerable-3-altered.py
+  role: vulnerable
+  derived_from: vulnerable-1.py
+  manufactured: true
+  license: n/a (manufactured, representative of a real, documented Flask/Jinja2 anti-pattern -- markupsafe.Markup() wrapping untrusted data; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 9 of 10). Same
+    weakness class as vulnerable-1.py's template-side `| safe` filter, but
+    the anti-pattern lives in the VIEW function itself (wrapping every
+    stored review body in Markup() before it ever reaches
+    render_template()), a distinct, independently common real-world
+    mistake from a template author choosing `| safe`.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-285, CWE-476]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique: CWE-285 (Improper Authorization) -- every stored review body
+    is wrapped in Markup() identically regardless of which user
+    authored it or what trust level that user has, so a brand-new,
+    unverified account's review content is marked "already safe" exactly
+    like a long-standing verified reviewer's. CWE-476 (NULL Pointer
+    Dereference, applied to Python's `None` analogue) -- if a review's
+    `body` column is ever SQL NULL, `Markup(r[1])` receives `None`
+    directly with no check, and MarkupSafe's own handling of a `None`
+    argument to `Markup()` is not validated anywhere in this code path
+    before the value is later used as if it were always a string.
+  suggested_op: markup_wrap_on_view   # new op: genuinely distinct from
+                                        # raw_concat -- the "already-safe"
+                                        # marking happens in Python view
+                                        # code (Markup()), not a template
+                                        # filter
+  suggested_sink_family: html_body   # existing family; reused
+
+- file: idiomatic-3-altered.py
+  role: idiomatic
+  derived_from: vulnerable-3-altered.py
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3-altered.py's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 9 of 10).
+    Minimal-pair discipline: identical route, identical query, identical
+    template. The ONLY mechanism difference: the review body reaches
+    render_template() as a plain `str`, never wrapped in Markup(), so
+    Jinja2's own default autoescaping applies to it.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1068, CWE-778]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique, flagged generally as residual concerns of this
+    plain-str-relies-on-default-autoescape mitigation rather than defects
+    it fails to address for its own stated purpose: CWE-1068
+    (Inconsistency Between Implementation and Documented Design) -- this
+    file's own safety depends entirely on Flask's documented default of
+    autoescaping `.html`-extension templates, a framework-level default
+    this code never states or asserts explicitly anywhere in its own
+    implementation, so nothing here would catch a future change to the
+    Jinja2 environment's `autoescape` setting; CWE-778 (Insufficient
+    Logging) -- flagged generally: nothing here logs when a review body
+    actually contained characters Jinja2 had to escape, so an operator
+    has no signal about attempted-XSS content in review submissions.
+  suggested_op: plain_str_default_autoescape   # new op: the direct fix
+                                                 # counterpart to
+                                                 # vulnerable-3-altered.py's
+                                                 # markup_wrap_on_view --
+                                                 # reused concept from
+                                                 # django-comments'
+                                                 # default_autoescape but
+                                                 # via Flask/Jinja2's view-
+                                                 # layer, not a template
+  suggested_sink_family: html_body   # existing family; reused
+  validation_note: >
+    Dynamically validated (mechanism-level, not the full Flask app --
+    both files are non-standalone Flask blueprint fragments with
+    relative imports into the app package, per this cell's own
+    convention, and cannot be imported directly outside it) in the
+    gVisor sandbox (`fuzzlab/tools/corpus_validation_sandbox.py`,
+    `run_in_sandbox`, authorized=True): a harness reproducing each
+    file's own exact mechanism (`Markup(payload)` vs. plain `payload`)
+    rendered both through an autoescape=True Jinja2 Environment with the
+    identical template fragment (`<div class="review">{{ body }}</div>`)
+    both files use. The Markup-wrapped value rendered the literal,
+    unescaped `<script>alert(document.cookie)</script>`; the plain-str
+    value rendered the HTML-entity-escaped
+    `&lt;script&gt;alert(document.cookie)&lt;/script&gt;`.

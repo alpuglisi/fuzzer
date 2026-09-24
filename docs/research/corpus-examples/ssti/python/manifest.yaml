@@ -59,3 +59,107 @@
     intended to submit.
   suggested_op: user_supplied_template_compile
   suggested_sink_family: template_render
+
+# --- added by docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's Phase 3 final
+# batch (group 6 of 10). Genuinely distinct third variant from the pair
+# above: a customizable-notification-email feature where compiling
+# admin-authored template text IS the point of the feature (unlike the
+# file-loaded pair's "never compile untrusted text" idiom), contrasting
+# jinja2.sandbox.SandboxedEnvironment against a plain jinja2.Environment.
+
+- file: idiomatic-4-altered.py
+  role: idiomatic
+  derived_from: idiomatic-jinja2-file-template-3.py
+  manufactured: true
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "jinja2.sandbox.SandboxedEnvironment().from_string(admin_template) -- Jinja2's own documented purpose-built API for compiling templates whose source might not be fully trusted"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, final batch, group 6 of 10). A
+    genuinely distinct sub-scenario from idiomatic-jinja2-file-template-3.py:
+    here, compiling admin-supplied template TEXT is the feature itself
+    (a customizable notification email), so "never compile untrusted
+    text" isn't an available mitigation -- SandboxedEnvironment is
+    Jinja2's own documented answer for exactly this case.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-807, CWE-676]
+  cwe_rationale: >
+    Shared (this cell's core class, see idiomatic-jinja2-file-template-3.py's
+    own cwe_rationale above): CWE-1336, CWE-94.
+    Unique: CWE-807 (Reliance on Untrusted Inputs in a Security
+    Decision) -- this mitigation's entire security boundary is the
+    assumption that SandboxedEnvironment's documented restrictions fully
+    contain whatever the admin-authored template text does, i.e. a
+    security decision ("is this safe to render") made by trusting the
+    untrusted template's behavior to stay within that boundary, rather
+    than by not compiling untrusted text at all (idiomatic-jinja2-file-
+    template-3.py's own, stronger mitigation for this same cell).
+    CWE-676 (Use of Potentially Dangerous Function) -- `from_string()`
+    is Jinja2's own documented-risky template-compilation entry point
+    (contrasted with `get_template()`'s fixed-name lookup in this cell's
+    file-loaded sibling); SandboxedEnvironment narrows, but does not
+    eliminate, the risk of calling it on external text at all.
+  suggested_op: sandboxed_environment_compile   # new op: genuinely
+                                                  # distinct from
+                                                  # file_loaded_template_name
+                                                  # -- compiles untrusted
+                                                  # TEXT (the feature's own
+                                                  # point), using Jinja2's
+                                                  # sandbox as the boundary
+                                                  # instead of never
+                                                  # compiling untrusted text
+  suggested_sink_family: template_render   # existing family; reused
+
+- file: vulnerable-4-altered.py
+  role: vulnerable
+  derived_from: idiomatic-4-altered.py
+  manufactured: true
+  license: "N/A (synthetic -- represents Jinja2's own documented risk: a plain, non-sandboxed Environment allows reaching Python's object model from template expressions)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: jinja2.Environment().from_string(admin_template) -- a plain Environment, not SandboxedEnvironment"
+  notes: >
+    Manufactured per Phase 3's 'Pair generation' methodology. Minimal-pair
+    discipline: identical function signature, identical from_string()/
+    render() call shape as idiomatic-4-altered.py -- the ONLY mechanism
+    difference is which Environment class compiles the template text.
+  validated: true
+  validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-470, CWE-829]
+  cwe_rationale: >
+    Shared: see idiomatic-4-altered.py above.
+    Unique: CWE-470 (Use of Externally-Controlled Input to Select
+    Classes or Code, 'Unsafe Reflection') -- the well-documented
+    `''.__class__.__mro__[...]` chain is precisely externally-controlled
+    input selecting which Python classes/objects the template expression
+    evaluator reaches, unrestricted by a plain Environment. CWE-829
+    (Inclusion of Functionality from Untrusted Control Sphere) --
+    `from_string(admin_template)` includes the admin-authored text's
+    entire behavior directly into this process's own execution, with no
+    boundary (sandboxed or otherwise) between the app's own trusted code
+    and the externally-authored template.
+  suggested_op: unsandboxed_environment_compile   # new op: the direct
+                                                    # counterpart to
+                                                    # idiomatic-4-altered.py's
+                                                    # sandboxed_environment_compile
+  suggested_sink_family: template_render   # existing family; reused
+  validation_note: >
+    Dynamically validated end-to-end in the gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py`, `run_in_sandbox`,
+    authorized=True): the payload
+    `{{ ''.__class__.__mro__[1].__subclasses__() }}` was rendered through
+    both this file and idiomatic-4-altered.py. idiomatic-4-altered.py's
+    SandboxedEnvironment raised `jinja2.exceptions.SecurityError` at the
+    `.__class__` attribute access, before any subclass traversal
+    happened; this file's plain Environment rendered the full
+    subclasses() listing (confirmed non-empty, ~9900 characters of
+    output), proving the sandbox boundary -- not merely the presence of
+    `from_string()` -- is what actually blocks the object-model-traversal
+    chain.

@@ -632,8 +632,16 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       unrelated cells had independently claimed the same "unique" CWE ID —
       was fixed by re-researching each duplicate against its actual source
       and assigning a genuinely specific, non-colliding MITRE ID)
-- [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
-      "Pair generation")
+- [x] Phase 3: manufactured pairs generated (floor met per CWE — see
+      "Pair generation") — all 33 (cell, CWE) groups / 39 manufactured
+      pairs in `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
+      table are done, across 4 batches: `CC-LAB-0226` (5 worst-gap groups),
+      `CC-LAB-0227` (7 `auth-session` groups), `CC-LAB-0228` (10
+      `ecommerce-logic`/`file-handling`/`header-injection` groups), and
+      `CC-LAB-0229` (final 10 groups: `insecure-deserialization/python`,
+      `search-export/{node,php,python}`, `ssrf/python`, `ssti/python`,
+      `ugc-xss/{node,php,python}`, `webhook-signature/python`) — see that
+      plan's own "Not yet done" section for the full per-batch record.
 - [x] Phase 3: validation execution sandbox actually built/tested (not just
       specified) — `fuzzlab/tools/corpus_validation_sandbox.py`
       (`CC-LAB-0084`/`FR-LAB-112`, 2026-09-23): real gVisor (`runsc run`),
