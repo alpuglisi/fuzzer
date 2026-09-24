@@ -597,6 +597,30 @@ Everything stays loopback, on infrastructure you own.
    ```
    **Exit:** non-trivial recall on the second target (`generalizes=True`).
 
+## Running everything in one pass (Parts A, C–L)
+
+`scripts/on_host_full_run.sh` runs the commands from Parts A and C through L
+above in order, appending each task's command, output, exit code, and the
+part's own follow-up `sqlite3`/`python` read-back queries to one evaluation
+log (default `on_host_results.txt`, appended to across runs — never
+truncated). It never aborts on a failing task (a real evaluation pass wants
+to see every part's result), and prints a PASS/FAIL/SKIP summary at the end.
+Run it after Parts A/B's one-time setup (lab up, toolkit installed):
+
+```bash
+scripts/on_host_full_run.sh                # everything
+scripts/on_host_full_run.sh --only E,J      # just Part(s) E and J
+scripts/on_host_full_run.sh --skip K,L      # everything except K, L
+OUT_FILE=my_run.txt scripts/on_host_full_run.sh
+```
+
+Every command it runs is copied verbatim from the parts above (same flags,
+same store names) — if you change one here, change it there too. Part
+C.4 (two-lab validation) and Part L's T10.6 transfer exit both need a
+second host/lab and are skipped unless configured (see the script's own
+header comment for the env vars). See the script's `--help`-equivalent
+header for every other knob (`BASE_URL`, `IDENTITY`, `PROXY_PORT`, …).
+
 ## Safety checklist (every run)
 
 - Web tier on `127.0.0.1` only; DB never published; app never exposed publicly.

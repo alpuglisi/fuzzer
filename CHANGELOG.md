@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (scripts/on_host_full_run.sh — run every deferred on-host task in one pass)
+- Added a driver script that runs every command from
+  `docs/ON_HOST_RUNBOOK.md` Parts A and C-L in sequence and appends each
+  task's command/output/exit-code plus its follow-up sqlite3/python
+  read-back queries to one evaluation log (`on_host_results.txt` by
+  default). Never aborts on a failing task, supports `--only`/`--skip`,
+  and every command is copied verbatim from the runbook so the two stay
+  in sync (CC-LAB-0233). Not executable in this sandbox (no container
+  daemon/live target — the same reason these tasks are deferred at all);
+  verified via `bash -n` and an isolated smoke test of the driver's own
+  control flow, which caught and fixed a real subshell-isolation bug.
+
 ## 2026-09-24 (docs/ARCHITECTURE.md — correct a stale django build-status summary)
 - The component-1 summary's one-line status still said `django` was at
   "Phase-A/foundation depth," even though the detailed narrative directly

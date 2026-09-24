@@ -3,6 +3,55 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0233 — `scripts/on_host_full_run.sh`: run every deferred on-host task in one pass, appending results to an evaluation log (2026-09-24)
+- Change: added `scripts/on_host_full_run.sh`, a driver that runs every
+  command from `docs/ON_HOST_RUNBOOK.md` Parts A and C through L in order
+  (bring up the lab -> per-identity crawl/audit/fuzz -> `fuzzlab auto`'s
+  detection benchmark + fail-safe checks -> the existing `greybox_e2e.sh`/
+  `proxy_e2e.sh`/`waf_evasion_e2e.sh`/`h2_desync_e2e.sh` one-command parts ->
+  bandit control-vs-accumulation runs -> classifier/ranker/active-learning
+  ->  plugins/anomaly/report/T10.6-transfer), appending each task's command,
+  combined stdout/stderr, exit code, and the runbook's own follow-up
+  `sqlite3`/`python` read-back queries to one append-only log (default
+  `on_host_results.txt`, `OUT_FILE` overridable). Every command in the
+  script is copied verbatim from the runbook (same flags, same store names)
+  so the two never drift apart. Never aborts on a failing task -- a real
+  evaluation pass needs to see every part's result, not stop at the first
+  one that needs attention -- and prints a PASS/FAIL/SKIP summary at the
+  end. Supports `--only PART[,PART...]` / `--skip PART[,PART...]` to run a
+  subset. Part C.4 (two-lab validation) and Part L's T10.6 transfer exit
+  each need a second host/lab and are skipped unless their env vars
+  (`JUICE_BASE_URL`/`JUICE_GROUND_TRUTH`, or a second `--host` for Part C.4
+  run by hand) are set, per the runbook's own documented scope for those
+  two items. `docs/ON_HOST_RUNBOOK.md` gained a new "Running everything in
+  one pass" section pointing at it; `.gitignore` gained an
+  `on_host_results*.txt` rule (a per-run artifact against a live lab,
+  never a tracked deliverable, same reasoning as the existing corpus
+  validation audit log's own ignore rule).
+- Why: requested directly -- a single script to execute the deferred
+  on-host tasks and append sequential results to one file for evaluation,
+  rather than running each runbook Part's commands by hand.
+- Verification: this repo's own sandbox has no container daemon/live
+  target (the exact reason these tasks are deferred in the first place —
+  see `docs/ON_HOST_TASKS.md`'s own "why deferred"), so the script's own
+  fuzzlab/lab commands cannot be executed here. What WAS verified in this
+  sandbox: `bash -n` (syntax), and an isolated smoke test of the driver's
+  own control-flow functions (`run_task`'s subshell isolation — a task
+  command that itself calls `exit` must only end that task, not the whole
+  driver; this caught and fixed a real bug where a `{ }` group instead of
+  a `( )` subshell let a stray `exit` inside an eval'd command terminate
+  the entire script — and its PASS/FAIL/exit-code logging; the `--only`/
+  `--skip` filter logic; `run_sql`'s fallback text when a producing task's
+  store doesn't exist). Every individual command inside each task is
+  copied verbatim from `docs/ON_HOST_RUNBOOK.md`, which is itself the
+  already-reviewed, already-run source for these exact commands — this
+  script does not invent new commands, only sequences and logs the
+  existing ones. Full non-slow suite unaffected (2446 passed, 8 skipped,
+  187 deselected, matches baseline) since this change adds a new script
+  and doc/gitignore lines only, touching no importable code path.
+- Scope: `scripts/on_host_full_run.sh` (new), `docs/ON_HOST_RUNBOOK.md`,
+  `.gitignore`. No `fuzzlab/` code changed.
+
 ### CC-LAB-0232 — Act on search-export/node's stale `template_precompiled_fixed` suggested_op into `lab/safety_matrix.yaml` (2026-09-24)
 - Change: `docs/research/corpus-examples/search-export/node/manifest.yaml`'s
   `vulnerable-2.js` entry carried a note (from the original Phase 2

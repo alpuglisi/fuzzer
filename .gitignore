@@ -54,3 +54,8 @@ lab/.snapshots/
 # on every real gVisor sandbox run (CC-LAB-0084/FR-LAB-102) -- regenerated
 # noise from running the test suite locally, not a tracked deliverable.
 docs/research/corpus-validation-audit.jsonl
+
+# scripts/on_host_full_run.sh's own appended evaluation log (and any
+# custom-named run via OUT_FILE=...) -- a per-run artifact against a live
+# lab, never a tracked deliverable, same reasoning as the audit log above.
+on_host_results*.txt
