@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (docs/ARCHITECTURE.md — correct a stale django build-status summary)
+- The component-1 summary's one-line status still said `django` was at
+  "Phase-A/foundation depth," even though the detailed narrative directly
+  below it (which was accurate and up to date) already documented Phase B
+  reaching Tier-A parity and Phase C landing PicTrail's full 6-page design
+  (CC-LAB-0092-0097) with real live-boot proofs, plus php_laravel's
+  CircleFeed landing its own full 4-page design, making category 2's
+  overall build complete. Discovered while planning "bring django to
+  generator parity" as the next lab-completion item — the work was
+  already done, only the summary line hadn't been updated to say so.
+  Corrected the summary to match the narrative; no code/behavior change.
+
 ## 2026-09-24 (lab/safety_matrix.yaml — act on search-export/node's stale template_precompiled_fixed suggested_op)
 - The generator's safety matrix was missing a `neutralises` row
   (`template_precompiled_fixed`/`template_render_pipeline`) that the
