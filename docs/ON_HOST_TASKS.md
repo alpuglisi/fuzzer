@@ -11,6 +11,31 @@ containerized lab (D7) cannot run; Playwright is present but there is no live ta
 to drive. Everything below is offline-complete (code + tests green); only the live
 measurement/validation remains.
 
+## On-host execution status — 2026-09-24
+
+First real on-host pass of these tasks (Fedora host, containerized lab up). Full
+per-task log: `on_host_results_20260924.txt`; summary + the bugs it surfaced:
+`CHANGELOG.md` (2026-09-24 "on-host execution pass"). In brief:
+
+- **Green on-host:** Part A (lab builds + serves), Part D detection benchmark
+  (`fp=0`, `tp=3` unauth / `tp=4` with `--browser`; negatives + fingerprint
+  present), Part E grey-box **T3.7 exit met** (payload reward ≫ baseline,
+  `db_fault` separates error-based SQLi), Part F bandit (posteriors accumulate +
+  differentiate per context), Part I proxy live-TLS + byte-exact malformed
+  forward (incl. real-CA minting test), Part J **T8.7** WAF-bypass variant, Part
+  K **T9.6** h2→h1 desync + parsed-path tests, Part L plugins/anomaly/report.
+- **Fixed to get there (all LAB):** from-scratch build (BUG-0047), e2e readiness
+  probes (BUG-0048), grey-box `db_fault` capture (BUG-0049). See their bug docs.
+- **Partial / not demonstrated:** the `--browser` run confirmed one, not all
+  three, client-only DOM/stored-XSS points (M6 store-endpoint wiring still a
+  follow-up); Parts G/H (classifier/ranker) hit the documented single-run
+  thin-data ML fallback, so T5.5/T7.4 "beat baseline" is not yet shown on this
+  lab; M10-into-`Oracle.confirm` remains advisory-only (Part E.3).
+- **Not attempted:** Phase 1 two-lab validation and Phase 10 **T10.6** transfer
+  (need a second/external lab — deferred per request); Part C `--identity`
+  login-auth steps (the generated target serves no discoverable GET login form —
+  see the runbook Part C "Known gap" note; not a fuzzlab defect).
+
 ## Phase 1 — live session validation
 
 - [ ] **Two-lab per-identity run.** Save per-host credentials

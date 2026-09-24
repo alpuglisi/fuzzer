@@ -102,6 +102,8 @@ class LocalSpider:
         self._identity = identity
         parts = urlparse(start_url)
         self._auth_base_url = f"{parts.scheme}://{parts.netloc}"
+        # Link-following scope: the start URL's own host (see _in_scope).
+        self._scope_host = self._norm_host(start_url)
 
         # A crawl normally rebuilds the whole map. Without this, a second run
         # against an existing database finds every URL already "visited" and
@@ -178,13 +180,38 @@ class LocalSpider:
             if self._pw:
                 self._pw.stop()
 
-    def _is_local(self, url):
-        """Ensures the crawler doesn't escape to the open web.
+    #: Loopback aliases treated as one host, so the lab can link between
+    #: `localhost` and `127.0.0.1` (and IPv6 loopback) without being dropped.
+    _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 
-        Uses hostname (not netloc) so a port such as :8080 does not cause a
-        local URL to be rejected.
+    @staticmethod
+    def _norm_host(url):
+        """Hostname, lowercased, with a leading ``www.`` stripped (apex and
+        ``www`` count as the same host). Uses hostname, not netloc, so a port
+        such as ``:8080`` never affects scope."""
+        host = (urlparse(url).hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host
+
+    def _in_scope(self, url):
+        """Whether a discovered link is in scope to follow.
+
+        Scope is the **start URL's own host** — the single target the operator
+        pointed the crawler at. This both keeps the crawler from escaping to the
+        open web (third-party domains, CDNs, social links are never followed —
+        the safety intent of the former localhost-only guard) and lets it
+        actually crawl whatever authorized host it was started on, loopback lab
+        or otherwise (previously it silently dropped every non-loopback link, so
+        a real target yielded zero followed links). Loopback aliases are one
+        host (see ``_LOOPBACK``); ``www.`` is normalised on both sides.
         """
-        return urlparse(url).hostname in ['localhost', '127.0.0.1']
+        host = self._norm_host(url)
+        if not host:
+            return False
+        if self._scope_host in self._LOOPBACK:
+            return host in self._LOOPBACK
+        return host == self._scope_host
 
     # ----- fetchers -----
     def _fetch_static(self, url):
@@ -275,14 +302,14 @@ class LocalSpider:
                         if 'text/html' in ct or ct == '':
                             for href in raw_links:
                                 absolute_link = urljoin(current_url, href).split('#')[0]
-                                if self._is_local(absolute_link) and not self.storage.is_visited(absolute_link):
+                                if self._in_scope(absolute_link) and not self.storage.is_visited(absolute_link):
                                     queue.append((absolute_link, depth + 1, 'link'))
                         # XHR/fetch targets are queued whatever the page's own
                         # content type, so JSON APIs behind rendered pages land
                         # in the map and get audited like any other URL.
                         for href in xhr_links:
                             absolute_link = urljoin(current_url, href).split('#')[0]
-                            if self._is_local(absolute_link) and not self.storage.is_visited(absolute_link):
+                            if self._in_scope(absolute_link) and not self.storage.is_visited(absolute_link):
                                 queue.append((absolute_link, depth + 1, 'xhr'))
 
                 except Exception as e:

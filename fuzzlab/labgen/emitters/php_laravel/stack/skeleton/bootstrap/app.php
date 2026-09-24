@@ -50,4 +50,18 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // Grey-box db_fault capture (BUG-0049). Laravel's Illuminate\Routing\
+        // Pipeline catches a controller QueryException at the router-dispatch
+        // boundary and renders it to a 500 Response before it can propagate back
+        // to the FzlCoverage middleware's own catch — so that middleware can
+        // never observe it directly. The handler DOES invoke report() for the
+        // exception, so record it here into the request-scoped static the
+        // middleware reads after $next(). Returns void (does not return false),
+        // so Laravel's default logging of the exception is unchanged. Self-gated
+        // downstream: the middleware only reads this when X-Fzl-Cov is present,
+        // so the default app and every ground-truth label are unaffected.
+        $exceptions->report(function (\Illuminate\Database\QueryException $e): void {
+            \App\Http\Middleware\FzlCoverage::$dbError = substr($e->getMessage(), 0, 300);
+        });
     })->create();

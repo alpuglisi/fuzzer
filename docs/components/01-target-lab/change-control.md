@@ -3,6 +3,70 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0236 — Fix grey-box `db_fault`: capture the controller `QueryException` via a Laravel `report()` hook, not a middleware `catch` (2026-09-24, BUG-0049/PA-0051)
+- Change: the `FzlCoverage` middleware
+  (`fuzzlab/labgen/emitters/php_laravel/stack/skeleton/app/Http/Middleware/
+  FzlCoverage.php`) recorded `db_fault=false` on every request, including
+  error-based SQLi, because it relied on a `QueryException` propagating out of
+  `$next()` — which Laravel's `Illuminate\Routing\Pipeline` prevents by
+  catching+rendering controller exceptions at the router-dispatch boundary.
+  Added a request-scoped static `FzlCoverage::$dbError` (reset per instrumented
+  request) and a `withExceptions(...)->report(\Illuminate\Database\
+  QueryException ...)` hook in the skeleton `bootstrap/app.php` that fills it;
+  the middleware now derives `db_fault`/`db_error` from that static after
+  `$next()` (the original `try/catch` kept as belt-and-suspenders). The report
+  callback returns void (default logging unchanged); both pieces stay self-gated
+  on `X-Fzl-Cov`, so the default app and every ground-truth label are unchanged.
+- Why: without it the Phase 3 exit (T3.7 — "error-based SQLi distinguishable via
+  `attempt.db_fault`", `ON_HOST_RUNBOOK.md` Part E) was structurally unmeetable.
+- Verification: on-host, benign `product.php?id=1` → `db_fault=false`; error-based
+  SQLi on `login.php` (`username='`) → `db_fault=true` with the SQL message
+  captured; `greybox_e2e.sh` step-3 self-test now OK; Part E T3.7 PASS (payload
+  reward 0.969 > baseline 0.200, `db_fault=1` on `sqli-error`/`sqli-boolean`).
+  `php -l` clean on both files. Python suite green for the changed surface
+  (2434 passed / 179 skipped; the 28 failures are pre-existing Ruby-Rails
+  `bundle install` env failures + one unrelated web-panel test, none touching
+  PHP/Laravel).
+- Scope: `.../skeleton/app/Http/Middleware/FzlCoverage.php`,
+  `.../skeleton/bootstrap/app.php`. See BUG-0049, PA-0051.
+
+### CC-LAB-0235 — Fix on-host e2e readiness probes to hit a served endpoint, not `/` (2026-09-24, BUG-0048/PA-0050)
+- Change: `scripts/greybox_e2e.sh`, `scripts/proxy_e2e.sh`,
+  `scripts/waf_evasion_e2e.sh` waited for the lab with `curl -fs "${BASE}/"`,
+  but the generated Laravel app returns 404 on `/` (no homepage route since the
+  `L-P3.3c-CUT` cutover), so `-f` made a healthy lab read as "not reachable" and
+  aborted the scripts. Changed each readiness probe to
+  `"${BASE}/product.php?id=1"` (a served endpoint that returns 200 and also
+  confirms DB), with an explanatory comment; swept `scripts/` for other bare-`/`
+  probes (none — `h2_desync_e2e.sh` waits on a raw TCP connect, already correct).
+- Why: Part E aborted at its readiness gate before running; Parts I/J would have
+  aborted identically.
+- Verification: on-host, Parts E, I, J all PASS after the change (`bash -n` clean
+  on all three; the new readiness message "Waiting for …/product.php?id=1"
+  observed in the run log; each script proceeded past step 1/2 to its own
+  self-tests).
+- Scope: `scripts/greybox_e2e.sh`, `scripts/proxy_e2e.sh`,
+  `scripts/waf_evasion_e2e.sh`. See BUG-0048, PA-0050.
+
+### CC-LAB-0234 — Pin the skeleton composer platform + regenerate its lock to PHP-8.3-compatible Symfony (2026-09-24, BUG-0047/PA-0049)
+- Change: the generated app's skeleton
+  (`fuzzlab/labgen/emitters/php_laravel/stack/skeleton/`) `composer.json` lacked
+  the `config.platform.php` pin its sibling `stack/composer.json` has, so its
+  committed `composer.lock` had drifted to Symfony 8.1.x / Laravel 13.32.0
+  (require PHP ≥ 8.4.1) and a from-scratch `web.Dockerfile` build failed
+  `composer install` on the D7-pinned `php:8.3` base. Added
+  `"platform": {"php": "8.3.33"}` to the skeleton `composer.json` and
+  regenerated `composer.lock` against it (Symfony 8.1.x → 7.4.19; Laravel →
+  13.33.0; no package now floors PHP > 8.3).
+- Why: the lab image could not be built at all, blocking every on-host task.
+- Verification: on-host, `labctl.sh up` builds and the app serves
+  (`product.php?id=1` → 200, valid JSON, no DB error); regenerated lock has zero
+  hard `php >= 8.4` floors; sibling `stack/composer.lock` confirmed already
+  consistent. No Python test pins the lock/symfony versions (verified by grep),
+  so the suite is unaffected by the regeneration.
+- Scope: `.../skeleton/composer.json`, `.../skeleton/composer.lock`. See
+  BUG-0047, PA-0049.
+
 ### CC-LAB-0233 — `scripts/on_host_full_run.sh`: run every deferred on-host task in one pass, appending results to an evaluation log (2026-09-24)
 - Change: added `scripts/on_host_full_run.sh`, a driver that runs every
   command from `docs/ON_HOST_RUNBOOK.md` Parts A and C through L in order

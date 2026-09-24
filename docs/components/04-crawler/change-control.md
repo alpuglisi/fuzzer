@@ -3,6 +3,28 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0008 — Scope link-following to the start URL's host, not a hardcoded loopback allowlist (2026-09-24, BUG-0050/PA-0052)
+- Change: `fuzzlab/tools/spider.py` — replaced `LocalSpider._is_local(url)` (which
+  followed a link only if its hostname was `localhost`/`127.0.0.1`) with
+  `_in_scope(url)`, scoped to the start URL's own host (`self._scope_host`,
+  computed in `__init__` via the new `_norm_host` helper). Loopback aliases
+  (`localhost`/`127.0.0.1`/`::1`) are treated as one host and `www.` is
+  normalised, so apex/`www` and cross-alias lab links still match; third-party
+  and other-subdomain links are still not followed (the "don't escape to the open
+  web" intent is preserved). Both enqueue call sites (link + XHR) updated. Applies
+  to both engines and, via the CLI, to the web-UI crawl.
+- Why: pointed at any authorized non-loopback host, the old guard dropped **every**
+  discovered link, so the crawler fetched only the start page and found nothing —
+  reported by the operator crawling authorized live hosts via the web UI. See
+  BUG-0050.
+- Verification: new `tests/test_spider_scope.py` (12 cases: external same-host /
+  subdomain / third-party / `www` / no-host / loopback aliases) — all pass.
+  End-to-end: a 3-page same-host site is fully discovered on both the `requests`
+  and `playwright` engines, while an embedded third-party link is correctly not
+  followed. Full non-slow suite unaffected.
+- Scope: `fuzzlab/tools/spider.py`, `tests/test_spider_scope.py` (new); requirement
+  FR-CRAWL-7 added. See BUG-0050, PA-0052.
+
 ### CC-CRAWL-0007 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
 - Change: `fuzzlab/tools/spider.py::build_parser()` gained `--dry-run` (via the new
   shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). The module's `__main__` block now

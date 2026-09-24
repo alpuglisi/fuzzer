@@ -89,6 +89,21 @@ The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
      --base-url http://127.0.0.1:8080/
    ```
 
+   > **Known gap on the generated target (observed 2026-09-24, on-host run).**
+   > `session print` (and any `--identity`-authenticated `crawl`/`fuzz`) needs to
+   > *discover a GET login form* to auto-detect the login. The generated Laravel
+   > lab has **no GET login form**: `login.php` is a **POST-only** injection point
+   > (the ground-truth models it that way — `GET /login.php` → 405), and the app
+   > serves no HTML homepage/nav (`GET /` → 404), so the detector reports
+   > "no login form found." This is the same accepted class as the D-open-1 note
+   > below (the cutover retired the hand-built app's HTML surface), **not** a
+   > fuzzlab defect: the *build-time* oracle logs in fine by POSTing known fields
+   > (`fuzzlab.labgen.auth_session`/`identity_session`). Consequence: against this
+   > target, run the Part D–L benchmarks **unauthenticated over `--ground-truth`**
+   > (they enumerate points from the contract, not from a crawl/login); the
+   > `--identity` steps in step 3 are only meaningful once a target that serves a
+   > discoverable login form (or a proxy-captured session, Phase 6) is available.
+
 3. **Run crawl → audit → fuzz for that identity**, all writing to one shared store
    (`--store`), authenticated via `--identity`:
    ```bash

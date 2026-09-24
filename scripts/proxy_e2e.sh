@@ -41,12 +41,16 @@ cleanup() { [ -n "${PROXY_PID}" ] && kill "${PROXY_PID}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # --- 1. lab up --------------------------------------------------------------
-say "1/6  Ensuring the lab is up at ${LAB_URL}/"
-if ! curl -fs -o /dev/null "${LAB_URL}/"; then
+# Probe a real served endpoint, not "/": the generated Laravel target 404s on
+# "/" (no homepage route), so `curl -f "${LAB_URL}/"` would never pass. Use
+# /product.php?id=1 (returns 200, also confirms DB).
+READY_URL="${LAB_URL}/product.php?id=1"
+say "1/6  Ensuring the lab is up at ${READY_URL}"
+if ! curl -fs -o /dev/null "${READY_URL}"; then
   ( cd lab && ./labctl.sh up )
-  for _ in $(seq 1 60); do curl -fs -o /dev/null "${LAB_URL}/" && break; sleep 2; done
+  for _ in $(seq 1 60); do curl -fs -o /dev/null "${READY_URL}" && break; sleep 2; done
 fi
-curl -fs -o /dev/null "${LAB_URL}/" || die "lab not reachable at ${LAB_URL}/"
+curl -fs -o /dev/null "${READY_URL}" || die "lab not reachable at ${READY_URL}"
 echo "lab is up."
 
 # --- 2. export the CA -------------------------------------------------------

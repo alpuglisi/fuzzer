@@ -4,6 +4,48 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (crawler scope fix — follow the target's own host, not only loopback)
+
+- Fixed **BUG-0050** (CRAWL, CC-CRAWL-0008, PA-0052, FR-CRAWL-7): `fuzzlab crawl`
+  followed a discovered link only if its host was `localhost`/`127.0.0.1`, so
+  pointed at any authorized external host (e.g. via the web UI's configurable
+  `target_base_url`) it dropped every link and crawled a single page. Replaced the
+  hardcoded loopback allowlist with same-host scoping derived from the start URL
+  (loopback aliases + `www.` normalised; third-party/other-subdomain links still
+  not followed). Fixes both the `requests` and `playwright` engines and the web-UI
+  crawl. Added `tests/test_spider_scope.py`. Swept the whole application
+  (PA-0002) for the same lab-only assumption ahead of external-target use: the
+  spider was the only silent loopback restriction — auditor/oracle/fuzzer/session
+  don't filter on target host, `fuzz`/`auto`/`proxy` gate on `--authorized`, and
+  the proxy uses configurable default-deny scope; OOB-callback strategies remain
+  loopback-only (flagged in BUG-0050 as a documented external-target limitation).
+
+## 2026-09-24 (on-host execution pass — ran the deferred on-host tasks; fixed 3 build/instrumentation bugs found doing so)
+
+- Executed `docs/ON_HOST_TASKS.md` / `ON_HOST_RUNBOOK.md` on the Fedora host via
+  `scripts/on_host_full_run.sh`. Parts A, D, E, F, G, H, I, J, K, L pass (Part D:
+  fp=0, tp=4 with `--browser`; Part E T3.7 exit met; Part I/J/K e2e green). Part C's
+  authenticated (login-detection) steps do not apply to the generated JSON/POST
+  target (no GET login form — accepted cutover characteristic, same class as
+  D-open-1); Parts G/H hit the documented single-run thin-data ML fallback; T10.6
+  transfer skipped (no second lab configured). Results in
+  `on_host_results_20260924.txt`.
+- Fixed **BUG-0047** (LAB, CC-LAB-0234, PA-0049): the skeleton `composer.json`
+  lacked a `config.platform.php` pin, so its `composer.lock` had drifted to
+  PHP-8.4-only Symfony 8.1 and a from-scratch lab build failed `composer install`
+  on the pinned `php:8.3` base. Added the pin (matching `stack/composer.json`) and
+  regenerated the lock (Symfony → 7.4.19).
+- Fixed **BUG-0048** (LAB, CC-LAB-0235, PA-0050): `greybox_e2e.sh`,
+  `proxy_e2e.sh`, `waf_evasion_e2e.sh` probed `/` with `curl -f` for readiness, but
+  the generated app 404s on `/`, so a healthy lab read as "not reachable." Probe a
+  served endpoint (`/product.php?id=1`) instead.
+- Fixed **BUG-0049** (LAB, CC-LAB-0236, PA-0051): the `FzlCoverage` grey-box
+  middleware's `db_fault` never fired because Laravel's `Illuminate\Routing\
+  Pipeline` renders a controller `QueryException` to a 500 before it can propagate
+  to the middleware's `catch`; capture it via a `withExceptions()->report()` hook
+  into a request-scoped static the middleware reads. Part E T3.7 now separates
+  error-based SQLi (`db_fault=1`) from benign traffic.
+
 ## 2026-09-24 (scripts/on_host_full_run.sh — run every deferred on-host task in one pass)
 - Added a driver script that runs every command from
   `docs/ON_HOST_RUNBOOK.md` Parts A and C-L in sequence and appends each

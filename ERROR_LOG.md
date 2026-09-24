@@ -18,6 +18,83 @@ Format per entry:
 
 ---
 
+## 2026-09-24 — CRAWL: crawler followed only loopback links; grabbed nothing on authorized external hosts (fixed, BUG-0050/PA-0052)
+
+- **Symptom:** operator pointed `fuzzlab crawl` (via the web UI) at authorized
+  live hosts; it fetched the start page but followed no links ("Crawled 1
+  page(s)"), on any real site.
+- **Root cause:** `LocalSpider._is_local` hardcoded the follow filter to
+  `hostname in {localhost, 127.0.0.1}`, so every link on a non-loopback target
+  was dropped. The lab-only guard was expressed as a fixed loopback allowlist
+  instead of "the operator-configured target's host."
+- **Remediation:** replaced it with `_in_scope`, scoped to the start URL's host
+  (loopback aliases + `www.` normalised; third-party/other-subdomain links still
+  not followed). Added `tests/test_spider_scope.py`; verified end-to-end on both
+  engines. BUG-0050, PA-0052, CC-CRAWL-0008, FR-CRAWL-7.
+- **Status:** Fixed.
+
+## 2026-09-24 — host lab image would not build: btrfs ENOSPC + missing `composer:2` image (Environment)
+
+- **Symptom:** first on-host `lab/labctl.sh up` failed with podman "no space
+  left on device" (even a metadata rename failed) though `df` showed ~8 GB free;
+  after freeing space, the build failed `COPY --from=composer:2 ... no stage or
+  image found with that name`.
+- **Root cause:** (a) the host root fs is **btrfs** with **0 unallocated space**
+  (all 242 GiB allocated into block groups), so no new metadata chunk could be
+  allocated — the "free" space was inside a full data block group; (b) the
+  `composer:2` image the Dockerfile's `COPY --from` references was not present
+  locally and podman-compose/buildah did not auto-pull it. Environment/infra, not
+  a fuzzlab code defect.
+- **Remediation:** `btrfs balance start -dusage=…,limit=…` to return ~4 GiB of
+  partially-empty data chunks to unallocated (so metadata could grow), plus a
+  narrow `podman image prune -f` (dangling layers only — the user's 234 GB of
+  personal data was left untouched); then `podman pull docker.io/library/
+  composer:2` so `COPY --from` resolves locally.
+- **Status:** Environment (fixed outside the repo).
+
+## 2026-09-24 — LAB: from-scratch lab image build failed — skeleton `composer.lock` locked PHP-8.4-only Symfony 8.1 on a `php:8.3` base (fixed, BUG-0047/PA-0049)
+
+- **Symptom:** `composer install` in `web.Dockerfile` failed with ~17
+  "requires php >=8.4.1 -> your php version (8.3.33) does not satisfy" errors.
+- **Root cause:** the skeleton `composer.json` had no `config.platform.php` pin
+  (its sibling `stack/composer.json` did), so its `composer.lock` had been
+  regenerated on a PHP-8.4 host and resolved to Symfony 8.1 (PHP ≥ 8.4.1),
+  incompatible with the D7-pinned `php:8.3` runtime.
+- **Remediation:** added `"platform": {"php": "8.3.33"}` to the skeleton
+  `composer.json` and regenerated `composer.lock` against it (Symfony → 7.4.19).
+  Lab now builds + serves. BUG-0047, PA-0049, CC-LAB-0234.
+- **Status:** Fixed.
+
+## 2026-09-24 — LAB: on-host e2e scripts declared a healthy lab "not reachable" (fixed, BUG-0048/PA-0050)
+
+- **Symptom:** `greybox_e2e.sh` (and latently `proxy_e2e.sh`,
+  `waf_evasion_e2e.sh`) aborted at their readiness gate — "lab did not become
+  reachable at http://127.0.0.1:8080/" — though the lab was serving.
+- **Root cause:** the readiness probe `curl -fs "${BASE}/"` treats the generated
+  Laravel app's (correct) 404 on `/` as failure; the app has no homepage route
+  since the `L-P3.3c-CUT` cutover.
+- **Remediation:** probe `"${BASE}/product.php?id=1"` (a served endpoint, also
+  confirms DB) in all three scripts; swept `scripts/` for other bare-`/` probes.
+  BUG-0048, PA-0050, CC-LAB-0235.
+- **Status:** Fixed.
+
+## 2026-09-24 — LAB: grey-box `db_fault` never fired; Laravel routing pipeline swallowed the controller `QueryException` (fixed, BUG-0049/PA-0051)
+
+- **Symptom:** error-based SQLi on `login.php` returned 500 with a real SQL
+  error, but the `FzlCoverage` side-channel file always had `db_fault=false`;
+  `greybox_e2e.sh`'s self-test failed. Phase 3 T3.7 exit unmeetable.
+- **Root cause:** `FzlCoverage` caught a `QueryException` *propagating out of
+  `$next()`*, but Laravel's `Illuminate\Routing\Pipeline` catches+renders a
+  controller exception at the router-dispatch boundary, so it never propagates
+  back to the middleware's `catch` — a mechanism ported from raw-PHP semantics
+  that Laravel does not share.
+- **Remediation:** capture the `QueryException` via a
+  `withExceptions(...)->report(...)` hook into a request-scoped static the
+  middleware reads after `$next()`; kept a belt-and-suspenders catch. Verified
+  live (fault ⇒ db_fault=1, benign ⇒ 0); Part E passes T3.7. BUG-0049, PA-0051,
+  CC-LAB-0236.
+- **Status:** Fixed.
+
 ## 2026-09-24 — `cwe.mitre.org` unreachable through this environment's egress proxy during PA-0033 CWE-migration research (Environment)
 
 - **Symptom:** while migrating `docs/research/corpus-examples/*/manifest.yaml`

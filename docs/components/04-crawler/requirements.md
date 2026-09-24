@@ -1,6 +1,6 @@
 # Crawler / Spider — Requirement Specification
 
-Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-09-21
+Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-09-24
 
 Related: `ARCHITECTURE.md` #4; `DECISIONS_AND_ROADMAP.md` (D5, D6, Phase 2);
 `./change-control.md`.
@@ -28,6 +28,12 @@ fuzzer.
   re-authenticate.
 - **FR-CRAWL-6** Respect a crawl budget and deadline via the shared budget
   manager; never overlap headless work with timing-sensitive fuzzing.
+- **FR-CRAWL-7** Link-following scope is the **start URL's own host** (loopback
+  aliases `localhost`/`127.0.0.1`/`::1` treated as one host; `www.` normalised):
+  follow same-host links, never third-party/other-subdomain links. Scope is
+  derived from the operator-configured target, never a hardcoded loopback
+  literal — so the crawler works on any authorized target, not only the
+  loopback lab (BUG-0050/PA-0052).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

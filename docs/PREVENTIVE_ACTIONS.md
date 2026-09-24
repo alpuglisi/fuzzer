@@ -660,3 +660,60 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   param, vuln_class)`, never `sink_context`, so it cannot double-count a
   TP/FP) — prefer emitting one point per distinct value over trying to
   merge/prioritize them. (from BUG-0046)
+
+- **PA-0049** — Every committed dependency lockfile must be resolved against the
+  project's **pinned runtime**, not the build/developer host. Concretely: each
+  distinct dependency root that ships a lockfile (here both
+  `fuzzlab/labgen/emitters/php_laravel/stack/composer.json` **and** its
+  `skeleton/composer.json`) must itself carry the platform pin that fixes the
+  runtime version (`"config": {"platform": {"php": "<image PHP>"}}` to match
+  `web.Dockerfile`'s pinned `php:8.3` base, per D7) — a pin on one root does not
+  protect a sibling root. Regenerating a lock (`composer update`, `npm install`,
+  etc.) on a newer host without that pin silently resolves to packages the
+  pinned runtime cannot run, and nothing fails until a from-scratch image build.
+  When adding or fixing such a pin, **sweep every lockfile in the repo for a
+  missing runtime pin** (PA-0002) and confirm each lock has no dependency
+  requiring a runtime newer than the pinned one. (from BUG-0047)
+
+- **PA-0050** — A liveness/readiness probe must target a **known-served,
+  modelled endpoint** and treat "the server answered at all" as up; it must not
+  equate "up" with a 2xx/3xx status on an **incidental** path such as `/`.
+  `curl -f "${BASE}/"` is a false-negative liveness signal against any target
+  whose `/` is not a 200 route — the generated Laravel lab 404s on `/` by
+  design. Probe something the target actually serves (e.g.
+  `/product.php?id=1`, which also confirms DB), or accept any HTTP response as
+  "up." This generalises `PA-0025` (which fixed the *audit oracle* inferring
+  *secure* from an *unreachable* target) to **every** reachability/health check
+  in any layer, on-host shell harnesses included, and covers the mirror
+  direction (inferring *dead* from a reachable target's incidental 404). When a
+  target-app cutover changes the served surface, re-audit every health/readiness
+  probe that hard-codes a route. (from BUG-0048)
+
+- **PA-0051** — When porting an **observation/interception mechanism** (a
+  coverage/fault shim, a proxy hook, an error sniffer) across runtimes or
+  frameworks, do not assume the control-flow it depends on carries over. In
+  particular, "an unhandled exception propagates out to my outer `catch`" is
+  **false** under frameworks that catch-and-render exceptions internally:
+  Laravel's `Illuminate\Routing\Pipeline` renders a controller `QueryException`
+  to a 500 `Response` at the router-dispatch boundary, so it never reaches a
+  global middleware's `catch`. Use the framework's own surfacing hook instead
+  (Laravel `withExceptions(...)->report(...)`), record into request-scoped state
+  the observer reads, and **keep a capability self-test that fails loud when the
+  signal is dead** (as `greybox_e2e.sh`'s step-3 self-test did here — the
+  discipline from PA-0008/BUG-0009 is what caught this). Verify the ported
+  mechanism live (fault present ⇒ flag set; benign ⇒ flag clear), never assume
+  parity with the predecessor runtime. (from BUG-0049)
+
+- **PA-0052** — A tool's **scope / allowlist filter** must be derived from the
+  operator-configured target (e.g. the start URL's own host, with loopback
+  aliases and `www.` normalised), **never a hardcoded lab literal** such as
+  `localhost`/`127.0.0.1`. The crawler's link-follow guard was a fixed loopback
+  allowlist that doubled as its "don't escape to the open web" boundary, so once
+  the target became any authorized external host the guard excluded the target
+  itself and followed zero links (BUG-0050). Express the boundary as "stay on
+  the configured target's host," and **exercise any lab-only-default guard with
+  a test that uses a non-default (non-loopback, real-host) target** — a
+  loopback-only test can never catch a filter that silently drops real targets.
+  Generalises `PA-0050` (which fixed the same class — a lab-shape assumption
+  baked into a *readiness* check) from reachability probes to every
+  target-scoping filter. (from BUG-0050)

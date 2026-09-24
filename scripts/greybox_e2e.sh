@@ -61,13 +61,18 @@ chmod 777 "${COV_DIR}" 2>/dev/null || true      # the container (www-data) must 
 ( cd lab && ./labctl.sh reset )
 
 # --- 2. wait for health ------------------------------------------------------
-say "2/6  Waiting for ${BASE_URL}/ to come up"
+# Probe a real served endpoint, not "/": the generated Laravel target has no
+# homepage route and returns 404 on "/", so `curl -f "${BASE_URL}/"` (fail-on-4xx)
+# would never succeed even with the app fully up. /product.php?id=1 returns 200
+# and also proves DB connectivity — the same endpoint step 3's self-test uses.
+READY_URL="${BASE_URL}/product.php?id=1"
+say "2/6  Waiting for ${READY_URL} to come up"
 ok=0
 for _ in $(seq 1 60); do
-  if curl -fs -o /dev/null "${BASE_URL}/"; then ok=1; break; fi   # -s (no -S): quiet retries
+  if curl -fs -o /dev/null "${READY_URL}"; then ok=1; break; fi   # -s (no -S): quiet retries
   sleep 2
 done
-[ "${ok}" = 1 ] || die "lab did not become reachable at ${BASE_URL}/ (see: cd lab && ./labctl.sh logs)"
+[ "${ok}" = 1 ] || die "lab did not become reachable at ${READY_URL} (see: cd lab && ./labctl.sh logs)"
 echo "lab is up."
 
 # --- 3. side-channel self-test ----------------------------------------------

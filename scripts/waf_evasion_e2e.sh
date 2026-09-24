@@ -43,10 +43,15 @@ code_for() { curl -s -o /dev/null -w '%{http_code}' --get --data-urlencode "q=$1
              "${LAB}/search.php"; }
 
 # --- 1. enable the WAF ------------------------------------------------------
+# Probe a real served endpoint, not "/": the generated Laravel target 404s on
+# "/" (no homepage route), so `curl -f "${LAB}/"` would never pass. Use
+# /product.php?id=1 (returns 200). The WAF default-allows benign GETs, so this
+# stays reachable with the WAF on.
+READY_URL="${LAB}/product.php?id=1"
 say "1/5  Enabling the lab WAF (PFF_WAF=on, mode=${WAF_MODE}) and restarting"
 ( cd lab && PFF_WAF=on PFF_WAF_MODE="${WAF_MODE}" ./labctl.sh up )
-for _ in $(seq 1 30); do curl -fs -o /dev/null "${LAB}/" && break; sleep 1; done
-curl -fs -o /dev/null "${LAB}/" || die "lab not reachable at ${LAB}/"
+for _ in $(seq 1 30); do curl -fs -o /dev/null "${READY_URL}" && break; sleep 1; done
+curl -fs -o /dev/null "${READY_URL}" || die "lab not reachable at ${READY_URL}"
 
 # --- 2. confirm the filter is live ------------------------------------------
 say "2/5  Confirming the filter is live"
