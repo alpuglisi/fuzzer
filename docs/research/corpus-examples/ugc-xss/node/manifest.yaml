@@ -107,20 +107,18 @@
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.js's migration note above -- same file). ---
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1021, CWE-668]
+  cwe_unique: [CWE-1021, CWE-669]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique: CWE-1021 (Improper Restriction of Rendered UI Layers or
-    Frames) -- flagged generally: since the entire `comment.body_html`
-    value is attacker-influenced markup rendered via
-    dangerouslySetInnerHTML with no restriction on embeddable content,
-    nothing here would stop an attacker-authored `<iframe>` from being
-    embedded either, a related but distinct risk from the `<script>`-
-    style payloads this pair otherwise focuses on. CWE-668 (Exposure of
-    Resource to Wrong Sphere) -- `dangerouslySetInnerHTML` exposes raw
-    DOM-insertion capability (normally outside React's own controlled
-    virtual-DOM sphere) directly to comment data sourced from an external
-    API, with nothing narrowing that exposure back down before use.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique: CWE-1021 (Improper
+    Restriction of Rendered UI Layers or Frames) -- flagged generally: since the
+    entire `comment.body_html` value is attacker-influenced markup rendered via
+    dangerouslySetInnerHTML with no restriction on embeddable content, nothing
+    here would stop an attacker-authored `<iframe>` from being embedded either, a
+    related but distinct risk from the `<script>`- style payloads this pair
+    otherwise focuses on. CWE-669 (Incorrect Resource Transfer Between Spheres) --
+    raw comment markup is transferred from the external GitHub-API sphere directly
+    into the DOM-insertion sphere via `dangerouslySetInnerHTML` with no sanitizing
+    transfer step between the two.
   suggested_op: raw_concat   # dangerouslySetInnerHTML with no sanitizer call
                              # -- same shape as vulnerable-1.js, reused
   suggested_sink_family: html_body   # same reasoning as vulnerable-1.js above
@@ -156,19 +154,18 @@
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.js's migration note above -- same file). ---
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1333, CWE-799]
+  cwe_unique: [CWE-1333, CWE-1176]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique, flagged generally as residual concerns of this DOMPurify
-    mitigation rather than defects it fails to address for its own
-    stated purpose: CWE-1333 (Inefficient Regular Expression Complexity)
-    -- DOMPurify's own sanitization internals rely on regex-based
-    tag/attribute detection, so an adversarially crafted comment body is
-    a documented class of DoS surface distinct from the XSS this call
-    is meant to prevent; CWE-799 (Improper Control of Interaction
-    Frequency) -- flagged generally: nothing shown here rate-limits how
-    often a given user can submit a new answer/comment before it reaches
-    this sanitize-then-render pipeline, not shown in this excerpt.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique, flagged generally
+    as residual concerns of this DOMPurify mitigation rather than defects it fails
+    to address for its own stated purpose: CWE-1333 (Inefficient Regular
+    Expression Complexity) -- DOMPurify's own sanitization internals rely on
+    regex-based tag/attribute detection, so an adversarially crafted comment body
+    is a documented class of DoS surface distinct from the XSS this call is meant
+    to prevent; CWE-1176 (Inefficient CPU Computation) -- the DOMPurify sanitize
+    call is reachable an unlimited number of times per submission with no rate
+    limit shown, compounding its own documented regex-based cost with unbounded
+    call volume.
   suggested_op: dompurify_sanitize   # DOMPurify.sanitize() is a distinct
                              # allowlist-sanitizer mechanism not currently in
                              # the matrix (the matrix's only HTML-body

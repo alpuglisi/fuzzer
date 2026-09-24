@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus CWE bookkeeping — migrate access-control/php's legacy `cwe:` field + resolve 76 cross-file cwe_unique collisions)
+- Docs (research corpus): the prior validation pass (CC-LAB-0230) was the
+  first to touch all 18 corpus manifests together, which surfaced a
+  pre-existing PA-0033 bookkeeping backlog no smaller batch had exposed:
+  4 `access-control/php` entries still on the legacy flat `cwe:` field,
+  and 76 cross-file `cwe_unique` collisions (the same CWE claimed unique
+  by two different entries). Migrated the 4 legacy entries to
+  `cwe_shared`/`cwe_unique`/`cwe_rationale` (grounded in each file's real
+  source) and resolved every collision with a fresh, code-grounded,
+  currently-unused replacement CWE, verified globally collision-free.
+  `.claude/hooks/check-corpus-cwe-coverage.sh` now exits 0. See
+  `docs/components/01-target-lab/change-control.md`'s CC-LAB-0231 for
+  full detail. Bookkeeping-only: no lab/generator code or vulnerability
+  content touched.
+
 ## 2026-09-24 (vuln-corpus Phase 3 validation — 63 of 63 real-collected pairs validated)
 - Docs (research corpus): validated all 63 remaining `validated: false`
   real-collected (Phase 2) entries across access-control, auth-session,

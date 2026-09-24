@@ -56,18 +56,16 @@
   # cwe.mitre.org is blocked by this environment's egress proxy (confirmed
   # via curl and WebFetch); recorded honestly rather than fabricated. ---
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-1284, CWE-807]
+  cwe_unique: [CWE-1286, CWE-349]
   cwe_rationale: >
-    CWE-1284 (Improper Validation of Specified Quantity in Input): the
-    view trusts BOTH `amount` and `currency` from request.POST with no
-    allowlist of supported currencies and no bound on the amount relative
-    to the actual order/cart total -- a currency-confusion variant (e.g.
-    charging 100 "JPY" when 100 "USD" cents was intended, since JPY has no
-    minor unit) is a well-known real consequence of exactly this gap.
-    CWE-807 (Reliance on Untrusted Input in a Security Decision): the
-    security-relevant decision "how much money to charge" is made
-    entirely from client-supplied fields with no independent server-side
-    source of truth consulted at all.
+    CWE-1286 (Improper Validation of Syntactic Correctness of Input) -- neither
+    `amount` nor `currency` is checked against any expected shape or allowlist
+    before use, so a syntactically-nonsensical or unsupported currency code is
+    accepted exactly like a valid one. CWE-349 (Acceptance of Extraneous Untrusted
+    Data With Trusted Data) -- the client-supplied amount/currency pair travels
+    alongside otherwise-trusted request data with nothing in this view
+    distinguishing which parts are trusted server state versus caller-supplied
+    input.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -113,28 +111,25 @@
     entry).
   redacted: false
   cwe_shared: [CWE-362, CWE-367]
-  cwe_unique: [CWE-662, CWE-664]
+  cwe_unique: [CWE-662, CWE-672]
   cwe_rationale: >
-    NOTE: this entry's cwe_unique was originally drafted with CWE-841,
-    which a cross-file run of check-corpus-cwe-coverage.sh (this batch
-    also touched ecommerce-logic/php, which already claims CWE-841 unique
-    for vulnerable-qloapps-booking-1.php) correctly flagged as a
-    collision -- replaced below with a narrower ID grounded in this
-    entry's own code, per the hook's own guidance that a collision is
-    expected/fine and the fix is a fresh, well-grounded replacement, not a
-    restatement.
-    CWE-662 (Improper Synchronization): the read-is_valid()-then-increment
-    sequence across `coupon.usage_count` has no synchronization primitive
-    of any kind coordinating concurrent access to that shared counter --
-    no lock, no atomic transaction, no select_for_update() -- distinct
-    from the shared CWE-362/CWE-367 TOCTOU class in naming the *absence of
-    a coordination mechanism itself*, not just the resulting race window.
-    CWE-664 (Improper Control of a Resource Through its Lifetime): the in-memory
-    `coupon` ORM object is read once at the top of the view, then mutated
-    and `.save()`-d multiple times (usage_count, then possibly
-    is_active) later in the same function without ever being re-read,
-    so later writes act on a potentially stale snapshot of that resource
-    for the rest of its lifetime within the request.
+    NOTE: this entry's cwe_unique was originally drafted with CWE-841, which a
+    cross-file run of check-corpus-cwe-coverage.sh (this batch also touched
+    ecommerce-logic/php, which already claims CWE-841 unique for
+    vulnerable-qloapps-booking-1.php) correctly flagged as a collision -- replaced
+    below with a narrower ID grounded in this entry's own code, per the hook's own
+    guidance that a collision is expected/fine and the fix is a fresh,
+    well-grounded replacement, not a restatement. CWE-662 (Improper
+    Synchronization): the read-is_valid()-then-increment sequence across
+    `coupon.usage_count` has no synchronization primitive of any kind coordinating
+    concurrent access to that shared counter -- no lock, no atomic transaction, no
+    select_for_update() -- distinct from the shared CWE-362/CWE-367 TOCTOU class
+    in naming the *absence of a coordination mechanism itself*, not just the
+    resulting race window. CWE-672 (Operation on a Resource after Expiration or
+    Release) -- the in-memory `coupon` object is read once and then mutated/saved
+    multiple times later in the same function without being re-read, so later
+    writes operate on a snapshot that is no longer guaranteed current for the rest
+    of its own lifetime in the request.
   suggested_op: unlocked_check_then_act
   suggested_sink_family: db_counter_increment
 
@@ -173,29 +168,26 @@
     pass.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-681, CWE-696]
+  cwe_unique: [CWE-681, CWE-663]
   cwe_rationale: >
-    NOTE: this entry's cwe_unique was originally drafted with CWE-1339,
-    which a cross-file run of check-corpus-cwe-coverage.sh (this batch
-    also touched ecommerce-logic/php, which already claims CWE-1339
-    unique for idiomatic-1.php) correctly flagged as a collision --
-    replaced below with a narrower, more precise ID for this entry's own
-    code, per the hook's own guidance that a collision is expected/fine
-    and the fix is a fresh, well-grounded replacement, not a restatement.
-    CWE-681 (Incorrect Conversion between Numeric Types):
-    process_payment() charges exactly `int(order.total * 100)` -- if
-    `order.total` is a float rather than a Decimal, this int() truncation
-    of a floating-point cents value can produce classic conversion errors
-    (e.g. 19.99 * 100 evaluating to 1998.9999999999998, truncated to 1998
-    instead of 1999 cents) -- a data-loss defect in the *conversion
-    between numeric representations* specifically, not merely an
-    imprecise real-number computation in the abstract. CWE-696 (Incorrect Behavior Order):
-    process_order() computes and commits `order.total` inside its own
-    `transaction.atomic()` block, and the actual charge happens in a
-    separate, later call to process_payment() -- a crash or retry between
-    the two steps can leave the committed order total and the actual
-    charge state inconsistent, since the total-computation and the
-    charge are not one atomic unit together.
+    NOTE: this entry's cwe_unique was originally drafted with CWE-1339, which a
+    cross-file run of check-corpus-cwe-coverage.sh (this batch also touched
+    ecommerce-logic/php, which already claims CWE-1339 unique for idiomatic-1.php)
+    correctly flagged as a collision -- replaced below with a narrower, more
+    precise ID for this entry's own code, per the hook's own guidance that a
+    collision is expected/fine and the fix is a fresh, well-grounded replacement,
+    not a restatement. CWE-681 (Incorrect Conversion between Numeric Types):
+    process_payment() charges exactly `int(order.total * 100)` -- if `order.total`
+    is a float rather than a Decimal, this int() truncation of a floating-point
+    cents value can produce classic conversion errors (e.g. 19.99 * 100 evaluating
+    to 1998.9999999999998, truncated to 1998 instead of 1999 cents) -- a data-loss
+    defect in the *conversion between numeric representations* specifically, not
+    merely an imprecise real-number computation in the abstract. CWE-663 (Use of a
+    Non-reentrant Function in a Concurrent Context) -- `process_payment()` is
+    invoked outside `process_order()`'s own `transaction.atomic()` block with no
+    idempotency guard, so a retried or concurrently-invoked call is not safely
+    re-enterable the way a function sharing state across a crash/retry boundary
+    needs to be.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -228,19 +220,17 @@
   validated_by: [py_compile, manual-review]
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-706, CWE-1050]
+  cwe_unique: [CWE-1057, CWE-1049]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-706
-    (Use of Incorrectly-Resolved Name or Reference) -- `.filter(customer=
-    request.user, active=True).first()` has no explicit `.order_by()`, so
-    on a backend without a guaranteed default ordering the "first" credit
-    record returned for a customer with more than one active credit is
-    nondeterministic, potentially resolving to an unintended record; CWE-1050
-    (Excessive Platform Resource Consumption within a Loop) -- `subtotal_cents`
-    is computed via `sum(... for item in order.items.all())` with no limit
-    on the number of order items iterated, a per-request cost that scales
-    with an attacker-influenced order size.
+    Shared: see vulnerable-1.py's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-1057 (Data Access Operations
+    Outside of Expected Data Manager Component) -- the `.filter(...).first()` call
+    bypasses any dedicated, deterministic selection logic a data-manager layer
+    would otherwise centralize, leaving which credit record is 'first' to whatever
+    the ORM/database happens to return by default; CWE-1049 (Excessive Data Query
+    Operations in a Large Data Table) -- `sum(... for item in order.items.all())`
+    re-fetches and iterates the full order-items collection on every request with
+    no cap on the number of items an order (and thus this query) can have.
   suggested_op: server_recomputed_amount
   suggested_sink_family: store_credit_redemption
 
@@ -262,16 +252,15 @@
   validated_by: [py_compile, manual-review]
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-248, CWE-693]
+  cwe_unique: [CWE-248, CWE-184]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above.
-    Unique to this entry: CWE-248 (Uncaught Exception) -- `int(request.
-    POST.get('credit_cents', 0))` raises an uncaught ValueError for any
-    non-numeric value, crashing the view with an unhandled 500 rather
-    than a controlled rejection; CWE-693 (Protection Mechanism Failure)
-    -- no protection mechanism of any kind (bounds check, allowlist, sign
-    check) exists for credit_cents before it is applied to the credit's
-    own persisted balance.
+    Shared: see vulnerable-1.py's cwe_rationale above. Unique to this entry:
+    CWE-248 (Uncaught Exception) -- `int(request. POST.get('credit_cents', 0))`
+    raises an uncaught ValueError for any non-numeric value, crashing the view
+    with an unhandled 500 rather than a controlled rejection; CWE-184 (Incomplete
+    List of Disallowed Inputs) -- no allowlist, denylist, or bounds check of any
+    kind constrains `credit_cents` before it is applied to the credit's own
+    persisted balance.
   suggested_op: client_trusted_amount
   suggested_sink_family: store_credit_redemption
 
@@ -314,21 +303,9 @@
   validated_by: [semgrep-custom-rule, py_compile, manual-review]
   redacted: false
   cwe_shared: [CWE-362, CWE-367]
-  cwe_unique: [CWE-636, CWE-460]
+  cwe_unique: [CWE-1178, CWE-460]
   cwe_rationale: >
-    CWE-636 (Not Failing Securely / 'Failing Open'): `select_for_update()`
-    only takes a real row lock on a database backend that supports
-    row-level locking; on a backend that doesn't (e.g. SQLite, common in
-    dev/test), Django logs a warning and silently proceeds WITHOUT
-    locking rather than raising an error -- so this fix's actual
-    protection is contingent on production DB configuration, not
-    guaranteed by the code alone. CWE-460 (Improper Cleanup on Thrown
-    Exception): only `Coupon.DoesNotExist` is caught by this function's
-    `except` clause; any other exception raised inside the
-    `transaction.atomic()` block (e.g. a DB error during the F()
-    update) propagates past the explicit error-handling this function
-    does have, relying entirely on Django's implicit atomic-block
-    rollback with no function-level cleanup/logging of its own.
+    CWE-1178 (SQL API With Insufficient Warning Mechanism) -- Django's `select_for_update()` merely logs a warning and silently proceeds without locking on a backend (e.g. SQLite) that doesn't support row-level locking, exactly the insufficient-warning-mechanism gap this ID describes for an API whose degraded-mode behavior isn't surfaced as an actionable error. CWE-460 (Improper Cleanup on Thrown Exception): only `Coupon.DoesNotExist` is caught by this function's `except` clause; any other exception raised inside the `transaction.atomic()` block (e.g. a DB error during the F() update) propagates past the explicit error-handling this function does have, relying entirely on Django's implicit atomic-block rollback with no function-level cleanup/logging of its own.
   suggested_op: locked_check_then_act
   suggested_sink_family: db_counter_increment
   validation_caveat: >

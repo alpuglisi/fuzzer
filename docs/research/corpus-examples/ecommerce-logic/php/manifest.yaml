@@ -127,22 +127,20 @@
     of scope for this offline pass.
   redacted: false
   cwe_shared: [CWE-840]
-  cwe_unique: [CWE-1339, CWE-573]
+  cwe_unique: [CWE-1339, CWE-354]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's
-    broader business-logic-error class (not a matched-shape pair with that
-    entry; each has its own distinct unique mechanism).
-    Unique to this entry, researched against the MITRE CWE index: CWE-1339
-    (Insufficient Precision or Accuracy of a Real Number) -- `process()`
-    "accumulates the order total itself" in PHP application code (not a
-    DB-side SUM or gateway-computed total); PHP floating-point price
-    accumulation is a well-documented real-world source of rounding-error
-    bugs, a residual concern even in this correctly-recomputing entry;
-    CWE-573 (Improper Following of Specification by Caller) -- this is a
-    PayPal Express Checkout integration, whose documented flow requires a
-    later confirmation call (`DoExpressCheckoutPayment`) to re-verify the
-    amount matches what was set here; nothing in this excerpt confirms
-    that later step follows PayPal's own specified verification.
+    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's broader
+    business-logic-error class (not a matched-shape pair with that entry; each has
+    its own distinct unique mechanism). Unique to this entry, researched against
+    the MITRE CWE index: CWE-1339 (Insufficient Precision or Accuracy of a Real
+    Number) -- `process()` "accumulates the order total itself" in PHP application
+    code (not a DB-side SUM or gateway-computed total); PHP floating-point price
+    accumulation is a well-documented real-world source of rounding-error bugs, a
+    residual concern even in this correctly-recomputing entry; CWE-354 (Improper
+    Validation of Integrity Check Value) -- nothing in this excerpt confirms the
+    later, PayPal-documented `DoExpressCheckoutPayment` confirmation call actually
+    validates the charged amount against this computed total as an integrity check
+    before finalizing.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -173,22 +171,20 @@
   validated_by: [php-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-840]
-  cwe_unique: [CWE-697, CWE-1023]
+  cwe_unique: [CWE-697, CWE-392]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's
-    broader business-logic-error class (not a matched-shape pair with any
-    other entry in this file; each has its own distinct unique mechanism).
-    Unique to this entry, researched against the MITRE CWE index: CWE-697
-    (Incorrect Comparison) -- the `$tierDiscounts[$tier] ?? 0.0` lookup
-    relies on PHP array-key lookup semantics for a value read straight out
-    of the database column with no explicit type/format check first,
-    which is exactly the class of PHP loose-comparison/coercion pitfall
-    CWE-697 describes if `$tier` is ever a non-string type from the DB
-    driver; CWE-1023 (Incomplete Comparison with Missing Factors) -- the
-    fixed $tierDiscounts map does not account for every tier value the
-    `loyalty_tier` column could actually hold (e.g. NULL for a brand-new
-    customer, or a future tier added to the enum but not yet to this map),
-    silently defaulting to 0.0 rather than surfacing the gap.
+    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's broader
+    business-logic-error class (not a matched-shape pair with any other entry in
+    this file; each has its own distinct unique mechanism). Unique to this entry,
+    researched against the MITRE CWE index: CWE-697 (Incorrect Comparison) -- the
+    `$tierDiscounts[$tier] ?? 0.0` lookup relies on PHP array-key lookup semantics
+    for a value read straight out of the database column with no explicit
+    type/format check first, which is exactly the class of PHP
+    loose-comparison/coercion pitfall CWE-697 describes if `$tier` is ever a
+    non-string type from the DB driver; CWE-392 (Missing Report of Error
+    Condition) -- an unrecognized or NULL `loyalty_tier` (e.g. a brand-new
+    customer, or a future tier not yet added to `$tierDiscounts`) silently falls
+    back to `0.0` with no error reported anywhere for that gap.
   suggested_op: server_recomputed_amount
   suggested_sink_family: discount_percent_lookup
 
@@ -210,17 +206,15 @@
   validated_by: [php-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-840]
-  cwe_unique: [CWE-183, CWE-20]
+  cwe_unique: [CWE-183, CWE-192]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique to this entry: CWE-183 (Permissive List of Allowed Inputs) --
-    no allowlist of valid discount percentages (e.g. the tiers' own known
-    {0, 5, 10, 15}) constrains vip_discount_percent at all -- literally any
-    numeric string is accepted; CWE-20 (Improper Input Validation) -- the
-    `(float) ($_POST['vip_discount_percent'] ?? 0)` cast performs a type
-    coercion but no actual validation (range, sign, or membership in a
-    known set) of the resulting value before it drives a monetary
-    calculation.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique to this entry:
+    CWE-183 (Permissive List of Allowed Inputs) -- no allowlist of valid discount
+    percentages (e.g. the tiers' own known {0, 5, 10, 15}) constrains
+    vip_discount_percent at all -- literally any numeric string is accepted;
+    CWE-192 (Integer Coercion Error) -- `(float) ($_POST['vip_discount_percent']
+    ?? 0)` performs a type coercion, not a validation, of the resulting numeric
+    value before it drives a monetary calculation.
   suggested_op: client_trusted_amount
   suggested_sink_family: discount_percent_lookup
 
@@ -262,28 +256,27 @@
   validated_by: [manual-review]
   redacted: false
   cwe_shared: [CWE-602, CWE-840]
-  cwe_unique: [CWE-829, CWE-668]
+  cwe_unique: [CWE-829, CWE-1061]
   cwe_rationale: >
-    Shared (documented, not counted toward the floor -- applies to every
-    entry in this pair-of-pairs, see vulnerable-woocommerce-hook-1.php and
-    both qloapps-booking entries): CWE-602 (Client-Side Enforcement of
-    Server-Side Security) is MITRE's own canonical example for this exact
-    shape -- its description names an e-commerce app that computes a price
-    client-side and trusts the value posted back; CWE-840 (Business Logic
-    Errors) is the general category this weakness instantiates.
-    Unique to this entry (researched against the MITRE CWE index,
-    https://cwe.mitre.org/data/index.html, not recalled, and not claimed by
-    any other entry in this corpus): CWE-829 (Inclusion of Functionality
-    from Untrusted Control Sphere) -- the real `do_action(
-    'woocommerce_before_calculate_totals', $this)` hook this method fires
-    passes the live Cart object, by reference, to *every* registered
-    callback (core WooCommerce or any installed plugin) with no additional
-    guardrail beyond "this function is hooked" -- exactly CWE-829's own
-    description of including/trusting functionality from a control sphere
-    the framework itself doesn't fully vet; CWE-668 (Exposure of Resource
-    to Wrong Sphere) -- the *entire* `$this` Cart object (not a narrower,
-    purpose-built API) is exposed to each hooked callback, more state/
-    surface than a minimal extension point would need to grant.
+    Shared (documented, not counted toward the floor -- applies to every entry in
+    this pair-of-pairs, see vulnerable-woocommerce-hook-1.php and both
+    qloapps-booking entries): CWE-602 (Client-Side Enforcement of Server-Side
+    Security) is MITRE's own canonical example for this exact shape -- its
+    description names an e-commerce app that computes a price client-side and
+    trusts the value posted back; CWE-840 (Business Logic Errors) is the general
+    category this weakness instantiates. Unique to this entry (researched against
+    the MITRE CWE index, https://cwe.mitre.org/data/index.html, not recalled, and
+    not claimed by any other entry in this corpus): CWE-829 (Inclusion of
+    Functionality from Untrusted Control Sphere) -- the real `do_action(
+    'woocommerce_before_calculate_totals', $this)` hook this method fires passes
+    the live Cart object, by reference, to *every* registered callback (core
+    WooCommerce or any installed plugin) with no additional guardrail beyond "this
+    function is hooked" -- exactly CWE-829's own description of including/trusting
+    functionality from a control sphere the framework itself doesn't fully vet;
+    CWE-1061 (Insufficient Encapsulation) -- the entire `$this` Cart object, not a
+    narrower purpose-built API, is exposed to every hooked callback, an
+    insufficient-encapsulation gap distinct from the general cross-sphere trust
+    issue already captured in this pair's shared class.
   suggested_op: hook_delegated_recompute   # distinct mechanism from
                              # server_recomputed_amount (idiomatic-1.php,
                              # above) -- that one recomputes inline in the
@@ -318,23 +311,20 @@
   validated_by: [manual-review]
   redacted: false
   cwe_shared: [CWE-602, CWE-840]
-  cwe_unique: [CWE-471, CWE-345]
+  cwe_unique: [CWE-471, CWE-1077]
   cwe_rationale: >
-    Shared: see idiomatic-woocommerce-hook-1.php's cwe_rationale above --
-    same mechanism, researched once.
-    Unique to this entry: CWE-471 (Modification of Assumed-Immutable Data)
-    -- `$cart_item['data']->set_price(...)` mutates the live `WC_Product`
-    object obtained from `$cart->get_cart()`; within a single request that
-    price is exactly the "assumed-immutable" authoritative value the rest
-    of checkout relies on once loaded, and this callback modifies it from
-    attacker-controlled `$_POST` data -- distinct from CWE-602/840 (the
-    general trust-boundary violation) in naming *what specifically* gets
-    corrupted and how; CWE-345 (Insufficient Verification of Data
-    Authenticity) -- the posted price is cast with `floatval(
-    wp_unslash(...))` (unslashing is correct WordPress practice for
-    undoing its own magic-quotes layer, but a type cast is not
-    verification) and never checked against any authoritative source
-    before being trusted as a charge amount.
+    Shared: see idiomatic-woocommerce-hook-1.php's cwe_rationale above -- same
+    mechanism, researched once. Unique to this entry: CWE-471 (Modification of
+    Assumed-Immutable Data) -- `$cart_item['data']->set_price(...)` mutates the
+    live `WC_Product` object obtained from `$cart->get_cart()`; within a single
+    request that price is exactly the "assumed-immutable" authoritative value the
+    rest of checkout relies on once loaded, and this callback modifies it from
+    attacker-controlled `$_POST` data -- distinct from CWE-602/840 (the general
+    trust-boundary violation) in naming *what specifically* gets corrupted and
+    how; CWE-1077 (Floating Point Comparison with Incorrect Operator) -- the
+    posted price is cast via `floatval(wp_unslash(...))` with no explicit
+    comparison against the authoritative catalog price before being trusted as a
+    charge amount, a raw numeric-cast-without-comparison gap.
   suggested_op: trust_client_price_input   # the exact gap this cell's
                              # "Skipped for no license" note (below) flagged
                              # as found-in-the-wild-but-unlicensed

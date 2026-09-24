@@ -47,21 +47,17 @@
   # knowledge, not a live MITRE lookup -- cwe.mitre.org is blocked by this
   # environment's egress proxy (see ERROR_LOG.md's 2026-09-22 entry). ---
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-639, CWE-703]
+  cwe_unique: [CWE-283, CWE-1177]
   cwe_rationale: >
     Shared: CWE-79 (Cross-site Scripting) is the primary weakness; CWE-116
-    (Improper Encoding or Escaping of Output) is its listed parent.
-    Unique: CWE-639 (Authorization Bypass Through User-Controlled Key) --
-    `check_ajax_referer()` confirms the request carries a valid nonce and
-    `is_user_logged_in()` confirms SOME user is logged in, but nothing
-    checks that the logged-in user actually owns or may edit the specific
-    `$comment_id` supplied -- any authenticated user can request any
-    comment's content through this endpoint. CWE-703 (Improper Check or
-    Handling of Exceptional Conditions) -- `substr($comment_id,
-    strpos($comment_id, '-') + 1)` never checks whether `strpos()`
-    actually found a `-` at all; if it returns `false` (no hyphen),
-    `false + 1` evaluates to `1`, silently changing what substring is
-    used as the comment ID instead of rejecting the malformed input.
+    (Improper Encoding or Escaping of Output) is its listed parent. Unique:
+    CWE-283 (Unverified Ownership) -- `check_ajax_referer()` and
+    `is_user_logged_in()` confirm a valid nonce and SOME logged-in user, but
+    nothing verifies that user actually owns the specific `$comment_id` supplied.
+    CWE-1177 (Use of Prohibited Code) -- relying on `strpos()`'s `false + 1 === 1`
+    PHP-specific coercion quirk, with no explicit check that a hyphen was actually
+    found, is exactly the kind of fragile, discouraged coding pattern this ID
+    flags.
   suggested_op: raw_concat   # zero escaping/sanitization before an HTML-body
                              # echo -- same "no transform at all" shape as the
                              # existing raw_concat entries; reused, not new
@@ -101,20 +97,9 @@
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.php's migration note above -- same file). ---
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1104, CWE-772]
+  cwe_unique: [CWE-1103, CWE-772]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique, flagged generally as residual concerns of this wp_kses_post()
-    mitigation rather than defects it fails to address for its own
-    stated purpose: CWE-1104 (Use of Unmaintained Third-Party Component)
-    -- flagged generally as the residual risk any dependency on a
-    third-party (here, WordPress core's own) sanitizer allowlist carries,
-    since this plugin's own safety is only as current as that shared
-    allowlist's own maintenance; CWE-772 (Missing Release of Resource
-    After Effective Lifetime) -- flagged generally: nothing shown in
-    this excerpt indicates the sanitized-but-still-rich-HTML comment
-    content is ever purged/expired from wherever it's cached or stored
-    once a comment is later deleted/moderated.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique, flagged generally as residual concerns of this wp_kses_post() mitigation rather than defects it fails to address for its own stated purpose: CWE-1103 (Use of Platform-Dependent Third-Party Components) -- this plugin's own safety is only as current as WordPress core's own shared `wp_kses_post()` allowlist, a platform-supplied component this code depends on but does not control; CWE-772 (Missing Release of Resource After Effective Lifetime) -- flagged generally: nothing shown in this excerpt indicates the sanitized-but-still-rich-HTML comment content is ever purged/expired from wherever it's cached or stored once a comment is later deleted/moderated.
   suggested_op: wp_kses_post   # allowlist HTML sanitizer -- a genuinely
                              # different mechanism from html_entity_escape
                              # (permits a safe tag/attribute subset rather
@@ -158,22 +143,9 @@
   # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
   # (see vulnerable-1.php's migration note above -- same file). ---
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1288, CWE-457]
+  cwe_unique: [CWE-705, CWE-457]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique: CWE-1288 (Improper Validation of Consistency within Input) --
-    `htmlspecialchars()` is applied consistently to `uid` and `name`, but
-    the surrounding method builds up `$output` across several
-    conditionally-executed `.=` appends with no single validation pass
-    confirming the whole assembled fragment is internally consistent
-    (e.g. a `published === "No"` comment skips escaping entirely for
-    its own fields, rather than the escaping decision being independent
-    of that branch). CWE-457 (Use of Uninitialized Variable) -- this
-    method references `$iconSize` (in the icon `<img>` tag's `width`/
-    `height` attributes) without it being defined anywhere in this
-    fragment or shown as a class property, a real, concrete uninitialized-
-    variable defect sitting in the same method as this entry's own
-    escaping mechanism.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique: CWE-705 (Incorrect Control Flow Scoping) -- the escaping decision for each conditionally-appended fragment of `$output` is entangled with the `published`/not-published branching rather than being scoped independently of it, so a change to that branching can silently change escaping coverage too. CWE-457 (Use of Uninitialized Variable) -- this method references `$iconSize` (in the icon `<img>` tag's `width`/ `height` attributes) without it being defined anywhere in this fragment or shown as a class property, a real, concrete uninitialized- variable defect sitting in the same method as this entry's own escaping mechanism.
   suggested_op: html_entity_escape   # htmlspecialchars() at an HTML-body
                              # position exactly matches the existing
                              # (html_entity_escape, html_body, neutralises)

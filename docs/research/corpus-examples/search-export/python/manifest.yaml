@@ -66,20 +66,14 @@
   # idiomatic-3-altered.php once that manufactured entry landed in this
   # same batch, so it was swapped out here rather than reused).
   cwe_shared: [CWE-89, CWE-943]
-  cwe_unique: [CWE-706, CWE-352]
+  cwe_unique: [CWE-282, CWE-1004]
   cwe_rationale: >
-    CWE-706 (Use of Incorrectly-Resolved Name or Reference): the
-    `idstring` value is joined from `request.POST.getlist('id', None)`
-    and used as a raw `IN (...)` clause with no check that any of its
-    comma-joined components actually resolve to a real primary key the
-    requesting user is authorized to reference, so the resolved set of
-    rows this clause matches is not verified against what the caller
-    should legitimately be able to name. CWE-352 (Cross-Site Request
-    Forgery): this is a state-mutating (bulk-delete) POST endpoint, and
-    nothing in this excerpt validates a CSRF token before acting on the
-    submitted ids -- a distinct weakness class from the SQLi this file
-    demonstrates (CSRF is about request-origin verification, not query
-    construction).
+    CWE-282 (Improper Ownership Management) -- the bulk-delete clause never
+    verifies the requesting user actually owns the referenced ids before deleting
+    them, an ownership-management gap distinct from the missing CSRF check below.
+    CWE-1004 (Sensitive Cookie Without 'HttpOnly' Flag) -- flagged generally as a
+    residual concern of this endpoint's overall session/cookie posture, not shown
+    hardened anywhere in this excerpt, alongside the missing CSRF token itself.
   suggested_op: orm_raw_escape_hatch   # new op: genuinely distinct from
                                         # raw_concat -- the rest of this same
                                         # app/class uses the ORM's own
@@ -121,22 +115,15 @@
   # PA-0033's tightened standard (see vulnerable-1.py's migration note
   # above -- same file touched in this Phase 3 final batch). ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-670, CWE-863]
+  cwe_unique: [CWE-1095, CWE-267]
   cwe_rationale: >
-    CWE-670 (Always-Incorrect Control Flow Implementation): the
-    permission-filtering loop above (`for i in self.queryset: ... if not
-    hasperm: self.queryset.delete(i)`) mutates `self.queryset` while
-    iterating over that exact same queryset -- a classic "modify a
-    collection during iteration over it" defect, which under Django's
-    real QuerySet semantics either raises or silently skips evaluating
-    some items, so the loop's own control flow cannot reliably do what
-    it appears to do. CWE-863 (Incorrect Authorization): because of that
-    same control-flow defect, the per-item `has_perm('read_assetproject',
-    ...)` check that is supposed to filter out assets the requesting
-    user may not read is not guaranteed to actually run for every item,
-    so this entry's permission enforcement is unreliable in exactly the
-    same way its own SQLi-safe `.filter(Q(...))` mechanism (this entry's
-    own primary, shared finding) is reliable.
+    CWE-1095 (Loop Condition Value Update within the Loop) -- `self.queryset` is
+    mutated (via `.delete()`) inside the very loop iterating over that same
+    queryset, exactly the loop-condition-mutated-during-iteration shape this ID
+    describes. CWE-267 (Privilege Defined With Unsafe Actions) -- the per-item
+    `has_perm('read_assetproject', ...)` grant is defined correctly in isolation,
+    but the surrounding control-flow defect makes acting on that grant (deciding
+    what to keep/delete) unsafe in practice.
   suggested_op: param_bind   # existing op; reused -- .filter(Q(...)) binds
                               # every value as a query parameter, same shape
                               # as the matrix's existing (param_bind,
@@ -180,21 +167,18 @@
   # PA-0033's tightened standard (see vulnerable-1.py's migration note
   # above -- same file touched in this Phase 3 final batch). ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-843, CWE-284]
+  cwe_unique: [CWE-843, CWE-657]
   cwe_rationale: >
-    CWE-843 (Access of Resource Using Incompatible Type, 'Type
-    Confusion'): `hasattr(self.model_class, sort_by)` only checks that
-    an attribute of that NAME exists on the model class -- it does not
-    check that the attribute is actually a real, sortable column (as
-    opposed to a method, a relation manager, or a property that raises)
-    before `.order_by()` treats it as one, a type-confusion gap between
-    "an attribute of this name exists" and "this name is usable as an
-    ORDER BY column". CWE-284 (Improper Access Control): the allowlist
-    here is implicitly "every attribute name the model class happens to
-    expose" rather than an explicit, curated list of sortable columns
-    the application deliberately intends to be sortable, so adding an
-    unrelated model attribute later
-    silently and automatically widens what `sort_by` accepts.
+    CWE-843 (Access of Resource Using Incompatible Type, 'Type Confusion'):
+    `hasattr(self.model_class, sort_by)` only checks that an attribute of that
+    NAME exists on the model class -- it does not check that the attribute is
+    actually a real, sortable column (as opposed to a method, a relation manager,
+    or a property that raises) before `.order_by()` treats it as one, a
+    type-confusion gap between "an attribute of this name exists" and "this name
+    is usable as an ORDER BY column". CWE-657 (Violation of Secure Design
+    Principles) -- using 'every attribute name the model class happens to expose'
+    as the implicit sortable-allowlist violates the secure-design principle of an
+    explicit, minimal, deliberately-curated allowlist.
   suggested_op: identifier_allowlist   # existing op; reused -- hasattr()
                                         # membership-checks the sort column
                                         # against the model's real attributes
@@ -234,20 +218,16 @@
   validated_by: [python-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-20, CWE-88]
+  cwe_unique: [CWE-625, CWE-138]
   cwe_rationale: >
-    Shared (this cell's core class, see vulnerable-1.py above): CWE-89.
-    Unique: CWE-20 (Improper Input Validation, applied to `sort_by`
-    specifically) -- `sort_by` is used as a bare identifier with no check
-    that it is even a plausible column-name-shaped string, let alone one
-    of this table's real columns; CWE-88 (Improper Neutralization of
-    Argument Delimiters
-    in a Command, 'Argument Injection') -- `search` is embedded between
-    literal single quotes inside the f-string, so a value containing a
-    single quote doesn't just add a LIKE wildcard, it can close the
-    string literal early and inject additional SQL clauses/arguments
-    into the surrounding query text, a distinct consequence from the
-    identifier-position risk `sort_by` carries.
+    Shared (this cell's core class, see vulnerable-1.py above): CWE-89. Unique:
+    CWE-625 (Permissive Regular Expression) -- `sort_by` is accepted as a bare
+    identifier with no shape check (not even a loose pattern match) constraining
+    it to plausible column-name characters; CWE-138 (Improper Neutralization of
+    Special Elements) -- the `search` value is embedded between literal single
+    quotes with no neutralization of that string-literal delimiter special element
+    before use, the general special-element gap this specific SQL-string-breakout
+    instance falls under.
   suggested_op: raw_concat   # f-string interpolation directly into SQL
                               # text at the driver level -- the "no
                               # transform at all" shape, but here at raw
@@ -278,23 +258,15 @@
   validated_by: [python-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-390, CWE-758]
+  cwe_unique: [CWE-394, CWE-1106]
   cwe_rationale: >
-    Shared: see vulnerable-3-altered.py above.
-    Unique: CWE-390 (Detection of Error Condition Without Action) --
-    the membership check (`sort_by in SORTABLE_COLUMNS`) silently
-    substitutes a default ("id") for anything not in the set, rather
-    than distinguishing "a genuinely bad sort_by" (worth logging/
-    rejecting with an error) from "no sort_by given at all" -- the
-    invalid-input condition is detected but nothing is done about it
-    beyond silently falling back. CWE-758
-    (Reliance on Undefined, Unspecified, or Implementation-Defined
-    Behavior) -- SORTABLE_COLUMNS is a hardcoded literal set kept
-    independently of the `orders` table's real schema (no introspection/
-    single source of truth), so whether a given name is "sortable"
-    depends entirely on this list staying manually in sync with the
-    table, an implementation detail the query's own correctness
-    silently relies on.
+    Shared: see vulnerable-3-altered.py above. Unique: CWE-394 (Unexpected Status
+    Code or Return Value) -- silently substituting a default `'id'` return value
+    for an invalid `sort_by` is an unsignaled, undocumented return-value
+    substitution rather than a detected-and-reported error condition. CWE-1106
+    (Insufficient Use of Symbolic Constants) -- `SORTABLE_COLUMNS` is a raw
+    hardcoded literal set kept independently of the `orders` table's real schema
+    rather than derived from a single symbolic source of truth.
   suggested_op: param_bind   # existing op; reused for the LIKE value --
                               # psycopg2's own %s placeholder substitution,
                               # the driver-level counterpart to

@@ -118,23 +118,9 @@
   redacted: false
   cwe: [CWE-79, CWE-116, CWE-183, CWE-85]
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-183, CWE-85]
+  cwe_unique: [CWE-692, CWE-85]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness
-    class, the same source file's secure() sibling route.
-    Unique to this entry: CWE-183 (Permissive List of Allowed Inputs) --
-    bleach.clean() sanitizes via an *allowlist* of permitted tags/
-    attributes (default allowlist per the pattern field), meaning the app
-    explicitly supports rich-text comments; the sanitizer itself, not the
-    render step, is now the security boundary, and an over-permissive
-    allowlist (e.g. permitting `<a href>` without restricting the URL
-    scheme) is a distinct residual risk this entry's own mitigation
-    introduces, separate from the render-time |safe concern shared with
-    vulnerable-1.py; CWE-85 (Doubled Character XSS Manipulations) -- HTML
-    sanitizers including bleach have real, documented history of bypasses
-    via double-encoding/character-doubling tricks, a distinct attack class
-    an allowlist sanitizer (unlike simple escaping) is specifically
-    exposed to.
+    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness class, the same source file's secure() sibling route. Unique to this entry: CWE-692 (Incomplete Denylist to Cross-Site Scripting) -- `bleach.clean()`'s default allowlist is a permissive, general-purpose configuration rather than one curated for this app's own comment feature, the same allowlist-completeness residual risk this ID captures for sanitizer bypasses; CWE-85 (Doubled Character XSS Manipulations) -- HTML sanitizers including bleach have real, documented history of bypasses via double-encoding/character-doubling tricks, a distinct attack class an allowlist sanitizer (unlike simple escaping) is specifically exposed to.
   suggested_op: bleach_clean   # bleach.clean() on ingest is an allowlist
                              # HTML sanitizer, distinct from html_entity_escape
                              # (the matrix's only existing HTML-body transform,
@@ -174,23 +160,9 @@
   redacted: false
   cwe: [CWE-79, CWE-116, CWE-1188, CWE-86]
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1188, CWE-86]
+  cwe_unique: [CWE-671, CWE-86]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness
-    class, an independent production instance of the mitigation.
-    Unique to this entry: CWE-1188 (Insecure Default Initialization of
-    Resource) -- the pattern field says bleach.clean() runs with its
-    "default allowlist," i.e. this production app relies on the library's
-    shipped default configuration, not an app-reviewed/hardened allowlist,
-    as its security boundary; CWE-86 (Improper Neutralization of Invalid
-    Characters in Identifiers in Web Pages) -- per the code, `bleach.clean(
-    comment)` is called with no extra character-handling/normalization step
-    of its own around it, so this entry's security boundary rests entirely
-    on bleach's own built-in handling of invalid/incomplete multi-byte
-    character sequences in tag and attribute names, a distinct, documented
-    class of allowlist-sanitizer bypass (malformed/invalid characters that
-    a browser still parses as markup) separate from the default-allowlist
-    configuration concern above.
+    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness class, an independent production instance of the mitigation. Unique to this entry: CWE-671 (Lack of Administrator Control over Security) -- the app has no admin-configurable override of bleach's shipped default allowlist, leaving zero operator control over this security boundary; CWE-86 (Improper Neutralization of Invalid Characters in Identifiers in Web Pages) -- per the code, `bleach.clean( comment)` is called with no extra character-handling/normalization step of its own around it, so this entry's security boundary rests entirely on bleach's own built-in handling of invalid/incomplete multi-byte character sequences in tag and attribute names, a distinct, documented class of allowlist-sanitizer bypass (malformed/invalid characters that a browser still parses as markup) separate from the default-allowlist configuration concern above.
   suggested_op: bleach_clean   # same allowlist-sanitizer mechanism as
                              # idiomatic-1.py, a second independent instance
                              # -- reused, not a new name
@@ -319,19 +291,16 @@
   validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-285, CWE-476]
+  cwe_unique: [CWE-285, CWE-456]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above.
-    Unique: CWE-285 (Improper Authorization) -- every stored review body
-    is wrapped in Markup() identically regardless of which user
-    authored it or what trust level that user has, so a brand-new,
-    unverified account's review content is marked "already safe" exactly
-    like a long-standing verified reviewer's. CWE-476 (NULL Pointer
-    Dereference, applied to Python's `None` analogue) -- if a review's
-    `body` column is ever SQL NULL, `Markup(r[1])` receives `None`
-    directly with no check, and MarkupSafe's own handling of a `None`
-    argument to `Markup()` is not validated anywhere in this code path
-    before the value is later used as if it were always a string.
+    Shared: see vulnerable-1.py's cwe_rationale above. Unique: CWE-285 (Improper
+    Authorization) -- every stored review body is wrapped in Markup() identically
+    regardless of which user authored it or what trust level that user has, so a
+    brand-new, unverified account's review content is marked "already safe"
+    exactly like a long-standing verified reviewer's. CWE-456 (Missing
+    Initialization of a Variable) -- if a review's `body` column is ever SQL NULL,
+    `Markup(r[1])` receives `None` with no prior initialization to a safe non-None
+    default before it is later treated as a string.
   suggested_op: markup_wrap_on_view   # new op: genuinely distinct from
                                         # raw_concat -- the "already-safe"
                                         # marking happens in Python view
@@ -355,21 +324,20 @@
   validated_by: [python-syntax-check, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1068, CWE-778]
+  cwe_unique: [CWE-1068, CWE-1118]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above.
-    Unique, flagged generally as residual concerns of this
-    plain-str-relies-on-default-autoescape mitigation rather than defects
-    it fails to address for its own stated purpose: CWE-1068
-    (Inconsistency Between Implementation and Documented Design) -- this
-    file's own safety depends entirely on Flask's documented default of
-    autoescaping `.html`-extension templates, a framework-level default
-    this code never states or asserts explicitly anywhere in its own
-    implementation, so nothing here would catch a future change to the
-    Jinja2 environment's `autoescape` setting; CWE-778 (Insufficient
-    Logging) -- flagged generally: nothing here logs when a review body
-    actually contained characters Jinja2 had to escape, so an operator
-    has no signal about attempted-XSS content in review submissions.
+    Shared: see vulnerable-1.py's cwe_rationale above. Unique, flagged generally
+    as residual concerns of this plain-str-relies-on-default-autoescape mitigation
+    rather than defects it fails to address for its own stated purpose: CWE-1068
+    (Inconsistency Between Implementation and Documented Design) -- this file's
+    own safety depends entirely on Flask's documented default of autoescaping
+    `.html`-extension templates, a framework-level default this code never states
+    or asserts explicitly anywhere in its own implementation, so nothing here
+    would catch a future change to the Jinja2 environment's `autoescape` setting;
+    CWE-1118 (Insufficient Documentation of Error Handling Techniques) -- nothing
+    here logs, or documents a policy for, when a review body actually contained
+    characters Jinja2 had to escape, leaving an operator with no signal and no
+    stated expectation about attempted-XSS content in submissions.
   suggested_op: plain_str_default_autoescape   # new op: the direct fix
                                                  # counterpart to
                                                  # vulnerable-3-altered.py's

@@ -178,18 +178,18 @@
   validated_by: [semgrep-custom-rule, py_compile, manual-review]
   redacted: false
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-799, CWE-200]
+  cwe_unique: [CWE-406, CWE-1230]
   cwe_rationale: >
-    CWE-799 (Improper Control of Interaction Frequency): this route has no
-    rate-limiting/throttling of any kind, so while each individual
-    invoice_id guess is correctly blocked by the ownership filter, an
-    attacker can still enumerate arbitrarily many IDs with no server-side
-    slowdown. CWE-200 (Exposure of Sensitive Information to an
-    Unauthorized Actor): `invoice.to_dict()` serializes the model with no
-    explicit field allowlist, so once the caller is (correctly) scoped to
-    their own invoice, any field later added to the Invoice model is
-    automatically included in the response with no deliberate re-review of
-    what's safe to expose to that caller.
+    CWE-406 (Insufficient Control of Network Message Volume within a Weight Ratio,
+    'Amplification') -- with no throttle of any kind, an attacker can send an
+    unbounded volume of invoice-id probe requests, each individually cheap for the
+    client but each still a full server-side lookup, a volume-control gap distinct
+    from the field-exposure concern below. CWE-1230 (Exposure of Sensitive
+    Information Through Metadata) -- `invoice.to_dict()` serializes the model's
+    full metadata shape with no explicit field allowlist, so any field later added
+    to the Invoice model (including operational/internal metadata never meant for
+    the caller) is automatically exposed once the caller is correctly scoped to
+    their own invoice.
   suggested_op: ownership_check_after_fetch
   suggested_sink_family: db_row_by_id_lookup
 

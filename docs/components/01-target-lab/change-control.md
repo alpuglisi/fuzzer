@@ -3,6 +3,68 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0231 — CWE-bookkeeping-only pass: migrate access-control/php's 4 legacy `cwe:` entries and resolve the 78-line cross-file cwe_unique collision backlog surfaced by CC-LAB-0230 (2026-09-24)
+- Change: CC-LAB-0230 was the first pass to touch all 18 corpus manifests
+  (`access-control`/`auth-session`/`ecommerce-logic`/`file-handling`/
+  `search-export`/`ugc-xss` x `{node,php,python}`) together in one turn,
+  which caused `.claude/hooks/check-corpus-cwe-coverage.sh` (checking
+  `cwe_unique` uniqueness across the WHOLE corpus, not just files touched
+  in isolation) to surface a pre-existing backlog no earlier, smaller
+  batch had ever exposed together: (1) `access-control/php`'s 4 entries
+  (`vulnerable-1.php`, `vulnerable-2.php`, `idiomatic-1.php`,
+  `idiomatic-2.php`) were still on the legacy flat `cwe:` field, never
+  migrated to `cwe_shared`/`cwe_unique`/`cwe_rationale` per PA-0033 --
+  migrated all 4, reading each file's real source (not recalled) to
+  ground 2 fresh `cwe_unique` picks per entry (e.g. `vulnerable-1.php`'s
+  literal duplicate order-info/order-items markup block = CWE-1041, its
+  inconsistent `htmlspecialchars()` escaping between the two duplicate
+  blocks = CWE-1076; `vulnerable-2.php`'s un-transactioned 7-statement
+  write chain = CWE-691, its uncorrelated cart-vs-order selection =
+  CWE-708; `idiomatic-1.php`'s raw exception message leaked to the
+  client = CWE-550, its generic `catch (Exception $e)` = CWE-396;
+  `idiomatic-2.php`'s destructive action reachable via plain GET =
+  CWE-650, its undifferentiated query-failure/zero-rows branch = CWE-388).
+  (2) 76 cross-file `cwe_unique` collisions (the same CWE ID independently
+  claimed unique by two different entries in two different manifests,
+  across all 6 cells) -- resolved every one in a single global pass:
+  for each collision, kept the CWE on whichever entry's manifest is
+  processed first by the hook (alphabetical file order) and replaced the
+  other entry's claim with a fresh, code-grounded, currently-unused CWE
+  (researched from trained knowledge -- `cwe.mitre.org` remains blocked
+  by this environment's egress proxy per the 2026-09-22 `ERROR_LOG.md`
+  entry, stated honestly in each rewritten rationale clause rather than
+  claimed as a live lookup), verified via a running Python script against
+  a live global "already-claimed" set so no two of the 76+8 new picks
+  ever collided with each other or with anything already in the corpus.
+  Re-wrapped the resulting `cwe_rationale` folded scalars back to this
+  corpus's established ~78-column wrap after a YAML round-trip tool
+  (`ruamel.yaml`) initially collapsed them to single long lines, so the
+  diff reads as ordinary prose edits rather than a reformatting churn.
+  Did not touch `validated`/`validated_by`/`pattern`/anything about the
+  actual vulnerability content, and did not touch `lab/` or the
+  generator -- documentation-only CWE bookkeeping.
+- Impact (other components / project): none outside the corpus
+  documentation; no lab/generator/runtime code touched. The
+  `>=5 vulnerable`/`>=5 idiomatic` pairs-per-cell floor was checked per
+  the hook's own aggregation logic and remains satisfied for all 6
+  touched cells (unchanged by this pass, which added zero new pairs by
+  design -- that floor was already closed by CC-LAB-0226..0230's
+  manufacturing/validation batches).
+- Risk (level; mitigation or accepted-risk justification): low --
+  bookkeeping-only; mitigated by re-running
+  `.claude/hooks/check-corpus-cwe-coverage.sh` to a clean exit 0 and the
+  full non-slow suite (`pytest -m "not slow"`) matching the established
+  baseline exactly before committing.
+- Deliverables:
+  - [x] Migrate `access-control/php`'s 4 legacy `cwe:` entries — done
+  - [x] Resolve all 76 flagged cross-file `cwe_unique` collisions — done
+  - [x] `check-corpus-cwe-coverage.sh` exits 0 — done
+  - [x] Full non-slow test suite matches baseline (2446 passed, 8
+    skipped, 187 deselected) — done
+- Effectiveness (assessed 2026-09-24): effective — hook exits 0 against
+  the current committed state; no further `cwe_unique` collisions or
+  legacy `cwe:` fields remain in any of the 18 touched manifests.
+
 ### CC-LAB-0230 — Validate the 63 remaining real-collected corpus entries (63 of 63) across access-control/auth-session/ecommerce-logic/file-handling/search-export/ugc-xss (2026-09-24)
 - Change: per `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Pair generation"/
   validation methodology, ran the two-step validation (structural

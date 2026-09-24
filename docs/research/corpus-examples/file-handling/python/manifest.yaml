@@ -40,21 +40,19 @@
   # cwe.mitre.org is blocked by this environment's egress proxy (already
   # logged in ERROR_LOG.md's 2026-09-22 entry). ---
   cwe_shared: [CWE-434]
-  cwe_unique: [CWE-1164, CWE-561]
+  cwe_unique: [CWE-1085, CWE-563]
   cwe_rationale: >
-    Shared (this cell's own upload-sub-shape class, see idiomatic-1.py
-    below and both file-handling/node/php upload entries elsewhere in
-    this corpus): CWE-434 (Unrestricted Upload of File with Dangerous
-    Type).
-    Unique to this entry, researched against the MITRE CWE index: CWE-1164
-    (Irrelevant Code) -- the commented-out `secure_filename()` call left
-    in place, per this entry's own pattern field, is exactly this
-    weakness: code that reads as if a security control is present but no
-    longer executes, misleading a reviewer; CWE-561 (Dead Code) -- the
-    module-scope `ALLOWED_EXTENSIONS` allowlist is defined but never
-    referenced by this route at all, a distinct defect from the disabled
-    secure_filename() call (unused-but-present validation data vs.
-    disabled-but-present validation logic).
+    Shared (this cell's own upload-sub-shape class, see idiomatic-1.py below and
+    both file-handling/node/php upload entries elsewhere in this corpus): CWE-434
+    (Unrestricted Upload of File with Dangerous Type). Unique to this entry,
+    researched against the MITRE CWE index: CWE-1085 (Invokable Control Element
+    with Excessive Volume of Commented-Out Code) -- the commented-out
+    `secure_filename()` call left in the route body is exactly this weakness:
+    disabled code that reads as if a control is present but no longer executes;
+    CWE-563 (Assignment to Variable without Use) -- the module-scope
+    `ALLOWED_EXTENSIONS` allowlist is assigned but never read anywhere in this
+    route, an unused-but-present validation value distinct from the disabled
+    `secure_filename()` call.
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
 
@@ -86,17 +84,16 @@
     (fixture=/tmp/jwt_poc_sandbox/poc_py_upload_idiomatic1.py).
   redacted: false
   cwe_shared: [CWE-434]
-  cwe_unique: [CWE-732, CWE-284]
+  cwe_unique: [CWE-732, CWE-425]
   cwe_rationale: >
-    Shared: see vulnerable-1.py's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-732
-    (Incorrect Permission Assignment for Critical Resource) -- nothing in
-    this excerpt shows the saved file's permissions being restricted
-    (e.g. non-executable) after `file.save()`, relying entirely on the
-    OS/webserver's own default umask; CWE-284 (Improper Access Control)
-    -- neither the `/upload` nor the `/uploads/<name>` route shown here
-    has any visible authentication/authorization dependency, so any
-    caller regardless of identity may upload or retrieve files.
+    Shared: see vulnerable-1.py's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-732 (Incorrect Permission
+    Assignment for Critical Resource) -- nothing in this excerpt shows the saved
+    file's permissions being restricted (e.g. non-executable) after `file.save()`,
+    relying entirely on the OS/webserver's own default umask; CWE-425 (Direct
+    Request, 'Forced Browsing') -- both `/upload` and `/uploads/<name>` are
+    reachable by a direct, forced request with no auth gate distinguishing an
+    authorized caller from a forced direct one.
   suggested_op: filename_charset_sanitize
   suggested_sink_family: fs_web_root_write
 
@@ -300,17 +297,9 @@
   validated_by: [py_compile, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-22]
-  cwe_unique: [CWE-287, CWE-552]
+  cwe_unique: [CWE-288, CWE-552]
   cwe_rationale: >
-    Shared: see vulnerable-2.py's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-287
-    (Improper Authentication) -- unlike a typical download route in this
-    corpus's own other entries, nothing here checks for an authenticated
-    session at all before serving arbitrary files under (or, via
-    traversal, beyond) REPORTS_DIR; CWE-552 (Files or Directories
-    Accessible to External Parties) -- the unconfined join lets any file
-    the process can read become externally fetchable through this route,
-    not just the intended report files.
+    Shared: see vulnerable-2.py's cwe_rationale above. Unique to this entry, researched against the MITRE CWE index: CWE-288 (Authentication Bypass Using an Alternate Path or Channel) -- this route is itself an alternate, unauthenticated path to report files that a properly-gated route elsewhere in the same app may otherwise require a session for; CWE-552 (Files or Directories Accessible to External Parties) -- the unconfined join lets any file the process can read become externally fetchable through this route, not just the intended report files.
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
   validation_caveat: >

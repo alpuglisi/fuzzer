@@ -52,7 +52,26 @@
     run attempted (the fragment `require_once 'config.php'` and depends on
     a live mysqli connection/session/DB schema not present in this
     excerpt -- not a standalone-runnable harness).
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-1041, CWE-1076]
+  cwe_rationale: >
+    Shared (this cell's own recurring core class): CWE-639 (Authorization Bypass
+    Through User-Controlled Key), CWE-862 (Missing Authorization) --
+    order_detail.php reads $_GET['id'] with no user_id/session predicate on the
+    WHERE clause. Unique to this entry, researched against the MITRE CWE index and
+    grounded in this file's own code (not recalled): CWE-1041 (Use of Redundant
+    Code) -- the order-info and order-items markup (product
+    name/price/quantity/total, order
+    id/date/customer/email/status/shipping-address) is rendered TWICE in the same
+    file, once in the Bootstrap card layout (lines ~109-150) and again, verbatim
+    in substance, in a second `order-info-section`/`order-items-section` block
+    (lines ~186-250) that appears to be leftover from an earlier template revision
+    never removed; CWE-1076 (Insufficient Adherence to Expected Conventions) --
+    the first (top) rendering of `full_name`/`email`/`shipping_address` correctly
+    wraps each in `htmlspecialchars()` (lines 105-106, 167), but the second
+    (bottom) rendering of the identical fields (lines 196, 199, 217) omits the
+    escaping entirely, an inconsistent application of this file's own established
+    output-encoding convention between its two duplicate sections.
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
 
@@ -88,7 +107,24 @@
     No psalm-taint (not installed, blocked by egress policy). No dynamic
     run: depends on `utility/utility.php`, a live `$con` connection and
     `$_SESSION` state not present in this excerpt.
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-691, CWE-708]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above -- process.php
+    fetches/updates the order keyed only on `$order_id`/`$_SESSION['USER_ID']`
+    with no check the order belongs to that session's user. Unique to this entry,
+    researched against the MITRE CWE index: CWE-691 (Insufficient Control Flow
+    Management) -- the order-status update, the `order_time` insert, the
+    cart/cart_detail deletes, and the per-item product-quantity decrement loop are
+    seven-plus separate, sequential `mysqli_query()` calls with no transaction or
+    other coordinating control-flow construct ensuring they either all apply or
+    none do, and no return value of any of them is checked; CWE-708 (Incorrect
+    Ownership Assignment) -- the cart being deleted (lines 12-15) is selected
+    purely by the current session's `u_id`+`belonging_city`, with nothing
+    correlating that fetched cart back to the specific `$order_id` this request is
+    finalizing, so the code implicitly assigns 'the caller's one active cart in
+    this city' as the owner of an order it never actually verified a relationship
+    to.
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
 
@@ -122,7 +158,19 @@
     parameterized, ownership-scoped query. No psalm-taint (unavailable).
     No dynamic run: depends on `backend/Database.php` and a live
     `$_SESSION`, not present in this excerpt.
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-550, CWE-396]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above -- success.php enforces
+    ownership inside the query itself via `WHERE id = ? AND user_id = ?`. Unique
+    to this entry, researched against the MITRE CWE index: CWE-550 (Information
+    Exposure Through Server Error Message) -- the `catch (Exception $e)` block at
+    line 41 does `die('Error: ' . $e->getMessage())`, echoing the raw internal
+    exception message (which can include database driver/query detail) directly to
+    the client on any failure; CWE-396 (Declaration of Catch for Generic
+    Exception) -- that same block catches the base `Exception` class, so a genuine
+    DB connectivity failure, a not-found condition, and an unrelated coding bug
+    are all funneled through one identical, undifferentiated handler.
   suggested_op: ownership_query_filter
   suggested_sink_family: db_row_by_id_lookup
 
@@ -157,6 +205,22 @@
     entry's own notes/pattern claim: correct access control, imperfect
     SQL hygiene. No psalm-taint (unavailable). No dynamic run: depends on
     `includes/config.php`/`functions.php` and a live `$conn`/`$_SESSION`.
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-650, CWE-388]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above -- cancel-order.php's own
+    comment "Get order and verify ownership" ANDs `user_id = $_SESSION['user_id']`
+    onto the WHERE clause (the file's own noted raw-interpolation SQLi hygiene
+    issue is a separate, out-of-scope concern per this entry's own notes, not
+    re-claimed here). Unique to this entry, researched against the MITRE CWE
+    index: CWE-650 (Trusting HTTP Permission Methods on the Server Side) -- this
+    destructive order-cancellation action is triggered by a plain GET request
+    (`cancel-order.php?id=...`) rather than a state-changing POST, relying on the
+    request reaching this script at all as its only gate rather than on the HTTP
+    method itself carrying any additional protection; CWE-388 (Error Handling) --
+    line 23's `if (!$order_result || $order_result->num_rows === 0)` folds a
+    genuine query failure and a legitimate zero-row result into one identical
+    'Order not found' branch, with no distinction in error-handling strategy
+    between the two different failure classes.
   suggested_op: ownership_query_filter
   suggested_sink_family: db_row_by_id_lookup

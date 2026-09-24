@@ -272,18 +272,20 @@
   validated_by: [manual-review, static-analysis, dynamic-sandbox]
   redacted: false
   cwe_shared: [CWE-347, CWE-757]
-  cwe_unique: [CWE-613, CWE-20]
+  cwe_unique: [CWE-613, CWE-391]
   cwe_rationale: >
     Shared: see vulnerable-3-altered.js's cwe_rationale above.
     Unique to this entry, grounded in latent gaps this fix does not
     close: CWE-613 (Insufficient Session Expiration) -- `verifyToken()`
     never inspects `payload.exp`/`payload.nbf` at all, so a token that
     passes the (now-correct) signature check is treated as valid
-    indefinitely; CWE-20 (Improper Input Validation) -- `token.split('.')`
-    is destructured into exactly three variables with no check that the
-    split actually produced three segments, so a malformed 1- or 2-part
-    token surfaces as an uncaught exception from a later `Buffer.from`
-    call rather than a clean, intentional rejection.
+    indefinitely; CWE-391 (Unchecked Error Condition) -- the malformed-token
+    `TypeError`/`RangeError` a 1- or 2-part token produces from the later
+    `Buffer.from` call (since `token.split('.')` is destructured into
+    exactly three variables with no check that the split actually produced
+    three segments) is never caught anywhere in `verifyToken()`, an
+    unchecked error condition distinct from the shared signature-
+    verification finding.
   suggested_op: jwt_alg_pinned
   suggested_sink_family: jwt_signature_verification
 
@@ -306,19 +308,19 @@
   validated_by: [manual-review, static-analysis, dynamic-sandbox]
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
-  cwe_unique: [CWE-340, CWE-200]
+  cwe_unique: [CWE-340, CWE-212]
   cwe_rationale: >
     Shared (this pair's core class): CWE-330; CWE-338 (Math.random() is
     explicitly Node's documented non-cryptographic PRNG).
     Unique to this entry: CWE-340 (Generation of Predictable Numbers or
     Identifiers) -- combining a coarse, externally-observable/
     approximable timestamp with a non-CSPRNG output is a textbook
-    predictable-identifier construction; CWE-200 (Exposure of Sensitive
-    Information to an Unauthorized Actor) -- `Date.now().toString(36)` is
-    concatenated as a literal, undisguised prefix of the token string
-    itself, so anyone who merely observes one issued token (e.g. in a
-    referrer header or log line) can directly recover the exact server-
-    side timestamp it was minted at.
+    predictable-identifier construction; CWE-212 (Improper Removal of
+    Sensitive Information Before Storage or Transfer) -- `Date.now().
+    toString(36)` is concatenated as a literal, undisguised prefix of the
+    token string itself, so the server-side timestamp it was minted at is
+    embedded, unremoved, directly into the token value that is then
+    transferred to and stored by the client.
   suggested_op: predictable_token_source
   suggested_sink_family: session_token_generation
 

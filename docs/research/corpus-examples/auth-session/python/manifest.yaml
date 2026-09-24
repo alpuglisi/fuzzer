@@ -157,21 +157,19 @@
     (fixture=/tmp/jwt_poc_sandbox/reset_and_login_poc.py).
   redacted: false
   cwe_shared: [CWE-330, CWE-338]
-  cwe_unique: [CWE-307, CWE-311]
+  cwe_unique: [CWE-307, CWE-313]
   cwe_rationale: >
-    Shared (this pair's core class): CWE-330 (Use of Insufficiently
-    Random Values); CWE-338 (Use of Cryptographically Weak PRNG), since
-    Python's `random` module (Mersenne Twister) is explicitly named.
-    Unique to this entry, grounded in this excerpt's own stated scope:
-    CWE-307 (Improper Restriction of Excessive Authentication Attempts)
-    -- this entry's own notes already flag "no visible rate-limit" on
-    the verification endpoint for a 6-digit (1-in-a-million) code, so a
-    weak code combined with no observed throttling in this excerpt is an
-    online-brute-force path; CWE-311 (Missing Encryption of Sensitive
-    Data) -- `user.set_login_code(code, timeout=LOGIN_CODE_TIMEOUT)`
-    passes the raw 6-digit code straight to storage with no hashing step
-    visible in this excerpt, unlike how a password would normally be
-    persisted.
+    Shared (this pair's core class): CWE-330 (Use of Insufficiently Random
+    Values); CWE-338 (Use of Cryptographically Weak PRNG), since Python's `random`
+    module (Mersenne Twister) is explicitly named. Unique to this entry, grounded
+    in this excerpt's own stated scope: CWE-307 (Improper Restriction of Excessive
+    Authentication Attempts) -- this entry's own notes already flag "no visible
+    rate-limit" on the verification endpoint for a 6-digit (1-in-a-million) code,
+    so a weak code combined with no observed throttling in this excerpt is an
+    online-brute-force path; CWE-313 (Cleartext Storage of Sensitive Information
+    in a File or on Disk) -- `user.set_login_code(code, ...)` persists the raw
+    6-digit code to storage with no hashing step shown, unlike how a password
+    would normally be persisted.
   suggested_op: weak_prng_token
   suggested_sink_family: session_token_generation
 

@@ -98,17 +98,16 @@
     dependency reason as vulnerable-1.js's entry.
   redacted: true
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-798, CWE-522]
+  cwe_unique: [CWE-798, CWE-921]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique to this entry: CWE-798 (Use of Hard-coded Credentials) -- the
-    original source had a hardcoded Stripe test-mode secret key
-    (sk_test_...), which this corpus's own secrets-scrubbing rule required
-    redacting (see the note above); CWE-522 (Insufficiently Protected
-    Credentials) -- the key was stored in plaintext application source
-    rather than a credential store, distinct from the fact of it being
-    hardcoded at all (CWE-798) in naming that it also carried no
-    protection at rest.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique to this entry:
+    CWE-798 (Use of Hard-coded Credentials) -- the original source had a hardcoded
+    Stripe test-mode secret key (sk_test_...), which this corpus's own
+    secrets-scrubbing rule required redacting (see the note above); CWE-921
+    (Storage of Sensitive Data in a Mechanism Without Access Control) -- the
+    Stripe secret key sat in application source under version control with no
+    access-control mechanism of its own restricting who could read it, distinct
+    from the mere fact of it being hardcoded.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -188,19 +187,17 @@
     Stripe API, out of scope for this offline validation pass.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-703, CWE-704]
+  cwe_unique: [CWE-1088, CWE-197]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique to this entry: CWE-703 (Improper Check or Handling of
-    Exceptional Conditions) -- the function "validates stock" per its own
-    pattern field, but nothing shown here confirms an insufficient-stock
-    condition is handled any differently across concurrent requests than
-    the success path; CWE-704 (Incorrect Type Conversion or Cast) --
-    `salePrice ?? price` mixes two DB-sourced numeric fields with the
-    nullish-coalescing operator with no explicit type normalization, a
-    real MongoDB/Mongoose gotcha where a schema field typed as
-    Decimal128 does not arithmetic-compose with a plain Number the way
-    this line assumes.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique to this entry:
+    CWE-1088 (Synchronous Access of Remote Resource Without Timeout) -- the
+    stock-validation DB lookup has no timeout/retry handling shown around it, so a
+    slow concurrent check leaves the race window this function is meant to close
+    open longer than necessary; CWE-197 (Numeric Truncation Error) -- `salePrice
+    ?? price` mixes two DB-sourced numeric fields with no explicit type
+    normalization; if one is a Mongoose Decimal128 and the other a plain Number,
+    the two representations don't arithmetic-compose the way this line assumes,
+    risking silent truncation.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -236,17 +233,9 @@
     a live Mongoose/MongoDB connection, session store, and Stripe API.
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-476, CWE-390]
+  cwe_unique: [CWE-908, CWE-390]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique to this entry: CWE-476 (NULL Pointer Dereference) -- nothing
-    shown checks that Product.findById() actually returned a document
-    (e.g. a deleted product) before this handler reads product.price off
-    it, which would throw on the null/undefined case rather than fail
-    gracefully; CWE-390 (Detection of Error Condition Without Action) --
-    the accumulation into cart.totalCost has no error-handling path shown
-    at all around the DB lookup or the .save() call, so a failure
-    partway through is not detected or acted on by this code.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique to this entry: CWE-908 (Use of Uninitialized Resource) -- `product` is treated as if always populated immediately after `Product.findById()`, with nothing confirming that call actually initialized it with a real document (e.g. a deleted product) before `product.price` is read off it; CWE-390 (Detection of Error Condition Without Action) -- the accumulation into cart.totalCost has no error-handling path shown at all around the DB lookup or the .save() call, so a failure partway through is not detected or acted on by this code.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -276,20 +265,19 @@
   validated_by: [node-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-459, CWE-372]
+  cwe_unique: [CWE-833, CWE-351]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-459
-    (Incomplete Cleanup) -- giftCard.save() and cart.save() are two
-    separate awaited calls with no transaction wrapping them; if the
-    second fails after the first succeeds, the card's balance has already
-    been decremented with no compensating cleanup of that partial state;
-    CWE-372 (Incomplete Internal State Distinction) -- the GiftCard's
-    `active` flag is a single boolean that does not distinguish "still
-    has balance" from "explicitly deactivated by an admin", so a
-    concurrent redemption racing the balance down to exactly 0 and this
-    handler's own re-save of `active` can observe/overwrite each other's
-    state transition ambiguously.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-833 (Deadlock) --
+    `giftCard.save()` and `cart.save()` are two separate, un-transactioned awaited
+    calls; a concurrent redemption racing the same gift card's balance down to 0
+    while this handler is mid-sequence between the two saves is exactly the kind
+    of unsynchronized, order-dependent resource acquisition that can deadlock or
+    corrupt state depending on which save lands first; CWE-351 (Insufficient Type
+    Distinction) -- the GiftCard's single boolean `active` flag cannot by itself
+    distinguish 'still has balance' from 'explicitly deactivated by an admin', two
+    states this handler and a concurrent redemption can each independently try to
+    set.
   suggested_op: server_recomputed_amount
   suggested_sink_family: store_credit_redemption
   validation_caveat: >
@@ -319,18 +307,16 @@
   validated_by: [node-syntax-check, manual-review]
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-778, CWE-799]
+  cwe_unique: [CWE-839, CWE-410]
   cwe_rationale: >
-    Shared: see vulnerable-1.js's cwe_rationale above.
-    Unique to this entry: CWE-778 (Insufficient Logging) -- neither a
-    negative amountCents nor an amountCents wildly exceeding the card's
-    own balance is logged anywhere before being applied, so an abuse
-    pattern that repeatedly tops up a balance via negative values leaves
-    no trail; CWE-799 (Improper Control of Interaction Frequency) --
-    nothing shown rate-limits repeated calls to this endpoint, and since
-    each call independently trusts its own amountCents, an attacker can
-    repeat the request as many times as desired before the abuse is
-    noticed.
+    Shared: see vulnerable-1.js's cwe_rationale above. Unique to this entry:
+    CWE-839 (Numeric Range Comparison Without Minimum Check) -- nothing shown
+    bounds `amountCents` from below with an explicit minimum-value check before it
+    is applied to the card's own persisted balance, so a negative value is
+    accepted exactly as readily as a legitimate top-up; CWE-410 (Insufficient
+    Resource Pool) -- nothing shown pools or caps concurrent redemption requests
+    against this endpoint, so repeated calls face no server-imposed ceiling before
+    the abuse is noticed.
   suggested_op: client_trusted_amount
   suggested_sink_family: store_credit_redemption
   validation_caveat: >

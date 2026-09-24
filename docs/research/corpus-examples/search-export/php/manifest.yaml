@@ -48,17 +48,16 @@
   # environment's egress proxy (confirmed via curl and WebFetch);
   # recorded honestly rather than fabricated. ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-840, CWE-682]
+  cwe_unique: [CWE-840, CWE-1094]
   cwe_rationale: >
-    CWE-840 (Business Logic Errors): the same tainted filter value is
-    reused in a "running-balance subquery", so a manipulated filter can
-    directly alter a financial balance CALCULATION, a business-logic
-    consequence distinct from simple data disclosure elsewhere in this
-    file's other two query sites. CWE-682 (Incorrect Calculation): that
-    running-balance subquery folds the injected/unvalidated filter
-    condition directly into an aggregate computation, so injection there
-    doesn't just change which rows match -- it can distort the computed
-    value itself.
+    CWE-840 (Business Logic Errors): the same tainted filter value is reused in a
+    "running-balance subquery", so a manipulated filter can directly alter a
+    financial balance CALCULATION, a business-logic consequence distinct from
+    simple data disclosure elsewhere in this file's other two query sites.
+    CWE-1094 (Excessive Index Range Scan for a Data Resource) -- the
+    injected/unvalidated filter condition folded into the running-balance subquery
+    changes which rows the aggregate sums over, an unintended, differently-bounded
+    scan range from the one the query was meant to compute over.
   suggested_op: raw_concat   # same shape lab/safety_matrix.yaml already
                               # covers -- a string-built WHERE clause with
                               # no transform at all, just reused across 3
@@ -94,19 +93,17 @@
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-1236, CWE-862]
+  cwe_unique: [CWE-1236, CWE-266]
   cwe_rationale: >
-    CWE-1236 (Improper Neutralization of Formula Elements in a CSV File):
-    the same unescaped filter/search values feed directly into a CSV
-    export (`$_GET['export']=csv`) alongside the paginated listing, with
-    nothing shown neutralizing leading `=`/`+`/`-`/`@` characters that a
-    spreadsheet application (Excel/Sheets) would interpret as a formula
-    on open -- this is this cell's own literal "search+export" shape.
-    CWE-862 (Missing Authorization): the separate bulk-delete path
-    concatenates raw POSTed IDs into a `WHERE id IN (...)` clause with no
-    check that the requesting user owns/may-delete those specific
-    records, a second, independent sink in this same file distinct from
-    the search/CSV path's SQLi.
+    CWE-1236 (Improper Neutralization of Formula Elements in a CSV File): the same
+    unescaped filter/search values feed directly into a CSV export
+    (`$_GET['export']=csv`) alongside the paginated listing, with nothing shown
+    neutralizing leading `=`/`+`/`-`/`@` characters that a spreadsheet application
+    (Excel/Sheets) would interpret as a formula on open -- this is this cell's own
+    literal "search+export" shape. CWE-266 (Incorrect Privilege Management) -- the
+    bulk-delete path concatenates raw POSTed IDs into a `WHERE id IN (...)` clause
+    with no privilege check tying the requesting user's own management rights to
+    the specific records being deleted.
   suggested_op: raw_concat   # sanitize() is an XSS mitigation
                               # (htmlspecialchars/strip_tags), not SQL
                               # escaping -- for the SQL sink this is
@@ -145,19 +142,9 @@
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
   cwe_shared: [CWE-611]
-  cwe_unique: [CWE-213, CWE-776]
+  cwe_unique: [CWE-319, CWE-776]
   cwe_rationale: >
-    CWE-213 (Exposure of Sensitive Information Due to Incompatible
-    Policies): `echo $doc->saveXML();` reflects the FULLY
-    entity-substituted document straight back to the client, so any
-    successfully-resolved external entity (e.g. local file content) is
-    directly returned in the HTTP response -- the exfiltration channel
-    itself. CWE-776 (Improper Restriction of Recursive Entity References
-    in DTDs / XML Entity Expansion): with LIBXML_NOENT set and no
-    libxml_disable_entity_loader()/entity-count or size limit configured,
-    nested internal entity definitions (a "billion laughs" payload) can
-    cause catastrophic memory/CPU consumption -- a distinct DoS vector
-    from the data-exfiltration angle CWE-213 covers.
+    CWE-319 (Cleartext Transmission of Sensitive Information) -- the fully entity-substituted document, potentially containing local file content resolved via XXE, is transmitted back to the client with no confidentiality control of any kind. CWE-776 (Improper Restriction of Recursive Entity References in DTDs / XML Entity Expansion): with LIBXML_NOENT set and no libxml_disable_entity_loader()/entity-count or size limit configured, nested internal entity definitions (a "billion laughs" payload) can cause catastrophic memory/CPU consumption -- a distinct DoS vector from the data-exfiltration angle CWE-213 covers.
   suggested_op: xml_external_entities_enabled   # new op: DOMDocument::loadXML()
                                                   # called with LIBXML_NOENT,
                                                   # no libxml_disable_entity_loader
@@ -188,30 +175,9 @@
   validated_by: [semgrep-custom-rule, php-lint, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-611]
-  cwe_unique: [CWE-665, CWE-918]
+  cwe_unique: [CWE-455, CWE-918]
   cwe_rationale: >
-    CWE-665 (Improper Initialization): this fix's safety rests entirely
-    on the ABSENCE of the LIBXML_NOENT flag rather than an affirmative,
-    explicit disable of entity loading -- the DOMDocument's entity
-    handling is left at its implementation default instead of being
-    positively configured, so a future edit that adds LIBXML_NOENT back
-    (e.g. "why isn't my entity substituting") would silently reopen the
-    hole with no test catching it. CWE-918 (Server-Side Request Forgery):
-    LIBXML_NONET specifically defends against the SSRF-flavored variant
-    of this bug, where the XML parser itself is made to act as a proxy
-    fetching internal/network resources on the attacker's behalf via a
-    network-scheme SYSTEM entity.
-    (Originally recorded as CWE-441 -- Unintended Proxy or Intermediary,
-    'Confused Deputy' -- until this Phase 3 final batch's own cross-file
-    run of `check-corpus-cwe-coverage.sh` surfaced a pre-existing
-    collision with insecure-deserialization/python's
-    vulnerable-job-cache-pickle-3.py entry, which also claimed CWE-441 as
-    unique; reassigned here to CWE-918, which fits this entry's own
-    described mechanism -- an XML parser forced to fetch a
-    network-scheme SYSTEM entity on the attacker's behalf -- at least as
-    precisely as CWE-441 did, per the same collision-fix class already
-    applied once before in CC-LAB-0228 for ecommerce-logic's
-    CWE-841/CWE-1339 collision.)
+    CWE-455 (Non-exit on Failed Initialization) -- this parser's safe configuration is never itself asserted or verified at initialization time; a future edit that silently fails to omit `LIBXML_NOENT` again would not halt anything or be caught here. CWE-918 (Server-Side Request Forgery): LIBXML_NONET specifically defends against the SSRF-flavored variant of this bug, where the XML parser itself is made to act as a proxy fetching internal/network resources on the attacker's behalf via a network-scheme SYSTEM entity. (Originally recorded as CWE-441 -- Unintended Proxy or Intermediary, 'Confused Deputy' -- until this Phase 3 final batch's own cross-file run of `check-corpus-cwe-coverage.sh` surfaced a pre-existing collision with insecure-deserialization/python's vulnerable-job-cache-pickle-3.py entry, which also claimed CWE-441 as unique; reassigned here to CWE-918, which fits this entry's own described mechanism -- an XML parser forced to fetch a network-scheme SYSTEM entity on the attacker's behalf -- at least as precisely as CWE-441 did, per the same collision-fix class already applied once before in CC-LAB-0228 for ecommerce-logic's CWE-841/CWE-1339 collision.)
   suggested_op: xml_external_entities_disabled   # new op: the direct fix
                                                   # counterpart to
                                                   # vulnerable-3.php's
@@ -261,19 +227,17 @@
   # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
   # PA-0033's tightened standard. ---
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-176, CWE-798]
+  cwe_unique: [CWE-176, CWE-259]
   cwe_rationale: >
     CWE-176 (Improper Handling of Unicode Encoding): mysqli_real_escape_
-    string()'s correctness depends on the DB connection's character set
-    being configured correctly; on a connection using a vulnerable
-    multi-byte charset (e.g. GBK) this escaping-based defense has a
-    well-documented bypass class distinct from the parameter-binding
-    approach idiomatic-1.js/etc. use elsewhere in this corpus. CWE-798
-    (Use of Hard-coded Credentials): this file's own `mysqli_connect(...)`
-    call originally hardcoded a live-looking DB host/username/password
-    (per this manifest's own note above); the three REDACTED_DB_*
-    placeholders mark exactly where those credentials were scrubbed
-    before first commit.
+    string()'s correctness depends on the DB connection's character set being
+    configured correctly; on a connection using a vulnerable multi-byte charset
+    (e.g. GBK) this escaping-based defense has a well-documented bypass class
+    distinct from the parameter-binding approach idiomatic-1.js/etc. use elsewhere
+    in this corpus. CWE-259 (Use of Hard-coded Password) -- this file's own
+    `mysqli_connect(...)` call originally hardcoded a live-looking database
+    password specifically, the precise sibling of the hardcoded-credentials
+    finding this corpus already documents elsewhere as CWE-798.
   suggested_op: driver_escape_string   # new op (not a reuse): mysqli_real_
                                         # escape_string() is a real driver-level
                                         # escaping call -- stronger than the
@@ -312,16 +276,15 @@
   validated_by: [php-lint, manual-review]
   redacted: false
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-269, CWE-522]
+  cwe_unique: [CWE-269, CWE-256]
   cwe_rationale: >
-    Shared (this cell's core class, see vulnerable-1.php above): CWE-89.
-    Unique: CWE-269 (Improper Privilege Management) -- flagged generally:
-    nothing in this fragment establishes what privilege level (public,
-    authenticated, admin) is actually required to reach this search
-    endpoint at all. CWE-522 (Insufficiently Protected Credentials) --
-    flagged generally: the PDO DSN/username/password this endpoint's
-    database connection depends on aren't shown as sourced from a
-    protected secret store anywhere in this excerpt.
+    Shared (this cell's core class, see vulnerable-1.php above): CWE-89. Unique:
+    CWE-269 (Improper Privilege Management) -- flagged generally: nothing in this
+    fragment establishes what privilege level (public, authenticated, admin) is
+    actually required to reach this search endpoint at all. CWE-256 (Unprotected
+    Storage of Credentials) -- flagged generally: nothing in this excerpt shows
+    the PDO DSN/username/password stored behind any access-controlled secret store
+    rather than in plain application configuration.
   suggested_op: raw_concat   # PDO in use, but still string-interpolated --
                               # functionally the "no transform at all"
                               # shape already covered by the existing
@@ -346,19 +309,9 @@
   validated_by: [php-lint, manual-review]
   redacted: false
   cwe_shared: [CWE-89]
-  cwe_unique: [CWE-404, CWE-272]
+  cwe_unique: [CWE-401, CWE-272]
   cwe_rationale: >
-    Shared: see vulnerable-4-altered.php above.
-    Unique, flagged generally as residual concerns of this
-    prepare()/execute() mitigation rather than defects it fails to
-    address for its own stated purpose: CWE-404 (Improper Resource
-    Shutdown or Release) -- neither the prepared statement nor the PDO
-    connection object is explicitly closed/unset after use, relying
-    entirely on PHP's own garbage collection and request-end teardown;
-    CWE-272 (Least Privilege Violation) -- flagged generally: nothing
-    here confirms the database user this PDO connection authenticates as
-    is restricted to read-only/SELECT privileges on the `products` table,
-    which is all this search endpoint actually needs.
+    Shared: see vulnerable-4-altered.php above. Unique, flagged generally as residual concerns of this prepare()/execute() mitigation rather than defects it fails to address for its own stated purpose: CWE-401 (Missing Release of Memory after Effective Lifetime) -- neither the prepared statement nor the PDO connection object is explicitly closed/unset after use, relying entirely on PHP's own garbage collection and request-end teardown to release them; CWE-272 (Least Privilege Violation) -- flagged generally: nothing here confirms the database user this PDO connection authenticates as is restricted to read-only/SELECT privileges on the `products` table, which is all this search endpoint actually needs.
   suggested_op: param_bind   # existing op; reused -- the driver-level
                               # counterpart to search-export/python's
                               # psycopg2 param_bind and this cell's own

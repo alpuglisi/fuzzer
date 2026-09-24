@@ -84,19 +84,9 @@
     in this excerpt.
   redacted: false
   cwe_shared: [CWE-434]
-  cwe_unique: [CWE-352, CWE-538]
+  cwe_unique: [CWE-1275, CWE-538]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-352
-    (Cross-Site Request Forgery) -- uploadFileAction() is a state-changing
-    POST action with nothing shown in this excerpt gating it with a CSRF
-    token; CWE-538 (Insertion of Sensitive Information into Externally-
-    Accessible File or Directory) -- the extension+MIME allowlist checks
-    what is uploaded, but nothing in this excerpt confirms the
-    destination directory itself sits outside the web-served document
-    root, so a validated-but-still-accepted file type could still be
-    directly fetchable if the deployment places uploads under a public
-    path.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique to this entry, researched against the MITRE CWE index: CWE-1275 (Sensitive Cookie with Improper SameSite Attribute) -- nothing shown confirms the session cookie backing this state-changing POST action carries a SameSite attribute restricting cross-site submission, a CSRF-adjacent gap distinct from the missing token itself; CWE-538 (Insertion of Sensitive Information into Externally- Accessible File or Directory) -- the extension+MIME allowlist checks what is uploaded, but nothing in this excerpt confirms the destination directory itself sits outside the web-served document root, so a validated-but-still-accepted file type could still be directly fetchable if the deployment places uploads under a public path.
   suggested_op: extension_allowlist_mime_check
   suggested_sink_family: fs_web_root_write
 
@@ -128,21 +118,9 @@
     (fixture=/tmp/jwt_poc_sandbox/poc_php_vuln2.php).
   redacted: false
   cwe_shared: [CWE-22]
-  cwe_unique: [CWE-200, CWE-676]
+  cwe_unique: [CWE-540, CWE-676]
   cwe_rationale: >
-    Shared (this cell's own download-sub-shape class, see idiomatic-2.php
-    below): CWE-22 (Path Traversal).
-    Unique to this entry, researched against the MITRE CWE index: CWE-200
-    (Exposure of Sensitive Information to an Unauthorized Actor) --
-    readfile() outputs raw file bytes with no restriction on which file
-    is read, so any file the PHP process can read (source files,
-    configuration, credentials) is directly exposed via traversal; CWE-676
-    (Use of Potentially Dangerous Function) -- readfile() is used
-    directly on a user-influenced path with none of PHP's own safer
-    alternatives (e.g. a stream wrapper restricted to a base path)
-    interposed, matching this corpus's own established use of this CWE
-    for exactly this class of low-level-function misuse (see
-    header-injection/php's vulnerable-raw-socket-response-4.php).
+    Shared (this cell's own download-sub-shape class, see idiomatic-2.php below): CWE-22 (Path Traversal). Unique to this entry, researched against the MITRE CWE index: CWE-540 (Information Exposure Through Source Code) -- `readfile()` with no path restriction can expose this application's own PHP source files directly to the caller, not merely configuration or credential data; CWE-676 (Use of Potentially Dangerous Function) -- readfile() is used directly on a user-influenced path with none of PHP's own safer alternatives (e.g. a stream wrapper restricted to a base path) interposed, matching this corpus's own established use of this CWE for exactly this class of low-level-function misuse (see header-injection/php's vulnerable-raw-socket-response-4.php).
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
 
@@ -176,20 +154,18 @@
     (fixture=/tmp/jwt_poc_sandbox/poc_php_safe2.php).
   redacted: false
   cwe_shared: [CWE-22]
-  cwe_unique: [CWE-59, CWE-1188]
+  cwe_unique: [CWE-59, CWE-454]
   cwe_rationale: >
-    Shared: see vulnerable-2.php's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-59
-    (Improper Link Resolution Before File Access, 'Link Following') --
-    the confinement check compares `realpath()` outputs (which do follow
-    symlinks) as strings, but nothing shown re-verifies the target isn't
-    reached via a symlink placed inside the share directory that itself
-    points outside it, between the check and the later readfile(); CWE-1188
-    (Insecure Default Initialization of Resource) -- the share
-    directory's own configured value is not shown validated as
-    non-empty/absolute at startup, so a misconfigured or unset value
-    could default to something the confinement check trivially resolves
-    against (e.g. an empty string satisfying any prefix).
+    Shared: see vulnerable-2.php's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-59 (Improper Link Resolution
+    Before File Access, 'Link Following') -- the confinement check compares
+    `realpath()` outputs (which do follow symlinks) as strings, but nothing shown
+    re-verifies the target isn't reached via a symlink placed inside the share
+    directory that itself points outside it, between the check and the later
+    readfile(); CWE-454 (External Initialization of Trusted Variables or Data
+    Stores) -- the share directory's own configured value is externally
+    initialized (config/env) with nothing shown validating it is trustworthy or
+    well-formed before it becomes the confinement check's security boundary.
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
 
@@ -221,19 +197,17 @@
   validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-434]
-  cwe_unique: [CWE-330, CWE-670]
+  cwe_unique: [CWE-330, CWE-1285]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-330
-    (Use of Insufficiently Random Values) -- `uniqid('avatar_', true)`
-    generates the stored filename from the current time (plus a weak
-    "more entropy" float), which is not a cryptographically strong source
-    despite looking randomized; CWE-670 (Always-Incorrect Control Flow
-    Implementation) -- `substr($type, strlen('image/'))` assumes
-    everything after the "image/" prefix is always a safe, simple file
-    extension, which the dynamic sandbox harness confirms is not correctly
-    implemented for an attacker-chosen Content-Type such as "image/php",
-    letting the client directly choose the saved file's own extension.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-330 (Use of Insufficiently Random
+    Values) -- `uniqid('avatar_', true)` generates the stored filename from the
+    current time (plus a weak "more entropy" float), which is not a
+    cryptographically strong source despite looking randomized; CWE-1285 (Improper
+    Validation of Specified Index, Position, or Offset in Input) -- `substr($type,
+    strlen('image/'))` computes its offset assuming the Content-Type value always
+    begins with the literal 'image/' prefix, with no check of that assumption
+    before using the resulting position.
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
   validation_caveat: >
@@ -268,22 +242,18 @@
   validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-434]
-  cwe_unique: [CWE-1104, CWE-710]
+  cwe_unique: [CWE-1104, CWE-1053]
   cwe_rationale: >
-    Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-1104
-    (Use of Unmaintained Third Party Components) -- this mitigation's
-    actual security boundary is GD's own native image-decoding code,
-    which has a documented history of memory-safety CVEs in its JPEG/PNG
-    parsers; relying on it as the trust boundary is only as sound as the
-    PHP/GD build's own patch currency, which this excerpt has no control
-    over; CWE-710 (Improper Adherence to Coding Standards) -- nothing in
-    this function documents that the decode/re-encode round trip IS the
-    actual security control (as opposed to incidental image-processing
-    behavior), so a future refactor optimizing this function (e.g.
-    "fast-path: skip re-encoding if the extension already matches") could
-    silently remove the real mitigation while appearing to preserve the
-    type check.
+    Shared: see vulnerable-1.php's cwe_rationale above. Unique to this entry,
+    researched against the MITRE CWE index: CWE-1104 (Use of Unmaintained Third
+    Party Components) -- this mitigation's actual security boundary is GD's own
+    native image-decoding code, which has a documented history of memory-safety
+    CVEs in its JPEG/PNG parsers; relying on it as the trust boundary is only as
+    sound as the PHP/GD build's own patch currency, which this excerpt has no
+    control over; CWE-1053 (Missing Documentation for Design) -- nothing in this
+    function documents that the decode/re-encode round trip IS the actual security
+    control (as opposed to incidental image-processing behavior), so a future
+    refactor has no design note warning it not to remove the mitigation.
   suggested_op: extension_allowlist_mime_check
   suggested_sink_family: fs_web_root_write
   validation_caveat: >
@@ -371,18 +341,9 @@
   validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
   redacted: false
   cwe_shared: [CWE-22]
-  cwe_unique: [CWE-306, CWE-404]
+  cwe_unique: [CWE-940, CWE-404]
   cwe_rationale: >
-    Shared: see vulnerable-2.php's cwe_rationale above.
-    Unique to this entry, researched against the MITRE CWE index: CWE-306
-    (Missing Authentication for Critical Function) -- $currentUserId is
-    used to scope the lookup but this excerpt does not itself show it
-    being derived from an authenticated session, a residual concern this
-    fix's own owner_id check depends on; CWE-404 (Improper Resource
-    Shutdown or Release) -- after unlink() removes the file, the
-    `attachments` row itself is never deleted or updated, so the
-    database record's lifecycle is not shut down together with the
-    file's, leaving an orphaned reference to a now-missing path.
+    Shared: see vulnerable-2.php's cwe_rationale above. Unique to this entry, researched against the MITRE CWE index: CWE-940 (Improper Verification of Source of a Communication Channel) -- `$currentUserId` is used to scope the lookup but this excerpt does not itself verify it was derived from a genuinely authenticated request channel; CWE-404 (Improper Resource Shutdown or Release) -- after unlink() removes the file, the `attachments` row itself is never deleted or updated, so the database record's lifecycle is not shut down together with the file's, leaving an orphaned reference to a now-missing path.
   suggested_op: realpath_confine
   suggested_sink_family: fs_file_delete
   validation_caveat: >
