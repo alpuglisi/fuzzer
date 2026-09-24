@@ -23,8 +23,26 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. NOTE: researched from trained knowledge,
+  # not a live MITRE lookup -- cwe.mitre.org is blocked by this
+  # environment's egress proxy (confirmed via curl and WebFetch);
+  # recorded honestly rather than fabricated. ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-943, CWE-116]
+  cwe_rationale: >
+    CWE-943 (Improper Neutralization of Special Elements in Data Query
+    Logic): this is specifically an ORM/query-builder MISUSE, not a
+    raw-concat-everywhere shape -- the surrounding query's WHERE values
+    are correctly parameter-bound, and only the sort_field/sort_dir
+    identifiers escape that discipline, matching CWE-943's own framing of
+    query-LOGIC manipulation distinct from a literal-value SQLi. CWE-116
+    (Improper Encoding or Escaping of Output): SQL identifiers (column
+    names) require different quoting/escaping than SQL literal values;
+    the code correctly parameter-binds VALUES but has no equivalent
+    identifier-quoting or allowlist mechanism for the ORDER BY column
+    name it interpolates raw, an encoding-context confusion between the
+    two positions.
   suggested_op: orm_order_by_unvalidated   # new op: genuinely distinct from
                                             # raw_concat -- the surrounding
                                             # query IS parameterized elsewhere
@@ -47,8 +65,25 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-1336]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. ---
+  cwe_shared: [CWE-1336]
+  cwe_unique: [CWE-1321, CWE-79]
+  cwe_rationale: >
+    CWE-1321 (Improperly Controlled Modification of Object Prototype
+    Attributes / 'Prototype Pollution'): this file explicitly widens
+    Handlebars via `@handlebars/allow-prototype-access`
+    (`allowInsecurePrototypeAccess`), enabling template expressions to
+    reach object-prototype properties -- a specific, independent
+    escalation beyond generic SSTI, distinct from the base
+    compile-user-content mechanism. CWE-79 (Cross-site Scripting): the
+    imported `sanitizeHtml`/`escapeHtml` helper is defined but never
+    invoked in `_getElement()`'s "p" branch, and Handlebars' own
+    default HTML-escaping only applies to `{{double-stash}}` output --
+    since the ENTIRE template source here is attacker content, an
+    attacker can simply author `{{{triple-stash}}}` syntax themselves to
+    bypass Handlebars' escaping too, giving a stored-XSS path independent
+    of the SSTI/prototype-pollution angle.
   suggested_op: template_compile_user_content   # new op: user-authored
                                                  # content is compiled AS a
                                                  # Handlebars template rather
@@ -66,6 +101,64 @@
   # but that shape was not found in this collection pass, so no
   # suggested_op is proposed for it here -- noted as a gap, not invented.
 
+- file: idiomatic-2-altered.js
+  role: idiomatic
+  derived_from: vulnerable-2.js
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-2.js's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, worst-gap group 4 of 5). Missing
+    idiomatic counterpart for vulnerable-2.js's CWE-1336 SSTI
+    (jeffreyPG/node-api's _getElement(), which compiles user-authored
+    report-editor content AS a Handlebars template). This cell's
+    manifest.yaml note above records that no license-clean real-world
+    counterpart of "the same app rendering user content as data into a
+    FIXED precompiled template" was found in the original collection
+    pass; this file supplies exactly that missing shape, closing the gap
+    the note names (`template_precompiled_fixed`/
+    `template_user_content_as_data`) rather than leaving it merely
+    noted. Minimal-pair discipline: identical imports, identical `list`
+    helper, identical formatEditorText(), identical overall
+    _getElement() control flow/exports. The ONLY mechanism difference is
+    in the "p" branch: a single FIXED, developer-authored template
+    ({{content}}) is compiled ONCE at module load and the user's
+    formatted content is passed into it purely as template DATA, instead
+    of compiling the user content itself as the template source.
+  pattern: "A module-level FIXED_PARAGRAPH_TEMPLATE = extendedHandlebars.compile(\"{{content}}\") is compiled once at load time; _getElement()'s 'p' branch calls FIXED_PARAGRAPH_TEMPLATE({ content, ...data }) instead of compiling elementObj.content itself, so user-authored Handlebars syntax in the report text renders as inert literal text (HTML-escaped) rather than executing server-side."
+  validated: true
+  validated_by: [semgrep-custom-rule, node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336]
+  cwe_unique: [CWE-693, CWE-838]
+  cwe_rationale: >
+    CWE-693 (Protection Mechanism Failure): the `escapeHtml()` helper
+    (carried over unmodified from vulnerable-2.js) is still defined in
+    this file and still never invoked in the "p" branch; even if it were
+    invoked, its `sanitizeHtml(html, { allowedAttributes: false,
+    allowedTags: false })` configuration disables tag/attribute
+    filtering rather than restricting it (sanitize-html treats `false`
+    as "no restriction"), so this named protection mechanism would not
+    actually neutralize anything even if called -- a dead, misleadingly-
+    named no-op sitting in the file. CWE-838 (Inappropriate Encoding for
+    Output Context): FIXED_PARAGRAPH_TEMPLATE's `{{content}}` placeholder
+    is Handlebars' auto-escaped (double-stash) form, so the literal
+    `<br>` tags formatEditorText() deliberately reintroduces (to render
+    line breaks as HTML) are re-escaped back to inert `&lt;br&gt;` text
+    by this fix -- a real formatting regression traded for safety, since
+    the escaping context (plain-text-safe HTML entity encoding) doesn't
+    match formatEditorText()'s own intended output context (raw HTML).
+  suggested_op: template_precompiled_fixed   # new op, per this cell's own
+                                              # manifest note above naming
+                                              # exactly this as the gap --
+                                              # user content passed as
+                                              # template DATA into a FIXED,
+                                              # precompiled template rather
+                                              # than compiled as template
+                                              # source itself
+  suggested_sink_family: template_render_pipeline   # existing family, reused
+                                                     # (see vulnerable-2.js)
+
 - file: idiomatic-1.js
   role: idiomatic
   repo: emailparaojp/bibliotecaBrasil
@@ -76,8 +169,21 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-704, CWE-190]
+  cwe_rationale: >
+    CWE-704 (Incorrect Type Conversion or Cast): the LIMIT/OFFSET values
+    arrive as query-string parameters (strings) and are pushed into the
+    same `params[]` array bound via knex.raw(sql, params) as the other
+    filter values, with no explicit integer cast/parse shown before
+    binding -- relying on the driver's implicit coercion for a numeric
+    position rather than validating the type itself. CWE-190 (Integer
+    Overflow or Wraparound): with no explicit bounds check on the parsed
+    OFFSET value, an extremely large client-supplied offset could
+    overflow/wrap in the underlying driver or database engine's own
+    integer handling for that position.
   suggested_op: param_bind   # existing op; reused -- every dynamic WHERE/
                               # LIMIT/OFFSET value is bound via knex.raw(sql,
                               # params), same shape as the matrix's existing

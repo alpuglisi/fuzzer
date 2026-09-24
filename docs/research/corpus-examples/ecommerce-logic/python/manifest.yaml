@@ -40,7 +40,23 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
+  # NOTE: researched from trained knowledge, not a live MITRE lookup --
+  # cwe.mitre.org is blocked by this environment's egress proxy (confirmed
+  # via curl and WebFetch); recorded honestly rather than fabricated. ---
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-1284, CWE-807]
+  cwe_rationale: >
+    CWE-1284 (Improper Validation of Specified Quantity in Input): the
+    view trusts BOTH `amount` and `currency` from request.POST with no
+    allowlist of supported currencies and no bound on the amount relative
+    to the actual order/cart total -- a currency-confusion variant (e.g.
+    charging 100 "JPY" when 100 "USD" cents was intended, since JPY has no
+    minor unit) is a well-known real consequence of exactly this gap.
+    CWE-807 (Reliance on Untrusted Input in a Security Decision): the
+    security-relevant decision "how much money to charge" is made
+    entirely from client-supplied fields with no independent server-side
+    source of truth consulted at all.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -67,7 +83,21 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-362, CWE-367]
+  cwe_shared: [CWE-362, CWE-367]
+  cwe_unique: [CWE-841, CWE-664]
+  cwe_rationale: >
+    CWE-841 (Improper Enforcement of Behavioral Workflow): the intended
+    workflow (validate the coupon -> apply it once -> increment its usage
+    counter) is not synchronized as a single unit, so under concurrency
+    the steps can interleave across requests in a way the intended
+    workflow forbids (e.g. two requests both passing the "not already
+    applied" check on the same cart before either commits). CWE-664
+    (Improper Control of a Resource Through its Lifetime): the in-memory
+    `coupon` ORM object is read once at the top of the view, then mutated
+    and `.save()`-d multiple times (usage_count, then possibly
+    is_active) later in the same function without ever being re-read,
+    so later writes act on a potentially stale snapshot of that resource
+    for the rest of its lifetime within the request.
   suggested_op: unlocked_check_then_act
   suggested_sink_family: db_counter_increment
 
@@ -92,7 +122,21 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-1339, CWE-696]
+  cwe_rationale: >
+    CWE-1339 (Insufficient Precision or Accuracy of a Real Number):
+    process_payment() charges exactly `int(order.total * 100)` -- if
+    `order.total` is a float rather than a Decimal, this float-to-cents
+    conversion can produce classic floating-point rounding errors (e.g.
+    19.99 * 100 evaluating to 1998.9999999999998, truncated to 1998
+    instead of 1999 cents). CWE-696 (Incorrect Behavior Order):
+    process_order() computes and commits `order.total` inside its own
+    `transaction.atomic()` block, and the actual charge happens in a
+    separate, later call to process_payment() -- a crash or retry between
+    the two steps can leave the committed order total and the actual
+    charge state inconsistent, since the total-computation and the
+    charge are not one atomic unit together.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -109,6 +153,64 @@
 #   amgad165/Retro-store, Ricas2410/mablex, IlboudoOusmane/Vente-en-ligne,
 #   GreeshmaAbeesh/Fashionfiesta) -- none of them carry a LICENSE file.
 #   arvinmaroufi/MasaiShop was the only one found with a declared license.
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, worst-gap group 2 of 5) ---
+
+- file: idiomatic-2-altered.py
+  role: idiomatic
+  derived_from: vulnerable-2.py
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-2.py's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED. Missing idiomatic counterpart for vulnerable-2.py's
+    CWE-362/CWE-367 TOCTOU race (arvinmaroufi/MasaiShop's apply_coupon(),
+    a non-atomic read-is_valid()-then-increment on
+    Coupon.usage_count). This cell's manifest.yaml note above records
+    that no license-clean real-world locked counterpart was found in the
+    original collection pass; this file supplies exactly the mitigation
+    that note names as absent. Minimal-pair discipline: same function
+    name/messages/discount computation/control flow, differing ONLY in
+    (1) select_for_update() locking the coupon row, (2) the whole
+    check-then-act sequence wrapped in transaction.atomic(), and (3) the
+    counter increment using F('usage_count') + 1 (an atomic
+    database-level UPDATE) instead of a Python-side `+= 1; .save()`.
+  pattern: "apply_coupon() locks the coupon row with Coupon.objects.select_for_update().get(...) inside a transaction.atomic() block before reading is_valid(), and increments usage_count via the atomic F('usage_count') + 1 expression -- closing the window where two concurrent requests could both pass is_valid() before either commits its increment."
+  validated: true
+  validated_by: [semgrep-custom-rule, py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-362, CWE-367]
+  cwe_unique: [CWE-636, CWE-460]
+  cwe_rationale: >
+    CWE-636 (Not Failing Securely / 'Failing Open'): `select_for_update()`
+    only takes a real row lock on a database backend that supports
+    row-level locking; on a backend that doesn't (e.g. SQLite, common in
+    dev/test), Django logs a warning and silently proceeds WITHOUT
+    locking rather than raising an error -- so this fix's actual
+    protection is contingent on production DB configuration, not
+    guaranteed by the code alone. CWE-460 (Improper Cleanup on Thrown
+    Exception): only `Coupon.DoesNotExist` is caught by this function's
+    `except` clause; any other exception raised inside the
+    `transaction.atomic()` block (e.g. a DB error during the F()
+    update) propagates past the explicit error-handling this function
+    does have, relying entirely on Django's implicit atomic-block
+    rollback with no function-level cleanup/logging of its own.
+  suggested_op: locked_check_then_act
+  suggested_sink_family: db_counter_increment
+  validation_caveat: >
+    Dynamic (gVisor-sandbox) execution was NOT run for this pair: genuinely
+    proving the race (and its fix) requires real concurrent requests
+    against a live multi-connection database (Postgres/MySQL under
+    Django's ORM, with select_for_update() actually taking a row lock
+    across connections) -- SQLite's single-writer model and this
+    sandbox's single-process, no-network execution model cannot exercise
+    that. Validated at the static tier only (a custom semgrep
+    differential rule confirms vulnerable-2.py's unguarded
+    `coupon.usage_count += 1` triggers and this file's F()/
+    select_for_update()/transaction.atomic() form does not) plus
+    py_compile and manual review. Reported honestly per the plan's "N of
+    M, never rounded up" instruction rather than skipped silently or
+    faked.
+
 # - A real, *locked* counterpart to this race (select_for_update() and/or
 #   an F('usage_count') + 1 atomic update inside a transaction) was found
 #   in CNRWhoAmI/meraycoshop (backend/apps/coupons/services.py),

@@ -242,3 +242,74 @@
   suggested_op: no_extension_check   # same op already established for
                              # this cell's PHP entries -- reused
   suggested_sink_family: fs_web_root_write
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, worst-gap group 3 of 5). This closes the
+# gap noted in the plan's gap analysis for the CWE-20/CWE-22/CWE-434
+# COMBINED shape specifically: idiomatic-peertube-upload-1.ts (above)
+# only covers the CWE-434/CWE-20 mimetype-check half and does not carry
+# CWE-22, while vulnerable-peertube-upload-1.ts (above) carries all
+# three (cwe_shared includes CWE-22, via its unsanitized
+# join(VIDEOS_DIR, file.originalname)) -- so the combined-shape triple
+# had no matching idiomatic counterpart until now. ---
+
+- file: idiomatic-peertube-upload-1-altered.ts
+  role: idiomatic
+  architecture: peertube-video-upload
+  derived_from: vulnerable-peertube-upload-1.ts
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-peertube-upload-1.ts's own manufactured structure per the plan's methodology; same AGPL-3.0-or-later caution as both peertube entries above applies since the shape is derived from that upstream excerpt)
+  notes: >
+    MANUFACTURED. Missing idiomatic counterpart for
+    vulnerable-peertube-upload-1.ts's combined CWE-20/CWE-22/CWE-434
+    shape. Minimal-pair discipline: identical function signature and
+    overall shape (destructure the uploaded file, validate, move it,
+    return its path), same imports as the vulnerable twin plus the two
+    additions the fix requires (a mimetype allowlist and `basename`).
+    The ONLY mechanism differences are (1) an explicit mimetype
+    allowlist check before anything is moved (mirrors the real
+    isVideoFileMimeTypeValid() gate idiomatic-peertube-upload-1.ts
+    documents) and (2) deriving the destination filename from
+    basename(file.originalname) reduced to a safe character set, so a
+    filename like `../../etc/cron.d/x` can no longer escape
+    CONFIG.STORAGE.VIDEOS_DIR.
+  pattern: "acceptVideoUpload() rejects the upload with 415 unless file.mimetype is in an explicit allowlist, and derives the stored filename from basename(file.originalname).replace(/[^a-zA-Z0-9_.-]/g, '_') before joining it to CONFIG.STORAGE.VIDEOS_DIR."
+  validated: true
+  validated_by: [semgrep-custom-rule, node-syntax-check, tsc-structural-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  # NOTE: this entry's CWE-unique pair was originally drafted reusing
+  # CWE-340/CWE-158 from idiomatic-1.js above, which
+  # `.claude/hooks/check-corpus-cwe-coverage.sh`'s cross-entry uniqueness
+  # check correctly flags as a collision (a CWE claimed unique by more
+  # than one entry belongs in cwe_shared, or a narrower replacement is
+  # needed) -- replaced below with two CWEs genuinely specific to this
+  # entry's own mimetype-allowlist implementation.
+  cwe_shared: [CWE-434, CWE-20, CWE-22]
+  cwe_unique: [CWE-436, CWE-1287]
+  cwe_rationale: >
+    Shared: CWE-434/CWE-20/CWE-22, see vulnerable-peertube-upload-1.ts's
+    cwe_rationale above -- this entry closes the CWE-22 half that
+    idiomatic-peertube-upload-1.ts's own cwe field does not carry.
+    Unique to this entry: CWE-436 (Interpretation Conflict) -- the
+    mimetype allowlist check trusts `file.mimetype`, a value multer
+    populates from the client's declared Content-Type header rather than
+    from inspecting the uploaded bytes themselves, so the check can pass
+    a file whose actual byte content a downstream consumer (a video
+    player, a transcoder) interprets differently than the declared type
+    claims. CWE-1287 (Improper Validation of Specified Type of Input) --
+    the mimetype allowlist and the derived stored filename are validated
+    independently of each other; nothing cross-checks that the
+    (sanitized) filename's own extension is consistent with the
+    validated mimetype, so a mismatched pair passes both checks
+    individually.
+  suggested_op: mime_type_check
+  suggested_sink_family: fs_web_root_write
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (Node,
+    executed both directly and inside the gVisor sandbox via
+    `run_in_sandbox`) that stubs `CONFIG`/`moveFile` and feeds a
+    traversal-shaped `file.originalname`, not against the real PeerTube
+    application (which is out of scope to boot here) -- the harness
+    proves the specific mechanism difference (destination path escapes
+    the intended directory for the vulnerable file; stays confined for
+    this file), which is what this pair exists to demonstrate.

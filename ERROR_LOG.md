@@ -18,6 +18,34 @@ Format per entry:
 
 ---
 
+## 2026-09-24 — `cwe.mitre.org` unreachable through this environment's egress proxy during PA-0033 CWE-migration research (Environment)
+
+- **Symptom:** while migrating `docs/research/corpus-examples/*/manifest.yaml`
+  entries to the `cwe_shared`/`cwe_unique`/`cwe_rationale` schema
+  (`docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` Step 6, enforced by
+  `.claude/hooks/check-corpus-cwe-coverage.sh`), both `curl` and `WebFetch`
+  against `https://cwe.mitre.org/data/index.html` returned a block
+  (EGRESS_BLOCKED/403) rather than the MITRE CWE index content the standard
+  calls for looking up live.
+- **Root cause:** this sandbox's outbound-egress proxy does not allow
+  `cwe.mitre.org` — an environment/network restriction, not a defect in any
+  fuzzlab code path. Not a code defect, so the full `docs/bugs/` RCA protocol
+  does not apply (per CLAUDE.md's own scoping: that protocol is for code
+  defects); this entry exists because it is exactly the "deploy/env failure"
+  class this log is for.
+- **Remediation:** CWE research for the affected entries was done from
+  trained knowledge instead of a live MITRE lookup, with that fact recorded
+  plainly in each touched entry's own note/comment (per this corpus's
+  existing "not silently" honesty convention) rather than fabricating a
+  citation or silently treating trained-knowledge recall as equivalent to a
+  verified lookup. Every migrated entry's `cwe_rationale` should be
+  spot-checked against the real MITRE index by a session with that access
+  before being treated as fully authoritative — flagged here so that
+  follow-up isn't lost.
+- **Status:** Environment (fixed outside the repo — a session with working
+  egress to `cwe.mitre.org` can re-verify; no code change possible or needed
+  here).
+
 ## 2026-09-23 — `RequestsProbeSender` followed redirects into an attacker-controlled canary host (fixed, BUG-0039/PA-0041)
 
 - **Symptom:** live-verifying category 5's `open_redirect` → `_VULN_TO_CATEGORY`

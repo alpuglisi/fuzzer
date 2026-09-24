@@ -3,6 +3,97 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0226 — Manufacture 5 worst-gap corpus pairs + migrate touched manifests to cwe_shared/cwe_unique (2026-09-24)
+- Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s "Worst gaps"
+  list, manufactured the missing side for 5 (cell, CWE) groups with zero
+  natural pairs: `access-control/python` (two distinct CWE-tuple
+  sub-groups — CWE-639/862/915 and CWE-639/862 — needing one new file
+  each: `idiomatic-1-altered.py` and `vulnerable-1-altered.py`),
+  `ecommerce-logic/python` (CWE-362/367 TOCTOU race,
+  `idiomatic-2-altered.py`), `file-handling/node` (combined
+  CWE-20/22/434 shape, `idiomatic-peertube-upload-1-altered.ts`),
+  `search-export/node` (CWE-1336 SSTI, `idiomatic-2-altered.js`), and
+  `search-export/php` (CWE-611 XXE, `idiomatic-3-altered.php`) — 6 new
+  files under `docs/research/corpus-examples/`, each named
+  `<role>-<n>-altered.<ext>`, each with a `manifest.yaml` entry carrying
+  `derived_from` pointing at its collected anchor. Also, per a mid-task
+  correction grounding `.claude/hooks/check-corpus-cwe-coverage.sh`/
+  PA-0033's tightened standard (not part of the original brief),
+  migrated every entry (24 total, including 18 pre-existing ones sharing
+  these 5 manifest files) from the legacy flat `cwe:` field to
+  `cwe_shared:`/`cwe_unique:`/`cwe_rationale:`, and fixed one real
+  cross-entry `cwe_unique` collision the migration surfaced in
+  `file-handling/node/manifest.yaml` (`idiomatic-peertube-upload-1-altered.ts`
+  had drafted CWE-340/CWE-158, already claimed by `idiomatic-1.js` in
+  the same file — replaced with CWE-436/CWE-1287).
+- Impact (other components / project): corpus-research reference material
+  only (`docs/research/corpus-examples/`) — read by future generator/
+  labgen work as illustrative pairs, never served by the lab app itself
+  and not wired into `lab/safety_matrix.yaml` by this change (that hookup
+  is its own future FUZZ/LAB change per the site-architecture plan's
+  "Step 8 handoff", unchanged here). No impact on any other component.
+- Risk (level; mitigation or accepted-risk justification): low. The new
+  files are inert reference text, not executed by any pipeline. Two
+  accepted-risk notes, both stated plainly rather than glossed over: (1)
+  the ecommerce-logic TOCTOU pair's dynamic validation genuinely needs a
+  real multi-connection database this sandboxed environment cannot
+  provide (SQLite/single-process can't exercise `select_for_update()`
+  across connections), so that pair is validated at the static tier only,
+  flagged in its own manifest entry; (2) the CWE-migration's research was
+  done from trained knowledge, not a live `cwe.mitre.org` lookup, since
+  this environment's egress proxy blocks that domain (confirmed via both
+  `curl` and `WebFetch` returning a block during this change) — every
+  migrated entry's rationale should be spot-checked against MITRE by a
+  session with that access before being treated as authoritative.
+- Deliverables:
+  - [x] 6 manufactured files (3 Python, 2 TypeScript/JS-family, 1 PHP) —
+        done.
+  - [x] Static validation: `python3 -m py_compile` / `php -l` / `node
+        --check` / `tsc` structural check on every new file; `bandit`
+        (no issues) on the 3 Python files; 5 hand-written differential
+        `semgrep` rules (one per CWE mechanism), each confirmed to fire
+        on the vulnerable side and stay clean on the idiomatic side (10
+        of 10 checks passed) — done.
+  - [x] Dynamic validation via `fuzzlab/tools/corpus_validation_sandbox.py`
+        (`run_in_sandbox`, `authorized=True`) for the 3 pairs where a
+        check genuinely needed real execution: XXE entity resolution
+        (leaked a real local-file marker on the vulnerable side, left
+        `&x;` unresolved on the idiomatic side), the access-control
+        ownership-check bypass (attacker flipped `payment_status` to
+        `paid` on someone else's order on the vulnerable side, blocked
+        on the idiomatic side), and the file-handling path-traversal
+        escape (destination path resolved outside `VIDEOS_DIR` on the
+        vulnerable side, confined on the idiomatic side) — done, 3 of 5
+        pairs dynamically proven, 2 of 5 static-only for stated reasons
+        (access-control's other sub-pair has a documentation/prompt-file
+        "vulnerable" side with no executable route to run; ecommerce's
+        TOCTOU race needs a real multi-connection DB).
+  - [x] Migrated all 24 entries across the 5 touched manifests to
+        `cwe_shared`/`cwe_unique`/`cwe_rationale`, verified 0 cross-entry
+        `cwe_unique` collisions and every entry >= 2 `cwe_unique` via a
+        standalone script mirroring the hook's own logic, then confirmed
+        by actually running `.claude/hooks/check-corpus-cwe-coverage.sh`
+        against the staged changes (exit 0) — done.
+  - [x] Confirmed all 4 touched cells (aggregated across every language
+        subdirectory, not just the one touched) already clear the >= 5
+        `role: vulnerable` / >= 5 `role: idiomatic` per-cell floor
+        (access-control 7/7, ecommerce-logic 8/7, file-handling 7/8,
+        search-export 6/6) — no additional pairs needed beyond the 6
+        manufactured files above.
+  - [x] `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s "Not yet done"
+        section updated to record these 5 groups as done — done.
+  - [x] Full non-slow suite green: 2446 passed, 8 skipped, 187 deselected
+        (unchanged from this branch's pre-change baseline; these are
+        data/docs files with no test surface of their own beyond the
+        manifest-parsing/hook checks already covered above) — done.
+- Effectiveness (assessed 2026-09-24): effective — every new pair
+  validated at the tier the plan's own methodology calls for (static
+  always, dynamic where the check genuinely needs execution), reported
+  as "N of M" honestly rather than rounded up, and the mechanical
+  CWE-coverage/pairs-floor hook (added since the original brief was
+  written) passes clean against the actual staged diff, not just an
+  isolated re-implementation of its logic.
+
 ### Bookkeeping-ID note: category 4's FR-LAB/CC-FUZZ/FR-FUZZ/BUG/PA entries, and a same-named strategy/rule pair, renumbered/renamed at merge time (2026-09-23, merge of `origin/claude/category-4-build-t9uz3y` into `claude/second-target-cat1-ecommerce`)
 
 Category 4 (`claude/category-4-build-t9uz3y`) independently assigned several

@@ -26,8 +26,23 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. NOTE: researched from trained knowledge,
+  # not a live MITRE lookup -- cwe.mitre.org is blocked by this
+  # environment's egress proxy (confirmed via curl and WebFetch);
+  # recorded honestly rather than fabricated. ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-840, CWE-682]
+  cwe_rationale: >
+    CWE-840 (Business Logic Errors): the same tainted filter value is
+    reused in a "running-balance subquery", so a manipulated filter can
+    directly alter a financial balance CALCULATION, a business-logic
+    consequence distinct from simple data disclosure elsewhere in this
+    file's other two query sites. CWE-682 (Incorrect Calculation): that
+    running-balance subquery folds the injected/unvalidated filter
+    condition directly into an aggregate computation, so injection there
+    doesn't just change which rows match -- it can distort the computed
+    value itself.
   suggested_op: raw_concat   # same shape lab/safety_matrix.yaml already
                               # covers -- a string-built WHERE clause with
                               # no transform at all, just reused across 3
@@ -44,8 +59,22 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-1236, CWE-862]
+  cwe_rationale: >
+    CWE-1236 (Improper Neutralization of Formula Elements in a CSV File):
+    the same unescaped filter/search values feed directly into a CSV
+    export (`$_GET['export']=csv`) alongside the paginated listing, with
+    nothing shown neutralizing leading `=`/`+`/`-`/`@` characters that a
+    spreadsheet application (Excel/Sheets) would interpret as a formula
+    on open -- this is this cell's own literal "search+export" shape.
+    CWE-862 (Missing Authorization): the separate bulk-delete path
+    concatenates raw POSTed IDs into a `WHERE id IN (...)` clause with no
+    check that the requesting user owns/may-delete those specific
+    records, a second, independent sink in this same file distinct from
+    the search/CSV path's SQLi.
   suggested_op: raw_concat   # sanitize() is an XSS mitigation
                               # (htmlspecialchars/strip_tags), not SQL
                               # escaping -- for the SQL sink this is
@@ -64,8 +93,22 @@
   validated: false
   validated_by: []
   redacted: false
-  # --- appended during Phase 3 ---
-  cwe: [CWE-611]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. ---
+  cwe_shared: [CWE-611]
+  cwe_unique: [CWE-213, CWE-776]
+  cwe_rationale: >
+    CWE-213 (Exposure of Sensitive Information Due to Incompatible
+    Policies): `echo $doc->saveXML();` reflects the FULLY
+    entity-substituted document straight back to the client, so any
+    successfully-resolved external entity (e.g. local file content) is
+    directly returned in the HTTP response -- the exfiltration channel
+    itself. CWE-776 (Improper Restriction of Recursive Entity References
+    in DTDs / XML Entity Expansion): with LIBXML_NOENT set and no
+    libxml_disable_entity_loader()/entity-count or size limit configured,
+    nested internal entity definitions (a "billion laughs" payload) can
+    cause catastrophic memory/CPU consumption -- a distinct DoS vector
+    from the data-exfiltration angle CWE-213 covers.
   suggested_op: xml_external_entities_enabled   # new op: DOMDocument::loadXML()
                                                   # called with LIBXML_NOENT,
                                                   # no libxml_disable_entity_loader
@@ -74,6 +117,58 @@
                                                   # not an SQL op
   suggested_sink_family: xml_parse_input   # new family: an XML parser fed
                                             # raw untrusted document text
+
+- file: idiomatic-3-altered.php
+  role: idiomatic
+  derived_from: vulnerable-3.php
+  manufactured: true
+  license: n/a (manufactured, derived from vulnerable-3.php's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics" (Phase 3, worst-gap group 5 of 5). Missing
+    idiomatic counterpart for vulnerable-3.php's CWE-611 XXE
+    (DOMDocument::loadXML() called with LIBXML_NOENT on raw
+    $_POST['xml']). Minimal-pair discipline: identical input source
+    ($_POST['xml']), identical DOMDocument/loadXML/saveXML shape. The
+    ONLY mechanism difference is that LIBXML_NOENT (the flag telling
+    libxml to substitute entity references, including external ones,
+    inline) is omitted, and LIBXML_NONET is passed instead (blocks any
+    network-based entity resolution as defense in depth).
+  pattern: "$doc->loadXML($xml, LIBXML_NONET) -- no LIBXML_NOENT flag, so external entity references in the input are never substituted/resolved."
+  validated: true
+  validated_by: [semgrep-custom-rule, php-lint, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-611]
+  cwe_unique: [CWE-665, CWE-441]
+  cwe_rationale: >
+    CWE-665 (Improper Initialization): this fix's safety rests entirely
+    on the ABSENCE of the LIBXML_NOENT flag rather than an affirmative,
+    explicit disable of entity loading -- the DOMDocument's entity
+    handling is left at its implementation default instead of being
+    positively configured, so a future edit that adds LIBXML_NOENT back
+    (e.g. "why isn't my entity substituting") would silently reopen the
+    hole with no test catching it. CWE-441 (Unintended Proxy or
+    Intermediary ('Confused Deputy')): LIBXML_NONET specifically defends
+    against the SSRF-flavored variant of this bug, where the XML parser
+    itself is made to act as a proxy fetching internal/network resources
+    on the attacker's behalf via a network-scheme SYSTEM entity.
+  suggested_op: xml_external_entities_disabled   # new op: the direct fix
+                                                  # counterpart to
+                                                  # vulnerable-3.php's
+                                                  # xml_external_entities_enabled
+  suggested_sink_family: xml_parse_input   # existing family, reused (see
+                                            # vulnerable-3.php)
+  validation_note: >
+    Dynamically validated end-to-end in the gVisor sandbox
+    (`fuzzlab/tools/corpus_validation_sandbox.py`, `run_in_sandbox`,
+    authorized=True): a crafted payload declaring `<!ENTITY x SYSTEM
+    "file:///.../secret.txt">` and referencing `&x;` in the document body
+    was run against both this file and vulnerable-3.php with identical
+    $_POST['xml'] input. vulnerable-3.php's output substitutes the
+    entity and leaks the local file's contents into the response;
+    this file's output leaves the literal, unresolved `&x;` in place --
+    proving the fix actually closes the entity-resolution channel, not
+    just that the flag differs syntactically.
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -85,8 +180,22 @@
   validated: false
   validated_by: []
   redacted: true
-  # --- appended during Phase 3 ---
-  cwe: [CWE-89]
+  # --- appended during Phase 3; migrated to cwe_shared/cwe_unique per
+  # PA-0033's tightened standard. ---
+  cwe_shared: [CWE-89]
+  cwe_unique: [CWE-176, CWE-798]
+  cwe_rationale: >
+    CWE-176 (Improper Handling of Unicode Encoding): mysqli_real_escape_
+    string()'s correctness depends on the DB connection's character set
+    being configured correctly; on a connection using a vulnerable
+    multi-byte charset (e.g. GBK) this escaping-based defense has a
+    well-documented bypass class distinct from the parameter-binding
+    approach idiomatic-1.js/etc. use elsewhere in this corpus. CWE-798
+    (Use of Hard-coded Credentials): this file's own `mysqli_connect(...)`
+    call originally hardcoded a live-looking DB host/username/password
+    (per this manifest's own note above); the three REDACTED_DB_*
+    placeholders mark exactly where those credentials were scrubbed
+    before first commit.
   suggested_op: driver_escape_string   # new op (not a reuse): mysqli_real_
                                         # escape_string() is a real driver-level
                                         # escaping call -- stronger than the

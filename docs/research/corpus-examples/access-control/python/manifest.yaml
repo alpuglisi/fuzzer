@@ -41,7 +41,30 @@
     against the corrected filter_by(...) form for the same route shape.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862, CWE-915]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard
+  # (docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6). NOTE:
+  # this entry's CWE research was done from trained knowledge, not a live
+  # MITRE index lookup -- cwe.mitre.org is blocked by this environment's
+  # egress proxy (confirmed via curl and WebFetch, both returned
+  # EGRESS_BLOCKED/403 at the time of this edit); recorded honestly per
+  # this corpus's own "not silently" convention rather than fabricating a
+  # citation. ---
+  cwe_shared: [CWE-639, CWE-862]   # class-defining CWEs for this whole
+                                    # cell's IDOR/ownership-check shape
+  cwe_unique: [CWE-1220, CWE-915]
+  cwe_rationale: >
+    CWE-1220 (Insufficient Granularity of Access Control): every Flask
+    example this prompt documents carries `@login_required` (session-level
+    authentication) but no per-resource ownership check -- authorization
+    exists, just at too coarse a granularity ("any logged-in user" rather
+    than "the owning user"), distinct from idiomatic-1-altered.py which
+    adds exactly that finer granularity. CWE-915 (Improperly Controlled
+    Modification of Dynamically-Determined Object Attributes): the
+    embedded Marshmallow `ProjectSchema` example's `owner_id =
+    fields.Int()` is writable in the request body, letting a caller
+    directly set/claim an object's ownership via mass-assignment -- a
+    second, independent mechanism from the URL-id-lookup shapes elsewhere
+    in this same file and manifest.
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
 
@@ -71,6 +94,98 @@
     different "ownership" relations on the same object.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-203, CWE-1050]
+  cwe_rationale: >
+    CWE-203 (Observable Discrepancy): confirm_payment()/confirm_completion()
+    fetch first via `Order.query.get_or_404(order_id)` (raising an
+    immediate 404 if the row doesn't exist) and only THEN compare
+    `order.user_id != current_user.id`, flashing an error and issuing a
+    302 redirect if it isn't the caller's order -- an attacker probing
+    order IDs can distinguish "doesn't exist" (404) from "exists, not
+    yours" (200/redirect) purely from the response shape, unlike
+    idiomatic-1-altered.py's combined filter_by(...).first_or_404(), which
+    returns an identical 404 for both cases. CWE-1050 (Excessive Platform
+    Resource Consumption within a Loop): confirm_shipping() determines
+    supplier-ness via `any(purchase.part.supplier_id ==
+    current_user.id for purchase in order.purchases)`, iterating the
+    order's full purchases/line-items collection (a lazily-loaded ORM
+    relationship) on every request regardless of order size.
   suggested_op: ownership_check_after_fetch
+  suggested_sink_family: db_row_by_id_lookup
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, worst-gap group 1 of 5) ---
+
+- file: idiomatic-1-altered.py
+  role: idiomatic
+  derived_from: vulnerable-1.py
+  manufactured: true
+  license: n/a (manufactured, no upstream source copied)
+  notes: >
+    MANUFACTURED. Missing idiomatic counterpart for vulnerable-1.py's
+    CWE-639/CWE-862/CWE-915 IDOR shape. DESIGN CHOICE (flagged per the
+    manufacturing plan's own instruction): vulnerable-1.py is unusually
+    a documentation/prompt-library file (an LLM code-reviewer's IDOR
+    detection prompt, embedding several vulnerable/safe Flask snippets
+    inline as illustrative text), not live route code -- mirroring that
+    odd prompt-library format for this counterpart would have made the
+    corpus less realistic, so this file is instead written as an actual,
+    standalone, runnable Flask route module, drawing its shape directly
+    from the exact pattern vulnerable-1.py itself documents
+    (`Invoice.query.filter_by(id=x, user_id=current_user.id)`). This is
+    a deliberate departure from vulnerable-1.py's own format, not a
+    silent copy of it.
+  pattern: "get_invoice() scopes the primary-key lookup with Invoice.query.filter_by(id=invoice_id, user_id=current_user.id).first_or_404() -- the caller can never fetch another user's invoice by id, and the 404 response is identical for both 'not found' and 'not yours'."
+  validated: true
+  validated_by: [semgrep-custom-rule, py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-799, CWE-200]
+  cwe_rationale: >
+    CWE-799 (Improper Control of Interaction Frequency): this route has no
+    rate-limiting/throttling of any kind, so while each individual
+    invoice_id guess is correctly blocked by the ownership filter, an
+    attacker can still enumerate arbitrarily many IDs with no server-side
+    slowdown. CWE-200 (Exposure of Sensitive Information to an
+    Unauthorized Actor): `invoice.to_dict()` serializes the model with no
+    explicit field allowlist, so once the caller is (correctly) scoped to
+    their own invoice, any field later added to the Invoice model is
+    automatically included in the response with no deliberate re-review of
+    what's safe to expose to that caller.
+  suggested_op: ownership_check_after_fetch
+  suggested_sink_family: db_row_by_id_lookup
+
+- file: vulnerable-1-altered.py
+  role: vulnerable
+  derived_from: idiomatic-1.py
+  manufactured: true
+  license: n/a (manufactured, derived from idiomatic-1.py's real structure per the plan's methodology; no additional upstream source copied)
+  notes: >
+    MANUFACTURED. Missing vulnerable counterpart for idiomatic-1.py's
+    CWE-639/CWE-862 ownership-check idiom (timluh98/FS-Webapp's
+    confirm_payment()/confirm_shipping()/confirm_completion() routes).
+    Minimal-pair discipline: identical routes/imports/business logic,
+    differing ONLY in the removed ownership check in each route -- every
+    route trusts order_id from the URL alone and performs the state
+    transition for any authenticated caller, not just the order's
+    owner/supplier.
+  pattern: "confirm_payment()/confirm_shipping()/confirm_completion() all call Order.query.get_or_404(order_id) and proceed straight to the state transition with no ownership/supplier-relation check -- contrast idiomatic-1.py's explicit `order.user_id != current_user.id` / supplier-relation checks."
+  validated: true
+  validated_by: [semgrep-custom-rule, py_compile, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-352, CWE-778]
+  cwe_rationale: >
+    CWE-352 (Cross-Site Request Forgery): all three routes are POST-only,
+    sensitive state-mutating endpoints, and nothing in this excerpt (or
+    the missing ownership check it demonstrates) validates a CSRF token --
+    a genuinely separate weakness class from the IDOR this file
+    demonstrates (CSRF is about request-origin verification; IDOR is about
+    authorization scope). CWE-778 (Insufficient Logging): none of the
+    three financial/shipping state transitions this file performs emit
+    any audit-log statement identifying who triggered the transition,
+    removing the forensic trail that would otherwise help detect this
+    exact abuse pattern after the fact.
+  suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup

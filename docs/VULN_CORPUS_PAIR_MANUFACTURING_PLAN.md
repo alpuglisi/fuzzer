@@ -91,8 +91,14 @@ gap.
 
 ## Not yet done
 
-None of the 39 pairs have been manufactured. No code has been written for this
-task beyond this plan and the gap-analysis script it was generated from.
+The 5 worst-gap groups above (`access-control/python` x2 sub-groups,
+`ecommerce-logic/python`, `file-handling/node`, `search-export/node`,
+`search-export/php`) are now done — see `CC-LAB-0226` in
+`docs/components/01-target-lab/change-control.md` for the full record
+(6 manufactured files, validation results, and the CWE-schema/pairs-floor
+migration a mid-task correction added to scope). The remaining ~28
+(cell, CWE) groups elsewhere in the gap-analysis table above (the smaller,
+gap=1 groups) are separate follow-up work, not touched by this pass.
 
 ## Execution options (pick one when scheduling this work)
 

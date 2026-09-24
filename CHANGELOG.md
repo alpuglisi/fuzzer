@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus manufactured pairs, 5 worst-gap groups + CWE-coverage/pairs-floor migration)
+- Docs (research corpus): manufactured the missing side of the 5 worst-gap
+  (cell, CWE) pairs identified in `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`
+  (`access-control/python` x2, `ecommerce-logic/python`, `file-handling/node`,
+  `search-export/node`, `search-export/php`) — 6 new files, each validated
+  static+dynamic (gVisor sandbox, `fuzzlab/tools/corpus_validation_sandbox.py`)
+  where the check genuinely needed execution (XXE entity resolution, an
+  ownership-check bypass, a path-traversal escape), static-only with an
+  honest caveat where it didn't (the ecommerce-logic TOCTOU race needs a
+  real multi-connection DB this sandboxed environment can't provide). Also
+  migrated every entry in the 5 touched `manifest.yaml` files from the
+  legacy flat `cwe:` field to `cwe_shared:`/`cwe_unique:`/`cwe_rationale:`
+  (>= 2 cwe_unique per entry, no cross-entry collisions) and fixed one
+  file-handling/node collision this migration surfaced, per PA-0033's
+  tightened standard and `.claude/hooks/check-corpus-cwe-coverage.sh`,
+  which now passes clean on these files; confirmed all 4 touched cells
+  already clear the >= 5 vulnerable / >= 5 idiomatic per-cell floor once
+  aggregated across their language subdirectories, so no additional pairs
+  were needed there. CWE research for the migration was done from trained
+  knowledge, not a live MITRE index lookup — `cwe.mitre.org` is blocked by
+  this environment's egress proxy (confirmed via `curl` and `WebFetch`) —
+  recorded plainly in each touched entry rather than silently assumed
+  compliant. Change-control: `CC-LAB-0226`.
+
 ## 2026-09-24 (overnight autonomous build plan: all 4 categories merged; sync-back and main push blocked)
 - Docs: updated `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` — all 4
   categories (2/3/4/5) reached confirmed completion and were merged into
