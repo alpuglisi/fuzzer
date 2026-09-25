@@ -1,2 +1,15 @@
 {{ channel_id_var }} := r.URL.Query().Get("{{ param_name }}")
 {{ broadcaster_var }} := r.Header.Get("X-Broadcaster-Id")
+{% if default_to_caller is defined %}
+// Absent-input behavior (CC-LAB-0243, R6, identical on both twins): with no
+// channel_id, show the caller's own channel; with no caller identity
+// either, a handled 401 sign-in page before any lookup. A request that
+// names a channel_id is unaffected.
+if {{ channel_id_var }} == "" {
+	{{ channel_id_var }} = {{ broadcaster_var }}
+}
+if {{ channel_id_var }} == "" {
+	renderPage(w, http.StatusUnauthorized, "Sign in", "<h2>Sign in</h2><p>Sign in to your channel to open this dashboard page.</p>")
+	return
+}
+{% endif %}
