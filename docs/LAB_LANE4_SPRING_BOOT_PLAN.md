@@ -1,16 +1,15 @@
 # Browsable Labs Lane 4 — spring_boot: TrackerNest, Netflix clone, Expedia clone
 
-Status: **revised after review round 1 (2026-09-25), awaiting round-2
-confirmation.**
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round; see §8).
 
-- Round 1 was run by the orchestrating session's own two reviewer agents
-  (accuracy + adequacy), because this lane's sub-agent has no agent-spawning
-  tool.
-- The result was ACCURATE / ADEQUATE contingent on 2 fixes, plus 1
-  recommended item. All three are applied in this revision (§8).
-- **This plan does not authorize implementation.** It needs round-2 3/3
-  agreement, and then the condensed `CC-LAB-0244` entry must clear its own
-  gate, mirroring `CC-LAB-0242`'s process.
+- The reviewers were run by the orchestrating session, because this lane's
+  sub-agent has no agent-spawning tool.
+- **Next step:** draft the condensed `CC-LAB-0244` change-control entry and
+  take it through its own 2-reviewer gate, mirroring `CC-LAB-0242`'s
+  process. This plan's own convergence does not yet authorize
+  implementation.
 
 Reserved numbers, per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table, used
 exactly: `CC-LAB-0244`; `FR-LAB-164` (browsable site) and `FR-LAB-165`
@@ -842,7 +841,7 @@ For each app:
 - [ ] `render_site` (home, catalog, 15 client pages across the 3 apps) and `site_build`/`served_url_for` twin URLs (S1). `assemble_spring_boot_app` made public for Lane 7.
 - [ ] App mode in `SpringBootLiveBootHarness` (additive).
 - [ ] §2e guards on every route, the offline declaration check (every route, every channel), and the twin-identity check (S9).
-- [ ] The `form_when_absent` decision rule applied, with the branch recorded as a sign-off in `FR-LAB-165`.
+- [ ] `form_when_absent` (accepted in review round 1) applied to `/wiki/pages/render`, and recorded as a sign-off in `FR-LAB-165`.
 - [ ] The §2f `body_content_type` pin (no GT edits).
 - [ ] The navigability module, green for all 3 apps, including the own-method bare sweep and the strict-xfail pins (S2, S6).
 - [ ] Every existing `spring_boot` live-boot and multitarget suite green. SSTI recall unchanged.
@@ -873,6 +872,12 @@ For each app:
 - A detector for Java-native `ObjectInputStream` deserialization
   (`TNEST-0003`'s existing, honest false negative).
 - Lanes 3, 5, 6 and 7, and the other emitters.
+- **Flagged for Lane 7** (round-2 adequacy suggestion, non-blocking): codify
+  in `docs/MULTI_AGENT_ORCHESTRATION.md` the rule "a shared strict-xfail
+  sentinel file: the lane that lands the fix deletes its own marker". The
+  pattern has now come up independently in Lane 3 (its point-6 amendment)
+  and in Lane 4 (S15's cross-emitter xfails). That governance-doc edit is
+  not made here.
 
 ## 8. Review history
 
@@ -911,8 +916,19 @@ on 2 fixes, plus 1 recommended item.**
 - **The adequacy reviewer also decided the draft's one open design
   question:** `form_when_absent` is **accepted** for `/wiki/pages/render`
   (§2e, now recorded as decided, with the FR-LAB-165 sign-off).
-- **Round 2 is pending.** The same two reviewers are to confirm through the
-  orchestrator. 3/3 agreement is not yet claimed.
+
+**Round 2 (accuracy + adequacy, same 2 reviewer agents via the orchestrator,
+2026-09-25): ACCURATE / ADEQUATE.**
+
+- Both reviewers confirmed the round-1 fixes: S15's self-applied
+  cross-emitter pin, the unconditional `docs/ARCHITECTURE.md` deliverable,
+  and the before/after sweep evidence.
+- **3/3 agreement reached** (2 reviewers plus the proposing agent).
+- One non-blocking suggestion was recorded as a Lane 7 follow-up in §7
+  (codify the "landing lane deletes its own strict-xfail marker" rule).
+- In the same revision, a wording-only update to §6's `form_when_absent`
+  item reflects the round-1 decision, without changing any content.
+- Implementation still requires the `CC-LAB-0244` entry's own gate.
 
 **Original blocker note (draft, 2026-09-25), kept for the record:**
 
