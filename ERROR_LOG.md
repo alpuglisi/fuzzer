@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `spring_boot` (ReelQueue) POST routes crashed on a bare POST — PA-0054's GET-only sweep never exercised them (fixed, BUG-0054/PA-0056)
+
+- **Symptom:** a bare `POST` (no multipart part / no query string) of
+  `/api/profiles/avatar` answered 500 on both twins; `/api/content/thumbnail-import`
+  answered 502 on the vulnerable twin -- reproduced live against the
+  pre-change emitter; ReelQueue's new nav/client pages would have led
+  straight to them.
+- **Root cause:** neither route's source guarded against its required input
+  (a multipart part, a query parameter) being absent, so the servlet API
+  (`getPart`) or the SSRF sink ran anyway; `PA-0054`'s only mechanical
+  enforcement is a bare-`GET` sweep, and Spring answers a bare `GET` on a
+  POST-only route with its own framework-level 405 before the handler ever
+  runs, so the sweep never reached the crash path.
+- **Remediation:** every `spring_boot` route now declares one of 7
+  absent-input kinds (`required_multipart`/`required_param`/etc.), rendered
+  before any sink; a new own-method bare-request sweep
+  (`tests/test_labgen_spring_boot_absent_input_live_boot.py`) sends each
+  route's own declared method, not only `GET`.
+- **Status:** Fixed (16/16 routes declared and passing on both twins). See
+  `docs/bugs/BUG-0054-*.md` and `PA-0056`.
+
 ## 2026-09-25 — LAB: `django` (PicTrail) routes 500'd on a bare GET — absent query parameter reached the sink as None (fixed, BUG-0052/PA-0054)
 
 - **Symptom:** a bare `GET` (no query string) of `/post`, `/explore`,
