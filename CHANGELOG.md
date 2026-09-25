@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 planning revision 4 — third round of 3 independent reviewer agents converges on the plan; no code change)
+- A third round of 3 fresh reviewer agents, aimed specifically at whether
+  revision 3's new R9 section (the `_PAGE_PROFILES`/`_twin_url_for` routing
+  mechanism needed to avoid `DuplicateRouteError`) was itself accurate,
+  complete, and adequate, found: R9 mischaracterized the collision key as
+  `(method, url)` when `route_accumulator.py`'s regex only ever captures
+  the URL (fixed); the claim that 4 webhook-signature test files "build
+  both twins together" was overstated — verified per-file that only
+  `test_labgen_php_laravel_access_control_live_boot.py` and
+  `test_labgen_phase_d_tier12_category5.py` genuinely exercise the
+  collision path (fixed, and R9's mitigation retargeted accordingly); a
+  second, currently-inert consumer of the same `_PAGE_PROFILES` keys
+  (`ground_truth_cases_for()`/`cutover_gate.py`) was found and noted, with
+  its own test added to the re-run list; R9's `_PAGE_PROFILES` wiring
+  requirement was only explicit in §4 step 4's own text, not steps 2/3/5
+  (fixed — now explicit in every step); and §3a/§4 step 3 still described
+  the fix as a "route-path edit" after R9 had already established no
+  manifest edit is needed (fixed — corrected to "no manifest edit, only an
+  emitter-code dict update"). Round 3's adequacy reviewer explicitly
+  confirmed the plan's substance is otherwise sound and recommended no
+  further full review round once these narrow fixes landed — this document
+  is now considered converged. See the plan doc's §9 for the full,
+  round-by-round account across all 4 revisions.
+
 ## 2026-09-25 (Lane 1 step 3 planning revision 3 — second round of 3 independent reviewer agents finds R9, a systemic implementation blocker; no code change)
 - A second round of 3 fresh reviewer agents (accuracy/thoroughness/adequacy,
   no memory of the prior round) re-checked
