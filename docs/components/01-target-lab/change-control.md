@@ -5,14 +5,20 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
-**Status: DRAFT, pre-change review gate in progress.** The underlying plan
-(`docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`) already went through 2 full
-review rounds and reached 3/3 agreement (2026-09-25). This entry is that
-plan condensed into the change-control template, but the entry itself has
-not yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
-gate is the next step, mirroring `CC-LAB-0241`'s drafting process exactly.
-Implementation is **not authorized** until this entry reaches 3/3 (2
-reviewers + proposing agent).
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 2 revision
+rounds — round 1 found R1b, the plan's own documented self-correction of a
+risk-register mistake, buried inside R3's prose instead of given its own
+labeled item, plus a silent, unflagged deviation in the `/explore`
+deliverable from the plan's own §6 wording; round 2 found the underlying
+plan's own §6 still carried a stale citation the entry had (correctly)
+already updated past — fixed in the plan itself and logged there, then
+both reviewers re-confirmed ACCURATE and ADEQUATE) — **implementation
+authorized, not yet landed.** Condensed from
+`docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`, which itself already went
+through 2 full review rounds and reached 3/3 agreement (2026-09-25); that
+document is the full detail, this entry is its change-control-template
+compression.
 
 - **Change:** converts PicTrail (`django`, already a real, named identity
   with 6 real pages and its own ground truth — unlike Lane 1's
