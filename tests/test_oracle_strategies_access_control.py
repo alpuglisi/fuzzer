@@ -14,7 +14,7 @@ from fuzzlab.oracle.strategies import AccessControlIdorStrategy, default_strateg
 
 
 def _cand():
-    return Candidate(url="http://h/generated/labgen-go-0005", param="channel_id",
+    return Candidate(url="http://h/channels/analytics", param="channel_id",
                      method="GET", location="query", vuln_class="access_control",
                      category="access-control")
 

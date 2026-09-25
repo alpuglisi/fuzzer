@@ -48,12 +48,12 @@ def test_real_boot_confirms_the_vulnerable_twin_and_fails_closed_on_the_secure_t
     sender = RequestsProbeSender(timeout=10.0)
 
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
-        vuln_candidate = _candidate(harness.base_url + "/generated/labgen-go-0017")
+        vuln_candidate = _candidate(harness.base_url + "/channels/emotes/upload")
         verdict = strategy.confirm(vuln_candidate, sender)
         assert verdict is not None and verdict.confirmed
         assert verdict.vuln_class == "unrestricted_file_upload"
         assert verdict.evidence["served_content_type"] == "image/svg+xml"
         assert verdict.evidence["control_content_type"] == "image/png"
 
-        secure_candidate = _candidate(harness.base_url + "/generated/labgen-go-0018")
+        secure_candidate = _candidate(harness.base_url + "/channels/emotes/upload.labgen-go-0018")
         assert strategy.confirm(secure_candidate, sender) is None

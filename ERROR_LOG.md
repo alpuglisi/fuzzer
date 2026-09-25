@@ -18,6 +18,26 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `go_net_http` (LoopCast) routes 502/500'd on a bare GET — absent query parameter reached the sink as an empty string (fixed, BUG-0053/PA-0055)
+
+- **Symptom:** a bare `GET` of `/api/clips/thumbnail`, `/clips/download`
+  (vulnerable twin) and `/clips/export` (both twins) reproduced live against
+  the pre-change emitter with the export directory absent: `502` (the SSRF
+  fetch of an empty URL), `502`, and `500` respectively.
+- **Root cause:** `read_url_query_param.go.j2` had no default or
+  required-parameter guard for these three routes, so `""` reached each
+  sink (`client.Get("")` -> a connection error mapped to 502; opening an
+  empty-named export file -> a 500). The same defect class as BUG-0051/
+  BUG-0052, in a third emitter; PA-0053's only enforcement (a link-
+  reachability crawl) never ran on the unlinked `go_net_http` build.
+- **Remediation:** `CC-LAB-0243`: a `required_400` route-profile key on all
+  three routes (no safe default URL/filename exists for any of them -- a
+  default would make the vulnerable twin fetch/read it) -> a handled 400
+  before the sink runs, identically on both twins. Verified live: all three
+  routes (both twins where applicable) now answer 400 (`docs/bugs/BUG-0053-
+  ...md`, `PA-0055`).
+- **Status:** Fixed.
+
 ## 2026-09-25 — LAB: `python_fastapi` / `node_express` routes had no declared absent-input behavior — a bare request 500'd, exited the Node process, or answered twin-asymmetrically (fixed, BUG-0056/PA-0058)
 
 - **Symptom:** a bare `GET /products` in the `python_fastapi` sample answered

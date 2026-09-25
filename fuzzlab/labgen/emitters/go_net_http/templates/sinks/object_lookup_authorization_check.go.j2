@@ -1,9 +1,14 @@
 _ = {{ broadcaster_var }} // always read by the source; used here so a
 // vulnerable twin whose transform ignores it still compiles.
 if {{ value_expr }} {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, `{"channel_id":"`+{{ channel_id_var }}+`","subscriber_count":42,"revenue_estimate_usd":1234.56}`)
+	// CC-LAB-0243: a real dashboard page inside the site layout. The echoed
+	// channel id is HTML-escaped (R3) so the conversion adds no reflected
+	// XSS the ground truth does not model.
+	renderPage(w, http.StatusOK, "{{ page_title | default("Channel dashboard") }}", "<h2>{{ page_title | default("Channel dashboard") }}</h2>"+
+		"<table><tr><th>Channel</th><td class=\"channel_id\">"+html.EscapeString({{ channel_id_var }})+"</td></tr>"+
+		"<tr><th>Subscribers</th><td class=\"subscriber_count\">42</td></tr>"+
+		"<tr><th>Estimated revenue (USD)</th><td class=\"revenue_estimate_usd\">1234.56</td></tr></table>")
 } else {
-	w.WriteHeader(http.StatusForbidden)
+	renderPage(w, http.StatusForbidden, "{{ page_title | default("Channel dashboard") }}", "<h2>{{ page_title | default("Channel dashboard") }}</h2>"+
+		"<p>This dashboard page is only available to the channel's own broadcaster.</p>")
 }

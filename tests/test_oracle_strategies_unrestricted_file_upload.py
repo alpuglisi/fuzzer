@@ -18,7 +18,7 @@ from fuzzlab.oracle.strategies import (
 
 
 def _cand():
-    return Candidate(url="http://h/generated/labgen-go-0017", param="file",
+    return Candidate(url="http://h/channels/emotes/upload", param="file",
                      method="POST", location="body", vuln_class="unrestricted_file_upload",
                      category="unrestricted-file-upload", sink_context="fs_web_root_write")
 

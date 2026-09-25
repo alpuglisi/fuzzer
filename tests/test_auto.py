@@ -108,8 +108,8 @@ def test_points_from_ground_truth_now_includes_header_points():
     points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
 
     tested = {(p.url, p.param, p.method, p.location) for p in points}
-    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET", "query") in tested
-    assert ("http://127.0.0.1:8080/generated/labgen-go-0001", "X-Signature-256",
+    assert ("http://127.0.0.1:8080/api/clips/thumbnail", "url", "GET", "query") in tested
+    assert ("http://127.0.0.1:8080/webhooks/eventsub", "X-Signature-256",
             "POST", "header") in tested
 
     skipped_by_param = {param: reason for _p, _m, param, reason in skipped}

@@ -21,6 +21,10 @@ var jwtSecret = []byte("fuzzlab-go-net-http-lab-fixed-demo-jwt-secret")
 
 func main() {
 	mux := http.NewServeMux()
+	// CC-LAB-0243 (FR-LAB-162, R5): the site layer's own route (the
+	// homepage) registers before the generated per-cell routes so a
+	// pattern conflict at startup (R5) surfaces from either side equally.
+	registerSiteRoutes(mux)
 	registerRoutes(mux)
 
 	addr := "127.0.0.1:" + port()

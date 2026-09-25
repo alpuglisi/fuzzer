@@ -3,98 +3,98 @@
   "target": "go_net_http",
   "points": [
     {
-      "url": "/generated/labgen-go-0001",
+      "url": "/webhooks/eventsub",
       "method": "POST",
       "param": "X-Signature-256",
       "location": "header",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0003",
+      "url": "/api/clips/thumbnail",
       "method": "GET",
       "param": "url",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0005",
+      "url": "/channels/analytics",
       "method": "GET",
       "param": "channel_id",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0007",
+      "url": "/channels/settings",
       "method": "GET",
       "param": "Authorization",
       "location": "header",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0009",
+      "url": "/sessions/refresh",
       "method": "POST",
       "param": "body",
       "location": "body",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0011",
+      "url": "/channels/profile",
       "method": "POST",
       "param": "body",
       "location": "body",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0013",
+      "url": "/channels/subscribers",
       "method": "GET",
       "param": "channel_id",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0015",
+      "url": "/clips/download",
       "method": "GET",
       "param": "source_url",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0017",
+      "url": "/channels/emotes/upload",
       "method": "POST",
       "param": "file",
       "location": "body",
       "rendering": "server"
     },
     {
-      "url": "/generated/labgen-go-0019",
+      "url": "/subscriptions/purchase",
       "method": "POST",
       "param": "body",
       "location": "body",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0021",
+      "url": "/clips/export",
       "method": "GET",
       "param": "filename",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0023",
+      "url": "/channels/commands",
       "method": "POST",
       "param": "body",
       "location": "body",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0025",
+      "url": "/channels/redirect",
       "method": "GET",
       "param": "destination",
       "location": "query",
       "rendering": "server-json"
     },
     {
-      "url": "/generated/labgen-go-0027",
+      "url": "/auth/login-redirect",
       "method": "GET",
       "param": "next",
       "location": "query",

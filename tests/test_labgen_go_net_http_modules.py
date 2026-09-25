@@ -65,8 +65,8 @@ def test_render_only_complexity_wraps_body_in_handler_func() -> None:
 
 
 def test_render_route_line_uses_method_pattern_syntax() -> None:
-    line = render_route_line(method="POST", path="/generated/labgen-go-0001", handler_name="handleLabgenGo0001")
-    assert line.strip() == 'mux.HandleFunc("POST /generated/labgen-go-0001", handleLabgenGo0001)'
+    line = render_route_line(method="POST", path="/webhooks/eventsub", handler_name="handleLabgenGo0001")
+    assert line.strip() == 'mux.HandleFunc("POST /webhooks/eventsub", handleLabgenGo0001)'
 
 
 # -- CC-LAB-0172 Phase B: SSRF (server_side_http_fetch) -----------------------

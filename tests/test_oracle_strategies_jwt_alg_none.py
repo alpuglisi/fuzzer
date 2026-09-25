@@ -16,7 +16,7 @@ from fuzzlab.oracle.strategies import JwtAlgNoneConfusionStrategy
 
 
 def _cand():
-    return Candidate(url="http://h/generated/labgen-go-0007", param="Authorization",
+    return Candidate(url="http://h/channels/settings", param="Authorization",
                      method="GET", location="header", vuln_class="jwt_algorithm_confusion",
                      category="jwt-algorithm-confusion")
 

@@ -81,7 +81,7 @@ def test_requests_probe_sender_header_location():
     # request header named the literal `param`, no query/body change.
     session = _FakeSession()
     RequestsProbeSender(session=session).send(
-        "http://localhost/generated/labgen-go-0001", "X-Signature-256", "deadbeef",
+        "http://localhost/webhooks/eventsub", "X-Signature-256", "deadbeef",
         method="POST", location="header")
     call = session.calls[0]
     assert call["method"] == "POST"
@@ -124,10 +124,10 @@ def test_seam_probe_sender_header_location():
                          fetch_factory=_factory(CookieLoginFetcher()))
     client = HttpClient(RequestBudget(50), ["localhost"], session=mgr, transport=transport)
     SeamProbeSender(client, "admin").send(
-        "http://localhost/generated/labgen-go-0001", "X-Signature-256", "deadbeef",
+        "http://localhost/webhooks/eventsub", "X-Signature-256", "deadbeef",
         method="POST", location="header")
     assert captured["method"] == "POST"
-    assert captured["url"] == "http://localhost/generated/labgen-go-0001"
+    assert captured["url"] == "http://localhost/webhooks/eventsub"
     assert captured["headers"].get("X-Signature-256") == "deadbeef"
     assert captured["body"] is None
 

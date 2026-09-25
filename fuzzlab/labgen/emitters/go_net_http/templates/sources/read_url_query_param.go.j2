@@ -1,1 +1,17 @@
 {{ var_name }} := r.URL.Query().Get("{{ param_name }}")
+{% if default_value is defined %}
+// Absent-input default (CC-LAB-0243, PA-0053/PA-0054): a bare request is
+// served as if it asked for "{{ default_value }}", identically on both twins.
+if {{ var_name }} == "" {
+	{{ var_name }} = "{{ default_value }}"
+}
+{% endif %}
+{% if required_param is defined %}
+// Required parameter (CC-LAB-0243, PA-0053/PA-0054): no safe default
+// exists, so an absent/empty value is a handled 400 before the sink runs,
+// identically on both twins.
+if {{ var_name }} == "" {
+	http.Error(w, "missing required parameter: {{ param_name }}", http.StatusBadRequest)
+	return
+}
+{% endif %}

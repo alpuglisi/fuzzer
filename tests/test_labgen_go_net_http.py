@@ -91,11 +91,14 @@ def test_render_route_accumulator_sorts_by_cell_id_and_uses_cell_derived_paths()
     accumulator = em.render_route_accumulator([SECURE_CELL, VULN_CELL])
     code = accumulator.content.decode()
     assert accumulator.path == "routes_generated.go"
-    first = code.index("labgen-go-0001")
-    second = code.index("labgen-go-0002")
+    first = code.index("LabgenGo0001")
+    second = code.index("LabgenGo0002")
     assert first < second
-    assert "/generated/labgen-go-0001" in code
-    assert "/generated/labgen-go-0002" in code
+    # CC-LAB-0243 (R1): the vulnerable cell at its own realistic route.path;
+    # its secure twin at the twin-suffixed variant (served_url_for), not
+    # the pre-Lane-3 generic `/generated/{cell_id}` scheme.
+    assert '"POST /webhooks/eventsub"' in code
+    assert '"POST /webhooks/eventsub.labgen-go-0002"' in code
 
 
 def test_two_renders_of_the_same_cell_are_byte_identical() -> None:
@@ -146,8 +149,16 @@ def test_accumulator_covers_both_shapes_with_distinct_paths() -> None:
     em = GoEmitter()
     accumulator = em.render_route_accumulator(list(ALL_CELLS))
     code = accumulator.content.decode()
-    for cell in ALL_CELLS:
-        assert f"/generated/{cell.cell_id.lower()}" in code
+    # CC-LAB-0243 (R1): every cell registers at its own served_url_for
+    # result (a real route, twin-suffixed for the secure twin), not the
+    # pre-Lane-3 generic `/generated/{cell_id}` scheme -- and every
+    # registered path is distinct.
+    from fuzzlab.labgen.emitters.go_net_http import served_url_for
+
+    served_urls = {served_url_for(cell) for cell in ALL_CELLS}
+    assert len(served_urls) == len(ALL_CELLS)
+    for url in served_urls:
+        assert f' {url}"' in code
 
 
 def go_available() -> bool:

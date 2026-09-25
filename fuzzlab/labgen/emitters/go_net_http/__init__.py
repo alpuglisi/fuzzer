@@ -196,7 +196,7 @@ from fuzzlab.labgen.schema import Cell, SinkContext
 
 from .modules import COMPLEXITIES, SINKS, SOURCES, TRANSFORMS, render_route_line
 
-__all__ = ["GoEmitter"]
+__all__ = ["ABSENT_INPUT_KINDS", "GoEmitter", "served_url_for"]
 
 
 class _ModuleSet(NamedTuple):
@@ -325,7 +325,7 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "read_channel_id_and_broadcaster_header": (),
     "no_ownership_check": (),
     "identity_match_before_fetch": (),
-    "object_lookup_authorization_check": ("io",),
+    "object_lookup_authorization_check": ("html",),
     "read_authorization_bearer_token": (
         "crypto/hmac", "crypto/sha256", "encoding/base64", "encoding/json", "strings",
     ),
@@ -358,55 +358,168 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
 #: Per-route static context this Phase A emitter needs beyond the
 #: verdict-relevant Cell IR -- same render-only-information separation
 #: rationale as every other stack's own per-route params table.
+#:
+#: CC-LAB-0243 (FR-LAB-162, Browsable Labs Lane 3) makes one key
+#: **required on every route** and adds optional render-only keys, each
+#: consumed by exactly one source/sink template and identical on both twins
+#: of a route (so every minimal pair still differs only in its
+#: transform/sink region, BUG-0027):
+#:
+#: * ``absent_input`` (required, PA-0053/PA-0054/PA-0055): the route's
+#:   *declared* behavior for a bare request carrying none of its inputs --
+#:   one of :data:`ABSENT_INPUT_KINDS`. Checked offline over every route
+#:   the go manifests produce (``tests/test_labgen_go_net_http_browsable.py``)
+#:   and live by the every-route, two-method bare sweep
+#:   (``tests/test_labgen_go_net_http_navigability_live_boot.py``).
+#: * ``default_value`` (``read_url_query_param``): an absent/empty value
+#:   becomes this default before the sink runs.
+#: * ``required_param`` (``read_url_query_param``): an absent/empty value is
+#:   a handled 400 before the sink runs (no safe default exists).
+#: * ``default_to_caller`` (``read_channel_id_and_broadcaster_header``): an
+#:   absent ``channel_id`` defaults to the caller's own ``X-Broadcaster-Id``;
+#:   with neither present, a handled 401 page before the sink (R6).
+#: * ``page_title`` (``object_lookup_authorization_check``): the dashboard
+#:   page's title -- that sink renders inside the site layout (CC-LAB-0243).
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
-    "/webhooks/eventsub": {},
-    "/api/clips/thumbnail": {"var_name": "targetUrl", "param_name": "url"},
-    "/channels/analytics": {"param_name": "channel_id"},
-    "/channels/settings": {},
-    "/sessions/refresh": {},
-    "/channels/profile": {},
+    # Genuine api (EventSub webhook receiver); GET serves its client page.
+    "/webhooks/eventsub": {"absent_input": "form_on_get"},
+    # CC-LAB-0243: `required_param` -- no safe default URL exists (any
+    # default would make the vulnerable twin fetch it); before this change
+    # a bare GET answered 502 on the vulnerable twin (BUG-0053).
+    "/api/clips/thumbnail": {
+        "var_name": "targetUrl", "param_name": "url",
+        "absent_input": "required_400", "required_param": True,
+    },
+    "/channels/analytics": {
+        "param_name": "channel_id",
+        "absent_input": "default_caller_else_401", "default_to_caller": True,
+        "page_title": "Channel analytics",
+    },
+    # Bearer-token JSON api: its existing fail-closed token check already
+    # answers a bare request with 401 on both twins (asserted, unchanged).
+    "/channels/settings": {"absent_input": "auth_reject_401"},
+    # The source reads no request input at all (`no_op_token_request`).
+    "/sessions/refresh": {"absent_input": "no_input"},
+    "/channels/profile": {"absent_input": "form_on_get"},
     # CC-LAB-0183: second instance of the access_control/db_row_by_id_lookup
     # shape (CC-LAB-0178's own /channels/analytics), zero new generator
     # code -- just this route-profile entry.
-    "/channels/subscribers": {"param_name": "channel_id"},
+    "/channels/subscribers": {
+        "param_name": "channel_id",
+        "absent_input": "default_caller_else_401", "default_to_caller": True,
+        "page_title": "Subscribers",
+    },
     # CC-LAB-0185: second instance of the ssrf/server_side_http_fetch shape
     # (CC-LAB-0172's own /api/clips/thumbnail), zero new generator code --
-    # just this route-profile entry.
-    "/clips/download": {"var_name": "sourceUrl", "param_name": "source_url"},
+    # just this route-profile entry. CC-LAB-0243: `required_param`, for the
+    # same reason as /api/clips/thumbnail (BUG-0053).
+    "/clips/download": {
+        "var_name": "sourceUrl", "param_name": "source_url",
+        "absent_input": "required_400", "required_param": True,
+    },
     # CC-LAB-0186: this stack's first unrestricted_file_upload/
     # fs_web_root_write instance -- no per-route var_name/param_name needed
-    # (ReadUploadedFileSource publishes its own default identifiers),
-    # matching /webhooks/eventsub's/`/channels/settings`'s own empty entries.
-    "/channels/emotes/upload": {},
+    # (ReadUploadedFileSource publishes its own default identifiers).
+    # CC-LAB-0243: a `page` -- GET renders the real upload form.
+    "/channels/emotes/upload": {"absent_input": "form_on_get"},
     # CC-LAB-0189: this stack's first price_integrity_bypass/
     # payment_charge_amount instance -- no per-route var_name/param_name
     # needed (ReadSubscriptionPurchaseRequestSource publishes its own
-    # default identifiers), matching /webhooks/eventsub's/
-    # /channels/settings's/`/channels/emotes/upload`'s own empty entries.
-    "/subscriptions/purchase": {},
+    # default identifiers).
+    "/subscriptions/purchase": {"absent_input": "form_on_get"},
     # CC-LAB-0190: this project's first path_traversal/fs_path_read
     # instance on any stack. Reuses ReadUrlQueryParamSource's own
-    # var_name/param_name convention (like /api/clips/thumbnail's own
-    # entry above) -- filename is read from the `filename` query param.
-    "/clips/export": {"var_name": "requestedFilename", "param_name": "filename"},
+    # var_name/param_name convention -- filename is read from the
+    # `filename` query param. CC-LAB-0243: `required_param` -- a download
+    # naming no export has no meaningful default.
+    "/clips/export": {
+        "var_name": "requestedFilename", "param_name": "filename",
+        "absent_input": "required_400", "required_param": True,
+    },
     # CC-LAB-0196: this stack's first ssti/template_render instance -- no
     # per-route var_name/param_name needed (ReadChannelCommandRequestSource
-    # publishes its own default identifier), matching
-    # `/channels/emotes/upload`'s/`/subscriptions/purchase`'s own empty
-    # entries.
-    "/channels/commands": {},
+    # publishes its own default identifier).
+    "/channels/commands": {"absent_input": "form_on_get"},
     # CC-LAB-0198: this project's first http_header_injection/
-    # http_response_header_value instance on any stack. Reuses
-    # ReadUrlQueryParamSource's own var_name/param_name convention (like
-    # /api/clips/thumbnail's/`/clips/export`'s own entries above) --
-    # destination is read from the `destination` query param.
-    "/channels/redirect": {"var_name": "destination", "param_name": "destination"},
+    # http_response_header_value instance on any stack. CC-LAB-0243:
+    # defaults to `/`, which the secure twin's own allowlist accepts --
+    # before this change the vulnerable twin sent an empty `Location`.
+    "/channels/redirect": {
+        "var_name": "destination", "param_name": "destination",
+        "absent_input": "default", "default_value": "/",
+    },
     # CC-LAB-0199: this stack's first open_redirect/http_redirect_location
-    # instance. Reuses ReadUrlQueryParamSource's own var_name/param_name
-    # convention (like /channels/redirect's own entry above) -- the
-    # redirect target is read from the `next` query param.
-    "/auth/login-redirect": {"var_name": "nextTarget", "param_name": "next"},
+    # instance. CC-LAB-0243 (R7): defaults to `/dashboard`, a real site page
+    # the secure twin's allowlist accepts (`/` alone does not: the regex
+    # needs `/` followed by an alphanumeric character).
+    "/auth/login-redirect": {
+        "var_name": "nextTarget", "param_name": "next",
+        "absent_input": "default", "default_value": "/dashboard",
+    },
 }
+
+#: CC-LAB-0243: the closed vocabulary of ``absent_input`` declarations.
+ABSENT_INPUT_KINDS: frozenset[str] = frozenset(
+    {
+        "default",                  # a real default value (``default_value``)
+        "required_400",             # handled 400 before the sink (``required_param``)
+        "default_caller_else_401",  # caller's own id, else handled 401 (``default_to_caller``)
+        "auth_reject_401",          # existing fail-closed credential check answers 401
+        "form_on_get",              # POST route: GET serves its page, never the sink
+        "no_input",                 # the source reads no request input at all
+    }
+)
+
+#: CC-LAB-0243 (FR-LAB-162, R1 -- see ``requirements.md``'s FR-LAB-162
+#: "R1 sign-off"): every Twitch-clone route's **vulnerable** cell, served at
+#: its own manifest ``route.path`` (the URL ground truth names), replacing
+#: the generic ``/generated/{cell_id}`` every cell used before. Declared
+#: explicitly, never inferred from odd/even cell IDs.
+_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
+    {
+        "LABGEN-GO-0001", "LABGEN-GO-0003", "LABGEN-GO-0005", "LABGEN-GO-0007",
+        "LABGEN-GO-0009", "LABGEN-GO-0011", "LABGEN-GO-0013", "LABGEN-GO-0015",
+        "LABGEN-GO-0017", "LABGEN-GO-0019", "LABGEN-GO-0021", "LABGEN-GO-0023",
+        "LABGEN-GO-0025", "LABGEN-GO-0027",
+    }
+)
+
+#: CC-LAB-0243 (R1, branch (a)): each route's **secure twin**, served at the
+#: twin-suffixed variant of that route (:func:`_twin_url_for`), mirroring the
+#: `django` (CC-LAB-0242) and `php_laravel` conventions. Ground truth still
+#: describes only the vulnerable cell. Every entry shares its ``route.path``
+#: with exactly one :data:`_REAL_PAGE_CELL_IDS` cell (asserted offline).
+_REAL_PAGE_TWIN_CELL_IDS: frozenset[str] = frozenset(
+    {
+        "LABGEN-GO-0002", "LABGEN-GO-0004", "LABGEN-GO-0006", "LABGEN-GO-0008",
+        "LABGEN-GO-0010", "LABGEN-GO-0012", "LABGEN-GO-0014", "LABGEN-GO-0016",
+        "LABGEN-GO-0018", "LABGEN-GO-0020", "LABGEN-GO-0022", "LABGEN-GO-0024",
+        "LABGEN-GO-0026", "LABGEN-GO-0028",
+    }
+)
+
+
+def _twin_url_for(real_url: str, cell_id: str) -> str:
+    """``/webhooks/eventsub`` + ``LABGEN-GO-0002`` ->
+    ``/webhooks/eventsub.labgen-go-0002`` -- the same suffix shape the
+    `django` emitter's own ``_twin_url_for`` produces."""
+    return f"{real_url}.{cell_id.lower()}"
+
+
+def served_url_for(cell: Cell) -> str:
+    """The URL path ``cell`` is actually served at -- **the one shared
+    derivation** of that fact (PA-0003/PA-0021), used by
+    :meth:`GoEmitter.render_route_accumulator` and by tests alike:
+
+    * a vulnerable cell (:data:`_REAL_PAGE_CELL_IDS`): its ``route.path``;
+    * its secure twin (:data:`_REAL_PAGE_TWIN_CELL_IDS`): :func:`_twin_url_for`;
+    * any other (not yet pinned) cell: ``/generated/{cell_id}``.
+    """
+    if cell.cell_id in _REAL_PAGE_CELL_IDS:
+        return cell.route.path
+    if cell.cell_id in _REAL_PAGE_TWIN_CELL_IDS:
+        return _twin_url_for(cell.route.path, cell.cell_id)
+    return f"/generated/{cell.cell_id.lower()}"
 
 
 class GoEmitter(Emitter):
@@ -528,22 +641,32 @@ class GoEmitter(Emitter):
         """
         supported = [c for c in cells if self.supports(c.vuln_class, c.sink_context)]
         by_id = sorted(supported, key=lambda c: c.cell_id)
-        route_lines = [
-            render_route_line(
-                method=c.route.method,
-                # Cell-ID-derived, not `c.route.path` directly: a vulnerable/
-                # secure twin pair shares one `route.path` (both illustrate
-                # the same conceptual endpoint), so registering both at the
-                # literal manifest path would double-register the same
-                # `net/http.ServeMux` pattern. Matches `node_express`'s own
-                # `render_route_accumulator` convention
-                # (`/generated/{cell_id.lower()}`) exactly, for the same
-                # reason.
-                path=f"/generated/{c.cell_id.lower()}",
-                handler_name=f"handle{_pascal_case(c.cell_id)}",
+        route_lines: list[str] = []
+        # `route.go.j2` renders one registration line; the GET page lines
+        # below use the same shape so gofmt sees one uniform block.
+        for c in by_id:
+            # CC-LAB-0243: the one shared `served_url_for` derivation
+            # (PA-0003/PA-0021) -- the vulnerable twin at its real
+            # `route.path`, the secure twin at the twin-suffixed variant, so
+            # the two never double-register one `net/http.ServeMux` pattern
+            # (the reason the old `/generated/{cell_id}` scheme existed).
+            served = served_url_for(c)
+            route_lines.append(
+                render_route_line(
+                    method=c.route.method,
+                    path=served,
+                    handler_name=f"handle{_pascal_case(c.cell_id)}",
+                )
             )
-            for c in by_id
-        ]
+            # CC-LAB-0243 (`absent_input: form_on_get`): a POST route also
+            # answers GET at the same URL with its page -- the site layer's
+            # form/client page for that route (`site.go`'s `sitePage`), never
+            # the cell's own handler, so every per-cell handler file (and so
+            # every minimal pair) is unchanged.
+            if c.route.method.upper() == "POST":
+                route_lines.append(
+                    f'\tmux.HandleFunc("GET {served}", sitePage("{c.route.path}"))\n'
+                )
         go_source = (
             "package main\n"
             "\n"

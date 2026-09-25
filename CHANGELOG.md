@@ -4,6 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 3 implemented: LoopCast/go_net_http browsable, CC-LAB-0243/FR-LAB-162)
+- Implemented `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md` (`CC-LAB-0243`):
+  LoopCast (the `go_net_http` Twitch clone) gets a homepage, shared layout,
+  a `/dashboard` page, and a client page for every route (5 static forms
+  for the `form_on_get` POST routes, plus the 2 dashboard pages converted
+  from JSON to escaped HTML); secure twins moved to twin-suffixed URLs
+  (R1 branch (a)); ~193 `/generated/labgen-go-NNNN` literals across 15
+  test/ground-truth files replaced with `served_url_for`'s real URLs
+  (R2); a new spider-based navigability test crawls the whole build and
+  found two real linkability gaps (4 unlinked ground-truth URLs; a
+  redirect default pointing at a route that didn't exist), both fixed.
+  Fixed BUG-0053 (bare-request 500/502s on 3 routes -- a completion of
+  PA-0054's own named sweep for this emitter, not a new rule) and seeded
+  the clip-export directory (R9: missing scaffolding, not a defect).
+  `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 gained an "R6 generalization"
+  paragraph extending its owner-scoped-page acceptance rule beyond
+  `php_laravel`'s split apps.
+
 ## 2026-09-25 (Lane 6 implemented: MeadowMart/node_express + python_fastapi sample browsable, CC-LAB-0246/FR-LAB-168-169)
 - Implemented `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md` (`CC-LAB-0246`).
   - **MeadowMart:** its backend-for-frontend JSON APIs are unchanged.
