@@ -1136,8 +1136,13 @@ Skip-guarded on `rails_boot_available()`.
       updated (Lane 2 precedent).
 - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0245`.
 - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 5 row updated to done, with the
-      numbers actually used. If more than one `CC-LAB` number was needed,
-      bump Lanes 6–7 immediately.
+      numbers actually used. If this step needed more than its reserved
+      single `CC-LAB-0245`, or more than its reserved `FR-LAB-166`–`167`,
+      Lanes 6–7's CC-LAB/FR-LAB numbers shift by the overflow (+1 per extra
+      number), applied immediately in that same doc. Follow the discipline in
+      its correction notes (`docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`, the
+      actual FR-LAB-158/159 collision between Lanes 1 and 2), and flag the
+      shift to the orchestrator.
 
 ## 7. Out of scope
 
@@ -1342,3 +1347,15 @@ claim against the installed gem source and found no errors.
   else changed.
 - **3/3 agreement** (2 reviewers plus the proposing agent). The plan is
   converged. Implementation still requires `CC-LAB-0245`'s own gate.
+
+**Post-convergence correction (2026-09-25, during `CC-LAB-0245`'s entry-gate
+round 1).** The entry's adequacy reviewer found that the
+numbering-collision contingency covered CC-LAB and BUG/PA but omitted
+FR-LAB. §6's last deliverable is updated to bundle CC-LAB/FR-LAB (overflow
+beyond `CC-LAB-0245` or `FR-LAB-166`–`167` shifts Lanes 6–7 immediately),
+mirroring `CC-LAB-0242`'s wording and citing the real FR-LAB-158/159
+collision (`docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`). The entry's
+Deliverables copy is kept verbatim with it. This completes one
+bookkeeping-contingency item. It changes no risk, design or test, so it does
+not reopen the plan's 3/3 convergence, the same treatment as Lane 2's
+post-convergence §6 citation fix.

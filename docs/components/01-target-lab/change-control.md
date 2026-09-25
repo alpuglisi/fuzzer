@@ -10,7 +10,11 @@ Component code: **LAB**. Entry format and required fields: see
 - **Round 1 accuracy:** NOT ACCURATE, 1 trivial fix. A stale sentence in
   this status paragraph contradicted the plan's convergence; the paragraph
   has been rewritten.
-- **Round 1 adequacy:** pending.
+- **Round 1 adequacy:** NOT ADEQUATE, 1 gap. The numbering-collision
+  contingency covered CC-LAB and BUG/PA but omitted FR-LAB. Fixed in the
+  Impact section and in the final Deliverables bullet (the latter mirrored
+  word for word into plan §6).
+- **Next:** round 2 of both accuracy and adequacy.
 
 The underlying plan **converged 3/3 on 2026-09-25 after 5 rounds**, with
 reviewers dispatched by the orchestrating session. Round 5 was its last
@@ -103,8 +107,13 @@ template; the plan holds the full detail.
     is pinned by an offline failing or strict-xfail check and flagged to the
     orchestrator, not fixed here.
   - `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 5 row is updated on
-    completion. Lanes 6–7 are bumped only if this change needs more than its
-    reserved `CC-LAB-0245`, or more than one BUG/PA pair.
+    completion. Lanes 6–7's CC-LAB/FR-LAB numbers shift (+1 per extra
+    number, applied immediately, not deferred) only if this step needs more
+    than its reserved single `CC-LAB-0245` or its reserved
+    `FR-LAB-166`–`167`. Their BUG/PA numbers shift likewise only if this
+    step needs more than one BUG/PA pair. This is the same
+    collision-avoidance discipline as `CC-LAB-0242`, and as the FR-LAB-158/159
+    correction in `docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
   The full register is in the plan's §3 (R1–R16). Every item is named here
   with its own label; none is a settled no-risk finding:
@@ -302,8 +311,14 @@ template; the plan holds the full detail.
         updated (Lane 2 precedent).
   - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0245`.
   - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 5 row updated to done, with
-        the numbers actually used. If more than one `CC-LAB` number was
-        needed, bump Lanes 6–7 immediately.
+        the numbers actually used. If this step needed more than its
+        reserved single `CC-LAB-0245`, or more than its reserved
+        `FR-LAB-166`–`167`, Lanes 6–7's CC-LAB/FR-LAB numbers shift by the
+        overflow (+1 per extra number), applied immediately in that same
+        doc. Follow the discipline in its correction notes
+        (`docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`, the actual
+        FR-LAB-158/159 collision between Lanes 1 and 2), and flag the shift
+        to the orchestrator.
 - **Effectiveness:** pending. Nothing has been implemented. This entry's own
   review gate is in progress (see Status).
 
