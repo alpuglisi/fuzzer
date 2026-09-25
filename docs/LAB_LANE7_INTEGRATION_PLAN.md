@@ -5,7 +5,9 @@ Reserved bookkeeping (`docs/LAB_BROWSABLE_APPS_PLAN.md` row 7, PA-0031): `CC-LAB
 number is reserved and none is expected to be needed (this lane touches serving/packaging,
 not detection).
 
-Status: **draft, not yet reviewed**.
+Status: **draft, revised after round-1 review (2026-09-25)**. Round-1 verdicts: ACCURATE
+WITH CORRECTIONS (2 fixes, both applied below) / ADEQUATE CONTINGENT ON 8 items (all
+applied below). Round 2 re-review pending.
 
 ## §1. Scope (live pre-scan, 2026-09-25)
 
@@ -18,8 +20,13 @@ browsable *as a live-boot-harness-managed test process*, but:
   - `php_laravel` already has one, at module level: `fuzzlab/labgen/assemble.py`'s
     `assemble_lab(out_dir, *, manifest_paths=None, emitter=None, app=None)`, with an
     `app=` key from `emitters.php_laravel.app_site.APP_REGISTRY`
-    (`circlefeed`/`huddlehub`/`booking`, or `None` for the merged PFF build). Wired into
-    `lab/web.Dockerfile`'s `gen` stage today (`python3 -m fuzzlab.labgen.assemble --out /app`).
+    (`circlefeed`/`huddlehub`/`booking`, or `None` for the merged PFF build). Its CLI
+    (`python -m fuzzlab.labgen.assemble --out DEST [--app ...]`) already supports app
+    selection, but **`lab/web.Dockerfile`'s `gen` stage does not pass `--app` through
+    today** -- verified directly (round-1 accuracy correction): the file contains no
+    `ARG` and no `--app` flag anywhere; it always builds the merged PFF app. There is
+    also no Dockerfile yet, of any shape, for CircleFeed/Huddle Hub/Booking. This is
+    real, uncredited scope this lane must add (§2b), not an existing precedent to mirror.
   - `spring_boot` already has one, at emitter level (Lane 4, `CC-LAB-0244`):
     `assemble_spring_boot_app(app_key, dest)` in `fuzzlab/labgen/emitters/spring_boot/__init__.py`,
     built specifically for this lane. It writes a source tree only (`mvn package`/`java -jar`
@@ -55,14 +62,18 @@ browsable *as a live-boot-harness-managed test process*, but:
   **Naming note:** that table still says "Netflix clone"/"Expedia clone"; this lane's own
   compose/doc text uses the current names, ReelQueue/WanderFare (post-convergence rename,
   `CC-LAB-0244`), and the table itself gets a one-line fix (S12, below).
-- Six things are explicitly flagged to this lane, because no earlier lane owns them (each
-  citation verified directly against its source file, not from memory):
-  1. **Absent-input vocabulary reconciliation** (`docs/PREVENTIVE_ACTIONS.md` PA-0056's own
-     note, `docs/bugs/BUG-0056-*.md`): Lane 3 (`go_net_http`) and Lane 4 (`spring_boot`)
+- Seven things are explicitly flagged to this lane, because no earlier lane owns them
+  (each citation verified directly against its source file, not from memory; two
+  corrected from round-1's original misattribution):
+  1. **Absent-input vocabulary reconciliation** (`docs/bugs/BUG-0056-*.md`, "the
+     vocabulary is fragmented... different value spellings," and its own "flagged to
+     Lane 7" line; `PA-0058` rule 2 -- **not** `PA-0056`, which is about enforcement
+     precision (own-method sweep, every input channel), never vocabulary; round-1
+     accuracy correction applied): Lane 3 (`go_net_http`) and Lane 4 (`spring_boot`)
      independently spelled their `absent_input` values (`required_400` vs.
      `required_param`, etc.). Unify into one closed, cross-emitter value set.
-  2. **S15's cross-emitter check must validate membership**, not merely presence, against
-     that unified set (`PA-0058` rule 2's own unmet half).
+  2. **Lane 4's own S15 cross-emitter check must validate membership**, not merely
+     presence, against that unified set (`PA-0058` rule 2's own unmet half).
   3. **`node_express`'s production-mode serving decision** (`docs/bugs/BUG-0055-*.md`:
      "left to Lane 7, which PA-0057's check keeps honest") -- its 3 test-time
      `node app.js` launches don't set `NODE_ENV=production` (pinned by a strict xfail,
@@ -80,11 +91,20 @@ browsable *as a live-boot-harness-managed test process*, but:
      decide, and record, whether either blocks compose/production serving (it does not:
      neither is exercised by a bare boot).
   6. **Lane 3's own go_net_http S7 digit-check blind spot** (identified during Lane 4's own
-     work, never reported or fixed: `site.go`'s CSS is a Go backtick raw string literal,
-     never matched by the double-quote-only regex Lane 3's/Lane 4's own S7 tests use) --
-     flagged here for a decision, not silently fixed or silently skipped (per the
-     multi-agent orchestration policy's "flag, never silently build or skip" rule). See
-     S13 below.
+     work, never reported or fixed, and confirmed live in round-1 review -- not merely
+     hypothetical: `site.go:18-29`'s CSS is a Go backtick raw string literal containing a
+     genuine, currently-undetected `max-width:100%` 3-digit run; both Lane 3's and Lane
+     4's own S7 tests use a double-quote-only regex that never matches it) -- flagged
+     here for a decision, not silently fixed or silently skipped (per the multi-agent
+     orchestration policy's "flag, never silently build or skip" rule). See S13 below.
+  7. **A process-doc suggestion from Lane 4's own round-2 adequacy review** (non-blocking
+     there, deferred to this lane): codify in `docs/MULTI_AGENT_ORCHESTRATION.md` the
+     rule this project has already applied ad hoc at least twice (Lane 3/Lane 6's own
+     shared strict-xfail sentinels) -- "a shared strict-xfail sentinel file: the lane
+     that lands the fix deletes its own marker." **Decision:** do it. It is a single,
+     low-risk paragraph in an existing process doc, cheap enough that deferring it again
+     would just repeat the same "flag instead of fixing something trivial" pattern this
+     plan itself criticizes at S13. See 2h below.
 
 **Not** flagged to this lane, and explicitly out of scope here: ForgeCart's 5 stale
 `CC-LAB-0077`/`FR-LAB-81` comment citations (Lane 5's own plan recommends "the next free
@@ -124,14 +144,20 @@ already have one.
 
 ### 2b. Dockerfiles
 
-One Dockerfile per stack (not per app -- `spring_boot`'s three apps and `php_laravel`'s
-four share one Dockerfile each, parameterized by a build arg selecting the app, mirroring
-`lab/web.Dockerfile`'s existing `--app` passthrough for `php_laravel`):
+One Dockerfile per stack, each following `lab/web.Dockerfile`'s existing two-stage shape
+(a `gen` stage, then a real-runtime stage) -- **this lane builds app selection into
+`lab/web.Dockerfile` itself for the first time** (round-1 correction: no `--app`
+passthrough exists there today):
 
+- `lab/web.Dockerfile`: add an `ARG APP` (default empty, the current merged-PFF
+  behavior unchanged when unset) passed through to `assemble.py`'s `--app` flag, so this
+  one Dockerfile can build PFF, CircleFeed, Huddle Hub, or Booking depending on a
+  compose-level `build.args.APP`. This is new work, credited honestly as such.
 - `lab/web-django.Dockerfile`, `lab/web-go.Dockerfile`, `lab/web-spring.Dockerfile`,
   `lab/web-rails.Dockerfile`: new, one two-stage build each (a `gen` stage running the new
   `assemble_<stack>_app`/`assemble_spring_boot_app` function, then a stage with that
-  stack's real runtime), following `lab/web.Dockerfile`'s own two-stage shape.
+  stack's real runtime). `web-spring.Dockerfile` takes the same `ARG APP` treatment as
+  `web.Dockerfile` (`trackernest`/`reelqueue`/`wanderfare`).
 - `lab/web-node.Dockerfile` / `lab/web-fastapi.Dockerfile`: the two scaffold Dockerfiles
   already checked into each emitter (§1) are **the** Dockerfiles for these stacks --
   copied into `lab/`, not rewritten, unless a live-boot run shows they need a fix (S10
@@ -152,7 +178,15 @@ four share one Dockerfile each, parameterized by a build arg selecting the app, 
   - its own env-var-overridable port, following `PFF_WEB_PORT`'s naming
     (`CIRCLEFEED_WEB_PORT`, `PICTRAIL_WEB_PORT`, ... defaulting to the reserved port table);
   - no `depends_on: db` (none of the 10 needs PFF's MariaDB; SQLite/no-DB stacks manage
-    their own file-backed or no state).
+    their own file-backed or no state);
+  - **its own dedicated compose network, not the project's shared default network** (S17
+    below) -- each app is otherwise fully self-contained, so no cross-app network path is
+    needed, and one exists is a real risk in a lab whose whole purpose is hosting
+    exploitable sinks (ReelQueue's `/api/content/thumbnail-import` is a real,
+    live-verified SSRF: an `unchecked_url_fetch` on a caller-supplied URL). Compose's
+    default same-project network would otherwise let that sink's fetch reach e.g.
+    `http://picktrail:8000/` by service-name DNS even though every host port stays
+    loopback-only -- host-level isolation alone does not close this.
 - `lab/labctl.sh`: `PROFILE_ARGS` currently supports exactly one `--profile` value
   (`PFF_PROFILE`). Compose supports multiple `--profile` flags simultaneously; this lane
   extends `PFF_PROFILE` to accept a comma-separated list (e.g. `PFF_PROFILE=apps,desync`),
@@ -179,6 +213,12 @@ entry, decided during review -- R1 below), that:
 3. Is marked `slow` (every real app boot is real, per stack's own live-boot module) and
    skip-guarded per stack the same way each stack's own live-boot suite already is (a host
    missing e.g. `java`+`mvn` skips only that stack's row, not the whole run).
+
+This automated run is separate from, and does not replace, the one required manual
+full-profile boot in §4/§5 (a real `docker compose --profile apps up` of all 10 services
+together at least once) -- an in-process/subprocess re-run of each stack's own harness
+proves each app still works, but not that the 10 real containers coexist without a
+container-name, network-alias, or resource collision (S16/S17).
 
 ### 2e. Absent-input vocabulary reconciliation (§1 item 1-2)
 
@@ -214,12 +254,38 @@ entry, decided during review -- R1 below), that:
   this lane only needs to confirm that live before deciding whether the Dockerfile needs
   an `assets:precompile` step).
 
+### 2h. `SECRET_KEY_BASE` (D12 compliance)
+
+A real `RAILS_ENV=production` boot requires `SECRET_KEY_BASE` to be set (Rails refuses to
+boot in production without it). CLAUDE.md's D12 ("credentials live in the OS keyring /
+credential store — never commit secrets") forbids hardcoding one in `lab/compose.yaml` or
+`lab/web-rails.Dockerfile`. **Decision:** generate an ephemeral value at container start
+(e.g. `SECRET_KEY_BASE="${SECRET_KEY_BASE:-$(bin/rails secret)}"` in the container's own
+entrypoint, or an equivalent one-liner), never persisted, never committed, and not derived
+from anything sensitive -- ForgeCart has no real user data or real secrets to protect (it
+is a lab-only app whose whole ground truth is deliberately public), so an ephemeral,
+container-lifetime-only value is a complete, correct resolution, not a placeholder for
+later real-secret handling. This is recorded here explicitly rather than left as an
+unstated implementation detail (S15 below).
+
+### 2i. Process-doc addition (§1 item 7)
+
+`docs/MULTI_AGENT_ORCHESTRATION.md` gains a short paragraph naming the pattern this
+project has already used at least twice (a strict-xfail marker shared across concurrent
+lanes' own cross-emitter checks, e.g. Lane 4's `test_absent_input_declarations_cross_emitter.py`,
+resolved independently by whichever lane lands the underlying fix first): the lane that
+lands the fix deletes its own marker at merge; a concurrent lane must never delete another
+lane's still-relevant marker, and a marker that unexpectedly XPASSes after an unrelated
+merge (as happened during this branch's own Lane 4 merge, §3.S9's own sibling case) is
+converted to a positive confirmation, not silently deleted without comment.
+
 ### 2g. Runbook and docs
 
 - `docs/ON_HOST_RUNBOOK.md` (or a new `docs/LAB_MULTI_APP_RUNBOOK.md`, decided during
   review) gains a section: bringing up every app (`PFF_PROFILE=apps ./labctl.sh up`),
   the port table (copied from `docs/LAB_BROWSABLE_APPS_PLAN.md`, kept in sync -- a single
-  source-of-truth decision made explicit in the entry, not left implicit), and how to run
+  source-of-truth decision made explicit in the entry, not left implicit), the expected
+  resource footprint (S16), the per-app network-isolation posture (S17), and how to run
   the cross-app navigability check against a real running stack vs. the in-process path.
 - `docs/ARCHITECTURE.md`: one new paragraph (matching every earlier lane's own precedent)
   naming the compose services, the vocabulary reconciliation, and the cross-app run.
@@ -227,6 +293,7 @@ entry, decided during review -- R1 below), that:
   integration) and `FR-LAB-171` (the absent-input vocabulary contract).
 - `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 7's own row updated on completion; the stale
   "Netflix clone"/"Expedia clone" port-table names fixed to ReelQueue/WanderFare (S12).
+- `docs/MULTI_AGENT_ORCHESTRATION.md`: the 2i paragraph.
 
 ## §3. Risk register
 
@@ -265,9 +332,12 @@ entry, decided during review -- R1 below), that:
    stack's live-boot harness), never a second, hand-written copy (PA-0027).
 9. **S9** -- *Behavior-preserving-rename verification for `go_net_http`* (§3.S2): full
    non-slow suite plus `go_net_http`'s own `slow` live-boot/navigability suites, before
-   and after the rename, with identical pass/fail outcomes recorded in the change-control
-   entry's Effectiveness section (not merely "still green," which would not by itself
-   prove nothing changed in *which* tests exercise which behavior).
+   and after the rename, with identical pass/fail outcomes **captured as an explicit
+   before/after evidence artifact** (counts + which tests exercise which behavior),
+   recorded in the change-control entry's own Effectiveness section as a named,
+   separately-reviewable item -- not folded into a generic "vocabulary reconciliation
+   done" bullet (round-1 adequacy fix; mirrors how Lane 4's own `CC-LAB-0244` entry
+   treated equivalent before/after evidence for `BUG-0054`).
 10. **S10** -- *The two checked-in scaffold Dockerfiles (`node_express`/`python_fastapi`)
     were written speculatively and never actually built or booted.* Mitigation: a real
     `docker build`/`podman build` of each, verified live, before wiring either into
@@ -283,60 +353,126 @@ entry, decided during review -- R1 below), that:
     edit alongside this lane's own doc updates (2g).
 13. **S13** -- *`go_net_http`'s own S7 digit-check blind spot* (§1 item 6): `site.go`'s CSS
     is a Go backtick raw string literal, never matched by the double-quote-only regex both
-    Lane 3's and Lane 4's own S7 offline tests use, so a real `max-width:100%`-style 3+
-    digit run could sit undetected in already-merged, already-pushed code. **Decision
-    needed at review**: fix it now (touches an already-merged lane's file, `site.go`,
-    outside this lane's own stated scope) or flag-and-defer with a tracked follow-up
-    (matching how Lane 5 deferred ForgeCart's stale-citation cleanup). Recommendation:
-    defer with a tracked, precisely-worded follow-up rather than silently expand scope,
-    per the multi-agent orchestration policy's own "flag, never silently build or skip"
-    rule -- this lane's own reviewers should confirm or override that recommendation.
+    Lane 3's and Lane 4's own S7 offline tests use, and round-1 review confirmed a real,
+    currently-undetected `max-width:100%` 3-digit run already sits there in already-merged,
+    already-pushed code. **Decision needed at review**: fix it now (touches an
+    already-merged lane's file, `site.go`, outside this lane's own stated scope) or
+    flag-and-defer with a tracked follow-up (matching how Lane 5 deferred ForgeCart's
+    stale-citation cleanup). Recommendation: defer with a tracked, precisely-worded
+    follow-up rather than silently expand scope, per the multi-agent orchestration
+    policy's own "flag, never silently build or skip" rule -- this lane's own reviewers
+    should confirm or override that recommendation.
 14. **S14** -- *F1/F2's pinned-xfail status must not be silently disturbed* by this lane's
     own new production-mode boots. Mitigation: re-run `tests/test_labgen_node_express_browsable.py`/
     `tests/test_labgen_python_fastapi_browsable.py`'s existing strict-xfail tests
-    unchanged, confirmed still `xfail` (not `xpass`) after this lane's changes.
+    unchanged, confirmed still `xfail` (not `xpass`), **as its own explicit deliverable
+    line** (round-1 adequacy fix; previously only implied by "full suite green").
+15. **S15** -- *A real `RAILS_ENV=production` boot needs `SECRET_KEY_BASE`, and hardcoding
+    one anywhere in the repo would violate D12* (round-1 adequacy finding, previously an
+    unstated implementation detail). Mitigation: 2h's ephemeral, container-lifetime-only,
+    never-committed generation -- recorded as its own deliverable line.
+16. **S16** -- *Resource contention across up to 11 real containers on one host*
+    (4 PHP/Laravel, 1 Django, 1 Go, 3 Spring/JVM, 1 Rails, 1 Node -- the JVM apps
+    especially are not lightweight) is a real operational risk this plan's earlier draft
+    did not name (round-1 adequacy finding). Mitigation: the runbook (2g) states the
+    expected combined memory/CPU footprint, measured live during the manual full-profile
+    boot (§4); a per-service compose `deploy.resources.limits`/`mem_limit` is added if
+    that measurement shows it is needed, not preemptively guessed.
+17. **S17** -- *Compose's default same-project network would let one app's container
+    reach another's by service-name DNS even though every host port stays loopback-only*
+    (round-1 adequacy finding) -- a real concern specifically because this lab hosts
+    genuine exploitable sinks, including a live SSRF (`unchecked_url_fetch` on
+    ReelQueue's `/api/content/thumbnail-import`, a caller-supplied URL fetched
+    server-side) that could otherwise pivot to another app's internal container port.
+    Mitigation: 2c's per-app dedicated compose network (no shared default network across
+    app services), verified by an offline/live check that no two app containers can reach
+    each other (e.g. `docker network inspect` showing disjoint networks, or a live
+    connectivity probe from inside one app container to another's internal port failing).
 
 ## §4. Test design
 
 - Offline: one new module per new assemble function (tree-shape assertions), the extended
   `test_absent_input_declarations_cross_emitter.py` (membership, not just existence), a
-  loopback-only compose-service check (S3), and a `labctl.sh` profile-arg parsing check (S5).
-- Live (`slow`, skip-guarded per stack): each new Dockerfile built and booted at least once
-  (S10); the cross-app navigability run (2d); `go_net_http`'s full existing live-boot suite
-  re-run after the vocabulary rename (S9), with the before/after outcome recorded.
+  loopback-only compose-service check (S3), a per-app network-isolation check (S17), and a
+  `labctl.sh` profile-arg parsing check (S5).
+- Live (`slow`, skip-guarded per stack): each new Dockerfile built and booted individually
+  at least once (S10); the cross-app navigability run (2d, in-process per R2); `go_net_http`'s
+  full existing live-boot suite re-run after the vocabulary rename (S9), with the
+  before/after outcome recorded; F1/F2's xfails re-confirmed still `xfail` (S14).
+- **One manual, recorded full-profile boot**: a real `docker compose --profile apps up`
+  (or `PFF_PROFILE=apps ./labctl.sh up`) of all 10 new services together plus PFF, at
+  least once, with its resource footprint measured (S16) and its network isolation
+  verified (S17) -- this is the one check that an individually-passing per-Dockerfile
+  build (S10) and an in-process cross-app run (2d/R2) cannot substitute for, since neither
+  proves the 10 real containers coexist without a name/network/resource collision.
 - Full non-slow suite green throughout, counts recorded (PA-0038), the same discipline
   every earlier lane's own Deliverables checklist required.
 
-## §5. Deliverables (draft -- finalized after review)
+## §5. Sequencing (named gates)
+
+Ordered so a later gate never depends on an earlier one's *unresolved* risk (round-1
+adequacy fix: this section did not exist in the previous draft):
+
+1. **Gate A** -- S13/R3 decision recorded (fix now or flag-and-defer), and 2i's process-doc
+   paragraph landed. Both are cheap, independent of everything else, and settle two open
+   scope questions before any code is written.
+2. **Gate B** -- Per-stack assemble functions (2a) green, including each one's dual-path
+   test (S1, S8).
+3. **Gate C** -- Absent-input vocabulary rename (2e) landed, with S9's before/after
+   evidence captured, **before** Gate E touches `go_net_http` again (the cross-app run
+   must run against the renamed, already-verified vocabulary, not the old one).
+4. **Gate D** -- Every Dockerfile (2b) built and booted individually (S10), including the
+   `web.Dockerfile`/`web-spring.Dockerfile` `ARG APP` addition.
+5. **Gate E** -- compose.yaml + labctl (2c) wired: per-app networks (S17), loopback-only
+   (S3), profile-arg parsing (S5), `SECRET_KEY_BASE` handling (S15).
+6. **Gate F** -- The one manual full-profile boot (§4), with S16/S17 measured/verified
+   live, plus the automated cross-app navigability run (2d).
+7. **Gate G** -- Docs/bookkeeping (2g): runbook, `ARCHITECTURE.md`, `FR-LAB-170`/`171`,
+   the plan-table row and naming fix (S12), the change-control entry's Effectiveness
+   section (S9's explicit evidence, S14's explicit re-confirmation).
+
+## §6. Deliverables (draft -- finalized after review)
 
 - [ ] `assemble_django_app`/`assemble_go_net_http_app`/`assemble_ruby_rails_app`, each with
-      its dual-path test (2a).
-- [ ] 4 new Dockerfiles (`web-django`/`web-go`/`web-spring`/`web-rails`), plus the 2 existing
-      scaffold Dockerfiles verified live and copied into `lab/` (2b, S10).
+      its dual-path test (2a, Gate B).
+- [ ] `lab/web.Dockerfile`/`lab/web-spring.Dockerfile`'s new `ARG APP` passthrough, plus
+      3 further new Dockerfiles (`web-django`/`web-go`/`web-rails`), plus the 2 existing
+      scaffold Dockerfiles verified live and copied into `lab/` (2b, S10, Gate D).
 - [ ] `lab/compose.yaml`: 10 new services, loopback-only, `profiles: ["apps"]`, ports from
-      the existing reserved table (2c).
-- [ ] `lab/labctl.sh`: multi-profile `PFF_PROFILE` support (2c, S5).
-- [ ] Cross-app navigability run (2d).
-- [ ] Absent-input vocabulary reconciliation + S15 membership validation (2e).
+      the existing reserved table, each on its own dedicated network (2c, S17, Gate E).
+- [ ] `lab/labctl.sh`: multi-profile `PFF_PROFILE` support (2c, S5, Gate E).
+- [ ] `SECRET_KEY_BASE` ephemeral generation for `ruby_rails`'s compose service, D12-compliant
+      (2h, S15, Gate E).
+- [ ] Absent-input vocabulary reconciliation, with `go_net_http`'s explicit before/after
+      suite-outcome evidence recorded (2e, S9, Gate C) + Lane 4's S15 module extended to
+      validate membership (2e item 2).
 - [ ] `node_express`/`ruby_rails` production-mode compose serving decisions recorded and
-      verified (2f).
+      verified (2f, Gate E); F1/F2's xfails re-confirmed still `xfail`, not silently
+      disturbed (S14, Gate F).
+- [ ] One manual, recorded full-profile `docker compose --profile apps up` of all 10
+      services together, with resource footprint (S16) and network isolation (S17)
+      measured/verified live (§4, Gate F).
+- [ ] Cross-app navigability run (2d, Gate F).
+- [ ] `docs/MULTI_AGENT_ORCHESTRATION.md`'s shared-strict-xfail-sentinel paragraph (2i,
+      Gate A).
 - [ ] Runbook update + `docs/ARCHITECTURE.md` paragraph + `FR-LAB-170`/`171` +
-      `docs/LAB_BROWSABLE_APPS_PLAN.md` row 7 + naming fix (2g, S12).
-- [ ] S13's decision recorded either way (fixed, or flagged with a tracked follow-up).
+      `docs/LAB_BROWSABLE_APPS_PLAN.md` row 7 + naming fix (2g, S12, Gate G).
+- [ ] S13's decision recorded either way (fixed, or flagged with a tracked follow-up)
+      (Gate A).
 - [ ] Full non-slow suite green, counts recorded; every affected stack's own `slow` suite
       re-run green.
 - [ ] Bug protocol if S1/S4/S10 (or any other item) surfaces a real defect (`BUG-0057`/`PA-0059`,
       pre-reserved).
 
-## §6. Open questions for review (not yet decided)
+## §7. Open questions for review (not yet decided)
 
 - R1: cross-app navigability run as a `tests/` module vs. a `scripts/` entry point.
 - R2: whether the cross-app run boots real compose containers or reuses each stack's
   in-process/subprocess live-boot harness (recommended: the latter, for CI practicality;
-  a real compose boot stays a documented, manual runbook step).
+  a real compose boot stays the one required manual step, §4/§6).
 - R3 (= S13): fix `go_net_http`'s S7 blind spot now, or flag-and-defer.
 
 ---
 
-*Not yet reviewed. Per this project's process (`CLAUDE.md`), this plan needs the 2-reviewer
-(accuracy + adequacy) gate to converge 3/3 before implementation begins.*
+*Revised after round-1 review; round-2 re-review pending before implementation begins,
+per this project's process (`CLAUDE.md`).*
