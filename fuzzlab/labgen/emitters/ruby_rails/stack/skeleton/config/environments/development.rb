@@ -9,8 +9,16 @@ Rails.application.configure do
   # Do not eager load code on boot.
   config.eager_load = false
 
-  # Show full error reports.
-  config.consider_all_requests_local = true
+  # CC-LAB-0245 / BUG-0055 / PA-0057: NEVER show Rails' detailed exception
+  # pages. This lab boots in development mode (RailsLiveBootHarness), and the
+  # detailed page's "Extracted source" printed the generated controller,
+  # transform comment included -- revealing to any anonymous request whether a
+  # cell is the vulnerable or the secure twin (and the dev 404 page listed the
+  # whole route table). With this off, errors render the static public/4xx/5xx
+  # pages, the same posture every other stack enforces (APP_DEBUG=false,
+  # DEBUG = False, NODE_ENV=production). Checked offline by
+  # tests/test_labgen_debug_pages_disabled.py.
+  config.consider_all_requests_local = false
 
   # Enable server timing.
   config.server_timing = true
@@ -49,8 +57,10 @@ Rails.application.configure do
   # Raises error for missing translations.
   # config.i18n.raise_on_missing_translations = true
 
-  # Annotate rendered view with file names.
-  config.action_view.annotate_rendered_view_with_filenames = true
+  # CC-LAB-0245 / BUG-0055: never annotate rendered views with their file
+  # names -- the annotation (<!-- BEGIN app/views/cell_<id>/... -->) put each
+  # cell's controller path, and so its cell ID, into every served page.
+  config.action_view.annotate_rendered_view_with_filenames = false
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
