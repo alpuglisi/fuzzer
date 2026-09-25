@@ -33,14 +33,19 @@ form p{margin:0.6em 0}`
 // from the mux at request time).
 var siteNav = []struct{ path, label string }{
 	{"/", "Home"},
+	{"/api/clips/thumbnail", "Clip thumbnail"},
+	{"/auth/login-redirect", "Login redirect"},
 	{"/channels/analytics", "Analytics"},
-	{"/channels/subscribers", "Subscribers"},
-	{"/channels/settings", "Settings"},
-	{"/channels/profile", "Edit profile"},
-	{"/channels/emotes/upload", "Upload emote"},
 	{"/channels/commands", "Chat commands"},
-	{"/clips/export", "Export clips"},
+	{"/channels/emotes/upload", "Upload emote"},
+	{"/channels/profile", "Edit profile"},
+	{"/channels/redirect", "Channel redirect"},
+	{"/channels/settings", "Settings"},
+	{"/channels/subscribers", "Subscribers"},
 	{"/clips/download", "Download clip"},
+	{"/dashboard", "Dashboard"},
+	{"/clips/export", "Export clips"},
+	{"/sessions/refresh", "Session refresh"},
 	{"/subscriptions/purchase", "Subscribe"},
 	{"/webhooks/eventsub", "EventSub webhook"},
 }
@@ -192,10 +197,19 @@ func homepageHandler(w http.ResponseWriter, r *http.Request) {
 	renderPage(w, http.StatusOK, "Home", homepageBody)
 }
 
-// registerSiteRoutes wires the one route the site layer owns outright: the
-// homepage. `GET /{$}` (R5), an exact match -- Go 1.22+ `ServeMux` treats a
+// dashboardHandler is the real page `/auth/login-redirect`'s own declared
+// default (R7) sends an absent `next` value to -- it must actually exist
+// and answer 200 (the secure twin's own allowlist regex also requires a
+// slash followed by an alphanumeric character, which "/" alone fails).
+func dashboardHandler(w http.ResponseWriter, r *http.Request) {
+	renderPage(w, http.StatusOK, "Dashboard", homepageBody)
+}
+
+// registerSiteRoutes wires the routes the site layer owns outright: the
+// homepage (`GET /{$}`, R5, an exact match -- Go 1.22+ `ServeMux` treats a
 // bare `GET /` as a catch-all subtree, which would swallow every unknown
-// path with a 200 instead of the mux's own 404.
+// path with a 200 instead of the mux's own 404) and `/dashboard`.
 func registerSiteRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", homepageHandler)
+	mux.HandleFunc("GET /dashboard", dashboardHandler)
 }

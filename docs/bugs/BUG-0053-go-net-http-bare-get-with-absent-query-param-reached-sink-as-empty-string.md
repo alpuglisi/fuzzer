@@ -80,7 +80,7 @@ PA-0054, not by a lapse in PA-0054 itself.
 ## Corrective action
 
 `CC-LAB-0243` (FR-LAB-162): the `go_net_http` route profile gains a
-`required:400` `absent_input` declaration for `/api/clips/thumbnail`,
+`required_400` `absent_input` declaration for `/api/clips/thumbnail`,
 `/clips/download` and `/clips/export` -- rendered identically on both twins
 in `read_url_query_param.go.j2`'s source region, before any sink runs.
 Verified live (both twins where applicable): a bare request to all three
