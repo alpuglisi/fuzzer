@@ -82,9 +82,10 @@ an independent redraft.
   already use) is a known, deliberately deferred design question for Lane 4,
   tracked via the Deliverables note below (R4), not overlooked.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
-  Four named risk classes from the source plan (`docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`'s
-  R1–R9), each mitigated by design rather than silently accepted; two
-  further open items tracked explicitly rather than folded away:
+  Five named risk classes from the source plan (`docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`'s
+  R1–R9), each mitigated by design rather than silently accepted (one of
+  the five, R8, is an open decision rather than a resolved mitigation —
+  called out as such below):
   1. *Oracle-anchor coupling* (R1 — `PriceIntegrityBypassStrategy`'s
      JSON-fragment match) — mitigated by changing the strategy and its two
      real dependent tests (`tests/test_oracle_vectors.py`,
@@ -109,7 +110,16 @@ an independent redraft.
      live `fuzzlab auto` run send JSON request bodies to an endpoint that no
      longer expects them. Mitigated by updating every relocated cell's
      fields in the same commit as its own move/conversion, never deferred.
-  4. **Open, not yet resolved** (R8 — split apps have no login route): an
+  4. *Leakage-gate silent skip* (R5 — chi-square/leakage-probe build gate) —
+     the required layout-byte-equality gate structurally skips rather than
+     runs for both of the 2-cell manifests this step converts
+     (`MIN_GROUPS_FOR_GATE=6` in `fuzzlab/labgen/leakage_probe.py`), so a
+     green `fuzzlab lab-generate --check` run proves nothing on its own
+     about the two new templates' fingerprint-independence. Mitigated by
+     the new automated twin-diff byte-equality test (Deliverables, below),
+     treated as the actual gate for this step rather than the skip-prone
+     chi-square command.
+  5. **Open, not yet resolved** (R8 — split apps have no login route): an
      anonymous crawl of a standalone split app can never authenticate, so a
      session-gated cell like `LABGEN-CF-0001` always shows its 401 branch to
      an unauthenticated visitor. This is a genuine, currently-undecided
