@@ -140,20 +140,15 @@ each in an isolated worktree. Lane 7 integrates.
 
 | Lane | Scope | CC-LAB | FR-LAB | CC-FUZZ / FR-FUZZ (if needed) | BUG / PA (if a defect is found) |
 |---|---|---|---|---|---|
-| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (4 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking, detailed implementation + risk plan in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` — done, except the spider-based navigability acceptance test; 0240 JSON→HTML conversion for PFF's *own* real pages (`/product.php`/`/products.php`/`/search.php`/`/blog_post.php`/`/register.php`), detailed implementation + risk plan in `docs/LAB_PFF_JSON_TO_HTML_PLAN.md` — done (plus `/login.php`'s failure tail). **Recommended next CC-LAB-numbered step (not yet reserved):** the bare-fragment layout gap on `/contact.php`/`/newsletter.php`/`/edit_profile.php` — their POST/error responses are `html_body_echo.blade.php.j2` fragments that do not `@extends('layouts.site')`, so they lack the shared nav/header the rest of the site now has; a different mechanism (the sink template, not a tail flag), deliberately kept out of CC-LAB-0240, see its plan §1/§6). **Also flagged,
-not fixed (pre-existing, not introduced by CC-LAB-0240):** `/product.php`
-and `/blog_post.php` 500 when visited with no `?id=` query param, since the
-generated controller has no default id (the real historical page falls back
-to `?? '1'`); the site nav links to both bare URLs, so a real anonymous
-crawl hits this) | 0237–0240 | 155–158 | 0047 / 31 | 0051 / 0053 |
-| 2 | django: PicTrail | 0241 | 159–160 | 0048 / 32 | 0052 / 0054 |
-| 3 | go_net_http: Twitch clone | 0242 | 161–162 | 0049 / 33 | 0053 / 0055 |
-| 4 | spring_boot: TrackerNest, Netflix, Expedia — Lane 1 step 3's `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` (R4) found `spring_boot`'s sink/transform templates (e.g. `no_ownership_check`) are separate files from `php_laravel`'s own, so this lane starts from `php_laravel`'s response format with no inherited constraint — apply the same `page`/`api` classification test independently per sink family, don't copy-render-format-verbatim | 0243 | 163–164 | 0050 / 34 | 0054 / 0056 |
-| 5 | ruby_rails: ForgeCart | 0244 | 165–166 | 0051 / 35 | 0055 / 0057 |
-| 6 | node_express (MeadowMart) + python_fastapi sample | 0245 | 167–168 | 0052 / 36 | 0056 / 0058 |
-| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0246 | 169–170 | — | 0057 / 0059 |
+| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (5 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking, detailed implementation + risk plan in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` — done, except the spider-based navigability acceptance test; 0240 JSON→HTML conversion for PFF's *own* real pages (`/product.php`/`/products.php`/`/search.php`/`/blog_post.php`/`/register.php`), detailed implementation + risk plan in `docs/LAB_PFF_JSON_TO_HTML_PLAN.md` — done (plus `/login.php`'s failure tail); 0241 closing the 3 remaining tracked gaps (spider-based navigability acceptance test; bare-fragment layout on `/contact.php`/`/newsletter.php`/`/edit_profile.php`/`/profile.php`; missing-`?id=` 500 on `/product.php`/`/blog_post.php`), detailed implementation + risk plan in `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md` — planned, not yet implemented) | 0237–0241 | 155–159 | 0047 / 31 | 0051 / 0053 |
+| 2 | django: PicTrail | 0242 | 160–161 | 0048 / 32 | 0052 / 0054 |
+| 3 | go_net_http: Twitch clone | 0243 | 162–163 | 0049 / 33 | 0053 / 0055 |
+| 4 | spring_boot: TrackerNest, Netflix, Expedia — Lane 1 step 3's `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` (R4) found `spring_boot`'s sink/transform templates (e.g. `no_ownership_check`) are separate files from `php_laravel`'s own, so this lane starts from `php_laravel`'s response format with no inherited constraint — apply the same `page`/`api` classification test independently per sink family, don't copy-render-format-verbatim | 0244 | 164–165 | 0050 / 34 | 0054 / 0056 |
+| 5 | ruby_rails: ForgeCart | 0245 | 166–167 | 0051 / 35 | 0055 / 0057 |
+| 6 | node_express (MeadowMart) + python_fastapi sample | 0246 | 168–169 | 0052 / 36 | 0056 / 0058 |
+| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0247 | 170–171 | — | 0057 / 0059 |
 
-Lane 1 turned out to need 4 sequential CC-LAB entries instead of the 1
+Lane 1 turned out to need 5 sequential CC-LAB entries instead of the 1
 originally reserved (each of its narrowed steps is its own change, verified
 and committed separately) -- Lanes 2-7's CC-LAB/FR-LAB numbers are bumped by
 +1 again (on top of the earlier +2 bump when Lane 1 grew from 1 to 3 steps)
@@ -172,6 +167,18 @@ unaffected (no collision existed there — Lane 1's CC-LAB range ends exactly
 at 0240 and Lane 2 starts at 0241). No lane past Lane 1 had consumed a
 number yet, so this is a pure table correction, not a rename of anything
 already used.
+
+**Second post-implementation correction (2026-09-25, Lane 1 step 5 planning):**
+Lane 1 needed a 5th step (`CC-LAB-0241`/`FR-LAB-159`, `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`)
+to close 3 remaining tracked gaps, which again collided with Lane 2's
+then-current reservation (`CC-LAB-0241`/`FR-LAB-159-160`). Fixed the same
+way, and this time applied **before** the new step's own change-control
+entry is drafted (not deferred to "once implemented"), specifically to
+avoid a Lane 2 dispatch picking up the stale number in the meantime per
+`docs/MULTI_AGENT_ORCHESTRATION.md`'s pre-assignment rule (PA-0031): Lanes
+2-7's CC-LAB numbers are now bumped by +1 too (Lane 2 now 0242, ... Lane 7
+now 0247), and their FR-LAB ranges by +1 again (Lane 2 now 160-161, ...
+Lane 7 now 170-171). No lane past Lane 1 has consumed a number yet.
 
 Use these numbers exactly. If one is already taken, stop and flag it; do not
 pick a different number.

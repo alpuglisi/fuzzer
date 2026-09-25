@@ -1,11 +1,12 @@
 # Lane 1 step 5 — closing the remaining Browsable Labs gaps
 
 Status: **planning, pre-change review gate not yet run.** Reserved as
-`CC-LAB-0241` / `FR-LAB-159` ("Lane 1 step 5"). Lanes 2-7's `CC-LAB`/`FR-LAB`
-ranges in `docs/LAB_BROWSABLE_APPS_PLAN.md` are bumped by +1 again once this
-is gate-cleared, per that document's own "re-derive next free numbers"
-instruction — no lane past Lane 1 has consumed a number yet, so this is a
-pure table correction, not a rename of anything already used.
+`CC-LAB-0241` / `FR-LAB-159` ("Lane 1 step 5"). This collided with Lane 2's
+then-current reservation (also `CC-LAB-0241`/`FR-LAB-159-160`); fixed
+**already, not deferred** — `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table
+is bumped in this same change (Lanes 2-7's `CC-LAB` numbers +1, their
+`FR-LAB` ranges +1 again), so `CC-LAB-0241`/`FR-LAB-159` are genuinely free
+for this step as of this commit, not merely "will be free once implemented."
 
 ## 1. Scope — the three tracked, still-open Lane 1 gaps
 
@@ -25,13 +26,23 @@ carries the "is this real" verification; §4 covers "will the fix work"):
    SQLite table) — no test anywhere uses it as a navigability/acceptance
    check. This is new test glue, not a new component.
 2. **Bare-fragment layout gap** on `/contact.php`, `/newsletter.php`,
-   `/edit_profile.php`'s POST/echo responses. Their sink template,
+   `/edit_profile.php`, **and `/profile.php`** (4 pages, not 3 — round-1
+   accuracy review found `/profile.php`'s page profile,
+   `_PAGE_PROFILES["/profile.php"]`, `real_page: True`,
+   `ground_truth_case: PFF-0005`, resolves through the
+   `("xss","html_body")` module-set mapping to the same `html_body_echo`
+   sink as the other 3, and there is no separate `profile.blade.php` view in
+   the skeleton — only `edit_profile.blade.php` exists — so `/profile.php`'s
+   real, GET-served, anonymous-visitor-facing response is bare today too,
+   not merely a theoretical R1 risk). Their sink template,
    `templates/sinks/html_body_echo.blade.php.j2`, is the entire response
    body — `<div class="{{ css_class }}">{!! $value !!}</div>` — with no
-   `@extends('layouts.site')`, so these 3 pages' POST responses render
-   outside the shared nav/header every other converted page now has. (Their
-   GET-form pages, e.g. `site/contact.blade.php`, already extend the layout
-   correctly — only the POST/echo response is bare.) The shared layout
+   `@extends('layouts.site')`, so these 4 pages' responses render outside
+   the shared nav/header every other converted page now has. (`/contact.php`,
+   `/newsletter.php`, `/edit_profile.php`'s GET-form pages, e.g.
+   `site/contact.blade.php`, already extend the layout correctly — only
+   their POST/echo response is bare; `/profile.php` has no separate form
+   page at all, since it's a pure read/display page.) The shared layout
    (`layouts/site.blade.php`) already defines `@yield('title', ...)` /
    `@yield('content')`, the same mechanism CC-LAB-0239/0240 pages already use.
 3. **`/product.php`/`/blog_post.php` 500 with no `?id=`.** Pre-existing (not
@@ -76,13 +87,13 @@ Change `html_body_echo.blade.php.j2` to:
 ```
 
 This needs a `page_title` context variable threaded into the sink's render
-context for these 3 profiles specifically (a short label — "Contact",
-"Newsletter", "Edit profile" — not modelled data, so no injection-context
-concern). Since `html_body_echo` may be shared by other, non-Lane-1-tracked
-cells elsewhere in the manifest set (checked in §4 R1), the title must be
-profile-supplied with a sane fallback (e.g. the app name) for any caller
-that doesn't set one, rather than becoming a required key that breaks an
-unrelated cell's render.
+context for these 4 profiles specifically (a short label — "Contact",
+"Newsletter", "Edit profile", "Profile" — not modelled data, so no
+injection-context concern). Since `html_body_echo` may be shared by other,
+non-Lane-1-tracked cells elsewhere in the manifest set (checked in §4 R1),
+the title must be profile-supplied with a sane fallback (e.g. the app name)
+for any caller that doesn't set one, rather than becoming a required key
+that breaks an unrelated cell's render.
 
 ### 2c. Spider-based navigability acceptance test
 
@@ -100,44 +111,76 @@ live-boot only, one test per app (PFF; CircleFeed; Huddle Hub; Booking):
    cover the site's real link depth, confirmed empirically, not guessed).
 3. Load that app's `injection-points.json` (`lab/ground-truth/` for PFF;
    `lab/ground-truth-{circlefeed,huddlehub,booking-clone}/` for the split
-   apps) and assert every listed `url` was discovered by the crawl.
+   apps) and **first assert the ground-truth list itself is non-trivial**
+   (`assert len(ground_truth) >= N` for a known, per-app expected minimum —
+   read the file's actual count at implementation time and hard-code that
+   number, don't compute it from the same file being asserted against) and
+   that **the crawl itself found more than a trivial number of pages**
+   (`assert len(discovered_pages) >= N`, same discipline) — a guard against
+   an empty ground-truth load or a crawl that silently failed to start both
+   satisfying a naive per-URL loop vacuously (the exact class of bug
+   CC-LAB-0240's R2 already found once in this codebase, `mariadb.py:431`).
+   Only then assert every listed ground-truth `url` was discovered by the
+   crawl.
 4. For each discovered ground-truth URL, assert the status code matches what
    a real anonymous visitor should see: 200 for a public page; the R8
    sign-off's accepted 401 for a session-gated cell in a split app (the
    decision already recorded in `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6);
    for PFF's own session-gated cells (`LABGEN-MA-0003`/`0004`, explicitly
    *not* covered by the R8 split-app exception since PFF has its own login
-   flow from step 1) — see R4 below for how the crawl handles authentication.
+   flow from step 1) — apply the R4 decision below.
 5. Assert `GET /` returns 200 for every app.
+6. Depth cap and per-URL reachability sub-items are filled in from §4 R5-R7's
+   measurements once taken (not left as an open-ended "iterate until green"
+   — see §3 step 3's scope-creep rule for what a crawl-surfaced defect does
+   to this checklist).
 
 ## 3. Sequencing
 
 1. Fix 2a (missing-id default) first — it removes a live 500 that would
    otherwise fail step 3's crawl for reasons unrelated to what step 3 is
-   actually testing. Run the existing PFF live-boot suites green before
-   proceeding (no cell/route touched besides these 2 profiles' source
+   actually testing. **Gate:** `tests/test_labgen_conformance_live_boot.py`,
+   `tests/test_labgen_conformance_live_boot_mariadb.py`, and
+   `tests/test_labgen_php_laravel_pff_html_pages.py` (CC-LAB-0240's own
+   `/product.php`/`/blog_post.php` twin-diff and byte-delta tests) all green
+   before proceeding (no cell/route touched besides these 2 profiles' source
    rendering — confirm no other test asserts the current 500 as expected
    behavior, R2).
-2. Fix 2b (bare-fragment layout) next. Run the existing test suite green
-   (in particular any oracle-strategy test touching these 3 cells, R1)
-   before proceeding.
+2. Fix 2b (bare-fragment layout) next. **Gate:**
+   `tests/test_labgen_conformance_live_boot.py`,
+   `tests/test_labgen_conformance_live_boot_mariadb.py`,
+   `tests/test_oracle_browser.py`, `tests/test_labgen_conformance_tier1.py`,
+   `tests/test_labgen_php_laravel_real_pages_forms.py`,
+   `tests/test_labgen_php_laravel_real_pages_g4.py`,
+   `tests/test_labgen_sink_endpoint.py`, `tests/test_labgen_context_depth.py`,
+   and `tests/test_auto.py` (every file that references these 4 cells or
+   `html_body_echo`, per a direct grep at plan time — re-grep at
+   implementation time in case the set has grown) all green before
+   proceeding.
 3. Build and run 2c (navigability test) last, once both live defects it
-   would otherwise catch are already fixed. Iterate on real crawl results
-   (depth cap, form-page reachability, R5/R6/R7 below) until every app's
-   assertion passes for real — this step is allowed to reveal further small
-   fixes elsewhere (e.g. a page not yet linked from anywhere); if it does,
-   fix them here rather than deferring again, since deferring this exact
-   check is the recurring pattern this step exists to end.
+   would otherwise catch are already fixed. Fill in the depth cap and
+   per-URL reachability sub-items (§2c step 6) from R5-R7's measurements.
+   **Scope-creep rule for anything the crawl newly surfaces:** fold a
+   crawl-surfaced defect into this same `CC-LAB-0241` entry only if it is
+   the *same class* as the 3 tracked gaps — a missing nav link, a missing
+   default value, a missing `@extends` — and touches only the `LAB`
+   component. Anything touching a different component, or requiring new
+   infrastructure beyond what §2 already designs, gets flagged in this
+   plan's own follow-up note (mirroring how CC-LAB-0240 flagged this very
+   step) and split into its own, separately-numbered `CC-LAB` entry — it
+   does not get silently absorbed here, and it does not block this step's
+   own Effectiveness assessment for the 3 gaps this step was actually
+   scoped to close.
 4. Full non-slow suite + all live-boot suites (SQLite + MariaDB + the new
    navigability tests) green.
 
 ## 4. Risk register
 
-**R1 — `html_body_echo` may be shared by cells outside this plan's 3 pages.**
+**R1 — `html_body_echo` may be shared by cells outside this plan's 4 pages.**
 Verify (`_PAGE_PROFILES` + module-composition search) every cell that
 resolves to the `html_body_echo` sink module before changing its shared
 template. If any belong to a cell outside `/contact.php`/`/newsletter.php`/
-`/edit_profile.php`, confirm the `page_title` fallback keeps their render
+`/edit_profile.php`/`/profile.php`, confirm the `page_title` fallback keeps their render
 context valid (no `KeyError`/`UndefinedError` from Blade or Jinja) and that
 wrapping their response in the shared layout does not change what their own
 oracle-strategy tests (if any) assert against the body — re-run those tests,
@@ -162,17 +205,29 @@ mismatch CC-LAB-0240's R6 already found between these two harnesses'
 **R4 — PFF's session-gated cells need real authentication for the crawl,
 not the split-apps' R8 exception.** `LABGEN-MA-0003`/`0004` are built into
 PFF's default merged build, which has its own login flow (step 1,
-`CC-LAB-0237`). The navigability test must either (a) seed an authenticated
-session before crawling PFF (the existing LAB-owned session helper /
-`browserauth` module referenced by `LocalSpider`'s own `--identity` flag
-looks like the fit — confirm it can mint a cookie jar this test can attach
-to a `requests`-engine crawl before treating it as available) or (b) crawl
-PFF anonymously and explicitly assert the 401/redirect anonymous-visitor
-response for those two URLs specifically, documenting that as PFF's own
-accepted anonymous-crawl outcome for exactly these 2 cells — distinct from,
-and narrower than, the R8 split-app exception, which does not apply to PFF.
-Decide and document explicitly during implementation; do not let this
-silently default to whichever branch happens to compile first.
+`CC-LAB-0237`). Two branches:
+  - (a) seed an authenticated session before crawling PFF (`browserauth`,
+    the module `LocalSpider`'s own `--identity` flag already wires in for
+    the Playwright engine, mints a cookie jar via the LAB-owned session
+    helper), or
+  - (b) crawl PFF anonymously and explicitly assert the anonymous-visitor
+    401/redirect for those two URLs specifically.
+
+**Decision rule (not left open):** try (a) first — spend one concrete spike
+attempting to attach `browserauth`'s cookie jar to the navigability test's
+crawl (the `requests` engine if it can carry cookies that way, or the
+Playwright engine via `--identity` otherwise). If that spike succeeds within
+this step's own implementation session, use (a) — it proves the *whole*
+authenticated site is reachable, which is the stronger and more honest
+check. If it does not attach cleanly (e.g. `browserauth` only supports the
+Playwright engine and PFF's app has no reason to need JS rendering
+otherwise, making the switch itself a scope question), fall back to (b)
+without re-litigating it further. **Either way, the outcome is not left as
+an implementation-time prose note**: record which branch was used, and why,
+in `docs/components/01-target-lab/requirements.md`'s `FR-LAB-159` entry (a
+short "R4 sign-off" callout, the same durable-record pattern
+`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 already used for the R8 sign-off)
+so a future reader doesn't have to re-derive it from test source.
 
 **R5 — link-only crawl vs. POST-only endpoints.** `LocalSpider` follows
 `<a href>` (and, in the Playwright engine, `fetch()`/XHR targets) — it does
@@ -207,6 +262,55 @@ verification-or-fix step, no risk is waved through.
 ## 5. Out of scope
 
 - Lanes 2-7 (other stacks) — unaffected by this step; only their
-  pre-reserved `CC-LAB`/`FR-LAB` numbers shift (§ header).
+  pre-reserved `CC-LAB`/`FR-LAB` numbers shift (§ header; already applied to
+  `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table in this same commit, not
+  deferred to "once gate-cleared").
 - Any further navigability polish beyond the 3 tracked gaps and what step 3
-  (§3.3) surfaces along the way.
+  (§3.3) surfaces, subject to §3 step 3's scope-creep rule — a
+  different-component or new-infrastructure finding gets its own numbered
+  entry, not folded in here.
+
+## 6. Deliverables checklist (drafted here so the change-control entry can
+copy it directly, per round-1 adequacy review)
+
+- [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
+      `CC-LAB-0241`/`FR-LAB-159` collision — **done as part of this plan's
+      own commit**, ahead of the change-control entry.
+- [ ] §3 step 1 gate: missing-`?id=` default added for `/product.php` and
+      `/blog_post.php`; the 3 named gate test files green.
+- [ ] §3 step 2 gate: `html_body_echo.blade.php.j2` extends the shared
+      layout with a `page_title` variable; all 4 cells' pages (`/contact.php`,
+      `/newsletter.php`, `/edit_profile.php`, `/profile.php`) render inside
+      the shared nav/header; the named gate test files green.
+- [ ] §2c navigability test built and green for all 4 apps (PFF; CircleFeed;
+      Huddle Hub; Booking), including the non-vacuous ground-truth-count and
+      discovered-page-count guards (§2c step 3).
+- [ ] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry (which
+      branch, (a) or (b), and why).
+- [ ] Any crawl-surfaced same-class defect (§3 step 3's scope-creep rule)
+      fixed and folded in; any different-class finding flagged with its own
+      recommended next `CC-LAB` number, not silently absorbed.
+- [ ] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the new
+      navigability tests) green.
+- [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
+      entry.
+- [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241`.
+
+## 7. Review history
+
+**Round 1 (accuracy + adequacy, 2 independent reviewer agents, 2026-09-25):**
+NOT YET ACCURATE / NOT YET ADEQUATE. Accuracy found: (a) `/profile.php` is a
+real 4th page in the bare-fragment state, not a hypothetical R1 risk — fixed
+throughout §1/§2b/§4 R1; (b) the `CC-LAB-0241`/`FR-LAB-159` reservation
+collided with Lane 2's then-current, already-live reservation — fixed by
+applying the lane-table bump immediately in this commit, not deferring it.
+Adequacy found 6 gaps: R4's decision left undecided with no forcing
+function (fixed — concrete decision rule + durable `requirements.md`
+sign-off requirement added); no vacuous-pass guard on the navigability
+test's ground-truth/discovered-page counts (fixed — §2c step 3); no
+scope-creep boundary for crawl-surfaced defects (fixed — §3 step 3); vague,
+unnamed sequencing gates (fixed — §3 steps 1-2 now name the exact test
+files); §2c's "iterate until green" language not checklist-able (fixed —
+split into §2c step 6 and this plan's own §6 checklist, drafted so the
+change-control entry can copy it directly); the lane-table edit not listed
+as its own deliverable (fixed — §6). All fixes applied in this revision.
