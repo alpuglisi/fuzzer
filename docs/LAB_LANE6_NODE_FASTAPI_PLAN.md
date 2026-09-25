@@ -1,8 +1,11 @@
 # Browsable Labs Lane 6 — node_express: MeadowMart + python_fastapi generic sample
 
-Status: **revised after review round 1, awaiting round 2** (2026-09-25).
-Round 1 returned ACCURATE and NOT YET ADEQUATE, with 3 gaps plus 1
-consolidation request, all addressed in this revision (see §8).
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewers run by the orchestrating session, plus the
+proposing agent, after 1 revision round; see §8).
+**Next step:** draft the condensed `CC-LAB-0246` change-control entry and
+take it through its own 2-reviewer gate. This plan's own convergence does
+not yet authorize implementation.
 Reserved numbers per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table:
 `CC-LAB-0246` / `FR-LAB-168-169` / `CC-FUZZ-0052` / `FR-FUZZ-36` /
 `BUG-0056` / `PA-0058`. None has been used yet.
@@ -1091,4 +1094,8 @@ orchestrator, 2026-09-25): ACCURATE / NOT YET ADEQUATE.**
 - **Also aligned while fixing gap 1:** R3 now notes that Lanes 1 and 4 use
   branch (b), so the gate can weigh cross-lane uniformity.
 
-**Round 2:** pending. No agreement is claimed yet.
+**Round 2 (accuracy + adequacy, the same 2 reviewers run by the
+orchestrator, 2026-09-25): ACCURATE / ADEQUATE.** Both reviewers confirmed
+the round-1 fixes, so 3/3 agreement is reached (2 reviewers plus the
+proposing agent). The plan is converged. Implementation still requires the
+`CC-LAB-0246` entry's own gate (see Status).
