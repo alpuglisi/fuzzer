@@ -3,6 +3,503 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0246 — Browsable labs Lane 6: node_express/MeadowMart + python_fastapi generic sample (2026-09-25, FR-LAB-168/FR-LAB-169, `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`)
+
+**Status: DRAFT. The pre-change review gate for this entry has not run
+yet.** Implementation is **not** authorized.
+
+This entry is condensed from `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`, which
+went through 2 review rounds and reached 3/3 agreement on 2026-09-25. The
+2 independent reviewers were run by the orchestrating session, because
+this lane's session has no agent-spawning tool; the lane stopped and
+flagged that per `docs/MULTI_AGENT_ORCHESTRATION.md` §4 instead of
+substituting a different mechanism.
+- **Round 1:** ACCURATE / NOT YET ADEQUATE. The gaps were: the PA-0058
+  hand-off ignored Lane 4's already-reserved S15 cross-emitter test; F3
+  had no decision rule; the one-entry justification borrowed Lane 4's
+  shared-emitter reasoning.
+- **Round 2:** ACCURATE / ADEQUATE.
+
+The plan is the full detail. This entry compresses it into the
+change-control template.
+
+**One entry covering 2 targets, in separate subsections** (plan §6):
+- **(A) MeadowMart**: `node_express`, a real app identity with ground
+  truth; `FR-LAB-168`.
+- **(B) The `python_fastapi` generic sample**: no identity, no ground
+  truth, no port; `FR-LAB-169`.
+
+These are different emitters, so Lane 4's "one shared emitter" reason does
+not apply. The entry rests on these reasons instead:
+- change-control is per component, and `CC-LAB-0040` is the precedent for
+  one entry spanning several emitters;
+- there is one root cause, one bug and one gate (`BUG-0056`);
+- each target keeps its own per-target FR;
+- both targets close on one date.
+
+The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
+`CC-LAB-0248` immediately.
+
+- **Change:**
+  - **(A) MeadowMart** (`node_express`; build = exactly
+    `lab/manifests/prototype_pollution_node_sample.yaml` plus
+    `redos_node_sample.yaml`, 4 cells; ground truth `lab/ground-truth-meadowmart/`,
+    `MMART-0001`–`0004`; no `--app` split needed; no login/session
+    exists):
+    1. **Page-vs-api classification: all 5 endpoints are `api`.** These
+       are `/api/preferences`, `/api/search` and the 3 inert BFF routes
+       `/api/products`, `/api/orders/:orderId`, `/api/cart`.
+       `docs/LAB_BROWSABLE_APPS_PLAN.md` names "MeadowMart's
+       backend-for-frontend `/api/*`" as a genuine API family, and
+       `/api/preferences`'s `server-json` ground truth drives `auto.py`'s
+       JSON body encoding (`fuzzlab/harness/auto.py:86-96`). So no cell
+       response is converted to HTML, and every wire contract is unchanged
+       except for the absent-input declarations in item 4.
+    2. **Site layer in a new checked-in scaffold file,
+       `scaffold/site.js`**. It holds `layout()` (header, nav sorted by
+       path, main, footer, inline CSS) and these routes:
+       - `/` (homepage);
+       - the client pages `/products`, `/cart`, `/orders`, `/search`,
+         `/account/preferences`, each an inline `fetch()` against the BFF,
+         the way the real frontend would call it;
+       - `/catalog`, the "API endpoints" page, which links every served
+         cell URL (twins included) and every inert API. GET APIs that
+         require a parameter are linked with an example query.
+
+       `app.js` gains one line, `require('./site').register(app,
+       <catalog>)`, where the catalog is built from the accumulator's own
+       sorted cell list. No cell controller calls `layout()`, so the
+       vulnerable and secure twin responses are byte-for-byte what they are
+       today. The Python tuple `_SITE_ROUTES` is the single source of
+       truth for the site routes, with an offline drift check against
+       `site.js`.
+    3. **`GET` resource read on every served preferences URL** (canonical
+       and twin). It is twin-identical, reads no input, and returns
+       `{ preferences: <target_literal> }`. The POST contract is untouched.
+       The `requests`-engine spider only follows `<a href>`, and a real
+       BFF preferences resource supports both GET and POST. This is R3
+       branch (a); Lanes 1 and 4 use branch (b), and the choice is recorded
+       as the "R3 sign-off" in `FR-LAB-168`.
+    4. **Absent-input declarations (PA-0053/PA-0054):** one required
+       `absent_input` key per `_ROUTE_PARAMS` route. It uses Lane 4's value
+       spellings, because Lane 4's S15 file is the shared cross-emitter
+       mechanism this lane adopts. Each value is rendered in the source
+       region, identically on both twins:
+       - `/api/search`: `required_param`, a 400 before the transform;
+       - `/api/products` and `/api/posts`: `default_value`, `'1'`;
+       - `/api/login`: `required_param`;
+       - `/api/preferences`: `empty_body_400`, a 400 before the merge
+         (changed from the draft's 200 no-op in round 1);
+       - `/api/profile`: `no_input`.
+    5. **Fixtures:** the 3 existing live MeadowMart modules copy a new
+       emitter constant, `RUNTIME_SCAFFOLD_FILES = ("db.js",
+       "package.json", "site.js")`, so `app.js`'s new `require('./site')`
+       boots. A shared helper, `tests/_meadowmart_app.py`, backs the new
+       navigability module.
+    6. **Spider-based navigability test**,
+       `tests/test_labgen_node_meadowmart_navigability_live_boot.py`
+       (marked slow). It covers:
+       - the crawl from `/`;
+       - the non-vacuous guards;
+       - every ground-truth path discovered with an anonymous 200;
+       - no 5xx anywhere;
+       - PA-0054 (2): a bare GET of every served route (from
+         `_served_url_for`, `_SITE_ROUTES` and the inert routes), plus a
+         bare POST to both preferences URLs;
+       - the R2 prototype-gadget boot.
+
+       Offline companions go in
+       `tests/test_labgen_node_express_browsable.py`.
+    7. **Ground truth:** no URL, method, param, location, `rendering` or
+       `vuln_class` changes. Only a one-sentence `notes` addition per case
+       naming where each endpoint is linked from; it carries no semantics
+       and is optional.
+  - **(B) `python_fastapi` generic sample** (`LABGEN-PY-0001`–`0006`;
+    `/products`, `/login`, `/profile`):
+    1. **A new scaffold file, `app/site.py`** (template `site.py.j2`). It
+       holds `layout()`, the homepage `GET /` and a `GET /login` form
+       page. The route table is rendered statically from `_PAGE_PARAMS`,
+       never read from `app.routes` at runtime (R-B3). `main.py.j2`
+       includes it after router discovery.
+    2. **Cell responses rendered inside the layout**, following contract
+       point 5's rule for generic cells:
+       - `/profile`'s fragment is wrapped in the layout and stays in the
+         HTML body;
+       - `/products` and `/login` swap the JSON tail for an HTML detail
+         view whose found and not-found responses stay distinguishable
+         (R-B2).
+    3. **Absent-input declarations**, using the same `absent_input`
+       vocabulary:
+       - `/products`: `default_value` `"1"`. This fixes D1.
+       - `/login`: `required_param`.
+       - `/profile`: `no_input`.
+    4. **Twin URLs, F3 / R-B7, branch (a):** router discovery serves any
+       module whose `(method, path)` is already taken under a
+       `/twin/<module-name>` prefix. There are no per-cell file changes, so
+       the minimal-pair contract is untouched. `served_path_for` in the
+       emitter mirrors this. The branch used is recorded as the "F3
+       sign-off" in `FR-LAB-169`.
+    5. **No spider crawl, by an explicit decision.** Contract point 6
+       ("100% of ground-truth URLs") is vacuous for a sample with no ground
+       truth. PA-0053/PA-0054 are enforced instead by an in-process
+       `TestClient` check: link reachability from `/`, the offline
+       declaration check, and a bare-request sweep of every served path.
+    6. **Not done:** no identity, no realistic URLs, no ground truth, no
+       port.
+  - **Both:** the bug protocol for **`BUG-0056`/`PA-0058`**. D1 is a
+    live-reproduced bare-request 500 of exactly the PA-0053 class, so the
+    protocol is planned, not contingent.
+- **Impact (other components / project):**
+  - **LAB only.** No detection strategy keys on a changed response:
+    - `RegexDosStrategy` is timing-only and never sends an empty value;
+    - prototype pollution has no in-band strategy, and MeadowMart's
+      recall stays honestly 0 (its classes are unmapped, as documented).
+
+    So `CC-FUZZ-0052`/`FR-FUZZ-36` are expected to stay unused. If R9's
+    re-runs disprove that, a CC-FUZZ entry is opened; the change is never
+    worked around.
+  - **Lane 4 interaction:** this lane adopts Lane 4's reserved
+    `tests/test_absent_input_declarations_cross_emitter.py` (S15) as the
+    one shared cross-emitter check, and builds no competing file. The
+    merge-order criterion is mechanical: delete the 2
+    `node_express`/`python_fastapi` strict-xfail markers at whichever
+    merge makes them XPASS.
+  - **Lane 7:**
+    - Port 8091, the compose service and `labctl` belong to Lane 7.
+    - The Lane 3 vs Lane 4 `absent_input` value-spelling divergence, and
+      making S15 validate values against one closed set, are flagged as a
+      recommended scope addition under Lane 7's reserved `CC-LAB-0247`.
+      They are not self-assigned.
+  - **`docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 6 row** is updated on
+    completion. No Lane 7 number bump is needed unless the one-entry split
+    rule fires.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.**
+  The full register is in the plan's §3, and every item is named here with
+  its own label. The candidate defects (§1d) and the different-class
+  findings (§7) are listed too, so nothing is folded into another item's
+  prose.
+
+  *Defects found during planning (probe-confirmed 2026-09-25, and
+  independently reproduced by the round-1 accuracy reviewer):*
+  1. **D1**: `python_fastapi` bare `GET /products` returns **500**.
+     `str(None)` produces `WHERE id = None`, which raises SQLite
+     `OperationalError`. This is the PA-0053 class, and it drives
+     `BUG-0056`. Fixed by `default_value` `"1"`.
+  2. **D2**: `node_express` bare `GET /generated/labgen-ne-0001` makes the
+     **Node process exit (rc=1)**. The rejection is unhandled in an
+     `async` Express 4 handler under Node 22. In this DB-less environment
+     the rejection is `ECONNREFUSED`; with a DB, the undeclared `id` would
+     instead give the malformed SQL `… = undefined`. The bug doc must say
+     the exact mode varies by environment. The absent-input half is the
+     same class and is fixed by `default_value`. The async-crash half is
+     F2.
+  3. **D3**: MeadowMart bare `GET /api/search` answers 200 on the
+     vulnerable twin, with `<mark></mark>` between every character, but
+     plain content on the secure twin. It does not crash, but it is
+     undeclared and twin-asymmetric, which violates PA-0054 (1). Fixed by
+     `required_param`, a 400 before the sink.
+  4. **D4**: `node_express` `/api/login` secure twin (`NE-0006`) with a
+     POST missing `username` makes the process exit, reproduced through
+     the same path as D2. Fixed by `required_param`. Whether a live DB
+     triggers the undefined-bind rejection is re-probed at plan §5 step 1.
+
+  *MeadowMart risks:*
+
+  5. **R1**: *the page-vs-api classification is the lane's main judgment
+     call.* All 5 endpoints are `api`. `/api/search` would be reclassified
+     only by a gate decision, never during implementation. That would
+     keep a present-`q` response unchanged inside `<main>` and re-prove
+     `RegexDosStrategy` live.
+  6. **R2**: *the site layer must not become a prototype-pollution gadget.*
+     Otherwise the vulnerable POST would change the pages' output, adding
+     an unmodelled in-band signal.
+     - **Mitigation:** `site.js` uses no `for…in` and does no reads from
+       options objects.
+     - **Offline check:** a scan of `site.js` for those constructs.
+     - **Live check:** a dedicated boot captures page bytes before and
+       after a `__proto__` POST and requires them to be identical.
+  7. **R3**: *the new `GET` on the preferences URLs.* Branch (a) is the
+     GET resource read. Fall back to branch (b), the HTML client page
+     served at the API URL, if either holds:
+     - the gate judges branch (a) misrepresents the modelled BFF;
+     - the pipeline turns out to score a GET to a POST-only ground-truth
+       URL.
+
+     The choice is recorded as the "R3 sign-off" in `FR-LAB-168`, noting
+     that Lanes 1 and 4 used branch (b).
+  8. **R4**: *the guard and default lines must not break the minimal-pair
+     contract or exact-string tests.* The `node_express` module, redos,
+     prototype-pollution and conformance suites are re-run, with a new
+     test asserting the declaration lines are identical on both twins. An
+     exact-string assertion is updated only if its intent is unchanged,
+     and every such update is listed.
+  9. **R5**: *name-leak scanner.* `scan_generated_tree_for_name_leaks` must
+     find nothing in `site.js` or the rendered `app.js`. Anything it finds
+     that already exists in `app.js` is a finding: fixed if it is a
+     comment-only change inside this emitter, flagged otherwise.
+  10. **R6**: *the client pages must not add an unlabelled sink.* The one
+      permitted `innerHTML` write is `/search`'s render of `/api/search`'s
+      response. That output is made of fixed characters: the literal
+      replacement `'<mark>$&</mark>'` applied to the fixed
+      `content_literal`. It is pinned offline to exactly 1 occurrence.
+      Every other write uses `textContent`/`createElement`.
+  11. **R7**: *fixture drift.* All 4 fixtures copy `RUNTIME_SCAFFOLD_FILES`,
+      and an offline test asserts that constant equals the scaffold
+      directory minus the build-only `Dockerfile` and `package-lock.json`.
+  12. **R8**: *the navigability test must not pass vacuously.* Hard-coded,
+      measured minimums (4 ground-truth points; a measured page floor) are
+      asserted before any per-URL check.
+  13. **R9**: *detection must not regress.* These are re-run live:
+      `test_labgen_node_bff_app.py` (the real-HTTP ReDoS timing
+      differential), `test_labgen_node_bff_multitarget.py`,
+      `test_multitarget_category1_combined.py`, `test_labgen_redos.py` and
+      `test_labgen_prototype_pollution.py`. Any change is reported and
+      opens a CC-FUZZ entry.
+  14. **R10**: *the inert `/api/orders/:orderId` has a path parameter.*
+      The sweep uses the declared example `/api/orders/ORD-12345` and also
+      requests `/api/orders/` bare, expecting < 500.
+
+  *`python_fastapi` risks:*
+
+  15. **R-B1**: *the layout could break the minimal-pair checker*, the only
+      byte-level twin contract here; no fingerprint gate reads this
+      sample's responses. The Tier-0 minimal-pair tests are re-run after
+      each step. If the checker rejects a pair, `layout(...)` moves to the
+      complexity region. The checker is never relaxed.
+  16. **R-B2**: *the found/not-found difference must be kept.* A direct test
+      asserts at least 200 bytes, measured and recorded. `CC-LAB-0240`'s
+      300 bytes is not carried over unexamined, because this sample has no
+      `SqliBooleanStrategy` target.
+  17. **R-B3**: *don't introspect `app.routes`.* On FastAPI 0.141.1 it holds
+      `_IncludedRouter` objects with no `.path` (observed while probing).
+      The static table comes from `_PAGE_PARAMS`, with an offline check
+      that its routes equal the sample manifest's route set.
+  18. **R-B4**: *the new `/login` form's POST needs `python-multipart`*,
+      which the generated `requirements.txt` does not declare (F4). The
+      TestClient POST assertions are skip-guarded on its presence
+      (PA-0005).
+  19. **R-B5**: *`GET /login` (form) and `POST /login` (cell) share a
+      path.* A TestClient test asserts both work.
+  20. **R-B6**: *PA-0054 (2) in-process.* The bare sweep enumerates from
+      `_PAGE_PARAMS`, `served_path_for` and the site table, not from the
+      homepage's links.
+  21. **R-B7 (F3)**: *the secure twins are unreachable because each pair
+      shares one path*, the same structural problem as Lane 2's R1.
+      Branch (a) is scaffold-level `/twin/<module>` prefixes. Fall back to
+      branch (b), keeping the shadowing with a strict xfail, if branch (a)
+      breaks any of:
+      - the minimal-pair checker or Tier-3 regeneration;
+      - `include_router(prefix=...)` semantics on FastAPI 0.141.1;
+      - scaffold determinism.
+
+      Recorded as the "F3 sign-off" in `FR-LAB-169`. Under branch (a),
+      TestClient asserts each twin's own behavior at its `/twin/...` URL.
+
+  *Different-class findings, flagged and not absorbed (plan §7).* The
+  scope-creep rule is the one restated from `CC-LAB-0241`/`CC-LAB-0242`:
+  fold in only the same class, touching only the `node_express` or
+  `python_fastapi` emitter's own files.
+
+  22. **F1**: the `node_express` generic sample's `/api/profile`
+      (`NE-0007/0008`) references `currentUser`, which is never defined,
+      so every request 500s. It is pinned by an offline strict xfail.
+  23. **F2**: `node_express` `async` handlers (`single_statement.js.j2`)
+      have no error handling, so any SQL error exits the process. It is
+      pinned by an offline strict xfail. Not fixed here, because fixing it
+      changes the SQLi error response, which is an oracle-facing decision,
+      and those cells have no live boot or ground truth.
+  24. **F3**: the `python_fastapi` twin path collision. It was brought into
+      scope in round 1 as R-B7, and returns as a pinned follow-up only
+      under branch (b).
+  25. **F4**: the generated `python_fastapi` `requirements.txt` lacks
+      `python-multipart`. It is flagged and skip-guarded, not fixed
+      (PA-0049 lockfile scope).
+
+  **F1 and F2 cannot affect MeadowMart's acceptance criteria.** They live
+  only in the generic `LABGEN-NE-*` cells, which MeadowMart's build never
+  serves, crawls or sweeps, and all 4 of MeadowMart's own handlers are
+  synchronous with no DB call.
+
+  **Follow-up numbers** for F1, F2 (and F3 under branch (b)) are assigned
+  by the orchestrator, per PA-0031. Each xfail reason names its finding
+  ID.
+
+  Accepted, not mitigated: none. Every risk above has a concrete
+  verification or fix step, or a flagged follow-up.
+- **Deliverables:** (copied verbatim from the plan's §6)
+  - [ ] §5 step 1: absent-input declarations for every `node_express` and
+        `python_fastapi` route, with offline PA-0054 (1) checks green; D1 fixed;
+        D4 probed and recorded.
+  - [ ] `BUG-0056` (`docs/bugs/BUG-0056-*.md`), with a full RCA (Five Whys)
+        and a **recurrence review against BUG-0037/PA-0039, BUG-0051/PA-0053
+        and BUG-0052/PA-0054**. It must include a prior-preventive-action
+        failure analysis. The working hypothesis, to be confirmed in the doc
+        and not assumed: PA-0054's rule was correct, but its offline check
+        was built **per emitter, by the lane that reached that emitter**
+        (`tests/test_labgen_django_browsable.py` covers only `django`).
+        Emitters no lane had reached yet (`python_fastapi`, `node_express`,
+        `php_current`) stayed unchecked. That is a "not enforced, wrong
+        layer" failure.
+
+        **Reconciliation with Lane 4's S15 (revised in round 1, adequacy gap
+        1).** Lane 4's plan (`docs/LAB_LANE4_SPRING_BOOT_PLAN.md` S15,
+        worktree `agent-ace983493fa0709aa`) already **reserves** the shared
+        cross-emitter mechanism: `tests/test_absent_input_declarations_cross_emitter.py`.
+        - It is parametrized over every emitter.
+        - Its `node_express` and `python_fastapi` cases are
+          `xfail(strict=True)`, naming Lane 6 as the owner.
+        - It reads each emitter's own route-profile table plus its
+          manifests: `node_express/__init__.py:171` (`_ROUTE_PARAMS`) and
+          `python_fastapi/__init__.py:105` (`_PAGE_PARAMS`). Those are
+          exactly the tables §2A-d/§2B-c add `absent_input` to.
+
+        So this lane **adopts S15 as the one shared mechanism and does not
+        build a second, competing cross-emitter test**. The draft's "flag to
+        Lane 7 to lift it later" hand-off is withdrawn.
+        - **What this lane does build:** only emitter-scoped offline tests
+          (§4A companions, §4B item 3). They check what S15 does not: that
+          each value is allowed for the route's source kind, that the guard
+          is actually rendered, and that it is twin-identical. This mirrors
+          Lane 2's `test_labgen_django_browsable.py`, which S15 also leaves
+          in place.
+        - **Merge-order criterion, whichever merges first:**
+          - If **Lane 4 merges first**, Lane 6's merge makes the two S15
+            cases XPASS. The orchestrator deletes those two
+            `xfail(strict=True)` markers in the same merge, which is Lane 4's
+            own S15 rule ("delete that one xfail marker at merge time").
+          - If **Lane 6 merges first**, S15 does not exist yet in this
+            branch, and this lane edits no file it does not own. Lane 4's
+            merge must then land those two cases without their xfail
+            markers, because they would XPASS immediately.
+          - Either way it is a mechanical edit at merge, not a design
+            decision.
+        - **Value-spelling divergence, flagged:** Lane 3 spells values
+          `default:<v>`/`required:400`/`form_on_get`/`no_input`. Lane 4
+          spells them `default_value`/`required_param`/`form_when_absent`/
+          `empty_body_400`/`no_input`. This lane uses Lane 4's spellings
+          because S15 is Lane 4's file. Unifying the spellings, and making
+          S15 validate each value against one closed set rather than only
+          checking presence, is a cross-lane change no single lane owns.
+          **Recommended owner: Lane 7's reserved `CC-LAB-0247`**
+          (integration). This is flagged to the orchestrator as a Lane 7
+          scope addition, not self-assigned.
+        - **Several lanes each writing a PA for the same rule (PA-0055 Lane
+          3, PA-0056 Lane 4, PA-0058 here):** PAs are append-only and are
+          never renumbered, so the criterion is about content.
+          - At bug-doc time, `BUG-0056` reads PA-0055 and PA-0056 as they
+            then stand (merged, or in their worktrees), and PA-0058 states
+            **only its delta** over them.
+          - The working candidate delta, evidenced by this lane's
+            vocabulary finding above: presence of *a* declaration is not
+            enough. The declaration must come from one closed cross-emitter
+            value set that the shared check validates. The draft's
+            per-emitter fragmentation made one emitter's valid declaration
+            unreadable to another emitter's check.
+          - **Decision rule:** if the delta over PA-0055/PA-0056 is empty,
+            do not write a PA that restates them. Stop and flag to the
+            orchestrator instead, and record PA-0058 as unused.
+        - **`php_current`:** S15 already pins it ("no lane assigned"). This
+          lane's PA-0002 sweep records its instances in `BUG-0056` and
+          relies on S15's pin. It does not add a second one.
+  - [ ] `ERROR_LOG.md` entry (newest on top), cross-referencing BUG-0056
+        and PA-0058.
+  - [ ] `docs/PREVENTIVE_ACTIONS.md`: `PA-0058`, plus the PA-0002 sweep's
+        results recorded in the bug doc.
+  - [ ] MeadowMart site layer: `scaffold/site.js`, the accumulator line, the
+        preferences GET resource read (with the R3 sign-off recorded), and
+        the fixtures refactored to `RUNTIME_SCAFFOLD_FILES`. The 3 existing
+        live modules are green.
+  - [ ] MeadowMart navigability test green: crawl, the PA-0054 (2) sweep of
+        every route, and the R2 gadget boot.
+  - [ ] `python_fastapi`: homepage, layout, `/login` form page, cell
+        responses inside the layout, twin URLs per R-B7 (branch (a), or the
+        branch (b) strict xfail), and the §4B in-process check green.
+  - [ ] Offline companions green (§4A list), including R5's name-leak scan
+        and R6's `innerHTML` pin.
+  - [ ] Strict-xfail pins for the different-class findings F1 and F2. F4 is
+        skip-guarded and flagged. F3 is now in scope (R-B7), and is pinned
+        only if branch (b) is used.
+        - **Corrected in round 1:** the draft claimed each pin "names its
+          follow-up".
+        - **What each pin actually names:** each xfail reason names its
+          finding ID and the text "follow-up CC-LAB number to be assigned by
+          the orchestrator". Per PA-0031, a lane must not self-assign
+          numbers beyond its reservation, and Lanes 1 and 4 handled their
+          own follow-ups the same way.
+        - The orchestrator's assigned numbers are recorded in the Lane 6 row
+          of `docs/LAB_BROWSABLE_APPS_PLAN.md` at merge.
+  - [ ] Full non-slow suite, every `node_express` live suite and the
+        `python_fastapi` TestClient suite green, with counts reported.
+  - [ ] `docs/components/01-target-lab/change-control.md`: **one** entry,
+        `CC-LAB-0246`, covering both targets in clearly separated
+        subsections.
+
+        **Why one entry. The argument stands on its own and does not borrow
+        Lane 4's reason (rewritten in round 1, adequacy gap 3).** Lane 4
+        justifies one entry by **one shared emitter** (`LAB_LANE4` §1.9).
+        That reason does **not** apply here: MeadowMart (`node_express`) and
+        the sample (`python_fastapi`) are different emitters with no shared
+        mechanism beyond the absent-input vocabulary. The reasons that do
+        apply are these:
+        1. **Change-control is per component (`LAB`), not per emitter**
+           (`docs/components/README.md`). One entry spanning several
+           emitters has precedent: `CC-LAB-0040` covered `php_current`,
+           `node_express`, `python_fastapi` and `php_laravel` in one entry.
+        2. **One root cause, one bug and one gate across both emitters.**
+           BUG-0056 is a single defect class (undeclared absent input)
+           found in both (D1–D4). §5 step 1 fixes both under one gate, and
+           PA-0058 is a single rule. Splitting would mean either two entries
+           citing one bug, or two bug reports for one root cause. The bug
+           protocol forbids the second and makes the first awkward.
+        3. **The two targets' specs stay separate without two entries.**
+           `FR-LAB-168` (MeadowMart) and `FR-LAB-169` (the sample) carry the
+           per-target spec and each target's sign-off (R3, F3). The entry
+           has separate per-target subsections for description, risks,
+           Deliverables and Effectiveness.
+        4. **One close date.** Both targets are implemented and verified in
+           this one lane before hand-back, so neither entry would ever be
+           closed while the other stayed open.
+
+        **The honest counter-argument:** the two targets are independently
+        verifiable. MeadowMart uses a live crawl; the sample uses an
+        in-process check.
+
+        **Decision rule:** split into two entries if either of these holds:
+        - the change-control gate's reviewers find that either target could
+          be judged done while the other is not, meaning reason 4 fails in
+          practice;
+        - implementation ends up delivering the two targets in separate
+          commits with separate Effectiveness dates.
+
+        To split, bump Lane 7 to `CC-LAB-0248` (and its FR-LAB range by the
+        same amount) in `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately,
+        before drafting the second entry. That is the discipline from that
+        doc's correction notes. Flag the bump.
+  - [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-168`
+        (MeadowMart browsable site, client pages, preferences GET resource
+        read, navigability test, and the **R3 sign-off**) and `FR-LAB-169`
+        (`python_fastapi` homepage and layout, in-process check, and the
+        **F3 sign-off**, R-B7).
+  - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0246`,
+        `BUG-0056` and `PA-0058`.
+  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: the Lane 6 row updated to done,
+        naming what was used and what was not (`CC-FUZZ-0052`/`FR-FUZZ-36`
+        are expected to stay unused, R9).
+  - [ ] `docs/ARCHITECTURE.md`: not expected to change. The new scaffold
+        files sit inside existing emitter packages, and Lane 7 owns the
+        compose/port and architecture integration. Check again at step 7
+        and update if any structure or contract did change.
+- **Effectiveness:** pending. It will be assessed after implementation,
+  with:
+  - pass/fail/skip counts for the full non-slow suite and for every
+    `node_express` live suite and the `python_fastapi` TestClient suite,
+    each run explicitly (PA-0038);
+  - the R3 and F3 sign-offs;
+  - the measured R8 minimums and R-B2 byte difference;
+  - the D4 re-probe result;
+  - the BUG-0056/PA-0058 outcome, including whether PA-0058 had a
+    non-empty delta over PA-0055/PA-0056.
+
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**

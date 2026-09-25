@@ -918,7 +918,8 @@ assertions. That choice is settled at the gate.
 - [ ] MeadowMart navigability test green: crawl, the PA-0054 (2) sweep of
       every route, and the R2 gadget boot.
 - [ ] `python_fastapi`: homepage, layout, `/login` form page, cell
-      responses inside the layout, and the §4B in-process check green.
+      responses inside the layout, twin URLs per R-B7 (branch (a), or the
+      branch (b) strict xfail), and the §4B in-process check green.
 - [ ] Offline companions green (§4A list), including R5's name-leak scan
       and R6's `innerHTML` pin.
 - [ ] Strict-xfail pins for the different-class findings F1 and F2. F4 is
@@ -983,7 +984,8 @@ assertions. That choice is settled at the gate.
 - [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-168`
       (MeadowMart browsable site, client pages, preferences GET resource
       read, navigability test, and the **R3 sign-off**) and `FR-LAB-169`
-      (`python_fastapi` homepage and layout, in-process check).
+      (`python_fastapi` homepage and layout, in-process check, and the
+      **F3 sign-off**, R-B7).
 - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0246`,
       `BUG-0056` and `PA-0058`.
 - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: the Lane 6 row updated to done,
@@ -1099,3 +1101,11 @@ orchestrator, 2026-09-25): ACCURATE / ADEQUATE.** Both reviewers confirmed
 the round-1 fixes, so 3/3 agreement is reached (2 reviewers plus the
 proposing agent). The plan is converged. Implementation still requires the
 `CC-LAB-0246` entry's own gate (see Status).
+
+**Post-convergence alignment (2026-09-25, while drafting `CC-LAB-0246`).**
+Two §6 checklist items did not yet name what §2B-e/R-B7 had already
+decided in round 1. The `python_fastapi` item now names the twin URLs, and
+the `FR-LAB-169` item now names the "F3 sign-off" destination. This only
+brings §6 in line with decisions already reviewed. No risk, decision or
+conclusion changed, so it does not reopen the 3/3 convergence above. This
+follows Lane 2's post-convergence citation fix (`LAB_LANE2` §8).
