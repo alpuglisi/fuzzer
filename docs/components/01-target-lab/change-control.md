@@ -3,6 +3,107 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0240 — Browsable labs Lane 1 step 4: JSON→HTML conversion for PFF's own real pages (2026-09-25, FR-LAB-158, `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`)
+
+**Status: DRAFT, pre-change review gate in progress.** The underlying plan
+(`docs/LAB_PFF_JSON_TO_HTML_PLAN.md`) already went through 3 full review
+rounds and reached 3/3 agreement (2026-09-25). This entry is that plan
+condensed into the change-control template, but the entry itself has not
+yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
+gate is the next step, mirroring exactly how CC-LAB-0239 was drafted
+before its own gate ran. Implementation is **not authorized** until this
+entry reaches 3/3 (2 reviewers + proposing agent).
+
+- **Change:** 5 of PFF's own migrated real pages (`/product.php`,
+  `/products.php`, `/search.php`, `/blog_post.php`, `/register.php`) still
+  return `response()->json($rows)` despite `lab/ground-truth/injection-points.json`
+  already claiming `"rendering": "server"` for them — a gap from an earlier
+  plan (`docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`) wrongly inferring response
+  format from that ground-truth field, which actually only governs request-
+  body encoding. Fix:
+  1. Add named `_HTML_ROW_VIEW_KEY`/`_HTML_LIST_VIEW_KEY` constants, pop
+     both in `render()`, and add a fail-loud mutual-exclusivity check if a
+     profile sets more than one tail flag (hygiene gap found while
+     extending the mechanism CC-LAB-0239 introduced).
+  2. Add a new `html_list_view` tail to `single_statement.php.j2` —
+     `return view($name, ['rows' => $rows]);` — since these 5 pages'
+     sinks (`DB::select`/`->get()->all()`) always return a PHP list, not
+     the associative-array shape CC-LAB-0239's `html_row_view` assumes
+     (confirmed: passing a list to `html_row_view` would extract zero
+     Blade variables).
+  3. Wire `html_list_view` on `/product.php`, `/products.php`,
+     `/search.php`, `/blog_post.php`'s page profiles; write shared Blade
+     views (byte-identical per twin pair) rendering real per-row content
+     with a found/not-found delta of **at least 300 bytes** (R1, below).
+  4. Bespoke HTML tail for `/register.php` (duplicate/success) and
+     `/login.php` (failure), reusing the real pre-cutover PFF copy
+     (`git show 876d2f9^:puppy-fort-factory/{register,login}.php`) —
+     status codes (409/200/401) unchanged, only the body becomes HTML.
+- **Impact (other components / project):** LAB (this component) only —
+  no FUZZ-side oracle-strategy change needed (`SqliErrorStrategy`/
+  `SqliBooleanStrategy`/`SqliTimingStrategy` confirmed format-agnostic by
+  2 independent reviewers reading their `confirm()` methods directly). No
+  ground-truth `url`/`rendering` field edits needed (`rendering: server`
+  was already correct — confirmed `regression_gate.py` never reads body/
+  rendering, so this change cannot trip it). **Out of scope, deliberately**:
+  the bare-fragment layout-inheritance gap on `/contact.php`/`/newsletter.php`/
+  `/edit_profile.php` (a different mechanism, the sink template not the
+  tail flag) — recommended as the next CC-LAB-numbered step, not folded in
+  here.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.**
+  One genuinely novel risk, found by a dedicated research pass, not
+  present in CC-LAB-0239's precedent:
+  1. *`SqliBooleanStrategy` length-ratio detection could silently break*
+     once responses are wrapped in a shared ~1,947-byte layout (its
+     `_similar` check scales its ~5%-of-length threshold up with page
+     size, to ≈100 bytes at this layout's size). Mitigated by a designed,
+     literal **≥300-byte** found/not-found content delta (verified
+     independently of the strategy's own threshold formula, so the guard
+     test isn't circular) and a direct test asserting that delta, not just
+     re-running the oracle strategy's own (format-agnostic, confirmed)
+     test suite.
+  2. *8 existing live-boot assertions (SQLite + MariaDB, both execute for
+     real in this environment) count literal JSON syntax* and would break;
+     one (`mariadb.py:431`) would otherwise pass *vacuously* rather than
+     fail, a silent false-pass. Mitigated by rewriting all 8 to check
+     HTML-appropriate content, verified re-run.
+  3. *SQLite vs MariaDB schema mismatch* (`posts` lacks `author`/
+     `published_at` in the SQLite harness) — mitigated by templates that
+     only reference columns present in both harnesses (`products`/`users`
+     columns cross-checked too; only `posts` differs), re-run against both
+     harnesses.
+  Accepted, not mitigated: none — every identified risk has a concrete
+  mitigation, no residual risk carried forward silently.
+- **Deliverables:**
+  - [ ] `_HTML_ROW_VIEW_KEY`/`_HTML_LIST_VIEW_KEY` constants + pop + mutual-
+        exclusivity check added; `test_labgen_php_laravel_access_control_live_boot.py`
+        + `test_labgen_phase_d_tier12_category5.py` (CC-LAB-0239's existing
+        `html_row_view` users) re-run green **before** proceeding — todo,
+        explicit gate.
+  - [ ] `html_list_view` tail added to `single_statement.php.j2` — todo.
+  - [ ] `/product.php` + `/blog_post.php` converted, shared Blade view(s),
+        ≥300-byte delta test, R5 twin-diff test, 4 JSON-counting live-boot
+        assertions (SQLite + MariaDB) updated — todo.
+  - [ ] `/products.php` converted (secure-only, no twin-diff needed);
+        existing live-boot assertions confirmed still agnostic — todo.
+  - [ ] `/search.php` converted on the shared profile; confirmed the 4 XSS
+        cells (different complexity, `render_only`) stay unaffected; 2
+        JSON-counting MariaDB assertions updated, including the vacuously-
+        true one; ≥300-byte delta test + R5 twin-diff test — todo.
+  - [ ] `/register.php` + `/login.php` failure tail converted to HTML
+        (real historical copy); 4 status/body assertions updated across
+        SQLite + MariaDB; static controller-source assertion
+        (`tests/test_labgen_php_laravel_real_pages_auth.py:132-134`)
+        confirmed still holds unchanged — todo.
+  - [ ] Full non-slow suite + both SQLite and MariaDB live-boot test files
+        green — todo.
+  - [ ] One-line note recommending the bare-fragment layout gap as the
+        next CC-LAB-numbered step, added somewhere durable (this entry's
+        Impact section already does; also add to
+        `docs/LAB_BROWSABLE_APPS_PLAN.md` if not otherwise tracked) — todo.
+- **Effectiveness (assessed <date> or pending):** pending — not yet
+  implemented.
+
 ### CC-LAB-0239 — Browsable labs Lane 1 step 3: JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-157, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25
