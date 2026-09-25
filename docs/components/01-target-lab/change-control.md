@@ -5,10 +5,20 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0244 — Browsable labs Lane 4: spring_boot TrackerNest, Netflix clone and Expedia clone (2026-09-25, FR-LAB-164/FR-LAB-165, `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`)
 
-**Status: DRAFT — awaiting its own pre-change review gate** (2 independent
-reviewer agents, accuracy + adequacy, run by the orchestrating session
-because this lane's sub-agent has no agent-spawning tool). **Implementation
-is not authorized** until this entry reaches 3/3 agreement.
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round).
+
+- The reviewers (accuracy + adequacy) were run by the orchestrating session,
+  because this lane's sub-agent has no agent-spawning tool.
+- **Round 1:** ACCURATE (including a direct spot-check of the
+  `ARCHITECTURE.md` line citations) / ADEQUATE contingent on one gap.
+  `CC-LAB-0242`'s numbering-collision contingency clause had not been
+  restated for the 3-app bundling. Fixed by adding that clause under
+  Impact, plus a post-implementation numbering check-back under
+  Effectiveness.
+- **Round 2:** both reviewers re-confirmed ACCURATE and ADEQUATE.
+- **Implementation authorized; not yet landed.**
 
 Condensed from `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`, which went through 2
 review rounds and reached 3/3 agreement on 2026-09-25:
