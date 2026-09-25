@@ -27,7 +27,7 @@ func main() {
 	registerSiteRoutes(mux)
 	registerRoutes(mux)
 
-	addr := "127.0.0.1:" + port()
+	addr := host() + ":" + port()
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		panic(err)
 	}
@@ -38,4 +38,21 @@ func port() string {
 		return p
 	}
 	return "8080"
+}
+
+// host defaults to 127.0.0.1 -- unchanged behavior for every existing
+// direct-host-process caller (this stack's own live-boot/navigability test
+// harnesses). CC-LAB-0247 (Lane 7, Gate D)'s container entrypoint sets
+// HOST=0.0.0.0 so the platform's port-publish (`-p 127.0.0.1:<host>:8080`)
+// can actually reach this process: binding the process itself to
+// 127.0.0.1 *inside* a container is unreachable from the host's
+// port-forwarding path (verified live -- a published port's traffic never
+// arrives at a loopback-only listener in the container's own netns). The
+// loopback-only guarantee is enforced by the host-side compose bind, not
+// by this process's own listen address.
+func host() string {
+	if h := os.Getenv("HOST"); h != "" {
+		return h
+	}
+	return "127.0.0.1"
 }

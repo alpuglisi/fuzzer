@@ -506,7 +506,19 @@ class NodeExpressEmitter(Emitter):
             "\n"
             "if (require.main === module) {\n"
             "    const port = Number(process.env.PORT || 3000);\n"
-            "    app.listen(port, '127.0.0.1');\n"
+            "    // CC-LAB-0247 (Lane 7, Gate D): HOST defaults to 127.0.0.1\n"
+            "    // (unchanged direct-host-process behavior, e.g. this stack's own\n"
+            "    // live-boot/navigability test harnesses). A container's own\n"
+            "    // entrypoint sets HOST=0.0.0.0 so the platform's port-publish\n"
+            "    // (`-p 127.0.0.1:<host>:<container>`) can actually reach this\n"
+            "    // process -- binding the process itself to 127.0.0.1 *inside* a\n"
+            "    // container is unreachable from the host's port-forwarding path\n"
+            "    // (verified live: connections to a published port never arrive at\n"
+            "    // a loopback-only listener in the container's own netns). The\n"
+            "    // loopback-only *guarantee* is enforced by the host-side compose\n"
+            "    // bind, not by this process's own listen address.\n"
+            "    const host = process.env.HOST || '127.0.0.1';\n"
+            "    app.listen(port, host);\n"
             "}\n"
             "\n"
             "module.exports = app;\n"
@@ -568,3 +580,36 @@ def _indent_block(text: str, prefix: str) -> str:
     and dependency-free, same convention as ``php_current._indent_block``."""
     lines = text.split("\n")
     return "\n".join((prefix + line) if line else line for line in lines)
+
+
+def assemble_meadowmart_app(dest: str) -> None:
+    """CC-LAB-0247 (Lane 7, Gate D): write MeadowMart's whole real build --
+    the runtime scaffold files (``db.js``/``package.json``/``site.js``, plus
+    ``package-lock.json`` for a real `npm ci`), every real cell's rendered
+    files, and the route accumulator (``app.js``) -- into ``dest``. Lifted
+    from ``tests/_meadowmart_app.py``'s own ``assemble()`` test helper
+    (PA-0027: that helper's default, no-explicit-``cells`` case now
+    delegates here, so the container build path and the test harness's own
+    boot path can never independently drift). A source tree only: no `npm
+    install`, no boot -- a real boot (the test harness or a container's own
+    build stage) still does that."""
+    import shutil
+    from pathlib import Path
+
+    from fuzzlab.labgen.schema import load_manifest
+
+    dest_path = Path(dest)
+    (dest_path / "routes").mkdir(parents=True, exist_ok=True)
+    scaffold_dir = Path(__file__).resolve().parent / "scaffold"
+    for name in (*RUNTIME_SCAFFOLD_FILES, "package-lock.json"):
+        shutil.copyfile(scaffold_dir / name, dest_path / name)
+
+    emitter = NodeExpressEmitter()
+    cells = [c for m in MEADOWMART_MANIFESTS for c in load_manifest(m).cells]
+    for cell in cells:
+        for f in emitter.render(cell):
+            out = dest_path / f.path
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(f.content)
+    acc = emitter.render_route_accumulator(cells)
+    (dest_path / acc.path).write_bytes(acc.content)

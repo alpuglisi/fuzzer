@@ -13,10 +13,17 @@
 # not lab/, so the `gen` stage can see fuzzlab/ and lab/manifests/.
 
 FROM python:3.12-slim AS gen
+# CC-LAB-0247 (Lane 7, §2b): optional split-app selector, passed through to
+# `assemble.py`'s own `--app` flag. Empty (the default) is byte-for-byte
+# today's behavior -- the merged PFF build with every cell. A caller sets
+# `--build-arg APP=circlefeed` (or `huddlehub`/`booking`) to build that
+# split-out app instead (`fuzzlab.labgen.emitters.php_laravel.app_site.
+# APP_REGISTRY`'s keys).
+ARG APP=""
 WORKDIR /src
 COPY . /src
 RUN pip install --no-cache-dir -e . \
-    && python3 -m fuzzlab.labgen.assemble --out /app
+    && python3 -m fuzzlab.labgen.assemble --out /app $( [ -n "$APP" ] && echo "--app $APP" )
 
 FROM php:8.3-apache-bookworm
 

@@ -62,8 +62,21 @@ def _load_scaffold_files() -> dict[str, bytes]:
 #: "soft-guarantee digest-pinned + SBOM-recorded" split determinism
 #: guarantee -- see scaffold/Dockerfile's own header comment for the digest's
 #: provenance and the re-pin command to run before a real build.
+#:
+#: CC-LAB-0247 (Lane 7, Gate D): this constant and scaffold/Dockerfile's own
+#: `FROM` line are two independently-hand-maintained copies of the same
+#: digest (PA-0027 violation, not new to this lane) -- the exact reason the
+#: two drifted silently when the Dockerfile was re-pinned to the live-
+#: verified `linux/amd64` digest (the old value here resolved to
+#: `linux/ppc64le`, caught only once a real Docker/Podman was available to
+#: build against) but this module-level copy was not, and
+#: `test_dockerfile_pins_the_same_digest_as_the_stack_env` caught the
+#: divergence immediately. Not refactored into one shared source in this
+#: same change (would mean `scaffold/Dockerfile` stops being a plain,
+#: independently-readable static file) -- flagged here as a real follow-up,
+#: not silently left for the next drift.
 _BASE_IMAGE = (
-    "node@sha256:93a7d0e0f6a1407b7e3d83325f9efcc096ead281667613141430347a925fe918"
+    "node@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2"
     "  # node:22-bookworm-slim, Node 22 LTS ('Jod')"
 ).split("  #")[0]
 

@@ -58,7 +58,15 @@ def npm_registry_reachable(probe_dir: Path) -> bool:
 
 
 def assemble(root: Path, cells=None) -> Path:
-    cells = meadowmart_cells() if cells is None else cells
+    if cells is None:
+        # CC-LAB-0247 (Lane 7, Gate D, PA-0027): the default (every real
+        # cell) case delegates to the shared `assemble_meadowmart_app`, the
+        # same assembly `lab/web-node.Dockerfile`'s own `gen` stage uses --
+        # one source, not two independently-maintained copies.
+        from fuzzlab.labgen.emitters.node_express import assemble_meadowmart_app
+
+        assemble_meadowmart_app(str(root))
+        return root
     (root / "routes").mkdir(parents=True, exist_ok=True)
     for name in RUNTIME_SCAFFOLD_FILES:
         (root / name).write_bytes((SCAFFOLD_DIR / name).read_bytes())
