@@ -76,18 +76,27 @@ never split across two.
   (`test_labgen_phase_d_tier12_category5.py`) as a second, differently-
   mechanised proof the new shape is still detected.
 - **Deliverables:**
-  - [ ] `PriceIntegrityBypassStrategy.confirm`'s anchor changed from the
-        JSON fragment to `data-charged-amount="<canary>"` — todo, blocked
-        on `CC-LAB-0239`'s `LABGEN-BC-0005`/`0006` HTML conversion landing
-        in the same commit.
-  - [ ] `tests/test_oracle_vectors.py`'s `PriceIntegrityBypassStrategy`
-        tests updated to the new shape — todo.
-  - [ ] `tests/test_labgen_price_integrity.py`'s live-boot proof updated —
-        todo.
-  - [ ] `tests/test_labgen_phase_d_tier12_category5.py` re-run and
-        confirmed green against the new HTML shape — todo.
-- **Effectiveness (assessed <date> or pending):** pending — not yet
-  implemented.
+  - [x] `PriceIntegrityBypassStrategy.confirm`'s anchor changed from the
+        JSON fragment to `data-charged-amount="<canary>"` — done, landed in
+        the same commit as `CC-LAB-0239`'s `LABGEN-BC-0005`/`0006` HTML
+        conversion.
+  - [x] `tests/test_oracle_vectors.py`'s `PriceIntegrityBypassStrategy`
+        tests updated to the new shape (all 3: confirmed-vulnerable,
+        fails-closed-on-secure, canary-collision-avoidance) — done.
+  - [x] `tests/test_labgen_price_integrity.py`'s live-boot proof updated —
+        done, re-run for real (live-boot available in this environment) and
+        green.
+  - [x] `tests/test_labgen_phase_d_tier12_category5.py` re-run and
+        confirmed green against the new HTML shape — done; its own
+        `evidence_marker` (a bare `"0.01"`, not a JSON-fragment anchor)
+        matched the new `data-charged-amount="0.01"` attribute without
+        needing its own change.
+- **Effectiveness (assessed 2026-09-25):** effective — the anchor change
+  landed in the same commit as the paired `CC-LAB-0239` sink-template
+  change (never split, per this entry's own risk mitigation), all 4
+  dependent tests re-run for real against a live-booted server and green,
+  and the independent Tier1/Tier2 conformance test confirms detection holds
+  via a second, differently-mechanised proof. No detection regression.
 
 ### CC-FUZZ-0046 — `PathTraversalFsPathReadStrategy` closes category 4's last known real, TRACKED detection gap (`path_traversal`/`fs_path_read`) (2026-09-23)
 

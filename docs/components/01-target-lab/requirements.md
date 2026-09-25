@@ -5640,9 +5640,39 @@ lane) can submit a payload as
   (`docs/LAB_BROWSABLE_APPS_PLAN.md`); explicitly deferred, not done here:
   giving these apps' cells realistic (non-`/cell/...`) URLs, and removing
   them from the default merged PFF build -- both are relocations that need
-  their own reviewed ground-truth/regression-gate baseline update. Lane 1's
-  remaining scope (that URL/ground-truth work, i.e. converting the
-  JSON-responding browser endpoints to real HTML) is not yet done.
+  their own reviewed ground-truth/regression-gate baseline update. That
+  remaining scope is `FR-LAB-157`, below.
+- **FR-LAB-157** *(realistic URLs + JSON→HTML conversion for CircleFeed,
+  Huddle Hub, and Booking's browser-facing cells; `php_laravel`;
+  `CC-LAB-0239`, 2026-09-25).* All 11 `LABGEN-CF-*`/`LABGEN-HHB-*`/
+  `LABGEN-BC-*`/`LABGEN-MA-0003`/`0004` cell pairs move off generic
+  `/cell/labgen-*` URLs onto their manifests' own realistic paths (e.g.
+  `/photos/view`, `/booking/checkout`), via `_PAGE_PROFILES`'
+  `real_page`/`canonical_cell_id` keys (the same mechanism `FR-LAB-155`'s
+  migrated PFF pages already use) -- no manifest edit needed, since
+  `_PAGE_PROFILES` is already keyed by each cell's own `route.path`. Of
+  these, `LABGEN-CF-0001`/`0002` (IDOR photo view) and `LABGEN-BC-0005`/
+  `0006` (price-integrity checkout) also convert their response body from
+  `response()->json(...)` to a real HTML page (a new `html_row_view` tail on
+  the `single_statement` complexity, backed by hand-authored, twin-shared
+  Blade views under `resources/views/site/`) -- every other pair already
+  returned a realistic non-JSON response (redirect, CSV) or is a genuine
+  JSON API by `docs/LAB_BROWSABLE_APPS_PLAN.md`'s own classification test
+  (webhook receivers, deserialization endpoints, JSON mass-assignment APIs
+  stay JSON). 4 new GET-reachable client pages (2 webhook `fetch()` pages,
+  1 account-settings `fetch()` page, 1 real `<form>` checkout page) make
+  the `POST`-only cells reachable from `/catalog` (a `GET`-only listing).
+  `PriceIntegrityBypassStrategy`'s (`fuzzlab.oracle.strategies`, `FUZZ`
+  component) detection anchor moved from the JSON fragment
+  `"charged_amount":"..."` to the `data-charged-amount` HTML attribute in
+  the same change (`CC-FUZZ-0047`) -- no other oracle strategy needed a
+  change. Per-app ground-truth `url`/`rendering` fields
+  (`lab/ground-truth-{circlefeed,huddlehub,booking-clone}/`) updated for
+  every relocated/converted cell. Explicitly deferred, not done here: the
+  spider-based crawl-from-`/` 100%-discovery navigability acceptance test
+  (`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6) -- every URL was instead
+  verified individually via real live-boot HTTP requests, which proves each
+  one is real and correct but is not the same proof as a full crawl.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

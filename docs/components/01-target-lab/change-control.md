@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0239 — Browsable labs Lane 1 step 3: JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
+### CC-LAB-0239 — Browsable labs Lane 1 step 3: JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-157, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25
 (2 independent reviewer agents plus the proposing agent, after 2 revision
@@ -135,38 +135,67 @@ before the change is considered done)."
   the default merged PFF build, which has a login flow, so R8 itself does
   not apply to it — no accepted risk here beyond the 10 pairs R8 covers).
 - **Deliverables:**
-  - [ ] R8 sign-off obtained (option (a): build a login route for each split
-        app; or (b), recommended: document the anonymous-401 result as
-        correct and edit `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6
-        accordingly) — todo, blocks everything below that touches
-        `LABGEN-CF-0001`/`0002`.
-  - [ ] `LABGEN-CF-0001`/`0002` converted to HTML + `_PAGE_PROFILES` wired +
-        ground truth updated + `test_labgen_php_laravel_access_control_live_boot.py`
-        updated + new `AccessControlIdorStrategy` realistic-fixture test
-        added — todo.
-  - [ ] 7 `GET`-only cells relocated (`_PAGE_PROFILES` wired + ground truth
-        updated) — todo.
-  - [ ] 4 `POST`-only `api` cell pairs given new client pages +
-        `_PAGE_PROFILES` wired where applicable — todo.
-  - [ ] `LABGEN-BC-0005`/`0006` converted to HTML + `_PAGE_PROFILES` wired +
-        `PriceIntegrityBypassStrategy` updated (jointly with `CC-FUZZ-0047`)
-        + ground truth updated + `tests/test_labgen_cutover_gate.py` re-run
-        (confirms the new `real_page`/`canonical_cell_id` entry doesn't
-        perturb the unrelated PFF cutover-coverage computation) — todo.
-  - [ ] New automated twin-diff byte-equality tests for both converted
-        pairs — todo.
-  - [ ] One-line note added to `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 4
-        row (R4): `db_row_by_id_lookup`-family sinks render per-lane, per
-        that lane's own `page`/`api` classification — not copied verbatim
-        from `php_laravel` — so Lane 4 doesn't rediscover this question —
-        todo.
-  - [ ] Full non-slow suite + this lane's live-boot suite green; every test
-        named in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` §5's checklist
-        passing — todo.
-  - [ ] Navigability acceptance test (crawl-from-`/`) re-run for all 3 split
-        apps, scored per the R8 option chosen — todo.
-- **Effectiveness (assessed <date> or pending):** pending — not yet
-  implemented.
+  - [x] R8 sign-off obtained — **option (b)** chosen (document the
+        anonymous-401 result as correct); `docs/LAB_BROWSABLE_APPS_PLAN.md`
+        point 6 edited accordingly — done, 2026-09-25.
+  - [x] `LABGEN-CF-0001`/`0002` converted to HTML (`site.photo-view.blade.php`)
+        + `_PAGE_PROFILES` wired (`real_page`/`canonical_cell_id`) +
+        per-app ground truth updated (`url`, `rendering: server`) +
+        `test_labgen_php_laravel_access_control_live_boot.py` updated +
+        new `AccessControlIdorStrategy` realistic-fixture test added — done.
+  - [x] 7 `GET`-only cells relocated (`_PAGE_PROFILES` wired, no manifest
+        edit needed per R9's own finding; per-app ground truth `url`
+        updated) — done: `LABGEN-CF-0005/0006`, `LABGEN-CF-0007/0008`,
+        `LABGEN-HHB-0003/0004`, `LABGEN-HHB-0005/0006`, `LABGEN-BC-0001/0002`,
+        `LABGEN-BC-0003/0004`.
+  - [x] 4 `POST`-only `api`/`page` cell pairs given new client pages +
+        `_PAGE_PROFILES` wired — done: `LABGEN-CF-0003/0004` (fetch() page,
+        `/groups/webhook`), `LABGEN-HHB-0001/0002` (fetch() page,
+        `/webhooks/events`), `LABGEN-MA-0003/0004` (fetch() page,
+        `/example/account_settings`, default merged build only),
+        `LABGEN-BC-0005/0006` (real `<form>`, `/booking/checkout`).
+  - [x] `LABGEN-BC-0005`/`0006` converted to HTML (`site.booking-checkout.blade.php`)
+        + `_PAGE_PROFILES` wired + `PriceIntegrityBypassStrategy` updated
+        (jointly with `CC-FUZZ-0047`, same commit) + ground truth updated
+        (`url`, `rendering: server`) + `tests/test_labgen_cutover_gate.py`
+        re-run (confirmed the new `real_page`/`canonical_cell_id` entries
+        don't perturb the unrelated PFF cutover-coverage computation) — done.
+  - [x] New automated twin-diff byte-equality tests for both converted
+        pairs — done
+        (`test_both_twins_render_via_the_same_shared_html_view_r5` in
+        `tests/test_labgen_access_control_circlefeed.py` and
+        `test_both_checkout_twins_render_via_the_same_shared_html_view_r5`
+        in `tests/test_labgen_price_integrity.py`).
+  - [x] One-line note added to `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 4
+        row (R4) — done.
+  - [x] Full non-slow suite green (2468 passed, 8 skipped — up from the
+        2465/8 pre-change baseline, the 3 net-new tests) — done, 2026-09-25.
+        Every test named in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` §5's
+        checklist re-run and green, including 3 dependent tests
+        (`test_labgen_php_laravel_booking_multitarget.py`,
+        `test_labgen_php_laravel_huddlehub_multitarget.py`) whose stale
+        URL/JSON-shape assertions the plan itself hadn't listed — found and
+        fixed during implementation, not silently left red.
+  - [ ] Navigability acceptance test (crawl-from-`/` with fuzzlab's own
+        spider) — **not run**; every relocated/converted URL was instead
+        verified directly and individually via real live-boot HTTP requests
+        (the tests above), which proves each URL is real and correctly
+        renders, but a full spider-crawl-based 100%-discovery proof (the
+        parent plan's own point 6 acceptance criterion, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
+        was not additionally run. Flagged here rather than marked done
+        inaccurately — left as a follow-up before this lane is considered
+        fully closed against the parent plan's own acceptance bar.
+- **Effectiveness (assessed 2026-09-25):** effective for what was
+  implemented and verified — every cell's conversion/relocation is proven
+  by real, executed HTTP requests (not just static generation), no
+  `DuplicateRouteError` anywhere, no detection regression (R1's oracle
+  strategy updated in lockstep and re-proven; R3's negative control held),
+  and the full non-slow suite plus every named live-boot/multitarget test
+  is green. **Not yet fully effective against the parent plan's own point 6
+  acceptance criterion**: the spider-based crawl-from-`/` 100%-discovery
+  proof was not run (see the unchecked deliverable above) — this entry's
+  Effectiveness will be revised once that gap is closed, rather than
+  claiming full effectiveness now.
 
 ### CC-LAB-0238 — Browsable labs Lane 1 step 2: `--app` split gives CircleFeed, Huddle Hub, and Booking their own standalone apps (2026-09-24, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
 - Change: `fuzzlab.labgen.assemble.collect_cells` gained an optional

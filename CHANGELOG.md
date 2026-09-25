@@ -4,6 +4,34 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 implemented: JSON→HTML conversion + realistic URLs, CC-LAB-0239/CC-FUZZ-0047/FR-LAB-157)
+- Implemented `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`'s converged,
+  gate-cleared plan for real. All 11 CircleFeed/Huddle Hub/Booking/mass-
+  assignment cell pairs moved off generic `/cell/labgen-*` URLs onto their
+  manifests' own realistic paths via a new `_PAGE_PROFILES`
+  `real_page`/`canonical_cell_id` wiring (R9) — no manifest edit needed,
+  since `_PAGE_PROFILES` was already keyed by each cell's own route path.
+  `LABGEN-CF-0001`/`0002` (IDOR photo view) and `LABGEN-BC-0005`/`0006`
+  (price-integrity checkout) also converted their response body from JSON
+  to real HTML pages (a new `html_row_view` complexity tail, backed by
+  hand-authored, twin-shared Blade views — byte-identical for both twins by
+  construction, satisfying R5 without needing the chi-square gate, which
+  structurally skips for these 2-cell manifests). 4 new GET-reachable
+  client pages make the `POST`-only cells reachable from `/catalog`.
+  `PriceIntegrityBypassStrategy`'s detection anchor moved from a JSON
+  fragment to an HTML `data-charged-amount` attribute in the same commit as
+  the sink-template change (R1); `AccessControlIdorStrategy` needed no
+  change (confirmed via a new realistic-fixture test, R3). Per-app
+  ground-truth `url`/`rendering` fields updated for every relocated/
+  converted cell (R6). Found and fixed 3 pre-existing tests whose
+  assertions depended on the old URL/JSON shape but weren't in the plan's
+  own dependent-test list. Full non-slow suite green (2468 passed, 8
+  skipped) and every live-boot/multitarget test the plan's R9 flagged
+  re-run for real against a live-booted server, all green. Deliberately not
+  done: the spider-based crawl-from-`/` navigability acceptance test
+  (`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6) — flagged as a follow-up in
+  `CC-LAB-0239`'s own Effectiveness assessment rather than claimed done.
+
 ## 2026-09-25 (Lane 1 step 3 pre-change review gate cleared: CC-LAB-0239/CC-FUZZ-0047 drafted, reviewed, 3/3 agreed; no code change)
 - Per `docs/components/README.md`'s pre-change review gate, drafted the two
   change-control entries for the converged `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`
