@@ -132,3 +132,33 @@ stop for every decision point. That bias does not extend to:
 For these, do the safe/verifiable parts, then stop and present the specific
 open question with your recommendation — rather than either quietly forcing
 a decision through or refusing to make any progress at all.
+
+## 6. Shared strict-xfail sentinels across concurrent lanes
+
+A cross-emitter (or otherwise cross-lane) offline check sometimes pins a
+still-missing mechanism in another, concurrently-developing lane's own
+scope with `xfail(strict=True)`, naming which lane owns fixing it (e.g. a
+check enumerating every emitter's absent-input declaration mechanism, with
+the ones that don't have one yet marked `xfail(strict=True)` rather than
+silently skipped). This has already happened at least twice in this
+project's Browsable Labs initiative: two concurrent lanes landed their own
+fixes for markers a third lane's check had pinned, and each pinned marker
+turned into an unexpected `XPASS(strict)` — a hard test failure — the
+moment the fixing lane's own commits merged in, even though neither lane
+knew about the other's marker at dispatch time.
+
+**Rule:** the lane that lands the fix for a shared strict-xfail marker
+deletes its own marker (or converts it to a positive confirmation) at merge
+time, as part of that lane's own merge, not as a follow-up. A concurrent
+lane must never delete another lane's still-relevant marker on its own
+say-so. When a marker unexpectedly XPASSes after a merge because a
+different, unrelated change happened to fix the underlying gap as a side
+effect (not the lane's own stated purpose), the orchestrating session
+converts it to a positive confirmation and records why in that merge's own
+commit message — never silently deletes it without comment, and never
+leaves a known-XPASSing strict marker in the tree past that merge.
+
+This generalizes the pre-assigned-numbering fix in §3: a marker shared
+across concurrent, not-yet-merged lanes is exactly the same kind of
+race-prone shared state a bookkeeping ID is, and deserves the same
+explicit, no-silent-improvisation discipline.

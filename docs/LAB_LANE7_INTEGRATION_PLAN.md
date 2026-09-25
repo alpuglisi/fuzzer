@@ -387,13 +387,17 @@ converted to a positive confirmation, not silently deleted without comment.
     is a Go backtick raw string literal, never matched by the double-quote-only regex both
     Lane 3's and Lane 4's own S7 offline tests use, and round-1 review confirmed a real,
     currently-undetected `max-width:100%` 3-digit run already sits there in already-merged,
-    already-pushed code. **Decision needed at review**: fix it now (touches an
-    already-merged lane's file, `site.go`, outside this lane's own stated scope) or
-    flag-and-defer with a tracked follow-up (matching how Lane 5 deferred ForgeCart's
-    stale-citation cleanup). Recommendation: defer with a tracked, precisely-worded
-    follow-up rather than silently expand scope, per the multi-agent orchestration
-    policy's own "flag, never silently build or skip" rule -- this lane's own reviewers
-    should confirm or override that recommendation.
+    already-pushed code. **Decided at Gate A (2026-09-25): flag-and-defer**, not fixed by
+    this lane (it touches an already-merged lane's file, `site.go`, outside this lane's
+    own stated scope) -- matching how Lane 5 deferred ForgeCart's stale-citation cleanup.
+    No reviewer overrode the round-1 recommendation across 3 rounds, so it stands as
+    final. **Tracked follow-up, recorded here and in `docs/LAB_BROWSABLE_APPS_PLAN.md`'s
+    Lane 7 row (2g/Gate G):** extend `go_net_http`'s own S7 test
+    (`tests/test_labgen_go_net_http_browsable.py`) to also scan backtick raw string
+    literals, not only double-quoted ones, then fix the resulting `max-width:100%` hit in
+    `fuzzlab/labgen/emitters/go_net_http/stack/skeleton/site.go`'s CSS the same way Lane 4
+    fixed its own analogous S7 hits (a digit/letter-mixed value, e.g. `99%`) -- the next
+    unreserved `CC-LAB` number is allocated by the orchestrator when that happens.
 14. **S14** -- *F1/F2's pinned-xfail status must not be silently disturbed* by this lane's
     own new production-mode boots. Mitigation: re-run `tests/test_labgen_node_express_browsable.py`/
     `tests/test_labgen_python_fastapi_browsable.py`'s existing strict-xfail tests
