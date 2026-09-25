@@ -12,9 +12,9 @@
       "subtypes": ["error", "boolean", "union"],
       "sink_context": "sql",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "django",
-      "notes": "PicTrail (Instagram-style) post-detail lookup: id concatenated raw into a WHERE clause via a raw connection.cursor() query (never the ORM); real, seeded SQLite backend. CC-LAB-0092, category 2 (Social/UGC platforms) pilot's first real, ground-truth-bearing page."
+      "notes": "PicTrail (Instagram-style) post-detail lookup: id concatenated raw into a WHERE clause via a raw connection.cursor() query (never the ORM); real, seeded SQLite backend. CC-LAB-0092, category 2 (Social/UGC platforms) pilot's first real, ground-truth-bearing page. CC-LAB-0242 (Browsable Labs Lane 2): now a real HTML post-detail page inside PicTrail's shared layout (pages/post_detail.html; bare /post defaults to id 1) instead of a bare JSON body -- `rendering` flipped `server-json`->`server` accordingly. The secure twin (LABGEN-DJ-0008) is served at /post.labgen-dj-0008."
     },
     {
       "case_id": "PT-0002",
@@ -51,9 +51,9 @@
       "vuln_class": "mass_assignment",
       "sink_context": "mass_assignment",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "django",
-      "notes": "PicTrail's account-settings update writes the whole POST body's fields (filtered only to real DB columns, not to the real settings form's own publicly-settable subset) into the profiles row via a raw parameterized connection.cursor() UPDATE, letting a POST body also set the privileged is_verified column the real settings form never exposes (CWE-915). lab/safety_matrix.yaml's own orm_entity_bulk_assign sink family: unfiltered_body_update/no_effect (this case) vs. runtime_field_allowlist/neutralises (the secure twin, LABGEN-DJ-0014, not separately ground-truthed here -- same convention as PT-0001/PT-0002/PT-0003's own secure twins). param names the specific privileged field being smuggled in, matching lab/ground-truth-forgecart's own mass_assignment case (FCART-0004) convention. CC-LAB-0095."
+      "notes": "PicTrail's account-settings update writes the whole POST body's fields (filtered only to real DB columns, not to the real settings form's own publicly-settable subset) into the profiles row via a raw parameterized connection.cursor() UPDATE, letting a POST body also set the privileged is_verified column the real settings form never exposes (CWE-915). lab/safety_matrix.yaml's own orm_entity_bulk_assign sink family: unfiltered_body_update/no_effect (this case) vs. runtime_field_allowlist/neutralises (the secure twin, LABGEN-DJ-0014, not separately ground-truthed here -- same convention as PT-0001/PT-0002/PT-0003's own secure twins). param names the specific privileged field being smuggled in, matching lab/ground-truth-forgecart's own mass_assignment case (FCART-0004) convention. CC-LAB-0095. CC-LAB-0242 (Browsable Labs Lane 2): GET /settings now renders the real settings form (its one public field, bio) and a POST re-renders that page with a saved notice instead of a JSON body -- `rendering` flipped `server-json`->`server`; the request stays form-encoded. The secure twin (LABGEN-DJ-0014) is served at /settings.labgen-dj-0014."
     },
     {
       "case_id": "PT-0005",
@@ -65,9 +65,9 @@
       "subtypes": ["identifier"],
       "sink_context": "sql",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "django",
-      "notes": "PicTrail's explore/search sort concatenates the raw sort key straight into a raw connection.cursor() ORDER BY clause with no identifier allowlist (CWE-89, identifier/ORDER-BY-position injection, not a syntax-break shape). lab/safety_matrix.yaml's own sql_order_by_clause sink family: orm_order_by_unvalidated/no_effect (this case) vs. identifier_allowlist/neutralises (the secure twin, LABGEN-DJ-0016, not separately ground-truthed here -- same convention as PT-0001/PT-0002/PT-0003/PT-0004's own secure twins). This project's first real implementation of the sql_order_by_clause family, on any stack. CC-LAB-0096."
+      "notes": "PicTrail's explore/search sort concatenates the raw sort key straight into a raw connection.cursor() ORDER BY clause with no identifier allowlist (CWE-89, identifier/ORDER-BY-position injection, not a syntax-break shape). lab/safety_matrix.yaml's own sql_order_by_clause sink family: orm_order_by_unvalidated/no_effect (this case) vs. identifier_allowlist/neutralises (the secure twin, LABGEN-DJ-0016, not separately ground-truthed here -- same convention as PT-0001/PT-0002/PT-0003/PT-0004's own secure twins). This project's first real implementation of the sql_order_by_clause family, on any stack. CC-LAB-0096. CC-LAB-0242 (Browsable Labs Lane 2): now a real HTML explore listing inside PicTrail's shared layout (pages/explore.html; bare /explore defaults to sort=id; the sort value is never echoed back) instead of a JSON results body -- `rendering` flipped `server-json`->`server`. The secure twin (LABGEN-DJ-0016) is served at /explore.labgen-dj-0016."
     },
     {
       "case_id": "PT-0006",
@@ -78,9 +78,9 @@
       "vuln_class": "insecure_deserialization",
       "sink_context": "deserialization",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "django",
-      "notes": "PicTrail's inbox/DM message payload is deserialized via Python's unrestricted pickle.loads(), modeling django.contrib.sessions.serializers.PickleSerializer's own real, documented opt-in footgun as an inbox payload (this emitter's per-cell views have no session-middleware round trip to exercise a real cookie) (CWE-502). A crafted pickle payload's __reduce__ hook executes arbitrary code during unpickling. lab/safety_matrix.yaml's own object_deserialization sink family: unrestricted_pickle_loads/no_effect (this case) vs. json_loads_type_check/neutralises (the secure twin, LABGEN-DJ-0018, not separately ground-truthed here -- same convention as every other page's own secure twin in this directory). Unlike every other page in this directory, the sink itself is not shared byte-identical between twins -- the deserialize mechanism (pickle vs. JSON) differs, flagged by the transform. CC-LAB-0097."
+      "notes": "PicTrail's inbox/DM message payload is deserialized via Python's unrestricted pickle.loads(), modeling django.contrib.sessions.serializers.PickleSerializer's own real, documented opt-in footgun as an inbox payload (this emitter's per-cell views have no session-middleware round trip to exercise a real cookie) (CWE-502). A crafted pickle payload's __reduce__ hook executes arbitrary code during unpickling. lab/safety_matrix.yaml's own object_deserialization sink family: unrestricted_pickle_loads/no_effect (this case) vs. json_loads_type_check/neutralises (the secure twin, LABGEN-DJ-0018, not separately ground-truthed here -- same convention as every other page's own secure twin in this directory). Unlike every other page in this directory, the sink itself is not shared byte-identical between twins -- the deserialize mechanism (pickle vs. JSON) differs, flagged by the transform. CC-LAB-0097. CC-LAB-0242 (Browsable Labs Lane 2): GET /inbox now renders the inbox page with its compose form and a POST re-renders it with a delivered/rejected notice instead of a JSON body -- `rendering` flipped `server-json`->`server`; the request stays form-encoded. The secure twin (LABGEN-DJ-0018) is served at /inbox.labgen-dj-0018."
     }
   ]
 }

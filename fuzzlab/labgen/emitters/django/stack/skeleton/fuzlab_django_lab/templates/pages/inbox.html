@@ -1,0 +1,22 @@
+{% extends "layouts/site.html" %}
+{% block title %}Inbox · PicTrail{% endblock %}
+{% block content %}
+<h2>Inbox</h2>
+<ul class="messages">
+    <li><strong>trailblazer</strong>: Loved your latest post &mdash; where was that taken?</li>
+    <li><strong>lakeside_lens</strong>: Sending you the sunset shot from yesterday.</li>
+</ul>
+{% if result %}
+{% if result.ok %}
+<p class="notice" data-ok="true" data-parsed-type="{{ result.parsed_type }}">Message delivered ({{ result.parsed_type }}).</p>
+{% else %}
+<p class="notice" data-ok="false" data-error="{{ result.error }}">Message rejected ({{ result.error }}).</p>
+{% endif %}
+{% endif %}
+<h3>New message</h3>
+<form method="post" action="">
+    <label for="inbox-payload">Message data (base64)</label>
+    <textarea id="inbox-payload" name="payload" rows="4"></textarea>
+    <button type="submit">Send</button>
+</form>
+{% endblock %}

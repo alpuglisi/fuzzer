@@ -34,8 +34,13 @@ import pytest
 
 from fuzzlab.labels.contract import load as load_ground_truth
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
-from fuzzlab.labgen.emitters.django import DjangoEmitter
+from fuzzlab.labgen.emitters.django import DjangoEmitter, served_url_for
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import (
+    MIN_FOUND_NOT_FOUND_DELTA,
+    assert_bare_get_gate,
+    found_not_found_delta,
+)
 
 pytestmark = [
     pytest.mark.slow,
@@ -103,21 +108,61 @@ def test_mismatched_http_method_against_the_pinned_real_page() -> None:
 
 
 def test_secure_twin_is_not_reachable_at_the_real_page_url() -> None:
-    """The secure twin (`LABGEN-DJ-0008`) is deliberately not in
-    `_REAL_PAGE_CELL_IDS` -- confirms it is genuinely served at its own,
-    separate generic URL, never silently sharing or shadowing the real
-    page's pinned `/post` URL (which would make the ground truth's own
-    `expected_vulnerable=true` claim unreliable, since both twins would
-    then be reachable at the same URL)."""
+    """The secure twin (`LABGEN-DJ-0008`) is never served at the real page's
+    pinned `/post` URL -- it is genuinely served at its own, separate URL
+    (CC-LAB-0242, R1 branch (a): the twin-suffixed `/post.labgen-dj-0008`,
+    `served_url_for`, replacing CC-LAB-0092's generic `generated/` URL),
+    never silently sharing or shadowing `/post` (which would make the
+    ground truth's own `expected_vulnerable=true` claim unreliable, since
+    both twins would then be reachable at the same URL)."""
     manifest = load_manifest(_MANIFEST_PATH)
     emitter = DjangoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+    assert served_url_for(cells["LABGEN-DJ-0007"]) == "/post"
+    assert served_url_for(cells["LABGEN-DJ-0008"]) == "/post.labgen-dj-0008"
     with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
         vuln_resp = harness.get("/post", params={"id": "1"})
-        secure_resp = harness.get("/generated/labgen_dj_0008/", params={"id": "1"})
+        secure_resp = harness.get("/post.labgen-dj-0008", params={"id": "1"})
+        # The old generic URL is gone -- no second route to the twin.
+        old_resp = harness.get("/generated/labgen_dj_0008/", params={"id": "1"})
 
     assert vuln_resp.status == 200
     assert secure_resp.status == 200
+    assert old_resp.status == 404
     # Both serve the same seeded row under normal use -- the differential
     # is only observable under the adversarial payload (proven by
     # test_ground_truth_case_matches_the_real_served_page above); this
     # test only proves the two twins are reachable at two distinct URLs.
+    assert 'data-post-id="1"' in vuln_resp.body and 'data-post-id="1"' in secure_resp.body
+
+
+def test_post_page_gate_bare_get_layout_and_found_not_found_delta() -> None:
+    """CC-LAB-0242's per-page gate for `/post` (plan §5 step 2):
+
+    (i) a bare `GET /post` (no `?id=`, exactly what the nav links to) falls
+    back to the real page's default (`id` 1) and returns 200 on both twins --
+    it used to concatenate `str(None)` into the SQL and 500 (BUG-0052);
+    (ii) the response is a real HTML page inside PicTrail's shared layout,
+    byte-identical between the vulnerable URL and its secure twin's own
+    URL (R1);
+    (iii) R3: the found vs. not-found page differs by a designed, literal
+    >= MIN_FOUND_NOT_FOUND_DELTA bytes on both twins, so
+    `SqliBooleanStrategy`'s length-similarity signal survives the layout."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        assert_bare_get_gate(harness, "/post", "/post.labgen-dj-0008", status=200, title="Post · PicTrail")
+        bare = harness.get("/post")
+        assert 'data-post-id="1"' in bare.body and "A walk in the park" in bare.body, bare.body[:2000]
+        for url in ("/post", "/post.labgen-dj-0008"):
+            delta = found_not_found_delta(harness, url, "id", found="1", not_found="999999")
+            assert delta >= MIN_FOUND_NOT_FOUND_DELTA, (
+                f"{url}: found/not-found HTML delta is only {delta} bytes "
+                f"(< {MIN_FOUND_NOT_FOUND_DELTA}) -- R3's designed margin is gone"
+            )
+        # The boolean-injection differential itself, on the real HTML: a
+        # false condition renders the not-found page on the vulnerable twin.
+        true_p = harness.get("/post", params={"id": "1 AND 1=1"})
+        false_p = harness.get("/post", params={"id": "1 AND 1=2"})
+        assert 'data-post-id="1"' in true_p.body, true_p.body[:2000]
+        assert "Post not found." in false_p.body, false_p.body[:2000]

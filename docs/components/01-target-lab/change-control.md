@@ -14,7 +14,8 @@ deliverable from the plan's own §6 wording; round 2 found the underlying
 plan's own §6 still carried a stale citation the entry had (correctly)
 already updated past — fixed in the plan itself and logged there, then
 both reviewers re-confirmed ACCURATE and ADEQUATE) — **implementation
-authorized, not yet landed.** Condensed from
+authorized; implemented 2026-09-25** (see Deliverables/Effectiveness).
+Condensed from
 `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`, which itself already went
 through 2 full review rounds and reached 3/3 agreement (2026-09-25); that
 document is the full detail, this entry is its change-control-template
@@ -122,36 +123,91 @@ compression.
   mitigation.
 - **Deliverables:** (copied directly from the plan's own §6, verbatim
   citations preserved)
-  - [ ] Homepage + shared layout template, structural gate green — todo.
-  - [ ] `/post` + `/post/comments` converted, bare-GET default decided,
+  - [x] Homepage + shared layout template, structural gate green — done
+        (skeleton `templates/layouts/site.html` + `views/site.py` serving
+        `/`, `/catalog`, `/upload`; `/catalog` kept because the build also
+        carries 6 illustrative Phase A/B cells with no ground-truth case;
+        gate `tests/test_labgen_django_browsable.py`, 17 passed).
+  - [x] `/post` + `/post/comments` converted, bare-GET default decided,
         found/not-found byte-delta designed and asserted (R3), twin
         asymmetry (R1) resolved via its decision rule and recorded as an
         "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry (mirroring
-        `CC-LAB-0241`'s R4 sign-off), live-boot green — todo.
-  - [ ] `/settings` converted to a real form page, live-boot green — todo.
-  - [ ] `/explore` converted, actual SQL shape confirmed (R1b), oracle-strategy
-        tests re-run (R6), live-boot green — todo.
-  - [ ] `/inbox` converted to a form page, live-boot green — todo.
-  - [ ] `/upload/link-preview` client page + bare-GET 4xx (R4), live-boot
-        green — todo.
-  - [ ] Ground-truth `rendering` field corrected where wrong — todo.
-  - [ ] Navigability test built and green, including the PA-0053 bare-GET
+        `CC-LAB-0241`'s R4 sign-off), live-boot green — done (`/post`
+        defaults to `id` 1; R1 branch (a); delta measured 569 bytes, floor
+        300; `/post/comments` extends the layout).
+  - [x] `/settings` converted to a real form page, live-boot green — done.
+  - [x] `/explore` converted, actual SQL shape confirmed (R1b), oracle-strategy
+        tests re-run (R6), live-boot green — done.
+  - [x] `/inbox` converted to a form page, live-boot green — done.
+  - [x] `/upload/link-preview` client page + bare-GET 4xx (R4), live-boot
+        green — done (client page `/upload`; bare/empty `url` -> JSON 400
+        before the sink on both twins).
+  - [x] Ground-truth `rendering` field corrected where wrong — done
+        (`/post`, `/settings`, `/explore`, `/inbox` -> `server`, points and
+        cases; `/upload/link-preview` stays `server-json`).
+  - [x] Navigability test built and green, including the PA-0053 bare-GET
         sweep across every reachable route (not only the 6 real pages) —
-        todo.
-  - [ ] Any same-class defect the navigability test surfaces fixed and
+        done (`tests/test_labgen_django_navigability_live_boot.py`, 3
+        passed; the sweep also covers every served route, not only crawled
+        ones, per PA-0054).
+  - [x] Any same-class defect the navigability test surfaces fixed and
         folded in; any different-class finding flagged with its own
-        recommended next `CC-LAB` number, not absorbed — todo.
-  - [ ] Full non-slow suite + every django live-boot suite green — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-160`
-        entry — todo.
-  - [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0242` — todo.
-  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 2 row updated — todo.
-  - [ ] Bug-protocol contingency: if PA-0053's bare-GET sweep finds a real
+        recommended next `CC-LAB` number, not absorbed — done (folded in:
+        `/explore` and the illustrative `/api/products` missing defaults;
+        no different-class finding surfaced, so nothing flagged).
+  - [x] Full non-slow suite + every django live-boot suite green — done
+        (see Effectiveness).
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-160`
+        entry — done (FR-LAB-95's twin-URL note marked partly superseded).
+  - [x] `CHANGELOG.md` — one dated line referencing `CC-LAB-0242` — done.
+  - [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 2 row updated — done (one
+        CC-LAB number used; Lanes 3-7 not bumped).
+  - [x] Bug-protocol contingency: if PA-0053's bare-GET sweep finds a real
         crash, full bug protocol using Lane 2's pre-assigned
         `BUG-0052`/`PA-0054`; if none found, state that explicitly in
-        Effectiveness — todo.
-- **Effectiveness (assessed <date> or pending):** pending — not yet
-  implemented.
+        Effectiveness — done (crash found: `ERROR_LOG.md`,
+        `docs/bugs/BUG-0052-...md`, `PA-0054`).
+- **Effectiveness (assessed 2026-09-25):** effective. Full non-slow suite
+  (`pytest -m "not slow"`): 2515 passed, 8 skipped, 204 deselected, 0 failed. Every django suite run
+  explicitly (PA-0038): `test_labgen_django_conformance.py` 25 passed;
+  `test_labgen_django_browsable.py` (new, offline) 17 passed;
+  `test_labgen_django_live_boot_phase_b.py` 4 passed;
+  `test_labgen_django_live_boot_single_shape.py` 3 passed;
+  `test_labgen_django_live_boot_picktrail.py` 4 passed;
+  `_picktrail_comments.py` 4 passed; `_picktrail_explore.py` 4 passed;
+  `_picktrail_inbox.py` 5 passed; `_picktrail_link_preview.py` 4 passed,
+  1 skipped (the pre-existing httpbin.org reachability probe);
+  `_picktrail_settings.py` 4 passed;
+  `test_labgen_django_navigability_live_boot.py` (new) 3 passed;
+  `test_oracle.py` 12 passed (R6 re-run) -- 89 passed, 1 skipped in all.
+  R1: branch (a) -- no Django resolver/accumulator obstacle (`path()` routes
+  are exact literals); each page's bare GET is byte-identical at the
+  vulnerable URL and the twin URL, live, all 6 pages; the old
+  `/generated/labgen_dj_0008/` URL now 404s. R1b: `/explore` confirmed an
+  ORDER-BY/identifier shape (sink reads `ORDER BY " + str(sort)`, `PT-0005`
+  says so); the page never echoes `sort` (two unrecognized keys give
+  identical bodies on the secure twin). R2: the crawl was actually run
+  against `DjangoLiveBootHarness` (no redirect/trailing-slash divergence
+  seen; all routes are slash-less except the illustrative `generated/*/`).
+  R3: found 2,443 vs not-found 1,874 bytes, delta 569 >= 300 (the ~122-byte
+  5% threshold of `SqliBooleanStrategy` at this size), asserted on both
+  twins; `1 AND 1=1` vs `1 AND 1=2` renders found vs not-found live. R4:
+  the corpus source defines no default (`unfurl_link(message_url: str)`),
+  so bare/empty `url` -> JSON 400 before the sink on both twins (before:
+  500 on both). R5: guards hard-coded from measurement (6 points; >= 16
+  crawled URLs vs measured 21). R6: `tests/test_oracle.py` re-run green;
+  no runtime strategy keys on PicTrail's old JSON shapes (the
+  `MassAssignmentPrivilegedFieldStrategy`/`InsecureDeserialization...`
+  strategies only act on JSON whole-body points, which PicTrail has none
+  of); `identifier_sqli_oracle.py` is not wired to django cells at all and
+  its body-diff is format-agnostic. R7: the sweep found 5 pre-existing
+  bare-GET 500s (reproduced live against the `HEAD` emitter:
+  `LABGEN-DJ-0001`, `-0007`, `-0011`, `-0012`, `-0015`), all fixed (same
+  class, folded in) -- bug protocol done as `BUG-0052`/`PA-0054`
+  (recurrence of `BUG-0051`/`BUG-0037`; strengthens `PA-0053`'s enforcement
+  scope). After the fix no crawled URL and no served route answers >= 500.
+  No session gating found in django (confirmed), so no 401 exception.
+  Depth: measured deepest 2, cap 4. No different-class follow-up flagged.
 
 ### CC-LAB-0241 — Browsable labs Lane 1 step 5: closing the remaining tracked gaps (2026-09-25, FR-LAB-159, `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`)
 

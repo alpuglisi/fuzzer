@@ -33,6 +33,7 @@ import base64
 import json
 import os
 import pickle
+import re
 
 import pytest
 
@@ -40,6 +41,7 @@ from fuzzlab.labels.contract import load as load_ground_truth
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
 from fuzzlab.labgen.emitters.django import DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import assert_bare_get_gate, assert_in_picktrail_layout
 
 pytestmark = [
     pytest.mark.slow,
@@ -79,6 +81,18 @@ def _pickle_payload(marker_path: str) -> str:
     return base64.b64encode(pickle.dumps(_MarkerDropper(marker_path))).decode("ascii")
 
 
+def _inbox_result(body: str) -> dict:
+    """CC-LAB-0242: `/inbox` re-renders the real inbox page after a POST
+    (was a bare JSON body) -- the delivery result is read back from the
+    page's own notice element's data attributes."""
+    ok = re.search(r'data-ok="true" data-parsed-type="([^"]*)"', body)
+    if ok:
+        return {"ok": True, "parsed_type": ok.group(1)}
+    err = re.search(r'data-ok="false" data-error="([^"]*)"', body)
+    assert err, body[:2000]
+    return {"ok": False, "error": err.group(1)}
+
+
 def _json_payload() -> str:
     return base64.b64encode(json.dumps({"subject": "hello"}).encode("utf-8")).decode("ascii")
 
@@ -97,7 +111,7 @@ def test_vulnerable_twin_really_executes_the_pickled_payload(tmp_path) -> None:
         resp = harness.post("/inbox", data={"payload": _pickle_payload(marker_path)})
 
     assert resp.status == 200
-    body = json.loads(resp.body)
+    body = _inbox_result(resp.body)
     assert body["ok"] is True
     with open(marker_path, encoding="utf-8") as fh:
         assert fh.read().strip() == "pwned", "the vulnerable twin must genuinely execute the pickled __reduce__ hook"
@@ -113,10 +127,10 @@ def test_secure_twin_never_executes_the_same_payload(tmp_path) -> None:
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0018"]
     with DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp = harness.post("/generated/labgen_dj_0018/", data={"payload": _pickle_payload(marker_path)})
+        resp = harness.post("/inbox.labgen-dj-0018", data={"payload": _pickle_payload(marker_path)})
 
     assert resp.status == 400
-    body = json.loads(resp.body)
+    body = _inbox_result(resp.body)
     assert body["ok"] is False
     assert not os.path.exists(marker_path), (
         "the secure twin must never execute the pickled payload -- the marker file must not exist"
@@ -132,10 +146,10 @@ def test_secure_twin_still_accepts_a_legitimate_json_payload() -> None:
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0018"]
     with DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp = harness.post("/generated/labgen_dj_0018/", data={"payload": _json_payload()})
+        resp = harness.post("/inbox.labgen-dj-0018", data={"payload": _json_payload()})
 
     assert resp.status == 200
-    body = json.loads(resp.body)
+    body = _inbox_result(resp.body)
     assert body == {"ok": True, "parsed_type": "dict"}
 
 
@@ -166,3 +180,27 @@ def test_ground_truth_case_pt_0006_matches_the_real_served_page(tmp_path) -> Non
             "the ground truth's own expected_vulnerable=true claim must hold at the exact "
             "URL/method/param it names"
         )
+
+
+def test_inbox_page_gate_get_renders_the_compose_form() -> None:
+    """CC-LAB-0242's per-page gate for `/inbox` (plan §5 step 2): the page
+    reads its `payload` from the POST body, so a bare `GET` never reaches
+    the deserializer -- it renders the inbox page with its compose form
+    (200; it used to fall through to the sink and answer a JSON 400) inside
+    the shared layout, byte-identical between the vulnerable URL and its
+    secure twin's own URL (R1). A POST re-renders the same page with a
+    delivered/rejected notice (real HTML, no longer a JSON body)."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        assert_bare_get_gate(harness, "/inbox", "/inbox.labgen-dj-0018", status=200, title="Inbox · PicTrail")
+        page = harness.get("/inbox")
+        assert '<form method="post" action="">' in page.body and 'name="payload"' in page.body, page.body[:2000]
+        delivered = harness.post("/inbox.labgen-dj-0018", data={"payload": _json_payload()})
+        rejected = harness.post("/inbox.labgen-dj-0018", data={"payload": "not base64 json"})
+    assert delivered.status == 200
+    assert_in_picktrail_layout(delivered, "Inbox · PicTrail")
+    assert _inbox_result(delivered.body) == {"ok": True, "parsed_type": "dict"}
+    assert rejected.status == 400
+    assert_in_picktrail_layout(rejected, "Inbox · PicTrail")
+    assert _inbox_result(rejected.body)["ok"] is False

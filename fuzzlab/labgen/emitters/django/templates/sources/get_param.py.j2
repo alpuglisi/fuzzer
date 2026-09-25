@@ -1,1 +1,9 @@
+{% if default_value is defined %}
+{{ var_name }} = request.GET.get("{{ param_name }}") or "{{ default_value }}"
+{% else %}
 {{ var_name }} = request.GET.get("{{ param_name }}")
+{% endif %}
+{% if required_param is defined %}
+if not {{ var_name }}:
+    return JsonResponse({"error": "missing required parameter: {{ param_name }}"}, status=400)
+{% endif %}

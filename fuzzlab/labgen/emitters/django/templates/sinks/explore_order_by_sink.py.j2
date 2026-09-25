@@ -1,4 +1,4 @@
 with connection.cursor() as cursor:
     cursor.execute("SELECT id, name FROM posts ORDER BY " + str({{ value_expr }}))
     _rows_{{ var_name }} = cursor.fetchall()
-return JsonResponse({"results": [{"id": r[0], "name": r[1]} for r in _rows_{{ var_name }}]})
+return render(request, "{{ page_template }}", {"posts": [{"id": r[0], "name": r[1]} for r in _rows_{{ var_name }}]})

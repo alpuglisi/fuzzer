@@ -32,6 +32,8 @@ unfurl-4.py`) almost verbatim:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from fuzzlab.labels.contract import load as load_ground_truth
@@ -44,6 +46,7 @@ from fuzzlab.labgen.conformance.django_live_boot import (
 )
 from fuzzlab.labgen.emitters.django import DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import assert_bare_get_gate, assert_in_picktrail_layout
 
 pytestmark = [
     pytest.mark.slow,
@@ -101,7 +104,7 @@ def test_secure_twin_blocks_the_same_payload_via_the_resolved_ip_check() -> None
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0012"]
     with InternalServiceFixture() as internal, DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp = harness.get("/generated/labgen_dj_0012/", params={"url": internal.url})
+        resp = harness.get("/upload/link-preview.labgen-dj-0012", params={"url": internal.url})
 
     assert resp.status == 500
     assert INTERNAL_SERVICE_SECRET not in resp.body, (
@@ -126,7 +129,7 @@ def test_secure_twin_still_allows_a_well_formed_allowlisted_url() -> None:
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0012"]
     with DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp = harness.get("/generated/labgen_dj_0012/", params={"url": _ALLOWLISTED_JSON_URL})
+        resp = harness.get("/upload/link-preview.labgen-dj-0012", params={"url": _ALLOWLISTED_JSON_URL})
 
     assert resp.status == 200, (
         "a well-formed, allowlisted URL must still succeed on the secure twin -- "
@@ -158,3 +161,31 @@ def test_ground_truth_case_pt_0003_matches_the_real_served_page() -> None:
         "the ground truth's own expected_vulnerable=true claim must hold at the exact "
         "URL/method/param it names"
     )
+
+
+def test_link_preview_bare_get_is_a_handled_400_before_the_sink_and_has_a_client_page() -> None:
+    """CC-LAB-0242 (plan §2c/§2d, R4): `/upload/link-preview` stays a JSON
+    `api` (wire contract unchanged), so it gets no layout -- but a bare
+    `GET` with no `url` must be a handled 4xx *before* the sink runs: the
+    corpus source it ports (`vulnerable-oembed-unfurl-4.py`'s
+    `unfurl_link(message_url: str)`) defines no default URL, and any
+    default would make the vulnerable twin fetch it. It used to reach
+    `requests.get(None)` and 500 on the vulnerable twin (BUG-0052). An
+    empty `?url=` is treated the same. Both twins answer the identical
+    JSON 400 (R1). The API's own browser client page, `/upload`, renders
+    inside the shared layout and calls the API with `fetch()`."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        assert_bare_get_gate(
+            harness, "/upload/link-preview", "/upload/link-preview.labgen-dj-0012", status=400, title=None
+        )
+        bare = harness.get("/upload/link-preview")
+        empty = harness.get("/upload/link-preview", params={"url": ""})
+        client = harness.get("/upload")
+    assert json.loads(bare.body) == {"error": "missing required parameter: url"}, bare.body
+    assert empty.status == 400 and empty.body == bare.body, (empty.status, empty.body)
+    assert client.status == 200, client.body[:500]
+    assert_in_picktrail_layout(client, "Share a link · PicTrail")
+    assert 'fetch("/upload/link-preview?url=" + encodeURIComponent(url))' in client.body, client.body[:3000]
+    assert '<a href="/upload/link-preview">' in client.body, client.body[:3000]

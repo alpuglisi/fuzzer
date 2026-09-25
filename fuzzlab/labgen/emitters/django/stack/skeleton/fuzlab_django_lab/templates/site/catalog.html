@@ -1,0 +1,13 @@
+{% extends "layouts/site.html" %}
+{% block title %}Catalog · PicTrail{% endblock %}
+{% block content %}
+<h2>Catalog</h2>
+<p>Every page this PicTrail build serves.</p>
+<ul class="site-list">
+{% for entry in entries %}
+    <li><a href="{{ entry.url }}">{{ entry.url }}</a> <small>({{ entry.method }}, {{ entry.cell_id }})</small></li>
+{% empty %}
+    <li class="empty">No pages in this build.</li>
+{% endfor %}
+</ul>
+{% endblock %}

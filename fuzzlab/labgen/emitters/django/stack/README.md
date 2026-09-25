@@ -86,6 +86,26 @@ files that are carried in (`manage.py`, `__init__.py`, `wsgi.py`) — each is
 byte-for-byte what the generator produced, only the project name
 (`fuzlab_django_lab`) chosen at generation time.
 
+**PicTrail site layer (`CC-LAB-0242`, FR-LAB-160) — hand-written, not
+generator output.** Browsable Labs Lane 2 adds checked-in, never-per-cell
+files the generated views and `urls.py` rely on:
+
+- `fuzlab_django_lab/templates/layouts/site.html` — the one shared layout
+  (header with the PicTrail name + nav, main, footer, inline CSS; interpolates
+  no context variable, so it is byte-identical for a vulnerable twin and its
+  secure twin);
+- `fuzlab_django_lab/templates/site/{home,catalog,upload}.html` and
+  `fuzlab_django_lab/views/site.py` — the homepage `/`, the `/catalog` of
+  every page the build serves (read from the generated `urls.py`'s
+  `CATALOG` list), and `/upload`, the `fetch()` client page for the
+  `/upload/link-preview` JSON API;
+- `fuzlab_django_lab/templates/pages/{post_detail,explore,settings,inbox}.html`
+  — the real pages the converted sinks render into (every one
+  `{% extends "layouts/site.html" %}`).
+
+`DjangoEmitter.render_route_accumulator()` registers `/`, `/catalog` and
+`/upload` ahead of every cell route.
+
 **Django/ORM defaults this harness's real `manage.py migrate` exercises**
 (enumerated up front per `CC-LAB-0090`'s pre-change review, reviewer #2,
 citing `PA-0030`/`BUG-0028`'s "enumerate framework/ORM defaults before

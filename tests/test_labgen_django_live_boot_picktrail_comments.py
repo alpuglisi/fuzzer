@@ -27,6 +27,7 @@ from fuzzlab.labels.contract import load as load_ground_truth
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
 from fuzzlab.labgen.emitters.django import DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import assert_bare_get_gate
 
 pytestmark = [
     pytest.mark.slow,
@@ -69,7 +70,7 @@ def test_default_autoescaping_still_protects_the_secure_twin() -> None:
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0010"]
     with DjangoLiveBootHarness(emitter, secure_cells, seed_comment=_XSS_PAYLOAD) as harness:
-        resp = harness.get("/generated/labgen_dj_0010/")
+        resp = harness.get("/post/comments.labgen-dj-0010")
 
     assert resp.status == 200
     assert _XSS_PAYLOAD not in resp.body, "the secure twin must not serve the raw payload"
@@ -100,3 +101,21 @@ def test_ground_truth_case_pt_0002_matches_the_real_served_page() -> None:
         "the ground truth's own expected_vulnerable=true claim must hold at the exact "
         "URL/method it names"
     )
+
+
+def test_comments_page_gate_bare_get_and_shared_layout() -> None:
+    """CC-LAB-0242's per-page gate for `/post/comments` (plan §5 step 2):
+    the page reads no request parameter (its value is the stored comment),
+    so a bare `GET` returns 200 on both twins; the page now renders inside
+    PicTrail's shared layout (`_COMMENT_TEMPLATE_HTML` extends
+    `layouts/site.html`) instead of a bare `<div>` fragment; and with a
+    benign seeded comment the vulnerable URL and the secure twin's own
+    twin-suffixed URL serve byte-identical pages (R1)."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        assert_bare_get_gate(
+            harness, "/post/comments", "/post/comments.labgen-dj-0010", status=200, title="Comments · PicTrail"
+        )
+        resp = harness.get("/post/comments")
+    assert '<div class="comment">Great shot! Love the lighting.</div>' in resp.body, resp.body[:2000]

@@ -1,0 +1,19 @@
+{% extends "layouts/site.html" %}
+{% block title %}Post · PicTrail{% endblock %}
+{% block content %}
+{% if row %}
+<article class="post" data-post-id="{{ row.id }}">
+    <h2>{{ row.name }}</h2>
+    <div class="photo" role="img" aria-label="Photo for {{ row.name }}">Photo #{{ row.id }}</div>
+    <p class="caption"><strong>{{ row.name }}</strong> &mdash; a moment shared on PicTrail.
+    Double-tap the photo to like it, or leave a note for the photographer in the comments below.</p>
+    <ul class="post-actions">
+        <li><a href="/post/comments">View all comments</a></li>
+        <li><a href="/explore">See more posts on Explore</a></li>
+        <li><a href="/inbox">Send this post to a friend</a></li>
+    </ul>
+</article>
+{% else %}
+<p class="empty">Post not found.</p>
+{% endif %}
+{% endblock %}

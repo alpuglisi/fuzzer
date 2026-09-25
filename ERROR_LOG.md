@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `django` (PicTrail) routes 500'd on a bare GET — absent query parameter reached the sink as None (fixed, BUG-0052/PA-0054)
+
+- **Symptom:** a bare `GET` (no query string) of `/post`, `/explore`,
+  `/upload/link-preview` (both twins) and the illustrative
+  `/generated/labgen_dj_0001/` returned HTTP 500 -- reproduced live against
+  the pre-change emitter; the new PicTrail nav/catalog would have linked
+  straight to them.
+- **Root cause:** the `django` `get_param` source had no default or
+  required-parameter guard, so `None` reached the sink (`str(None)` -> `WHERE
+  id = None` / `ORDER BY None`; `requests.get(None)`); PA-0053's only
+  enforcement is a link-reachability crawl, which never ran on the unlinked
+  `django` build (BUG-0051's sweep deferred it).
+- **Remediation:** `CC-LAB-0242`: `default_value` (`/post`, `/api/products`
+  = `"1"`, `/explore` = `"id"`) and `required_param` (`/upload/link-preview`
+  -> handled 400) route-profile keys; `/settings`/`/inbox` render their form
+  on GET; an offline declaration check and a live bare-GET sweep of every
+  served route (`docs/bugs/BUG-0052-...md`, `PA-0054`).
+- **Status:** Fixed.
+
 ## 2026-09-25 — LAB: `php_laravel` nav/catalog links 500'd on a bare GET — absent query parameter reached the sink as null (fixed, BUG-0051/PA-0053)
 
 - **Symptom:** clicking the Puppy Fort Factory nav's "Product"/"Blog" links

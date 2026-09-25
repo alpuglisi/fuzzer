@@ -1,0 +1,32 @@
+{% extends "layouts/site.html" %}
+{% block title %}Share a link · PicTrail{% endblock %}
+{% block content %}
+<h2>Share a link</h2>
+<p>Paste a link to a photo page and PicTrail will fetch a preview card for it
+before you post.</p>
+<form id="link-preview-form">
+    <label for="link-url">Link to share</label>
+    <input id="link-url" name="url" type="url" placeholder="https://example.com/photo">
+    <button type="submit">Preview link</button>
+</form>
+<p id="link-preview-result" class="empty">No preview yet.</p>
+<p><small>This page calls PicTrail's link-preview API:
+<a href="/upload/link-preview">GET /upload/link-preview?url=&hellip;</a> (JSON).</small></p>
+<script>
+document.getElementById("link-preview-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var url = document.getElementById("link-url").value;
+    var result = document.getElementById("link-preview-result");
+    fetch("/upload/link-preview?url=" + encodeURIComponent(url))
+        .then(function (resp) {
+            return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+        })
+        .then(function (r) {
+            result.textContent = r.ok
+                ? "Preview: " + (r.data.preview_title || "(no title)")
+                : "Error: " + (r.data.error || "preview failed");
+        })
+        .catch(function () { result.textContent = "Error: preview failed"; });
+});
+</script>
+{% endblock %}

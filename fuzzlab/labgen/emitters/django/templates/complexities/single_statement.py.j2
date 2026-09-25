@@ -1,5 +1,11 @@
 def {{ handler_name }}(request):
 {{ body }}
+{% if html_row_template is defined %}
+    if row is None:
+        return render(request, "{{ html_row_template }}", {"row": None}, status=404)
+    return render(request, "{{ html_row_template }}", {"row": {"id": row[0], "name": row[1]}})
+{% else %}
     if row is None:
         return HttpResponse(status=404)
     return JsonResponse({"id": row[0], "name": row[1]})
+{% endif %}

@@ -7,6 +7,10 @@ per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table. **Next step: draft the
 condensed change-control entry and take it through its own 2-reviewer
 gate**, mirroring `CC-LAB-0241`'s process exactly — this plan document's
 own convergence does not yet authorize implementation.
+**Update 2026-09-25:** the `CC-LAB-0242` entry cleared its own gate and the
+plan was **implemented** the same day — see that entry's Deliverables and
+Effectiveness (R1 took branch (a); the PA-0053 sweep found 5 bare-GET 500s,
+fixed as `BUG-0052`/`PA-0054`).
 
 ## 0. What Lane 1 taught us, applied here from the start
 

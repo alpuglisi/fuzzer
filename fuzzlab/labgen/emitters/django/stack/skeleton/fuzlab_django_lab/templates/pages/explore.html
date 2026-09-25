@@ -1,0 +1,20 @@
+{% extends "layouts/site.html" %}
+{% block title %}Explore · PicTrail{% endblock %}
+{% block content %}
+<h2>Explore</h2>
+<form method="get" action="">
+    <label for="explore-sort">Sort posts by</label>
+    <select id="explore-sort" name="sort">
+        <option value="id">Post number</option>
+        <option value="name">Title</option>
+    </select>
+    <button type="submit">Sort</button>
+</form>
+<ul class="explore-results">
+{% for post in posts %}
+    <li data-post-id="{{ post.id }}"><a href="/post?id={{ post.id }}">{{ post.name }}</a></li>
+{% empty %}
+    <li class="empty">No posts yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}

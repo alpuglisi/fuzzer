@@ -28,6 +28,7 @@ from fuzzlab.labels.contract import load as load_ground_truth
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
 from fuzzlab.labgen.emitters.django import DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import assert_bare_get_gate, assert_in_picktrail_layout
 
 pytestmark = [
     pytest.mark.slow,
@@ -75,7 +76,7 @@ def test_secure_twin_blocks_the_privileged_field_but_still_applies_bio() -> None
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0014"]
     with DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp = harness.post("/generated/labgen_dj_0014/", data=_PAYLOAD)
+        resp = harness.post("/settings.labgen-dj-0014", data=_PAYLOAD)
         rows = harness.query_db("SELECT bio, is_verified FROM profiles WHERE id = 1")
 
     assert resp.status == 200
@@ -111,3 +112,31 @@ def test_ground_truth_case_pt_0004_matches_the_real_served_page() -> None:
         "the ground truth's own expected_vulnerable=true claim must hold at the exact "
         "URL/method/param it names"
     )
+
+
+def test_settings_page_gate_get_renders_the_form_post_renders_the_saved_page() -> None:
+    """CC-LAB-0242's per-page gate for `/settings` (plan §5 step 2): the
+    page reads the whole POST body, not a named GET parameter, so a bare
+    `GET` never reaches the sink -- it renders the real settings form (200,
+    its one publicly-settable field `bio`, pre-filled from the stored
+    profile) inside the shared layout, byte-identical between the
+    vulnerable URL and its secure twin's own URL (R1), and writes nothing.
+    A POST processes the form and re-renders the page (real HTML, no longer
+    a JSON body) with a saved notice naming the fields actually written."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        before = harness.query_db("SELECT bio, is_verified FROM profiles WHERE id = 1")
+        assert_bare_get_gate(
+            harness, "/settings", "/settings.labgen-dj-0014", status=200, title="Account settings · PicTrail"
+        )
+        form = harness.get("/settings")
+        assert '<form method="post" action="">' in form.body, form.body[:2000]
+        assert 'name="bio"' in form.body and "is_verified" not in form.body, form.body[:2000]
+        assert harness.query_db("SELECT bio, is_verified FROM profiles WHERE id = 1") == before
+
+        saved = harness.post("/settings.labgen-dj-0014", data=_PAYLOAD)
+    assert saved.status == 200, saved.body[:500]
+    assert_in_picktrail_layout(saved, "Account settings · PicTrail")
+    assert 'data-updated-fields="bio"' in saved.body, saved.body[:2000]
+    assert ">updated bio text</textarea>" in saved.body, saved.body[:2000]

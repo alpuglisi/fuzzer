@@ -1,0 +1,13 @@
+{% extends "layouts/site.html" %}
+{% block title %}Account settings · PicTrail{% endblock %}
+{% block content %}
+<h2>Account settings</h2>
+{% if saved %}
+<p class="notice" data-updated-fields="{{ updated_fields|join:',' }}">Saved: {{ updated_fields|join:", "|default:"no changes" }}.</p>
+{% endif %}
+<form method="post" action="">
+    <label for="settings-bio">Bio</label>
+    <textarea id="settings-bio" name="bio" rows="4">{{ bio }}</textarea>
+    <button type="submit">Save changes</button>
+</form>
+{% endblock %}

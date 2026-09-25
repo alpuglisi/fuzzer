@@ -734,3 +734,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before its pages count as converted, and a newly linked page must pass it.
   A known exception is pinned by an `xfail(strict=True)` test naming its
   follow-up, never by asserting the 500 as expected. (from BUG-0051)
+
+- **PA-0054** — Strengthens `PA-0053` (whose rule stands) on **enforcement
+  scope**. `PA-0053`'s only mechanical check, a link-reachability crawl, cannot
+  see a route that nothing links to yet, so a known absent-input crash sat in
+  the un-crawled `django` emitter until its lane built a homepage. Therefore:
+  (1) every emitter's route profile must **declare** each named request
+  parameter's absent-input behavior (a real default, or a handled 4xx before
+  any sink), checked **offline** over every route the emitter's manifests
+  produce -- not left to whatever a crawl reaches; (2) every live navigability
+  test must also send a bare request to **every route the build serves**,
+  enumerated from the emitter's own served-URL derivation (e.g.
+  `served_url_for`), in addition to the crawl; (3) a `PA-0002` sweep that finds
+  this class in an emitter it does not fix must pin each known instance with
+  an `xfail(strict=True)` or an offline failing check -- never a prose
+  deferral to a future lane. (from BUG-0052)

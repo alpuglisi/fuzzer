@@ -915,6 +915,16 @@ tracked in the requirements files, not here.
   fully built.** The full auto-linking-specific XSS shape (§4 row 2's
   own fuller `@mention`/`#hashtag` mechanism, deliberately simplified in
   `CC-LAB-0093`) stays planned, not built.
+  **PicTrail is browsable (`CC-LAB-0242`, Browsable Labs Lane 2):** the
+  `django` skeleton now carries a checked-in site layer (shared
+  `layouts/site.html`, homepage `/`, `/catalog`, the `/upload` client page
+  for the `/upload/link-preview` JSON API, and `templates/pages/*`); the
+  five `page`-classified real pages render real HTML inside the layout;
+  secure twins are served at twin-suffixed URLs (`served_url_for`,
+  `/post.labgen-dj-0008`); every `get_param` route declares a default or a
+  handled 400 (BUG-0052/PA-0054); and
+  `tests/test_labgen_django_navigability_live_boot.py` crawls the whole
+  build from `/`.
   **CircleFeed (`CC-LAB-0216`), category 2's Facebook pick, landed its
   first real page** — the second app identity built on the existing
   `php_laravel` emitter (after Huddle Hub, category 3): a photo/tag-

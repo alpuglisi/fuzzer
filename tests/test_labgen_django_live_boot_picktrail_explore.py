@@ -27,12 +27,15 @@ string-literal-escape shape already proven elsewhere in this project:
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from fuzzlab.labels.contract import load as load_ground_truth
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
 from fuzzlab.labgen.emitters.django import DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
+from tests._django_site import assert_bare_get_gate
 
 pytestmark = [
     pytest.mark.slow,
@@ -52,6 +55,13 @@ _ASCENDING_IDS = [1, 2]
 _DESCENDING_IDS = [2, 1]
 
 
+def _listed_post_ids(body: str) -> list[int]:
+    """CC-LAB-0242: `/explore` is a real HTML listing now (was a JSON
+    `results` array) -- the row order is read from each listing entry's own
+    `data-post-id` attribute, in document order."""
+    return [int(m) for m in re.findall(r'<li data-post-id="(\d+)">', body)]
+
+
 def test_vulnerable_twin_lets_the_payload_control_real_row_order() -> None:
     """A real, legal SQL fragment injected as the sort key (no quotes, no
     syntax break) must genuinely reverse the real row order a real
@@ -64,9 +74,7 @@ def test_vulnerable_twin_lets_the_payload_control_real_row_order() -> None:
         resp = harness.get("/explore", params={"sort": _PAYLOAD})
 
     assert resp.status == 200
-    import json
-
-    ids = [row["id"] for row in json.loads(resp.body)["results"]]
+    ids = _listed_post_ids(resp.body)
     assert ids == _DESCENDING_IDS, (
         f"the vulnerable twin must genuinely honor the injected ORDER BY modifier -- got {ids!r}"
     )
@@ -83,14 +91,12 @@ def test_secure_twin_ignores_the_payload_and_falls_back_to_the_default_order() -
     emitter = DjangoEmitter()
     secure_cells = [c for c in manifest.cells if c.cell_id == "LABGEN-DJ-0016"]
     with DjangoLiveBootHarness(emitter, secure_cells) as harness:
-        resp_payload = harness.get("/generated/labgen_dj_0016/", params={"sort": _PAYLOAD})
-        resp_legit = harness.get("/generated/labgen_dj_0016/", params={"sort": "id"})
-
-    import json
+        resp_payload = harness.get("/explore.labgen-dj-0016", params={"sort": _PAYLOAD})
+        resp_legit = harness.get("/explore.labgen-dj-0016", params={"sort": "id"})
 
     assert resp_payload.status == 200
-    ids_payload = [row["id"] for row in json.loads(resp_payload.body)["results"]]
-    ids_legit = [row["id"] for row in json.loads(resp_legit.body)["results"]]
+    ids_payload = _listed_post_ids(resp_payload.body)
+    ids_legit = _listed_post_ids(resp_legit.body)
     assert ids_payload == _ASCENDING_IDS == ids_legit, (
         "the secure twin must ignore the injected modifier and match a legitimate "
         f"sort=id request -- got payload={ids_payload!r}, legit={ids_legit!r}"
@@ -116,11 +122,34 @@ def test_ground_truth_case_pt_0005_matches_the_real_served_page() -> None:
     with DjangoLiveBootHarness(emitter, vuln_cells) as harness:
         resp = harness.request(case.method, case.url, params={case.param: _PAYLOAD})
 
-    import json
-
     assert resp.status == 200
-    ids = [row["id"] for row in json.loads(resp.body)["results"]]
+    ids = _listed_post_ids(resp.body)
     assert ids == _DESCENDING_IDS, (
         "the ground truth's own expected_vulnerable=true claim must hold at the exact "
         "URL/method/param it names"
     )
+
+
+def test_explore_page_gate_bare_get_default_sort_and_shared_layout() -> None:
+    """CC-LAB-0242's per-page gate for `/explore` (plan §5 step 2): a bare
+    `GET /explore` (no `?sort=`, exactly what the nav links to) falls back to
+    `sort=id` -- the key the secure twin's allowlist already defaults to --
+    and returns 200 on both twins (the vulnerable twin used to concatenate
+    `str(None)` into `ORDER BY` and 500, BUG-0052); both render inside the
+    shared layout, byte-identical between the vulnerable URL and its secure
+    twin's own URL (R1). R1b: the listing never echoes the `sort` value
+    back, so the parameter's only body-visible effect is the row order --
+    two different unrecognized keys on the secure twin serve identical
+    bodies (the format-agnostic body-diff property
+    `identifier_sqli_oracle.py` relies on, R6)."""
+    manifest = load_manifest(_MANIFEST_PATH)
+    emitter = DjangoEmitter()
+    with DjangoLiveBootHarness(emitter, manifest.cells) as harness:
+        assert_bare_get_gate(harness, "/explore", "/explore.labgen-dj-0016", status=200, title="Explore · PicTrail")
+        bare = harness.get("/explore")
+        assert _listed_post_ids(bare.body) == _ASCENDING_IDS, bare.body[:2000]
+        assert '<a href="/post?id=1">A walk in the park</a>' in bare.body, bare.body[:2000]
+        a = harness.get("/explore.labgen-dj-0016", params={"sort": "zzz_marker_a"})
+        b = harness.get("/explore.labgen-dj-0016", params={"sort": "zzz_marker_b"})
+    assert a.status == b.status == 200
+    assert a.body == b.body and "zzz_marker" not in a.body

@@ -1,9 +1,13 @@
 if not {{ value_expr }}:
-    return JsonResponse({"updated_fields": []})
+    return render(request, "{{ page_template }}", {"bio": _read_stored_bio(), "saved": True, "updated_fields": []})
 _set_clause_{{ var_name }} = ", ".join(f"{col} = %s" for col in {{ value_expr }})
 with connection.cursor() as cursor:
     cursor.execute(
         "UPDATE profiles SET " + _set_clause_{{ var_name }} + " WHERE id = 1",
         list({{ value_expr }}.values()),
     )
-return JsonResponse({"updated_fields": list({{ value_expr }}.keys())})
+return render(
+    request,
+    "{{ page_template }}",
+    {"bio": _read_stored_bio(), "saved": True, "updated_fields": list({{ value_expr }}.keys())},
+)

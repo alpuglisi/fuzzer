@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 2 implemented: PicTrail/django browsable, CC-LAB-0242/FR-LAB-160)
+- Implemented `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md` (`CC-LAB-0242`): PicTrail
+  gets a homepage, shared layout, `/catalog` and a `fetch()` client page for its
+  one JSON API (`/upload/link-preview`); `/post`, `/post/comments`, `/settings`,
+  `/explore` and `/inbox` are real HTML pages (with a designed 569-byte `/post`
+  found/not-found delta so boolean-SQLi length detection survives the layout);
+  secure twins moved to twin-suffixed URLs (`/post.labgen-dj-0008`, R1 branch
+  (a)); ground-truth `rendering` corrected; a new spider-based navigability test
+  crawls the whole `django` build. Fixed BUG-0052 (bare-GET 500s on 5 routes;
+  new PA-0054: enforce absent-input behavior by route enumeration, not only by
+  crawl), so the site is clickable end to end for a real visitor.
+
 ## 2026-09-25 (Lane 1 step 5 implemented: remaining browsability gaps, CC-LAB-0241/FR-LAB-159)
 - Implemented `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`: a per-profile
   `default_value` stops bare `/product.php`/`/blog_post.php` (linked from the

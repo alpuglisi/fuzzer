@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from fuzzlab.labgen.conformance.tier0 import lint_python, lint_python_emitted_files, python_available
 from fuzzlab.labgen.conformance.tier3 import regenerate_and_diff_emitter, render_whole_sample
-from fuzzlab.labgen.emitters.django import DjangoEmitter
+from fuzzlab.labgen.emitters.django import _COMMENT_TEMPLATE_HTML, DjangoEmitter
 from fuzzlab.labgen.schema import load_manifest
 
 
@@ -342,9 +342,14 @@ def test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_pass() 
         template_files = [f for f in files if f.role == "template"]
         assert len(template_files) == 1, f"{cell.cell_id}: expected exactly one template file"
         templates[cell.cell_id] = template_files[0].content
-        assert templates[cell.cell_id] == b'<div class="comment">{{ comment }}</div>\n', (
+        # CC-LAB-0242: the constant now extends PicTrail's shared layout;
+        # the emitted bytes must still be exactly that constant, untouched
+        # by generation, with the literal Django syntax intact.
+        assert templates[cell.cell_id] == _COMMENT_TEMPLATE_HTML.encode("utf-8"), (
             f"{cell.cell_id}: template content was altered -- {templates[cell.cell_id]!r}"
         )
+        assert b'<div class="comment">{{ comment }}</div>\n' in templates[cell.cell_id]
+        assert templates[cell.cell_id].startswith(b'{% extends "layouts/site.html" %}\n')
     assert templates["LABGEN-DJ-0009"] == templates["LABGEN-DJ-0010"], (
         "the template must be byte-identical between twins -- the differential lives "
         "entirely in the transform, never the template"
@@ -352,19 +357,22 @@ def test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_pass() 
 
 
 def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
-    """`CC-LAB-0092`'s own regression check for the new
+    """`CC-LAB-0092`'s own regression check for the
     `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism: a cell in that set
-    is served at its own declared route path; every other cell (including
-    its own secure twin) keeps the existing generic `generated/{slug}/`
-    pattern -- so adding a real page can never silently change an
-    unrelated cell's served URL."""
+    is served at its own declared route path; since CC-LAB-0242 (R1,
+    branch (a)) its secure twin is served at the twin-suffixed variant of
+    that path (`/post.labgen-dj-0008`, mirroring `php_laravel`'s
+    `_twin_url_for`), never the real path itself -- so adding a real page
+    can never silently change an unrelated cell's served URL (the
+    illustrative cells' generic `generated/{slug}/` URLs are asserted in
+    `tests/test_labgen_django_browsable.py`)."""
     manifest = load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml")
     emitter = DjangoEmitter()
     accumulator = emitter.render_route_accumulator(manifest.cells)
     body = accumulator.content.decode("utf-8")
     assert 'path("post", handle_labgen_dj_0007' in body, "the real-page cell must be served at /post"
-    assert 'path("generated/labgen_dj_0008/", handle_labgen_dj_0008' in body, (
-        "the secure twin (not a real-page cell) must keep the generic pattern"
+    assert 'path("post.labgen-dj-0008", handle_labgen_dj_0008' in body, (
+        "the secure twin must be served at its own twin-suffixed URL (CC-LAB-0242, R1 branch (a))"
     )
 
     link_preview_manifest = load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml")
@@ -373,8 +381,8 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
     assert 'path("upload/link-preview", handle_labgen_dj_0011' in link_preview_body, (
         "the real-page cell must be served at /upload/link-preview"
     )
-    assert 'path("generated/labgen_dj_0012/", handle_labgen_dj_0012' in link_preview_body, (
-        "the secure twin (not a real-page cell) must keep the generic pattern"
+    assert 'path("upload/link-preview.labgen-dj-0012", handle_labgen_dj_0012' in link_preview_body, (
+        "the secure twin must be served at its own twin-suffixed URL (CC-LAB-0242, R1 branch (a))"
     )
 
     settings_manifest = load_manifest("lab/manifests/phase_c_picktrail_settings.yaml")
@@ -383,8 +391,8 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
     assert 'path("settings", handle_labgen_dj_0013' in settings_body, (
         "the real-page cell must be served at /settings"
     )
-    assert 'path("generated/labgen_dj_0014/", handle_labgen_dj_0014' in settings_body, (
-        "the secure twin (not a real-page cell) must keep the generic pattern"
+    assert 'path("settings.labgen-dj-0014", handle_labgen_dj_0014' in settings_body, (
+        "the secure twin must be served at its own twin-suffixed URL (CC-LAB-0242, R1 branch (a))"
     )
 
     explore_manifest = load_manifest("lab/manifests/phase_c_picktrail_explore.yaml")
@@ -393,8 +401,8 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
     assert 'path("explore", handle_labgen_dj_0015' in explore_body, (
         "the real-page cell must be served at /explore"
     )
-    assert 'path("generated/labgen_dj_0016/", handle_labgen_dj_0016' in explore_body, (
-        "the secure twin (not a real-page cell) must keep the generic pattern"
+    assert 'path("explore.labgen-dj-0016", handle_labgen_dj_0016' in explore_body, (
+        "the secure twin must be served at its own twin-suffixed URL (CC-LAB-0242, R1 branch (a))"
     )
 
     inbox_manifest = load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml")
@@ -403,8 +411,8 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
     assert 'path("inbox", handle_labgen_dj_0017' in inbox_body, (
         "the real-page cell must be served at /inbox"
     )
-    assert 'path("generated/labgen_dj_0018/", handle_labgen_dj_0018' in inbox_body, (
-        "the secure twin (not a real-page cell) must keep the generic pattern"
+    assert 'path("inbox.labgen-dj-0018", handle_labgen_dj_0018' in inbox_body, (
+        "the secure twin must be served at its own twin-suffixed URL (CC-LAB-0242, R1 branch (a))"
     )
 
 

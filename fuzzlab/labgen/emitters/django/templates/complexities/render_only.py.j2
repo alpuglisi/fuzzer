@@ -1,2 +1,6 @@
 def {{ handler_name }}(request):
+{% if get_form_template is defined %}
+    if request.method != "POST":
+        return render(request, "{{ get_form_template }}", {{ get_form_context }})
+{% endif %}
 {{ body }}

@@ -1999,7 +1999,10 @@ lane) can submit a payload as
   exact URL" convention, ported at a much smaller scale — one real-URL-
   owning cell, no twin/canonical-cell machinery). Passes Tier 0/Tier 3
   for the new manifest
-  (`lab/manifests/phase_c_picktrail_post_detail.yaml`).
+  (`lab/manifests/phase_c_picktrail_post_detail.yaml`). *(Partly
+  superseded by FR-LAB-160, 2026-09-25: each real page's secure twin is
+  now served at a twin-suffixed URL, e.g. `/post.labgen-dj-0008`, not the
+  generic `generated/{slug}/` pattern -- see FR-LAB-160's R1 sign-off.)*
 - **FR-LAB-96** *(real, independent ground truth authored and cross-
   checked against a real live-booted request, including a `PA-0034`
   adversarial test; `CC-LAB-0092`, 2026-09-23).* A brand-new, independent
@@ -5774,6 +5777,77 @@ lane) can submit a payload as
   (crawl-discovered, 200), the POST-only twin URL not GET-reachable, and an
   anonymous POST to either twin answering 200 JSON while writing no row --
   not the 401/redirect the plan anticipated, because none exists.
+- **FR-LAB-160** *(Browsable Labs Lane 2 -- PicTrail, `django`; `CC-LAB-0242`,
+  2026-09-25, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`).* PicTrail is a
+  browsable HTML site. Five parts:
+  1. **Homepage + shared layout.** A checked-in site layer in the `django`
+     skeleton: `templates/layouts/site.html` (header with the "PicTrail" name
+     and nav, main, footer, inline CSS, no context variable interpolated, so
+     byte-identical for both twins), `views/site.py` + `templates/site/*`
+     serving `/` (homepage with links to every page), `/catalog` (every page
+     the build serves, read from the generated `urls.py`'s `CATALOG` list --
+     needed because PicTrail's build also carries 6 illustrative Phase A/B
+     cells with no ground-truth case) and `/upload` (the link-preview API's
+     client page). `render_route_accumulator()` registers the three ahead of
+     every cell route. Every page template, and `_COMMENT_TEMPLATE_HTML`,
+     `{% extends "layouts/site.html" %}`.
+  2. **Page/api classification and conversion.** `page`: `/post` (post
+     detail: the `single_statement` complexity's optional `html_row_template`
+     tail renders `pages/post_detail.html`, found = 200, not found = 404
+     "Post not found."), `/post/comments` (layout-wrapped comment),
+     `/settings` (GET renders the settings form with its one public field,
+     `bio`; POST processes it and re-renders with a saved notice),
+     `/explore` (HTML listing, never echoing `sort`), `/inbox` (GET renders
+     the inbox with a compose form; POST re-renders with a delivered/rejected
+     notice, 200/400). `api`: `/upload/link-preview` stays JSON (a real
+     oEmbed/unfurl endpoint), reached through the `/upload` `fetch()` client
+     page. The illustrative `/api/products`/`/api/login`/`/api/profile`
+     cells stay as they were (`api`-shaped, under `/api/`).
+  3. **Absent-input behavior (PA-0053/PA-0054).** Route-profile keys
+     `default_value` (`/post` and `/api/products` = `"1"`, `/explore` =
+     `"id"`) and `required_param` (`/upload/link-preview`: handled JSON 400
+     before any transform/sink -- its corpus source defines no default URL,
+     R4); `get_form_template` makes `/settings`/`/inbox` answer a non-POST
+     request with their form before the source runs. All are
+     source/complexity-region lines, identical on both twins. A bare `GET`
+     of every served route answers < 500 (BUG-0052).
+  4. **R3 byte delta.** `/post`'s found vs. not-found page differs by a
+     designed >= 300 bytes (measured 569: 2,443 vs 1,874 bytes, against a
+     ~122-byte `SqliBooleanStrategy` 5% threshold), asserted directly on the
+     served HTML of both twins.
+  5. **Ground truth + navigability.** `rendering` flipped `server-json` ->
+     `server` for `/post`, `/settings`, `/explore`, `/inbox` (points and
+     cases); `/upload/link-preview` stays `server-json`. No point is
+     whole-body, so `fuzzlab.harness.auto` still sends every point
+     form-encoded/query-string (asserted). New
+     `tests/test_labgen_django_navigability_live_boot.py` crawls the whole
+     `django` build from `/` (`LocalSpider`, `requests` engine, depth cap 4
+     vs. measured 2), with hard-coded non-vacuous guards (6 points, >= 16
+     crawled URLs vs. measured 21), asserting every ground-truth URL is
+     discovered with the anonymous visitor's status (200 for pages, 400 for
+     the bare API), every catalog page is link-reachable, and no crawled URL
+     and no served route (enumerated via `served_url_for`) answers 5xx. No
+     session gating exists in the `django` emitter (confirmed), so no 401
+     exception applies.
+
+  **R1 sign-off (2026-09-25): branch (a), extend pinning.** Each real page's
+  secure twin (`_REAL_PAGE_TWIN_CELL_IDS`: `LABGEN-DJ-0008`/`0010`/`0012`/
+  `0014`/`0016`/`0018`) is served at the twin-suffixed variant of its real
+  page's URL (`_twin_url_for`: `/post.labgen-dj-0008`,
+  `/post/comments.labgen-dj-0010`, `/upload/link-preview.labgen-dj-0012`,
+  `/settings.labgen-dj-0014`, `/explore.labgen-dj-0016`,
+  `/inbox.labgen-dj-0018`), the suffix-less form of `php_laravel`'s own
+  `_twin_url_for` convention, through one shared derivation,
+  `served_url_for()`. No concrete reason to fall back to branch (b) was
+  found: Django's `path()` matches each literal route string exactly (dots
+  and hyphens are plain characters in a `path()` route; `post` and
+  `post.labgen-dj-0008` never shadow each other), and the route accumulator
+  emits one literal line per cell, so there is no naming collision --
+  confirmed live (every twin URL answers its own cell; the old
+  `/generated/labgen_dj_0008/` URL is gone, 404). The leakage contract is
+  proven directly: each page's bare `GET` returns byte-identical bodies at
+  the vulnerable URL and at its twin's URL (live, all 6 pages). Ground truth
+  still names only the vulnerable cell.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

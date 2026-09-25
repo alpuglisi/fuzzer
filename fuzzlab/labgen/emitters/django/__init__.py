@@ -52,7 +52,7 @@ from fuzzlab.labgen.schema import Cell, SinkContext
 
 from .modules import COMPLEXITIES, SINKS, SOURCES, TRANSFORMS, render_route_import_line
 
-__all__ = ["DjangoEmitter"]
+__all__ = ["DjangoEmitter", "served_url_for"]
 
 # A small, fixed helper every generated view includes unconditionally
 # (CC-LAB-0091) -- present identically in every generated file regardless
@@ -103,7 +103,22 @@ _READ_STORED_COMMENT_HELPER = (
 # interpolation at generation time at all -- written byte-for-byte,
 # untouched by Jinja2, so Django's own template engine is the only thing
 # that ever evaluates `{{ comment }}`, at real request time.
-_COMMENT_TEMPLATE_HTML = '<div class="comment">{{ comment }}</div>\n'
+#
+# CC-LAB-0242 (FR-LAB-160, Browsable Labs Lane 2): the template now extends
+# PicTrail's shared site layout (`templates/layouts/site.html`, a checked-in
+# skeleton file) instead of being a bare `<div>` fragment -- the same fix
+# shape Lane 1 applied to `php_laravel`'s `html_body_echo.blade.php.j2`. The
+# `{{ comment }}` echo itself is unchanged, and the whole constant is still
+# byte-identical between twins.
+_COMMENT_TEMPLATE_HTML = (
+    '{% extends "layouts/site.html" %}\n'
+    "{% block title %}Comments · PicTrail{% endblock %}\n"
+    "{% block content %}\n"
+    "<h2>Comments</h2>\n"
+    '<div class="comment">{{ comment }}</div>\n'
+    '<p><a href="/post">Back to the post</a></p>\n'
+    "{% endblock %}\n"
+)
 
 # CC-LAB-0095: fixed, unconditional constants backing the mass-assignment
 # shape's two transforms. `_KNOWN_PROFILE_COLUMNS` is SQL-column-name
@@ -201,13 +216,46 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: naming is render-only information, not verdict-relevant, so it lives
 #: here rather than growing the shared IR. Keyed by ``cell.route.path``,
 #: since a vulnerable cell and its secure twin share one route profile.
+#:
+#: CC-LAB-0242 (FR-LAB-160, Browsable Labs Lane 2) adds optional, render-only
+#: keys, each consumed by exactly one module template and identical on both
+#: twins of a route (so every minimal pair still differs only in its
+#: transform region, BUG-0027):
+#:
+#: * ``default_value`` (``get_param``): the page's absent-input default --
+#:   ``request.GET.get(<param>) or "<default>"`` (PA-0053/BUG-0052).
+#: * ``required_param`` (``get_param``): no safe default exists, so an
+#:   absent/empty parameter returns a handled 400 *before* any transform or
+#:   sink runs (PA-0053's "handled 4xx before the sink" branch).
+#: * ``html_row_template`` (``single_statement``): render the found/not-found
+#:   row through this Django template (inside the shared layout) instead of
+#:   the default ``JsonResponse`` tail -- the Django analogue of
+#:   ``php_laravel``'s ``html_row_view`` tail flag (CC-LAB-0239/0240).
+#: * ``page_template`` (page sinks): the Django template a converted page's
+#:   sink renders its result into.
+#: * ``get_form_template``/``get_form_context`` (``render_only``): a
+#:   POST-processing page answers any non-POST request by rendering its form
+#:   page, before the source/transform/sink run at all.
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
-    "/api/products": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # CC-LAB-0242: an illustrative JSON API, left JSON; `default_value`
+    # folded in from the PA-0053 bare-GET sweep (BUG-0052) -- its vulnerable
+    # twin concatenated `str(None)` into SQL and 500'd on a bare GET.
+    "/api/products": {
+        "var_name": "id", "param_name": "id", "table": "products", "column": "id",
+        "default_value": "1",
+    },
     # PicTrail's real post-detail lookup (CC-LAB-0092, Phase C's first
     # real page) -- a distinct `posts` table, not a reuse of the
     # illustrative `/api/products` table above, per that entry's own
-    # "thematically-accurate table" note.
-    "/post": {"var_name": "id", "param_name": "id", "table": "posts", "column": "id"},
+    # "thematically-accurate table" note. CC-LAB-0242: a real HTML page in
+    # the shared layout (`pages/post_detail.html`, designed found/not-found
+    # byte delta, R3), defaulting to post 1 when `?id=` is absent -- the
+    # same `?? '1'` default Lane 1's `/product.php`/`/blog_post.php` got.
+    "/post": {
+        "var_name": "id", "param_name": "id", "table": "posts", "column": "id",
+        "default_value": "1",
+        "html_row_template": "pages/post_detail.html",
+    },
     "/api/login": {
         "var_name": "username",
         "param_name": "username",
@@ -223,19 +271,44 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # PicTrail's real link-preview upload flow (CC-LAB-0094, Phase C's
     # third real page) -- ports docs/research/corpus-examples/ssrf/
     # python/{vulnerable,idiomatic}-oembed-unfurl-4.py almost verbatim.
-    "/upload/link-preview": {"var_name": "url", "param_name": "url"},
+    # CC-LAB-0242: stays a JSON `api` (its client page is the site layer's
+    # `/upload`); `required_param` -- the corpus source
+    # (`vulnerable-oembed-unfurl-4.py`'s `unfurl_link(message_url: str)`)
+    # defines no default URL, and any default would make the vulnerable
+    # twin fetch it, so a bare GET is a handled 400 before the sink (R4).
+    "/upload/link-preview": {"var_name": "url", "param_name": "url", "required_param": True},
     # PicTrail's real account-settings page (CC-LAB-0095, Phase C's
     # fourth real page) -- the whole-POST-body mass-assignment shape
     # needs no `param_name` (the source reads the entire body, not one
-    # named field).
-    "/settings": {"var_name": "settings_fields"},
+    # named field). CC-LAB-0242: GET renders the real settings form (its
+    # one publicly-settable field, `bio` -- `_PUBLIC_SETTINGS_FIELDS`);
+    # POST processes it and re-renders the page with a saved notice.
+    "/settings": {
+        "var_name": "settings_fields",
+        "page_template": "pages/settings.html",
+        "get_form_template": "pages/settings.html",
+        "get_form_context": '{"bio": _read_stored_bio(), "saved": False}',
+    },
     # PicTrail's real explore/search page (CC-LAB-0096, Phase C's fifth
-    # real page).
-    "/explore": {"var_name": "sort", "param_name": "sort"},
+    # real page). CC-LAB-0242: a real listing page; defaults to sorting by
+    # `id`, the same key the secure twin's allowlist already falls back to.
+    # The page never echoes the `sort` value back (so the only
+    # body-visible effect of the parameter is the row order, R1b/R6).
+    "/explore": {
+        "var_name": "sort", "param_name": "sort",
+        "default_value": "id",
+        "page_template": "pages/explore.html",
+    },
     # PicTrail's real inbox/DM page (CC-LAB-0097, Phase C's sixth real
     # page) -- the payload param models the inbox message's own
-    # serialized-cache-data field.
-    "/inbox": {"var_name": "payload", "param_name": "payload"},
+    # serialized-cache-data field. CC-LAB-0242: GET renders the inbox with
+    # its compose form; POST delivers the message and re-renders the page.
+    "/inbox": {
+        "var_name": "payload", "param_name": "payload",
+        "page_template": "pages/inbox.html",
+        "get_form_template": "pages/inbox.html",
+        "get_form_context": "{}",
+    },
 }
 
 #: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
@@ -250,6 +323,8 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
 #: twin is deliberately not added here: ground truth only ever needs to
 #: describe the one real, exploitable page, matching how a ``php_current``
 #: secure twin does not necessarily get its own ``PFF-`` case either.
+#: (CC-LAB-0242: the secure twin now gets its own twin-suffixed URL via
+#: :data:`_REAL_PAGE_TWIN_CELL_IDS` -- still never this set's exact path.)
 _REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
     {
         "LABGEN-DJ-0007",
@@ -260,6 +335,78 @@ _REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
         "LABGEN-DJ-0017",
     }
 )
+
+#: CC-LAB-0242 (FR-LAB-160, R1 -- branch (a), see ``requirements.md``'s
+#: FR-LAB-160 "R1 sign-off"): each real page's **secure twin**, served at a
+#: twin-suffixed variant of the real page's own URL (:func:`_twin_url_for`,
+#: ``/post`` -> ``/post.labgen-dj-0008``) instead of the generic
+#: ``generated/{cell_slug}/`` pattern -- mirroring ``php_laravel``'s own
+#: ``_twin_url_for`` convention (``/login.php`` ->
+#: ``/login.labgen-pla-0002.php``), so both twins of a page live in the same
+#: URL family and can be compared page-for-page (the shared layout's
+#: byte-identical-across-twins contract). Superseding CC-LAB-0092's
+#: "secure twin deliberately not pinned" note: ground truth still describes
+#: only the vulnerable cell (the twin has no ground-truth case), exactly as
+#: before -- only the twin's URL changed. Every entry must share its
+#: ``route.path`` with exactly one :data:`_REAL_PAGE_CELL_IDS` cell (asserted
+#: offline, `tests/test_labgen_django_browsable.py`).
+_REAL_PAGE_TWIN_CELL_IDS: frozenset[str] = frozenset(
+    {
+        "LABGEN-DJ-0008",
+        "LABGEN-DJ-0010",
+        "LABGEN-DJ-0012",
+        "LABGEN-DJ-0014",
+        "LABGEN-DJ-0016",
+        "LABGEN-DJ-0018",
+    }
+)
+
+#: CC-LAB-0242: the site layer's own fixed routes (hand-written views in the
+#: checked-in skeleton's ``fuzlab_django_lab/views/site.py``), registered
+#: ahead of every cell's route by :meth:`DjangoEmitter.render_route_accumulator`.
+#: ``(url_path, view_name, route_name)``.
+_SITE_ROUTES: tuple[tuple[str, str, str], ...] = (
+    ("", "home", "home"),
+    ("catalog", "catalog", "catalog"),
+    ("upload", "upload_client", "upload"),
+)
+
+
+def _twin_url_for(real_url: str, cell_id: str) -> str:
+    """The twin-suffixed URL a real page's secure twin is served at, e.g.
+    ``/post`` + ``LABGEN-DJ-0008`` -> ``/post.labgen-dj-0008`` -- the same
+    shape ``php_laravel``'s own ``_twin_url_for`` produces for a
+    suffix-less path (Django routes here carry no ``.php``-style suffix)."""
+    return f"{real_url}.{cell_id.lower()}"
+
+
+def served_url_for(cell: Cell) -> str:
+    """The URL path ``cell`` is actually served at -- **the one shared
+    derivation** of that fact (PA-0003/PA-0021), used by
+    :meth:`DjangoEmitter.render_route_accumulator` and by tests alike:
+
+    * a real page's vulnerable cell (:data:`_REAL_PAGE_CELL_IDS`): its own
+      ``route.path`` (``/post``);
+    * that page's secure twin (:data:`_REAL_PAGE_TWIN_CELL_IDS`):
+      :func:`_twin_url_for` (``/post.labgen-dj-0008``);
+    * every illustrative cell: ``/generated/{cell_slug}/``.
+    """
+    if cell.cell_id in _REAL_PAGE_CELL_IDS:
+        return cell.route.path
+    if cell.cell_id in _REAL_PAGE_TWIN_CELL_IDS:
+        return _twin_url_for(cell.route.path, cell.cell_id)
+    return f"/generated/{_snake_case(cell.cell_id)}/"
+
+
+def _get_linkable(cell: Cell) -> bool:
+    """Whether a plain ``GET`` of ``cell``'s served URL is a real page a
+    visitor can follow a link to: a ``GET`` route, or a POST-processing
+    page that renders its own form on ``GET`` (``get_form_template``). A
+    POST-only illustrative API (``/api/login``) is not linked from
+    ``/catalog``."""
+    if cell.route.method.upper() == "GET":
+        return True
+    return "get_form_template" in _ROUTE_PARAMS.get(cell.route.path, {})
 
 
 class DjangoEmitter(Emitter):
@@ -405,6 +552,7 @@ class DjangoEmitter(Emitter):
 
         import_lines: list[str] = []
         urlpattern_lines: list[str] = []
+        catalog_lines: list[str] = []
         for c in by_id:
             cell_slug = _snake_case(c.cell_id)
             handler_name = f"handle_{cell_slug}"
@@ -415,14 +563,23 @@ class DjangoEmitter(Emitter):
             # its own declared route path, never the generic
             # `generated/{cell_slug}/` pattern -- so the URL a real page's
             # ground truth names is the URL that is actually served, not
-            # a derived/guessed one.
-            if c.cell_id in _REAL_PAGE_CELL_IDS:
-                url_path = c.route.path.lstrip("/")
-            else:
-                url_path = f"generated/{cell_slug}/"
+            # a derived/guessed one. CC-LAB-0242 (R1, branch (a)): its
+            # secure twin at the twin-suffixed variant of that path. One
+            # shared derivation, `served_url_for` (PA-0003/PA-0021).
+            served = served_url_for(c)
+            url_path = served.lstrip("/")
             urlpattern_lines.append(
                 f'    path("{url_path}", {handler_name}, name="{cell_slug}"),  # cell: {c.cell_id}\n'
             )
+            catalog_lines.append(
+                f'    ("{served}", "{c.cell_id}", "{c.route.method.upper()}", {_get_linkable(c)!r}),\n'
+            )
+
+        site_lines = "".join(
+            f'    path("{url_path}", {view}, name="{name}"),  # site layer (CC-LAB-0242)\n'
+            for url_path, view, name in _SITE_ROUTES
+        )
+        site_views = ", ".join(sorted(view for _, view, _ in _SITE_ROUTES))
 
         urls_py = (
             "# Generated by fuzzlab.labgen.emitters.django -- fuzlab_django_lab/urls.py\n"
@@ -432,9 +589,17 @@ class DjangoEmitter(Emitter):
             "# gate).\n"
             "\n"
             "from django.urls import path\n"
+            f"from fuzlab_django_lab.views.site import {site_views}\n"
             + ("".join(f"{line}\n" for line in import_lines) if import_lines else "")
             + "\n"
+            "# CC-LAB-0242: (served URL, cell ID, HTTP method, linked from /catalog)\n"
+            "# for every generated cell -- read by the site layer's /catalog page.\n"
+            "CATALOG = [\n"
+            + "".join(catalog_lines)
+            + "]\n"
+            "\n"
             "urlpatterns = [\n"
+            + site_lines
             + "".join(urlpattern_lines)
             + "]\n"
         )

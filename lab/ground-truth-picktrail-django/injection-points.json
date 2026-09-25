@@ -7,7 +7,7 @@
       "method": "GET",
       "param": "id",
       "location": "query",
-      "rendering": "server-json"
+      "rendering": "server"
     },
     {
       "url": "/post/comments",
@@ -28,21 +28,21 @@
       "method": "POST",
       "param": "is_verified",
       "location": "body",
-      "rendering": "server-json"
+      "rendering": "server"
     },
     {
       "url": "/explore",
       "method": "GET",
       "param": "sort",
       "location": "query",
-      "rendering": "server-json"
+      "rendering": "server"
     },
     {
       "url": "/inbox",
       "method": "POST",
       "param": "payload",
       "location": "body",
-      "rendering": "server-json"
+      "rendering": "server"
     }
   ]
 }

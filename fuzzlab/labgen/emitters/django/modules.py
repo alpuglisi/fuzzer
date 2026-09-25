@@ -529,7 +529,11 @@ class SingleStatementComplexity(TemplateModule):
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
         template = self._env.get_template(self._template_name)
-        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"])
+        # CC-LAB-0242: `html_row_template` (optional, per route profile)
+        # swaps the JSON tail for a real Django-template page render --
+        # passed through only when the route profile sets it.
+        extra = {k: ctx[k] for k in ("html_row_template",) if k in ctx}
+        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"], **extra)
         return RenderResult(code=code, context=dict(ctx))
 
 
@@ -545,7 +549,11 @@ class RenderOnlyComplexity(TemplateModule):
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
         template = self._env.get_template(self._template_name)
-        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"])
+        # CC-LAB-0242: `get_form_template`/`get_form_context` (optional, per
+        # route profile) make a POST-processing page answer a non-POST
+        # request with its form page before the source/transform/sink run.
+        extra = {k: ctx[k] for k in ("get_form_template", "get_form_context") if k in ctx}
+        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"], **extra)
         return RenderResult(code=code, context=dict(ctx))
 
 
