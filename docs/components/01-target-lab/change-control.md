@@ -115,7 +115,19 @@ its change-control-template compression.
   - **Lane 7** consumes `assemble_spring_boot_app`.
   - **Project-level:** `PA-0056` added to `docs/PREVENTIVE_ACTIONS.md`;
     `docs/ARCHITECTURE.md` updated (unconditional); the Lane 4 row in
-    `docs/LAB_BROWSABLE_APPS_PLAN.md` updated.
+    `docs/LAB_BROWSABLE_APPS_PLAN.md` updated on completion.
+  - **Numbering-collision contingency** (the same discipline
+    `CC-LAB-0242` and `CC-LAB-0241`'s review required):
+    - Lanes 5-7's `CC-LAB`/`FR-LAB` numbers shift by +1 only if this step
+      needs more than its pre-reserved single `CC-LAB-0244`, or more than
+      its reserved `FR-LAB-164`-`165`. For example, implementation might
+      show that the 3-app bundling (plan §1.9) does not fit one coherent
+      change and must split per app.
+    - The shift is applied immediately in `docs/LAB_BROWSABLE_APPS_PLAN.md`'s
+      lane table, before any new entry is drafted, not deferred, and it is
+      flagged to the orchestrator for reconciliation against the other
+      concurrent lanes.
+    - Otherwise Lanes 5-7 are not bumped.
   - **No session/login exists in `spring_boot`** (fixed demo `X-Account-Id`
     and `Authorization` headers), so the R8 split-app 401 exception does not
     apply. `/api/account/preferences`'s anonymous 401 is a token API's
@@ -294,7 +306,12 @@ its change-control-template compression.
   - the S2/S6 pins' xfail status;
   - S15's per-emitter results, including `php_laravel`'s outcome;
   - SSTI recall;
-  - whether `CC-FUZZ-0050`/`FR-FUZZ-34` stayed unused.
+  - whether `CC-FUZZ-0050`/`FR-FUZZ-34` stayed unused;
+  - a **numbering check-back**: confirmation, after implementation, that
+    the single `CC-LAB-0244` (and `FR-LAB-164`-`165`) sufficed for all three
+    apps, so the numbering-collision contingency above did not fire and
+    Lanes 5-7 needed no bump. If it did fire, the entry records the exact
+    shift applied.
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
