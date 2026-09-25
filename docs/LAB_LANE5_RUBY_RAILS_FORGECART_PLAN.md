@@ -1,7 +1,10 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **plan drafted 2026-09-25; review gate NOT RUN — blocked, not
-passed.** Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
+Status: **round 1 reviewed 2026-09-25 (ACCURATE / ADEQUATE with 2 minor
+gaps, both fixed in this revision); awaiting round-2 confirmation. Not yet
+converged, and implementation is not authorized.** The orchestrating
+session ran the review rounds (§8). The original drafting-time status is
+kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
 `BUG-0055` / `PA-0057`, per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table.
 The dispatch required two independent reviewer subagents (accuracy +
@@ -397,6 +400,30 @@ Applied to this lane's findings:
 - If implementation measures anything different, the rule is re-applied to
   the measurement.
 
+**How §2d's rule relates to R7 (round-1 adequacy finding).** The
+`yaml_payload` catch-all `rescue` doesn't crash and doesn't tell the twins
+apart, so under the rule above it isn't a bug. The obvious objection is
+that it could quietly defeat detection, a different failure from "a weak
+check". It is kept outside the bug trigger for three stated reasons:
+
+1. **It only affects requests without `yaml_payload`.** No detection probe
+   sends such a request, because every strategy sends a value in the
+   parameter it tests. So it cannot change any detection verdict.
+2. **`FCART-0005` was already a known false negative before this lane.**
+   The §1h baseline (measured live, and confirmed by the round-1 accuracy
+   reviewer) records it as a miss, caused by something unrelated to the
+   `rescue`: `InsecureDeserializationTypeConfusionStrategy`'s JSON gate
+   (`strategies.py:993`) and its Jackson-specific probes.
+3. **The detection it does defeat is the absent-input sweep itself.** That
+   is exactly what R7 addresses, by asserting the declared status instead
+   of "< 500".
+
+Guard on this reasoning: if the §5 step 8 post-change measurement shows
+`FCART-0005`, or any other case, changing detection status in a way this
+explanation doesn't predict, the rule is re-applied with "defeats
+detection" treated as a verdict-affecting result, which counts as trigger
+(b).
+
 ### 2e. Ground-truth `rendering` correction
 
 In `lab/ground-truth-forgecart/`, both `injection-points.json` and
@@ -479,6 +506,38 @@ Lanes 2–7's reservations, i.e. the one following `CC-LAB-0248` if that is
 still the next free number at dispatch time) instead of folding it in.
 Either way, the absent-input 4xx responses §2d declares would be served
 through it.
+
+**Blast radius of turning debug pages off (round-1 adequacy finding, its
+own named step, §5 step 1a).** `consider_all_requests_local` governs every
+4xx/5xx body Rails renders, not only the 400 above. It also replaces the
+dev 404 page, which lists the full route table. So before the setting is
+flipped, a dedicated check looks for anything that depends on debug-page
+content. This is separate from R12's shape grep, which only looks for
+JSON/plain-text body assertions.
+
+- **Tests.** Grep `tests/` for debug-page-specific content: `Extracted
+  source`, `Routing Error`, `Routes match in priority`, `Full Trace`,
+  `Application Trace`, `Framework Trace`, `ActionController::RoutingError`,
+  `ActionController::ParameterMissing`, `ActiveRecord::RecordNotFound`,
+  `Rails.root`.
+- **Detection code.** Grep `fuzzlab/` (outside the ruby_rails emitter and
+  its harness) for the same strings, plus `ActiveRecord`/`ActionController`,
+  since an oracle keyed on Rails error text would lose its signal.
+- **Rails suites.** Re-run every Rails test that asserts a non-2xx status.
+- **Result when this plan was revised (2026-09-25):**
+  - **0 hits in `tests/`**;
+  - **0 hits in `fuzzlab/`** outside the emitter and its harness (one
+    unrelated docstring mention of "ActiveRecord" in
+    `spring_boot/modules.py:555`);
+  - the only Rails non-2xx assertion is
+    `test_labgen_ruby_rails_webhook_signature_live_boot.py:104`
+    (`tampered.status == 401`). That is the sink's own JSON 401, not a
+    Rails error page, and it is unaffected.
+
+The check is re-run at implementation time, because the suite may have
+grown. Any new hit is either updated to the static error page's contract
+or, if it is a detection signal, treated under R11 as a possible
+regression.
 
 **Not changed:** `config.server_timing` (a `Server-Timing` response header
 with per-request timings). It is response metadata, not a source or verdict
@@ -652,6 +711,9 @@ Re-run `test_multitarget_ruby_rails_forgecart.py` and
   the per-shape sample live-boot suites.
 - PA-0045 applies: count the old-shape assertions per edited file and
   confirm that many were edited.
+- This grep covers response shapes only. Dependencies on **debug-page**
+  content (stack traces, the 404 route table, "Extracted source") have
+  their own dedicated check in R2 ("Blast radius") and §5 step 1a.
 
 **R13: vacuous pass and crawl depth.**
 
@@ -791,6 +853,9 @@ Skip-guarded on `rails_boot_available()`.
 ## 5. Sequencing (each step's gate must be green before the next)
 
 1. **Skeleton hygiene (§2a).**
+   - **1a (must pass before the setting is flipped):** re-run R2's
+     debug-page blast-radius check over `tests/` and `fuzzlab/`, and record
+     the hit list. Every hit is resolved per R2 before step 1 continues.
    - *Gate:* O6 green.
    - *Live:* whole-app boots, and a bare `POST /admin/customers/update`
      returns 400 with **no** `Extracted source` and no `permit`. Before the
@@ -916,7 +981,8 @@ Skip-guarded on `rails_boot_available()`.
 
 ## 8. Review history
 
-**Round 1: NOT RUN (blocked).** The dispatch specified two independent
+**Drafting-time note (superseded by the actual round 1 below): the
+drafting agent could not run round 1.** The dispatch specified two independent
 reviewer subagents (accuracy + adequacy) spawned with the drafting agent's
 own Agent tool, iterated to 3/3 agreement.
 
@@ -938,3 +1004,43 @@ own Agent tool, iterated to 3/3 agreement.
   written.
 - **Implementation stays unauthorized** until this plan and the
   `CC-LAB-0245` draft each clear their own gate.
+
+**Round 1, actually run (accuracy + adequacy, 2 independent reviewer
+agents, 2026-09-25).** Since the drafting agent had no Agent tool, the
+**orchestrating session** spawned the reviewers itself; this is a disclosed
+change of who dispatched them, not a self-review. Result: **ACCURATE /
+ADEQUATE with 2 minor gaps.**
+
+- **Accuracy: no inaccuracies.** The reviewer reproduced the findings
+  live:
+  - the `BUG-0055` debug-page leak on **both** twins
+    (`permit_bang_unrestricted` versus `strong_params_explicit_allowlist` in
+    the "Extracted source" section of each twin's 400 page);
+  - the §1h detection baseline, exactly (tp=1/fp=1/tn=1/fn=3);
+  - all of the Rails gotchas, including the `allow_browser` 406 with an old
+    Chrome UA.
+- **Adequacy: 2 non-blocking gaps, both fixed in this revision per the
+  project's fix-anyway discipline.**
+  1. **No explicit blast-radius check for turning debug pages off.** R12's
+     grep was scoped to JSON/plain-text shape assertions, but
+     `consider_all_requests_local` also governs the 404 route-table page.
+     Fixed: R2 gets its own "Blast radius" check, run over both `tests/`
+     and `fuzzlab/` detection code at revision time (0 hits in either; the
+     only Rails non-2xx assertion is the sink's own JSON 401). It becomes
+     §5 step 1a, a gate that must pass before the setting is flipped, and
+     R12 cross-references it.
+  2. **The link between §2d's bug rule and R7 was left implicit.** Fixed:
+     §2d now states directly why "defeats detection without crashing" stays
+     outside the bug trigger. The missing-`yaml_payload` path is never sent
+     by a detection probe. `FCART-0005` was already a known false negative
+     in the measured baseline, for an unrelated reason (the strategy's JSON
+     gate). The detection it does defeat is the absent-input sweep, which
+     R7 addresses. A guard re-applies the rule if the post-change
+     measurement contradicts this.
+
+   **Clarification recorded rather than silently absorbed:** the round-1
+   note said the `rescue` "bakes in a false negative for that ground-truth
+   cell". The revised §2d explains why that attribution does not hold
+   (reasons 1 and 2). The reviewer's requested fix, making the connection
+   explicit, is applied in full.
+- **Next:** round-2 confirmation by the same two reviewers.

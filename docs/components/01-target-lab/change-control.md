@@ -5,8 +5,12 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
-**Status: DRAFT. Pre-change review gate NOT RUN (blocked, not passed).**
-Neither this entry nor the underlying plan has been reviewed. The dispatch
+**Status: DRAFT. This entry's own review gate has NOT RUN.** The underlying
+plan's round 1 has run: the orchestrating session dispatched the reviewers,
+who returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed (see the
+plan's §8). The plan is awaiting round-2 confirmation. Text below the next
+sentence records the drafting-time situation. At drafting time, neither this
+entry nor the underlying plan had been reviewed. The dispatch
 required two independent reviewer subagents for each document; the drafting
 agent had no Agent tool, and the one alternative it tried (a separate cloud
 session via `create_session`) was denied by the permission classifier.
@@ -104,6 +108,13 @@ template; the plan holds the full detail.
        production-equivalent rule, which every other stack already enforces.
        A reviewer who disagrees triggers the plan's stated fallback: flag it
        with a recommended next `CC-LAB` number instead.
+     - **Blast radius** (plan R2, §5 step 1a; added after plan round 1):
+       before the setting is flipped, a dedicated check greps `tests/` and
+       `fuzzlab/` detection code for debug-page-specific content (stack
+       traces, the 404 route table, "Extracted source", Rails exception
+       class names). At plan revision it found 0 hits; the only Rails non-2xx
+       assertion is the sink's own JSON 401. The check is re-run at
+       implementation time.
   3. **R3: CSRF posture must neither gain nor lose protection.** Mitigated:
      plain `<form>` only (never `form_with`/`form_tag`), no
      `csrf_meta_tags`, global `skip_forgery_protection` untouched. Checked
@@ -128,7 +139,13 @@ template; the plan holds the full detail.
      sink's catch-all `rescue` turned a `nil` input into a 200. Mitigated:
      the live sweep asserts the **declared** bare-request status, and the
      offline declaration check (with its own adversarial self-test) is the
-     authoritative gate.
+     authoritative gate. Why this stays outside the bug trigger (plan §2d,
+     added after plan round 1): the missing-`yaml_payload` path is never sent
+     by a detection probe; `FCART-0005` was already a known false negative in
+     the measured baseline, for an unrelated reason (the strategy's JSON
+     gate); and the detection it does defeat is the absent-input sweep,
+     which this item fixes. If the post-change measurement contradicts this,
+     the bug rule is re-applied.
   8. **R8: catalog entries for POST/PATCH-only illustrative cells.**
      Mitigated (Lane 2's `_get_linkable` precedent): only GET routes are
      linked. A bare GET of the others is a declared, exactly-asserted 404,
@@ -150,7 +167,9 @@ template; the plan holds the full detail.
       `test_labgen_ruby_rails_whole_app_live_boot.py:93,97,101,105,149`.
       Mitigated: update them to the new contract, re-grep every file that
       mentions ruby_rails, ForgeCart or `FCART-` (slow files included,
-      PA-0044), and count the edited assertions (PA-0045).
+      PA-0044), and count the edited assertions (PA-0045). Dependencies on
+      debug-page content have their own separate check, under R2's blast
+      radius.
   13. **R13: vacuous pass and crawl depth.** Mitigated as in
       `CC-LAB-0241`/`0242`: hard-coded, measured minimums asserted first;
       depth measured, cap 4, deepest ground-truth URL asserted below the cap.
