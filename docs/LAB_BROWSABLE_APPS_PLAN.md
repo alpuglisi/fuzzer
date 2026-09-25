@@ -140,22 +140,23 @@ each in an isolated worktree. Lane 7 integrates.
 
 | Lane | Scope | CC-LAB | FR-LAB | CC-FUZZ / FR-FUZZ (if needed) | BUG / PA (if a defect is found) |
 |---|---|---|---|---|---|
-| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (3 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 JSON→HTML conversion + realistic URLs, detailed implementation + risk plan in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` — done, except the spider-based navigability acceptance test) | 0237–0239 | 155–157 | 0047 / 31 | 0051 / 0053 |
-| 2 | django: PicTrail | 0240 | 157–158 | 0048 / 32 | 0052 / 0054 |
-| 3 | go_net_http: Twitch clone | 0241 | 159–160 | 0049 / 33 | 0053 / 0055 |
-| 4 | spring_boot: TrackerNest, Netflix, Expedia — Lane 1 step 3's `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` (R4) found `spring_boot`'s sink/transform templates (e.g. `no_ownership_check`) are separate files from `php_laravel`'s own, so this lane starts from `php_laravel`'s response format with no inherited constraint — apply the same `page`/`api` classification test independently per sink family, don't copy-render-format-verbatim | 0242 | 161–162 | 0050 / 34 | 0054 / 0056 |
-| 5 | ruby_rails: ForgeCart | 0243 | 163–164 | 0051 / 35 | 0055 / 0057 |
-| 6 | node_express (MeadowMart) + python_fastapi sample | 0244 | 165–166 | 0052 / 36 | 0056 / 0058 |
-| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0245 | 167–168 | — | 0057 / 0059 |
+| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (4 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking, detailed implementation + risk plan in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` — done, except the spider-based navigability acceptance test; 0240 JSON→HTML conversion for PFF's *own* real pages (`/product.php`/`/products.php`/`/search.php`/`/blog_post.php`/`/register.php`), detailed implementation + risk plan in `docs/LAB_PFF_JSON_TO_HTML_PLAN.md` — planned, not yet implemented) | 0237–0240 | 155–158 | 0047 / 31 | 0051 / 0053 |
+| 2 | django: PicTrail | 0241 | 158–159 | 0048 / 32 | 0052 / 0054 |
+| 3 | go_net_http: Twitch clone | 0242 | 160–161 | 0049 / 33 | 0053 / 0055 |
+| 4 | spring_boot: TrackerNest, Netflix, Expedia — Lane 1 step 3's `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` (R4) found `spring_boot`'s sink/transform templates (e.g. `no_ownership_check`) are separate files from `php_laravel`'s own, so this lane starts from `php_laravel`'s response format with no inherited constraint — apply the same `page`/`api` classification test independently per sink family, don't copy-render-format-verbatim | 0243 | 162–163 | 0050 / 34 | 0054 / 0056 |
+| 5 | ruby_rails: ForgeCart | 0244 | 164–165 | 0051 / 35 | 0055 / 0057 |
+| 6 | node_express (MeadowMart) + python_fastapi sample | 0245 | 166–167 | 0052 / 36 | 0056 / 0058 |
+| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0246 | 168–169 | — | 0057 / 0059 |
 
-Lane 1 turned out to need 3 sequential CC-LAB entries instead of the 1
-originally reserved (each of its 3 narrowed steps is its own change,
-verified and committed separately) -- Lanes 2-7's CC-LAB numbers are bumped
-by +2 from the original reservation to keep every number unique. Their
-FR-LAB/CC-FUZZ/FR-FUZZ/BUG/PA numbers are unchanged (not yet consumed by
-anything). Re-derive this table's "next free" numbers from the component
-logs' actual current top before dispatching a lane if more of Lane 1's own
-work lands first.
+Lane 1 turned out to need 4 sequential CC-LAB entries instead of the 1
+originally reserved (each of its narrowed steps is its own change, verified
+and committed separately) -- Lanes 2-7's CC-LAB/FR-LAB numbers are bumped by
++1 again (on top of the earlier +2 bump when Lane 1 grew from 1 to 3 steps)
+to keep every number unique, following the exact same discipline as that
+earlier bump. Their CC-FUZZ/FR-FUZZ/BUG/PA numbers are unchanged (not yet
+consumed by anything). Re-derive this table's "next free" numbers from the
+component logs' actual current top before dispatching a lane if more of
+Lane 1's own work lands first.
 
 Use these numbers exactly. If one is already taken, stop and flag it; do not
 pick a different number.

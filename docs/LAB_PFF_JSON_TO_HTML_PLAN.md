@@ -1,6 +1,13 @@
 # PFF's own real pages: JSON→HTML conversion — implementation + risk plan
 
-Status: **planning only, not yet implemented** (2026-09-25).
+Status: **planning only, not yet implemented** (2026-09-25, revised
+2026-09-25 after 2 independent reviewer agents checked accuracy and
+adequacy per `docs/components/README.md`'s pre-change review gate).
+Reserved as `CC-LAB-0240`/`FR-LAB-158` — **Lane 1 step 4** of
+`docs/LAB_BROWSABLE_APPS_PLAN.md`. This reservation required bumping Lanes
+2-7's `CC-LAB`/`FR-LAB` numbers by +1 in that parent plan (the same
+discipline it already used once, when Lane 1 grew from 1 to 3 steps),
+since `CC-LAB-0240` was already pre-assigned there to Lane 2.
 
 ## Why this exists
 
@@ -35,9 +42,16 @@ throughout).
   `return view(...)`. **Known, separate limitation, not silently ignored**:
   the rendered views are bare fragments (e.g. `<div class="notice ok">...</div>`)
   that don't `@extends('layouts.site')`, so they don't get the shared nav/
-  header. Cosmetic, not a response-format defect — left out of this plan's
-  scope (JSON→HTML), tracked as a follow-up polish item, not conflated with
-  this fix.
+  header — confirmed this is a different mechanism entirely (the sink
+  template itself, `html_body_echo.blade.php.j2`, not a tail flag), so it
+  is a genuinely separate bug from this plan's JSON→HTML scope, correctly
+  kept out rather than folded in. **Escalated per review**, since its
+  user-visible impact is real: once this plan lands, the site will have 5
+  more pages with full nav/header and 3 pages (on their POST/error paths)
+  still bare-fragment — a visible inconsistency against
+  `docs/LAB_BROWSABLE_APPS_PLAN.md`'s own "consistent, browsable site"
+  goal. **Recommend this becomes the next CC-LAB-numbered step** after this
+  one, not left as an unweighted aside.
 - `/api/products.php` — genuine JSON API, correctly JSON.
 - `/add_to_cart.php`, `/cart.php`, `/checkout.php` — appear only in
   `injection-points.json` (parameter discovery), never in `labels.json`
@@ -94,7 +108,12 @@ pre-cutover PFF page *did* have exactly this UX (recovered from git history,
 page with `<p class="notice err">That username is already taken.</p>` and
 the username field prefilled; success shows
 `<p class="notice ok">Welcome to the pack, {{ $username }}! You can now <a href="login.php">log in</a>.</p>`.
-This plan reuses that real copy rather than inventing new UX.
+This plan reuses that real copy rather than inventing new UX. **Verified,
+not just copied (per review):** the historical page's fields
+(`username`/`email`/`full_name`/`password`) were checked against the
+*current* skeleton's `resources/views/site/register.blade.php` — it already
+has exactly those same four fields, so there is no field-name mismatch to
+introduce by reusing this copy.
 
 **Status codes preserved** (200/409, matching what tests already pin — see
 §4): the tail still returns 409 on duplicate and 200 on success; only the
@@ -129,17 +148,27 @@ one, since a future page redesign could quietly shrink it back under
 threshold with no test catching the regression until oracle detection goes
 dark.
 
-**Mitigation:** design each new Blade view to render enough real per-row
-content (name, description, price, category — the actual columns these
-tables have, not a truncated placeholder) that a found-vs-not-found delta
-is comfortably over the threshold, and add an explicit, direct test
-asserting the byte-length delta itself (not just re-running the existing
-oracle strategy test, which only proves today's fixture data clears the
-bar — a direct assertion on the rendered HTML's own length delta is the
-regression guard that survives future content changes). Run
+**Mitigation, made concrete per review** (an earlier revision said only
+"comfortably over the threshold" — too qualitative to build or check
+against, and risked a circular test that just re-derives the strategy's own
+math): design each new Blade view to render enough real per-row content
+(name, description, price, category — the actual columns these tables
+have, not a truncated placeholder) that a found-vs-not-found delta is **at
+least 300 bytes** — a fixed, independently-chosen number with real headroom
+over the ~100-byte threshold at this layout's size, not derived from the
+threshold formula itself. Add an explicit, direct test asserting the
+rendered HTML's own found-vs-not-found byte-length delta is `>= 300`
+(a literal length comparison on the actual template output, not a
+recomputation of `_similar`'s formula — the two must stay independent, or a
+future change to the strategy's own threshold could silently make the test
+meaningless). This is the regression guard that survives future content
+changes; re-running the oracle strategy's own test only proves today's
+fixture data clears the bar, not that the templates will keep doing so. Run
 `SqliBooleanStrategy`'s own test suite (`tests/test_oracle.py`) unchanged as
 a negative control (it uses plain-text fixtures, format-agnostic, confirmed
-by the research pass) — expected to need no change, verify it doesn't.
+by 2 independent reviewers reading `_similar`'s exact formula and the
+layout's exact byte size, 1947 bytes) — expected to need no change, verify
+it doesn't.
 
 ### R2 — 8 existing live-boot assertions count literal JSON syntax and will break
 
@@ -163,9 +192,11 @@ a vacuously-true check.
 **Found:** `/search.php`'s one `_PAGE_PROFILES` entry is shared by 6 cells;
 the 2 SQLi twins (`PL-RP-0001`/`0002`) use `single_statement` (reads the
 whole profile as Jinja context), the other 4 XSS cells use `render_only`
-(`RenderOnlyComplexity.render` passes only 3 explicit keys — `body`,
-`method_name`, `view_name` — confirmed by reading `modules.py:1450-1460`,
-so a new `html_list_view` flag on the shared profile cannot reach them).
+(**correction, per review**: `RenderOnlyComplexity.render` passes 4 explicit
+keys, not 3 — `body`, `method_name`, `view_name`, and `value_expr`,
+confirmed by reading `modules.py:1457-1462`; none of the 4 is a tail-selection
+flag, so a new `html_list_view` key on the shared profile still cannot reach
+these cells — the correction doesn't change R3's conclusion, only its count).
 **Mitigation:** none needed beyond confirming this stays true after the
 change — add it as an explicit assertion (the 4 XSS cells' rendered
 controllers must still contain no `html_list_view`-tail code), so a future
@@ -208,8 +239,15 @@ and MariaDB harness do have. Seed data also differs (SQLite: `Chew Toy`/
 present in *both* harnesses' schemas (`id`, `title`, `body`), or conditionally
 renders `author`/`published_at` only `@if(isset($row->author))`, so the same
 template works against both harnesses without erroring on a missing
-property. Re-run both the SQLite and MariaDB live-boot test files — a fix
-proven only against one harness is not proven.
+property. **Checked, not assumed limited to `posts` (per review):** every
+column the new views reference on `products` (`name`, `description`,
+`price`, `category`, `stock`) and `users` (`username`, `email`, `full_name`)
+was cross-checked against both harnesses' schema definitions directly —
+`products` matches exactly (same columns, same types modulo SQLite `REAL`
+vs. MariaDB `DECIMAL`), and `users` has no columns these views read that
+differ between harnesses. `posts`' `author`/`published_at` is the *only*
+mismatch found. Re-run both the SQLite and MariaDB live-boot test files — a
+fix proven only against one harness is not proven.
 
 ### R7 — error-based SQLi detection unaffected (verified, not assumed)
 
@@ -236,9 +274,15 @@ to confirm, not skipped.
 
 1. Add `_HTML_ROW_VIEW_KEY`/`_HTML_LIST_VIEW_KEY` constants, pop both in
    `render()`, add the mutual-exclusivity fail-loud check (§2's hygiene
-   fix) — no behavior change yet, existing `html_row_view` users
-   (`LABGEN-CF-0001`/`0002`, `LABGEN-BC-0005`/`0006`) must still pass
-   unchanged.
+   fix) — no behavior change yet. **Gate, made explicit per review** (an
+   earlier revision left this as a parenthetical aside rather than an
+   enforced checkpoint): step 1 is not complete, and step 2 must not start,
+   until `tests/test_labgen_php_laravel_access_control_live_boot.py` and
+   `tests/test_labgen_phase_d_tier12_category5.py` — the two tests that
+   actually exercise CC-LAB-0239's existing `html_row_view` users
+   (`LABGEN-CF-0001`/`0002`, `LABGEN-BC-0005`/`0006`) — are re-run and
+   confirmed green, the same explicit-gate discipline step 7's "full suite
+   green" already gets.
 2. Add the `html_list_view` tail to `single_statement.php.j2`.
 3. `/product.php` + `/blog_post.php`: wire `html_list_view`, write one
    shared Blade view template used by both pages' twins (found/not-found
