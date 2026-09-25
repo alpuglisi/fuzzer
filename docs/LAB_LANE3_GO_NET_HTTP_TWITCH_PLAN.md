@@ -1,6 +1,7 @@
 # Browsable Labs Lane 3 — go_net_http: Twitch clone
 
-Status: **DRAFT, not yet reviewed (2026-09-25).** Reserved as `CC-LAB-0243` /
+Status: **DRAFT, revised after review round 1 (2026-09-25); round 2
+pending, not gate-cleared** (see §8). Reserved as `CC-LAB-0243` /
 `FR-LAB-162-163` (and `CC-FUZZ-0049`/`FR-FUZZ-33`, `BUG-0053`/`PA-0055` if
 needed) per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table. **Review gate
 not yet run:** the proposing agent for this draft had no subagent-spawning
@@ -40,10 +41,14 @@ own gate.
   Ground truth uses those generic URLs (`labels.json`,
   `injection-points.json`, `expectedresults.csv`). There is no
   `_REAL_PAGE_CELL_IDS`/`served_url_for` equivalent. Grep count of
-  `generated/labgen-go` outside docs: `tests/test_labgen_go_live_boot.py`
-  87, `tests/test_labels_contract_category4.py` 16, and 10 other test
-  files with 1-3 each, plus `fuzzlab/harness/auto.py:51` (comment) and
-  `go_live_boot.py:209` (docstring).
+  `generated/labgen-go` outside docs (re-counted 2026-09-25 per round-1
+  accuracy review): **121 hits across 13 test files** (led by
+  `tests/test_labgen_go_live_boot.py` 87 and
+  `tests/test_labels_contract_category4.py` 16), **plus 59 across the 3
+  ground-truth files** (`labels.json` 30, `injection-points.json` 14,
+  `expectedresults.csv` 15), **~180 total**, plus
+  `fuzzlab/harness/auto.py:51` (comment) and `go_live_boot.py:209`
+  (docstring).
 - **No homepage, no layout, no HTML anywhere.** The skeleton `main.go`
   (`stack/skeleton/main.go:23-31`) only calls `registerRoutes(mux)`.
   Responses are JSON (analytics/subscribers, JWT settings, tokens,
@@ -173,7 +178,8 @@ converted/client page is byte-identical at both twin URLs. (The leakage
 gate does not cover go, `leakage_probe.py:690-695`, so the direct test is
 the proof.)
 
-**R2 — test/ground-truth URL migration volume (~130 literal references).**
+**R2 — test/ground-truth URL migration volume (~180 literal references:
+121 in 13 test files + 59 in the 3 ground-truth files).**
 Rule: replace via a mapping derived from `served_url_for`, never by hand.
 Before and after, `grep -c` each file (PA-0045). Done means zero
 `/generated/labgen-go` in `tests/`, `lab/`, `fuzzlab/` code. Historical
@@ -206,11 +212,35 @@ so the homepage must use `GET /{$}` (otherwise every unknown path returns
 an offline accumulator check for unique method+path pairs plus the live
 boot.
 
-**R6 — anonymous status for owner-scoped pages.** The R8 sign-off text
-covers split `php_laravel` apps only. Decision: analytics/subscribers
-answer a bare anonymous GET with the handled 401 page (§2d). Recorded as
-an explicit "R6 sign-off" in `FR-LAB-162`. The crawl expects 401 for
-`TWCH-0003`/`0007`.
+**R6 — anonymous status for owner-scoped pages, and its reach beyond
+this lane.** The R8 sign-off text in `docs/LAB_BROWSABLE_APPS_PLAN.md`
+point 6 covers session-gated cells in the split `php_laravel` apps only.
+Decision: analytics/subscribers answer a bare anonymous GET with the
+handled 401 page (§2d). The crawl expects 401 for `TWCH-0003`/`0007`.
+
+Round-1 adequacy review found this sets a precedent, not a local quirk,
+and it is **not narrow enough to stay local to go_net_http**. The
+situation (an owner-scoped route in a single, non-split app whose lab
+models identity with a stand-in, not a login system) plausibly recurs in
+Lane 4's `spring_boot` apps (e.g. Netflix's `/api/account/billing`
+access-control cell, the same `db_row_by_id_lookup` family). Left
+lane-local, each later lane would either re-derive it or silently
+reinterpret point 6, which is the failure this rule exists to prevent.
+Decision:
+- **Amend point 6's contract text in place** with a dated, sourced
+  "R6 generalization" paragraph written the way R8 is written there. It
+  extends the handled-401 acceptance to any owner-scoped route in any
+  app whose lab has no login flow, but only when (i) the route's
+  absent-input declaration is a handled 401 before the sink, (ii) it is
+  identical on both twins, (iii) a present identifier keeps the modelled
+  vulnerable/secure behavior unchanged, and (iv) the lane records it in
+  its own change-control entry. It explicitly does not cover
+  `LABGEN-MA-0003`/`0004` (PFF has a login flow).
+- Also record the lane-local "R6 sign-off" in `FR-LAB-162`, pointing at
+  that paragraph.
+- Because Lanes 4-6 run in parallel worktrees, the amendment is flagged
+  in the final report for the orchestrator to reconcile at merge. It
+  isn't assumed visible to the other lanes.
 
 **R7 — `/auth/login-redirect` default.** Rule: the default must (i) match
 the secure template's own regex (extracted from the template file in an
@@ -226,13 +256,27 @@ linked bare from a page, and redirect GT URLs are expected at their
 followed final status (200). The raw status of each (302) is asserted
 separately with the harness (no redirect following).
 
-**R9 — clip-export directory missing in a fresh boot.** The secure sink's
-`EvalSymlinks(absBase)` returns 500 when `static/clips_exports` is absent,
-for any input. Rule: seed that directory in the skeleton with one sample
-export (the path traversal test's own `mkdir(exist_ok=True)`,
-`test_labgen_go_live_boot.py:1058-1059`, is compatible). If the sweep
-confirms this 500 pre-change, it is a code defect and goes through the
-bug protocol (§6).
+**R9 — clip-export directory missing in a fresh boot (observe first, then
+seed).** Code reading suggests the secure sink's `EvalSymlinks(absBase)`
+returns 500 when `static/clips_exports` is absent, for any input. The
+fix (seed that directory in the skeleton with one sample export; the path
+traversal test's own `mkdir(exist_ok=True)`,
+`test_labgen_go_live_boot.py:1058-1059`, is compatible) would hide the
+evidence, so round-1 adequacy review correctly required the observation
+to come **first, as its own step** (§5 step 0), not be left to the §4
+sweep, which runs after seeding and could never see it:
+- **Observation (before any change):** boot the unmodified whole app
+  (every go cell, as `tests/test_multitarget_category4.py:502` does) on
+  the current HEAD, and send a bare GET plus one ordinary `?filename=`
+  value to both clip-export twins. Record the statuses verbatim in
+  `CC-LAB-0243`'s Effectiveness.
+- **Decision rule:** if either twin answers >= 500 (or drops the
+  connection, R10) with the directory absent, it is a **pre-existing code
+  defect** (a lab route that crashes in its own default deployment). Run
+  the full bug protocol with `BUG-0053`/`PA-0055` before seeding. If
+  neither does, it is missing lab scaffolding, not a defect: say so
+  explicitly and seed with no bug entry.
+- Only then seed, and assert the post-seed statuses live.
 
 **R10 — Go panic is not a 500.** `net/http` recovers a handler panic by
 closing the connection with no response. The sweep must count any
@@ -276,6 +320,10 @@ cells:
 
 ## 5. Sequencing (named gates)
 
+0. **R9 pre-seed observation** on unmodified HEAD (whole-app boot, both
+   clip-export twins, bare and ordinary requests). **Gate 0:** statuses
+   recorded, and the R9 decision rule applied (bug protocol run, or
+   "not a defect" stated) *before* any later step seeds the directory.
 1. `served_url_for` + ground-truth/test URL migration (R2). **Gate A:**
    full existing go offline + live suites green at the new URLs,
    `multitarget_category4` `tp == 14`, `fp == 0`.
@@ -302,7 +350,15 @@ cells:
 - [ ] `absent_input` on every route; offline PA-0054 check; Gate C green.
 - [ ] Analytics/subscribers HTML with escaping and no denial markers;
       "R6 sign-off" in `FR-LAB-162`; Gate D green.
-- [ ] Export-dir seed (R9); conformance manifest list derived (R11).
+- [ ] R9 pre-seed observation done on unmodified HEAD (Gate 0), statuses
+      recorded, and its decision rule applied (bug protocol or an explicit
+      "not a defect") **before** the seed.
+- [ ] Export-dir seed (R9), only after Gate 0; conformance manifest list
+      derived (R11).
+- [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 amended in place with the
+      dated, sourced "R6 generalization" paragraph (conditions i-iv, R8's
+      format); "R6 sign-off" in `FR-LAB-162` points to it; flagged for
+      orchestrator reconciliation with Lanes 4-6.
 - [ ] Navigability test built and green, including the every-route
       two-method bare sweep.
 - [ ] Same-class defects folded in; different-class findings flagged, not
@@ -318,7 +374,8 @@ cells:
       including a recurrence review against `BUG-0051`/`PA-0053` and
       `BUG-0052`/`PA-0054`. The candidate strengthening is to sweep with
       each route's own method, not only GET. If none is found, say so
-      explicitly.
+      explicitly. Its trigger for R9 is the Gate 0 observation, not the
+      post-seed sweep.
 
 ## 7. Out of scope
 
@@ -330,5 +387,25 @@ cells:
 
 ## 8. Review history
 
-None yet. See the Status line: the reviewer mechanism was unavailable to
-the proposing agent, and this is flagged to the orchestrator.
+The proposing agent had no subagent-spawning tool, so the orchestrating
+session spawned the 2 reviewer agents directly against this worktree
+(disclosed here per `docs/MULTI_AGENT_ORCHESTRATION.md` §4).
+
+**Round 1 (2026-09-25):** ACCURATE (with one count correction) / NOT YET
+ADEQUATE.
+- Accuracy: the migration count was undercounted ("~130 across 12
+  files"). Re-verified by the proposing agent: 121 hits in 13 test files
+  plus 59 in the 3 ground-truth files, ~180 total. Fixed in §1 and R2.
+  The approach is unchanged.
+- Adequacy gap 1: R9's verification was self-defeating. The seed ran
+  (Gate C) before the only check that could observe the un-seeded 500
+  (the §4 sweep), so a real pre-existing crash could have been patched
+  without the mandatory bug protocol. Fixed: a new §5 step 0 / Gate 0
+  observes on unmodified HEAD first, with a decision rule and its own
+  deliverable.
+- Adequacy gap 2: R6's precedent did not reach the shared contract.
+  Fixed: R6 now argues it is not lane-local, and a new deliverable
+  amends point 6 of `docs/LAB_BROWSABLE_APPS_PLAN.md` in place (R8's
+  format, conditions i-iv), flagged for cross-lane reconciliation.
+
+**Round 2:** pending (orchestrator to resend to the same 2 reviewers).
