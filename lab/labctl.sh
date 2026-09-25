@@ -36,10 +36,22 @@ fi
 
 PORT="${PFF_WEB_PORT:-8080}"
 
-# Optional compose profile (top-level flag, must precede the subcommand). Set
-# PFF_PROFILE=desync to also start the opt-in h2->h1 downgrade front-end (D17).
+# Optional compose profile(s) (top-level flag, must precede the subcommand).
+# Set PFF_PROFILE=desync to also start the opt-in h2->h1 downgrade front-end
+# (D17), PFF_PROFILE=apps for the 10 browsable-app services (CC-LAB-0247),
+# or a comma-separated combination (PFF_PROFILE=apps,desync) -- one
+# `--profile` flag per entry, since Compose only accepts one value per flag.
+# tests/test_lab_labctl_profile_parsing.py extracts and exercises exactly
+# this block by its sentinel markers -- keep them if this logic moves.
+# PROFILE_ARGS_BLOCK_BEGIN
 PROFILE_ARGS=()
-[ -n "${PFF_PROFILE:-}" ] && PROFILE_ARGS=(--profile "${PFF_PROFILE}")
+if [ -n "${PFF_PROFILE:-}" ]; then
+  IFS=',' read -ra _profiles <<< "$PFF_PROFILE"
+  for p in "${_profiles[@]}"; do
+    PROFILE_ARGS+=(--profile "$p")
+  done
+fi
+# PROFILE_ARGS_BLOCK_END
 
 # Force-clear a wedged podman stack. podman-compose can leave containers "improper" or
 # running that `down`/`down -v` cannot remove; `podman rm -f` kills+removes them, then the

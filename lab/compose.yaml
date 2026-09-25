@@ -96,5 +96,141 @@ services:
       # Loopback only. The raw-frame client speaks h2c to this port.
       - "127.0.0.1:${PFF_DOWNGRADE_PORT:-8081}:80"
 
+  # Browsable labs (CC-LAB-0247, Lane 7): the 10 split-out apps across the
+  # other 5 stacks. DEFAULT OFF -- gated behind the `apps` compose profile,
+  # so a plain `up` starts only PFF, unchanged. Enable with
+  # `PFF_PROFILE=apps ./labctl.sh up` (combine with `desync` via
+  # `PFF_PROFILE=apps,desync`). Ports are the fixed table in
+  # docs/LAB_BROWSABLE_APPS_PLAN.md, kept in sync.
+  #
+  # Network isolation (S17): each app gets its OWN dedicated network, never
+  # the project's implicit default network PFF/desync use -- a real SSRF
+  # exists in this lab (ReelQueue's /api/content/thumbnail-import), so no
+  # app may reach another by service-name DNS even though every host port
+  # is loopback-only. A compose service with an explicit `networks:` key
+  # stops auto-joining the default network (it does not join both), so
+  # this is sufficient by itself -- the `db`/`web`/`frontend` services
+  # above are deliberately left with no `networks:` key, unchanged.
+
+  circlefeed:
+    build:
+      context: ..
+      dockerfile: lab/web.Dockerfile
+      args:
+        APP: circlefeed
+    profiles: ["apps"]
+    networks: [circlefeed-net]
+    ports:
+      - "127.0.0.1:${CIRCLEFEED_WEB_PORT:-8082}:80"
+
+  huddlehub:
+    build:
+      context: ..
+      dockerfile: lab/web.Dockerfile
+      args:
+        APP: huddlehub
+    profiles: ["apps"]
+    networks: [huddlehub-net]
+    ports:
+      - "127.0.0.1:${HUDDLEHUB_WEB_PORT:-8083}:80"
+
+  booking:
+    build:
+      context: ..
+      dockerfile: lab/web.Dockerfile
+      args:
+        APP: booking
+    profiles: ["apps"]
+    networks: [booking-net]
+    ports:
+      - "127.0.0.1:${BOOKING_WEB_PORT:-8084}:80"
+
+  pictrail:
+    build:
+      context: ..
+      dockerfile: lab/web-django.Dockerfile
+    profiles: ["apps"]
+    networks: [pictrail-net]
+    ports:
+      - "127.0.0.1:${PICTRAIL_WEB_PORT:-8085}:8000"
+
+  loopcast:
+    build:
+      context: ..
+      dockerfile: lab/web-go.Dockerfile
+    profiles: ["apps"]
+    networks: [loopcast-net]
+    ports:
+      - "127.0.0.1:${LOOPCAST_WEB_PORT:-8086}:8080"
+
+  trackernest:
+    build:
+      context: ..
+      dockerfile: lab/web-spring.Dockerfile
+      args:
+        APP: trackernest
+    profiles: ["apps"]
+    networks: [trackernest-net]
+    ports:
+      - "127.0.0.1:${TRACKERNEST_WEB_PORT:-8087}:8080"
+
+  reelqueue:
+    build:
+      context: ..
+      dockerfile: lab/web-spring.Dockerfile
+      args:
+        APP: reelqueue
+    profiles: ["apps"]
+    networks: [reelqueue-net]
+    ports:
+      - "127.0.0.1:${REELQUEUE_WEB_PORT:-8088}:8080"
+
+  wanderfare:
+    build:
+      context: ..
+      dockerfile: lab/web-spring.Dockerfile
+      args:
+        APP: wanderfare
+    profiles: ["apps"]
+    networks: [wanderfare-net]
+    ports:
+      - "127.0.0.1:${WANDERFARE_WEB_PORT:-8089}:8080"
+
+  forgecart:
+    build:
+      context: ..
+      dockerfile: lab/web-rails.Dockerfile
+    profiles: ["apps"]
+    environment:
+      RAILS_ENV: production
+    networks: [forgecart-net]
+    ports:
+      - "127.0.0.1:${FORGECART_WEB_PORT:-8090}:3000"
+
+  meadowmart:
+    build:
+      context: ..
+      dockerfile: lab/web-node.Dockerfile
+    profiles: ["apps"]
+    environment:
+      # Already baked into web-node.Dockerfile (ENV NODE_ENV=production);
+      # set here too, harmless and explicit.
+      NODE_ENV: production
+    networks: [meadowmart-net]
+    ports:
+      - "127.0.0.1:${MEADOWMART_WEB_PORT:-8091}:3000"
+
 volumes:
   pff-db-data:
+
+networks:
+  circlefeed-net: {}
+  huddlehub-net: {}
+  booking-net: {}
+  pictrail-net: {}
+  loopcast-net: {}
+  trackernest-net: {}
+  reelqueue-net: {}
+  wanderfare-net: {}
+  forgecart-net: {}
+  meadowmart-net: {}
