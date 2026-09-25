@@ -5,14 +5,17 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0240 — Browsable labs Lane 1 step 4: JSON→HTML conversion for PFF's own real pages (2026-09-25, FR-LAB-158, `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`)
 
-**Status: DRAFT, pre-change review gate in progress.** The underlying plan
-(`docs/LAB_PFF_JSON_TO_HTML_PLAN.md`) already went through 3 full review
-rounds and reached 3/3 agreement (2026-09-25). This entry is that plan
-condensed into the change-control template, but the entry itself has not
-yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
-gate is the next step, mirroring exactly how CC-LAB-0239 was drafted
-before its own gate ran. Implementation is **not authorized** until this
-entry reaches 3/3 (2 reviewers + proposing agent).
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round — round 1 found the Risk section had dropped R3/search.php-XSS-cell
+isolation and R5/leakage-gate-substitute despite their mitigations already
+appearing in Deliverables, and that Deliverables omitted the mandatory
+`requirements.md`/`CHANGELOG.md` bookkeeping items; both fixed and
+re-confirmed ACCURATE and ADEQUATE by both reviewers) — **implementation
+authorized, not yet landed.** Condensed from `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`,
+which itself already went through 3 full review rounds and reached 3/3
+agreement (2026-09-25); that document is the full detail, this entry is
+its change-control-template compression.
 
 - **Change:** 5 of PFF's own migrated real pages (`/product.php`,
   `/products.php`, `/search.php`, `/blog_post.php`, `/register.php`) still
