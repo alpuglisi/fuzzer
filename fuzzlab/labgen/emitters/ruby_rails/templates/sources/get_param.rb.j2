@@ -1,2 +1,9 @@
 # Query-string parameter -> local variable (Rails' ActionController::Parameters).
-{{ var_name }} = params[:{{ param_name }}]
+{% if absent_kind == "default" %}
+# Absent-input behavior declared (CC-LAB-0245, PA-0053/PA-0054): default.
+{{ var_name }} = params.fetch(:{{ param_name }}, {{ default_rb }})
+{% else %}
+# Absent-input behavior declared (CC-LAB-0245, PA-0053/PA-0054): Rails' own
+# handled 400 (ActionController::ParameterMissing) before any transform/sink.
+{{ var_name }} = params.require(:{{ param_name }})
+{% endif %}

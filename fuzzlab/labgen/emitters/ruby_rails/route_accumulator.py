@@ -36,6 +36,16 @@ class DuplicateRouteError(ValueError):
 #: mechanical match must not be a loose substring).
 _ROUTE_URL_RE = re.compile(r"^\s*[a-z]+\s+'([^']*)'")
 
+#: A ``controller#action`` routing target (lowercase snake_case, PA-0022).
+_TO_RE = re.compile(r"[a-z][a-z0-9_]*#[a-z][a-z0-9_]*")
+
+#: One registration line of a rendered ``config/routes.rb`` (this module's
+#: own two emitted forms): ``<verb> '<path>', to: '<target>'`` and the
+#: health check's ``get "up" => "rails/health#show"``.
+_SERVED_ROUTE_RE = re.compile(
+    r"""^\s*(get|post|put|patch|delete)\s+(?:'([^']*)',\s*to:\s*'([^']*)'|"([^"]*)"\s*=>\s*"([^"]*)")"""
+)
+
 #: Fixed, non-generated routes for "ForgeCart"'s surrounding inert/static
 #: pages (Phase C, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.5
 #: -- CC-LAB-0077/FR-LAB-81). These exist so the assembled app reads as a
@@ -49,10 +59,15 @@ _ROUTE_URL_RE = re.compile(r"^\s*[a-z]+\s+'([^']*)'")
 #: declared, kept in lockstep with those two files by hand (PA-0003/PA-0021
 #: applies to this fixed set exactly as it does to per-cell routes: a route
 #: named here with no matching controller action would 404 for real).
+#
+#: CC-LAB-0245 (Browsable Labs Lane 5) adds ``/catalog`` -- the page listing
+#: the illustrative ``/cell/*`` routes (design contract point 5), built at
+#: request time from Rails' own route table (``StorefrontController#catalog``).
 _STATIC_APP_ROUTES = (
     "  get '/', to: 'storefront#home'",
     "  get '/products', to: 'storefront#products'",
     "  get '/cart', to: 'storefront#cart'",
+    "  get '/catalog', to: 'storefront#catalog'",
     "  get '/admin', to: 'admin#dashboard'",
     "  get '/admin/orders', to: 'admin#orders'",
 )
@@ -95,7 +110,14 @@ class RouteAccumulator:
     }
 
     def fragment_for_cell(
-        self, *, cell_id: str, controller_name: str, url_path: str, method: str = "GET", action: str = "show"
+        self,
+        *,
+        cell_id: str,
+        controller_name: str,
+        url_path: str,
+        method: str = "GET",
+        action: str = "show",
+        get_page: str | None = None,
     ) -> str:
         """One route-registration line.
 
@@ -112,6 +134,12 @@ class RouteAccumulator:
         name, unlike Laravel's ``[Controller::class, 'action']`` array
         form, because Rails' own ``to:`` string routing convention does not
         take one.
+
+        ``get_page`` (CC-LAB-0245): a checked-in skeleton ``controller#action``
+        that answers ``GET`` on the same URL -- a real page's form page or an
+        api's ``fetch()`` client page. It is emitted as a separate line
+        *before* the cell's own verb line, so the duplicate-URL check (keyed on
+        a fragment's first line) is unchanged.
         """
         helper = self._METHOD_HELPERS.get(method.upper())
         if helper is None:
@@ -119,10 +147,14 @@ class RouteAccumulator:
                 f"{cell_id}: no Rails route helper for HTTP method {method!r} "
                 f"-- known methods: {sorted(self._METHOD_HELPERS)}"
             )
-        return (
-            f"  {helper} '{url_path}', to: '{controller_name}#{action}'"
-            f" # cell: {cell_id}"
-        )
+        line = f"  {helper} '{url_path}', to: '{controller_name}#{action}' # cell: {cell_id}"
+        if get_page is None:
+            return line
+        if helper == "get":
+            raise ValueError(f"{cell_id}: a GET cell already serves GET {url_path!r}; it cannot have a get_page")
+        if not _TO_RE.fullmatch(get_page):
+            raise ValueError(f"{cell_id}: get_page {get_page!r} is not a 'controller#action' string")
+        return f"  get '{url_path}', to: '{get_page}' # cell: {cell_id} (GET page)\n" + line
 
     def render_file(self, fragments: Mapping[str, str]) -> str:
         """Assemble the whole ``config/routes.rb`` from ``{cell_id:
@@ -160,3 +192,28 @@ def assemble_routes_file(fragments: Mapping[str, str]) -> EmittedFile:
     accumulator = RouteAccumulator()
     content = accumulator.render_file(fragments)
     return EmittedFile(path="config/routes.rb", content=content.encode("utf-8"), role="route")
+
+
+def served_routes(routes_rb: str) -> list[tuple[str, str, str]]:
+    """Every ``(VERB, path, target)`` a rendered ``config/routes.rb`` registers
+    -- the single source the live PA-0054 sweep enumerates (CC-LAB-0245),
+    parsed from the exact file Rails loads, never from a crawl. Raises if a
+    non-comment, non-structural line is not understood, so a new route form
+    cannot silently fall out of the sweep."""
+    routes: list[tuple[str, str, str]] = []
+    for raw in routes_rb.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or stripped in ("end",) or stripped.startswith(
+            "Rails.application.routes.draw"
+        ):
+            continue
+        match = _SERVED_ROUTE_RE.match(raw)
+        if match is None:
+            raise ValueError(f"served_routes: unrecognized routes.rb line {raw!r}")
+        verb, path, target, alt_path, alt_target = match.groups()
+        if path is None:
+            path, target = alt_path, alt_target
+        if not path.startswith("/"):
+            path = "/" + path
+        routes.append((verb.upper(), path, target))
+    return routes

@@ -4,4 +4,11 @@
 # attribute this write sets. The sink never filters anything itself.
 user = User.find_by!(username: "shopper1")
 user.update!({{ var_name }})
+{% if result_template %}
+# CC-LAB-0245: a browser page -- the updated record rendered (escaped) inside
+# the site layout; the verdict stays observable as the rendered role.
+@user = user.reload
+render template: "{{ result_template }}"
+{% else %}
 render json: user.reload.as_json(only: [:id, :username, :bio, :role])
+{% endif %}
