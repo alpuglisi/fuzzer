@@ -735,3 +735,53 @@ class SpringBootEmitter(Emitter):
         )
         path = f"src/main/java/com/fuzzlab/trackernest/generated/site/{class_name}.java"
         return (EmittedFile(path=path, content=java_source.encode("utf-8"), role="controller"),)
+
+
+def app_cells_for(app_key: str) -> list[Cell]:
+    """CC-LAB-0244: every cell belonging to ``app_key``, derived from
+    ``_PAGE_PARAMS``'s own ``app`` key across every manifest under
+    ``lab/manifests`` (PA-0027), never a hand-kept cell-ID list."""
+    import glob
+
+    from fuzzlab.labgen.schema import load_manifest
+
+    emitter = SpringBootEmitter()
+    seen: dict[str, Cell] = {}
+    for path in sorted(glob.glob("lab/manifests/*.yaml")):
+        for cell in load_manifest(path).cells:
+            if (
+                cell.stack_profile == "spring_boot"
+                and emitter.supports(cell.vuln_class, cell.sink_context)
+                and _PAGE_PARAMS.get(cell.route.path, {}).get("app") == app_key
+            ):
+                seen.setdefault(cell.cell_id, cell)
+    return list(seen.values())
+
+
+def assemble_spring_boot_app(app_key: str, dest: str) -> None:
+    """CC-LAB-0244 (plan §2d): assemble ``app_key``'s whole site build (the
+    skeleton, every one of its cells rendered with twin-suffixed secure-twin
+    URLs, and its generated ``SiteController``) into the real directory
+    ``dest`` -- no build or boot. The one shared assembly step
+    :class:`fuzzlab.labgen.conformance.live_boot_spring_boot.
+    SpringBootLiveBootHarness`'s own ``app=`` mode also uses, exposed
+    publicly so Lane 7 can build each app's jar for its compose service
+    without re-implementing assembly."""
+    import shutil
+    from pathlib import Path
+
+    from fuzzlab.labgen.conformance.live_boot_spring_boot import SKELETON_DIR
+
+    cells = app_cells_for(app_key)
+    emitter = SpringBootEmitter(site_build=True)
+    dest_path = Path(dest)
+    shutil.copytree(SKELETON_DIR, dest_path, dirs_exist_ok=True)
+    for cell in cells:
+        for emitted in emitter.render(cell):
+            out = dest_path / emitted.path
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(emitted.content)
+    for emitted in emitter.render_site(cells, app_key):
+        out = dest_path / emitted.path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(emitted.content)
