@@ -1,10 +1,9 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **rounds 1–3 reviewed 2026-09-25. Round 3 found 1 adequacy gap (O7-neg
-must also prove the exclusions and allowlist neither swallow nor over-match)
-and 1 accuracy error (R2's webhook side-effect premise), plus a wording
-cleanup. All are fixed in this revision. Awaiting round-4 confirmation. Not
-yet converged, and implementation is not authorized.** The orchestrating
+Status: **rounds 1–4 reviewed 2026-09-25. Round 4 found 1 adequacy gap: the
+console script's error-path branch was not derived, and not confirmed live.
+It is fixed in this revision. Awaiting round-5 confirmation. Not yet
+converged, and implementation is not authorized.** The orchestrating
 session ran the review rounds (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
@@ -571,11 +570,49 @@ receiver's own responses (`{"verified":…}`) are not involved.
 So the change is *large debug HTML → small static page*. It is not a
 JSON-to-HTML format change.
 
-The design rule for the §2c client page is unchanged, and is sound in both
-states: the error body may be HTML or JSON depending on the request's
-`Accept`, so the page reads `response.text()`, attempts `JSON.parse` only
-inside a guard, and shows the raw text when parsing fails. O5 checks this
-offline.
+**Which branch this lane's own console script hits (round 4; derived from
+source, then confirmed live by §4 step 9d).** The §2c script's `fetch()`
+sends `Content-Type: application/json` and the signature header, with **no
+`Accept` override**, so the browser sends `Accept: */*`. In `PublicExceptions`
+that resolves as follows (all in `actionpack-8.1.3.1/lib/action_dispatch/`):
+
+1. `http/mime_negotiation.rb:72-92` (`formats`): `params_readable?` is
+   `false` because the body does not parse (`:223-227`).
+2. A lone `*/*` counts as a valid Accept header (`:229-232`), since
+   `BROWSER_LIKE_ACCEPTS` requires a comma (`:221`). So `formats` is
+   `[Mime::ALL]`, which survives the `ref == "*/*"` filter (`:86-88`).
+3. `Mime::ALL` is `AllType` with symbol `nil` (`http/mime_type.rb:349-363`).
+   So `PublicExceptions#render` builds the method name `"to_"`
+   (`middleware/public_exceptions.rb:40`). The body hash does not respond to
+   it, and control falls through to `render_html` (`:41-44`).
+
+The console's own requests therefore **deterministically** get the static
+HTML `public/400.html`. The JSON branch is reachable only by a client that
+explicitly sends `Accept: application/json`, which this script never does.
+
+The design rule for the §2c client page is unchanged. It reads
+`response.text()`, attempts `JSON.parse` only inside a guard, and shows the
+raw text when parsing fails. That guard is **defense in depth**, not a
+response to live ambiguity: this script can reach only one branch. The guard
+keeps the page correct if the script, the browser's default Accept, or Rails'
+negotiation ever changes. O5 checks the guard offline, and §4 step 9d checks
+the predicted branch live.
+
+**One link cannot be settled from source.** The webhook action reads
+`request.body.read` and never `params`, so whether Rails parses (and
+rejects) the malformed body at all depends on something else touching the
+params during the request. That is probably Action Controller's
+instrumentation payload, which includes the filtered params. The predicted
+outcome is `400`; §4 step 9d measures it.
+
+**Decision rule:**
+- If the live result matches (`400`, `text/html`, body equal to the
+  skeleton's `public/400.html`), keep the assertion as written.
+- If it differs (for example `401 {"verified":false}`, because nothing
+  parsed the body), record the measured behavior here and in `CC-LAB-0245`,
+  and assert that exact measured status/type instead.
+- **Never** weaken the assertion to "HTML or JSON". In either case the
+  guarded parse stays correct.
 
 **Not changed:** `config.server_timing` (a `Server-Timing` response header
 with per-request timings). It is response metadata, not a source or verdict
@@ -830,9 +867,11 @@ or fix step.
   URL.
 - **O5.** No skeleton view contains `form_with`, `form_tag` or
   `csrf_meta_tags` (R3). The webhook console view does not contain the
-  webhook secret literal (R6), and its script parses the response only
-  inside a guard (`try`/`catch`, falling back to the raw text), per R2's
-  note on the webhook api side effect.
+  webhook secret literal (R6). Its script sends no `Accept` override, which
+  is what R2's branch derivation assumes. And it parses the response only
+  inside a guard (`try`/`catch`, falling back to the raw text), as defense in
+  depth: per R2, this script's own error path deterministically receives
+  HTML, and §4 step 9d confirms that live.
 - **O6 (PA-0057 offline half, final wording set by `BUG-0055`).** The
   skeleton's `development.rb` sets `consider_all_requests_local = false` and
   `annotate_rendered_view_with_filenames = false`. Also a cross-emitter debug
@@ -933,6 +972,19 @@ Skip-guarded on `rails_boot_available()`.
    - The import form POST with an `OpenStruct` tag renders "OpenStruct".
    - The webhook POST contract is unchanged (valid signature → 200 JSON
      `{"verified":true}`).
+   - **(9d) the console's error path, measured (round 4).** POST a malformed
+     JSON body (`{"order_id": `) to both `/webhooks/orders/create` and
+     `/webhooks/customers/update`, with exactly the headers the §2c script
+     sends: `Content-Type: application/json`,
+     `X-Shopify-Hmac-SHA256: <any>`, `Accept: */*`.
+     - Assert the R2-predicted branch: status `400`, `Content-Type`
+       starting `text/html`, and a body byte-equal to the skeleton's
+       `public/400.html`.
+     - Also assert it contains no `Extracted source`.
+     - On a mismatch, apply R2's decision rule (record the measured result
+       and assert it exactly), never a looser "HTML or JSON" assertion.
+     - This closes the loop between R2's source-derived prediction and
+       execution.
 
    Session note: the crawl is itself a multi-request, same-session run
    (PA-0037(2)).
@@ -1011,7 +1063,10 @@ Skip-guarded on `rails_boot_available()`.
 - [ ] `/search` in the layout; customer and import GET form pages and escaped
       HTML result pages (§2c, R4/R5); each page's §5 step-4 gate green.
 - [ ] Webhook `fetch()` client page for both topics, no secret, byte-identical
-      (§2c, R6); JSON wire contract unchanged (webhook live suite green).
+      (§2c, R6); JSON wire contract unchanged (webhook live suite green);
+      the console's malformed-JSON error branch is asserted live at R2's
+      predicted (or, per R2's decision rule, measured) status/content type
+      (§4 step 9d).
 - [ ] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
       points and cases (§2e).
 - [ ] Navigability test (§4) built and green: non-vacuous guards, 100%
@@ -1209,3 +1264,28 @@ wording cleanup.** Both are fixed in this revision. The O7 spec, the
    file" *is* `tests/test_labgen_ruby_rails_browsable.py`. It is reworded as
    exactly 2 files.
 - **Next:** round-4 confirmation.
+
+**Round 4 (dispatched by the orchestrating session, 2026-09-25): ACCURATE /
+NOT ADEQUATE, 1 gap.** The accuracy reviewer re-checked every debug-page
+claim against the installed gem source and found no errors.
+
+- **Gap:** R2 presented the post-change error body as "HTML or JSON
+  depending on Accept", as if both were live outcomes for this lane's
+  console, without tracing which branch the console script actually hits.
+- **Fixed:**
+  - R2 now derives the branch from source: no `Accept` override means
+    `*/*`, which means `Mime::ALL` with symbol `nil`, which means
+    `render_html`. The drafting agent re-verified each step against
+    `mime_negotiation.rb` and `mime_type.rb` before writing it. R2 states
+    plainly that the script deterministically gets the static HTML 400, and
+    that the guarded parse is defense in depth.
+  - O5 also pins "no `Accept` override" in the script.
+  - A live assertion, §4 step 9d, POSTs a malformed JSON body with the
+    script's exact headers to both topics. It asserts `400` + `text/html` +
+    a body byte-equal to `public/400.html`.
+- **Drafting agent's addition:** one link in the chain cannot be settled from
+  source. The action never reads `params`, so whether the body is parsed at
+  all depends on instrumentation. R2 flags this explicitly and adds a
+  decision rule: on a mismatch, record the measured behavior and assert it
+  exactly, never a looser "either" assertion.
+- **Next:** round-5 confirmation.

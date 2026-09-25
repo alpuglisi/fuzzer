@@ -6,15 +6,16 @@ Component code: **LAB**. Entry format and required fields: see
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
 **Status: DRAFT. This entry's own review gate has NOT RUN.** The underlying
-plan has had 3 review rounds, with reviewers dispatched by the orchestrating
+plan has had 4 review rounds, with reviewers dispatched by the orchestrating
 session. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
 Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
 had to become a standing check. That is fixed as O7. Round 3's adequacy
 review returned NOT ADEQUATE with 1 narrow gap: O7-neg did not test the
 exclusion side. Round 3's accuracy review returned NOT ACCURATE with 1 error:
 the webhook side-effect's "was JSON before" premise was false. Both are
-fixed (see the plan's §8). The plan is awaiting
-round-4 confirmation. Text below the next
+fixed. Round 4 returned ACCURATE / NOT ADEQUATE with 1 gap: the console
+script's error-path branch was neither derived nor confirmed live. That is
+fixed too (see the plan's §8). The plan is awaiting round-5 confirmation. Text below the next
 sentence records the drafting-time situation. At drafting time, neither this
 entry nor the underlying plan had been reviewed. The dispatch
 required two independent reviewer subagents for each document; the drafting
@@ -133,9 +134,22 @@ template; the plan holds the full detail.
        is `public/400.html`, or a `{status, error}` body in the request's
        own format, for example with `Accept: application/json`. It was
        never JSON before, because `DebugExceptions` uses its API renderer
-       only for `config.api_only` apps, and this app is not one. The
-       webhook client page therefore parses responses only inside a guard,
-       with a raw-text fallback; O5 checks this.
+       only for `config.api_only` apps, and this app is not one.
+       - **Branch this lane's console hits** (plan R2, round 4; derived from
+         source): the console script sends no `Accept` override, so its
+         requests go out with `*/*`. That resolves to `Mime::ALL`, whose
+         symbol is `nil`, so `PublicExceptions` renders HTML. The console
+         therefore deterministically gets `public/400.html`. The JSON branch
+         needs an explicit `Accept: application/json`, which the script
+         never sends.
+       - The guarded parse, with raw-text fallback, is defense in depth.
+         Offline check O5 verifies the guard and pins the absence of an
+         `Accept` override.
+       - The plan's §4 step 9d asserts the predicted `400`/`text/html` live.
+         One link cannot be settled from source: whether the action's body
+         is parsed at all. If step 9d measures something else, that
+         measured result is recorded and asserted exactly, never loosened
+         to "either".
   3. **R3: CSRF posture must neither gain nor lose protection.** Mitigated:
      plain `<form>` only (never `form_with`/`form_tag`), no
      `csrf_meta_tags`, global `skip_forgery_protection` untouched. Checked
@@ -227,7 +241,9 @@ template; the plan holds the full detail.
         green.
   - [ ] Webhook `fetch()` client page for both topics, no secret,
         byte-identical (§2c, R6); JSON wire contract unchanged (webhook live
-        suite green).
+        suite green); the console's malformed-JSON error branch is asserted
+        live at R2's predicted (or, per R2's decision rule, measured)
+        status/content type (§4 step 9d).
   - [ ] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
         points and cases (§2e).
   - [ ] Navigability test (§4) built and green: non-vacuous guards, 100%
