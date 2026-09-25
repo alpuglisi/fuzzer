@@ -5,14 +5,20 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0241 — Browsable labs Lane 1 step 5: closing the remaining tracked gaps (2026-09-25, FR-LAB-159, `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`)
 
-**Status: DRAFT, pre-change review gate in progress.** The underlying plan
-(`docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`) already went through 2 full
-review rounds and reached 3/3 agreement (2026-09-25). This entry is that
-plan condensed into the change-control template, but the entry itself has
-not yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
-gate is the next step, mirroring `CC-LAB-0240`'s drafting process exactly.
-Implementation is **not authorized** until this entry reaches 3/3 (2
-reviewers + proposing agent).
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round — round 1 found the Risk section silently dropped R5/R6/R7 with no
+acknowledgment, unlike `CC-LAB-0240`'s explicit "omitted as no-risk
+findings" narration, and that a vacuous-pass mitigation was misattributed
+to this plan's own §4 register instead of correctly cited as the same bug
+class `CC-LAB-0240`'s R2 found; both fixed by naming R1-R7 explicitly with
+their numbers and moving the vacuous-pass guard into its own clearly
+separate, correctly-attributed paragraph; both reviewers re-confirmed
+ACCURATE and ADEQUATE) — **implementation authorized, not yet landed.**
+Condensed from `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`, which itself
+already went through 2 full review rounds and reached 3/3 agreement
+(2026-09-25); that document is the full detail, this entry is its
+change-control-template compression.
 
 - **Change:** closes the 3 remaining, previously-flagged gaps in Browsable
   Labs Lane 1:
