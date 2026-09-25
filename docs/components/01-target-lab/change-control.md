@@ -5,8 +5,26 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0246 — Browsable labs Lane 6: node_express/MeadowMart + python_fastapi generic sample (2026-09-25, FR-LAB-168/FR-LAB-169, `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`)
 
-**Status: DRAFT. The pre-change review gate for this entry has not run
-yet.** Implementation is **not** authorized.
+**Status: DRAFT, in this entry's own pre-change review gate.**
+Implementation is **not** authorized.
+- **Entry gate, round 1 (run by the orchestrating session, 2026-09-25):**
+  - **Accuracy:** one fixable inaccuracy. The one-entry justification
+    cited `CC-LAB-0040` as though it were a same-shape precedent. In fact
+    `CC-LAB-0040` was one cross-cutting schema/CLI-gate change that only
+    referenced four emitters' manifests. It was not an entry containing
+    substantive changes inside several emitters.
+  - **Fixed:** the citation is reworded both below and in the verbatim
+    Deliverables copy. It now says `CC-LAB-0040` shows one entry *can*
+    span several emitters' concerns, that it is not a same-shape
+    precedent, and that no closer precedent was found. The plan's §6
+    reason 1 is corrected identically, as a logged post-convergence
+    correction, so the verbatim copy still matches.
+  - Everything else was confirmed accurate: the reserved numbers, the
+    distinction from Lane 4's shared-emitter reason, the verbatim
+    Deliverables copy, the R-B7 = F3 mapping, and the Status and
+    reviewer-mechanism claim.
+  - **Adequacy:** pending.
+- **Entry gate, round 2:** pending.
 
 This entry is condensed from `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`, which
 went through 2 review rounds and reached 3/3 agreement on 2026-09-25. The
@@ -31,8 +49,12 @@ change-control template.
 
 These are different emitters, so Lane 4's "one shared emitter" reason does
 not apply. The entry rests on these reasons instead:
-- change-control is per component, and `CC-LAB-0040` is the precedent for
-  one entry spanning several emitters;
+- change-control is per component. `CC-LAB-0040` shows that one entry
+  can legitimately span several emitters' concerns, but it is not a
+  same-shape precedent: it was one cross-cutting schema/CLI-gate change
+  that only referenced four emitters' manifests. No closer precedent
+  was found (plan §6, reason 1), so the entry rests mainly on the
+  following three reasons;
 - there is one root cause, one bug and one gate (`BUG-0056`);
 - each target keeps its own per-target FR;
 - both targets close on one date.
@@ -442,9 +464,19 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
         mechanism beyond the absent-input vocabulary. The reasons that do
         apply are these:
         1. **Change-control is per component (`LAB`), not per emitter**
-           (`docs/components/README.md`). One entry spanning several
-           emitters has precedent: `CC-LAB-0040` covered `php_current`,
-           `node_express`, `python_fastapi` and `php_laravel` in one entry.
+           (`docs/components/README.md`). `CC-LAB-0040` shows that one
+           entry can legitimately span several emitters' concerns. It is
+           **not** a same-shape precedent, though: it was one
+           cross-cutting schema/CLI-gate change (a `stack` field on
+           `Case`, plus the fingerprint gate wired into `--check`) that
+           only *referenced* four emitters' existing manifests. It made no
+           substantive code changes inside each emitter. (Corrected by the
+           `CC-LAB-0246` round-1 accuracy review.) A search of the LAB log
+           for entries naming two or more emitter packages (`CC-LAB-0036`,
+           `-0044`, `-0064`, `-0170`, `-0173`) found none that makes
+           substantive changes inside two different emitters. So this
+           reason only shows that one entry is permitted, and the decision
+           rests mainly on reasons 2–4.
         2. **One root cause, one bug and one gate across both emitters.**
            BUG-0056 is a single defect class (undeclared absent input)
            found in both (D1–D4). §5 step 1 fixes both under one gate, and

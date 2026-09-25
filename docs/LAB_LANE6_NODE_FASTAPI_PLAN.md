@@ -948,9 +948,19 @@ assertions. That choice is settled at the gate.
       mechanism beyond the absent-input vocabulary. The reasons that do
       apply are these:
       1. **Change-control is per component (`LAB`), not per emitter**
-         (`docs/components/README.md`). One entry spanning several
-         emitters has precedent: `CC-LAB-0040` covered `php_current`,
-         `node_express`, `python_fastapi` and `php_laravel` in one entry.
+         (`docs/components/README.md`). `CC-LAB-0040` shows that one
+         entry can legitimately span several emitters' concerns. It is
+         **not** a same-shape precedent, though: it was one
+         cross-cutting schema/CLI-gate change (a `stack` field on
+         `Case`, plus the fingerprint gate wired into `--check`) that
+         only *referenced* four emitters' existing manifests. It made no
+         substantive code changes inside each emitter. (Corrected by the
+         `CC-LAB-0246` round-1 accuracy review.) A search of the LAB log
+         for entries naming two or more emitter packages (`CC-LAB-0036`,
+         `-0044`, `-0064`, `-0170`, `-0173`) found none that makes
+         substantive changes inside two different emitters. So this
+         reason only shows that one entry is permitted, and the decision
+         rests mainly on reasons 2–4.
       2. **One root cause, one bug and one gate across both emitters.**
          BUG-0056 is a single defect class (undeclared absent input)
          found in both (D1–D4). §5 step 1 fixes both under one gate, and
@@ -1109,3 +1119,17 @@ the `FR-LAB-169` item now names the "F3 sign-off" destination. This only
 brings §6 in line with decisions already reviewed. No risk, decision or
 conclusion changed, so it does not reopen the 3/3 convergence above. This
 follows Lane 2's post-convergence citation fix (`LAB_LANE2` §8).
+
+**Post-convergence correction (2026-09-25, `CC-LAB-0246` entry gate, round
+1, accuracy).** The reviewer found that §6 reason 1 overstated
+`CC-LAB-0040` as a same-shape precedent. `CC-LAB-0040` was one
+cross-cutting schema/CLI-gate change that only referenced four emitters'
+manifests; it was not an entry with substantive changes inside several
+emitters.
+- **Fixed:** reason 1 now says `CC-LAB-0040` shows one entry can span
+  several emitters' concerns, that it is not a same-shape precedent, and
+  that a search found no closer one. It is fixed identically in the entry.
+- **Effect on the decision:** the one-entry decision now explicitly rests
+  mainly on reasons 2–4. That was already their weight in the reviewed
+  argument, and the conclusion and split rule are unchanged. So this is a
+  citation fix that does not reopen the 3/3 above.
