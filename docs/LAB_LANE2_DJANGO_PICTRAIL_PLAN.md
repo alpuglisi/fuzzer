@@ -15,11 +15,18 @@ risk coverage were each drafted, then found incomplete on review, more than
 once. This plan applies those lessons up front rather than repeating the
 discovery order:
 
-- The navigability acceptance test is **§4 of this same plan**, not a
-  follow-up step — PA-0053 already requires it as part of what "converted"
-  means for every Browsable Labs lane.
+- The navigability acceptance test's **spec is written in §4 up front**,
+  not invented as an afterthought — but round-1 review correctly caught
+  that §5's sequencing still *runs* it last (step 5 of 6), after every page
+  conversion, which is operationally the same order Lane 1 actually used.
+  The honest claim is narrower than "not a follow-up step": designing the
+  test's shape before any page conversion starts (so each page's PA-0053
+  default decision, §2d, is made against a known target contract, not
+  guessed) is the actual improvement over Lane 1, not the execution order.
 - Every converted page's absent-input behavior is decided in §2 alongside
-  its conversion, not left to a crawl to find (PA-0053's own rule).
+  its conversion, and **gated by that page's own live-boot assertion**
+  (§5 step 2 names exactly what each assertion checks, not left as
+  unspecified prose — see §5).
 - §1 does the "is this real" research directly against the current code
   (django emitter, PicTrail's actual manifests, actual ground truth), not
   by analogy to what Lane 1 found for a different stack.
@@ -177,16 +184,57 @@ real path (`__init__.py:249-252`, explicit, deliberate). This means the
 shared-layout/leakage-independence contract ("byte-identical for a
 vulnerable twin and its secure twin") cannot be verified by visiting "the
 same URL, different cell" the way Lane 1's twin-diff tests did — the two
-twins are reached via genuinely different URLs today. Mitigated: either (a)
-extend `_REAL_PAGE_CELL_IDS`-style pinning to give the secure twin a
-twin-suffixed URL too (the smaller, more consistent fix, matching
-`php_laravel`'s mechanism), or (b) if that's out of this step's scope,
-explicitly document why the asymmetry is acceptable at PicTrail's current
-scale (`MIN_GROUPS_FOR_GATE`/`MIN_CELLS_FOR_GATE` almost certainly not
-reached, so the leakage gate doesn't fire here either way) and add a direct
-twin-content-equality test comparing the two different URLs' rendered
-templates instead of the same URL. Decide and document explicitly during
-implementation, not left open — same discipline `CC-LAB-0241`'s R4 used.
+twins are reached via genuinely different URLs today.
+
+**Decision rule (not left open, per round-1 review):** default to branch
+(a) — extend `_REAL_PAGE_CELL_IDS`-style pinning so each secure twin gets
+its own twin-suffixed URL (e.g. `/post.twin` or a `?twin=1`-free path
+variant, mirroring `php_laravel`'s `_twin_url_for` convention) — unless
+implementation finds a concrete reason this breaks Django's own URL
+resolver or route accumulator (e.g. a naming collision `render_route_
+accumulator()` can't express), in which case fall back to branch (b): keep
+the asymmetry, add a direct twin-content-equality test comparing the two
+different URLs' rendered templates (not the same URL), and record which
+branch was used and why as an explicit "R1 sign-off" note in this same
+change's `requirements.md` entry (`FR-LAB-160`), mirroring exactly how
+`CC-LAB-0241`'s R4 sign-off was recorded — not a bare implementation-time
+prose note. (`MIN_GROUPS_FOR_GATE`/`MIN_CELLS_FOR_GATE` are almost
+certainly not reached at PicTrail's scale either way, so the leakage gate
+itself doesn't fire regardless of which branch is used — this only affects
+which direct test proves the contract.)
+
+**R1b — the risk register itself was mis-targeted on first draft (round-1
+review finding, corrected here).** The original R3/R6 below speculated
+about `/explore`'s SQL shape and a generic "oracle format-agnosticism"
+concern without reading the actual sink templates or ground truth first.
+Direct reading (done now, not deferred) shows:
+- `/explore`'s sink (`explore_order_by_sink.py.j2`) is
+  `cursor.execute("SELECT id, name FROM posts ORDER BY " + str(value))` —
+  and PicTrail's own ground truth (`lab/ground-truth-picktrail-django/
+  labels.json`, case `PT-0005`) states explicitly: "identifier/ORDER-BY-
+  position injection, **not a syntax-break shape**." This is *not* a
+  length/boolean-differential shape, so `/explore` does **not** carry the
+  `CC-LAB-0240`-style length-delta risk R3 originally worried about.
+- `/post`'s sink (`sql_numeric_lookup.py.j2`, via `_MODULE_SET_BY_SHAPE`'s
+  `("sqli", "sql_numeric_literal")` mapping) is structurally **identical**
+  to `php_laravel`'s `/product.php`/`/blog_post.php` — a single-row
+  found/not-found lookup, exactly the shape `CC-LAB-0240`'s own R1 found
+  needed a designed, literal ≥300-byte found/not-found HTML delta once
+  wrapped in a shared layout, so `SqliBooleanStrategy`-style length-ratio
+  detection keeps its signal. **This risk belongs on `/post`, not
+  `/explore`** — the original draft put it on the wrong cell. See the
+  corrected R3 below.
+- A dedicated, django-adjacent oracle module exists for `/explore`'s actual
+  shape: `fuzzlab/labgen/identifier_sqli_oracle.py` (a differential-response
+  prober built specifically because value-context tools like sqlmap can't
+  probe an identifier/ORDER-BY-position injection the way they probe an
+  ordinary literal — see that module's own docstring). This is a *build-time
+  validation* tool (confirming the cell is really vulnerable/secure), not a
+  runtime detection strategy read from HTTP responses the way
+  `fuzzlab/oracle/strategies.py`'s classes are — so it is unaffected by a
+  response-body/layout change either way, but it should be named explicitly
+  rather than omitted, since a reviewer checking "did you consider every
+  oracle mechanism touching this cell" should find it named, not absent.
 
 **R2 — `DjangoLiveBootHarness` is a separate class from `LiveBootHarness`,
 not the same class with a different emitter arg.** Confirmed its API
@@ -197,12 +245,21 @@ inspection alone (a different internal request-handling path could still
 diverge in ways only a real run surfaces, e.g. redirect handling,
 trailing-slash behavior in Django's own URL resolver).
 
-**R3 — `/explore`'s actual SQL shape is unconfirmed.** The plan infers an
-ORDER BY/identifier-position shape from the sink's name
-(`explore_order_by_sink`) but has not read the sink template directly.
-Confirm the actual shape and its oracle strategy before assuming or ruling
-out an `R1`-style (`CC-LAB-0240`) length-differential risk from wrapping
-the response in a shared layout.
+**R3 (corrected, round-1 review) — `/post`'s single-row lookup needs the
+same designed found/not-found byte-delta `CC-LAB-0240` used for
+`php_laravel`'s structurally identical pages.** Confirmed (R1b above):
+`/post` uses `sql_numeric_lookup.py.j2`, a single-row found/not-found
+shape. Once wrapped in PicTrail's shared layout, `SqliBooleanStrategy`-style
+length-ratio detection could lose its signal the same way `CC-LAB-0240`'s
+R1 found for `/product.php`/`/blog_post.php`. Mitigated the identical way:
+design a literal, independently-verified found/not-found HTML delta of at
+least the same order of magnitude `CC-LAB-0240` used (re-measure against
+*this* layout's actual byte size, don't reuse `php_laravel`'s 300-byte
+number unexamined — PicTrail's layout may be a different size), with a
+direct test asserting that delta, not just re-running the oracle strategy's
+own test suite. `/explore` (ORDER-BY/identifier-position, confirmed
+"not a syntax-break shape" per its own ground truth) does **not** carry
+this risk — corrected from the original draft, which had this backwards.
 
 **R4 — `/upload/link-preview`'s SSRF shape and its bare-GET default.** A
 bare GET with no `url` param has no safe default to fetch (unlike
@@ -217,13 +274,23 @@ Lane 1's `CC-LAB-0241` built (assert both the ground-truth count and the
 discovered-page count are non-trivial, hard-coded, before any per-URL
 assertion) — built into §4 from the start here, not a later addition.
 
-**R6 — oracle-strategy format-agnosticism.** Confirm django's own oracle
-strategies (or the shared cross-stack ones, if `fuzzlab/oracle/strategies.py`
-is stack-agnostic — check) don't key on the current JSON shape the way
-`php_laravel`'s `PriceIntegrityBypassStrategy` keyed on
-`"charged_amount":"<canary>"` before `CC-LAB-0239` changed its anchor.
-Re-run every oracle test touching these 6 cells after conversion, don't
-just read the strategy source.
+**R6 (corrected, round-1 review) — oracle-mechanism inventory, both kinds.**
+Two distinct mechanisms touch these 6 cells, named explicitly rather than
+lumped together:
+1. `fuzzlab/oracle/strategies.py`'s runtime detection strategies
+   (`fuzzlab.oracle.strategies`, shared cross-stack, confirmed
+   stack-agnostic by reading their `confirm()` methods) read the live HTTP
+   response — confirm none keys on the current JSON shape the way
+   `php_laravel`'s `PriceIntegrityBypassStrategy` keyed on
+   `"charged_amount":"<canary>"` before `CC-LAB-0239` changed its anchor.
+   Re-run every such test touching these 6 cells after conversion, don't
+   just read the strategy source.
+2. `fuzzlab/labgen/identifier_sqli_oracle.py` (R1b above) is a **build-time**
+   differential prober for `/explore`'s identifier/ORDER-BY-position shape,
+   confirming the generated cell is really vulnerable/secure — it never
+   reads the converted HTML response body, so it is unaffected by this
+   change either way; named here so its irrelevance is a confirmed finding,
+   not a silent omission.
 
 **R7 — illustrative (non-real-page) django cells' bare-GET behavior.**
 Apply PA-0053's rule proactively to every django route reachable from the
@@ -262,17 +329,31 @@ directly mirroring `tests/test_labgen_navigability_live_boot.py`'s structure:
    layout template exists and every real page's future template can
    extend it (structural, not yet content).
 2. Convert `/post`, `/post/comments`, `/settings`, `/explore`, `/inbox`
-   (§2b) — one page at a time, each with its own bare-GET default decision
-   (§2d) and its own live-boot assertion update. Gate after each: that
-   page's own live-boot test green before moving to the next, so a
-   regression is attributable to one page's change.
+   (§2b) — one page at a time. Each page's gate, named concretely (per
+   round-1 review, not left as unspecified "an assertion"): (i) a bare `GET`
+   with no query/body returns the page's decided absent-input status (§2d)
+   — 200 with a default value, or a handled 4xx, never a 500; (ii) the
+   response body renders inside the shared layout (`{% extends
+   "layouts/site.html" %}` present, nav/header visible); (iii) for `/post`
+   specifically, the found/not-found byte-delta (R3) is measured and
+   asserted ≥ the value decided there. Gate after each page: that page's
+   own live-boot test green before moving to the next, so a regression is
+   attributable to one page's change.
 3. `/upload/link-preview`'s client page (§2c) + its bare-GET 4xx (§2d/R4).
 4. Ground-truth `rendering` correction (§2e), only where actually wrong.
 5. Build and run the navigability test (§4) — apply PA-0053's bare-GET
-   sweep to every reachable route, not only the 6 converted ones (R7),
-   fixing what it finds as the same class of change, flagging (not
-   absorbing) anything genuinely different-class, mirroring `CC-LAB-0241`'s
-   own scope-creep rule.
+   sweep to every reachable route, not only the 6 converted ones (R7).
+   **Scope-creep rule, restated from `CC-LAB-0241` (not just cited, per
+   round-1 review):** fold a crawl-surfaced defect into this same change
+   only if it is the *same class* as this plan's own tracked work — a
+   missing nav link, a missing absent-input default, a missing
+   `{% extends %}` — and touches only the `LAB` component (specifically:
+   only the django emitter's own templates/routes, not another
+   component). Anything touching a different component, or needing new
+   infrastructure beyond what §2/§4 already design, gets flagged as a
+   named follow-up (its own recommended next `CC-LAB` number, not invented
+   here) and does not block this step's own Effectiveness assessment for
+   the 6 tracked pages plus the homepage/layout.
 6. Full non-slow suite + all django live-boot suites (existing +
    `test_labgen_django_conformance.py`/`test_labgen_django_live_boot_phase_b.py`/
    `test_labgen_django_live_boot_single_shape.py`/`test_labgen_django_live_boot_picktrail*.py`
@@ -281,8 +362,11 @@ directly mirroring `tests/test_labgen_navigability_live_boot.py`'s structure:
 ## 6. Deliverables checklist
 
 - [ ] Homepage + shared layout template, structural gate green.
-- [ ] `/post` + `/post/comments` converted, bare-GET default decided, twin
-      asymmetry (R1) resolved or explicitly documented, live-boot green.
+- [ ] `/post` + `/post/comments` converted, bare-GET default decided,
+      found/not-found byte-delta designed and asserted (R3), twin asymmetry
+      (R1) resolved via its decision rule and recorded as an explicit
+      "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry (mirroring
+      `CC-LAB-0241`'s R4 sign-off), live-boot green.
 - [ ] `/settings` converted to a real form page, live-boot green.
 - [ ] `/explore` converted, actual SQL shape confirmed (R3), oracle-strategy
       tests re-run (R6), live-boot green.
@@ -304,6 +388,17 @@ directly mirroring `tests/test_labgen_navigability_live_boot.py`'s structure:
       to however many steps this actually took, mirroring Lane 1's own
       updates, bumping Lanes 3-7 by +1 again if this needed more than the
       1 pre-reserved `CC-LAB` number).
+- [ ] **Bug protocol contingency (added per round-1 review, not in the
+      original draft):** if PA-0053's bare-GET sweep (§4 step 6 / §5 step 5)
+      finds a real crash the way Lane 1's own sweep found `BUG-0051`, follow
+      the full bug protocol using Lane 2's pre-assigned numbers
+      (`BUG-0052`/`PA-0054` per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane
+      table) — `ERROR_LOG.md` entry, `docs/bugs/BUG-0052-*.md` full RCA
+      including a recurrence review against `BUG-0037`/`PA-0039` and
+      `BUG-0051`/`PA-0053`, and a preventive-action entry that strengthens
+      rather than restates `PA-0053` if the same root cause recurs. If no
+      such crash is found, state that explicitly in Effectiveness rather
+      than leaving the item silently unaddressed.
 
 ## 7. Out of scope
 
@@ -314,3 +409,22 @@ directly mirroring `tests/test_labgen_navigability_live_boot.py`'s structure:
   `CC-LAB-0241`'s own review).
 - Any further django polish beyond PicTrail's 6 real pages and what §4's
   crawl surfaces, subject to §5 step 5's scope-creep rule.
+
+## 8. Review history
+
+**Round 1 (accuracy + adequacy, 2 independent reviewer agents, 2026-09-25):**
+ACCURATE / NOT YET ADEQUATE. Accuracy found no inaccuracies. Adequacy found
+6 gaps, the most consequential being a genuine risk misattribution: the
+original R3/R6 speculated about `/explore`'s shape without reading its sink
+template or ground truth, and put the `CC-LAB-0240`-style length-delta risk
+on `/explore` (which its own ground truth confirms is "not a syntax-break
+shape") instead of `/post` (structurally identical to `php_laravel`'s
+`/product.php`/`/blog_post.php`, the actual cells that risk applies to).
+Fixed: R1b documents the correction with direct evidence; R3/R6 rewritten
+to target the right cells and name `identifier_sqli_oracle.py` explicitly.
+Also fixed: R1 given a concrete decision rule instead of two undecided
+branches; the scope-creep rule restated in full rather than only cited;
+§5 step 2's per-page gate named concretely; §0's "built from the start"
+claim narrowed to what's actually true (the spec exists early; the crawl
+still runs operationally last); a bug-protocol contingency deliverable
+added to §6.
