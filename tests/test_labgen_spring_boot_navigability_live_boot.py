@@ -249,3 +249,55 @@ def test_pa_0053_bare_get_sweep_no_route_answers_5xx(crawl) -> None:
     print(f"[{crawl['app_key']}] bare-GET sweep:", statuses)
     bad = {u: s for u, s in statuses.items() if not s or s >= 500}
     assert not bad, (crawl["app_key"], bad)
+
+
+def test_s2_browser_accept_negotiation_reflected_xss_flagged_follow_up(crawl) -> None:
+    """S2 (plan §3, flagged follow-up -- **not fixed by this lane**): a
+    browser's `Accept: text/html` is honored by Spring's own content
+    negotiation for an `api` route's plain-`String` body, serving an
+    OGNL-vulnerable twin's unescaped, reflected error text
+    (`/api/support/template-preview`'s `expr`) as `text/html` -- a latent,
+    unlabelled reflected XSS. Confirmed live 2026-09-25: `Accept: text/html`
+    -> `Content-Type: text/html;charset=UTF-8` with the payload verbatim in
+    the body; `Accept: application/json` / no `Accept` header do not trigger
+    it. The `page`-classified route already sets `text/html` explicitly and
+    escapes (plan §2b); `api` routes are deliberately unchanged here (would
+    alter 10 plain-text api wire contracts -- a different class). Pinned so
+    a real fix flips this xfail and forces deletion of the marker; the next
+    unreserved `CC-LAB` number is allocated by the orchestrator when that
+    happens."""
+    if crawl["app_key"] != "reelqueue":
+        pytest.skip("S2 is reproduced on reelqueue's /api/support/template-preview")
+    payload = "<b>xss-canary</b>"
+    resp = crawl["harness"].get(
+        "/api/support/template-preview", params={"expr": payload}, headers={"Accept": "text/html"},
+    )
+    is_html = resp.headers.get("Content-Type", "").split(";")[0].strip() == "text/html"
+    reflected_unescaped = payload in resp.body
+    if is_html and reflected_unescaped:
+        pytest.xfail("S2: browser Accept negotiation reflects the payload as text/html (known, not fixed)")
+    pytest.fail("S2 appears fixed -- delete this xfail-by-manual-check test (S15 decision rule)")
+
+
+#: S6 (plan §3, flagged follow-up -- **not fixed by this lane**): malformed
+#: *present* JSON (the input exists, but doesn't parse) crashes both twins
+#: of these two routes with a raw Spring 500 -- a different bug class from
+#: S4/BUG-0054 (which is about *absent* input). Confirmed live 2026-09-25.
+_S6_MALFORMED_JSON_ROUTES = ("/api/account/settings", "/api/subscription/change-plan")
+
+
+def test_s6_malformed_present_json_flagged_follow_up(crawl) -> None:
+    """S6: a syntactically invalid (but present) JSON body 500s on both
+    twins of `/api/account/settings` and `/api/subscription/change-plan`.
+    Reviewer-reproduced; confirmed live here. Pinned the same way as S2 --
+    a real fix flips this xfail."""
+    if crawl["app_key"] != "reelqueue":
+        pytest.skip("S6 is reproduced on reelqueue's account/settings and subscription/change-plan routes")
+    still_crashing = []
+    for path in _S6_MALFORMED_JSON_ROUTES:
+        resp = crawl["harness"].post(path, data=b"{not valid json", content_type="application/json")
+        if resp.status >= 500:
+            still_crashing.append((path, resp.status))
+    if still_crashing:
+        pytest.xfail(f"S6: malformed present JSON still 500s (known, not fixed): {still_crashing}")
+    pytest.fail("S6 appears fixed -- delete this xfail-by-manual-check test (S15 decision rule)")
