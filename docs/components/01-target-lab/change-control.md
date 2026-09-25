@@ -6,9 +6,11 @@ Component code: **LAB**. Entry format and required fields: see
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
 **Status: DRAFT. This entry's own review gate has NOT RUN.** The underlying
-plan's round 1 has run: the orchestrating session dispatched the reviewers,
-who returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed (see the
-plan's §8). The plan is awaiting round-2 confirmation. Text below the next
+plan has had 2 review rounds, with reviewers dispatched by the orchestrating
+session. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
+Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
+had to become a standing check. That is fixed as O7 (see the plan's §8). The
+plan is awaiting round-3 confirmation. Text below the next
 sentence records the drafting-time situation. At drafting time, neither this
 entry nor the underlying plan had been reviewed. The dispatch
 required two independent reviewer subagents for each document; the drafting
@@ -108,13 +110,18 @@ template; the plan holds the full detail.
        production-equivalent rule, which every other stack already enforces.
        A reviewer who disagrees triggers the plan's stated fallback: flag it
        with a recommended next `CC-LAB` number instead.
-     - **Blast radius** (plan R2, §5 step 1a; added after plan round 1):
-       before the setting is flipped, a dedicated check greps `tests/` and
-       `fuzzlab/` detection code for debug-page-specific content (stack
-       traces, the 404 route table, "Extracted source", Rails exception
-       class names). At plan revision it found 0 hits; the only Rails non-2xx
-       assertion is the sink's own JSON 401. The check is re-run at
-       implementation time.
+     - **Blast radius** (plan R2, §5 step 1a; added after plan round 1, made
+       permanent after round 2): the **standing offline check O7** scans
+       `tests/` and `fuzzlab/` detection code on every test invocation for
+       debug-page-specific content (stack traces, the 404 route table,
+       "Extracted source", Rails exception class names). Its allowlist of
+       absence-only files is pinned and literal, and it has an adversarial
+       self-test (O7-neg). It must be green before the setting is flipped.
+       A grep at plan revision found 0 hits; the only Rails non-2xx
+       assertion is the sink's own JSON 401.
+     - **Side effect:** a malformed-JSON webhook POST now gets the static
+       HTML 400 page instead of a JSON-shaped Rails error. The webhook
+       client page parses responses only inside a guard; O5 checks this.
   3. **R3: CSRF posture must neither gain nor lose protection.** Mitigated:
      plain `<form>` only (never `form_with`/`form_tag`), no
      `csrf_meta_tags`, global `skip_forgery_protection` untouched. Checked
@@ -191,6 +198,11 @@ template; the plan holds the full detail.
   - [ ] Skeleton `development.rb`: `consider_all_requests_local = false`,
         `annotate_rendered_view_with_filenames = false` (§2a, R1/R2); O6
         green; live no-debug-page check green.
+  - [ ] Standing offline check **O7** (no test or detection code depends on
+        Rails debug-page content; pinned absence-only allowlist) plus its
+        adversarial self-test O7-neg, added and green **before** the setting
+        above is flipped (§5 step 1a, R2). It is a permanent test, not a
+        one-time grep.
   - [ ] `_ABSENT_INPUT_BY_SHAPE` declarations and source-template constructs
         (§2d); O1 + O1-neg green; bare `POST /admin/products/import` → 400
         before the sink (was 200 with `nil` in the sink).

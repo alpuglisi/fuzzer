@@ -1,8 +1,9 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **round 1 reviewed 2026-09-25 (ACCURATE / ADEQUATE with 2 minor
-gaps, both fixed in this revision); awaiting round-2 confirmation. Not yet
-converged, and implementation is not authorized.** The orchestrating
+Status: **rounds 1–2 reviewed 2026-09-25. Round 2 found 1 remaining gap: the
+blast-radius grep needs to be a standing check. It is fixed in this revision
+as O7. Awaiting round-3 confirmation. Not yet converged, and implementation
+is not authorized.** The orchestrating
 session ran the review rounds (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
@@ -534,10 +535,26 @@ JSON/plain-text body assertions.
     (`tampered.status == 401`). That is the sink's own JSON 401, not a
     Rails error page, and it is unaffected.
 
-The check is re-run at implementation time, because the suite may have
-grown. Any new hit is either updated to the static error page's contract
-or, if it is a detection signal, treated under R11 as a possible
-regression.
+**Standing check, not a one-time grep (added after round 2).** The same
+string list and scope become the permanent offline test **O7** (§4). It
+runs on every `pytest` invocation, so a *future* test or detection change
+that starts depending on Rails debug-page content fails automatically,
+instead of relying on someone remembering to repeat this grep. The
+revision-time result above is O7's expected initial state. §5 step 1a gates
+on O7 being green before the setting is flipped. Any hit O7 reports is
+either updated to the static error page's contract or, if it is a detection
+signal, treated under R11 as a possible regression. A hit is never simply
+added to O7's allowlist.
+
+**Side effect on the webhook api (round-2 note).** With debug pages off, a
+request whose body Rails cannot parse no longer gets a JSON-shaped Rails
+error. An example is a webhook POST with `Content-Type: application/json`
+and malformed JSON, which Rails rejects in its parameter parser before the
+controller runs. It now gets the static HTML `public/400.html`. The
+receiver's own responses (`{"verified":…}`) are unchanged. The design rule
+for the §2c client page is that it reads `response.text()` and shows it
+verbatim when it is not JSON, never calling `JSON.parse` unguarded.
+O5 checks this offline.
 
 **Not changed:** `config.server_timing` (a `Server-Timing` response header
 with per-request timings). It is response metadata, not a source or verdict
@@ -792,12 +809,39 @@ or fix step.
   URL.
 - **O5.** No skeleton view contains `form_with`, `form_tag` or
   `csrf_meta_tags` (R3). The webhook console view does not contain the
-  webhook secret literal (R6).
+  webhook secret literal (R6), and its script parses the response only
+  inside a guard (`try`/`catch`, falling back to the raw text), per R2's
+  note on the webhook api side effect.
 - **O6 (PA-0057 offline half, final wording set by `BUG-0055`).** The
   skeleton's `development.rb` sets `consider_all_requests_local = false` and
   `annotate_rendered_view_with_filenames = false`. Also a cross-emitter debug
   check (see §6's bug item), which covers every emitter's known
   debug-disabling setting.
+- **O7 (standing debug-page-dependency check, R2).** It scans every `*.py`
+  file under `tests/` and `fuzzlab/` for the R2 string list:
+  `Extracted source`, `Routing Error`, `Routes match in priority`,
+  `Full Trace`, `Application Trace`, `Framework Trace`,
+  `ActionController::RoutingError`, `ActionController::ParameterMissing`,
+  `ActiveRecord::RecordNotFound`, `Rails.root`.
+
+  It skips three kinds of file:
+  - `fuzzlab/labgen/emitters/ruby_rails/` and
+    `fuzzlab/labgen/conformance/rails_live_boot.py`, which generate or boot
+    the app rather than consume its error pages;
+  - `__pycache__`;
+  - a **pinned, explicit allowlist** of files that name these strings only
+    to assert their **absence**: O7's own file,
+    `tests/test_labgen_ruby_rails_browsable.py`, and
+    `tests/test_labgen_ruby_rails_navigability_live_boot.py` (§4 step 7).
+
+  The allowlist is a literal set in the test. Adding to it needs a code
+  change reviewed like any other, never a pattern match. O7 fails on any
+  other hit and names the file and line.
+- **O7-neg (PA-0034(2)).** Call O7's scanner on a synthetic temporary tree
+  that holds one non-allowlisted file containing `Extracted source`, and one
+  containing `ActionController::RoutingError` inside `fuzzlab/`. It must
+  report both hits. This proves the check can fail, and is not validated
+  only against today's clean codebase.
 
 ### Live: `tests/test_labgen_ruby_rails_navigability_live_boot.py` (new, `slow`)
 
@@ -853,9 +897,11 @@ Skip-guarded on `rails_boot_available()`.
 ## 5. Sequencing (each step's gate must be green before the next)
 
 1. **Skeleton hygiene (§2a).**
-   - **1a (must pass before the setting is flipped):** re-run R2's
-     debug-page blast-radius check over `tests/` and `fuzzlab/`, and record
-     the hit list. Every hit is resolved per R2 before step 1 continues.
+   - **1a (must pass before the setting is flipped):** add the standing
+     offline check **O7** (R2's blast-radius check over `tests/` and
+     `fuzzlab/`, §4) together with its adversarial self-test O7-neg, and get
+     both green. Every hit is resolved per R2 before step 1 continues. From
+     then on O7 runs on every test invocation; it is not a manual step.
    - *Gate:* O6 green.
    - *Live:* whole-app boots, and a bare `POST /admin/customers/update`
      returns 400 with **no** `Extracted source` and no `permit`. Before the
@@ -909,6 +955,11 @@ Skip-guarded on `rails_boot_available()`.
 - [ ] Skeleton `development.rb`: `consider_all_requests_local = false`,
       `annotate_rendered_view_with_filenames = false` (§2a, R1/R2); O6
       green; live no-debug-page check green.
+- [ ] Standing offline check **O7** (no test or detection code depends on
+      Rails debug-page content; pinned absence-only allowlist) plus its
+      adversarial self-test O7-neg, added and green **before** the setting
+      above is flipped (§5 step 1a, R2). It is a permanent test, not a
+      one-time grep.
 - [ ] `_ABSENT_INPUT_BY_SHAPE` declarations and source-template constructs
       (§2d); O1 + O1-neg green; bare `POST /admin/products/import` → 400
       before the sink (was 200 with `nil` in the sink).
@@ -1044,3 +1095,29 @@ ADEQUATE with 2 minor gaps.**
    (reasons 1 and 2). The reviewer's requested fix, making the connection
    explicit, is applied in full.
 - **Next:** round-2 confirmation by the same two reviewers.
+
+**Round 2 (same 2 reviewers, dispatched by the orchestrating session,
+2026-09-25): ACCURATE / NOT ADEQUATE, 1 gap.**
+
+- **Confirmed adequate:** the §2d/R7 reconciliation. The reviewer
+  independently verified, via `strategies.py:993`, the drafting agent's
+  pushback on "bakes in a false negative by construction", and agrees with
+  it. Side-effect coverage and R7's test design were also confirmed.
+- **Gap:** the round-1 blast-radius grep was a **one-time** step ("re-run at
+  implementation time"). A future test or detection change that depends on
+  Rails debug-page content would not be caught automatically; the live
+  step-7 regression check guards the app's responses, not the test and
+  detection code.
+  - **Fixed:** the grep becomes the permanent offline check **O7** (§4). It
+    uses the same string list and scope, and runs on every test invocation.
+  - Its allowlist of absence-only files is pinned and literal.
+  - It has its own adversarial self-test, O7-neg (PA-0034(2)).
+  - R2, §5 step 1a and §6 now reference O7 as a standing test, not a manual
+    step.
+- **Optional note, applied:** with debug pages off, a malformed-JSON webhook
+  POST now gets the static HTML `public/400.html`, not JSON.
+  - It is recorded under R2.
+  - The §2c client page must parse the response only inside a guard,
+    falling back to the raw text.
+  - O5 checks this offline.
+- **Next:** round-3 confirmation.
