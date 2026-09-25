@@ -102,6 +102,18 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: `_PAGE_PARAMS` uses -- `fuzzlab.labgen.schema.Cell` deliberately carries
 #: only what `verdict()` needs. These are illustrative synthetic routes
 #: (this stack has no real hand-built app to migrate, unlike php_laravel).
+#:
+#: CC-LAB-0246 (FR-LAB-169, Browsable Labs Lane 6; PA-0053/PA-0054/BUG-0056)
+#: adds render-only keys, identical on both twins of a route:
+#:
+#: * ``absent_input`` (required): the declared absent-input behavior, from
+#:   the shared cross-emitter vocabulary (Lane 4's S15 spellings), allowed
+#:   per source kind by :data:`ABSENT_INPUT_BY_SOURCE` -- ``default_value``
+#:   (+ ``default_literal``), ``required_param`` (handled 400 before any
+#:   transform/sink) or ``no_input``;
+#: * ``nav_label``: the page's link text on the homepage/nav (``site.py``);
+#: * ``form_fields`` (POST routes): the fields of the GET form page the
+#:   site layer serves at the same path (design contract point 4).
 _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # A plain query-string route, deliberately not `/products/{id}` -- the
     # source module reads `id` via `request.query_params.get(...)`
@@ -109,7 +121,13 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # parameter with no matching typed function argument is a startup-time
     # routing error, and a *typed* one would coerce/reject non-numeric
     # input before the handler body ever ran, closing off this shape).
-    "/products": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # CC-LAB-0246: `default_value` "1" fixes D1/BUG-0056 (a bare GET
+    # concatenated `str(None)` into SQL and 500'd on the vulnerable twin).
+    "/products": {
+        "var_name": "id", "param_name": "id", "table": "products", "column": "id",
+        "absent_input": "default_value", "default_literal": "1",
+        "nav_label": "Product",
+    },
     "/login": {
         "var_name": "username",
         "param_name": "username",
@@ -117,9 +135,46 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
         "column": "username",
         "password_var": "password_hash",
         "password_param": "password",
+        "absent_input": "required_param",
+        "nav_label": "Log in",
+        "form_fields": ("username", "password"),
     },
-    "/profile": {"var_name": "bio", "stored_expr": "current_user['bio']", "css_class": "bio"},
+    "/profile": {
+        "var_name": "bio", "stored_expr": "current_user['bio']", "css_class": "bio",
+        "absent_input": "no_input",
+        "nav_label": "Profile",
+    },
 }
+
+#: CC-LAB-0246: which ``absent_input`` values each source module may carry
+#: (PA-0054 (1), checked offline by tests/test_labgen_python_fastapi_browsable.py).
+ABSENT_INPUT_BY_SOURCE: dict[str, frozenset[str]] = {
+    "get_param": frozenset({"default_value", "required_param"}),
+    "post_param": frozenset({"default_value", "required_param"}),
+    "read_stored_field": frozenset({"no_input"}),
+}
+
+
+def served_path_for(cell: Cell, cells: list[Cell]) -> str:
+    """CC-LAB-0246 (F3/R-B7 branch (a)): the path ``cell`` is actually served
+    at in a whole-app build of ``cells`` -- the pure-Python mirror of
+    ``app/main.py``'s router discovery. Routers are included in sorted
+    module-name order; the first to claim a ``(method, path)`` keeps it, and
+    any later router claiming a taken pair is included under the prefix
+    ``/twin/<cell-id>``, so both twins of a pair are served (the per-cell
+    files are unchanged, keeping every minimal pair intact)."""
+    taken: set[tuple[str, str]] = set()
+    for other in sorted(cells, key=lambda c: _module_name(c.cell_id)):
+        key = (other.route.method, other.route.path)
+        path = other.route.path if key not in taken else f"/twin/{other.cell_id.lower()}{other.route.path}"
+        taken.add((other.route.method, path))
+        if other.cell_id == cell.cell_id:
+            return path
+    raise ValueError(f"{cell.cell_id} is not in the given cell set")
+
+
+def _module_name(cell_id: str) -> str:
+    return cell_id.lower().replace("-", "_")
 
 
 class PythonFastapiEmitter(Emitter):
@@ -186,11 +241,12 @@ class PythonFastapiEmitter(Emitter):
             "\n"
             "import jinja2\n"
             "from fastapi import APIRouter, Depends, Request\n"
-            "from fastapi.responses import HTMLResponse\n"
+            "from fastapi.responses import HTMLResponse, JSONResponse\n"
             "from sqlalchemy import text\n"
             "from sqlalchemy.orm import Session\n"
             "\n"
             "from ..db import get_current_user, get_db\n"
+            "from ..site import layout, render_row\n"
             "\n"
             "router = APIRouter()\n"
             "\n"
@@ -277,10 +333,23 @@ def render_scaffold_files() -> EmittedFiles:
         jinja2_version=JINJA2_VERSION,
         pydantic_version=PYDANTIC_VERSION,
     )
+    # CC-LAB-0246: the site layer's page table, rendered statically from
+    # _PAGE_PARAMS (sorted -> deterministic), never read from app.routes.
+    pages = {
+        path: {
+            "label": profile["nav_label"],
+            **({"form_fields": tuple(profile["form_fields"])} if "form_fields" in profile else {}),
+        }
+        for path, profile in sorted(_PAGE_PARAMS.items())
+    }
+    site_code = SCAFFOLD_ENV.get_template("site.py.j2").render(
+        app_name="fuzzlab FastAPI sample", pages_literal=repr(pages)
+    )
     return (
         EmittedFile(path="app/__init__.py", content=b"", role="scaffold"),
         EmittedFile(path="app/main.py", content=main_code.encode("utf-8"), role="scaffold"),
         EmittedFile(path="app/db.py", content=db_code.encode("utf-8"), role="scaffold"),
+        EmittedFile(path="app/site.py", content=site_code.encode("utf-8"), role="scaffold"),
         EmittedFile(path="app/routers/__init__.py", content=b"", role="scaffold"),
         EmittedFile(path="requirements.txt", content=requirements.encode("utf-8"), role="scaffold"),
         EmittedFile(path="Dockerfile", content=dockerfile.encode("utf-8"), role="scaffold"),

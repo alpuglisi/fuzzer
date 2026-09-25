@@ -27,7 +27,7 @@ import pkgutil
 
 from fastapi import FastAPI
 
-from . import routers
+from . import routers, site
 
 app = FastAPI(
     title="{{ app_title }}",
@@ -39,13 +39,30 @@ app = FastAPI(
 
 def _discover_and_include_routers(application: FastAPI) -> None:
     """Walk `routers/` and `include_router()` every module that defines a
-    module-level `router` attribute, sorted by module name for determinism."""
+    module-level `router` attribute, sorted by module name for determinism.
+
+    CC-LAB-0246 (F3, twin URLs): a vulnerable cell and its secure twin
+    declare the same (method, path), so previously only the first-sorted
+    one was reachable. The first router to claim a (method, path) keeps it;
+    a later router claiming a taken pair is included under the prefix
+    `/twin/<cell-id>`, so both twins are served. Mirrored in Python by
+    `fuzzlab.labgen.emitters.python_fastapi.served_path_for`. Reads each
+    module's own `APIRouter.routes` (plain routes with `.path`/`.methods`),
+    never `app.routes`. Every served pair is recorded in `site.SERVED`."""
+    taken: set[tuple[str, str]] = set()
     module_infos = sorted(pkgutil.iter_modules(routers.__path__), key=lambda m: m.name)
     for module_info in module_infos:
         module = importlib.import_module(f"{routers.__name__}.{module_info.name}")
         router = getattr(module, "router", None)
-        if router is not None:
-            application.include_router(router)
+        if router is None:
+            continue
+        pairs = sorted((method, route.path) for route in router.routes for method in route.methods)
+        prefix = "/twin/" + module_info.name.replace("_", "-") if taken.intersection(pairs) else ""
+        application.include_router(router, prefix=prefix)
+        for method, path in pairs:
+            taken.add((method, prefix + path))
+            site.SERVED.append((method, prefix + path))
 
 
 _discover_and_include_routers(app)
+site.install(app)

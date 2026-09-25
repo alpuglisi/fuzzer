@@ -183,7 +183,9 @@ class SingleStatementComplexity(TemplateModule):
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
         template = self._env.get_template(self._template_name)
-        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"])
+        # CC-LAB-0246: the HTML detail view's heading (the route's nav label).
+        extra = {"nav_label": ctx["nav_label"]} if "nav_label" in ctx else {}
+        code = template.render(body=ctx["body"], handler_name=ctx["handler_name"], **extra)
         return RenderResult(code=code, context=dict(ctx))
 
 

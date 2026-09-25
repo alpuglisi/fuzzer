@@ -1,1 +1,9 @@
+{% if absent_input is defined and absent_input == "default_value" %}
+{{ var_name }} = request.query_params.get("{{ param_name }}") or "{{ default_literal }}"
+{% else %}
 {{ var_name }} = request.query_params.get("{{ param_name }}")
+{% endif %}
+{% if absent_input is defined and absent_input == "required_param" %}
+if not {{ var_name }}:
+    return JSONResponse({"error": "missing required parameter: {{ param_name }}"}, status_code=400)
+{% endif %}

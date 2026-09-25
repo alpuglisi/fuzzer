@@ -168,9 +168,29 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: information, not verdict-relevant, so it lives here rather than growing
 #: the shared IR. Keyed by ``cell.route.path``, since a vulnerable cell and
 #: its secure twin share one route profile.
+#:
+#: CC-LAB-0246 (FR-LAB-168, Browsable Labs Lane 6; PA-0053/PA-0054/BUG-0056):
+#: every profile carries one required ``absent_input`` key -- the route's
+#: declared behavior when its request input is absent, rendered by the
+#: source module in the source region, identically on both twins. Values
+#: use the shared cross-emitter vocabulary (Lane 4's S15 spellings), each
+#: allowed only for the source kind listed in
+#: :data:`ABSENT_INPUT_BY_SOURCE`:
+#:
+#: * ``default_value`` (+ ``default_literal``): ``req.<x>.<param> || '<lit>'``;
+#: * ``required_param``: a handled 400 before any transform or sink;
+#: * ``empty_body_400``: whole-body source, an absent/empty body is a
+#:   handled 400 before the merge;
+#: * ``no_input``: the source reads no request input at all.
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
-    "/api/products": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
-    "/api/posts": {"var_name": "id", "param_name": "id", "table": "posts", "column": "id"},
+    "/api/products": {
+        "var_name": "id", "param_name": "id", "table": "products", "column": "id",
+        "absent_input": "default_value", "default_literal": "1",
+    },
+    "/api/posts": {
+        "var_name": "id", "param_name": "id", "table": "posts", "column": "id",
+        "absent_input": "default_value", "default_literal": "1",
+    },
     "/api/login": {
         "var_name": "username",
         "param_name": "username",
@@ -178,8 +198,12 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "column": "username",
         "password_var": "passwordHash",
         "password_param": "password",
+        "absent_input": "required_param",
     },
-    "/api/profile": {"var_name": "bio", "stored_expr": "currentUser.bio", "css_class": "bio"},
+    "/api/profile": {
+        "var_name": "bio", "stored_expr": "currentUser.bio", "css_class": "bio",
+        "absent_input": "no_input",
+    },
     # CC-LAB-0070: a BFF-style "update account/cart preferences" endpoint
     # (Walmart functionality research), deep-merging the whole request body
     # onto a live preferences object -- target_var/target_literal are this
@@ -189,6 +213,12 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "var_name": "incomingPreferences",
         "target_var": "currentPreferences",
         "target_literal": "{ theme: 'light', notifications: true }",
+        "absent_input": "empty_body_400",
+        # CC-LAB-0246 R3 branch (a): every served URL of this route also
+        # answers GET with the resource's default state (a real BFF
+        # preferences resource is read+update), registered in app.js --
+        # twin-identical, reads no input, POST contract untouched.
+        "get_resource": True,
     },
     # CC-LAB-0076: a BFF-style "search results" endpoint (Walmart
     # functionality research) that highlights matches of a user-supplied
@@ -208,8 +238,57 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "var_name": "searchTerm",
         "param_name": "q",
         "content_literal": "'Comfortable running shoes with breathable mesh ' + 'a'.repeat(22) + '!'",
+        # CC-LAB-0246 (D3): a bare search was undeclared and twin-asymmetric
+        # (vulnerable twin marked every character, secure twin did not) --
+        # no meaningful default term exists, so a handled 400 before the
+        # RegExp is ever built.
+        "absent_input": "required_param",
+        # /catalog links GET APIs needing a parameter with this example.
+        "example_query": "q=shoes",
     },
 }
+
+#: CC-LAB-0246: which ``absent_input`` values each source module may carry
+#: (PA-0054 (1), checked offline by tests/test_labgen_node_express_browsable.py).
+ABSENT_INPUT_BY_SOURCE: dict[str, frozenset[str]] = {
+    "get_query_param": frozenset({"default_value", "required_param"}),
+    "post_body_param": frozenset({"default_value", "required_param"}),
+    "post_body_json": frozenset({"empty_body_400"}),
+    "read_stored_field": frozenset({"no_input"}),
+}
+
+#: CC-LAB-0246: the MeadowMart app's own manifests -- its whole build (the
+#: generic Tier-A sample, phase3_node_express_sample.yaml, is NOT part of it).
+MEADOWMART_MANIFESTS: tuple[str, ...] = (
+    "lab/manifests/prototype_pollution_node_sample.yaml",
+    "lab/manifests/redos_node_sample.yaml",
+)
+
+#: CC-LAB-0246 (R7): the scaffold files a running app needs next to app.js
+#: -- every fixture copies exactly these (build-only files excluded).
+RUNTIME_SCAFFOLD_FILES: tuple[str, ...] = ("db.js", "package.json", "site.js")
+
+#: CC-LAB-0246: the site layer's GET routes, registered by scaffold/site.js
+#: (single source of truth for the tests; an offline drift check keeps it
+#: equal to site.js's own ``app.get('...')`` literals).
+SITE_ROUTES: tuple[str, ...] = (
+    "/",
+    "/account/preferences",
+    "/cart",
+    "/catalog",
+    "/orders",
+    "/products",
+    "/search",
+)
+
+#: CC-LAB-0246 (R10): the inert BFF routes (see _INERT_ROUTES_JS) as
+#: (route pattern, concrete example URL) -- the example is what /catalog
+#: links and what the bare-request sweep requests.
+INERT_ROUTES: tuple[tuple[str, str], ...] = (
+    ("/api/cart", "/api/cart"),
+    ("/api/orders/:orderId", "/api/orders/ORD-12345"),
+    ("/api/products", "/api/products"),
+)
 
 
 #: CC-LAB-0077: which cell is the "real page" canonical owner of a route
@@ -382,6 +461,16 @@ class NodeExpressEmitter(Emitter):
             )
             for c in by_id
         ]
+        # CC-LAB-0246 (R3 branch (a)): GET resource reads for routes whose
+        # profile declares ``get_resource`` -- twin-identical, input-free.
+        resource_lines = [
+            f"app.get('{_served_url_for(c)}', (req, res) => {{\n"
+            f"    res.json({{ preferences: {_ROUTE_PARAMS[c.route.path]['target_literal']} }});\n"
+            "});\n"
+            for c in by_id
+            if _ROUTE_PARAMS.get(c.route.path, {}).get("get_resource")
+        ]
+        catalog_js = _render_catalog_js(by_id)
         app_js = (
             "'use strict';\n"
             "// Generated by fuzzlab.labgen.emitters.node_express -- route accumulator\n"
@@ -403,6 +492,18 @@ class NodeExpressEmitter(Emitter):
             "\n"
             f"{''.join(route_lines)}"
             "\n"
+            + (
+                "// Resource reads (CC-LAB-0246): GET on a read+update resource\n"
+                "// returns its default state; reads no request input.\n"
+                f"{''.join(resource_lines)}"
+                "\n"
+                if resource_lines else ""
+            )
+            + "// Site layer (CC-LAB-0246): homepage, shared layout, client pages and\n"
+            "// the endpoint catalog -- see site.js. The catalog below is derived\n"
+            "// from the same sorted cell list as the route lines above.\n"
+            f"require('./site').register(app, {catalog_js});\n"
+            "\n"
             "if (require.main === module) {\n"
             "    const port = Number(process.env.PORT || 3000);\n"
             "    app.listen(port, '127.0.0.1');\n"
@@ -411,6 +512,48 @@ class NodeExpressEmitter(Emitter):
             "module.exports = app;\n"
         )
         return EmittedFile(path="app.js", content=app_js.encode("utf-8"), role="route")
+
+
+#: Public name for the one served-URL derivation (PA-0054 (2): the
+#: navigability test's bare-request sweep enumerates from it).
+served_url_for = _served_url_for
+
+
+def catalog_entries(cells: list[Cell]) -> list[dict[str, str]]:
+    """CC-LAB-0246: the ``/catalog`` rows -- every served cell URL (twins
+    included) plus every inert API route, sorted by path. ``href`` is the
+    link a visitor clicks (a GET API needing a parameter gets its declared
+    ``example_query``); it is empty for a POST-only endpoint with no GET
+    resource read."""
+    rows: list[dict[str, str]] = []
+    for c in cells:
+        url = _served_url_for(c)
+        profile = _ROUTE_PARAMS.get(c.route.path, {})
+        if c.route.method == "GET":
+            example = profile.get("example_query")
+            href = f"{url}?{example}" if example else url
+        elif profile.get("get_resource"):
+            href = url
+        else:
+            href = ""
+        rows.append({"method": c.route.method, "path": url, "href": href})
+    for pattern, example in INERT_ROUTES:
+        rows.append({"method": "GET", "path": pattern, "href": example})
+    return sorted(rows, key=lambda r: (r["path"], r["method"]))
+
+
+def _render_catalog_js(cells: list[Cell]) -> str:
+    """Deterministic JS array literal of :func:`catalog_entries` (single
+    quotes are never present in these ASCII paths; asserted)."""
+    parts = []
+    for row in catalog_entries(cells):
+        for value in row.values():
+            if "'" in value or "\\" in value:
+                raise ValueError(f"catalog value not safe for a JS literal: {value!r}")
+        parts.append(
+            f"{{ method: '{row['method']}', path: '{row['path']}', href: '{row['href']}' }}"
+        )
+    return "[\n    " + ",\n    ".join(parts) + ",\n]"
 
 
 def _pascal_case(cell_id: str) -> str:

@@ -125,7 +125,9 @@ def test_html_body_echo_sink_renders_jinja_template_and_returns_html_response() 
     result = SINKS["html_body_echo"].render(ctx)
     assert 'class="bio"' in result.code
     assert ".render(value=bio)" in result.code
-    assert "return HTMLResponse(content=html_fragment)" in result.code
+    # CC-LAB-0246: the fragment is still returned as HTML, now inside the
+    # shared site layout (the fragment itself is unchanged).
+    assert 'return HTMLResponse(content=layout("Page", html_fragment))' in result.code
 
 
 def test_html_body_echo_sink_reflects_whatever_value_expr_it_is_given() -> None:
@@ -140,7 +142,11 @@ def test_single_statement_complexity_wraps_body_in_an_async_handler_with_db_depe
     result = COMPLEXITIES["single_statement"].render(ctx)
     assert result.code.startswith("async def handle_x(request: Request, db: Session = Depends(get_db)):\n")
     assert "row = None" in result.code
-    assert result.code.rstrip("\n").endswith("return dict(row) if row else {}")
+    # CC-LAB-0246: the row (or its absence) now renders as an HTML detail
+    # view in the site layout instead of a JSON dict.
+    assert result.code.rstrip("\n").endswith(
+        'return HTMLResponse(content=render_row("Page", dict(row) if row else None))'
+    )
 
 
 def test_render_only_complexity_wraps_body_with_current_user_dependency_and_no_return() -> None:

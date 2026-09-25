@@ -62,7 +62,7 @@ from pathlib import Path
 
 import pytest
 
-from fuzzlab.labgen.emitters.node_express import NodeExpressEmitter
+from fuzzlab.labgen.emitters.node_express import RUNTIME_SCAFFOLD_FILES, NodeExpressEmitter
 from fuzzlab.labgen.schema import load_manifest
 
 PP_MANIFEST = "lab/manifests/prototype_pollution_node_sample.yaml"
@@ -168,7 +168,7 @@ def app_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("meadowmart_bff_app")
     (root / "routes").mkdir()
 
-    for name in ("package.json", "db.js"):
+    for name in RUNTIME_SCAFFOLD_FILES:  # CC-LAB-0246 R7
         (root / name).write_bytes((SCAFFOLD_DIR / name).read_bytes())
 
     emitter = NodeExpressEmitter()

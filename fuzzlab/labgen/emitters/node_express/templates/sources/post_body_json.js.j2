@@ -1,1 +1,6 @@
 const {{ var_name }} = req.body;
+{% if absent_input is defined and absent_input == "empty_body_400" %}
+if (!{{ var_name }} || typeof {{ var_name }} !== 'object' || Object.keys({{ var_name }}).length === 0) {
+    return res.status(400).json({ error: 'missing request body' });
+}
+{% endif %}

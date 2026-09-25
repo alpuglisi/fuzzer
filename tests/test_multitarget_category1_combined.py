@@ -43,7 +43,7 @@ from fuzzlab.core.store import Store
 from fuzzlab.harness.multitarget import TargetSpec, format_transfer, run_targets, transfer_summary
 from fuzzlab.labels import contract
 from fuzzlab.labgen.conformance.rails_live_boot import RailsLiveBootHarness, rails_boot_available
-from fuzzlab.labgen.emitters.node_express import NodeExpressEmitter
+from fuzzlab.labgen.emitters.node_express import RUNTIME_SCAFFOLD_FILES, NodeExpressEmitter
 from fuzzlab.labgen.emitters.ruby_rails import RailsEmitter
 from fuzzlab.labgen.schema import load_manifest
 from fuzzlab.tools.probesender import RequestsProbeSender
@@ -102,7 +102,7 @@ def _boot_meadowmart(tmp_path_factory: pytest.TempPathFactory):
     out of order relative to the Rails harness's own context manager)."""
     root = tmp_path_factory.mktemp("meadowmart_bff_combined")
     (root / "routes").mkdir()
-    for name in ("package.json", "db.js"):
+    for name in RUNTIME_SCAFFOLD_FILES:  # CC-LAB-0246 R7
         (root / name).write_bytes((SCAFFOLD_DIR / name).read_bytes())
 
     emitter = NodeExpressEmitter()

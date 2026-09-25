@@ -1,4 +1,4 @@
 html_fragment = jinja2.Template(
     {% raw %}'<div class="{% endraw %}{{ css_class }}{% raw %}">{{ value }}</div>'{% endraw %}
 ).render(value={{ value_expr }})
-return HTMLResponse(content=html_fragment)
+return HTMLResponse(content=layout("{{ nav_label | default("Page") }}", html_fragment))

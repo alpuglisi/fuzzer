@@ -1,1 +1,10 @@
+{% if absent_input is defined and absent_input == "default_value" %}
+const {{ var_name }} = req.body.{{ param_name }} || '{{ default_literal }}';
+{% else %}
 const {{ var_name }} = req.body.{{ param_name }};
+{% endif %}
+{% if absent_input is defined and absent_input == "required_param" %}
+if (!{{ var_name }}) {
+    return res.status(400).json({ error: 'missing required parameter: {{ param_name }}' });
+}
+{% endif %}

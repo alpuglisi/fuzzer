@@ -209,7 +209,9 @@ def test_rendered_app_runs_under_testclient_and_matches_its_verdicts() -> None:
         # for this offline conformance suite per FR-LAB-25).
         r = client.get("/products", params={"id": "1"})
         assert r.status_code == 200
-        assert r.json()["name"] == "Puppy Bed"
+        # CC-LAB-0246: the found row now renders as an HTML detail view in
+        # the site layout (same intent: row id=1 is found).
+        assert "<td>Puppy Bed</td>" in r.text
 
         # /profile (LABGEN-PY-0005, vulnerable twin): renders the stored
         # bio field unescaped.
