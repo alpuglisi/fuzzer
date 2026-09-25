@@ -125,6 +125,25 @@ class TemplateModule(Module):
 
 # --- sources ----------------------------------------------------------------
 
+#: CC-LAB-0245 (PA-0053/PA-0054): the only absent-input behaviors a named
+#: ``params`` read may render with. A source asked to render without one is an
+#: emitter-authoring bug -- there is deliberately no bare ``params[:name]``
+#: fallback for an undeclared input.
+_ABSENT_KINDS = ("default", "required_4xx")
+
+
+def _require_declared_absent_input(ctx: dict[str, Any], source: str) -> None:
+    kind = ctx.get("absent_kind")
+    if kind not in _ABSENT_KINDS:
+        raise ValueError(
+            f"{source} source for param {ctx.get('param_name')!r} has no declared absent-input "
+            f"behavior (absent_kind={kind!r}, expected one of {_ABSENT_KINDS}) -- declare it in "
+            "ruby_rails._ABSENT_INPUT_BY_SHAPE (PA-0053/PA-0054)"
+        )
+    if kind == "default" and not ctx.get("default_rb"):
+        raise ValueError(f"{source} source: absent_kind 'default' needs a rendered default_rb")
+
+
 
 class GetParamSource(TemplateModule):
     """One query-string parameter read through Rails' ``params`` accessor
@@ -136,6 +155,7 @@ class GetParamSource(TemplateModule):
         super().__init__("get_param", "source", _SOURCE_ENV, "get_param.rb.j2")
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
+        _require_declared_absent_input(ctx, "get_param")
         result = super().render(ctx)
         new_ctx = dict(ctx)
         new_ctx["value_expr"] = ctx["var_name"]
@@ -157,6 +177,7 @@ class PostParamSource(TemplateModule):
         super().__init__("post_param", "source", _SOURCE_ENV, "post_param.rb.j2")
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
+        _require_declared_absent_input(ctx, "post_param")
         result = super().render(ctx)
         new_ctx = dict(ctx)
         new_ctx["value_expr"] = ctx["var_name"]

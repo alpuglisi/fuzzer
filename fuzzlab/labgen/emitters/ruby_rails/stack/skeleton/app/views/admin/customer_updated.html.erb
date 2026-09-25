@@ -1,0 +1,13 @@
+<%# CC-LAB-0245: rendered by the /admin/customers/update cell's sink. Every
+    value is ERB-escaped (the escaping output tag, never raw): converting the old JSON echo to
+    HTML must not add a reflected/stored XSS this cell does not model (plan
+    R5). The mass-assignment verdict stays observable as the rendered role. %>
+<% content_for :title, "Customer updated - ForgeCart" %>
+<h1>Customer updated</h1>
+<table>
+  <tr><th>ID</th><td id="customer-id"><%= @user.id %></td></tr>
+  <tr><th>Username</th><td id="customer-username"><%= @user.username %></td></tr>
+  <tr><th>Customer note</th><td id="customer-bio"><%= @user.bio %></td></tr>
+  <tr><th>Role</th><td id="customer-role"><%= @user.role %></td></tr>
+</table>
+<p><a href="/admin/customers/update">Edit again</a></p>

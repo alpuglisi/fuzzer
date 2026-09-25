@@ -20,8 +20,6 @@ every other Rails live-boot test in this stack. Marked ``@pytest.mark.slow``
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from fuzzlab.labgen.conformance.rails_live_boot import RailsLiveBootHarness, rails_boot_available
@@ -87,22 +85,25 @@ def test_whole_app_boots_with_every_cell_registered_together() -> None:
         home = harness.get("/")
         assert home.status == 200
         assert "ForgeCart" in home.body
+        assert "<nav>" in home.body  # CC-LAB-0245: the shared layout
 
         products = harness.get("/products")
         assert products.status == 200
-        assert json.loads(products.body) == {"products": []}
+        # CC-LAB-0245: an HTML page in the ForgeCart layout (was JSON
+        # `{"products": []}`) -- same fact, an empty catalog.
+        assert "<h1>Products</h1>" in products.body and "No products yet" in products.body
 
         cart = harness.get("/cart")
         assert cart.status == 200
-        assert json.loads(cart.body) == {"items": []}
+        assert "<h1>Your cart</h1>" in cart.body and "Your cart is empty" in cart.body
 
         dashboard = harness.get("/admin")
         assert dashboard.status == 200
-        assert "ForgeCart admin" in dashboard.body
+        assert "<h1>ForgeCart admin</h1>" in dashboard.body
 
         orders = harness.get("/admin/orders")
         assert orders.status == 200
-        assert json.loads(orders.body) == {"orders": []}
+        assert "<h1>Orders</h1>" in orders.body and "No orders yet" in orders.body
 
         # -- ForgeCart's five real vulnerability pages (Phase C) ---------
         # /search -- reflected XSS, the storefront search box.
@@ -146,7 +147,9 @@ def test_whole_app_boots_with_every_cell_registered_together() -> None:
             data={"user[bio]": "whole-app boot check", "user[role]": "admin"},
         )
         assert mass.status == 200, mass.body
-        assert json.loads(mass.body)["role"] == "admin"
+        # CC-LAB-0245: the result is an HTML page now (was JSON); the
+        # mass-assignment verdict is still observable as the rendered role.
+        assert '<td id="customer-role">admin</td>' in mass.body
 
         # /admin/products/import -- CWE-502 insecure deserialization,
         # vulnerable: a `!ruby/object:OpenStruct` YAML tag is honored.

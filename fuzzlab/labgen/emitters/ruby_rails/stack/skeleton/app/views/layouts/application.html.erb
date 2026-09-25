@@ -1,26 +1,61 @@
+<%# ForgeCart's one shared site layout (CC-LAB-0245, Browsable Labs Lane 5;
+    docs/LAB_BROWSABLE_APPS_PLAN.md design-contract point 2). Byte-identical
+    for every page and every twin: it reads no request data except the page's
+    own literal content_for(:title). Deliberately absent (plan R1/R3):
+    csrf_meta_tags (a per-request random token; forgery protection is skipped
+    globally), csp_meta_tag, and every external asset (inline CSS only; the
+    lab stays offline). The header search box never echoes `q`. %>
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
-    <title><%= content_for(:title) || "Fuzzlab App" %></title>
+    <meta charset="utf-8">
+    <title><%= content_for(:title) || "ForgeCart" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Fuzzlab App">
-    <meta name="mobile-web-app-capable" content="yes">
-    <%= csrf_meta_tags %>
-    <%= csp_meta_tag %>
-
-    <%= yield :head %>
-
-    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
-    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
-
-    <link rel="icon" href="/icon.svg" type="image/svg+xml">
-
-    <%# Includes all stylesheet files in app/assets/stylesheets %>
-    <%= stylesheet_link_tag :app %>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; color: #1f2933; background: #f7f7f5; }
+      header { background: #1f3a2e; color: #fff; padding: 12px 24px; }
+      header a { color: #fff; }
+      .brand { font-size: 1.4em; font-weight: bold; text-decoration: none; margin-right: 24px; }
+      header form { display: inline; }
+      nav { background: #e4ece6; padding: 8px 24px; font-size: 0.95em; }
+      nav strong { margin-right: 6px; }
+      nav a { margin-right: 12px; color: #1f3a2e; }
+      main { max-width: 860px; margin: 24px auto; padding: 0 24px; }
+      footer { color: #6b7280; font-size: 0.85em; text-align: center; padding: 24px; }
+      label { display: block; margin: 12px 0 4px; }
+      textarea, input[type=text], input[type=search] { width: 100%; max-width: 640px; }
+      table { border-collapse: collapse; }
+      td, th { border: 1px solid #cbd5d0; padding: 4px 10px; text-align: left; }
+      .empty { color: #6b7280; }
+    </style>
   </head>
-
   <body>
-    <%= yield %>
+    <header>
+      <a class="brand" href="/">ForgeCart</a>
+      <form action="/search" method="get" role="search">
+        <input type="search" name="q" placeholder="Search products" aria-label="Search products">
+        <button type="submit">Search</button>
+      </form>
+    </header>
+    <nav>
+      <strong>Storefront:</strong>
+      <a href="/">Home</a>
+      <a href="/cart">Cart</a>
+      <a href="/catalog">Catalog</a>
+      <a href="/products">Products</a>
+      <a href="/search">Search</a>
+      <br>
+      <strong>Merchant admin:</strong>
+      <a href="/admin">Dashboard</a>
+      <a href="/admin/customers/update">Edit customer</a>
+      <a href="/admin/orders">Orders</a>
+      <a href="/admin/products/import">Import products</a>
+      <a href="/webhooks/customers/update">Webhook: customers/update</a>
+      <a href="/webhooks/orders/create">Webhook: orders/create</a>
+    </nav>
+    <main>
+<%= yield %>
+    </main>
+    <footer>ForgeCart &mdash; a Shopify-style merchant storefront (fuzzlab lab fixture, loopback only).</footer>
   </body>
 </html>

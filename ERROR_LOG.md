@@ -60,6 +60,41 @@ Format per entry:
   a strict xfail. See `docs/bugs/BUG-0056-*.md`, `PA-0058`.
 - **Status:** Fixed.
 
+## 2026-09-25 — LAB: `ruby_rails` (ForgeCart) dev-mode exception pages expose generated source, revealing which twin is vulnerable (fixed, BUG-0055/PA-0057)
+
+- **Symptom:** reproduced live against the current emitter
+  (`RailsLiveBootHarness`, whole ForgeCart build).
+  - A bare `POST /admin/customers/update` returns a 400 debug page of about
+    121 KB. Its "Extracted source" section shows the generated controller,
+    including the transform comment `# permit_bang_unrestricted: every key
+    in attrs is accepted…`.
+  - The secure sample twin (`PATCH /cell/labgen_rr_0005`) shows
+    `# strong_params_explicit_allowlist: …` instead. An anonymous request
+    therefore reveals which twin is vulnerable.
+  - The dev 404 page also lists the full route table.
+  - Every rendered view carries a `<!-- BEGIN app/views/cell_<id>/... -->`
+    annotation that names the cell.
+- **Root cause:** `RailsLiveBootHarness` boots `RAILS_ENV=development`
+  (`rails_live_boot.py:276`). The skeleton's `development.rb` keeps Rails'
+  defaults `consider_all_requests_local = true` and
+  `annotate_rendered_view_with_filenames = true`. The cross-stack
+  "production-equivalent, debug pages off" requirement
+  (`docs/LAB_IMPLEMENTATION_PLAN.md:775`) is enforced separately in every
+  other stack (`APP_DEBUG=false`, `DEBUG = False`, `NODE_ENV=production`,
+  FastAPI docs off). Nothing carried it over to the Rails port.
+- **Remediation:** `CC-LAB-0245` (commit `8670847`): both settings `false`
+  in the skeleton's `development.rb` (errors now render the static
+  `public/*.html` pages); standing checks `tests/test_labgen_debug_pages_disabled.py`
+  (cross-emitter, PA-0057), O6/O7 in `tests/test_labgen_ruby_rails_browsable.py`,
+  and the live no-debug-content sweep in
+  `tests/test_labgen_ruby_rails_navigability_live_boot.py` -- each verified to
+  fail with the pre-fix setting restored. Bug report
+  `docs/bugs/BUG-0055-rails-dev-mode-exception-pages-leaked-generated-source-and-twin-verdict.md`.
+  PA-0002 sweep: one more instance in `node_express` (test-time `node app.js`
+  launches without `NODE_ENV=production`), Lane 6's emitter -- pinned by a
+  strict xfail and flagged, not fixed here.
+- **Status:** Fixed (`ruby_rails`); `node_express` instance Open (pinned, flagged).
+
 ## 2026-09-25 — LAB: `django` (PicTrail) routes 500'd on a bare GET — absent query parameter reached the sink as None (fixed, BUG-0052/PA-0054)
 
 - **Symptom:** a bare `GET` (no query string) of `/post`, `/explore`,

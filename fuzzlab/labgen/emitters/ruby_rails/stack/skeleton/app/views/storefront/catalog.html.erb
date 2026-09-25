@@ -1,0 +1,18 @@
+<% content_for :title, "Catalog - ForgeCart" %>
+<h1>Lab catalog</h1>
+<p>Illustrative lab endpoints with no ForgeCart product page of their own
+(generated covering cells). Endpoints a browser can open are linked; the
+others are machine-to-machine endpoints, listed with their HTTP method.</p>
+<% if @cell_routes.empty? %>
+<p class="empty">No illustrative endpoints in this build.</p>
+<% else %>
+<ul>
+<% @cell_routes.each do |path, verb| %>
+<% if verb == "GET" %>
+  <li><a href="<%= path %>"><%= path %></a></li>
+<% else %>
+  <li><code><%= verb %> <%= path %></code> (API endpoint)</li>
+<% end %>
+<% end %>
+</ul>
+<% end %>

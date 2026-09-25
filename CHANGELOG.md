@@ -4,6 +4,28 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 5 implemented: ForgeCart/ruby_rails browsable, CC-LAB-0245/FR-LAB-166)
+- Implemented `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md` (`CC-LAB-0245`) so
+  ForgeCart can be browsed end to end by a real visitor:
+  - a ForgeCart layout, an HTML homepage and inert pages, and a `/catalog`;
+  - `/search` and the admin customer-update and product-import pages as
+    real HTML pages with tokenless GET forms and escaped results;
+  - one `fetch()` client page for the two webhook receivers, which stay
+    JSON APIs;
+  - every named input's absent-input behavior declared per shape (the
+    import page now returns a handled 400 instead of passing `nil` to
+    `YAML.*_load`);
+  - a spider-based navigability test that sweeps every served route at
+    its *declared* status.
+- Fixed BUG-0055: the Rails harness served development-mode exception pages
+  whose "Extracted source" revealed each twin's transform to any anonymous
+  request. New PA-0057 enforces debug pages off in every stack's served build,
+  checked across emitters. That sweep found one more instance, `node_express`'s
+  test-time launches without `NODE_ENV=production`; it is pinned with a strict
+  xfail and flagged to Lane 6.
+- Detection did not regress (`FCART-0001` still matched), and a pre-existing
+  XSS false alarm on the old JSON echo is gone.
+
 ## 2026-09-25 (Lane 3 implemented: LoopCast/go_net_http browsable, CC-LAB-0243/FR-LAB-162)
 - Implemented `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md` (`CC-LAB-0243`):
   LoopCast (the `go_net_http` Twitch clone) gets a homepage, shared layout,

@@ -3,5 +3,10 @@
     fragment and the cell's transform region alone decides whether the value
     reaching this line was already escaped (mirrors php_laravel's own
     html_body_echo.blade.php.j2 -- see that emitter's modules.py docstring,
-    decision 2, for the full rationale this stack reuses). %>
+    decision 2, for the full rationale this stack reuses). Rendered inside the
+    ForgeCart layout (app/views/layouts/application.html.erb, CC-LAB-0245). %>
+{% if page_title %}
+<% content_for :title, "{{ page_title }} - ForgeCart" %>
+<h1>{{ page_title }}</h1>
+{% endif %}
 <div class="cell-output"><%= raw @value %></div>

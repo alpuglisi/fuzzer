@@ -2,10 +2,19 @@
 # attacker-supplied `!ruby/object:...` tag is honored (unsafe_load) or
 # rejected (safe_load). The sink reports which Ruby class the parsed value
 # actually became -- or which exception Psych raised -- so the vulnerable/
-# secure divergence is directly observable in the response.
+# secure divergence is directly observable in the response. One render, after
+# the begin/rescue (CC-LAB-0245), so a render can never happen twice.
 begin
   parsed = YAML.{{ deserialize_method }}({{ var_name }})
-  render json: { ok: true, parsed_class: parsed.class.name }
+  result = { ok: true, parsed_class: parsed.class.name }
 rescue => e
-  render json: { ok: false, error: e.class.name }
+  result = { ok: false, error: e.class.name }
 end
+{% if result_template %}
+# CC-LAB-0245: a browser page -- the import result rendered (escaped) inside
+# the site layout.
+@result = result
+render template: "{{ result_template }}"
+{% else %}
+render json: result
+{% endif %}

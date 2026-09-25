@@ -55,7 +55,17 @@ from fuzzlab.labgen.emitters.ruby_rails.modules import COMPLEXITIES, SINKS, SOUR
 from fuzzlab.labgen.emitters.ruby_rails.route_accumulator import RouteAccumulator
 from fuzzlab.labgen.schema import Cell, SinkContext
 
-__all__ = ["RailsEmitter", "SUPPORTED_CONTEXT_DEPTHS", "controller_name_for", "url_path_for"]
+__all__ = [
+    "AbsentInput",
+    "RailsEmitter",
+    "RealPageProfile",
+    "SUPPORTED_CONTEXT_DEPTHS",
+    "absent_input_violations",
+    "bare_request_status_for",
+    "controller_name_for",
+    "real_page_profile_for",
+    "url_path_for",
+]
 
 #: The one ``Cell.context_depth`` this Phase A emitter renders. Widening this
 #: (``stored_second_order``, the pass-through-helper depths) is Phase B/a
@@ -215,6 +225,179 @@ _REAL_PAGE_URL_BY_CELL_ID: dict[str, str] = {
 }
 
 
+class RealPageProfile(NamedTuple):
+    """CC-LAB-0245 (FR-LAB-166, Browsable Labs Lane 5): how one real ForgeCart
+    URL is presented in a browser. Keyed by URL in
+    :data:`_REAL_PAGE_PROFILES` -- so two twins sharing a URL would share one
+    profile and still differ only in their transform region (BUG-0027).
+
+    * ``kind`` -- ``"page"`` (server-rendered HTML in the site layout) or
+      ``"api"`` (a genuine machine-to-machine JSON endpoint that keeps its wire
+      contract and gets a client page), per ``docs/LAB_BROWSABLE_APPS_PLAN.md``'s
+      page-vs-api refinement; justified in the plan's §1e.
+    * ``get_page`` -- a checked-in skeleton ``controller#action`` that answers
+      ``GET`` on the same URL (a form page for a POST page, a ``fetch()`` client
+      page for an api). ``None``: the cell itself serves GET.
+    * ``result_template`` -- the skeleton view a POST page's sink renders its
+      result into (inside the layout) instead of its default JSON tail.
+    * ``page_title`` -- the ``<title>``/heading for a view-rendering cell.
+    """
+
+    kind: str
+    get_page: str | None = None
+    result_template: str | None = None
+    page_title: str | None = None
+
+
+#: CC-LAB-0245: the §1e page/api classification, in code (pinned to the plan's
+#: table by ``tests/test_labgen_ruby_rails_browsable.py``).
+_REAL_PAGE_PROFILES: dict[str, RealPageProfile] = {
+    "/search": RealPageProfile(kind="page", page_title="Search results"),
+    "/webhooks/orders/create": RealPageProfile(kind="api", get_page="webhooks#console"),
+    "/webhooks/customers/update": RealPageProfile(kind="api", get_page="webhooks#console"),
+    "/admin/customers/update": RealPageProfile(
+        kind="page", get_page="admin#customer_form", result_template="admin/customer_updated",
+    ),
+    "/admin/products/import": RealPageProfile(
+        kind="page", get_page="admin#product_import_form", result_template="admin/product_import_result",
+    ),
+}
+
+
+class AbsentInput(NamedTuple):
+    """CC-LAB-0245 (PA-0053/PA-0054): one named request input a shape reads,
+    and its **declared** absent-input behavior.
+
+    * ``kind`` -- ``"default"`` (an absent input takes ``default``) or
+      ``"required_4xx"`` (an absent/blank input is Rails' own handled 400,
+      ``ActionController::ParameterMissing``, raised before any transform or
+      sink runs).
+    * ``construct`` -- the exact Ruby text the rendered controller must contain
+      for this declaration (checked offline over every route by
+      :func:`absent_input_violations`).
+    """
+
+    name: str
+    location: str  # "query" | "body" | "header" | "raw_body"
+    kind: str  # "default" | "required_4xx"
+    default: str | None
+    construct: str
+
+
+class ShapeAbsentInput(NamedTuple):
+    inputs: tuple[AbsentInput, ...]
+    #: The status a bare request (the route's own verb, no query, no body, no
+    #: extra headers) must return -- asserted exactly by the live sweep (R7),
+    #: never only "< 500".
+    bare_status: int
+
+
+#: CC-LAB-0245 §2d: every named input every shape reads, with its declared
+#: absent-input behavior. Per shape (never per page): a shape's source region
+#: must be byte-identical across twins.
+_ABSENT_INPUT_BY_SHAPE: dict[tuple[str, str], ShapeAbsentInput] = {
+    # A storefront search page with no query shows its empty results page.
+    ("xss", "html_body"): ShapeAbsentInput(
+        inputs=(AbsentInput("q", "query", "default", "", 'params.fetch(:q, "")'),),
+        bare_status=200,
+    ),
+    # The strong-parameters root: Rails' own handled 400 when absent (unchanged).
+    ("mass_assignment", "orm_entity_bulk_assign"): ShapeAbsentInput(
+        inputs=(AbsentInput("user", "body", "required_4xx", None, "params.require(:user)"),),
+        bare_status=400,
+    ),
+    # No meaningful default import payload; before CC-LAB-0245 an absent value
+    # reached `YAML.*_load` as nil and the sink's catch-all rescue hid it (R7).
+    ("insecure_deserialization", "object_deserialization"): ShapeAbsentInput(
+        inputs=(AbsentInput("yaml_payload", "body", "required_4xx", None, "params.require(:yaml_payload)"),),
+        bare_status=400,
+    ),
+    # An absent signature header or body is "" (never nil) and fails to verify.
+    ("webhook_signature", "webhook_signature_verification"): ShapeAbsentInput(
+        inputs=(
+            AbsentInput(
+                "X-Shopify-Hmac-SHA256", "header", "default", "",
+                'request.headers["X-Shopify-Hmac-SHA256"].to_s',
+            ),
+            AbsentInput("<raw body>", "raw_body", "default", "", "request.body.read"),
+        ),
+        bare_status=401,
+    ),
+}
+
+
+def _named_inputs_read(shape: tuple[str, str]) -> set[tuple[str, str]]:
+    """Every ``(name, location)`` input a shape's modules actually read,
+    derived from the module set and shape context -- not from the
+    declaration table, so a missing declaration is detectable."""
+    modules = _MODULE_SET_BY_SHAPE[shape]
+    ctx = _SHAPE_CTX[shape]
+    read: set[tuple[str, str]] = set()
+    if modules.source == "get_param":
+        read.add((ctx["param_name"], "query"))
+    elif modules.source == "post_param":
+        read.add((ctx["param_name"], "body"))
+    elif modules.source == "all_params_nested":
+        read.add((ctx["resource_name"], "body"))
+    elif modules.source == "raw_request_body":
+        read.add(("<raw body>", "raw_body"))
+    if modules.sink == "webhook_signature_verification":
+        read.add((ctx["header_name"], "header"))
+    return read
+
+
+def absent_input_violations(
+    cell: Cell,
+    *,
+    declarations: dict[tuple[str, str], ShapeAbsentInput] | None = None,
+    controller_source: str | None = None,
+) -> list[str]:
+    """PA-0054 part 1 (CC-LAB-0245 O1): every named input ``cell``'s shape
+    reads has a declared absent-input behavior, and the rendered controller
+    contains that declaration's construct and no bare ``params[:name]`` read
+    of it. Returns human-readable violations (empty means compliant).
+    ``declarations``/``controller_source`` are injectable so the check's own
+    adversarial self-test (O1-neg) can prove it fails."""
+    table = _ABSENT_INPUT_BY_SHAPE if declarations is None else declarations
+    shape = (cell.vuln_class, cell.sink_context.family)
+    if controller_source is None:
+        rendered = RailsEmitter().render(cell)
+        controller_source = next(f.content.decode("utf-8") for f in rendered if f.role == "controller")
+    # Code lines only: a construct named in a comment proves nothing, and a
+    # comment mentioning `params[:x]` is not a bare read.
+    controller_source = "\n".join(
+        line for line in controller_source.splitlines() if not line.lstrip().startswith("#")
+    )
+    violations: list[str] = []
+    declared = table.get(shape)
+    declared_by_key = {(i.name, i.location): i for i in (declared.inputs if declared else ())}
+    for name, location in sorted(_named_inputs_read(shape)):
+        decl = declared_by_key.get((name, location))
+        if decl is None:
+            violations.append(f"{cell.cell_id}: input {name!r} ({location}) has no declared absent-input behavior")
+            continue
+        if decl.construct not in controller_source:
+            violations.append(f"{cell.cell_id}: declared construct {decl.construct!r} not in the rendered controller")
+        if location in ("query", "body") and f"params[:{name}]" in controller_source:
+            violations.append(f"{cell.cell_id}: bare params[:{name}] read of a declared input")
+    return violations
+
+
+def bare_request_status_for(cell: Cell) -> int:
+    """The declared status of a bare request (the route's own verb) to ``cell``."""
+    return _ABSENT_INPUT_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)].bare_status
+
+
+def real_page_profile_for(cell_id: str) -> RealPageProfile | None:
+    return _REAL_PAGE_PROFILES.get(url_path_for(cell_id)) if cell_id in _REAL_PAGE_URL_BY_CELL_ID else None
+
+
+def _ruby_string_literal(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9 _.,:/-]*", value):
+        raise ValueError(f"ruby_rails refuses to emit {value!r} as a string literal (unexpected characters)")
+    return f'"{value}"'
+
+
 def url_path_for(cell_id: str) -> str:
     """The URL a cell is served at. A Phase C real-page cell
     (:data:`_REAL_PAGE_URL_BY_CELL_ID`) gets its real, coherent app URL;
@@ -265,10 +448,31 @@ class RailsEmitter(Emitter):
         controller_class = _controller_class_for(cell.cell_id)
         view_name = _view_name_for(modules.action)
 
+        # CC-LAB-0245: the page profile (real ForgeCart URLs only) and the
+        # shape's declared absent-input behavior. Every key is always defined
+        # (the module environment is StrictUndefined).
+        profile = real_page_profile_for(cell.cell_id)
+        declared = _ABSENT_INPUT_BY_SHAPE.get(shape)
+        if declared is None:
+            raise ValueError(
+                f"{cell.cell_id}: shape {shape!r} declares no absent-input behavior "
+                "(_ABSENT_INPUT_BY_SHAPE, PA-0053/PA-0054)"
+            )
+        source_input = next(
+            (i for i in declared.inputs if i.location in ("query", "body")), None
+        )
         ctx: dict[str, Any] = {
             "method_name": modules.action,
             "view_name": view_name,
             **_SHAPE_CTX[shape],
+            "absent_kind": source_input.kind if source_input else None,
+            "default_rb": (
+                _ruby_string_literal(source_input.default)
+                if source_input is not None and source_input.default is not None
+                else None
+            ),
+            "page_title": profile.page_title if profile else None,
+            "result_template": profile.result_template if profile else None,
         }
 
         source_result = SOURCES[modules.source].render(ctx)
@@ -360,10 +564,13 @@ class RailsEmitter(Emitter):
         the accumulator category lives outside a per-cell ``render()``
         return value)."""
         modules = _MODULE_SET_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)]
+        profile = real_page_profile_for(cell.cell_id)
         return self._route_accumulator.fragment_for_cell(
             cell_id=cell.cell_id,
             controller_name=controller_name_for(cell.cell_id),
             url_path=url_path_for(cell.cell_id),
             method=cell.route.method,
             action=modules.action,
+            # CC-LAB-0245: a real page's GET form/client page on the same URL.
+            get_page=profile.get_page if profile else None,
         )

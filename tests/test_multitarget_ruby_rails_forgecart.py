@@ -97,6 +97,20 @@ def test_target_spec_runs_run_auto_against_a_real_booted_rails_target() -> None:
             f"expected at least the real /search reflected-XSS case confirmed; "
             f"report={report.as_dict()}"
         )
+        print("forgecart report:", report.as_dict(), "matched", report.matched,
+              "missed", report.missed, "false_alarms", report.false_alarms)
+        # CC-LAB-0245 R5/R11 (Browsable Labs Lane 5), pinned from measurement:
+        # detection did not regress (FCART-0001 still matched; the secure
+        # webhook twin FCART-0003 still a true negative), and the pre-change
+        # false alarm `/admin/customers/update:user[role]:xss-reflected` --
+        # ReflectedXssStrategy confirming on the old JSON echo of `role` --
+        # is gone, because the page now renders every echoed value
+        # ERB-escaped (R5), so no reflected-XSS break-out survives.
+        # FCART-0002/0004/0005 stay false negatives by design (their
+        # strategies fail closed on these shapes; plan §1h).
+        assert report.matched == ["FCART-0001"], report.matched
+        assert report.tn == 1, report.as_dict()
+        assert report.fp == 0 and report.false_alarms == [], report.false_alarms
 
         summary = transfer_summary(outcomes)
         assert summary["targets"] == 1

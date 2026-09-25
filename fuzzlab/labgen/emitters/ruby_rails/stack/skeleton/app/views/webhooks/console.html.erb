@@ -1,0 +1,45 @@
+<%# CC-LAB-0245: the shared fetch() client page for both webhook receivers
+    (api). Reads no request data and never embeds or computes the webhook
+    secret (plan R6), so both topics serve a byte-identical page. The script
+    sends no Accept override (so Rails' error responses to it resolve to HTML,
+    plan R2) and parses the response only inside a guard (O5b). %>
+<% content_for :title, "Webhook test delivery - ForgeCart" %>
+<h1>Webhook test delivery</h1>
+<p>Replay a webhook delivery against this receiver: paste the raw JSON body
+and the <code>X-Shopify-Hmac-SHA256</code> signature from the delivery log.</p>
+<p>Receiver: <code id="endpoint"></code></p>
+<form id="webhook-form">
+  <label for="payload">Raw JSON body</label>
+  <textarea id="payload" name="payload" rows="8">{"id": 1}</textarea>
+  <label for="signature">X-Shopify-Hmac-SHA256</label>
+  <input type="text" id="signature" name="signature">
+  <p><button type="submit">Send delivery</button></p>
+</form>
+<pre id="result"></pre>
+<script>
+(function () {
+  var endpoint = window.location.pathname;
+  document.getElementById("endpoint").textContent = endpoint;
+  document.getElementById("webhook-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Hmac-SHA256": document.getElementById("signature").value
+      },
+      body: document.getElementById("payload").value
+    }).then(function (response) {
+      return response.text().then(function (text) {
+        var shown = text;
+        try {
+          shown = JSON.stringify(JSON.parse(text), null, 2);
+        } catch (err) {
+          shown = text;
+        }
+        document.getElementById("result").textContent = response.status + "\n" + shown;
+      });
+    });
+  });
+})();
+</script>

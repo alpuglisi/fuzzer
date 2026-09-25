@@ -5,7 +5,7 @@
     { "url": "/search", "method": "GET", "param": "q", "location": "query", "rendering": "server" },
     { "url": "/webhooks/orders/create", "method": "POST", "param": "X-Shopify-Hmac-SHA256", "location": "header", "rendering": "server-json" },
     { "url": "/webhooks/customers/update", "method": "POST", "param": "X-Shopify-Hmac-SHA256", "location": "header", "rendering": "server-json" },
-    { "url": "/admin/customers/update", "method": "POST", "param": "user[role]", "location": "body", "rendering": "server-json" },
-    { "url": "/admin/products/import", "method": "POST", "param": "yaml_payload", "location": "body", "rendering": "server-json" }
+    { "url": "/admin/customers/update", "method": "POST", "param": "user[role]", "location": "body", "rendering": "server" },
+    { "url": "/admin/products/import", "method": "POST", "param": "yaml_payload", "location": "body", "rendering": "server" }
   ]
 }
