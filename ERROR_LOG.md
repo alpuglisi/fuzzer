@@ -18,6 +18,23 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `labctl.sh down` silently left an `apps`-profile stack running (fixed, BUG-0057/PA-0059)
+
+- **Symptom:** `PFF_PROFILE=apps ./labctl.sh down`, run right after Lane 7 Gate F's
+  required full-profile boot, printed a page of podman-compose "container state
+  improper"/"network is being used" errors but exited as if successful, leaving all 11
+  containers and 10 dedicated networks running.
+- **Root cause:** two independent gaps -- `podman compose down` returns exit code 0 even
+  when it fails to remove containers (so `down`'s `if ! down; then force-clean` never
+  triggered), and the shared `_force_clean` helper's own container/network lists had never
+  been updated to include the 10 new Lane 7 app services in the first place.
+- **Remediation:** `down` now checks real post-state (`podman ps -a`) instead of trusting
+  the wrapped command's exit code, and `_force_clean`'s lists now cover all 13 containers
+  and 10 dedicated networks. See `docs/bugs/BUG-0057-labctl-down-apps-profile-not-self-healing.md`.
+- **Status:** Fixed.
+
+---
+
 ## 2026-09-25 — LAB: `spring_boot` (ReelQueue) POST routes crashed on a bare POST — PA-0054's GET-only sweep never exercised them (fixed, BUG-0054/PA-0056)
 
 - **Symptom:** a bare `POST` (no multipart part / no query string) of

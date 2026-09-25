@@ -829,3 +829,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   are unified, and the shared S15 check validates membership, that
   reconciliation is flagged to Lane 7 (`CC-LAB-0247`). (from BUG-0056)
 
+- **PA-0059** — Strengthens `PA-0018` (container-lifecycle self-heal must route through
+  the one shared `_force_clean` helper). `PA-0018` fixed *where* self-heal must run but not
+  *how its trigger is detected* or *how its own data stays current*, and both gaps let the
+  same "self-heal must actually happen" bug class recur a third time (`BUG-0057`, a
+  wedged `apps`-profile stack left running by `labctl.sh down`):
+  1. **Never trust a wrapped compose command's own exit code as the sole failure signal.**
+     `podman compose down` returned exit 0 while printing per-container/per-network
+     removal errors and leaving the whole stack running. A container-lifecycle operation's
+     self-heal must additionally check **real post-state** (e.g. `podman ps -a` for any
+     leftover project container) before concluding it succeeded.
+  2. **A shared self-heal helper's own resource-name data is a hand-maintained duplicate
+     of `compose.yaml`'s service list and must be swept in the same change that adds or
+     removes a compose service** (PA-0002 applied to data, not just logic) — flagged as a
+     candidate to derive `_force_clean`'s container/network lists from `compose.yaml`
+     directly the next time this file is touched for that reason, rather than continuing
+     to hand-list them. (from BUG-0057)
+

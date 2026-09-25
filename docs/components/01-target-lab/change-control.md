@@ -3,6 +3,244 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0247 — Browsable labs Lane 7: compose/labctl integration, all 10 apps (2026-09-25, FR-LAB-170/FR-LAB-171, `docs/LAB_LANE7_INTEGRATION_PLAN.md`)
+
+**Status: plan converged 3/3 on round 3 (0 accuracy/adequacy fixes needed); implemented
+Gates A-G, complete 2026-09-25.** Gates A-C were built in a cloud sandbox with no real
+Docker/Podman daemon (`docker` CLI present, daemon start blocked by a sandbox `ulimit`
+restriction with no workaround); a handoff document
+(`docs/LAB_LANE7_GATES_D_TO_G_HANDOFF.md`) carried Gates D-G to a session with real
+Podman (this host has no `docker` binary at all -- `podman`/`podman compose` used
+throughout as the drop-in equivalent the plan itself allows).
+
+Condensed from `docs/LAB_LANE7_INTEGRATION_PLAN.md` (full detail: §1 scope, §2 design
+a-i, §3's 17-item risk register, §4 test design, §5 gated sequencing, §6 deliverables);
+this entry is its change-control-template compression plus the real, live Gate D-G
+results the plan's own draft could not have.
+
+- **Change:** integrates every app built by Lanes 1-6 into one containerized,
+  browsable, cross-app-verified lab, in 7 gates:
+  - **Gate A:** the `go_net_http` S13/R3 decision finalized (flag-and-defer, see Risk
+    S13 below) and the shared strict-xfail-sentinel rule added to
+    `docs/MULTI_AGENT_ORCHESTRATION.md` §6.
+  - **Gate B:** `assemble_django_app`/`assemble_go_net_http_app`/`assemble_ruby_rails_app`
+    (mirroring the existing `assemble_spring_boot_app`), each lifted verbatim from that
+    stack's own live-boot harness's `_assemble()` (PA-0027), each with a dual-path proof
+    test (`tests/test_lab_lane7_assemble_functions.py`: the new function's output re-boots
+    correctly through that stack's own existing harness).
+  - **Gate C:** the absent-input vocabulary reconciliation
+    (`fuzzlab/labgen/absent_input.py`; `go_net_http`'s route table renamed onto
+    the shared core), plus Lane 4's S15 cross-emitter check extended to validate real
+    membership, not merely "some declaration-shaped dict exists."
+  - **Gate D:** a real, individually build-and-boot-verified Dockerfile for every one of
+    the 10 apps (`lab/web.Dockerfile`'s `ARG APP` passthrough for the `php_laravel` 3;
+    new `web-django`/`web-go`/`web-spring`/`web-rails`/`web-node` Dockerfiles; the two
+    pre-existing, never-before-built `node_express`/`python_fastapi` scaffold
+    Dockerfiles built-and-booted standalone, S10).
+  - **Gate E:** all 10 apps wired into `lab/compose.yaml` behind the `apps` profile,
+    each on its own dedicated network (S17); `labctl.sh`'s `PFF_PROFILE` comma-split
+    multi-profile support (S5).
+  - **Gate F:** the one required manual full-profile boot (`PFF_PROFILE=apps
+    ./labctl.sh up`, all 11 services, resource footprint measured, network isolation
+    verified live, `SECRET_KEY_BASE` rotation confirmed) plus the automated cross-app
+    navigability run (`tests/test_lab_cross_app_navigability.py`).
+  - **Gate G:** this entry, the runbook, `docs/ARCHITECTURE.md`, `FR-LAB-170`/`171`,
+    the `docs/LAB_BROWSABLE_APPS_PLAN.md` row and naming fix, and the bug protocol
+    below.
+- **Impact (other components / project):**
+  - **LAB only** for code: 6 new/amended Dockerfiles, `lab/compose.yaml`,
+    `lab/labctl.sh`, `lab/docker-entrypoint-rails.sh`, 3 emitter modules
+    (`go_net_http`'s skeleton `main.go`, `node_express`'s route accumulator +
+    `stack_env.py`, both additive), 1 new public assemble function
+    (`assemble_meadowmart_app`).
+  - **No ground-truth edits.** No `injection-points.json`/`labels.json`/
+    `expectedresults.csv` file touched by this lane.
+  - **Every existing stack-specific live-boot/navigability test is unaffected**: this
+    lane's own container/compose layer is a new consumer of each stack's existing
+    assembly/harness code, never a modification of it (except the additive `HOST` env
+    var on `go_net_http`/`node_express`, byte-for-byte unchanged default behavior for
+    every existing caller, confirmed by re-running both stacks' full live-boot/
+    navigability suites green after the change).
+  - **Numbering-collision contingency:** not triggered. `CC-LAB-0247` and
+    `FR-LAB-170`-`171` (a single entry, two requirements) sufficed for the whole lane;
+    no other lane's numbers needed a bump (see numbering check-back under
+    Effectiveness).
+  - **Project-level:** `PA-0059` added (supersedes `PA-0018`); `docs/ARCHITECTURE.md`,
+    `docs/ON_HOST_RUNBOOK.md` (new Part A2), `docs/components/01-target-lab/requirements.md`,
+    `docs/LAB_BROWSABLE_APPS_PLAN.md` all updated.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.** Full
+  register in the plan's §3, 17 items:
+  1. **S1** -- a per-stack assemble function might not produce a live-bootable tree.
+     Mitigated: Gate B's dual-path test re-boots each new function's own output through
+     that stack's existing harness; all 4 (`django`/`go_net_http`/`ruby_rails`,
+     `spring_boot` pre-existing) pass.
+  2. **S2** -- renaming `go_net_http`'s absent-input values is a behavior-preserving
+     refactor with real regression risk on an already-shipped lane. Mitigated: full
+     before/after suite parity (S9 below).
+  3. **S3** -- loopback-only discipline across the 10 new compose services. Mitigated:
+     `tests/test_lab_compose_network_isolation.py` asserts every `ports:` entry starts
+     `127.0.0.1:`; verified live via `podman compose --profile apps config`.
+  4. **S4** -- a real production-mode boot may behave differently from the
+     development-mode boot every existing live-boot test proved correct. **Confirmed
+     true, and more consequential than the plan anticipated**: Rails' checked-in
+     `database.yml` has no real `production:` database path at all (fixed via
+     `DATABASE_URL` in the entrypoint); a container's served process binding
+     `127.0.0.1` (correct for development-mode direct-host-process boots) is
+     unreachable via the host's port-publish path entirely (fixed via the additive
+     `HOST` env var, `go_net_http`/`node_express`; Django's/Rails' Dockerfile
+     CMD/entrypoint bind `0.0.0.0` directly; Spring already defaults to `0.0.0.0`, the
+     plan's own "force `server.address=127.0.0.1`" assumption was wrong and is
+     corrected here). Gate F's real compose-mode boot (not just each stack's
+     development-mode live-boot harness) is exactly what caught both.
+  5. **S5** -- `PFF_PROFILE`'s comma-split could break the existing single-value
+     `desync` case. Mitigated: `tests/test_lab_labctl_profile_parsing.py` (extracts and
+     exercises `labctl.sh`'s own real logic by sentinel comment, not a reimplementation)
+     plus a live `PFF_PROFILE=desync ./labctl.sh up` boot, unchanged.
+  6. **S6** -- port collisions with anything else on 8082-8091 on a shared host. Out of
+     this lane's control beyond following the existing reserved table exactly (no new
+     numbers invented); no collision occurred in this session.
+  7. **S7** -- a full compose boot might not be exercisable in the build environment at
+     all. Confirmed empirically **false** for Gate D-G's own session (real Podman,
+     `docker` CLI absent) -- resolved by using `podman`/`podman compose` throughout, the
+     plan's own allowed fallback.
+  8. **S8** -- `assemble_<stack>_app`'s cell-selection logic could drift from each
+     stack's own existing selection code. Mitigated: every new function reuses that
+     stack's exact existing manifest-glob + `emitter.supports()` walk (PA-0027), never a
+     second hand-written copy.
+  9. **S9** -- `go_net_http` rename verification needs an explicit before/after
+     evidence artifact, not folded into a generic bullet. **Evidence:** Gate C's own
+     commit recorded the full non-slow suite plus `go_net_http`'s own `slow`
+     live-boot/navigability suites passing identically before and after the rename (see
+     Gate C's own commit for the exact counts; re-confirmed again in Gates D/F/F2's own
+     suite runs in this session, all green, `go` toolchain installed fresh this
+     session to run them for real rather than skip them).
+  10. **S10** -- the two checked-in scaffold Dockerfiles were written speculatively,
+      never built or booted. Fixed: both built and booted live in Gate D (`node_express`
+      standalone against a real assembled MeadowMart tree; `python_fastapi`'s generic
+      sample standalone) -- **and this caught a real defect**: `node_express`'s pinned
+      base-image digest resolved to `linux/ppc64le`, not `linux/amd64` (`podman pull`
+      warned explicitly), re-pinned live via `skopeo inspect` against the current
+      manifest list.
+  11. **S11** -- this lane could balloon into a de facto Lane 8. Did not occur: the
+      1-Dockerfile(-group)-per-stack / 1-function-per-stack shape held exactly as
+      designed; no split was needed, so no other lane needed a number bump.
+  12. **S12** -- stale "Netflix clone"/"Expedia clone" naming in the port table. Fixed:
+      `docs/LAB_BROWSABLE_APPS_PLAN.md`'s port table now reads "ReelQueue (Netflix
+      clone)"/"WanderFare (Expedia clone)", matching `CC-LAB-0244`'s own rename and
+      `LoopCast (Twitch clone)`'s existing row style.
+  13. **S13** -- `go_net_http`'s own S7 digit-check blind spot (a backtick raw string
+      literal never matched by the double-quote-only regex; a real, currently-
+      undetected `max-width:100%` 3-digit run already sits in `site.go`'s CSS).
+      **Decided at Gate A: flag-and-defer**, unchanged by this lane (it touches an
+      already-merged lane's file outside this lane's own stated scope). Recorded here
+      and in `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 7 row as a tracked follow-up: the
+      next unreserved `CC-LAB` number, when the orchestrator allocates one, extends
+      `tests/test_labgen_go_net_http_browsable.py`'s S7 test to scan backtick literals
+      too, then fixes the resulting hit.
+  14. **S14** -- F1/F2's pinned strict-xfails must not be silently disturbed. Confirmed
+      unchanged: `tests/test_labgen_node_express_browsable.py`/
+      `tests/test_labgen_python_fastapi_browsable.py`'s existing strict-xfail tests
+      re-run still `xfail` (not `xpass`) in every full-suite run this session.
+  15. **S15** -- a real `RAILS_ENV=production` boot needs `SECRET_KEY_BASE`, never
+      hardcoded (D12). Delivered exactly as the plan's §2h designed: generated fresh by
+      `lab/docker-entrypoint-rails.sh` at every container start, verified live to differ
+      across two separate restarts of the same container (Gate D standalone, and again
+      inside the real compose-managed stack in Gate F).
+  16. **S16** -- resource contention across up to 11 real containers on one host.
+      Measured live (Gate F, `podman stats --no-stream`, all 12 containers up): ~1.05GB
+      combined memory on a 16.5GB-limit host, no starvation, no crash-looping. No
+      per-service `mem_limit`/`deploy.resources.limits` added -- not needed at the
+      measured scale.
+  17. **S17** -- compose's default same-project network would let one app reach
+      another's container by service-name DNS despite loopback-only host ports, a real
+      concern given ReelQueue's genuine SSRF
+      (`/api/content/thumbnail-import`). Mitigated: each app on its own dedicated
+      network (`lab/compose.yaml`), verified both offline
+      (`tests/test_lab_compose_network_isolation.py`) and live (Gate F: from inside
+      `circlefeed`, `pictrail`/`loopcast` by service name both failed to resolve/
+      connect; same from `reelqueue` to `forgecart`).
+- **Deliverables:** (mirrors the plan's own §6 checklist)
+  - [x] `assemble_django_app`/`assemble_go_net_http_app`/`assemble_ruby_rails_app`, each
+        with its dual-path test (Gate B).
+  - [x] `lab/web.Dockerfile`/`lab/web-spring.Dockerfile`'s `ARG APP` passthrough, plus 3
+        further new Dockerfiles (`web-django`/`web-go`/`web-rails`), plus the 2 existing
+        scaffold Dockerfiles verified live and copied into `lab/` (Gate D, S10).
+  - [x] `lab/compose.yaml`: 10 new services, loopback-only, `profiles: ["apps"]`,
+        reserved ports, each on its own dedicated network (Gate E, S17).
+  - [x] `lab/labctl.sh`: multi-profile `PFF_PROFILE` support (Gate E, S5).
+  - [x] `SECRET_KEY_BASE` ephemeral generation for `ruby_rails`'s compose service,
+        D12-compliant (Gate E/D, S15).
+  - [x] Absent-input vocabulary reconciliation with `go_net_http`'s explicit before/
+        after suite-outcome evidence (Gate C, S9) + Lane 4's S15 module extended to
+        validate membership.
+  - [x] `node_express`/`ruby_rails` production-mode compose serving decisions recorded
+        and verified (Gate E); F1/F2's xfails re-confirmed still `xfail` (Gate F, S14).
+  - [x] One manual, recorded full-profile boot of all 10 services together, with
+        resource footprint (S16) and network isolation (S17) measured/verified live
+        (Gate F).
+  - [x] Cross-app navigability run (Gate F, `tests/test_lab_cross_app_navigability.py`,
+        10/10 passing).
+  - [x] `docs/MULTI_AGENT_ORCHESTRATION.md`'s shared strict-xfail-sentinel paragraph
+        (Gate A).
+  - [x] Runbook update (`docs/ON_HOST_RUNBOOK.md` Part A2) + `docs/ARCHITECTURE.md`
+        paragraph + `FR-LAB-170`/`171` + `docs/LAB_BROWSABLE_APPS_PLAN.md` row 7 +
+        naming fix (Gate G, S12).
+  - [x] S13's decision recorded (flag-and-defer, Gate A).
+  - [x] Full non-slow suite green, counts recorded; every affected stack's own `slow`
+        suite re-run green.
+  - [x] Bug protocol: `BUG-0057`/`PA-0059` used (see Effectiveness).
+- **Effectiveness (recorded 2026-09-25, after implementation):**
+  - **Gate D:** all 7 Dockerfiles (`web`, `web-django`, `web-go`, `web-spring` x3 apps,
+    `web-rails`, `web-node`, plus `web-fastapi` standalone) built and boot-verified
+    live, `curl /` -> 200 for every one. Real defect found: `node_express`'s digest was
+    pinned to the wrong CPU architecture (`linux/ppc64le`); fixed in both the scaffold
+    Dockerfile and the independently-hand-maintained `stack_env.py` copy (a real
+    PA-0027 duplication the fix also flagged).
+  - **Gate E:** `podman compose --profile apps config` confirmed every new service on
+    its own distinct network with a `127.0.0.1:` port bind; `PFF_PROFILE=desync
+    ./labctl.sh up` (pre-existing single-value case) booted unchanged; the new combined
+    `apps,desync` case verified via `config --services` resolving all 13 services (the
+    full build was deferred to Gate F's own required boot, avoiding a redundant
+    duplicate build).
+  - **Gate F (F1):** all 11 services up; all 10 new apps `curl /` -> 200; `podman
+    stats`: ~1.05GB combined memory; network isolation confirmed (cross-app service-name
+    resolution fails); `SECRET_KEY_BASE` confirmed different across a real container
+    restart. Real defect found and fixed: `PFF_PROFILE=apps ./labctl.sh down` silently
+    left the whole stack running (`BUG-0057`/`PA-0059`, a third recurrence of
+    `BUG-0013`/`BUG-0017`'s container-lifecycle self-heal class) -- `podman compose
+    down`'s own exit code is not trustworthy, and `_force_clean`'s container/network
+    lists had not been extended for the 10 new services; both fixed, verified live.
+  - **Gate F (F2):** `tests/test_lab_cross_app_navigability.py`, real output: 10/10
+    apps booted and crawled successfully (circlefeed rows=10, huddlehub rows=8, booking
+    rows=8, pictrail rows=21, loopcast rows=16, reelqueue rows=27, trackernest rows=8,
+    wanderfare rows=7, forgecart rows=12, meadowmart rows=14; 74.85s). Real environment
+    gaps found and fixed to get this to run (not fuzzlab code defects): `maven` and
+    `composer` were not installed (`dnf install`); Rails' `bundle install` failed on
+    native-extension compilation for a missing `ruby-devel` (`dnf install ruby-devel
+    gcc make redhat-rpm-config`) -- ordinary host-toolchain gaps, not defects in this
+    repo's own code.
+  - **Full non-slow suite**, run repeatedly across Gates D-F as toolchains were added
+    (each run strictly improving or holding, never regressing): final count
+    **2585 passed, 1 failed, 16 skipped, 250 deselected, 5 xfailed**. The 1 failure
+    (`test_labgen_secret_scanner.py::test_scanner_flags_known_leaky_secrets[should_flag/id_rsa]`)
+    is pre-existing and unrelated to this lane -- this sandbox had no `gitleaks` binary
+    at all before this session (installed via `dnf`, Fedora's packaged 8.28.0), and that
+    version's private-key detection rule does not fire on this test's synthetic id_rsa
+    fixture (a secret-scanner-component/gitleaks-version gap, not touched by this lane,
+    flagged for that component's own owner).
+  - **Numbering check-back:** the single `CC-LAB-0247` (and `FR-LAB-170`-`171`)
+    sufficed for the whole lane. No other lane's `CC-LAB`/`FR-LAB`/`BUG`/`PA` numbers
+    needed a bump; `BUG-0057`/`PA-0059` (pre-reserved for this lane) were both used, as
+    the plan anticipated might be needed.
+  - **Handoff-document corrections** (Gates D-G's own session, real Docker/Podman
+    available for the first time): the in-container-vs-host-side loopback-bind
+    assumption (S4 above); `lab/web-spring.Dockerfile`'s `server.address=127.0.0.1`
+    assumption (Spring already defaults to `0.0.0.0`; not forced); Rails' `database.yml`
+    production-path gap; F2's own text said "php_laravel's 4 apps" where the port table
+    (and this lane's actual scope) has 3 (CircleFeed/Huddle Hub/Booking; PFF itself is
+    the pre-existing default `web` service, not part of the `apps` profile) -- corrected
+    in `docs/LAB_LANE7_GATES_D_TO_G_HANDOFF.md` and this entry.
+
 ### CC-LAB-0244 — Browsable labs Lane 4: spring_boot TrackerNest, ReelQueue and WanderFare (2026-09-25, FR-LAB-164/FR-LAB-165, `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**

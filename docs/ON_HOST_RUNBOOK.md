@@ -55,6 +55,77 @@ live work) and the phase plans.
    ./labctl.sh reset
    ```
 
+## Part A2 — Bring up the 10 browsable apps (Lane 7, `CC-LAB-0247`)
+
+Default OFF — a plain `./labctl.sh up` (Part A) never starts these; they live behind
+the `apps` compose profile, same convention as the `desync` frontend.
+
+1. **Start them:**
+   ```bash
+   cd lab
+   PFF_PROFILE=apps ./labctl.sh up          # combine with desync: PFF_PROFILE=apps,desync
+   podman compose ps                        # or `docker compose ps` — confirm all 11 services Up
+   ```
+
+2. **Port table** (fixed; keep this in sync with `docs/LAB_BROWSABLE_APPS_PLAN.md`'s own
+   copy — one source of truth, both places cite `CC-LAB-0247`):
+
+   | App | Stack | URL |
+   |---|---|---|
+   | CircleFeed | php_laravel | http://127.0.0.1:8082/ |
+   | Huddle Hub | php_laravel | http://127.0.0.1:8083/ |
+   | Booking clone | php_laravel | http://127.0.0.1:8084/ |
+   | PicTrail | django | http://127.0.0.1:8085/ |
+   | LoopCast | go_net_http | http://127.0.0.1:8086/ |
+   | TrackerNest | spring_boot | http://127.0.0.1:8087/ |
+   | ReelQueue | spring_boot | http://127.0.0.1:8088/ |
+   | WanderFare | spring_boot | http://127.0.0.1:8089/ |
+   | ForgeCart | ruby_rails | http://127.0.0.1:8090/ |
+   | MeadowMart | node_express | http://127.0.0.1:8091/ |
+
+   (8080 = PFF, 8081 = the `desync` frontend, both unchanged.) Each app's host port env
+   var follows `PFF_WEB_PORT`'s own naming (e.g. `CIRCLEFEED_WEB_PORT`,
+   `PICTRAIL_WEB_PORT`, …) if you need to move one off its default.
+
+3. **Resource footprint** (measured 2026-09-25, `podman stats --no-stream` with all 12
+   containers up): ~1.05GB combined memory (the 3 `spring_boot` apps are the heaviest at
+   ~170-270MB each during JVM startup; every other app is under 100MB) on a 16.5GB-limit
+   host — no per-service `mem_limit` needed at this scale. CPU is a brief startup spike
+   per JVM app, then idle.
+
+4. **Network isolation (S17 — verify if you touch `compose.yaml`'s networking):** each
+   app is on its own dedicated compose network, never the default network `db`/`web`/
+   `frontend` share. From inside one app's container, another app's service name must
+   fail to resolve or connect:
+   ```bash
+   podman compose exec circlefeed sh -c "curl -m3 http://pictrail:8000/"   # must fail
+   ```
+   This matters because ReelQueue has a real SSRF (`/api/content/thumbnail-import`) —
+   network isolation is what stops it reaching another app's container, since every
+   host port is loopback-only regardless.
+
+5. **Cross-app navigability check**, two ways:
+   - **In-process** (no compose boot needed — boots each app's own live-boot harness
+     directly, `@pytest.mark.slow`):
+     ```bash
+     python3 -m pytest tests/test_lab_cross_app_navigability.py -v -s
+     ```
+   - **Manually, against a real running stack** (after step 1 above):
+     ```bash
+     for p in 8082 8083 8084 8085 8086 8087 8088 8089 8090 8091; do
+       curl -sS -o /dev/null -w "%{http_code} :$p\n" http://127.0.0.1:$p/
+     done
+     ```
+     Every line should read `200`.
+
+6. **Tear down:**
+   ```bash
+   PFF_PROFILE=apps ./labctl.sh down
+   ```
+   If `podman compose down` prints "container state improper"/"network is being used"
+   errors, `labctl.sh` already self-heals (`BUG-0057`/`PA-0059`) — re-run `./labctl.sh
+   status` afterward to confirm nothing is left running.
+
 ## Part B — Install the toolkit
 
 From the repo root, in a Python 3.11+ venv:

@@ -6183,6 +6183,77 @@ lane) can submit a payload as
   crashes `BUG-0054` documents (`/api/profiles/avatar` bare-`POST` 500 on
   both twins; `/api/content/thumbnail-import` bare-`POST` 502 on the
   vulnerable twin).
+- **FR-LAB-170** *(Browsable Labs Lane 7 -- compose/labctl/runbook
+  integration; `CC-LAB-0247`, 2026-09-25,
+  `docs/LAB_LANE7_INTEGRATION_PLAN.md`).* All 10 split-out apps across the
+  5 non-`php_laravel` stacks (PicTrail/`django`, LoopCast/`go_net_http`,
+  TrackerNest+ReelQueue+WanderFare/`spring_boot`, ForgeCart/`ruby_rails`,
+  MeadowMart/`node_express`) plus `php_laravel`'s own CircleFeed/Huddle
+  Hub/Booking, get a real, individually build-and-boot-verified Dockerfile
+  each (`lab/web.Dockerfile`'s `ARG APP` passthrough for the `php_laravel`
+  3; `lab/web-django.Dockerfile`, `lab/web-go.Dockerfile`,
+  `lab/web-spring.Dockerfile`, `lab/web-rails.Dockerfile`,
+  `lab/web-node.Dockerfile`), wired into `lab/compose.yaml` behind the
+  `apps` compose profile (default off, matching `desync`'s own
+  convention), and reachable via `PFF_PROFILE=apps ./labctl.sh up`
+  (`labctl.sh`'s `PROFILE_ARGS` now splits `PFF_PROFILE` on commas, one
+  `--profile` flag per entry, so profiles combine:
+  `PFF_PROFILE=apps,desync`). The generic `python_fastapi` sample
+  (`FR-LAB-169`) is deliberately excluded -- no app identity, no reserved
+  port.
+  1. **Loopback-only, per-app network isolation (S17).** Every app's
+     compose service binds its host port to `127.0.0.1` only and joins its
+     own, distinct dedicated network (`<app>-net`) -- never the implicit
+     default network `db`/`web`/`frontend` still share -- so no app can
+     reach another by service-name DNS even though every host port is
+     loopback-only (ReelQueue's real `/api/content/thumbnail-import` SSRF
+     is the concrete risk this closes). Enforced offline
+     (`tests/test_lab_compose_network_isolation.py`, parsing `compose.yaml`
+     as YAML) and verified live (from inside one app's container, another
+     app's service name fails to resolve/connect; `podman stats` measured
+     ~1.05GB combined memory across all 12 containers, no per-service
+     resource limit needed).
+  2. **In-container bind address vs. host-side loopback bind (a real,
+     live-verified correction to this lane's own original design
+     assumption).** A container's own served process must bind
+     `0.0.0.0` (or the framework default, which is already `0.0.0.0` for
+     Django's/Rails'/Spring's dev servers) -- **not** `127.0.0.1` --
+     because a host-side `-p 127.0.0.1:<host>:<container>` publish
+     forwards to the container's own non-loopback interface, never to a
+     loopback-only listener inside that container's netns (verified live
+     with a minimal test container before writing any of this lane's
+     Dockerfiles). The loopback-only guarantee is enforced entirely by the
+     host-side compose bind. `go_net_http`'s and `node_express`'s served
+     processes (whose skeleton/route-accumulator output hardcoded
+     `127.0.0.1`, correct for their own pre-existing direct-host-process
+     live-boot harnesses) gained an additive `HOST` env var, default
+     `127.0.0.1` (byte-for-byte unchanged for every existing caller);
+     their container images set `HOST=0.0.0.0`.
+  3. **Ephemeral secrets, never committed (D12).** ForgeCart's
+     `SECRET_KEY_BASE` is generated fresh by `lab/docker-entrypoint-rails.sh`
+     at every container start (`bin/rails secret`, never a literal in
+     `compose.yaml`/the Dockerfile/the repo) -- verified live to differ
+     across two restarts of the same container.
+  4. **`docs/ON_HOST_RUNBOOK.md`** documents `PFF_PROFILE=apps
+     ./labctl.sh up`, the fixed port table, the measured resource
+     footprint, the per-app network-isolation posture, and both ways to
+     run the cross-app navigability check (the in-process pytest module,
+     `FR-LAB-171`'s own; and manually via `curl` against a real running
+     stack).
+- **FR-LAB-171** *(Browsable Labs Lane 7 -- cross-app navigability run;
+  `CC-LAB-0247`, 2026-09-25).* One combined, `@pytest.mark.slow` pytest
+  module (`tests/test_lab_cross_app_navigability.py`) proves all 10 apps in
+  `FR-LAB-170` can build and boot **in the same combined run** -- reusing
+  each stack's own already-existing navigability live-boot fixture *by
+  importing it directly* (a supported pytest pattern: a fixture is resolved
+  by the attribute name visible in the collecting module's namespace,
+  wherever it was originally defined) rather than re-deriving crawl logic
+  (PA-0002/PA-0027). Each app's row is independently skip-guarded on that
+  stack's own `*_boot_available()`/network-probe function, so a host
+  missing one stack's toolchain skips only that row. Prints a per-app
+  pass/fail summary table. Does not need a real compose boot (plan §5's own
+  R2 recommendation) -- `FR-LAB-170`'s own compose services are verified
+  separately, live, in `CC-LAB-0247`'s change-control entry.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

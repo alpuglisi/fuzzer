@@ -4,6 +4,37 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 7 implemented: browsable-labs integration, all 10 apps containerized, CC-LAB-0247/FR-LAB-170/171)
+- Implemented `docs/LAB_LANE7_INTEGRATION_PLAN.md` (`CC-LAB-0247`, Gates
+  A-G) so every app built by Lanes 1-6 is now a real, individually
+  build-and-boot-verified container, wired into `lab/compose.yaml` behind
+  a new `apps` compose profile (`PFF_PROFILE=apps ./labctl.sh up`), each
+  on its own dedicated network (S17 -- ReelQueue's real SSRF is the
+  concrete risk this closes). `labctl.sh` gained multi-profile support
+  (`PFF_PROFILE` comma-split). Verified live (real Podman, this host has
+  no `docker` binary): all 11 services up, ~1.05GB combined memory,
+  network isolation confirmed, ForgeCart's `SECRET_KEY_BASE` confirmed
+  ephemeral across restarts, and a new combined
+  `tests/test_lab_cross_app_navigability.py` proving all 10 apps boot and
+  crawl together in one run (10/10 passing).
+- Real defects found and fixed along the way, only visible once a real
+  Docker/Podman daemon was available: `node_express`'s pinned base-image
+  digest resolved to the wrong CPU architecture (`linux/ppc64le`, not
+  `linux/amd64`); a container's served process must bind `0.0.0.0`
+  internally, never `127.0.0.1` (the lane's own original design
+  assumption was wrong -- the loopback-only guarantee is the host-side
+  compose bind); Rails' checked-in `database.yml` had no real
+  `production:` database path; and `labctl.sh down` silently left an
+  `apps`-profile stack running (`BUG-0057`/`PA-0059`, a third recurrence
+  of `BUG-0013`/`BUG-0017`'s container-lifecycle self-heal class --
+  `podman compose down`'s own exit code is not trustworthy).
+- Docs: `docs/ON_HOST_RUNBOOK.md` (new Part A2), `docs/ARCHITECTURE.md`,
+  `docs/components/01-target-lab/requirements.md` (`FR-LAB-170`/`171`),
+  `docs/components/01-target-lab/change-control.md` (`CC-LAB-0247`), and
+  `docs/LAB_BROWSABLE_APPS_PLAN.md` (Lane 7's row completed; the stale
+  "Netflix clone"/"Expedia clone" port-table naming fixed to
+  ReelQueue/WanderFare, S12) all updated.
+
 ## 2026-09-25 (Lane 4 implemented: TrackerNest/ReelQueue/WanderFare, `spring_boot`, browsable, CC-LAB-0244/FR-LAB-164/165)
 - Implemented `docs/LAB_LANE4_SPRING_BOOT_PLAN.md` (`CC-LAB-0244`, one entry
   covering all three `spring_boot` app identities): each gets a homepage,

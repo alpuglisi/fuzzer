@@ -994,6 +994,42 @@ tracked in the requirements files, not here.
     `tests/test_labgen_node_meadowmart_navigability_live_boot.py` crawls
     MeadowMart from `/`, and `tests/test_labgen_python_fastapi_browsable.py`
     checks the sample in-process.
+  **All 10 apps are containerized and boot together (`CC-LAB-0247`,
+  Browsable Labs Lane 7 -- integration, `FR-LAB-170`/`FR-LAB-171`):**
+  every split-out app built by Lanes 2-6 above (PicTrail, LoopCast,
+  TrackerNest/ReelQueue/WanderFare, ForgeCart, MeadowMart, plus
+  `php_laravel`'s CircleFeed/Huddle Hub/Booking) now has a real,
+  individually build-and-boot-verified Dockerfile and a `lab/compose.yaml`
+  service behind the `apps` compose profile (`PFF_PROFILE=apps
+  ./labctl.sh up`, `labctl.sh`'s `PROFILE_ARGS` now splitting
+  `PFF_PROFILE` on commas so profiles combine). Each app gets its own
+  dedicated compose network (`<app>-net`), never the implicit default
+  network `db`/`web`/`frontend` still share, so no app can reach another
+  by service-name DNS even though every host port stays loopback-only --
+  the concrete risk this closes is ReelQueue's own real
+  `/api/content/thumbnail-import` SSRF (`FR-LAB-170`). Building this
+  surfaced a real, live-verified correction to the lane's own original
+  design assumption: a container's served process must bind `0.0.0.0`
+  internally (the loopback-only guarantee comes entirely from the
+  host-side compose bind), not `127.0.0.1` as `go_net_http`'s and
+  `node_express`'s pre-existing skeletons hardcoded for their own
+  direct-host-process live-boot harnesses -- both gained an additive
+  `HOST` env var (default unchanged) rather than a behavior change for
+  their existing callers. ForgeCart's `SECRET_KEY_BASE` is generated fresh
+  by a container entrypoint script at every start, never committed (D12).
+  Gate C's absent-input vocabulary reconciliation (`go_net_http`'s route
+  table renamed onto the shared core the S15 cross-emitter check now
+  validates real membership against) landed earlier in this same lane. A
+  new combined test, `tests/test_lab_cross_app_navigability.py`
+  (`FR-LAB-171`), reuses each stack's own existing navigability live-boot
+  fixture (imported directly, never re-derived) to prove all 10 apps boot
+  together in one run, independently skip-guarded per stack's own
+  toolchain. A real self-heal defect in `labctl.sh down` (a wedged
+  `apps`-profile stack left running, since `podman compose down`'s own
+  exit code cannot be trusted and the shared `_force_clean` helper's
+  container/network lists had not been extended for the 10 new services)
+  was found and fixed live, `BUG-0057`/`PA-0059`, a third recurrence of
+  `BUG-0013`/`BUG-0017`'s "container-lifecycle self-heal" class.
   **CircleFeed (`CC-LAB-0216`), category 2's Facebook pick, landed its
   first real page** — the second app identity built on the existing
   `php_laravel` emitter (after Huddle Hub, category 3): a photo/tag-
