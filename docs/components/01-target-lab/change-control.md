@@ -43,31 +43,53 @@ reviewers + proposing agent).
   (flagged with its own recommended next `CC-LAB` number, not absorbed
   here).
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
-  Full register in the plan's §4 (R1-R7); the load-bearing ones:
-  1. *`html_body_echo` may be shared by cells beyond the 4 tracked pages.*
-     Mitigated: verify every consuming cell before changing the shared
-     template; keep the new `page_title` context key optional with a
+  Full register in the plan's §4; named here in full (R1-R7 — unlike
+  `CC-LAB-0240`'s register, none of this plan's risks are settled
+  no-risk findings, so none are omitted):
+  1. **R1** — *`html_body_echo` may be shared by cells beyond the 4 tracked
+     pages.* Mitigated: verify every consuming cell before changing the
+     shared template; keep the new `page_title` context key optional with a
      fallback so an unrelated cell's render can't break.
-  2. *The missing-id default could invalidate a test that currently depends
-     on the 500.* Mitigated: grep the full suite for such an assertion
-     before changing the source template; if found, that assertion is the
-     bug's own artifact and gets updated, not worked around.
-  3. *PFF's session-gated cells (`LABGEN-MA-0003`/`0004`) aren't covered by
-     the split-apps' R8 401-exception.* Mitigated by a concrete decision
-     rule (try an authenticated crawl via `browserauth` first; fall back to
-     an anonymous-crawl 401 assertion if it doesn't attach cleanly) with a
-     mandatory durable sign-off recorded in `requirements.md`'s new
-     `FR-LAB-159` entry — not left as an implementation-time judgment call.
-  4. *The navigability test's "100% discovered" assertion could pass
-     vacuously* (empty ground-truth load, or a crawl that silently failed
-     to start). Mitigated by an explicit guard asserting both the
-     ground-truth count and the discovered-page count are non-trivial,
-     against hard-coded expected minimums, before any per-URL assertion —
-     the same bug class `CC-LAB-0240`'s R2 already found once
-     (`mariadb.py:431`).
-  5. *Seed-data / schema parity* (SQLite vs. MariaDB `id = 1` rows;
-     `LiveBootHarness` serving a full multi-page app, not one cell) —
-     mitigated by explicit per-harness confirmation before relying on it.
+  2. **R2** — *The missing-id default could invalidate a test that currently
+     depends on the 500.* Mitigated: grep the full suite for such an
+     assertion before changing the source template; if found, that
+     assertion is the bug's own artifact and gets updated, not worked
+     around.
+  3. **R3** — *Seed-data availability* (SQLite vs. MariaDB harnesses must
+     both have an `id = 1` row in `products` and `posts`, given
+     `CC-LAB-0240`'s R6 already found a schema mismatch between them for
+     `posts`). Mitigated by explicit per-harness confirmation before
+     relying on it.
+  4. **R4** — *PFF's session-gated cells (`LABGEN-MA-0003`/`0004`) aren't
+     covered by the split-apps' R8 401-exception.* Mitigated by a concrete
+     decision rule (try an authenticated crawl via `browserauth` first;
+     fall back to an anonymous-crawl 401 assertion if it doesn't attach
+     cleanly) with a mandatory durable sign-off recorded in
+     `requirements.md`'s new `FR-LAB-159` entry — not left as an
+     implementation-time judgment call.
+  5. **R5** — *Link-only crawl vs. POST-only endpoints* (`LocalSpider`
+     follows `<a href>`/`fetch()`, never parses `<form action>`). Mitigated:
+     the shared design contract already requires every POST endpoint's URL
+     to double as its own GET-served form page and every API to have a
+     linked `fetch()` client page, so this is expected to be a non-issue —
+     verify it holds for every ground-truth URL before relying on it; fix
+     any missing link/page found, don't extend the spider.
+  6. **R6** — *The split apps' live-boot harness must serve the whole site,
+     not one cell,* for the crawl to mean anything. Mitigated: confirm
+     `LiveBootHarness._assemble()` (or the split-app equivalent) builds
+     every page of that app's manifest into one running instance before
+     assuming parity with PFF's harness.
+  7. **R7** — *Crawl depth/start point could be under- or over-set.*
+     Mitigated: measure the real link depth from `/` to every ground-truth
+     URL empirically per app, then set the test's depth cap with headroom
+     above that measured number, not a guessed default.
+  Also mitigated, folded into Deliverables rather than named as a separate
+  numbered risk: the navigability test's "100% discovered" assertion could
+  pass vacuously (empty ground-truth load, or a crawl that silently failed
+  to start) — guarded by an explicit non-trivial-count assertion on both the
+  ground-truth list and the discovered-page set before any per-URL
+  assertion, the same bug class `CC-LAB-0240`'s R2 already found once
+  (`mariadb.py:431`).
   Accepted, not mitigated: none — every identified risk has a concrete
   mitigation.
 - **Deliverables:** (copied directly from the plan's own §6, drafted for
