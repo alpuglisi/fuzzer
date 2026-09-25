@@ -1,4 +1,4 @@
-# Browsable Labs Lane 4 — spring_boot: TrackerNest, Netflix clone, Expedia clone
+# Browsable Labs Lane 4 — spring_boot: TrackerNest, ReelQueue, WanderFare
 
 Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
 (2 independent reviewer agents plus the proposing agent, after 1 revision
@@ -42,7 +42,7 @@ detection strategy must change (the plan expects not, §3 S7); `BUG-0054`/
 - **R4's warning (Lane 1 step 3) verified directly, not assumed** (§1.2).
   The warning holds one level further than stated. Two routes that share
   **one sink family and the same two sink templates** classify differently:
-  TrackerNest's `/wiki/pages/render` is a `page`, and Netflix's
+  TrackerNest's `/wiki/pages/render` is a `page`, and ReelQueue's
   `/api/support/template-preview` is an `api`. The HTML conversion
   therefore has to be driven by the route profile, never by the sink
   template (§2b, S8).
@@ -107,8 +107,8 @@ All 32 `spring_boot` cells form 16 same-route vulnerable/secure twin pairs:
 | App | GT dir | GT points | Cells | Manifests |
 |---|---|---|---|---|
 | TrackerNest (cat. 3, Atlassian) | `lab/ground-truth-trackernest/` (TNEST-0001..0003) | 3 | `LABGEN-SSTI-0001/2`, `LABGEN-XXE-0001/2`, `LABGEN-DESER-0001/2` | `ssti_spring_boot_sample`, `xxe_spring_boot_sample`, `insecure_deserialization_spring_boot_sample` (first 2 cells) |
-| Netflix clone (cat. 4) | `lab/ground-truth-netflix-clone/` (NFLX-0001..0011) | 11 | `LABGEN-JV-0001..0022` | `insecure_deserialization_spring_boot_sample` (JV-0001/2), 10 `*netflix*` manifests |
-| Expedia clone (cat. 5) | `lab/ground-truth-expedia-clone/` (EXPD-0001..0002) | 2 | `LABGEN-EXP-0001..0004` | `expedia_spel_injection_sample`, `expedia_trip_restore_sample` |
+| ReelQueue (cat. 4) | `lab/ground-truth-netflix-clone/` (NFLX-0001..0011) | 11 | `LABGEN-JV-0001..0022` | `insecure_deserialization_spring_boot_sample` (JV-0001/2), 10 `*netflix*` manifests |
+| WanderFare (cat. 5) | `lab/ground-truth-expedia-clone/` (EXPD-0001..0002) | 2 | `LABGEN-EXP-0001..0004` | `expedia_spel_injection_sample`, `expedia_trip_restore_sample` |
 
 Facts established from the code:
 
@@ -122,10 +122,10 @@ Facts established from the code:
     Everything else is single-cell.
 - **App membership cannot be derived from the manifest file.**
   `insecure_deserialization_spring_boot_sample.yaml` carries TrackerNest's
-  `LABGEN-DESER-0001/2` **and** Netflix's `LABGEN-JV-0001/2`
+  `LABGEN-DESER-0001/2` **and** ReelQueue's `LABGEN-JV-0001/2`
   (`/api/playback/resume`).
   - It *is* derivable from the route, and from the cell-ID prefix: `JV-` is
-    Netflix, `EXP-` is Expedia, and `SSTI-`/`XXE-`/`DESER-` are TrackerNest.
+    ReelQueue, `EXP-` is WanderFare, and `SSTI-`/`XXE-`/`DESER-` are TrackerNest.
     Those prefixes are generic class names, not app names.
 - Every `spring_boot` cell is a ground-truth-bearing real page or its
   secure twin. **There are no illustrative covering-array cells** (contrast
@@ -156,22 +156,22 @@ with "choose `page` when unsure":
 | TrackerNest | `/wiki/pages/render` (GET `macroExpr`) | **page** | Confluence's macro/page render is a server-rendered browser page (the real CVE-2021-26084 surface is a Velocity-rendered `.action` page). Not under an `/api/` namespace. |
 | TrackerNest | `/issues/import` (POST raw XML) | api | A raw `application/xml` request body can't be produced by an HTML form. It is Jira's REST-style XML import. Client page: textarea + `fetch()`. |
 | TrackerNest | `/integrations/webhook-payload` (POST Java-serialized binary) | api | A webhook receiver, named explicitly by the parent plan. Client page: file input + `fetch()` posting the bytes. |
-| Netflix | `/api/playback/resume`, `/api/profiles/switch` (POST JSON) | api | Deserialization endpoints (named explicitly), called by the player/profile-gate SPA. |
-| Netflix | `/api/content/import` (POST XML) | api | Partner (B2B) content-ingest feed, machine to machine. |
-| Netflix | `/api/account/billing` (GET `account_id`) | api | JSON backend of the account SPA. The URL is literally `/api/`. `AccessControlIdorStrategy` reads its JSON. |
-| Netflix | `/api/subscription/change-plan` (POST JSON) | api | JSON backend. `PriceTrustDifferentialStrategy` reads its JSON. |
-| Netflix | `/api/profiles/avatar` (POST multipart) | api | Its response *is* the uploaded file's bytes. Wrapping it would destroy the modelled CWE-434 stored-XSS chain. Client page: a plain `enctype="multipart/form-data"` form (no `fetch()`: browsers submit multipart natively). |
-| Netflix | `/api/account/settings` (POST JSON) | api | JSON mass-assignment API (named explicitly). |
-| Netflix | `/api/account/preferences` (GET, `Authorization`) | api | JWT API (named explicitly). A link can't carry the header. Client page: token field + `fetch()`. |
-| Netflix | `/api/content/thumbnail-import` (POST, `thumbnail_url` **in the query**) | api | Partner-portal backend call. The response is the fetched body. |
-| Netflix | `/api/session/refresh` (POST, no input) | api | Token-refresh JSON API. |
-| Netflix | `/api/support/template-preview` (GET `expr`) | api | Support-console backend, under `/api/` by design (`CC-LAB-0197`). Same sink family as TrackerNest's `page` above, but a different product surface (S8). |
-| Expedia | `/api/hotels/search-sort` (GET `sortBy`) | api | Search-results sort call from the SPA, under `/api/`. |
-| Expedia | `/api/trips/restore` (POST JSON) | api | Deserialization endpoint (named explicitly). |
+| ReelQueue | `/api/playback/resume`, `/api/profiles/switch` (POST JSON) | api | Deserialization endpoints (named explicitly), called by the player/profile-gate SPA. |
+| ReelQueue | `/api/content/import` (POST XML) | api | Partner (B2B) content-ingest feed, machine to machine. |
+| ReelQueue | `/api/account/billing` (GET `account_id`) | api | JSON backend of the account SPA. The URL is literally `/api/`. `AccessControlIdorStrategy` reads its JSON. |
+| ReelQueue | `/api/subscription/change-plan` (POST JSON) | api | JSON backend. `PriceTrustDifferentialStrategy` reads its JSON. |
+| ReelQueue | `/api/profiles/avatar` (POST multipart) | api | Its response *is* the uploaded file's bytes. Wrapping it would destroy the modelled CWE-434 stored-XSS chain. Client page: a plain `enctype="multipart/form-data"` form (no `fetch()`: browsers submit multipart natively). |
+| ReelQueue | `/api/account/settings` (POST JSON) | api | JSON mass-assignment API (named explicitly). |
+| ReelQueue | `/api/account/preferences` (GET, `Authorization`) | api | JWT API (named explicitly). A link can't carry the header. Client page: token field + `fetch()`. |
+| ReelQueue | `/api/content/thumbnail-import` (POST, `thumbnail_url` **in the query**) | api | Partner-portal backend call. The response is the fetched body. |
+| ReelQueue | `/api/session/refresh` (POST, no input) | api | Token-refresh JSON API. |
+| ReelQueue | `/api/support/template-preview` (GET `expr`) | api | Support-console backend, under `/api/` by design (`CC-LAB-0197`). Same sink family as TrackerNest's `page` above, but a different product surface (S8). |
+| WanderFare | `/api/hotels/search-sort` (GET `sortBy`) | api | Search-results sort call from the SPA, under `/api/`. |
+| WanderFare | `/api/trips/restore` (POST JSON) | api | Deserialization endpoint (named explicitly). |
 
 Result: **1 `page`, 15 `api`.**
 
-- Netflix's and Expedia's entire ground-truth surface is their SPA backend
+- ReelQueue's and WanderFare's entire ground-truth surface is their SPA backend
   (`/api/*`). Their browsable form is a homepage, a layout and **one client
   page per api**.
 - **No ground-truth URL moves.** Every GT URL already fits its app. Contract
@@ -262,7 +262,7 @@ route then received a bare `GET`, a bare empty-body `POST`, a browser-`Accept`
   (§1.6.3, S2).
 - **G3:** `rendering` doubles as the *request* encoding for whole-body
   points (`fuzzlab/harness/auto.py:92-96`). 9 of the 16 GT points are
-  `param=body` (TrackerNest 2, Netflix 6, Expedia 1), 6 of them
+  `param=body` (TrackerNest 2, ReelQueue 6, WanderFare 1), 6 of them
   `server-json`. Relabelling any of them would
   silently switch `fuzzlab auto` from JSON to raw encoding (S3).
 - **G4:** one sink template pair serves both a `page` and an `api` route
@@ -343,7 +343,7 @@ every build compiles, single-cell included. `SiteLayout.page`:
 The form's `macroExpr` input is always rendered **empty**. The page never
 echoes the submitted value (S7).
 
-**No sink template changes.** Netflix's `/api/support/template-preview`
+**No sink template changes.** ReelQueue's `/api/support/template-preview`
 renders through the same two sink templates with `single_handler`, so it is
 unchanged (S8). An offline test asserts that no sink template references
 `SiteLayout`.
@@ -708,28 +708,28 @@ author a Java-serialized stream, so the client page takes a file and POSTs
 its bytes. The page says so plainly and does not pretend to be a real
 webhook sender.
 
-**N1 (Netflix) — 11 api client pages, 22 cells, the largest build.**
+**N1 (ReelQueue) — 11 api client pages, 22 cells, the largest build.**
 Three GET apis need separate client-page URLs plus `<a href>` links (§2c).
 The measured crawl depth is expected to be at most 2.
 
-**N2 (Netflix) — `/api/profiles/avatar`.** The multipart guard must run
+**N2 (ReelQueue) — `/api/profiles/avatar`.** The multipart guard must run
 before `getPart` (§2e). The client page is a plain multipart form. The
 existing upload differential tests re-run green.
 
-**N3 (Netflix) — `/api/content/thumbnail-import`'s query-carried param on a
+**N3 (ReelQueue) — `/api/content/thumbnail-import`'s query-carried param on a
 POST.** The client page must use the query string. The `required_param`
 guard fires only when the query **and** the form body lack it
 (`getParameter` reads both).
 
-**N4 (Netflix) — `/api/account/preferences`.** An anonymous visitor gets
+**N4 (ReelQueue) — `/api/account/preferences`.** An anonymous visitor gets
 401. This is a token API's correct response, not R8 (§1.4).
 
-**E1 (Expedia) — `/api/hotels/search-sort` default.** `'recommended'` must
+**E1 (WanderFare) — `/api/hotels/search-sort` default.** `'recommended'` must
 evaluate to 2xx on **both** SpEL contexts (restricted and unrestricted).
 This is verified live at §5 step 2. If either twin errors, fall back to
 `required_param` (400).
 
-**E2 (Expedia) — smallest app** (2 api, 4 cells). The non-vacuous minimums
+**E2 (WanderFare) — smallest app** (2 api, 4 cells). The non-vacuous minimums
 must still be meaningful: GT is at least 2, and pages are at least the
 measured count.
 
@@ -754,8 +754,8 @@ For each app:
    | App | Anonymous status per GT URL |
    |---|---|
    | TrackerNest | `/wiki/pages/render` 200 (form); `/issues/import` 200 and `/integrations/webhook-payload` 200 (client pages) |
-   | Netflix | the 8 POST apis 200 (client pages); `/api/account/billing` 400; `/api/account/preferences` 401; `/api/support/template-preview` 400 |
-   | Expedia | `/api/hotels/search-sort` 200 (default); `/api/trips/restore` 200 (client page) |
+   | ReelQueue | the 8 POST apis 200 (client pages); `/api/account/billing` 400; `/api/account/preferences` 401; `/api/support/template-preview` 400 |
+   | WanderFare | `/api/hotels/search-sort` 200 (default); `/api/trips/restore` 200 (client page) |
 
 4. `GET /` returns 200 `text/html`.
 5. Every catalog entry that a `GET` can open is link-reachable.
@@ -814,7 +814,7 @@ For each app:
 3. **§2b page conversion of `/wiki/pages/render`.** **Gate:** T1's checks,
    plus the TrackerNest multitarget recall unchanged (2/3).
 4. **§2c/§2d site layer and app-mode harness, one app at a time**
-   (TrackerNest, then Expedia, then Netflix). **Gate per app:** boot,
+   (TrackerNest, then WanderFare, then ReelQueue). **Gate per app:** boot,
    `GET /` 200, and every nav link 200.
 5. **§4 navigability module, all three apps.**
 
@@ -856,7 +856,7 @@ For each app:
 - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0244` (and `BUG-0054`).
 - [ ] **`docs/ARCHITECTURE.md` updated (unconditional; review round 1, adequacy fix 2).** The harness app mode, the public `assemble_spring_boot_app`, the `render_site` site-layer generator, `SiteLayout.java` and the `site_build` twin-URL derivation are structural additions by `CLAUDE.md`'s own test. Two edits:
   - amend the manifest-driven-generator status line's `spring_boot` clause (`ARCHITECTURE.md:162`) to say that all three `spring_boot` apps are browsable;
-  - add a "TrackerNest, Netflix clone and Expedia clone are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
+  - add a "TrackerNest, ReelQueue and WanderFare are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
 - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 4 row updated.
 
 ## 7. Out of scope
@@ -929,6 +929,31 @@ on 2 fixes, plus 1 recommended item.**
 - In the same revision, a wording-only update to §6's `form_when_absent`
   item reflects the round-1 decision, without changing any content.
 - Implementation still requires the `CC-LAB-0244` entry's own gate.
+
+**Post-convergence naming change (2026-09-25, during Phase 7, orchestrator
+instruction):** the two streaming and travel app identities are renamed to
+fictional brands, **ReelQueue** and **WanderFare**, matching every other
+lane's fictional brands (CircleFeed, Huddle Hub, PicTrail, ForgeCart,
+MeadowMart; TrackerNest is unchanged).
+
+- **Why:** an implementation response was stopped by a safety classifier
+  partway through Phase 7, and the orchestrator traced the likely cause to
+  generating realistic branded pages under real companies' names.
+- **Scope:** naming only. No risk, decision, design or number changed, so
+  the 3/3 convergence above stands, in the same way Lane 2 logged its
+  citation fix.
+- **Pre-existing lowercase identifiers are kept as-is:**
+  `lab/ground-truth-netflix-clone/`, `lab/ground-truth-expedia-clone/`, the
+  `*netflix*`/`expedia_*` manifests, the existing
+  `test_labgen_spring_boot_netflix_*` test files, and earlier change-control
+  entries. So every file citation in this plan stays accurate. The
+  ReelQueue ground truth lives in the former directory and the WanderFare
+  ground truth in the latter.
+- **Flagged, not done here:** renaming those shared, pre-existing
+  identifiers repo-wide. Earlier change-control entries are append-only.
+  The ground-truth directories are also read by
+  `test_multitarget_category4`/`category5`, which concurrent lanes touch.
+  That rename needs its own change and an orchestrator decision.
 
 **Original blocker note (draft, 2026-09-25), kept for the record:**
 

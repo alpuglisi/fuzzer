@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0244 — Browsable labs Lane 4: spring_boot TrackerNest, Netflix clone and Expedia clone (2026-09-25, FR-LAB-164/FR-LAB-165, `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`)
+### CC-LAB-0244 — Browsable labs Lane 4: spring_boot TrackerNest, ReelQueue and WanderFare (2026-09-25, FR-LAB-164/FR-LAB-165, `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
 (2 independent reviewer agents plus the proposing agent, after 1 revision
@@ -19,6 +19,17 @@ round).
   Effectiveness.
 - **Round 2:** both reviewers re-confirmed ACCURATE and ADEQUATE.
 - **Implementation authorized; not yet landed.**
+- **Post-convergence naming change (2026-09-25, orchestrator
+  instruction):** the streaming and travel apps are renamed to the
+  fictional brands **ReelQueue** and **WanderFare**.
+  - Naming only; no risk, decision or number changed, so the 3/3 gate
+    stands.
+  - Pre-existing lowercase identifiers are kept, so every citation here
+    stays accurate: `lab/ground-truth-netflix-clone/` (ReelQueue),
+    `lab/ground-truth-expedia-clone/` (WanderFare), the manifests, the
+    existing test files and earlier entries.
+  - A repo-wide rename of those shared identifiers is flagged as a
+    separate follow-up (plan §8).
 
 Condensed from `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`, which went through 2
 review rounds and reached 3/3 agreement on 2026-09-25:
@@ -46,8 +57,8 @@ its change-control-template compression.
   (S7). **Lanes 5-7 are not bumped.**
 
 - **Change:** makes the three `spring_boot` app identities browsable. Today
-  they exist only as ground truth: 16 points (TrackerNest 3, Netflix 11,
-  Expedia 2) over 32 cells in 16 same-route vulnerable/secure twin pairs.
+  they exist only as ground truth: 16 points (TrackerNest 3, ReelQueue 11,
+  WanderFare 2) over 32 cells in 16 same-route vulnerable/secure twin pairs.
   No app has ever been booted as a whole, and `GET /` answers
   `404 application/json`. The change has seven parts:
   1. **App registry and route-profile keys** (a new
@@ -56,10 +67,10 @@ its change-control-template compression.
      by route, cross-checked offline against each app's ground-truth URL
      set and cell-ID prefixes. It is not by manifest file:
      `insecure_deserialization_spring_boot_sample.yaml` mixes TrackerNest
-     and Netflix cells.
+     and ReelQueue cells.
   2. **Page/API classification: 1 `page`, 15 `api`**, each justified
      against the real product (plan §1.5). Only TrackerNest's
-     `/wiki/pages/render` is a `page`. Netflix's and Expedia's whole
+     `/wiki/pages/render` is a `page`. ReelQueue's and WanderFare's whole
      ground-truth surface is their SPA's `/api/*` backend, and TrackerNest's
      `/issues/import` (raw XML) and `/integrations/webhook-payload`
      (Java-serialized binary) are `api`s.
@@ -71,7 +82,7 @@ its change-control-template compression.
        the layout, preserves the status code, and sets `text/html`
        explicitly.
      - The form never echoes the submitted value (S7).
-     - Netflix's `/api/support/template-preview` shares the same two sink
+     - ReelQueue's `/api/support/template-preview` shares the same two sink
        templates and stays unchanged.
   4. **Site layer per app** (`SpringBootEmitter.render_site(cells,
      app_key)` → a generated `SiteController.java`):
@@ -261,22 +272,22 @@ its change-control-template compression.
   17. **T2** (TrackerNest) — *Binary webhook client page.* A browser can't
       author a Java-serialized stream, so the page POSTs an uploaded file's
       bytes and says so plainly.
-  18. **N1** (Netflix) — *The largest build: 11 api client pages, 22
+  18. **N1** (ReelQueue) — *The largest build: 11 api client pages, 22
       cells.* Three GET apis get separate client-page URLs plus `<a href>`
       links. Expected crawl depth ≤ 2.
-  19. **N2** (Netflix) — *`/api/profiles/avatar`.* The multipart guard runs
+  19. **N2** (ReelQueue) — *`/api/profiles/avatar`.* The multipart guard runs
       before `getPart`. The client page is a plain multipart form. The
       existing upload differential tests re-run green.
-  20. **N3** (Netflix) — *`/api/content/thumbnail-import`'s
+  20. **N3** (ReelQueue) — *`/api/content/thumbnail-import`'s
       query-carried parameter on a POST.* The client page uses the query
       string. `required_param` fires only when the query and the form body
       both lack it.
-  21. **N4** (Netflix) — *`/api/account/preferences`.* Anonymous → 401,
+  21. **N4** (ReelQueue) — *`/api/account/preferences`.* Anonymous → 401,
       a token API's correct response, not R8.
-  22. **E1** (Expedia) — *`/api/hotels/search-sort` default `'recommended'`*
+  22. **E1** (WanderFare) — *`/api/hotels/search-sort` default `'recommended'`*
       must be 2xx on both SpEL contexts, verified live. If either errors,
       fall back to `required_param` (400).
-  23. **E2** (Expedia) — *The smallest app* (2 api, 4 cells). Its
+  23. **E2** (WanderFare) — *The smallest app* (2 api, 4 cells). Its
       non-vacuous minimums must still be meaningful.
 
   Accepted, not mitigated: G7, the shared `com.fuzzlab.trackernest`
@@ -305,7 +316,7 @@ its change-control-template compression.
   - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0244` (and `BUG-0054`) — todo.
   - [ ] **`docs/ARCHITECTURE.md` updated (unconditional; review round 1, adequacy fix 2)** — todo. The harness app mode, the public `assemble_spring_boot_app`, the `render_site` site-layer generator, `SiteLayout.java` and the `site_build` twin-URL derivation are structural additions by `CLAUDE.md`'s own test. Two edits:
     - amend the manifest-driven-generator status line's `spring_boot` clause (`ARCHITECTURE.md:162`) to say that all three `spring_boot` apps are browsable;
-    - add a "TrackerNest, Netflix clone and Expedia clone are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
+    - add a "TrackerNest, ReelQueue and WanderFare are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
   - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 4 row updated — todo.
 - **Effectiveness:** pending (assessed after implementation). It is to
   record:
