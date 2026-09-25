@@ -12,7 +12,7 @@ isolation and R5/leakage-gate-substitute despite their mitigations already
 appearing in Deliverables, and that Deliverables omitted the mandatory
 `requirements.md`/`CHANGELOG.md` bookkeeping items; both fixed and
 re-confirmed ACCURATE and ADEQUATE by both reviewers) — **implementation
-authorized, not yet landed.** Condensed from `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`,
+authorized; implemented 2026-09-25** (see Deliverables/Effectiveness). Condensed from `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`,
 which itself already went through 3 full review rounds and reached 3/3
 agreement (2026-09-25); that document is the full detail, this entry is
 its change-control-template compression.
@@ -98,39 +98,73 @@ its change-control-template compression.
   Accepted, not mitigated: none — every identified risk has a concrete
   mitigation, no residual risk carried forward silently.
 - **Deliverables:**
-  - [ ] `_HTML_ROW_VIEW_KEY`/`_HTML_LIST_VIEW_KEY` constants + pop + mutual-
+  - [x] `_HTML_ROW_VIEW_KEY`/`_HTML_LIST_VIEW_KEY` constants + pop + mutual-
         exclusivity check added; `test_labgen_php_laravel_access_control_live_boot.py`
         + `test_labgen_phase_d_tier12_category5.py` (CC-LAB-0239's existing
-        `html_row_view` users) re-run green **before** proceeding — todo,
-        explicit gate.
-  - [ ] `html_list_view` tail added to `single_statement.php.j2` — todo.
-  - [ ] `/product.php` + `/blog_post.php` converted, shared Blade view(s),
+        `html_row_view` users) re-run green **before** proceeding — done,
+        gate cleared (7 passed, 0 skipped, before step 2 started). All four
+        tail flags (`_TAIL_FLAG_KEYS`, incl. `session_login`/
+        `register_insert`) are popped and handed back only to the
+        complexity module; every `php_laravel`-rendered file was confirmed
+        byte-identical to HEAD after this step.
+  - [x] `html_list_view` tail added to `single_statement.php.j2` — done.
+  - [x] `/product.php` + `/blog_post.php` converted, shared Blade view(s),
         ≥300-byte delta test, R5 twin-diff test, 4 JSON-counting live-boot
-        assertions (SQLite + MariaDB) updated — todo.
-  - [ ] `/products.php` converted (secure-only, no twin-diff needed);
-        existing live-boot assertions confirmed still agnostic — todo.
-  - [ ] `/search.php` converted on the shared profile; confirmed the 4 XSS
+        assertions (SQLite + MariaDB) updated — done (`site.product`,
+        `site.blog-post`; blog_post had no prior live-boot assertion, now
+        added to both suites).
+  - [x] `/products.php` converted (secure-only, no twin-diff needed);
+        existing live-boot assertions confirmed still agnostic — done
+        (`site.products` + shared `site.partials.product-card`; its
+        injected-payload `not in` checks made non-vacuous with an
+        empty-state assertion).
+  - [x] `/search.php` converted on the shared profile; confirmed the 4 XSS
         cells (different complexity, `render_only`) stay unaffected; 2
         JSON-counting MariaDB assertions updated, including the vacuously-
-        true one; ≥300-byte delta test + R5 twin-diff test — todo.
-  - [ ] `/register.php` + `/login.php` failure tail converted to HTML
+        true one; ≥300-byte delta test + R5 twin-diff test — done
+        (`site.search`, which deliberately never reflects `q`; R3 asserted
+        on the rendered code of all 4 XSS cells; a new SQLite search
+        live-boot test added too).
+  - [x] `/register.php` + `/login.php` failure tail converted to HTML
         (real historical copy); 4 status/body assertions updated across
         SQLite + MariaDB; static controller-source assertion
         (`tests/test_labgen_php_laravel_real_pages_auth.py:132-134`)
-        confirmed still holds unchanged — todo.
-  - [ ] Full non-slow suite + both SQLite and MariaDB live-boot test files
-        green — todo.
-  - [ ] One-line note recommending the bare-fragment layout gap as the
+        confirmed still holds unchanged — done (`form_view` key on
+        `session_login`/`register_insert`; `site.login`/`site.register`
+        gained error/success slots; that file passes unmodified, 14/14).
+  - [x] Full non-slow suite + both SQLite and MariaDB live-boot test files
+        green — done (see Effectiveness).
+  - [x] One-line note recommending the bare-fragment layout gap as the
         next CC-LAB-numbered step, added somewhere durable (this entry's
         Impact section already does; also add to
-        `docs/LAB_BROWSABLE_APPS_PLAN.md` if not otherwise tracked) — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-158`
+        `docs/LAB_BROWSABLE_APPS_PLAN.md` if not otherwise tracked) — done
+        (Lane 1 row of that plan's lane table).
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-158`
         requirement added in place, describing this capability (mirroring
-        how CC-LAB-0239 added `FR-LAB-157`) — todo.
-  - [ ] `CHANGELOG.md` — one dated, high-level line for this change,
-        referencing `CC-LAB-0240` — todo.
-- **Effectiveness (assessed <date> or pending):** pending — not yet
-  implemented.
+        how CC-LAB-0239 added `FR-LAB-157`) — done.
+  - [x] `CHANGELOG.md` — one dated, high-level line for this change,
+        referencing `CC-LAB-0240` — done.
+- **Effectiveness (assessed 2026-09-25):** effective. Full non-slow suite
+  (`pytest -m "not slow"`): 2490 passed, 8 skipped, 188 deselected, 0
+  failed. Both live-boot files run for real (not skipped):
+  `tests/test_labgen_conformance_live_boot.py` +
+  `tests/test_labgen_conformance_live_boot_mariadb.py` 13 passed, 0 skipped.
+  R1: the literal found/not-found HTML deltas measured on real served
+  responses are 582 B (`/product.php`), 613 B (`/blog_post.php`), 447 B
+  (`/products.php`), 495 B (`/search.php`) on SQLite and 645 B / 858 B /
+  553 B (product / blog_post / search) on MariaDB, identical on each twin
+  -- all ≥ 300. The first cut of the shared product card measured only
+  207 B for `/products.php` and was enlarged (an add-to-cart form, the real
+  product page's own) before it passed, i.e. the guard caught a real
+  shortfall. R2/R3/R5/R6/R8 plus the step-1 gate and negative controls:
+  `test_labgen_conformance_tier1.py`, `test_labgen_conformance_tier2.py`,
+  `test_oracle.py` (unchanged), `test_labgen_php_laravel_access_control_live_boot.py`,
+  `test_labgen_phase_d_tier12_category5.py`,
+  `test_labgen_php_laravel_booking_multitarget.py`,
+  `test_labgen_php_laravel_real_pages_auth.py` (unchanged) and the new
+  `test_labgen_php_laravel_pff_html_pages.py` (22 tests) -- 75 passed, 0
+  skipped. No code defect found (only the anticipated test-assertion
+  updates), so no BUG/PA was raised.
 
 ### CC-LAB-0239 — Browsable labs Lane 1 step 3: JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-157, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 

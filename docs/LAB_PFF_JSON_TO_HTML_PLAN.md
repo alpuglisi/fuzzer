@@ -1,8 +1,10 @@
 # PFF's own real pages: JSON→HTML conversion — implementation + risk plan
 
-Status: **planning only, not yet implemented** (2026-09-25, revised
-2026-09-25 after 2 independent reviewer agents checked accuracy and
-adequacy per `docs/components/README.md`'s pre-change review gate).
+Status: **implemented 2026-09-25** (`CC-LAB-0240`; see that entry's
+Deliverables/Effectiveness for what was verified). Originally planning-only
+(2026-09-25, revised 2026-09-25 after 2 independent reviewer agents checked
+accuracy and adequacy per `docs/components/README.md`'s pre-change review
+gate).
 Reserved as `CC-LAB-0240`/`FR-LAB-158` — **Lane 1 step 4** of
 `docs/LAB_BROWSABLE_APPS_PLAN.md`. This reservation required bumping Lanes
 2-7's `CC-LAB`/`FR-LAB` numbers by +1 in that parent plan (the same

@@ -497,6 +497,34 @@ _SESSION_LOGIN_KEY = "session_login"
 #: complexity, never a new composition name).
 _REGISTER_INSERT_KEY = "register_insert"
 
+#: Page-profile key (CC-LAB-0239): render the ``single_statement`` tail as
+#: ``return view('<name>', $rows);`` -- for a sink whose ``$rows`` is an
+#: **associative array** (Laravel ``extract()``s each key into its own Blade
+#: variable). Same layering rationale as :data:`_SESSION_LOGIN_KEY`.
+_HTML_ROW_VIEW_KEY = "html_row_view"
+
+#: Page-profile key (CC-LAB-0240, ``docs/LAB_PFF_JSON_TO_HTML_PLAN.md`` §2):
+#: render the ``single_statement`` tail as ``return view('<name>', ['rows' =>
+#: $rows]);`` -- for a sink whose ``$rows`` is a numeric **list**
+#: (``DB::select(...)``/``->get()->all()``), which :data:`_HTML_ROW_VIEW_KEY`
+#: cannot carry (``extract()`` of a numeric-indexed list yields zero
+#: variables, so the page would silently render empty). The named Blade view
+#: iterates ``$rows`` itself.
+_HTML_LIST_VIEW_KEY = "html_list_view"
+
+#: Every ``single_statement`` tail-selection flag. The template's
+#: ``{% if %}/{% elif %}`` chain silently prefers whichever branch comes
+#: first, so :meth:`LaravelEmitter.render` pops all of them out of the shared
+#: module context (no source/transform/sink module may read a tail flag),
+#: fails loud if a profile sets more than one, and hands the survivor only to
+#: the complexity module (CC-LAB-0240 hygiene fix).
+_TAIL_FLAG_KEYS: tuple[str, ...] = (
+    _SESSION_LOGIN_KEY,
+    _REGISTER_INSERT_KEY,
+    _HTML_ROW_VIEW_KEY,
+    _HTML_LIST_VIEW_KEY,
+)
+
 #: Page-profile keys that describe a **write** endpoint (a
 #: ``stored_second_order`` cell's ``cell.route``, looked up by
 #: ``cell.route.path``) rather than the render/sink endpoint every other
@@ -591,7 +619,7 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "default_room_type": "standard",
         "real_page": True,
         "canonical_cell_id": "LABGEN-BC-0005",
-        "html_row_view": "site.booking-checkout",
+        _HTML_ROW_VIEW_KEY: "site.booking-checkout",
     },
     # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): genuine `api`
     # endpoint (JSON mass-assignment API, per docs/LAB_BROWSABLE_APPS_PLAN.md's
@@ -674,7 +702,7 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "param_name": "id",
         "real_page": True,
         "canonical_cell_id": "LABGEN-CF-0001",
-        "html_row_view": "site.photo-view",
+        _HTML_ROW_VIEW_KEY: "site.photo-view",
     },
     # CC-LAB-0217: CircleFeed's (category 2's Facebook pick) second designed
     # cell -- a Groups webhook receiver, modeling Meta's own publicly
@@ -808,6 +836,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-RPL-PRODUCT",
         "ground_truth_case": "PFF-0001",
+        # CC-LAB-0240: a real HTML product page (was `response()->json($rows)`),
+        # shared byte-for-byte by both twins. `DB::select(...)` returns a
+        # LIST, hence `html_list_view`, never `html_row_view`.
+        _HTML_LIST_VIEW_KEY: "site.product",
     },
     # The real page's extra nuance -- it suppresses DB errors with `@`, making
     # it a blind-only target where product.php is also error-based -- is not
@@ -824,6 +856,8 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-RPL-BLOGPOST",
         "ground_truth_case": "PFF-0006",
+        # CC-LAB-0240: real HTML blog post page, shared by both twins.
+        _HTML_LIST_VIEW_KEY: "site.blog-post",
     },
     # --- L-P3.3c-G2: catalog listing + its JSON feed -----------------------
     # Both are secure-only cells (PFF-1001 / PFF-1003 are true negatives),
@@ -841,6 +875,8 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-PLRP-G2-0001",
         "ground_truth_case": "PFF-1001",
+        # CC-LAB-0240: real HTML catalogue listing (secure-only cell).
+        _HTML_LIST_VIEW_KEY: "site.products",
     },
     # The JSON feed the fetch-based JS pages (`deals.php` and friends)
     # consume. Same SQL position and same binding as `/products.php`; the
@@ -894,6 +930,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
             "name_column": "username",
             "redirect_to": "/profile.php",
             "error_message": "Invalid username or password.",
+            # CC-LAB-0240 §3: the failure path re-renders the real login
+            # form with an inline error (the real pre-cutover page's own UX),
+            # still status 401 -- not a JSON error body.
+            "form_view": "site.login",
         },
     },
     # register.php (PFF-1004, secure-only). The modeled sink is the real
@@ -917,6 +957,11 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
             "full_name_param": "full_name",
             "password_hash_fn": "md5",
             "taken_message": "That username is already taken.",
+            # CC-LAB-0240 §3: duplicate (409) re-renders the real register
+            # form with an inline error and the submitted fields prefilled;
+            # success (200) renders its welcome notice -- the real
+            # pre-cutover page's own UX, not a JSON body.
+            "form_view": "site.register",
         },
     },
     # --- L-P3.3c-G4: the stored second-order pair --------------------------
@@ -1049,6 +1094,12 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         # URL" state this resolution exists to close. `PFF-0003` is named in
         # `lab/ground-truth/migration-exemptions.yaml` instead.
         "ground_truth_case": "PFF-0002",
+        # CC-LAB-0240: the SQLi twins (`single_statement`) render a real HTML
+        # results page. The four XSS cells sharing this profile use
+        # `render_only`, whose `render()` passes only body/method_name/
+        # view_name/value_expr -- this tail flag cannot reach them (R3,
+        # asserted directly in tests/test_labgen_php_laravel_pff_html_pages.py).
+        _HTML_LIST_VIEW_KEY: "site.search",
     },
     # --- L-P3.3c-DOM: reviews.php/feedback.php's DOM-based XSS -------------
     # The real page: a `<script>` block reads `#author=` from `location.hash`
@@ -1351,6 +1402,18 @@ class LaravelEmitter(Emitter):
         ctx.pop(_GROUND_TRUTH_CASE_KEY, None)
         ctx.pop(_SECONDARY_GROUND_TRUTH_CASES_KEY, None)
         ctx.pop(_GROUND_TRUTH_CASE_BY_FAMILY_KEY, None)
+        # Tail-selection flags (CC-LAB-0240): popped so no source/transform/
+        # sink module sees them, checked for mutual exclusivity (the
+        # template's elif chain would otherwise silently pick one), and
+        # handed only to the complexity module below.
+        tail_flags = {key: ctx.pop(key) for key in _TAIL_FLAG_KEYS if key in ctx}
+        if len(tail_flags) > 1:
+            raise ValueError(
+                f"{cell.cell_id}: php_laravel page profile for {render_route.path!r} sets more "
+                f"than one method-tail flag {sorted(tail_flags)} -- a controller method has "
+                "exactly one tail, and single_statement.php.j2's elif chain would silently "
+                "prefer whichever comes first (fail loud instead)"
+            )
         ctx["method_name"] = _METHOD_NAME
         ctx["view_name"] = _view_name_for(cell.cell_id)
 
@@ -1462,7 +1525,7 @@ class LaravelEmitter(Emitter):
             # the method unchanged.
             body_fragments.append(view_result.context["view_bridge_code"])
         body = _indent_block("\n".join(body_fragments), "        ")
-        method_code = COMPLEXITIES[modules.complexity].render({**ctx, "body": body}).code
+        method_code = COMPLEXITIES[modules.complexity].render({**ctx, **tail_flags, "body": body}).code
 
         controller_class = _controller_class_for(cell.cell_id)
         imports = ["use Illuminate\\Http\\Request;"]

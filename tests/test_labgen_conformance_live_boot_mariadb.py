@@ -103,6 +103,11 @@ from fuzzlab.labgen.conformance.live_boot import (
 )
 from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter, served_url_for
 from fuzzlab.labgen.schema import load_manifest
+from tests.test_labgen_conformance_live_boot import (
+    _PRODUCT_ROW_MARKER,
+    _assert_found_not_found_delta,
+    _content_type,
+)
 
 pytestmark = [
     pytest.mark.skipif(
@@ -188,17 +193,43 @@ def test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload_mariadb() ->
             vuln_resp = harness.get(vuln_url, params={"id": payload})
             secure_resp = harness.get(secure_url, params={"id": payload})
             assert vuln_resp.status == 200, vuln_resp.body[:500]
-            # Ten real seeded products -> ten real leaked rows.
-            assert vuln_resp.body.count('"id"') == 10, (
+            # Ten real seeded products -> ten real leaked rows, each one
+            # `data-product-id` article of the real HTML page (CC-LAB-0240;
+            # was ten JSON `"id"` keys).
+            assert vuln_resp.body.count(_PRODUCT_ROW_MARKER) == 10, (
                 "vulnerable cell did not leak every real seeded row for a boolean-injection "
                 f"payload against real MariaDB: {vuln_resp.body[:1000]}"
             )
-            secure_row_count = secure_resp.body.count('"id"')
-            assert secure_row_count < vuln_resp.body.count('"id"'), (
+            assert "Glow-in-the-Dark Flags" in vuln_resp.body, vuln_resp.body[:2000]
+            secure_row_count = secure_resp.body.count(_PRODUCT_ROW_MARKER)
+            assert secure_row_count < vuln_resp.body.count(_PRODUCT_ROW_MARKER), (
                 "secure (bound-parameter) twin did not behave differently from the vulnerable "
                 f"twin for the same payload against real MariaDB: vulnerable={vuln_resp.body[:300]!r} "
                 f"secure={secure_resp.body[:300]!r}"
             )
+            assert "Glow-in-the-Dark Flags" not in secure_resp.body, secure_resp.body[:2000]
+
+            # R1 (CC-LAB-0240): the designed >= 300-byte found/not-found
+            # delta, re-proven against the real engine and seed data.
+            for url in (vuln_url, secure_url):
+                _assert_found_not_found_delta(
+                    harness, url, "id", found="1", not_found="999999", empty_text="couldn't find that fort"
+                )
+
+            # /blog_post.php's twin against the REAL `posts` table, which
+            # (unlike the SQLite harness's) has `author`/`published_at` --
+            # rendered only when present (R6).
+            for url in (
+                served_url_for(cells["LABGEN-RPL-BLOGPOST"]),
+                served_url_for(cells["LABGEN-RPL-BLOGPOST-BOUND"]),
+            ):
+                post = harness.get(url, params={"id": "1"})
+                assert post.status == 200, (url, post.body[:500])
+                assert "<h1>Five signs your puppy has outgrown their fort</h1>" in post.body, post.body[:2000]
+                assert "by Ryder on 2026-08-01" in post.body, post.body[:2000]
+                _assert_found_not_found_delta(
+                    harness, url, "id", found="1", not_found="999999", empty_text="Post not found."
+                )
 
 
 @pytest.mark.slow
@@ -228,6 +259,9 @@ def test_live_boot_g2_manifest_serves_real_listing_and_json_feed_mariadb() -> No
             assert filtered.status == 200, filtered.body[:500]
             assert "Puppy Fort Deluxe" in filtered.body
             assert "Glow-in-the-Dark Flags" not in filtered.body  # a real 'accessories' row
+            # CC-LAB-0240: real HTML listing, one card per real 'forts' row.
+            assert filtered.body.count(_PRODUCT_ROW_MARKER) == 3, filtered.body[:3000]
+            assert "text/html" in _content_type(filtered), filtered.headers
 
             api_resp = harness.get(api_url, params={"category": "forts"})
             assert api_resp.status == 200, api_resp.body[:500]
@@ -245,6 +279,8 @@ def test_live_boot_g2_manifest_serves_real_listing_and_json_feed_mariadb() -> No
             injected_html = harness.get(listing_url, params={"category": payload_str})
             assert injected_html.status == 200, injected_html.body[:500]
             assert "Puppy Fort Deluxe" not in injected_html.body
+            # Non-vacuous (R2): the page really rendered its own empty state.
+            assert "No forts in that category yet." in injected_html.body, injected_html.body[:2000]
             injected_api = harness.get(api_url, params={"category": payload_str})
             assert injected_api.status == 200, injected_api.body[:500]
             assert json.loads(injected_api.body) == []
@@ -314,7 +350,10 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row_
                 f"literal, nonexistent username against real MariaDB: got {secure_resp.status} "
                 f"{secure_resp.body[:500]!r}"
             )
-            assert "Invalid username or password." in secure_resp.body
+            # CC-LAB-0240: the real login page re-rendered with its inline
+            # error (HTML), still 401 -- not a JSON body.
+            assert '<p class="notice err">Invalid username or password.</p>' in secure_resp.body
+            assert "text/html" in _content_type(secure_resp), secure_resp.headers
 
             # register.php: a real prepared INSERT against the real schema
             # (DB::table(), never Eloquent -- unaffected by the G4 finding).
@@ -329,7 +368,9 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row_
                 },
             )
             assert reg_resp.status == 200, (reg_resp.status, reg_resp.body[:500])
-            assert json.loads(reg_resp.body) == {"registered": True}
+            # CC-LAB-0240: the real page's HTML welcome notice.
+            assert f"Welcome to the pack, {new_username}!" in reg_resp.body, reg_resp.body[:2000]
+            assert "text/html" in _content_type(reg_resp), reg_resp.headers
             rows = db.query("SELECT * FROM users WHERE username = %s", (new_username,))
             assert len(rows) == 1, f"register.php did not insert a real row into MariaDB: {rows}"
             row = rows[0]
@@ -344,7 +385,10 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row_
                 data={"username": "admin", "email": "x@example.test", "password": "x", "full_name": "X"},
             )
             assert dup_resp.status == 409, (dup_resp.status, dup_resp.body[:500])
-            assert "That username is already taken." in dup_resp.body
+            # CC-LAB-0240: the register form re-rendered with the inline
+            # error and the submitted username prefilled.
+            assert '<p class="notice err">That username is already taken.</p>' in dup_resp.body
+            assert 'name="username" value="admin"' in dup_resp.body, dup_resp.body[:2000]
 
 
 @pytest.mark.slow
@@ -423,12 +467,30 @@ def test_live_boot_search_manifest_like_sqli_twin_mariadb() -> None:
             vuln_resp = harness.get(vuln_url, params={"q": payload})
             secure_resp = harness.get(secure_url, params={"q": payload})
             assert vuln_resp.status == 200, vuln_resp.body[:500]
-            assert vuln_resp.body.count('"id"') == 10, (
+            # CC-LAB-0240: real HTML results (`site.search`), one
+            # `data-product-id` card per row (was ten JSON `"id"` keys).
+            assert vuln_resp.body.count(_PRODUCT_ROW_MARKER) == 10, (
                 "vulnerable LIKE-clause SQLi cell did not leak every real seeded product against "
                 f"real MariaDB: {vuln_resp.body[:1000]}"
             )
             assert secure_resp.status == 200, secure_resp.body[:500]
-            assert secure_resp.body.count('"id"') == 0, (
+            # R2: the old `.count('"id"') == 0` passed vacuously on ANY page
+            # lacking that literal. Now it must be the real results page
+            # (its search form is present) showing its own empty state with
+            # zero row cards.
+            assert 'action="/search.php"' in secure_resp.body, secure_resp.body[:2000]
+            assert "No forts matched your search." in secure_resp.body, (
+                "secure (bound-parameter) LIKE twin did not render its real no-results state for "
+                f"the same payload against real MariaDB: {secure_resp.body[:2000]!r}"
+            )
+            assert secure_resp.body.count(_PRODUCT_ROW_MARKER) == 0, (
                 "secure (bound-parameter) LIKE twin unexpectedly matched a real row for the "
                 f"same payload against real MariaDB: {secure_resp.body[:500]!r}"
             )
+
+            # R1 (CC-LAB-0240): one real result card vs none, both twins.
+            for url in (vuln_url, secure_url):
+                _assert_found_not_found_delta(
+                    harness, url, "q", found="Squeaky", not_found="zzz-no-such-fort",
+                    empty_text="No forts matched your search.",
+                )

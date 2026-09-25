@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 4 implemented: JSON→HTML for PFF's own real pages, CC-LAB-0240/FR-LAB-158)
+- Implemented `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`: `/product.php`,
+  `/blog_post.php`, `/products.php` and `/search.php`'s SQLi twins now render
+  real HTML (new `html_list_view` tail -- their sinks return a list, which
+  CC-LAB-0239's `html_row_view` cannot carry) through twin-shared Blade views
+  reusing the real pre-cutover PFF copy, with a designed, directly-tested
+  ≥300-byte found/not-found delta so `SqliBooleanStrategy` keeps its signal
+  inside the shared layout; `/register.php` and `/login.php`'s failure path
+  re-render their real forms with inline errors (status codes unchanged).
+  Also hardened the tail-flag mechanism (named constants, popped from the
+  shared module context, fail-loud if a profile sets two) and rewrote the
+  JSON-counting live-boot assertions as non-vacuous HTML checks -- because
+  an earlier plan had wrongly inferred these pages were already HTML from
+  the ground truth's `rendering: server` field.
+
 ## 2026-09-25 (Lane 1 step 3 implemented: JSON→HTML conversion + realistic URLs, CC-LAB-0239/CC-FUZZ-0047/FR-LAB-157)
 - Implemented `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`'s converged,
   gate-cleared plan for real. All 11 CircleFeed/Huddle Hub/Booking/mass-

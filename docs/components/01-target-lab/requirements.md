@@ -5673,6 +5673,42 @@ lane) can submit a payload as
   (`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6) -- every URL was instead
   verified individually via real live-boot HTTP requests, which proves each
   one is real and correct but is not the same proof as a full crawl.
+- **FR-LAB-158** *(JSON→HTML conversion for Puppy Fort Factory's own migrated
+  real pages; `php_laravel`; `CC-LAB-0240`, 2026-09-25,
+  `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`).* `/product.php`, `/blog_post.php`,
+  `/products.php` and `/search.php`'s SQLi twins (`LABGEN-RPL-PRODUCT`/
+  `-BOUND`, `LABGEN-RPL-BLOGPOST`/`-BOUND`, `LABGEN-PLRP-G2-0001`,
+  `LABGEN-PL-RP-0001`/`0002`) render real HTML pages instead of
+  `response()->json($rows)`, via a new `html_list_view` tail on the
+  `single_statement` complexity (`return view('<name>', ['rows' => $rows])`)
+  -- distinct from `FR-LAB-157`'s `html_row_view`, because these sinks
+  (`DB::select`/`->get()->all()`) return a numeric **list**, from which
+  `extract()` would yield no Blade variables. Backed by hand-authored,
+  twin-shared Blade views under `resources/views/site/` (`product`,
+  `blog-post`, `products`, `search`, `partials/product-card`) that reuse the
+  real pre-cutover PFF copy (`git show 876d2f9^:puppy-fort-factory/...`)
+  including its empty-state text. Each converted page's found vs not-found
+  HTML differs by **at least 300 bytes** (a designed contract so
+  `SqliBooleanStrategy`'s length-similarity signal survives the shared
+  layout), asserted directly on real served responses in both live-boot
+  suites. `/register.php` (`LABGEN-PLA-0003`) re-renders its real form with
+  the inline "That username is already taken." error and prefilled fields
+  (409) or its "Welcome to the pack, ...!" notice (200), and `/login.php`'s
+  failure path (`LABGEN-PLA-0001`/`0002`) re-renders its real form with
+  "Invalid username or password." (401) -- status codes unchanged, bodies
+  now HTML (`session_login`/`register_insert` gained a `form_view` key).
+  `/search.php`'s four XSS cells (`render_only`) are unaffected, and the
+  SQLi twins' shared view never reflects `q`. `/api/products.php` stays
+  JSON. Hygiene: the four tail-selection flags (`_SESSION_LOGIN_KEY`,
+  `_REGISTER_INSERT_KEY`, `_HTML_ROW_VIEW_KEY`, `_HTML_LIST_VIEW_KEY` =
+  `_TAIL_FLAG_KEYS`) are named constants, popped out of the shared module
+  context so only the complexity module sees them, and a page profile
+  setting more than one raises `ValueError` instead of the template's elif
+  chain silently preferring one. No ground-truth `url`/`rendering` edit
+  (`rendering: server` was already correct). Explicitly out of scope: the
+  bare-fragment (non-`@extends`) POST/error responses of `/contact.php`/
+  `/newsletter.php`/`/edit_profile.php` -- recommended as the next
+  CC-LAB-numbered step.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

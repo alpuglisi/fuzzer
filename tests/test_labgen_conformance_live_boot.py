@@ -67,6 +67,40 @@ pytestmark = pytest.mark.skipif(
     ),
 )
 
+#: One rendered row of `site.product`/`site.partials.product-card`
+#: (CC-LAB-0240) -- the HTML analogue of the old JSON body's `"id"` key.
+_PRODUCT_ROW_MARKER = 'data-product-id="'
+
+#: R1 (CC-LAB-0240, docs/LAB_PFF_JSON_TO_HTML_PLAN.md): the designed minimum
+#: found-vs-not-found byte delta of every converted page's HTML. A fixed,
+#: independently-chosen literal (a design contract of the Blade views), NOT
+#: derived from `SqliBooleanStrategy`'s own `_similar` threshold -- deriving
+#: it would make this guard move with the thing it guards.
+_MIN_FOUND_NOT_FOUND_DELTA = 300
+
+
+def _assert_found_not_found_delta(harness, url, param, *, found, not_found, empty_text) -> None:
+    """Fetch ``url`` in its found and not-found states and assert the served
+    HTML bodies differ by at least :data:`_MIN_FOUND_NOT_FOUND_DELTA` bytes
+    -- a literal length comparison on the real response, nothing else."""
+    found_resp = harness.get(url, params={param: found})
+    missing_resp = harness.get(url, params={param: not_found})
+    assert found_resp.status == 200, (url, found_resp.body[:500])
+    assert missing_resp.status == 200, (url, missing_resp.body[:500])
+    assert empty_text in missing_resp.body, (url, missing_resp.body[:2000])
+    assert empty_text not in found_resp.body, (url, found_resp.body[:2000])
+    delta = len(found_resp.body.encode("utf-8")) - len(missing_resp.body.encode("utf-8"))
+    print(f"R1 found/not-found delta {url}: {delta} bytes")
+    assert delta >= _MIN_FOUND_NOT_FOUND_DELTA, (
+        f"{url}: found/not-found HTML delta is only {delta} bytes (< {_MIN_FOUND_NOT_FOUND_DELTA}) "
+        "-- SqliBooleanStrategy's length-similarity signal needs this designed margin (R1)"
+    )
+
+
+def _content_type(resp) -> str:
+    """The response's Content-Type, looked up case-insensitively."""
+    return {k.lower(): v for k, v in resp.headers.items()}.get("content-type", "")
+
 
 @pytest.mark.slow
 def test_live_boot_forms_manifest_serves_real_pages() -> None:
@@ -134,15 +168,50 @@ def test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload() -> None:
         vuln_resp = harness.get(vuln_url, params={"id": payload})
         secure_resp = harness.get(secure_url, params={"id": payload})
         assert vuln_resp.status == 200, vuln_resp.body[:500]
-        assert vuln_resp.body.count('"id"') >= 2, (
+        # CC-LAB-0240: the page is real HTML now (`site.product`), one
+        # `data-product-id` article per row -- counted instead of the old
+        # JSON `"id"` keys, plus each seeded row's own name.
+        assert vuln_resp.body.count(_PRODUCT_ROW_MARKER) >= 2, (
             "vulnerable cell did not return multiple rows for a boolean-injection "
             f"payload -- expected the raw-concatenation SQLi to leak every row: {vuln_resp.body[:1000]}"
         )
-        secure_row_count = secure_resp.body.count('"id"')
-        assert secure_row_count < vuln_resp.body.count('"id"'), (
+        assert "Chew Toy" in vuln_resp.body and "Puppy Bed" in vuln_resp.body, vuln_resp.body[:2000]
+        secure_row_count = secure_resp.body.count(_PRODUCT_ROW_MARKER)
+        assert secure_row_count < vuln_resp.body.count(_PRODUCT_ROW_MARKER), (
             "secure (bound-parameter) twin did not behave differently from the vulnerable twin "
             f"for the same payload: vulnerable={vuln_resp.body[:500]!r} secure={secure_resp.body[:500]!r}"
         )
+        assert "Puppy Bed" not in secure_resp.body, secure_resp.body[:2000]
+
+        # R1 (CC-LAB-0240): found vs not-found must differ by a designed,
+        # literal >= 300 bytes of real page content on BOTH twins -- checked
+        # on the actual served HTML, independent of any oracle strategy's own
+        # similarity threshold.
+        for url in (vuln_url, secure_url):
+            _assert_found_not_found_delta(
+                harness, url, "id", found="1", not_found="999999", empty_text="couldn't find that fort"
+            )
+
+        # /blog_post.php's twin (same manifest, same `html_list_view` tail,
+        # `site.blog-post`): real HTML for the seeded post, the real page's
+        # own "Post not found." empty state, and the same R1 delta.
+        blog_vuln_url = served_url_for(cells["LABGEN-RPL-BLOGPOST"])
+        blog_secure_url = served_url_for(cells["LABGEN-RPL-BLOGPOST-BOUND"])
+        assert blog_vuln_url == "/blog_post.php"
+        for url in (blog_vuln_url, blog_secure_url):
+            post = harness.get(url, params={"id": "1"})
+            assert post.status == 200, (url, post.body[:500])
+            assert "<h1>Welcome to the Fort</h1>" in post.body, (url, post.body[:2000])
+            assert post.body.count('data-post-id="') == 1, (url, post.body[:2000])
+            _assert_found_not_found_delta(
+                harness, url, "id", found="1", not_found="999999", empty_text="Post not found."
+            )
+        blog_payload = "999999 OR 1=1"
+        blog_vuln = harness.get(blog_vuln_url, params={"id": blog_payload})
+        blog_secure = harness.get(blog_secure_url, params={"id": blog_payload})
+        assert "Welcome to the Fort" in blog_vuln.body, blog_vuln.body[:2000]
+        assert "Welcome to the Fort" not in blog_secure.body, blog_secure.body[:2000]
+        assert "Post not found." in blog_secure.body, blog_secure.body[:2000]
 
 
 @pytest.mark.slow
@@ -214,7 +283,11 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row(
             "expected the bound-parameter login twin to reject the same payload as a literal, "
             f"nonexistent username: got {secure_resp.status} {secure_resp.body[:500]!r}"
         )
-        assert "Invalid username or password." in secure_resp.body
+        # CC-LAB-0240: the 401 body is the real login page (HTML, the form
+        # re-rendered with the real page's inline error), not a JSON body.
+        assert '<p class="notice err">Invalid username or password.</p>' in secure_resp.body
+        assert 'action="/login.php"' in secure_resp.body, secure_resp.body[:2000]
+        assert "text/html" in _content_type(secure_resp), secure_resp.headers
 
         # register.php: a real prepared INSERT the app itself performs, not
         # a stub -- observed by reading the real row back out of the same
@@ -230,7 +303,10 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row(
             },
         )
         assert reg_resp.status == 200, (reg_resp.status, reg_resp.body[:500])
-        assert json.loads(reg_resp.body) == {"registered": True}
+        # CC-LAB-0240: the real page's own HTML welcome notice (was the JSON
+        # body `{"registered": true}`).
+        assert f"Welcome to the pack, {new_username}!" in reg_resp.body, reg_resp.body[:2000]
+        assert "text/html" in _content_type(reg_resp), reg_resp.headers
         rows = harness.query_db("SELECT * FROM users WHERE username = ?", (new_username,))
         assert len(rows) == 1, f"register.php did not insert a real row: {rows}"
         row = rows[0]
@@ -248,7 +324,11 @@ def test_live_boot_auth_manifest_sqli_bypasses_login_and_register_inserts_a_row(
             data={"username": SEED_USERNAME, "email": "x@example.test", "password": "x", "full_name": "X"},
         )
         assert dup_resp.status == 409, (dup_resp.status, dup_resp.body[:500])
-        assert "That username is already taken." in dup_resp.body
+        # CC-LAB-0240: the register form re-rendered with the real page's
+        # inline error and the submitted username prefilled -- real HTML.
+        assert '<p class="notice err">That username is already taken.</p>' in dup_resp.body
+        assert f'name="username" value="{SEED_USERNAME}"' in dup_resp.body, dup_resp.body[:2000]
+        assert "Welcome to the pack" not in dup_resp.body
 
 
 @pytest.mark.slow
@@ -277,6 +357,13 @@ def test_live_boot_g2_manifest_serves_real_html_listing_and_real_json_feed() -> 
         assert filtered.status == 200, filtered.body[:500]
         assert "Chew Toy" in filtered.body
         assert "Puppy Bed" not in filtered.body
+        # CC-LAB-0240: real HTML listing (`site.products`), one card per row.
+        assert filtered.body.count(_PRODUCT_ROW_MARKER) == 1, filtered.body[:2000]
+        assert "text/html" in _content_type(filtered), filtered.headers
+        _assert_found_not_found_delta(
+            harness, listing_url, "category", found="toys", not_found="no-such-category",
+            empty_text="No forts in that category yet.",
+        )
 
         # api/products.php: a real, well-formed JSON array (not HTML), with
         # the declared field shape/casts the json_view Resource publishes.
@@ -302,9 +389,48 @@ def test_live_boot_g2_manifest_serves_real_html_listing_and_real_json_feed() -> 
         assert injected_html.status == 200, injected_html.body[:500]
         assert "Chew Toy" not in injected_html.body
         assert "Puppy Bed" not in injected_html.body
+        # Non-vacuous (R2): the page really rendered its own empty state.
+        assert "No forts in that category yet." in injected_html.body, injected_html.body[:2000]
         injected_api = harness.get(api_url, params={"category": payload_str})
         assert injected_api.status == 200, injected_api.body[:500]
         assert json.loads(injected_api.body) == []
+
+
+@pytest.mark.slow
+def test_live_boot_search_manifest_serves_real_html_results_and_like_sqli_twin() -> None:
+    """`search.php`'s SQLi twin (`LABGEN-PL-RP-0001`/`0002`, `CC-LAB-0240`)
+    against the seeded SQLite `products` table: a real HTML results page
+    (`site.search`), the `LIKE`-clause breakout differential, and R1's
+    designed found/not-found byte delta on both twins. (Since `CC-LAB-0058`
+    resolved `search.php`'s canonical cell, the module docstring's
+    "search.php is deliberately left out" note is historical.)"""
+    manifest = load_manifest("lab/manifests/phase3_php_laravel_real_pages_search.yaml")
+    emitter = LaravelEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+    vuln_url = served_url_for(cells["LABGEN-PL-RP-0001"])
+    secure_url = served_url_for(cells["LABGEN-PL-RP-0002"])
+    assert vuln_url == "/search.php"
+
+    with LiveBootHarness(emitter, list(manifest.cells)) as harness:
+        for url in (vuln_url, secure_url):
+            baseline = harness.get(url, params={"q": "Chew"})
+            assert baseline.status == 200, (url, baseline.body[:500])
+            assert "text/html" in _content_type(baseline), baseline.headers
+            assert "Chew Toy" in baseline.body and "Puppy Bed" not in baseline.body, baseline.body[:2000]
+            assert baseline.body.count(_PRODUCT_ROW_MARKER) == 1, baseline.body[:2000]
+            _assert_found_not_found_delta(
+                harness, url, "q", found="Chew", not_found="zzz-no-such-fort",
+                empty_text="No forts matched your search.",
+            )
+
+        payload = "%' OR '1'='1"
+        vuln_resp = harness.get(vuln_url, params={"q": payload})
+        secure_resp = harness.get(secure_url, params={"q": payload})
+        assert vuln_resp.status == 200, vuln_resp.body[:500]
+        assert vuln_resp.body.count(_PRODUCT_ROW_MARKER) == 2, vuln_resp.body[:2000]
+        assert secure_resp.status == 200, secure_resp.body[:500]
+        assert secure_resp.body.count(_PRODUCT_ROW_MARKER) == 0, secure_resp.body[:2000]
+        assert "No forts matched your search." in secure_resp.body, secure_resp.body[:2000]
 
 
 def _write_url_for(emitter: LaravelEmitter, cell) -> str:

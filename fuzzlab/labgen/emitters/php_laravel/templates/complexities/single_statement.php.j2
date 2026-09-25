@@ -15,7 +15,21 @@
    named Blade view as its own variable. The view itself is hand-authored
    (not generated), shared byte-for-byte by both twins of the cell pair
    (only the data differs), so it cannot itself leak which twin served the
-   request (leakage/fingerprint-independence, R5). #}
+   request (leakage/fingerprint-independence, R5).
+
+   `html_list_view` (CC-LAB-0240, docs/LAB_PFF_JSON_TO_HTML_PLAN.md §2): a
+   fifth tail, for a sink whose `$rows` is a numeric LIST (`DB::select(...)`,
+   `->get()->all()`) -- `html_row_view`'s `extract()` would yield zero
+   variables from a list, so the list is wrapped under one `rows` key and the
+   named, hand-authored, twin-shared Blade view iterates it itself.
+
+   `session_login`'s failure path and `register_insert`'s duplicate/success
+   paths render their page's own Blade form view (`form_view`) with the
+   message as a view variable (CC-LAB-0240 §3) -- status codes (401/409/200)
+   unchanged; the message strings stay literals in the controller source.
+
+   At most one of these flags is ever set: `php_laravel.LaravelEmitter.render`
+   fails loud otherwise (`_TAIL_FLAG_KEYS`). #}
     public function {{ method_name }}(Request $request)
     {
 {{ body }}
@@ -26,12 +40,21 @@
             $request->session()->put('username', $rows[0]->{{ session_login.name_column }});
             return redirect('{{ session_login.redirect_to }}');
         }
-        return response()->json(['error' => '{{ session_login.error_message }}'], 401);
+        return response()->view('{{ session_login.form_view }}', ['error' => '{{ session_login.error_message }}'], 401);
 {% elif html_row_view is defined %}
         return view('{{ html_row_view }}', $rows);
+{% elif html_list_view is defined %}
+        return view('{{ html_list_view }}', ['rows' => $rows]);
 {% elif register_insert is defined %}
         if ($rows) {
-            return response()->json(['error' => '{{ register_insert.taken_message }}'], 409);
+            // Re-render the real register form with the error inline and the
+            // submitted fields prefilled (Blade escapes every echo).
+            return response()->view('{{ register_insert.form_view }}', [
+                'error' => '{{ register_insert.taken_message }}',
+                'username' => {{ value_expr }},
+                'email' => $request->input('{{ register_insert.email_param }}'),
+                'full_name' => $request->input('{{ register_insert.full_name_param }}'),
+            ], 409);
         }
         // The insert is prepared too: every value is bound by the query
         // builder, never spliced into the statement text.
@@ -50,7 +73,7 @@
 {% endif %}
 {% endfor %}
         ]);
-        return response()->json(['registered' => true]);
+        return response()->view('{{ register_insert.form_view }}', ['registered_username' => {{ value_expr }}], 200);
 {% else %}
         return response()->json($rows);
 {% endif %}
