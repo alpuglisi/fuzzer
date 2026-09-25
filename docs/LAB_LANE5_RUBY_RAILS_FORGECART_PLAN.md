@@ -1,9 +1,10 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **rounds 1–3 reviewed 2026-09-25. Round 3 found 1 narrow gap: O7-neg
-now also proves the exclusions and allowlist neither swallow nor over-match.
-Fixed in this revision. Awaiting round-4 confirmation. Not yet converged, and implementation
-is not authorized.** The orchestrating
+Status: **rounds 1–3 reviewed 2026-09-25. Round 3 found 1 adequacy gap (O7-neg
+must also prove the exclusions and allowlist neither swallow nor over-match)
+and 1 accuracy error (R2's webhook side-effect premise), plus a wording
+cleanup. All are fixed in this revision. Awaiting round-4 confirmation. Not
+yet converged, and implementation is not authorized.** The orchestrating
 session ran the review rounds (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
@@ -546,15 +547,35 @@ either updated to the static error page's contract or, if it is a detection
 signal, treated under R11 as a possible regression. A hit is never simply
 added to O7's allowlist.
 
-**Side effect on the webhook api (round-2 note).** With debug pages off, a
-request whose body Rails cannot parse no longer gets a JSON-shaped Rails
-error. An example is a webhook POST with `Content-Type: application/json`
-and malformed JSON, which Rails rejects in its parameter parser before the
-controller runs. It now gets the static HTML `public/400.html`. The
-receiver's own responses (`{"verified":…}`) are unchanged. The design rule
-for the §2c client page is that it reads `response.text()` and shows it
-verbatim when it is not JSON, never calling `JSON.parse` unguarded.
-O5 checks this offline.
+**Side effect on the webhook api (round-2 note; before/after corrected in
+round 3, checked against the installed Rails source).** Take a webhook POST
+with `Content-Type: application/json` and a malformed JSON body. Rails'
+parameter parser rejects it with a 400 before the controller runs, and the
+receiver's own responses (`{"verified":…}`) are not involved.
+
+- **Before this change** it was **not** a JSON error. `DebugExceptions`
+  uses its API (JSON) renderer only when `api_request?` is true. That
+  requires `@response_format == :api`
+  (`actionpack-8.1.3.1/lib/action_dispatch/middleware/debug_exceptions.rb:206-208`),
+  which is set only for a `config.api_only` app, and nothing in this
+  skeleton sets `api_only`. So the response was the large interactive HTML
+  debug page (`render_for_browser_request`, `:70-73`, `:80`).
+- **After this change** the response comes from `PublicExceptions`
+  (`public_exceptions.rb:25-46`):
+  - for a request whose preferred format is HTML, the small static
+    `public/400.html`;
+  - if the client asked for another format it can serialise (for example
+    `Accept: application/json`), a small `{"status":400,"error":"Bad
+    Request"}` body in that format.
+
+So the change is *large debug HTML → small static page*. It is not a
+JSON-to-HTML format change.
+
+The design rule for the §2c client page is unchanged, and is sound in both
+states: the error body may be HTML or JSON depending on the request's
+`Accept`, so the page reads `response.text()`, attempts `JSON.parse` only
+inside a guard, and shows the raw text when parsing fails. O5 checks this
+offline.
 
 **Not changed:** `config.server_timing` (a `Server-Timing` response header
 with per-request timings). It is response metadata, not a source or verdict
@@ -829,10 +850,12 @@ or fix step.
     `fuzzlab/labgen/conformance/rails_live_boot.py`, which generate or boot
     the app rather than consume its error pages;
   - `__pycache__`;
-  - a **pinned, explicit allowlist** of files that name these strings only
-    to assert their **absence**: O7's own file,
-    `tests/test_labgen_ruby_rails_browsable.py`, and
-    `tests/test_labgen_ruby_rails_navigability_live_boot.py` (§4 step 7).
+  - a **pinned, explicit allowlist of exactly 2 files** that name these
+    strings only to assert their **absence**:
+    - `tests/test_labgen_ruby_rails_browsable.py`, which is O7's own file,
+      since every O-check lives there, and so is also where O7 lists the
+      strings;
+    - `tests/test_labgen_ruby_rails_navigability_live_boot.py` (§4 step 7).
 
   The allowlist is a literal set in the test. Adding to it needs a code
   change reviewed like any other, never a pattern match. O7 fails on any
@@ -1161,4 +1184,28 @@ had not reported when this fix was made.
   prove both that exclusions are honoured and that they are not broader than
   intended. The reviewer judged this a refinement of the existing design,
   not a new risk item.
+- **Next:** round-4 confirmation.
+
+**Round 3 (accuracy reviewer): NOT ACCURATE, 1 real inaccuracy plus 1
+wording cleanup.** Both are fixed in this revision. The O7 spec, the
+`CC-LAB-0245` draft update and the round-2 record were confirmed accurate.
+
+1. **Inaccuracy.** R2's webhook side-effect note said a malformed-JSON POST
+   went from "a JSON-shaped Rails error" to HTML. That premise was false:
+   `DebugExceptions#api_request?` requires `@response_format == :api`
+   (`debug_exceptions.rb:206-208`), which only a `config.api_only` app has,
+   so the pre-change response was already HTML (the large debug page).
+   - **Corrected** to *large debug HTML → small static `PublicExceptions`
+     response*.
+   - The drafting agent re-checked the source while fixing this and added
+     one precision: `public_exceptions.rb:25-46` answers in the request's
+     own format when it can serialise to it. The "after" body is therefore
+     `public/400.html` for an HTML-preferring request, but a small JSON
+     `{status, error}` body for `Accept: application/json`.
+   - The guarded-parse design rule (O5) is unchanged. Its rationale is
+     restated as "the error body may be HTML or JSON depending on `Accept`".
+   - The `CC-LAB-0245` mirror is corrected the same way.
+2. **Wording.** O7's allowlist was worded as three files, but "O7's own
+   file" *is* `tests/test_labgen_ruby_rails_browsable.py`. It is reworded as
+   exactly 2 files.
 - **Next:** round-4 confirmation.

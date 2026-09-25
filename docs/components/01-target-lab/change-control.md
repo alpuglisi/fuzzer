@@ -11,7 +11,9 @@ session. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
 Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
 had to become a standing check. That is fixed as O7. Round 3's adequacy
 review returned NOT ADEQUATE with 1 narrow gap: O7-neg did not test the
-exclusion side. That is fixed too (see the plan's §8). The plan is awaiting
+exclusion side. Round 3's accuracy review returned NOT ACCURATE with 1 error:
+the webhook side-effect's "was JSON before" premise was false. Both are
+fixed (see the plan's §8). The plan is awaiting
 round-4 confirmation. Text below the next
 sentence records the drafting-time situation. At drafting time, neither this
 entry nor the underlying plan had been reviewed. The dispatch
@@ -125,9 +127,15 @@ template; the plan holds the full detail.
        setting is flipped.
        A grep at plan revision found 0 hits; the only Rails non-2xx
        assertion is the sink's own JSON 401.
-     - **Side effect:** a malformed-JSON webhook POST now gets the static
-       HTML 400 page instead of a JSON-shaped Rails error. The webhook
-       client page parses responses only inside a guard; O5 checks this.
+     - **Side effect** (corrected after plan round 3): a malformed-JSON
+       webhook POST's parser 400 changes from Rails' large interactive
+       debug HTML page to `PublicExceptions`' small static response. That
+       is `public/400.html`, or a `{status, error}` body in the request's
+       own format, for example with `Accept: application/json`. It was
+       never JSON before, because `DebugExceptions` uses its API renderer
+       only for `config.api_only` apps, and this app is not one. The
+       webhook client page therefore parses responses only inside a guard,
+       with a raw-text fallback; O5 checks this.
   3. **R3: CSRF posture must neither gain nor lose protection.** Mitigated:
      plain `<form>` only (never `form_with`/`form_tag`), no
      `csrf_meta_tags`, global `skip_forgery_protection` untouched. Checked
