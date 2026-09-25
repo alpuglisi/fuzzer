@@ -5848,6 +5848,134 @@ lane) can submit a payload as
   proven directly: each page's bare `GET` returns byte-identical bodies at
   the vulnerable URL and at its twin's URL (live, all 6 pages). Ground truth
   still names only the vulnerable cell.
+- **FR-LAB-168** *(Browsable Labs Lane 6, MeadowMart, `node_express`;
+  `CC-LAB-0246`, 2026-09-25, `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`).*
+  MeadowMart is a browsable storefront around its backend-for-frontend (BFF)
+  JSON APIs. It has five parts:
+  1. **Classification.**
+     - Every MeadowMart endpoint is `api`: `/api/preferences`,
+       `/api/search`, and the inert `/api/products`,
+       `/api/orders/:orderId` and `/api/cart`.
+     - `docs/LAB_BROWSABLE_APPS_PLAN.md` names this BFF `/api/*` family as
+       a genuine API. The JSON-body encoding of `/api/preferences` depends
+       on its `server-json` ground truth.
+     - No cell response is converted, and no ground-truth field changes.
+  2. **Site layer.** A checked-in scaffold file, `scaffold/site.js`, is
+     registered once by `app.js`
+     (`require('./site').register(app, <catalog>)`).
+     - `layout()` renders a header with the "MeadowMart" name and nav
+       sorted by path, then main, a footer, and inline CSS.
+     - Pages: `/` (homepage) and the client pages `/products`, `/cart`,
+       `/orders`, `/search` and `/account/preferences`. Each client page
+       calls its BFF API with an inline `fetch()`.
+     - `/catalog` links every served cell URL (twins included) and every
+       inert API. A GET API that needs a parameter is linked with its
+       declared `example_query`, for example `/api/search?q=shoes`.
+     - No cell controller uses the layout, so twin responses are unchanged.
+     - `SITE_ROUTES` (Python) mirrors `site.js`'s routes. Every running
+       app, and every test fixture, copies `RUNTIME_SCAFFOLD_FILES`.
+     - `site.js` is built so a polluted `Object.prototype` cannot change
+       what it renders: no `for…in` loops, no merging of request data into
+       objects, and no reading of request input. Its only `innerHTML`
+       write is the `/api/search` response.
+  3. **Absent-input declarations (PA-0053/PA-0054/PA-0058).**
+     - Every `_ROUTE_PARAMS` profile carries one required `absent_input`
+       key. The value must be allowed for the route's source kind
+       (`ABSENT_INPUT_BY_SOURCE`).
+     - Each declaration is rendered in the source region, identically on
+       both twins.
+     - `/api/search` → `required_param`, a JSON 400 before the RegExp is
+       built.
+     - `/api/preferences` → `empty_body_400`.
+     - `/api/products` and `/api/posts` → `default_value` `'1'`.
+     - `/api/login` → `required_param`.
+     - `/api/profile` → `no_input`.
+  4. **GET resource read.** Every served URL of a route whose profile
+     declares `get_resource` (the preferences canonical and twin URLs)
+     answers GET with `{ preferences: <default> }`. It is twin-identical,
+     reads no input, and leaves the POST contract unchanged.
+  5. **Navigability.** New `tests/test_labgen_node_meadowmart_navigability_live_boot.py`
+     boots MeadowMart's build (`MEADOWMART_MANIFESTS`: the PP and RD
+     manifests only; the generic `LABGEN-NE-*` sample is not part of it) and
+     crawls it from `/` with `LocalSpider`. It asserts:
+     - non-vacuous guards: 4 points, and at least 12 crawled URLs
+       (measured 14);
+     - every ground-truth path is discovered at depth 2 (cap 4) and
+       answers an anonymous visitor 200;
+     - `/` and every nav link answer 200;
+     - no crawled URL answers 5xx;
+     - a bare request to every served route answers exactly its declared
+       status, on both twins;
+     - site pages are byte-identical before and after a polluting POST.
+       The test proves the pollution really happened, so this check is not
+       vacuous.
+
+     There is no session gating in `node_express`, so no 401 exception
+     applies.
+
+  **R3 sign-off (2026-09-25): branch (a), GET resource read.**
+  - The `requests`-engine spider follows only `<a href>`, and a real BFF
+    preferences resource supports both GET and POST. So both preferences
+    URLs answer GET with the resource's default state.
+  - Lanes 1 and 4 use branch (b) instead: serving the HTML client page on
+    GET at the API URL.
+  - Neither fallback condition held:
+    - no reviewer judged branch (a) to misrepresent the BFF;
+    - `fuzzlab.harness.auto` sends the ground-truth points' own method
+      (POST), so the new GET is never scored. The MeadowMart multitarget
+      runs are unchanged.
+- **FR-LAB-169** *(Browsable Labs Lane 6: the generic `python_fastapi`
+  sample; `CC-LAB-0246`, 2026-09-25).* The sample, which has no app
+  identity, no ground truth and no port, gets a homepage and layout. It has
+  four parts:
+  1. **Site scaffold.** `app/site.py` (template `site.py.j2`) holds
+     `layout()`, `render_row()` and the homepage `/`.
+     - It also serves a GET form page for every served POST path that has
+       a declared `form_fields` (`/login` and its twin).
+     - The page table is rendered statically from `_PAGE_PARAMS`
+       (`nav_label`, `form_fields`), never read from `app.routes`.
+     - `main.py` records each served `(method, path)` pair in `site.SERVED`
+       and calls `site.install(app)` after router discovery.
+  2. **Cell responses inside the layout.**
+     - `/profile`'s fragment is wrapped in the layout. The sink context is
+       unchanged: the value stays in the HTML body.
+     - `/products` and `/login` render their row as an HTML detail view.
+       A found row gives a table; a missing row gives "No matching
+       record." The found view is at least 200 bytes larger than the
+       not-found view (measured 213: 1,137 vs 924).
+  3. **Absent-input declarations.** Every `_PAGE_PARAMS` profile carries
+     `absent_input`, allowed per source kind:
+     - `/products` → `default_value` `"1"` (fixes BUG-0056's D1);
+     - `/login` → `required_param`, a JSON 400;
+     - `/profile` → `no_input`.
+
+     Each is rendered in the source region, identically on both twins.
+  4. **Checks.** There is no spider crawl, by explicit decision: with no
+     ground truth, contract point 6 is vacuous. Instead,
+     `tests/test_labgen_python_fastapi_browsable.py` covers, in-process:
+     - the offline declaration check;
+     - site-table coverage;
+     - the homepage;
+     - link reachability of every served page;
+     - a bare-request sweep of every served path, twins included, with the
+       declared statuses;
+     - the found/not-found byte difference;
+     - the GET form and POST cell sharing one path;
+     - twin reachability.
+
+  **F3 sign-off (2026-09-25): branch (a), scaffold-level twin prefixes.**
+  - Router discovery now includes a module whose `(method, path)` is
+    already taken under `/twin/<cell-id>`. For example, `LABGEN-PY-0002`
+    is served at `/twin/labgen-py-0002/products`.
+    `served_path_for()` mirrors this in Python.
+  - No per-cell file changes, so every minimal pair still differs only in
+    its transform/sink region.
+  - None of branch (b)'s conditions held:
+    - the minimal-pair checker and Tier-3 regeneration pass;
+    - `include_router(prefix=...)` serves prefixed GET and POST routes
+      correctly under `TestClient` on FastAPI 0.141.1;
+    - the scaffold stays byte-deterministic.
+  - Each secure twin is now reachable and answers with its own behavior.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

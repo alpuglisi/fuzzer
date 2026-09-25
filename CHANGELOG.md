@@ -4,6 +4,25 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 6 implemented: MeadowMart/node_express + python_fastapi sample browsable, CC-LAB-0246/FR-LAB-168-169)
+- Implemented `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md` (`CC-LAB-0246`).
+  - **MeadowMart:** its backend-for-frontend JSON APIs are unchanged.
+    - It gains a homepage, a shared layout, `fetch()` client pages and an
+      endpoint `/catalog`, from a new `scaffold/site.js`.
+    - Its preferences URLs now answer GET with their default state.
+    - A new live navigability test crawls it from `/` and sweeps every
+      served route bare.
+  - **FastAPI sample:** it gets a homepage, a layout and form pages. Its
+    responses render in the layout, and each secure twin is now reachable
+    at `/twin/<cell-id>`.
+  - **Bug fixed, BUG-0056:** in both emitters, a bare request could 500,
+    kill the Node process, or answer differently on each twin. Every route
+    now declares its `absent_input` behavior.
+  - **New PA-0058:** checks must assert the declared status identically on
+    both twins, and validate declarations against one closed value set.
+  - **Why:** so a browser visitor can click through both apps end to end,
+    and a bare URL can no longer tell twins apart.
+
 ## 2026-09-25 (Lane 2 implemented: PicTrail/django browsable, CC-LAB-0242/FR-LAB-160)
 - Implemented `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md` (`CC-LAB-0242`): PicTrail
   gets a homepage, shared layout, `/catalog` and a `fetch()` client page for its

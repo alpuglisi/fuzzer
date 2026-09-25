@@ -340,7 +340,10 @@ tracked in the requirements files, not here.
   module-composition system; a `route`-category accumulator method
   (`render_route_accumulator`, not part of the base `Emitter` ABC) builds
   the shared `app.js` route-registration file, fed by one fragment per
-  supported cell sorted by cell ID. A **fifth stack emitter**
+  supported cell sorted by cell ID. Since `CC-LAB-0246`, `app.js` also
+  registers the checked-in `scaffold/site.js` site layer, so MeadowMart is
+  browsable. The `python_fastapi` scaffold likewise gained `app/site.py`
+  and serves twin cells under `/twin/<cell-id>`. A **fifth stack emitter**
   (`fuzzlab/labgen/emitters/go_net_http/`, category 4 second-target pilot's
   `CC-LAB-0170`/`FR-LAB-76`, 2026-09-22) is this project's first Go stack —
   standard-library `net/http` only, Phase A depth (one illustrative
@@ -925,6 +928,31 @@ tracked in the requirements files, not here.
   handled 400 (BUG-0052/PA-0054); and
   `tests/test_labgen_django_navigability_live_boot.py` crawls the whole
   build from `/`.
+  **MeadowMart and the FastAPI sample are browsable (`CC-LAB-0246`,
+  Browsable Labs Lane 6).**
+  - **MeadowMart** (`node_express`) keeps every endpoint a
+    backend-for-frontend JSON API. A new checked-in scaffold file,
+    `scaffold/site.js`, is registered by `app.js` with a cell-derived
+    catalog. It provides:
+    - a shared layout;
+    - a homepage;
+    - `fetch()` client pages (`/products`, `/cart`, `/orders`, `/search`,
+      `/account/preferences`);
+    - `/catalog`.
+  - Both preferences URLs answer GET with the resource's default state.
+  - Every running app, and every test fixture, copies
+    `RUNTIME_SCAFFOLD_FILES`.
+  - **The `python_fastapi` sample** gains an `app/site.py` scaffold (layout,
+    homepage, GET form pages). Its cell responses render inside the layout,
+    and router discovery serves each twin under `/twin/<cell-id>`
+    (`served_path_for`).
+  - **Absent-input declarations** (BUG-0056/PA-0058): both emitters' route
+    profiles declare a required `absent_input`, using the shared
+    cross-emitter vocabulary.
+  - **Tests:**
+    `tests/test_labgen_node_meadowmart_navigability_live_boot.py` crawls
+    MeadowMart from `/`, and `tests/test_labgen_python_fastapi_browsable.py`
+    checks the sample in-process.
   **CircleFeed (`CC-LAB-0216`), category 2's Facebook pick, landed its
   first real page** — the second app identity built on the existing
   `php_laravel` emitter (after Huddle Hub, category 3): a photo/tag-
