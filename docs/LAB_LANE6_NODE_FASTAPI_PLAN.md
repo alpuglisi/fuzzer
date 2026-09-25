@@ -322,7 +322,7 @@ uses:
 **2A-e. Fixtures.** `app.js` will now `require('./site')`. The 3 existing
 live fixtures copy only `package.json`/`db.js`
 (`test_labgen_node_bff_app.py:171`, `test_labgen_node_bff_multitarget.py:109`,
-and the combined test), so they would fail to boot. They are changed to
+`test_multitarget_category1_combined.py:105`), so they would fail to boot. They are changed to
 copy every file in a new emitter constant, `RUNTIME_SCAFFOLD_FILES =
 ("db.js", "package.json", "site.js")`, so the next scaffold file added
 cannot silently break them again. A shared helper, `tests/_meadowmart_app.py`
