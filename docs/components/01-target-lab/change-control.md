@@ -5,11 +5,15 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0243 — Browsable labs Lane 3: go_net_http/Twitch clone conversion (2026-09-25, FR-LAB-162, `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`)
 
-**Status: DRAFT, pre-change review gate in progress.** Round 1: ACCURATE
-/ adequate except one gap (the cross-lane risk of concurrent point 6
-edits was only a one-line Impact flag), fixed by adding R13 here and in
-the plan, plus a sharper point 6 deliverable. Round 2 pending.
-Implementation is not authorized. Condensed from `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`,
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents, spawned by the orchestrating session,
+plus the proposing agent, after 1 revision round). Round 1 found the
+entry ACCURATE (deliverables independently confirmed byte-identical to the
+plan's §6), with one adequacy gap: the cross-lane risk of concurrent point 6
+edits was only a one-line Impact flag. It was fixed by adding R13 here and in
+the plan, plus a sharper point 6 deliverable. In round 2 both reviewers
+re-confirmed ACCURATE and ADEQUATE. **Implementation authorized, not yet
+landed.** Condensed from `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`,
 which reached 3/3 agreement on 2026-09-25 (2 independent reviewer agents,
 spawned by the orchestrating session because the proposing agent had no
 subagent tool, plus the proposing agent, after 1 revision round). That
