@@ -1,0 +1,11 @@
+<%# CC-LAB-0245: rendered by the /admin/products/import cell's sink. Escaped
+    output only (plan R5). The deserialization verdict stays observable as the
+    parsed class (or the exception class Psych raised). %>
+<% content_for :title, "Import result - ForgeCart" %>
+<h1>Import result</h1>
+<% if @result[:ok] %>
+<p id="import-result">Import parsed as <code id="parsed-class"><%= @result[:parsed_class] %></code>.</p>
+<% else %>
+<p id="import-result">Import failed: <code id="import-error"><%= @result[:error] %></code>.</p>
+<% end %>
+<p><a href="/admin/products/import">Import another file</a></p>

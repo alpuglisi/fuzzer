@@ -1,0 +1,8 @@
+<% content_for :title, "Import products - ForgeCart" %>
+<h1>Import products</h1>
+<p>Paste a YAML product export to import it.</p>
+<form method="post" action="/admin/products/import">
+  <label for="yaml_payload">Product YAML</label>
+  <textarea id="yaml_payload" name="yaml_payload" rows="10"></textarea>
+  <p><button type="submit">Import</button></p>
+</form>
