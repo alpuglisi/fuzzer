@@ -439,8 +439,14 @@ def _site_home_method(tagline: str) -> str:
 
 
 def _site_catalog_method(cells: list[Cell]) -> str:
+    # CC-LAB-0244 (plan design contract point 3): a real <a href> per row,
+    # not plain text -- a "site map" that only names a URL instead of
+    # linking it leaves that URL (chiefly a secure twin's own served URL,
+    # which nothing else on the site links to) unreachable by browsing.
     rows = "".join(
-        f"<tr><td>{c.route.method}</td><td>{served_url_for(c, site_build=True)}</td><td>{c.cell_id}</td></tr>"
+        f'<tr><td>{c.route.method}</td>'
+        f'<td><a href="{(url := served_url_for(c, site_build=True))}">{url}</a></td>'
+        f"<td>{c.cell_id}</td></tr>"
         for c in sorted(cells, key=lambda c: (served_url_for(c, site_build=True), c.cell_id))
     )
     body = f"<h2>Site map</h2><table><tr><th>Method</th><th>URL</th><th>Cell</th></tr>{rows}</table>"
@@ -471,7 +477,15 @@ def _site_client_page_method(route_path: str, method: str, spec: dict[str, Any],
         inputs = "".join(
             f'<p><label>{label}<br><input type="text" name="{param}"></label></p>' for label, param in fields
         )
-        body = f"<h2>{title}</h2><form method=\"get\" action=\"{api_url}\">{inputs}<button type=\"submit\">Go</button></form>"
+        body = (
+            f"<h2>{title}</h2><form method=\"get\" action=\"{api_url}\">{inputs}"
+            "<button type=\"submit\">Go</button></form>"
+            # CC-LAB-0244 (plan design contract point 3): a plain <a href>
+            # to the API's own URL -- a form's own action target is never
+            # itself a crawlable link, so without this the ground-truth
+            # URL would be unreachable from a static crawl.
+            f'<p><small>Calls <a href="{api_url}">GET {api_url}</a> directly.</small></p>'
+        )
     elif kind == "post_form":
         body = f'<h2>{title}</h2><form method="post"><button type="submit">Send</button></form><pre id="result"></pre>'
     elif kind == "multipart_form":
@@ -485,6 +499,10 @@ def _site_client_page_method(route_path: str, method: str, spec: dict[str, Any],
             f'<h2>{title}</h2>'
             '<p><label>Token<br><input type="text" id="token"></label></p>'
             '<button id="go">Fetch</button><pre id="result"></pre>'
+            # CC-LAB-0244 (plan design contract point 3): see the get_form
+            # branch above -- a fetch() target is never itself a crawlable
+            # link either.
+            f'<p><small>Calls <a href="{api_url}">GET {api_url}</a> directly.</small></p>'
         )
         js = (
             "<script>"
