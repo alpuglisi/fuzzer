@@ -7,8 +7,14 @@
         // (CC-LAB-0180) established, ported idiomatically to Java rather
         // than reused as a real library's own CVE.
         String authHeader = request.getHeader("Authorization");
-        if (authHeader == null) {
-            authHeader = "";
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054): an
+        // absent or empty Authorization header is a handled 401 (with a
+        // Bearer challenge) before any token parsing or sink runs.
+        if (authHeader == null || authHeader.isEmpty()) {
+            return org.springframework.http.ResponseEntity.status(401)
+                .header("WWW-Authenticate", "Bearer")
+                .header("Content-Type", "application/json")
+                .body("{\"error\":\"missing token\"}");
         }
         String {{ token_var }} = authHeader.startsWith("Bearer ")
             ? authHeader.substring("Bearer ".length()) : authHeader;

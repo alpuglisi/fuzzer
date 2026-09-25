@@ -1,4 +1,19 @@
         String {{ var_name }} = request.getParameter("{{ param_name }}");
+{% if absent_input == "default_value" %}
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054):
+        // the route's own default when the parameter is absent or empty.
+        if ({{ var_name }} == null || {{ var_name }}.isEmpty()) {
+            {{ var_name }} = "{{ default_value_java }}";
+        }
+{% elif absent_input == "required_param" %}
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054): no
+        // safe default exists, so an absent or empty parameter is a handled
+        // 400 returned before any sink runs.
+        if ({{ var_name }} == null || {{ var_name }}.isEmpty()) {
+            return com.fuzzlab.trackernest.SiteLayout.missingInput(400, "missing required parameter: {{ param_name }}");
+        }
+{% else %}
         if ({{ var_name }} == null) {
             {{ var_name }} = "";
         }
+{% endif %}

@@ -1,3 +1,13 @@
+        // Declared absent-input behavior (CC-LAB-0244, BUG-0054): a request
+        // that is not multipart at all is a handled 400 BEFORE getPart(),
+        // which throws (an unhandled 500) on a non-multipart request -- the
+        // null-part guard below never ran for a bare POST.
+        String {{ part_var }}RequestType = request.getContentType();
+        if ({{ part_var }}RequestType == null
+                || !{{ part_var }}RequestType.toLowerCase(java.util.Locale.ROOT).startsWith("multipart/")) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("missing file field".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
         jakarta.servlet.http.Part {{ part_var }} = request.getPart("file");
         if ({{ part_var }} == null) {
             return org.springframework.http.ResponseEntity.status(400)

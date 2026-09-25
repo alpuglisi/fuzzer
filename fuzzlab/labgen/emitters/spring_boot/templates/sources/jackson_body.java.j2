@@ -1,1 +1,6 @@
         byte[] requestBody = request.getInputStream().readAllBytes();
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054): an
+        // empty body is a handled 400 before any sink runs.
+        if (requestBody.length == 0) {
+            return com.fuzzlab.trackernest.SiteLayout.missingInput(400, "empty request body");
+        }

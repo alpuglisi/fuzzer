@@ -1,0 +1,27 @@
+@org.springframework.web.bind.annotation.RestController
+public class {{ class_name }} {
+
+    // CC-LAB-0244 (FR-LAB-164/165): a page-classified route. The source and
+    // sink below are unchanged; this complexity renders their result inside
+    // the app's shared layout (com.fuzzlab.trackernest.SiteLayout), HTML-
+    // escaped, at the sink's own status code. Selected by the route profile,
+    // never by the sink template (plan S8).
+    @org.springframework.web.bind.annotation.{{ mapping_annotation }}("{{ route_path }}")
+    public org.springframework.http.ResponseEntity<String> {{ handler_name }}(
+            jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException {
+        String pageInput = request.getParameter("{{ param_name }}");
+        // Declared absent-input behavior, form_when_absent (FR-LAB-165
+        // sign-off): no input -> the page with its form alone, 200, before
+        // the source or sink runs.
+        org.springframework.http.ResponseEntity<String> result =
+            (pageInput == null || pageInput.isEmpty()) ? null : compute(request);
+        return com.fuzzlab.trackernest.SiteLayout.page(
+            "{{ app_name_java }}", "{{ app_brand_java }}", "{{ nav_html_java }}",
+            "{{ page_title_java }}", "{{ form_html_java }}", result);
+    }
+
+    private org.springframework.http.ResponseEntity<String> compute(
+            jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException {
+{{ body }}
+    }
+}
