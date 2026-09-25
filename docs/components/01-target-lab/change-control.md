@@ -7,7 +7,8 @@ Component code: **LAB**. Entry format and required fields: see
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
 (2 independent reviewer agents, dispatched by the orchestrating session,
-plus the proposing agent, after 2 rounds). **Implementation authorized.**
+plus the proposing agent, after 2 rounds). **Implementation authorized; implemented
+2026-09-25** (see Deliverables and Effectiveness).
 
 - **Round 1 accuracy:** NOT ACCURATE, 1 trivial fix. A stale sentence in
   this status paragraph contradicted the plan's convergence; the paragraph
@@ -253,42 +254,53 @@ change-control template; the plan holds the full detail.
       `ruby_rails` cell (PA-0024).
 
   Accepted, not mitigated: none.
-- **Deliverables:** copied verbatim from the plan's §6.
-  - [ ] Skeleton `development.rb`: `consider_all_requests_local = false`,
+- **Deliverables:** copied verbatim from the plan's §6, checked off at implementation with notes.
+  - [x] Skeleton `development.rb`: `consider_all_requests_local = false`,
         `annotate_rendered_view_with_filenames = false` (§2a, R1/R2); O6
         green; live no-debug-page check green.
-  - [ ] Standing offline check **O7** (no test or detection code depends on
+        — done (commit `8670847`; O6 and the cross-emitter `test_labgen_debug_pages_disabled.py` green; live: every error body is the byte-equal static page, with no trace, `permit`, `YAML.` or `labgen`; each check verified to fail with the pre-fix setting restored).
+  - [x] Standing offline check **O7** (no test or detection code depends on
         Rails debug-page content; pinned absence-only allowlist) plus its
         adversarial self-test O7-neg, added and green **before** the setting
         above is flipped (§5 step 1a, R2). It is a permanent test, not a
         one-time grep.
-  - [ ] `_ABSENT_INPUT_BY_SHAPE` declarations and source-template constructs
+        — done (O7 plus O7-neg, which plants 2 must-report, 2 must-not and 2 near-miss hits; 0 real hits at implementation).
+  - [x] `_ABSENT_INPUT_BY_SHAPE` declarations and source-template constructs
         (§2d); O1 + O1-neg green; bare `POST /admin/products/import` → 400
         before the sink (was 200 with `nil` in the sink).
-  - [ ] ForgeCart layout, homepage, HTML inert pages and `/catalog` (§2b);
+        — done (O1, O1-neg x3, plus a source module that refuses an undeclared input; bare POST measured 400 on both deserialization routes, `/admin/products/import` and `/cell/labgen_rr_0006`/`0007`).
+  - [x] ForgeCart layout, homepage, HTML inert pages and `/catalog` (§2b);
         O2, O3, O5a green; whole-app live test updated (R12) and green.
-  - [ ] `/search` in the layout; customer and import GET form pages and
+        — done (layout: sorted nav groups, no token or external asset; `/catalog` built from Rails' route table; whole-app test's 5 old-shape assertions moved to the HTML contract, a PA-0045 count matching the plan).
+  - [x] `/search` in the layout; customer and import GET form pages and
         escaped HTML result pages (§2c, R4/R5); each page's §5 step-4 gate
         green.
-  - [ ] Webhook `fetch()` client page for both topics, no secret,
+        — done (`/search` in the layout with `raw` reflection unchanged; the customer form exposes only `user[bio]`; results ERB-escaped, `<b>note</b>` rendered as `&lt;b&gt;`; `role`=`admin` and `OpenStruct` observable).
+  - [x] Webhook `fetch()` client page for both topics, no secret,
         byte-identical (§2c, R6); O5b green; JSON wire contract unchanged
         (webhook live suite green); the console's malformed-JSON error branch is asserted
         live at R2's predicted (or, per R2's decision rule, measured)
         status/content type (§4 step 9d).
-  - [ ] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
+        — done (both topics' GET bodies byte-identical; no secret; O5b green; webhook live suite 3 passed; 9d measured `401` `application/json` `{"verified":false}`, not the source-derived `400`: nothing parses the body, so per R2's rule the measured result is asserted exactly).
+  - [x] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
         points and cases (§2e).
-  - [ ] Navigability test (§4) built and green: non-vacuous guards, 100%
+        — done (commit `e419c79`; `contract.load` validates; the PA-0044 grep found no cardinality-dependent assertion, since only a field changed).
+  - [x] Navigability test (§4) built and green: non-vacuous guards, 100%
         ground-truth discovery with anonymous status, link-reachability,
         the PA-0054 sweep of every served route at the **declared** status
         (R7), and the `BUG-0055` regression checks.
-  - [ ] Any same-class defect the navigability test surfaces fixed and
+        — done (`tests/test_labgen_ruby_rails_navigability_live_boot.py`, 8 passed; see Effectiveness).
+  - [x] Any same-class defect the navigability test surfaces fixed and
         folded in; any different-class finding flagged with its own
         recommended next `CC-LAB` number, not absorbed (§5 step 7).
-  - [ ] Detection non-regression measured and pinned per R5/R11; both
+        — done. Folded in: nothing new, as the sweep found no crash and no undeclared input. Flagged, not absorbed: stale `CC-LAB-0077`/`FR-LAB-81` and `CC-LAB-0079`/`FR-LAB-83` (MeadowMart's) citations in 5 ForgeCart code/test comments and a `CC-LAB-0078` reference in `expectedresults.csv`; ForgeCart's real IDs are `CC-LAB-0080`–`0082`/`FR-LAB-84`–`86`. Recommended as its own entry at the next free CC-LAB number after `CC-LAB-0248`, subject to the orchestrator's re-derivation. The two skeleton controllers this lane rewrote were corrected in place.
+  - [x] Detection non-regression measured and pinned per R5/R11; both
         multitarget modules green.
-  - [ ] Full non-slow suite plus every `ruby_rails` suite green, per-file
+        — done (measured `tp=1` (`FCART-0001`), `tn=1`, `fp` 1→0, `fn=3`; per R5 pinned as `matched == ["FCART-0001"]`, `tn == 1`, `fp == 0` in `test_multitarget_ruby_rails_forgecart.py`; both multitarget modules green).
+  - [x] Full non-slow suite plus every `ruby_rails` suite green, per-file
         counts quoted (PA-0038).
-  - [ ] **Bug protocol for `BUG-0055`** (R2, the development-mode debug-page
+        — done (see Effectiveness).
+  - [x] **Bug protocol for `BUG-0055`** (R2, the development-mode debug-page
         verdict leak, reproduced live pre-change):
     - an `ERROR_LOG.md` entry (added **Open** with this plan; flipped to
       Fixed at implementation);
@@ -304,20 +316,25 @@ change-control template; the plan holds the full detail.
       in an emitter this lane does not own is pinned by an offline failing
       or strict-xfail check, per PA-0054(3), and flagged to the orchestrator
       because Lanes 3, 4 and 6 are running concurrently.
-  - [ ] If the §2d bug decision rule, applied to implementation-time
+        — done (`ERROR_LOG.md` flipped to Fixed; `docs/bugs/BUG-0055-rails-dev-mode-exception-pages-leaked-generated-source-and-twin-verdict.md`; `PA-0057`. Sweep: php_laravel, django, fastapi, spring_boot and go are clean, and php_current is not served. One instance found in `node_express` (Lane 6): the test-time `node app.js` launches in 3 test files omit `NODE_ENV=production`. It is pinned by the strict xfail `test_every_test_time_node_launch_sets_production` and flagged.)
+  - [x] If the §2d bug decision rule, applied to implementation-time
         measurements, finds an additional defect: state it. `BUG-0055`/`PA-0057` are the only reserved numbers. Needing a second pair means
         bumping Lanes 6–7's BUG/PA reservations in
         `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately and flagging it. If
         none is found, say so explicitly in Effectiveness.
-  - [ ] `docs/components/01-target-lab/requirements.md`: new `FR-LAB-166`
+        — done: no additional defect. The §2d rule applied to the measurements: the absent-`yaml_payload` path was a rescued 200, twin-identical, under 500 and never probed by detection, so it is a conformance change, not a bug. The sweep found no absent-input crash in `ruby_rails`. Only `BUG-0055`/`PA-0057` were used, and no BUG/PA bump was needed.
+  - [x] `docs/components/01-target-lab/requirements.md`: new `FR-LAB-166`
         entry (ForgeCart browsable, page/api classification, absent-input
-        declarations, debug-page posture). `FR-LAB-81`/`FR-LAB-83` are
-        cross-referenced in place where their JSON/plain-text descriptions
-        are superseded.
-  - [ ] `docs/ARCHITECTURE.md`: the `ruby_rails`/ForgeCart build-status line
+        declarations, debug-page posture). `FR-LAB-84`/`FR-LAB-85`/`FR-LAB-86` (ForgeCart's own identity, whole-app
+        and `TargetSpec` entries) are cross-referenced in place where their
+        JSON/plain-text descriptions are superseded.
+        — done (`FR-LAB-166`; `FR-LAB-84`/`85`/`86` annotated in place).
+  - [x] `docs/ARCHITECTURE.md`: the `ruby_rails`/ForgeCart build-status line
         updated (Lane 2 precedent).
-  - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0245`.
-  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 5 row updated to done, with
+        — done.
+  - [x] `CHANGELOG.md`: one dated line referencing `CC-LAB-0245`.
+        — done.
+  - [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 5 row updated to done, with
         the numbers actually used. If this step needed more than its
         reserved single `CC-LAB-0245`, or more than its reserved
         `FR-LAB-166`–`167`, Lanes 6–7's CC-LAB/FR-LAB numbers shift by the
@@ -326,8 +343,81 @@ change-control template; the plan holds the full detail.
         (`docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`, the actual
         FR-LAB-158/159 collision between Lanes 1 and 2), and flag the shift
         to the orchestrator.
-- **Effectiveness:** pending. Nothing has been implemented. This entry's own
-  review gate is in progress (see Status).
+        — done (only `CC-LAB-0245` and `FR-LAB-166` used; `FR-LAB-167` and `CC-FUZZ-0051`/`FR-FUZZ-35` unused; Lanes 6–7 not bumped).
+- **Effectiveness (assessed 2026-09-25):** effective. One same-class
+  instance was found in another lane's emitter; it is pinned and flagged, not
+  fixed. One different-class citation follow-up is flagged, not absorbed.
+
+  **Suites.**
+  - Full non-slow suite (`pytest -m "not slow"`): 2538 passed, 8 skipped, 212 deselected, 1 xfailed (the `node_express` pin), 0 failed.
+  - Every `ruby_rails`-related suite, run explicitly (PA-0038):
+    100 passed, 1 xfailed, 0 skipped. The live harness really ran
+    (`rails_boot_available()` true: Ruby 3.3.6, Rails 8.1.3.1).
+
+  | Suite | Result |
+  |---|---|
+  | `test_labgen_ruby_rails_browsable.py` (new, offline) | 15 passed |
+  | `test_labgen_debug_pages_disabled.py` (new, offline) | 8 passed, 1 strict xfail (the `node_express` pin) |
+  | `test_labgen_ruby_rails_navigability_live_boot.py` (new) | 8 passed |
+  | `_webhook_signature.py` | 14 passed |
+  | `_mass_assignment.py` | 16 passed |
+  | `_insecure_deserialization.py` | 14 passed |
+  | `test_labgen_ruby_rails_live_boot.py` | 1 passed |
+  | `_webhook_signature_live_boot.py` | 3 passed |
+  | `_mass_assignment_live_boot.py` | 2 passed |
+  | `_insecure_deserialization_live_boot.py` | 3 passed |
+  | `_whole_app_live_boot.py` | 1 passed |
+  | `test_multitarget_ruby_rails_forgecart.py` | 2 passed |
+  | `test_multitarget_category1_combined.py` | 1 passed |
+  | `test_oracle.py` (R11 re-run) | 12 passed |
+
+  **Risk items, as measured.**
+  - **R1/R2 (`BUG-0055`).** Pre-change, reproduced live: bare
+    `POST /admin/customers/update` returned a roughly 121 KB 400 debug page
+    showing `permit_bang_unrestricted`, and the secure twin's showed
+    `strong_params_explicit_allowlist`. Every view carried
+    `BEGIN app/views/cell_<id>`.
+    - After the change: every error body across the full route sweep is the
+      byte-equal static `public/*.html` page (the one exception, the 401, is
+      the sink's own JSON), and no page has an annotation.
+    - The live, O6 and cross-emitter checks each fail with the pre-fix
+      setting restored.
+    - R2's `production` fallback was not needed.
+  - **R3.** Forms are tokenless and there is no `csrf_meta_tags`; two GETs of
+    `/` are byte-identical.
+  - **R4.** The form exposes only `user[bio]`.
+  - **R5.** Results are escaped. The pre-existing `xss-reflected` false alarm
+    on `/admin/customers/update` is gone, and `fp == 0` is pinned.
+  - **R6.** Both topics' client pages are byte-identical and carry no secret.
+  - **R7.** Every one of the 29 bare requests (a GET of each served path plus
+    each non-GET route's own verb) returned exactly its declared status: 200,
+    400, 401 or 404.
+    - `yaml_payload` moved from a rescued 200 with `nil` in the sink to the
+      declared 400.
+    - The sweep found no crash, so there is no absent-input bug.
+    - The §2d rule was applied: that change is a conformance change.
+  - **R8.** POST-only illustrative cells are listed unlinked in `/catalog`,
+    and a GET of each returns an exact 404.
+  - **R9.** The crawl's `requests` user agent got 200 everywhere, so
+    `allow_browser` is kept.
+  - **R10.** Nav targets are exactly the whole build's page routes (O3).
+  - **R11.** Detection: `tp=1` (`FCART-0001`), `tn=1`, `fp` 1→0, `fn=3`
+    (unchanged; these strategies fail closed on these shapes).
+    `CC-FUZZ-0051`/`FR-FUZZ-35` are unused.
+  - **R12.** 5 whole-app assertions were migrated (the PA-0045 count matches),
+    and the PA-0044 grep found nothing.
+  - **R13.** 5 points; 12 crawled URLs against a floor of 10; every
+    ground-truth URL at depth 1, the deepest page at depth 2, cap 4.
+  - **R14.** No session gating; every ground-truth URL returns 200 to an
+    anonymous visitor.
+  - **R15.** The crawl was actually run against `RailsLiveBootHarness`.
+  - **R16.** Every `ruby_rails` cell passes `ruby -c`, and the minimal-pair
+    and tier3 checks are unchanged.
+  - **9d.** Measured `401 {"verified":false}`, not the source-derived `400`:
+    nothing parses the body. It is asserted exactly per R2's rule.
+
+  **Numbers.** No additional bug beyond `BUG-0055`. Only `CC-LAB-0245` and
+  `FR-LAB-166` were used, so Lanes 6–7 are not bumped.
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 

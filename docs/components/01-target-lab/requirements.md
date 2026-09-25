@@ -2935,6 +2935,9 @@ lane) can submit a payload as
     controllers (`StorefrontController`/`AdminController`) -- no request
     input read or reflected by any of them; added purely for app-identity
     coherence, no manifest cell or ground-truth case of their own.
+    *(Partly superseded by FR-LAB-166, 2026-09-25: these pages now render
+    HTML in the ForgeCart layout -- no longer plain text/JSON -- and
+    `/catalog` joined them; still no request input read.)*
   - New `lab/manifests/shopify_forgecart_real_pages.yaml`: the five
     real-page cells, each reusing an existing shape's existing modules (no
     new vulnerability module). Four vulnerable, one secure (a second,
@@ -2978,6 +2981,9 @@ lane) can submit a payload as
   skeleton-json-gem-arity-breaks-second-request-in-a-session.md`;
   preventive action `docs/PREVENTIVE_ACTIONS.md` `PA-0037`. Fixed by
   pinning `gem "json", "~> 2.7"` and regenerating `Gemfile.lock` for real.
+  *(FR-LAB-166, 2026-09-25: the whole-app test now asserts the HTML page
+  contract for the inert pages and the mass-assignment result, and the build's
+  error responses are the static public pages -- see FR-LAB-166 part 1.)*
 
 - **FR-LAB-86** *(Phase E: ForgeCart `TargetSpec` wired into
   `multitarget.py`; `CC-LAB-0082`, 2026-09-23).* Per
@@ -3001,6 +3007,8 @@ lane) can submit a payload as
   `insecure_deserialization`; running both this target and the Node target
   together in one `run_targets` call (left for a follow-on step per §6 step
   2's own note, same as `FR-LAB-83`).
+  *(FR-LAB-166, 2026-09-25: now also pins `matched == ["FCART-0001"]`,
+  `tn == 1`, `fp == 0` -- measured after the HTML conversion.)*
 - **FR-LAB-87** *(§6 step 2: combine ForgeCart + MeadowMart `TargetSpec`s in
   one `run_targets` call; `CC-LAB-0083`, 2026-09-23).* Closes the follow-on
   both `FR-LAB-83` and `FR-LAB-86` left open. New
@@ -5848,6 +5856,70 @@ lane) can submit a payload as
   proven directly: each page's bare `GET` returns byte-identical bodies at
   the vulnerable URL and at its twin's URL (live, all 6 pages). Ground truth
   still names only the vulnerable cell.
+
+- **FR-LAB-166** *(Browsable Labs Lane 5 -- ForgeCart, `ruby_rails`;
+  `CC-LAB-0245`, 2026-09-25, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`;
+  BUG-0055/PA-0057).* ForgeCart (`FR-LAB-84`) is a browsable HTML site. Six
+  parts:
+  1. **Debug posture (BUG-0055).** The `ruby_rails` skeleton's
+     `config/environments/development.rb` (the environment
+     `RailsLiveBootHarness` boots) sets `consider_all_requests_local = false`
+     and `annotate_rendered_view_with_filenames = false`: every error response
+     is the checked-in static `public/*.html` page, never Rails' detailed
+     exception page (whose "Extracted source" revealed each twin's transform),
+     and no page carries a cell-ID-bearing view annotation. Enforced
+     cross-emitter by `tests/test_labgen_debug_pages_disabled.py` (PA-0057).
+  2. **Homepage + shared layout.** The skeleton's
+     `app/views/layouts/application.html.erb` is ForgeCart's layout (brand,
+     header search box that never echoes `q`, two nav groups each sorted by
+     path, inline CSS; no `csrf_meta_tags`, no external asset; byte-identical
+     for every page and twin). `/`, `/products`, `/cart`, `/admin`,
+     `/admin/orders` are HTML pages (they were plain text/JSON); new
+     `/catalog` lists the illustrative `/cell/*` routes from Rails' own route
+     table at request time (GET routes linked, the rest listed with their
+     verb).
+  3. **Page/api classification** (`_REAL_PAGE_PROFILES`). `page`: `/search`
+     (the cell's view in the layout, `raw` reflection unchanged),
+     `/admin/customers/update` (GET: a tokenless form exposing only
+     `user[bio]`; POST: the updated record rendered ERB-escaped, role
+     observable), `/admin/products/import` (GET: a `yaml_payload` form; POST:
+     the parsed class or Psych error rendered escaped). `api`:
+     `/webhooks/orders/create`, `/webhooks/customers/update` keep their JSON
+     wire contract; GET on each serves one shared, byte-identical `fetch()`
+     client page that never embeds the webhook secret, sends no `Accept`
+     override, and parses the response only inside a guard. GET page routes
+     are emitted only for real-page cells (`route_fragment_for`'s `get_page`);
+     illustrative sample cells keep their JSON tails byte-for-byte.
+  4. **Absent-input behavior (PA-0053/PA-0054).** `_ABSENT_INPUT_BY_SHAPE`
+     declares every named input per shape: `q` default `""`
+     (`params.fetch`); `user` and `yaml_payload` Rails' handled 400
+     (`params.require`, before any transform/sink -- `yaml_payload` previously
+     reached `YAML.*_load` as `nil`, hidden as a 200 by the sink's catch-all
+     `rescue`); the webhook header and raw body `""` (fail to verify, 401).
+     The source modules refuse to render an undeclared input; the offline
+     check `absent_input_violations()` (O1) runs over every route with its own
+     adversarial self-test.
+  5. **Ground truth.** `rendering` `server-json` -> `server` for `FCART-0004`/
+     `0005` (points and cases); request encoding unchanged
+     (`fuzzlab/harness/auto.py` sends JSON only for `param == "body"`).
+     Detection (measured): `tp=1` (`FCART-0001`), `tn=1` (`FCART-0003`),
+     `fp=0` (the pre-change `xss-reflected` false alarm on
+     `/admin/customers/update`, from the old JSON echo, is gone with escaped
+     HTML output), `fn=3` (`FCART-0002`/`0004`/`0005`, whose strategies fail
+     closed on these shapes by design).
+  6. **Navigability.** `tests/test_labgen_ruby_rails_navigability_live_boot.py`
+     boots the whole 12-cell build and crawls it from `/` (`LocalSpider`,
+     `requests` engine, depth cap 4 vs. measured 2): every ground-truth URL is
+     discovered at depth 1 with the anonymous visitor's 200 (no session gating
+     exists in `ruby_rails`), every GET route is link-reachable, and every
+     route of the rendered `config/routes.rb` (`served_routes()`) answers its
+     **declared** bare-request status exactly (200/400/401/404) -- never only
+     "< 500" -- with no debug content in any error body. The webhook console's
+     malformed-JSON error branch is asserted at its measured `401`
+     `{"verified":false}` (the action is reached; nothing parses the body --
+     the plan's R2 decision rule). Standing offline checks O1-O7
+     (`tests/test_labgen_ruby_rails_browsable.py`), including O7: no test or
+     detection code may depend on Rails debug-page content.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

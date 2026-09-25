@@ -6,8 +6,13 @@ the proposing agent, after 5 rounds; see §8). Round 5 returned ACCURATE /
 ADEQUATE, with 1 trivial sequencing fix (O5 split into O5a/O5b) that the
 adequacy reviewer explicitly judged needed no further round. It is applied.
 **Update 2026-09-25:** `CC-LAB-0245` cleared its own 2-reviewer gate (3/3,
-after 2 rounds). Implementation is therefore authorized; see that entry's
-Deliverables and Effectiveness for what was done. The orchestrating session
+after 2 rounds), and the plan was **implemented** the same day. See that
+entry's Deliverables and Effectiveness.
+- BUG-0055 is fixed, and PA-0057 checks it across emitters.
+- 9d measured `401` JSON, and R2's rule was applied to it.
+- Detection shows `fp` 1 → 0.
+- One different-class follow-up is flagged, and so is one same-class
+  instance in `node_express`, which is pinned. The orchestrating session
 ran every review round (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
@@ -52,7 +57,9 @@ written.
 
 ### 1a. ForgeCart already exists as a named app identity (no `--app` split)
 
-- Phase C (`CC-LAB-0077`/`FR-LAB-81`) created ForgeCart, a Shopify-style
+- Phase C (`CC-LAB-0080`/`FR-LAB-84`; the `ruby_rails` code comments
+  mis-cite MeadowMart's `CC-LAB-0077`/`FR-LAB-81` -- corrected here after
+  convergence, see §8) created ForgeCart, a Shopify-style
   merchant storefront plus admin. It has its own manifest
   (`lab/manifests/shopify_forgecart_real_pages.yaml`, 5 real-page cells
   `LABGEN-RR-RP-0001`..`0005`) and its own ground truth
@@ -624,6 +631,13 @@ The *derived branch prediction* for the case where Rails does reject the
 body stays `400` + static HTML. §4 step 9d measures which one actually
 happens, and R2's decision rule governs the outcome.
 
+**Measured at implementation (2026-09-25, §4 step 9d):** `401`
+`application/json` `{"verified":false}` on both topics. The request reaches
+the action because nothing parses the malformed body, the case this
+paragraph flagged as possible. Per the decision rule, `EXPECTED_9D` in the
+navigability test asserts exactly this measured result, with the reason
+recorded next to it. The guarded parse (O5b) handles it.
+
 **Decision rule:**
 - If the live result matches (`400`, `text/html`, body equal to the
   skeleton's `public/400.html`), keep the assertion as written.
@@ -1130,9 +1144,9 @@ Skip-guarded on `rails_boot_available()`.
       Effectiveness.
 - [ ] `docs/components/01-target-lab/requirements.md`: new `FR-LAB-166`
       entry (ForgeCart browsable, page/api classification, absent-input
-      declarations, debug-page posture). `FR-LAB-81`/`FR-LAB-83` are
-      cross-referenced in place where their JSON/plain-text descriptions are
-      superseded.
+      declarations, debug-page posture). `FR-LAB-84`/`FR-LAB-85`/`FR-LAB-86` (ForgeCart's own identity, whole-app
+      and `TargetSpec` entries) are cross-referenced in place where their
+      JSON/plain-text descriptions are superseded.
 - [ ] `docs/ARCHITECTURE.md`: the `ruby_rails`/ForgeCart build-status line
       updated (Lane 2 precedent).
 - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0245`.
@@ -1144,6 +1158,9 @@ Skip-guarded on `rails_boot_available()`.
       its correction notes (`docs/LAB_BROWSABLE_APPS_PLAN.md:161-169`, the
       actual FR-LAB-158/159 collision between Lanes 1 and 2), and flag the
       shift to the orchestrator.
+
+(All items were done at implementation, 2026-09-25. `CC-LAB-0245`'s
+Deliverables list is the authoritative copy, with a note on each item.)
 
 ## 7. Out of scope
 
@@ -1360,3 +1377,29 @@ Deliverables copy is kept verbatim with it. This completes one
 bookkeeping-contingency item. It changes no risk, design or test, so it does
 not reopen the plan's 3/3 convergence, the same treatment as Lane 2's
 post-convergence §6 citation fix.
+
+**Post-convergence corrections found during implementation (2026-09-25).**
+Neither changes any risk, design decision or test, so neither reopens 3/3.
+This is the same treatment as Lane 2's post-convergence citation fix.
+
+1. **Citation.** The plan (§1a and the §6 `requirements.md` deliverable)
+   cited ForgeCart's requirements as `FR-LAB-81`/`FR-LAB-83`, taken from the
+   `ruby_rails` code comments. In `requirements.md` and `change-control.md`
+   those are **MeadowMart's** (`CC-LAB-0077`/`FR-LAB-81`,
+   `CC-LAB-0079`/`FR-LAB-83`). ForgeCart's are `FR-LAB-84`/`85`/`86`
+   (`CC-LAB-0080`/`0081`/`0082`).
+   - Corrected in §1a and in §6, with the entry's Deliverables copy kept
+     verbatim.
+   - The same mis-citation remains in 5 `ruby_rails`/ForgeCart code or test
+     comments this lane did not otherwise rewrite:
+     - `__init__.py` (2 places);
+     - `route_accumulator.py`;
+     - `shopify_forgecart_real_pages.yaml`;
+     - `test_labgen_ruby_rails_whole_app_live_boot.py`;
+     - and a `CC-LAB-0078` reference in `expectedresults.csv`.
+   - That residue is flagged as a different-class follow-up (§5 step 7's
+     rule), not absorbed. The two skeleton controllers this lane rewrote were
+     corrected in place.
+2. **R2's open question, measured.** The link R2 called unsettleable from
+   source resolved to the `401` branch (see R2). The decision rule was
+   applied exactly as written.

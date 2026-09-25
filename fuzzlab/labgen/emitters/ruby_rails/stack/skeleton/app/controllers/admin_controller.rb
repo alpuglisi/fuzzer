@@ -1,6 +1,6 @@
 # ForgeCart's merchant-admin surrounding pages (Phase C, see
 # `storefront_controller.rb`'s own module docstring for the full rationale
-# -- CC-LAB-0077/FR-LAB-81). None of these actions reads user-controlled
+# -- CC-LAB-0080/FR-LAB-84; the code elsewhere still cites MeadowMart's CC-LAB-0077/FR-LAB-81 -- flagged in CC-LAB-0245). None of these actions reads user-controlled
 # input; the admin app's real vulnerability cells (customer mass-assignment
 # update, product bulk-import deserialization) are `RailsEmitter`-rendered
 # from the manifest, not defined here.

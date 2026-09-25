@@ -1,6 +1,6 @@
 # ForgeCart's storefront-facing surrounding pages (Phase C page/route
 # identity, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.5 --
-# CC-LAB-0077/FR-LAB-81). Checked into the skeleton itself, not emitted by
+# CC-LAB-0080/FR-LAB-84; the code elsewhere still cites MeadowMart's CC-LAB-0077/FR-LAB-81 -- flagged in CC-LAB-0245). Checked into the skeleton itself, not emitted by
 # any `Cell`/manifest: these actions carry no vulnerability and read no
 # user-controlled input at all, so there is no minimal-pair module to author
 # for them -- they exist only to make the app's real vulnerability cells
