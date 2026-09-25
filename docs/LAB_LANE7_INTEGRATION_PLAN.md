@@ -5,10 +5,10 @@ Reserved bookkeeping (`docs/LAB_BROWSABLE_APPS_PLAN.md` row 7, PA-0031): `CC-LAB
 number is reserved and none is expected to be needed (this lane touches serving/packaging,
 not detection).
 
-Status: **draft, revised after round-2 review (2026-09-25)**. Round-1 verdicts: ACCURATE
-WITH CORRECTIONS (2 fixes) / ADEQUATE CONTINGENT ON 8 items -- all applied. Round 2
-verdicts: ACCURATE (no further corrections) / ADEQUATE CONTINGENT ON 3 items -- all
-applied below (see §8). Round 3 re-review pending.
+Status: **converged 3/3, implementation authorized (2026-09-25)**. Round 1: ACCURATE WITH
+CORRECTIONS (2 fixes) / ADEQUATE CONTINGENT ON 8 items -- all applied. Round 2: ACCURATE /
+ADEQUATE CONTINGENT ON 3 items -- all applied. Round 3: ACCURATE / ADEQUATE, both reviewers
+confirmed ready for implementation, no further items. See §8.
 
 ## §0. What Lanes 1-6 taught us, applied here from the start
 
@@ -521,9 +521,15 @@ adequacy fix: this section did not exist in the previous draft):
   sections against the established template; 2c's network-isolation mitigation needed one
   clarifying sentence on the underlying compose mechanic and on PFF's own services being
   unaffected). All 3 applied in this revision.
-- **Round 3**: pending.
+- **Round 3** (2026-09-25): ACCURATE (a full re-verification of §0's cited sources, the
+  compose-networking mechanic claim against real Compose semantics, and the Gate C fix,
+  with no further errors found) / ADEQUATE (a full cross-check of every S1-S17 risk item
+  against §4/§5/§6 confirmed no missing test/deliverable/gate coverage, and one trivial,
+  non-blocking cosmetic nit -- §2's subsections run 2a-2f, 2h, 2i, 2g, out of alphabetical
+  order -- noted as not worth a fourth round). **Converged 3/3; implementation
+  authorized.**
 
 ---
 
-*Revised after round-2 review; round-3 re-review pending before implementation begins,
-per this project's process (`CLAUDE.md`).*
+*Converged 3/3 after 3 review rounds. Implementation begins at Gate A, per this project's
+process (`CLAUDE.md`).*
