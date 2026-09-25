@@ -1,16 +1,31 @@
-"""PA-0002 sweep (CC-LAB-0244, S15): does each emitter declare, for every
-real route it serves, what happens when the request's required input is
-absent (`PA-0053`/`PA-0054`, strengthened by `PA-0056`)?
+"""PA-0002 sweep (CC-LAB-0244/CC-LAB-0247, S15): does each emitter declare,
+for every real route it serves, what happens when the request's required
+input is absent (`PA-0053`/`PA-0054`, strengthened by `PA-0056`/`PA-0058`)?
 
-`spring_boot` (this lane), `django` (`CC-LAB-0242`), `go_net_http`
+`spring_boot` (`CC-LAB-0244`), `django` (`CC-LAB-0242`), `go_net_http`
 (`CC-LAB-0243`/`PA-0055`), `node_express` and `python_fastapi`
 (`CC-LAB-0246`/`PA-0058`) already declare this explicitly, per route,
 checked offline in full elsewhere (each stack's own
 `tests/test_labgen_<stack>_browsable.py`) -- this module only re-confirms
 the declaration *mechanism* exists for them, so a regression that silently
 removes it is caught here too. `go_net_http`/`node_express`/`python_fastapi`
-landed their mechanisms concurrently with this lane (Lanes 3 and 6); their
+landed their mechanisms concurrently with Lane 4 (Lanes 3 and 6); their
 `xfail` markers were dropped at merge time, per the decision rule below.
+
+**CC-LAB-0247 (Lane 7, §2e, PA-0058 rule 2):** `spring_boot` and
+`go_net_http` independently spelled the same absent-input behaviors
+differently (`required_param` vs. `required_400`, `default_value` vs.
+`default`). `go_net_http`'s route table was renamed onto the shared,
+cross-emitter core vocabulary (`fuzzlab.labgen.absent_input.ABSENT_INPUT_VALUES`)
+wherever the underlying behavior was identical; its genuinely distinct
+mechanisms (caller-header-based auth, GET-serves-page/POST-is-sink method
+routing) kept their own names rather than being force-renamed onto a
+core value that doesn't actually mean the same thing. Both emitters' own
+tests in this module now validate **membership**, not merely presence,
+against that emitter's own closed `ABSENT_INPUT_KINDS` (core plus its
+declared extras) -- the unmet half of `PA-0058` rule 2 this lane closes.
+`node_express`/`python_fastapi`'s own vocabularies are unchanged by this
+lane (out of scope here; still only an existence check below).
 
 `ruby_rails` and `php_current` have **no such mechanism at all** (verified
 directly: neither emitter module defines anything resembling a per-route
@@ -95,13 +110,20 @@ def _has_absent_input_declaration(mod) -> bool:
     return False
 
 
-def test_go_net_http_declares_absent_input_mechanism_exists() -> None:
+def test_go_net_http_declares_absent_input_for_every_route() -> None:
     """Landed by Browsable Labs Lane 3 (`CC-LAB-0243`/`PA-0055`), concurrently
-    with this lane -- full per-route coverage is `tests/test_labgen_go_net_http_browsable.py`'s
-    own job; this only re-confirms the mechanism itself is still present."""
-    import fuzzlab.labgen.emitters.go_net_http as mod
+    with this lane; full per-route coverage is also
+    `tests/test_labgen_go_net_http_browsable.py`'s own job. CC-LAB-0247
+    (Lane 7, §2e/PA-0058 rule 2): this now validates **membership**, not
+    merely presence -- every declared value must be in `go_net_http`'s own
+    `ABSENT_INPUT_KINDS` (the shared cross-emitter core,
+    `fuzzlab.labgen.absent_input.ABSENT_INPUT_VALUES`, plus this stack's own
+    genuinely-distinct extras), the same real check `spring_boot`'s own
+    test above already does."""
+    from fuzzlab.labgen.emitters.go_net_http import ABSENT_INPUT_KINDS, _ROUTE_PARAMS
 
-    assert _has_absent_input_declaration(mod)
+    for route, profile in _ROUTE_PARAMS.items():
+        assert profile.get("absent_input") in ABSENT_INPUT_KINDS, route
 
 
 @pytest.mark.xfail(strict=True, reason="Browsable Labs Lane 5 (ruby_rails) owns adding this -- PA-0056 rule 3")

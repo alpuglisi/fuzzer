@@ -192,6 +192,7 @@ from __future__ import annotations
 from typing import Any, NamedTuple
 
 from fuzzlab.labgen.emitter import EmittedFile, EmittedFiles, Emitter
+from fuzzlab.labgen.absent_input import ABSENT_INPUT_VALUES
 from fuzzlab.labgen.schema import Cell, SinkContext
 
 from .modules import COMPLEXITIES, SINKS, SOURCES, TRANSFORMS, render_route_line
@@ -388,7 +389,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # a bare GET answered 502 on the vulnerable twin (BUG-0053).
     "/api/clips/thumbnail": {
         "var_name": "targetUrl", "param_name": "url",
-        "absent_input": "required_400", "required_param": True,
+        "absent_input": "required_param", "required_param": True,
     },
     "/channels/analytics": {
         "param_name": "channel_id",
@@ -415,7 +416,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # same reason as /api/clips/thumbnail (BUG-0053).
     "/clips/download": {
         "var_name": "sourceUrl", "param_name": "source_url",
-        "absent_input": "required_400", "required_param": True,
+        "absent_input": "required_param", "required_param": True,
     },
     # CC-LAB-0186: this stack's first unrestricted_file_upload/
     # fs_web_root_write instance -- no per-route var_name/param_name needed
@@ -434,7 +435,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # naming no export has no meaningful default.
     "/clips/export": {
         "var_name": "requestedFilename", "param_name": "filename",
-        "absent_input": "required_400", "required_param": True,
+        "absent_input": "required_param", "required_param": True,
     },
     # CC-LAB-0196: this stack's first ssti/template_render instance -- no
     # per-route var_name/param_name needed (ReadChannelCommandRequestSource
@@ -446,7 +447,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # before this change the vulnerable twin sent an empty `Location`.
     "/channels/redirect": {
         "var_name": "destination", "param_name": "destination",
-        "absent_input": "default", "default_value": "/",
+        "absent_input": "default_value", "default_value": "/",
     },
     # CC-LAB-0199: this stack's first open_redirect/http_redirect_location
     # instance. CC-LAB-0243 (R7): defaults to `/dashboard`, a real site page
@@ -454,21 +455,32 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # needs `/` followed by an alphanumeric character).
     "/auth/login-redirect": {
         "var_name": "nextTarget", "param_name": "next",
-        "absent_input": "default", "default_value": "/dashboard",
+        "absent_input": "default_value", "default_value": "/dashboard",
     },
 }
 
-#: CC-LAB-0243: the closed vocabulary of ``absent_input`` declarations.
-ABSENT_INPUT_KINDS: frozenset[str] = frozenset(
+#: CC-LAB-0247 (Lane 7, §2e): `go_net_http`-specific absent-input values with
+#: no shared-vocabulary equivalent -- genuinely different mechanisms, not
+#: just different spellings, so kept distinct rather than force-renamed:
+#: `default_caller_else_401`/`auth_reject_401` are caller-header-based auth
+#: shapes no other emitter's route table currently models, and
+#: `form_on_get` is a *method-routing* split (GET serves the page, POST is
+#: the sink), not a same-method absent-*parameter* behavior like
+#: `form_when_absent` (`spring_boot`'s `/wiki/pages/render`) actually is.
+_ABSENT_INPUT_EXTRAS: frozenset[str] = frozenset(
     {
-        "default",                  # a real default value (``default_value``)
-        "required_400",             # handled 400 before the sink (``required_param``)
         "default_caller_else_401",  # caller's own id, else handled 401 (``default_to_caller``)
         "auth_reject_401",          # existing fail-closed credential check answers 401
         "form_on_get",              # POST route: GET serves its page, never the sink
-        "no_input",                 # the source reads no request input at all
     }
 )
+
+#: CC-LAB-0243/CC-LAB-0247: the closed vocabulary of ``absent_input``
+#: declarations -- the shared cross-emitter core (`default` -> renamed
+#: `default_value`, `required_400` -> renamed `required_param`, and
+#: `no_input`, unchanged, already matched it) plus this stack's own
+#: genuinely-distinct extras above.
+ABSENT_INPUT_KINDS: frozenset[str] = ABSENT_INPUT_VALUES | _ABSENT_INPUT_EXTRAS
 
 #: CC-LAB-0243 (FR-LAB-162, R1 -- see ``requirements.md``'s FR-LAB-162
 #: "R1 sign-off"): every Twitch-clone route's **vulnerable** cell, served at

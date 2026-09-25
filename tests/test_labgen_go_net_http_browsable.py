@@ -73,11 +73,14 @@ def test_every_route_declares_its_absent_input_behavior() -> None:
 
 
 def test_required_and_default_routes_are_the_declared_ones() -> None:
-    """`required_400` is declared exactly for the 3 routes BUG-0053 found
-    (no safe default URL/filename exists for any of them); `default` is
-    declared exactly for the 2 redirect routes (R7's decision rule)."""
-    required = {p for p, v in _ROUTE_PARAMS.items() if v["absent_input"] == "required_400"}
-    default = {p for p, v in _ROUTE_PARAMS.items() if v["absent_input"] == "default"}
+    """`required_param` (CC-LAB-0247: renamed from `required_400` during the
+    Lane 7 absent-input vocabulary reconciliation, PA-0058 rule 2 -- same
+    meaning, unified spelling) is declared exactly for the 3 routes
+    BUG-0053 found (no safe default URL/filename exists for any of them);
+    `default_value` (renamed from `default`) is declared exactly for the 2
+    redirect routes (R7's decision rule)."""
+    required = {p for p, v in _ROUTE_PARAMS.items() if v["absent_input"] == "required_param"}
+    default = {p for p, v in _ROUTE_PARAMS.items() if v["absent_input"] == "default_value"}
     assert required == {"/api/clips/thumbnail", "/clips/download", "/clips/export"}
     assert default == {"/channels/redirect", "/auth/login-redirect"}
     for route in default:

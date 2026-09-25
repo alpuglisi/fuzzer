@@ -89,16 +89,16 @@ _MIN_DISCOVERED_PAGES = 16
 #: already answers a handled 401 (missing/invalid signature).
 _EXPECTED_OWN_METHOD_STATUS = {
     "/webhooks/eventsub": 401,  # existing signature check rejects a bare POST
-    "/api/clips/thumbnail": 400,  # required_400 (BUG-0053)
+    "/api/clips/thumbnail": 400,  # required_param (BUG-0053; renamed from required_400, CC-LAB-0247)
     "/channels/analytics": 401,  # default_caller_else_401, no caller header
     "/channels/settings": 401,  # auth_reject_401
     "/sessions/refresh": 200,  # no_input: the source reads nothing
     "/channels/profile": 200,  # existing handler accepts a bare POST
     "/channels/subscribers": 401,  # default_caller_else_401
-    "/clips/download": 400,  # required_400 (BUG-0053)
+    "/clips/download": 400,  # required_param (BUG-0053; renamed from required_400, CC-LAB-0247)
     "/channels/emotes/upload": 400,  # existing handler: missing file part
     "/subscriptions/purchase": 400,  # existing handler: empty JSON body
-    "/clips/export": 400,  # required_400 (BUG-0053)
+    "/clips/export": 400,  # required_param (BUG-0053; renamed from required_400, CC-LAB-0247)
     "/channels/commands": 200,  # existing handler accepts a bare POST
     "/channels/redirect": 302,  # default: redirects to "/"
     "/auth/login-redirect": 302,  # default: redirects to "/dashboard"
