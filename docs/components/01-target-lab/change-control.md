@@ -5,30 +5,39 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
-**Status: DRAFT. Awaiting this entry's own 2-reviewer gate (round 1 not yet
-run).** The underlying plan **converged 3/3 on 2026-09-25 after 5 rounds**,
-with reviewers dispatched by the orchestrating session. Round 5 returned
-ACCURATE / ADEQUATE plus one trivial sequencing fix (O5 split into O5a/O5b,
-reflected below). Earlier rounds, for the record: the plan had 4 review
-rounds before round 5. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
-Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
-had to become a standing check. That is fixed as O7. Round 3's adequacy
-review returned NOT ADEQUATE with 1 narrow gap: O7-neg did not test the
-exclusion side. Round 3's accuracy review returned NOT ACCURATE with 1 error:
-the webhook side-effect's "was JSON before" premise was false. Both are
-fixed. Round 4 returned ACCURATE / NOT ADEQUATE with 1 gap: the console
-script's error-path branch was neither derived nor confirmed live. That is
-fixed too (see the plan's §8). The plan is awaiting round-5 confirmation. Text below the next
-sentence records the drafting-time situation. At drafting time, neither this
-entry nor the underlying plan had been reviewed. The dispatch
+**Status: DRAFT. This entry's own 2-reviewer gate is in round 1.**
+
+- **Round 1 accuracy:** NOT ACCURATE, 1 trivial fix. A stale sentence in
+  this status paragraph contradicted the plan's convergence; the paragraph
+  has been rewritten.
+- **Round 1 adequacy:** pending.
+
+The underlying plan **converged 3/3 on 2026-09-25 after 5 rounds**, with
+reviewers dispatched by the orchestrating session. Round 5 was its last
+round: ACCURATE / ADEQUATE plus one trivial sequencing fix (O5 split into
+O5a/O5b, reflected below). The earlier plan rounds, for the record:
+
+| Round | Verdict | Fix |
+|---|---|---|
+| 1 | ACCURATE / ADEQUATE with 2 minor gaps | Both fixed. |
+| 2 | ACCURATE / NOT ADEQUATE, 1 gap: the blast-radius grep had to become a standing check | Fixed as O7. |
+| 3 (adequacy) | NOT ADEQUATE, 1 narrow gap: O7-neg did not test the exclusion side | Fixed. |
+| 3 (accuracy) | NOT ACCURATE, 1 error: the webhook side-effect's "was JSON before" premise was false | Fixed. |
+| 4 | ACCURATE / NOT ADEQUATE, 1 gap: the console script's error-path branch was neither derived nor confirmed live | Fixed. |
+
+Full history is in the plan's §8.
+
+**Drafting-time record:** when this entry was first drafted, neither it nor
+the underlying plan had been reviewed. The dispatch
 required two independent reviewer subagents for each document; the drafting
 agent had no Agent tool, and the one alternative it tried (a separate cloud
 session via `create_session`) was denied by the permission classifier.
 Following `docs/MULTI_AGENT_ORCHESTRATION.md` §4, the agent did not work
 around the denial and did not substitute a self-review. No reviewer
-agreement exists and none is claimed; see the plan's §8. **Implementation is
-not authorized** until the plan and then this entry each clear their own
-2-reviewer gate (3/3). This entry condenses the plan into the change-control
+agreement existed at that point, and none was claimed. The orchestrating
+session then dispatched the reviewers itself (see the plan's §8).
+**Implementation is not authorized** until this entry clears its own
+2-reviewer gate (3/3); the plan already has. This entry condenses the plan into the change-control
 template; the plan holds the full detail.
 
 - **Change:** converts ForgeCart from JSON, plain-text and bare-fragment
@@ -295,8 +304,8 @@ template; the plan holds the full detail.
   - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 5 row updated to done, with
         the numbers actually used. If more than one `CC-LAB` number was
         needed, bump Lanes 6–7 immediately.
-- **Effectiveness:** pending. Nothing has been implemented, and the review
-  gate is blocked (see Status).
+- **Effectiveness:** pending. Nothing has been implemented. This entry's own
+  review gate is in progress (see Status).
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
