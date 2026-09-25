@@ -763,6 +763,25 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `ruby_rails`, `node_express`, `python_fastapi`) still owe their own
   application of `PA-0054`, unchanged by this entry. (from BUG-0053)
 
+- **PA-0056** — Strengthens `PA-0054` (whose rule stands) on **enforcement
+  precision**, after a `spring_boot` recurrence exposed three specific gaps in
+  its wording rather than its intent: (1) `PA-0054`'s bare-request sweep must
+  send the request using **that route's own declared HTTP method**, not only
+  a bare `GET` -- a framework's own method-routing layer can answer a `GET`
+  on a POST-only route with its own 4xx (e.g. Spring's `405`) before the
+  handler, and therefore the source/sink code, ever runs, so a `GET`-only
+  sweep is structurally blind to this whole crash class on a POST-heavy
+  stack however long the defect has been present; (2) "declare each named
+  request parameter's absent-input behavior" covers **every input channel** a
+  route can read -- query, header, multipart part, or whole body -- not only
+  a named query parameter; (3) a `PA-0002` sweep that names another emitter as
+  still owing this class, rather than fixing it, must pin every named,
+  un-fixed instance with a failing-by-design check (`xfail(strict=True)` or an
+  offline declaration-coverage test) **in the same change that defers it** --
+  a prose "Lane N must do this later" sentence with no enforcement is not a
+  preventive action, and stating it a second time (as `PA-0054`'s own sweep
+  note did) does not make it one. (from BUG-0054)
+
 - **PA-0057** — Strengthens `PA-0039`'s scope (from module ports to a stack's
   skeleton/harness runtime configuration) and `PA-0054`'s live half. (1) Every
   stack's **served** build -- the real deployment path **and** every test-time

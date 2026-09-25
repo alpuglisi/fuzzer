@@ -6114,6 +6114,76 @@ lane) can submit a payload as
      (`tests/test_labgen_ruby_rails_browsable.py`), including O7: no test or
      detection code may depend on Rails debug-page content.
 
+- **FR-LAB-164** *(Browsable Labs Lane 4 -- TrackerNest, ReelQueue and
+  WanderFare, `spring_boot`; `CC-LAB-0244`, 2026-09-25,
+  `docs/LAB_LANE4_SPRING_BOOT_PLAN.md`).* All three `spring_boot` app
+  identities are browsable HTML sites, one entry covering all three (they
+  share one emitter, skeleton, live-boot harness, twin-URL mechanism,
+  absent-input scheme and layout helper; per-app differences are data).
+  1. **App registry and route-profile keys.** A new `spring_boot/app_site.py`
+     (`APP_REGISTRY`, `ROUTE_APP`). Every `_PAGE_PARAMS` route gains `app`
+     (cross-checked offline against `ROUTE_APP`, S11), `classification`
+     (`page`/`api`) and `absent_input` (see `FR-LAB-165`).
+  2. **Page/api classification.** Only TrackerNest's `/wiki/pages/render` is
+     a `page` (`page_handler.java.j2`, selected by the route profile, never
+     the sink template -- one sink family serves both a `page` and an `api`
+     route unchanged, S8); the other 15 routes (ReelQueue's and WanderFare's
+     whole SPA-backend surface, plus TrackerNest's XML/binary-serialized
+     endpoints) are `api`.
+  3. **Site layer per app.** `SpringBootEmitter.render_site(cells, app_key)`
+     generates one `SiteController.java` per app: `/`, `/catalog` (a real
+     `<a href>` per served URL -- both twins -- not plain text, so a
+     secure twin nothing else links to stays browsable), and one client
+     page per `api` route (`_CLIENT_PAGE_SPECS`, 8 client-page kinds
+     covering every real wire format: native GET/POST/multipart forms, and
+     `fetch()` for JSON/XML/binary/bearer-header/query-carried-POST bodies).
+     A POST api's client page is served by `GET` on the api's own URL
+     (`_twin_suffixed` too); a GET api's client page lives at a separate,
+     realistic non-`/api` URL and also carries a plain `<a href>` straight
+     to the api's own URL (neither a `<form action>` nor a `fetch()` target
+     is itself a crawlable link).
+  4. **Whole-app build.** `SpringBootEmitter(site_build=True)` plus
+     `served_url_for(cell, site_build=...)` serve each secure twin at
+     `route.path + "." + cell_id.lower()` in site builds only (S1);
+     single-cell builds are unchanged. `SpringBootLiveBootHarness` gains an
+     additive `app=` mode. A public `assemble_spring_boot_app(app_key,
+     dest)` exists for Lane 7's compose services.
+  5. **Navigability acceptance test.** `tests/test_labgen_spring_boot_navigability_live_boot.py`
+     crawls each of the three apps separately from `/` (`LocalSpider`,
+     `requests` engine, depth cap 4 vs. measured 2), with hard-coded
+     non-vacuous guards per app (ground-truth minimums 3/11/2), asserting
+     every ground-truth URL is discovered with the anonymous visitor's
+     status (a `page`/GET-`api` route's declared absent-input status; 200,
+     the route's own client page, for a POST `api` route), every URL
+     `render_site` links to is reachable, and the PA-0053/PA-0054/PA-0056
+     bare-request sweep (every served route, each route's own method)
+     answers < 500. Two known, un-fixed issues (S2's browser-Accept-
+     negotiated reflected XSS on an `api` route; S6's malformed-present-JSON
+     500 on two routes) are pinned there as flagged follow-ups, not fixed by
+     this requirement.
+- **FR-LAB-165** *(Browsable Labs Lane 4 -- declared absent-input contract;
+  `CC-LAB-0244`/`BUG-0054`/`PA-0056`, 2026-09-25).* Every one of the 16 real
+  `spring_boot` routes declares exactly one of 7 `ABSENT_INPUT_KINDS` values
+  -- `default_value` / `required_param` / `required_header` /
+  `required_multipart` / `empty_body_400` / `no_input` / `form_when_absent`
+  -- covering every input channel a route can read (query, header, multipart
+  part, whole body), rendered in the source region identically on both
+  twins before any sink runs. `form_when_absent` (`/wiki/pages/render`: no
+  input -> the page with its form alone, 200, before the source or sink
+  runs) is signed off here as accepted in the Lane 4 review's round 1.
+  Enforced offline (`tests/test_labgen_spring_boot_browsable.py`: every
+  route declares a value; `tests/test_absent_input_declarations_cross_emitter.py`,
+  S15/PA-0002: the mechanism itself is confirmed present for `spring_boot`
+  and `django`, confirmed still present for `php_laravel`, and pinned
+  absent -- `xfail(strict=True)`, naming the owning lane -- for
+  `go_net_http`/`ruby_rails`/`node_express`/`python_fastapi`/`php_current`)
+  and live (`tests/test_labgen_spring_boot_absent_input_live_boot.py`: a
+  bare request using **each route's own declared method**, not only `GET`,
+  asserts the declared status on both twins). This closed the two live
+  crashes `BUG-0054` documents (`/api/profiles/avatar` bare-`POST` 500 on
+  both twins; `/api/content/thumbnail-import` bare-`POST` 502 on the
+  vulnerable twin).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

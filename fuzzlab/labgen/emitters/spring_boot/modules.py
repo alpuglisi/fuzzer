@@ -460,6 +460,46 @@ class SingleHandlerBinaryComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
+class PageHandlerComplexity(TemplateModule):
+    """A page-classified route's handler (`CC-LAB-0244`, FR-LAB-164/165,
+    Browsable Labs Lane 4). Selected by the route profile's
+    ``classification == "page"``, never by the sink module. The same sink
+    templates also serve an ``api`` route (TrackerNest's `/wiki/pages/render`
+    is a page, Netflix's `/api/support/template-preview` an api -- plan S8).
+    Its handler:
+
+    * applies the ``form_when_absent`` absent-input behavior: with no input
+      parameter it returns the page with its form alone, before the source
+      or sink runs;
+    * otherwise calls a private ``compute()`` whose body is the unchanged
+      source+sink code;
+    * hands that result to ``SiteLayout.page``, which HTML-escapes it into
+      the app's shared layout at the sink's own status code, with an
+      explicit ``text/html`` content type.
+
+    The form is static and never echoes the submitted value (plan S7)."""
+
+    def __init__(self) -> None:
+        super().__init__("page_handler", "complexity", COMPLEXITY_ENV, "page_handler.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(
+            class_name=ctx["class_name"],
+            route_path=ctx["route_path"],
+            handler_name=ctx["handler_name"],
+            mapping_annotation=ctx["mapping_annotation"],
+            param_name=ctx["param_name"],
+            app_name_java=ctx["app_name_java"],
+            app_brand_java=ctx["app_brand_java"],
+            nav_html_java=ctx["nav_html_java"],
+            page_title_java=ctx["page_title_java"],
+            form_html_java=ctx["form_html_java"],
+            body=ctx["body"],
+        )
+        return RenderResult(code=code, context=dict(ctx))
+
+
 class ReadUploadedAvatarFileSource(TemplateModule):
     """Reads a real `multipart/form-data` profile-avatar upload
     (`CC-LAB-0191`) -- this stack's first, the `unrestricted_file_upload`
@@ -794,4 +834,5 @@ SINKS: dict[str, Module] = {
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),
     "single_handler_binary": SingleHandlerBinaryComplexity(),
+    "page_handler": PageHandlerComplexity(),
 }

@@ -208,11 +208,40 @@ class SpringBootLiveBootHarness:
     together).
     """
 
-    def __init__(self, emitter: Emitter, cell: Cell, *, build_timeout: float = BUILD_TIMEOUT_S) -> None:
-        if not emitter.supports(cell.vuln_class, cell.sink_context):
-            raise ValueError(f"{cell.cell_id}: emitter does not support this cell's shape")
+    def __init__(
+        self,
+        emitter: Emitter,
+        cell_or_cells: Cell | list[Cell],
+        *,
+        app: str | None = None,
+        build_timeout: float = BUILD_TIMEOUT_S,
+    ) -> None:
+        """``app`` (CC-LAB-0244, plan §2d) is additive: omitted (the
+        default), this is the original single-cell harness, unchanged for
+        every existing caller -- ``cell_or_cells`` is exactly one
+        :class:`Cell`. Given ``app`` (one of ``app_site.APP_REGISTRY``),
+        ``cell_or_cells`` is that app's whole cell list, assembled as a
+        real site build: every cell rendered with ``emitter.site_build =
+        True`` (twin-suffixed secure-twin URLs, so same-route pairs never
+        collide) plus the app's own generated ``SiteController`` (this
+        module's own precedent for what a same-route twin pair needs, R1).
+        """
+        self._app = app
+        if app is None:
+            cell = cell_or_cells
+            assert isinstance(cell, Cell), "cell_or_cells must be one Cell when app is not given"
+            if not emitter.supports(cell.vuln_class, cell.sink_context):
+                raise ValueError(f"{cell.cell_id}: emitter does not support this cell's shape")
+            self._cells = [cell]
+        else:
+            cells = cell_or_cells
+            assert not isinstance(cells, Cell), "cell_or_cells must be a list of Cells when app is given"
+            self._cells = list(cells)
+            for c in self._cells:
+                if not emitter.supports(c.vuln_class, c.sink_context):
+                    raise ValueError(f"{c.cell_id}: emitter does not support this cell's shape")
+            emitter.site_build = True
         self._emitter = emitter
-        self._cell = cell
         self._build_timeout = build_timeout
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
@@ -240,10 +269,16 @@ class SpringBootLiveBootHarness:
     def _assemble(self) -> None:
         assert self._app_dir is not None
         shutil.copytree(SKELETON_DIR, self._app_dir, dirs_exist_ok=True)
-        for emitted in self._emitter.render(self._cell):
-            dest = self._app_dir / emitted.path
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(emitted.content)
+        for cell in self._cells:
+            for emitted in self._emitter.render(cell):
+                dest = self._app_dir / emitted.path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(emitted.content)
+        if self._app is not None:
+            for emitted in self._emitter.render_site(self._cells, self._app):
+                dest = self._app_dir / emitted.path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(emitted.content)
 
     def build(self) -> None:
         """Assemble the app, build a real executable jar, and boot it.

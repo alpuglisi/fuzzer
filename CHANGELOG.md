@@ -4,6 +4,39 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 4 implemented: TrackerNest/ReelQueue/WanderFare, `spring_boot`, browsable, CC-LAB-0244/FR-LAB-164/165)
+- Implemented `docs/LAB_LANE4_SPRING_BOOT_PLAN.md` (`CC-LAB-0244`, one entry
+  covering all three `spring_boot` app identities): each gets a homepage,
+  shared layout, a real `<a href>`-linked `/catalog`, and a client page for
+  every one of its 15 `api` routes (8 client-page kinds covering every real
+  wire format); `/wiki/pages/render` is converted to a real HTML page
+  (`page_handler.java.j2`); secure twins move to twin-suffixed URLs in
+  site builds only (`served_url_for(..., site_build=True)`, S1); every
+  route declares its absent-input behavior (`FR-LAB-165`); a spider-based
+  navigability test crawls all three apps.
+- While building the site layer, two navigability bugs were caught and
+  fixed before merge: `/catalog`'s site-map table named every served URL as
+  plain text instead of linking it (a secure twin nothing else links to was
+  unreachable), and a GET `api` route's client page only pointed at the
+  api's own URL via a `<form action>`/`fetch()` target, neither of which a
+  static crawl follows (its ground-truth URL was unreachable from `/`).
+- Fixed `BUG-0054` (two live crashes: `/api/profiles/avatar` bare-`POST`
+  500 on both twins, `/api/content/thumbnail-import` bare-`POST` 502 on the
+  vulnerable twin) and added `PA-0056`, strengthening `PA-0054`'s
+  bare-request sweep to use each route's own HTTP method (a `GET`-only
+  sweep is structurally blind to a POST-only route's crash, since Spring
+  answers a bare `GET` with its own 405 before the handler ever runs) and
+  to cover every input channel, not only a named query parameter. A new
+  cross-emitter sweep (`tests/test_absent_input_declarations_cross_emitter.py`,
+  S15/PA-0002) pins the five emitters that still lack any declaration
+  mechanism, each naming its owning lane.
+- Two known, unrelated issues are flagged as follow-ups, not fixed here:
+  S2 (an `api` route's plain-`String` body is served as `text/html` under
+  browser `Accept` negotiation, a latent reflected XSS) and S6 (malformed
+  *present* JSON 500s on two routes, a different class from the
+  absent-input fix above) -- each pinned by a live test that fails loudly
+  the moment it's actually fixed.
+
 ## 2026-09-25 (Lane 5 implemented: ForgeCart/ruby_rails browsable, CC-LAB-0245/FR-LAB-166)
 - Implemented `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md` (`CC-LAB-0245`) so
   ForgeCart can be browsed end to end by a real visitor:

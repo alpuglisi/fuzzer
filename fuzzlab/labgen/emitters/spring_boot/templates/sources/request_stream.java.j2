@@ -4,3 +4,11 @@
    source module intentionally renders no code; it exists to keep this
    emitter's source/sink/complexity composition contract uniform across
    shapes rather than special-casing this one shape into skipping it. #}
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054): a
+        // request that declares an empty body (Content-Length: 0) is a
+        // handled 400 before the sink reads the stream. The stream itself is
+        // left unread here (binary data); a chunked empty body still reaches
+        // the sink's own handled 400 (EOF).
+        if (request.getContentLengthLong() == 0) {
+            return com.fuzzlab.trackernest.SiteLayout.missingInput(400, "empty request body");
+        }

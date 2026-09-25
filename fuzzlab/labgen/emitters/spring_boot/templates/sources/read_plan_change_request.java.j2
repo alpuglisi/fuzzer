@@ -1,4 +1,11 @@
         byte[] requestBody = request.getInputStream().readAllBytes();
+        // Declared absent-input behavior (CC-LAB-0244, PA-0053/PA-0054): an
+        // empty body is a handled 400 before it is parsed or any sink runs
+        // (otherwise the vulnerable twin emitted malformed JSON,
+        // "monthly_charge":}).
+        if (requestBody.length == 0) {
+            return com.fuzzlab.trackernest.SiteLayout.missingInput(400, "empty request body");
+        }
         tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
         tools.jackson.databind.JsonNode root = mapper.readTree(requestBody);
         String {{ plan_tier_var }} = root.path("{{ plan_tier_field }}").asText();
