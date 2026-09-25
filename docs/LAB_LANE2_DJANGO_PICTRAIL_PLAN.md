@@ -376,7 +376,7 @@ directly mirroring `tests/test_labgen_navigability_live_boot.py`'s structure:
       "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry (mirroring
       `CC-LAB-0241`'s R4 sign-off), live-boot green.
 - [ ] `/settings` converted to a real form page, live-boot green.
-- [ ] `/explore` converted, actual SQL shape confirmed (R3), oracle-strategy
+- [ ] `/explore` converted, actual SQL shape confirmed (R1b), oracle-strategy
       tests re-run (R6), live-boot green.
 - [ ] `/inbox` converted to a form page, live-boot green.
 - [ ] `/upload/link-preview` client page + bare-GET 4xx (R4), live-boot

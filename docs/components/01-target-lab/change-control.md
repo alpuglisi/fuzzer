@@ -48,9 +48,12 @@ reviewers + proposing agent).
   step needs more than its pre-reserved single `CC-LAB-0242` number — the
   exact collision-avoidance discipline `CC-LAB-0241`'s own review required.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
-  Full register in the plan's §3 (R1-R7, plus R1b); named here in full,
-  matching `CC-LAB-0241`'s own disclosure discipline (none of this plan's
-  risks are settled no-risk findings):
+  Full register in the plan's §3 (R1, R1b, R2-R7); named here in full, each
+  with its own labeled item — including R1b, the plan's own documented
+  self-correction of an earlier risk-register mistake, kept visible rather
+  than folded into another item's prose — matching `CC-LAB-0241`'s own
+  disclosure discipline (none of this plan's risks are settled no-risk
+  findings):
   1. **R1** — *Secure-twin URL asymmetry*: unlike `php_laravel`'s
      `canonical_cell_id`/`_twin_url_for`, PicTrail's secure twins keep a
      generic URL while only the vulnerable cell owns the real path
@@ -67,51 +70,60 @@ reviewers + proposing agent).
      mitigated by actually running the crawl against it, not API-shape
      inspection alone (a different internal request path could still
      diverge, e.g. redirect/trailing-slash handling).
-  3. **R3** — *`/post`'s single-row lookup needs a designed found/not-found
-     byte-delta*, the same `CC-LAB-0240`-style mitigation `php_laravel`'s
-     structurally identical `/product.php`/`/blog_post.php` needed — found
-     and correctly targeted only after a round-1 review caught the first
-     draft's register misattributing this risk to `/explore` instead
-     (`/explore`'s own ground truth confirms it is "not a syntax-break
-     shape," an identifier/ORDER-BY-position injection, not a
-     length/boolean-differential one). Mitigated by designing and directly
-     testing that byte-delta, re-measured against PicTrail's own layout
-     size, not reused from `php_laravel`'s number unexamined.
-  4. **R4** — *`/upload/link-preview`'s bare-GET has no safe default to
+  3. **R1b** — *the plan's own risk register was mis-targeted on its first
+     draft, and documents its own correction.* Round-1 review caught the
+     original register speculating about `/explore`'s SQL shape without
+     reading its sink template or ground truth first, and placing a
+     `CC-LAB-0240`-style length-delta risk there instead of on `/post`.
+     Direct reading confirmed: `/explore`'s sink is an ORDER BY
+     concatenation, and its own ground truth states explicitly "not a
+     syntax-break shape" (identifier/ORDER-BY-position injection); `/post`
+     uses `sql_numeric_lookup.py.j2`, structurally identical to
+     `php_laravel`'s `/product.php`/`/blog_post.php`. Recorded here as its
+     own labeled item (not folded into R3's prose) because a plan
+     documenting and fixing its own risk-register mistake is itself
+     informative content this record should keep visible, not compress
+     away.
+  4. **R3** (corrected per R1b) — *`/post`'s single-row lookup needs a
+     designed found/not-found byte-delta*, the same `CC-LAB-0240`-style
+     mitigation `php_laravel`'s structurally identical
+     `/product.php`/`/blog_post.php` needed. Mitigated by designing and
+     directly testing that byte-delta, re-measured against PicTrail's own
+     layout size, not reused from `php_laravel`'s number unexamined.
+  5. **R4** — *`/upload/link-preview`'s bare-GET has no safe default to
      fetch* (unlike `/post`'s numeric default). Mitigated by a
      4xx-before-sink decision, checked against the real corpus source
      (`docs/research/corpus-examples/ssrf/python/vulnerable-oembed-unfurl-4.py`)
      for any intended default worth reproducing instead of inventing one.
-  5. **R5** — *Non-vacuous-pass guard for the navigability test* — the same
+  6. **R5** — *Non-vacuous-pass guard for the navigability test* — the same
      guard `CC-LAB-0241` built (hard-coded, measured minimums for both the
      ground-truth count and the discovered-page count, asserted before any
      per-URL check), built in from this plan's own design rather than
      added after the fact.
-  6. **R6** — *Two distinct oracle mechanisms touch these cells, both
+  7. **R6** — *Two distinct oracle mechanisms touch these cells, both
      confirmed unaffected by the HTML conversion for different reasons*:
      `fuzzlab/oracle/strategies.py`'s runtime detection strategies
      (re-run after conversion, don't just read the source) and
      `fuzzlab/labgen/identifier_sqli_oracle.py` (a build-time differential
      prober for `/explore`'s shape — reads raw probe bodies but its check
      is format-agnostic, so it is unaffected either way).
-  7. **R7** — *Illustrative (non-real-page) django cells reachable from the
+  8. **R7** — *Illustrative (non-real-page) django cells reachable from the
      new nav could 500 on a bare GET*, the same class of gap Lane 1's own
      navigability crawl found (`BUG-0051`). Mitigated by applying PA-0053's
      bare-GET sweep to every reachable route the crawl finds, not only the
      6 real pages, before the navigability test is declared green.
   Accepted, not mitigated: none — every identified risk has a concrete
   mitigation.
-- **Deliverables:** (copied directly from the plan's own §6, drafted for
-  exactly this purpose)
+- **Deliverables:** (copied directly from the plan's own §6, verbatim
+  citations preserved)
   - [ ] Homepage + shared layout template, structural gate green — todo.
   - [ ] `/post` + `/post/comments` converted, bare-GET default decided,
         found/not-found byte-delta designed and asserted (R3), twin
         asymmetry (R1) resolved via its decision rule and recorded as an
-        "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry, live-boot
-        green — todo.
+        "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry (mirroring
+        `CC-LAB-0241`'s R4 sign-off), live-boot green — todo.
   - [ ] `/settings` converted to a real form page, live-boot green — todo.
-  - [ ] `/explore` converted, actual SQL shape confirmed (R1b — already
-        done in the plan itself, carried forward here), oracle-strategy
+  - [ ] `/explore` converted, actual SQL shape confirmed (R1b), oracle-strategy
         tests re-run (R6), live-boot green — todo.
   - [ ] `/inbox` converted to a form page, live-boot green — todo.
   - [ ] `/upload/link-preview` client page + bare-GET 4xx (R4), live-boot
