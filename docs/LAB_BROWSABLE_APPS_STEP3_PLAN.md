@@ -1,10 +1,10 @@
 # Lane 1 step 3 — JSON→HTML conversion, detailed implementation + risk plan
 
 Status: **planning only, not yet implemented** (2026-09-24, revised
-2026-09-25 after a self-review research pass, then revised again 2026-09-25
-after 3 independent reviewer agents checked accuracy, thoroughness, and
-adequacy — see the dated CHANGELOG entries for what changed each time).
-Scopes the third
+2026-09-25 after a self-review research pass, then revised twice more
+2026-09-25 after 2 separate rounds of 3 independent reviewer agents each
+checked accuracy, thoroughness, and adequacy — see §9 and the dated
+CHANGELOG entries for what changed each round). Scopes the third
 and last step of Lane 1 (`docs/LAB_BROWSABLE_APPS_PLAN.md`), reserved as
 `CC-LAB-0239`/`FR-LAB-156` (LAB side) plus `CC-FUZZ-0047`/`FR-FUZZ-31` (FUZZ
 side, oracle-strategy and live-boot-test updates only — no new FUZZ feature).
@@ -203,7 +203,23 @@ This was the single most consequential error caught in review — fixed here.
   test's own fixture/expectation still assumes the old JSON shape, it is
   updated to the new `data-charged-amount` anchor (the fixtures model what
   the real generated cell does; they follow the cell, not the other way
-  round).
+  round). **Also re-run `tests/test_labgen_phase_d_tier12_category5.py`**
+  (found by review, previously unlisted here): it independently proves
+  Tier1/Tier2 conformance for both `LABGEN-BC-0003`/`0004` and
+  `LABGEN-BC-0005`/`0006` via its own `evaluate_tier1_response`/
+  `build_tier1_case` marker mechanism, using the bare `"0.01"` amount as its
+  `evidence_marker` rather than a JSON-fragment anchor — it will likely
+  still pass against a `data-charged-amount="0.01"` HTML attribute, but this
+  must be confirmed by actually running it, not assumed by similarity to
+  R1's own anchor design.
+- **Decimal/formatting precision**, added per review: confirm the
+  `data-charged-amount` attribute's value is rendered with exactly the same
+  string the JSON response used (e.g. Blade/PHP number formatting must not
+  collapse `"123.450"` to `"123.45"` or otherwise reformat the canary) —
+  both `PriceIntegrityBypassStrategy`'s exact-match and
+  `test_labgen_phase_d_tier12_category5.py`'s marker match depend on the
+  attribute carrying the literal string, not a numerically-equal
+  reformatting of it.
 - This is the **highest-risk single change** in this step. Do it in its own
   isolated commit and CC-FUZZ entry, verified independently before touching
   anything else. "Same commit" here is a **documented discipline this plan
@@ -261,7 +277,13 @@ the actual new photo-detail page's markup (copied from what the real Blade
 template renders, not a generic `<html>` stub) and assert the strategy
 still confirms on the vulnerable twin and fails closed on the secure twin.
 Small, not over-engineering, given R3's whole "no change needed" conclusion
-is load-bearing for this step's lowest-risk-first sequencing.
+is load-bearing for this step's lowest-risk-first sequencing. **Sequencing
+clause, added per review:** this fixture cannot be written before the real
+Blade template exists — write the template first (as §4 step 2 already
+does), then copy its actual rendered markup into the fixture, in that order
+within the same commit. An earlier phrasing of this risk read as if the
+fixture could be authored standalone; it cannot, since it must copy real
+output that doesn't exist yet.
 
 ### R4 — shared module-template names across stacks
 
@@ -312,11 +334,24 @@ for either manifest, `leakage_probe.insufficiency_reason` reports the gate
 as *skipped* (informative output, per `cli.py`'s own documented behavior,
 never build-failing), not passed. A "green `--check` run" that's actually a
 silent skip proves nothing about R5's own concern. State the actual group
-count found for each manifest in the `CC-LAB-0239` entry, and if the gate
-does skip, say so explicitly and explain what manual/alternative check
-covers the byte-identical-twin-layout requirement instead (e.g. a direct
-diff of the two twins' rendered output outside the layout, done by hand and
-recorded, since the automated gate doesn't have enough data to run).
+count found for each manifest in the `CC-LAB-0239` entry. **Given
+`MIN_GROUPS_FOR_GATE = 6` and each of these manifests having exactly 2
+cells, the leakage gate is structurally guaranteed to skip for both — this
+is the expected outcome, not merely a possibility to check for** —
+`cli.py`'s `--manifest` flag takes exactly one manifest with no
+multi-manifest/corpus mode, so no alternate invocation changes this. Since
+R5's own concern is a *security* property (leakage/fingerprint-independence),
+not a style nit, **a hand-diff "done by hand and recorded" is not adequate
+on its own** (an earlier revision of this section proposed exactly that,
+correctly flagged by review as underpowered for what it's guarding).
+Required instead: **a new automated test**, written as part of this step's
+own commit for each of the two body-format-converting cells, that renders
+both twins, strips the known dynamic/sink region (identifiable directly from
+the manifest's own `sink_context`), and asserts byte-equality of the
+remainder — the same kind of automated byte-identical-output check this
+codebase already uses elsewhere for determinism claims, just not yet
+instantiated for a twin-vs-twin layout comparison. This turns "by hand" into
+a committed, repeatable regression test rather than a one-time manual note.
 
 ### R6 — regression/additive-only gate: correctly ruled out for `lab/ground-truth/`, but WRONG about there being no ground truth at all — per-app ground-truth directories exist and DO carry these cells
 
@@ -357,15 +392,25 @@ These are **live test dependencies, not dead files**:
   Relocating `LABGEN-BC-0001`/`0003` off `/cell/labgen-*` **will fail these
   assertions** unless `labels.json`'s `url` field for `BKNG-0001`/`BKNG-0002`
   is updated in the same change.
-- `tests/test_labgen_php_laravel_booking_multitarget.py`,
-  `tests/test_labgen_php_laravel_huddlehub_multitarget.py`,
-  `tests/test_multitarget_category3_combined.py`,
+- **Corrected split (review found the original list overclaimed this):**
+  only `tests/test_labgen_php_laravel_booking_multitarget.py`,
+  `tests/test_labgen_php_laravel_huddlehub_multitarget.py`, and
+  `tests/test_multitarget_category3_combined.py` actually load a per-app
+  `GT_DIR` and depend on `case.url`/`rendering` (confirmed: each imports
+  `fuzzlab.labels.contract` and sets `GT_DIR = "lab/ground-truth-<app>"`).
   `tests/test_labgen_webhook_signature_circlefeed.py`,
   `tests/test_labgen_webhook_signature_circlefeed_magic_hash.py`,
   `tests/test_labgen_webhook_signature_live_boot.py`, and
   `tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py`
-  all load one of these per-app `GT_DIR`s and depend on the same
-  `case.url`/`rendering` fields.
+  — an earlier revision of this section wrongly grouped these in as
+  ground-truth-dependent too; **none of the four reference ground truth,
+  `GT_DIR`, or `contract.load` at all** (confirmed by direct grep: zero
+  hits in any of them). They still need to be re-run (their URLs are
+  computed dynamically via `served_url_for(cell)`, so a route move doesn't
+  break a hardcoded assertion, but the route *is* moving and R9's
+  `DuplicateRouteError` risk applies to exactly these cells), just not for
+  a ground-truth reason — re-run them because of the route/mechanism change
+  (R9), not because they read `case.url`.
 - The `rendering` field feeds `fuzzlab/harness/auto.py`'s live
   request-body-encoding decision (JSON body sent iff `rendering ==
   "server-json"`) for a real `fuzzlab auto` run against these apps. For
@@ -374,6 +419,15 @@ These are **live test dependencies, not dead files**:
   `server-json` → `server` in the same change, or a live `auto` run keeps
   sending JSON request bodies to an endpoint that no longer expects/returns
   JSON.
+- **`LABGEN-MA-0003`/`0004` has no ground-truth entry anywhere** — not in
+  any per-app directory, nor in the default `lab/ground-truth/` (confirmed:
+  zero hits for `MA-0003`/`MA-0004`-shaped case ids in any `labels.json`).
+  It is referenced only in `tests/test_labgen_mass_assignment.py` and
+  `tests/test_labgen_mass_assignment_live_boot.py`, both of which compute
+  its URL dynamically via `served_url_for(cell)` rather than a hardcoded
+  literal — so this pair carries no `url`/`rendering`-field update risk at
+  all, unlike the other 10 pairs in this section. Its own risk is R9's
+  `DuplicateRouteError` mechanism, not ground truth.
 
 **Revised conclusion:** `regression_gate.py`/`T-LAB0.9` genuinely has no
 baseline to diff for these cells (that narrow point stands, unchanged), but
@@ -468,6 +522,70 @@ per the inventory-table correction above, `LABGEN-MA-0003`/`0004` is *not*
 in scope for this sign-off (its page lives in the default merged PFF build,
 which already has a login flow).
 
+### R9 — the actual URL-relocation mechanism is never invoked: every relocation in this plan will hit `DuplicateRouteError` as written
+
+**The single most consequential gap found across both review rounds,
+previously entirely missing from this plan.** Every one of the 11 cell
+pairs in scope is, today, built and live-booted with **both twins present
+in the same generated app at once** (confirmed: e.g.
+`tests/test_labgen_php_laravel_access_control_live_boot.py` builds a
+`LiveBootHarness(emitter, [login_cell, vulnerable, secure])`). This works
+today only because neither twin's manifest `route.path` (e.g. `/photos/view`)
+is actually honored as the served URL — `_served_route_for()`
+(`fuzzlab/labgen/emitters/php_laravel/__init__.py`) treats every one of
+these page profiles as **illustrative** (no `real_page` key set), so each
+twin is served at its own distinct `/cell/<slug>` URL, avoiding collision.
+This plan's own table header ("route (manifest, undelivered)") already
+names this, but never connects it to what changes when the route becomes
+*delivered*.
+
+**Read directly:** `fuzzlab/labgen/emitters/php_laravel/route_accumulator.py`'s
+`RouteAccumulator.render_file` raises `DuplicateRouteError` if two
+fragments register the same `(method, url)` pair. The mechanism that
+avoids this for a page real enough to have one canonical URL — already
+built, already used for every one of PFF's own real pages, and exactly
+what the *parent* plan's point 5 means by "the existing URL-pinning
+mechanisms (`_REAL_PAGE_CELL_IDS` and similar)" — is
+`_PAGE_PROFILES`' two extra keys, `_REAL_PAGE_KEY` (`"real_page": True`)
+and `_CANONICAL_CELL_KEY` (`"canonical_cell_id": "<one cell_id>"`). Setting
+both on a page profile routes the **canonical** cell to the literal
+realistic path, and every **other** cell sharing that profile to a distinct
+suffixed variant via `_twin_url_for()` (e.g. PFF's own
+`/login.php`/`LABGEN-PLA-0002` → `/login.labgen-pla-0002.php`, keeping the
+`.php` suffix; for these apps' extension-less paths, `_twin_url_for`'s
+no-dot fallback applies, e.g. `/photos/view` + `LABGEN-CF-0002` →
+`/photos/view.labgen-cf-0002`).
+
+**What this plan must add, for every one of the 11 relocations in §4 steps
+2–5, not only the 2 body-format conversions:**
+1. Add `"real_page": True` and `"canonical_cell_id": "<chosen cell_id>"` to
+   that cell pair's `_PAGE_PROFILES` entry in
+   `fuzzlab/labgen/emitters/php_laravel/__init__.py`.
+2. Decide which twin is canonical (the vulnerable one, by this codebase's
+   own established convention — confirmed by reading the existing
+   `LABGEN-PLA-0001`/`LABGEN-RPL-PRODUCT`-style entries, which all name the
+   vulnerable cell canonical).
+3. Confirm the **non-canonical** twin's new `_twin_url_for`-derived URL is
+   what every test that currently hardcodes or derives its URL now expects
+   — this is exactly the same class of fix R6 and R2 already require for
+   the *canonical* cell's URL, extended to the twin's suffixed variant too.
+4. Re-run every live-boot test that builds both twins together (the list in
+   R2/R6 plus, per the thoroughness reviewer's finding, the class-specific
+   unit tests: `test_labgen_access_control_circlefeed.py`,
+   `test_labgen_header_injection_circlefeed.py`,
+   `test_labgen_insecure_deserialization_circlefeed.py`,
+   `test_labgen_ssrf.py` + `test_labgen_ssrf_live_boot.py`,
+   `test_labgen_header_injection.py` + `test_labgen_header_injection_live_boot.py`)
+   and confirm no `DuplicateRouteError` and no stale-URL assertion.
+
+Without this, an implementer who does exactly what §3a/§4 literally
+describe today (just edit the manifest's `route.path`, or naively
+re-register both twins at the same new literal path) hits a build-breaking
+`DuplicateRouteError` the first time both twins of *any* of these 11 pairs
+are assembled together — which is how every one of them is currently
+tested. This is systemic, not narrow to R1/R2's two cells, and must be
+resolved (§4 revised below) before implementation starts.
+
 ## 4. Sequencing (safest-first, independently verifiable steps)
 
 Do these as **separate commits**, each independently green, in this order:
@@ -504,15 +622,19 @@ Do these as **separate commits**, each independently green, in this order:
    into the default merged PFF build, not a split app; see §1's scope
    note). Each needs a settings/webhook-explainer page whose inline
    `fetch()` POSTs JSON, per the parent plan's client-page pattern, plus
-   (per R6) its own per-app `labels.json`/`injection-points.json` `url`
-   update, plus re-running the webhook-signature tests named in R6
-   (`test_labgen_webhook_signature_circlefeed.py`,
-   `..._magic_hash.py`, `..._live_boot.py`,
-   `test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py`,
-   `test_labgen_php_laravel_huddlehub_multitarget.py`,
-   `test_labgen_php_laravel_booking_multitarget.py`,
-   `test_multitarget_category3_combined.py`) — batch together only if all
-   four pages are ready in the same commit; otherwise split by app.
+   `_PAGE_PROFILES` wiring (R9) for `LABGEN-CF-0003/0004` and
+   `LABGEN-HHB-0001/0002` (`LABGEN-MA-0003/0004` has no per-app ground-truth
+   entry at all — R6 — so only the R9 `_PAGE_PROFILES` wiring applies to
+   it, not a `url` field update), plus re-running: for the ground-truth-
+   dependent tests, `test_labgen_php_laravel_huddlehub_multitarget.py`,
+   `test_labgen_php_laravel_booking_multitarget.py`, and
+   `test_multitarget_category3_combined.py` (R6); for the route/mechanism
+   change (R9, not a ground-truth reason),
+   `test_labgen_webhook_signature_circlefeed.py`, `..._magic_hash.py`,
+   `..._live_boot.py`, and
+   `test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py` —
+   batch together only if all four pages are ready in the same commit;
+   otherwise split by app.
 5. **`LABGEN-BC-0005`/`0006`** (price_integrity → HTML page) **last**,
    in its own commit, because it's R1 — the one genuine oracle-anchor
    change, and (per §3a) also needs a new GET-reachable page (the checkout
@@ -545,11 +667,17 @@ Do these as **separate commits**, each independently green, in this order:
 - [ ] New/updated `tests/test_labgen_assemble_app_split.py`-style disk-content
       tests for each relocated URL (old `/cell/labgen-*` path gone, new
       realistic path serves the same cell).
-- [ ] Leakage-probe / chi-square build gate — `fuzzlab lab-generate
-      --manifest <path> --out <dir> --emitter php_laravel --check` run
-      against both affected manifests, with the actual group count recorded
-      (not just "green" — confirm it didn't silently skip under
-      `MIN_GROUPS_FOR_GATE`, per R5).
+- [ ] The gate command is run and its group count recorded (expected: skip,
+      since both manifests have 2 cells < `MIN_GROUPS_FOR_GATE`), **and** the
+      new automated twin-diff byte-equality test (R5) is written and green
+      for both `LABGEN-CF-0001`/`0002` and `LABGEN-BC-0005`/`0006` — a skip
+      recorded without this new test does not satisfy R5.
+- [ ] **`_PAGE_PROFILES` wired with `real_page`/`canonical_cell_id` for all
+      11 relocated cell pairs** (R9), canonical twin chosen per this
+      codebase's existing convention (vulnerable cell canonical), and every
+      live-boot/class-specific test that builds both twins together
+      re-run and confirmed free of `DuplicateRouteError` and stale-URL
+      assertions (R9's own list, plus R2/R6's lists).
 - [ ] Regression/additive-only gate (`T-LAB0.9`/`regression_gate.py`) —
       confirmed still green; no `lab/ground-truth/` (default dir) exemption
       entry needed (that narrow point of R6 stands).
@@ -559,16 +687,30 @@ Do these as **separate commits**, each independently green, in this order:
       `lab/ground-truth-circlefeed/`, `-huddlehub/`, `-booking-clone/`'s
       `labels.json` + `injection-points.json`, each in the same commit as
       its cell's move/conversion.
-- [ ] `tests/test_labgen_open_redirect.py`,
+- [ ] Ground-truth-dependent (R6): `tests/test_labgen_open_redirect.py`,
       `tests/test_labgen_csv_export_injection.py`,
       `tests/test_labgen_php_laravel_booking_multitarget.py`,
       `tests/test_labgen_php_laravel_huddlehub_multitarget.py`,
-      `tests/test_multitarget_category3_combined.py`,
+      `tests/test_multitarget_category3_combined.py` — all green after the
+      per-app `url`/`rendering` updates.
+- [ ] Route/mechanism-dependent, not ground-truth (R9, corrected split from
+      an earlier draft that miscategorized these as R6/ground-truth):
       `tests/test_labgen_webhook_signature_circlefeed.py`,
       `tests/test_labgen_webhook_signature_circlefeed_magic_hash.py`,
       `tests/test_labgen_webhook_signature_live_boot.py`,
-      `tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py`
-      — all green after the ground-truth `url` updates (R6).
+      `tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py`,
+      `tests/test_labgen_access_control_circlefeed.py`,
+      `tests/test_labgen_header_injection_circlefeed.py`,
+      `tests/test_labgen_insecure_deserialization_circlefeed.py`,
+      `tests/test_labgen_ssrf.py`, `tests/test_labgen_ssrf_live_boot.py`,
+      `tests/test_labgen_header_injection.py`,
+      `tests/test_labgen_header_injection_live_boot.py`,
+      `tests/test_labgen_phase_d_tier12_category5.py` (also named under R1)
+      — all green after `_PAGE_PROFILES` wiring, with no `DuplicateRouteError`.
+- [ ] `LABGEN-MA-0003`/`0004`'s own tests
+      (`tests/test_labgen_mass_assignment.py`,
+      `tests/test_labgen_mass_assignment_live_boot.py`) — green; no
+      ground-truth `url` update applies to this pair (R6).
 - [ ] `bootstrap/app.php`'s `validateCsrfTokens(except: ['*'])` line diffed
       against pre-change and confirmed unchanged (R7).
 - [ ] R8 sign-off obtained, **and `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6
@@ -614,16 +756,24 @@ commit to unwind.
   get a `BUG-NNNN` (a latent defect in this plan's own inventory) plus the
   recurrence-review/PA workflow in `CLAUDE.md`, since it would mean this
   inventory pass missed something a full implementation pass caught.
-- Per `docs/components/README.md`'s pre-change review gate for substantive
-  architecture/code changes: this document and its two rounds of revision
-  (self-review, then 3 independent reviewer agents checking accuracy/
-  thoroughness/adequacy, converging on the corrections above) **serve as
-  that gate's Change/Impact/Risk/Deliverables discussion** for `CC-LAB-0239`/
-  `CC-FUZZ-0047`, but the formal, fielded change-control entries themselves
-  are still to be drafted once implementation actually starts (this
-  document is the plan that entry will cite, not the entry itself). Draft
-  those entries from this plan's final, converged state before §4 step 1
-  begins.
+- **Correction (reviewer-found, process-compliance gap):** an earlier
+  revision of this section said the formal `CC-LAB-0239`/`CC-FUZZ-0047`
+  entries could be "drafted once implementation actually starts." Read
+  `docs/components/README.md`'s pre-change review gate directly: for a
+  *substantive code/architecture change* (which this unambiguously is), the
+  **fielded change-control entry itself** — not a discussion feeding it —
+  must be drafted first, reviewed by 2 independent agents plus the
+  proposing agent, and **agreed 3/3 before implementation begins**. This
+  plan document's own 2 rounds of review satisfy that gate's *spirit* (real,
+  independently-verified accuracy/thoroughness/adequacy checking) but not
+  its *letter*, which requires the actual entry. **Corrected requirement:
+  draft the real `CC-LAB-0239` and `CC-FUZZ-0047` entries (Change, Impact,
+  Risk, Deliverables fields; Effectiveness left `pending`) from this plan's
+  now-converged content, and take *them* through the same 2-reviewer-agent
+  +3/3-agreement process this plan itself went through — as their own,
+  separate, explicit gate — before §4 step 0 begins.** This plan document
+  is the input those entries are grounded in; it does not substitute for
+  them.
 - A one-line addition to `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 4 row
   (R4) is itself a small piece of bookkeeping this step owes going forward
   — do it in the same PR as this plan's implementation, not deferred
@@ -669,9 +819,40 @@ from, per `CLAUDE.md`'s multi-agent review convention (mirrors the
    this document — see the "Correction (reviewer-found, 2026-09-25)" and
    "Strengthened per review" callouts throughout §1–§7 for exactly what
    changed and why.
+4. **Second 3-independent-reviewer-agent round** (2026-09-25): with round 3's
+   corrections in place, 3 fresh agents (no memory of round 3, briefed only
+   on the document's then-current state) re-checked accuracy, thoroughness,
+   and adequacy again. Most of round 3's fixes held up under independent
+   re-verification, but this round found real, further issues: the accuracy
+   reviewer found R6's own corrected dependent-test list had overclaimed —
+   4 webhook-signature test files it listed as ground-truth-dependent
+   reference no ground truth at all; the thoroughness reviewer found **R9**,
+   the single most consequential finding across both rounds — every one of
+   the 11 relocations in this plan will hit a build-breaking
+   `DuplicateRouteError` unless `_PAGE_PROFILES`' `real_page`/
+   `canonical_cell_id` mechanism is actually wired for each one (the plan
+   had discussed *whether* a URL should move, never *how* the codebase's
+   own existing routing mechanism makes that move safe), plus a missing
+   `LABGEN-MA-0003`/`0004` ground-truth-absence note and an unlisted
+   conformance test (`test_labgen_phase_d_tier12_category5.py`); the
+   adequacy reviewer found a genuine process-compliance gap — this
+   document's own §7 had deferred drafting the actual `CC-LAB-0239`/
+   `CC-FUZZ-0047` change-control entries past what
+   `docs/components/README.md`'s pre-change review gate actually requires
+   (the fielded entry itself, 3/3-agreed, before implementation starts, not
+   merely a plan discussion feeding it) — plus smaller strengthenings to
+   R1 (decimal-formatting precision), R3 (explicit template-before-fixture
+   sequencing), and R5 (replacing a "hand-diff" fallback with a required
+   automated twin-diff test, since R5 guards a security property). Every
+   finding was independently re-verified against the repo again before
+   being folded in.
 
 This document is considered converged (4/4 — the author plus all 3
-reviewers) once a review pass finds no further corrections needed beyond
-concurring with what's written here. If a future reviewer disagrees with
-anything in this section or elsewhere, treat that as reopening the loop,
-not as this document being final regardless.
+reviewers, for whichever round is current) once a review pass finds no
+further corrections needed beyond concurring with what's written here. Two
+rounds of 3 reviewers each have now run; round 2 found real issues round 1
+missed (most notably R9), which is itself evidence the process is working
+as intended, not that it's failing to converge — each round's corrections
+have gotten narrower and more incremental than the last. If a future
+reviewer disagrees with anything in this section or elsewhere, treat that
+as reopening the loop, not as this document being final regardless.

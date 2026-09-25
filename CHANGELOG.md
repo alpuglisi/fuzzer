@@ -4,6 +4,41 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 planning revision 3 — second round of 3 independent reviewer agents finds R9, a systemic implementation blocker; no code change)
+- A second round of 3 fresh reviewer agents (accuracy/thoroughness/adequacy,
+  no memory of the prior round) re-checked
+  `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` after revision 2's fixes. Found
+  and, after independent re-verification, folded in: (1) **new R9** — the
+  single most consequential finding across both rounds: every one of the 11
+  cell relocations this plan describes will hit a build-breaking
+  `DuplicateRouteError` (`fuzzlab/labgen/emitters/php_laravel/route_accumulator.py`)
+  unless the codebase's existing `_PAGE_PROFILES`'
+  `real_page`/`canonical_cell_id` mechanism (confirmed real, already used
+  for every one of PFF's own real pages) is wired for each relocated pair —
+  the plan had discussed *whether* a URL should move without ever
+  mentioning *how* the routing layer avoids two twins colliding on the same
+  path once it does. (2) R6's own corrected dependent-test list still
+  overclaimed: 4 webhook-signature test files it listed as
+  ground-truth-dependent reference no ground truth at all (verified: zero
+  matches for `GT_DIR`/`case.url` in any of them) — split into
+  ground-truth-dependent vs. route/mechanism-dependent (R9) categories.
+  (3) `LABGEN-MA-0003`/`0004` has no ground-truth entry anywhere (not even
+  the per-app directories R6 found) — noted explicitly so an implementer
+  doesn't go looking for a case_id that doesn't exist.
+  (4) `tests/test_labgen_phase_d_tier12_category5.py`, an independent
+  Tier1/Tier2 conformance proof against `LABGEN-BC-0003`/`0004`/`0005`/`0006`
+  via a different marker mechanism than R1's own fix, was missing from
+  every dependent-test list. (5) A genuine process-compliance gap: §7 had
+  deferred drafting the actual `CC-LAB-0239`/`CC-FUZZ-0047` change-control
+  entries past what `docs/components/README.md`'s pre-change review gate
+  actually requires (the fielded entry itself, 3/3-agreed, before
+  implementation starts) — corrected to require those entries as their own,
+  separate gate. (6) Smaller strengthenings to R1 (decimal-formatting
+  precision), R3 (explicit template-before-fixture sequencing clause), and
+  R5 (replaced an underpowered "hand-diff" fallback with a required
+  automated twin-diff byte-equality test, since R5 guards a security
+  property). See the plan doc's §9 for the full round-by-round account.
+
 ## 2026-09-25 (Lane 1 step 3 planning revision 2 — 3 independent reviewer agents; corrects one load-bearing factual error and one previously-missed inventory gap, no code change)
 - 3 agents, briefed independently with no shared context, reviewed
   `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` for accuracy, thoroughness, and
