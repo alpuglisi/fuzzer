@@ -1,20 +1,20 @@
 # Browsable Labs Lane 6 — node_express: MeadowMart + python_fastapi generic sample
 
-Status: **DRAFT — plan written, review gate NOT yet run** (2026-09-25).
+Status: **revised after review round 1, awaiting round 2** (2026-09-25).
+Round 1 returned ACCURATE and NOT YET ADEQUATE, with 3 gaps plus 1
+consolidation request, all addressed in this revision (see §8).
 Reserved numbers per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table:
 `CC-LAB-0246` / `FR-LAB-168-169` / `CC-FUZZ-0052` / `FR-FUZZ-36` /
 `BUG-0056` / `PA-0058`. None has been used yet.
 
-**Why the gate has not run.** The lane brief says to review this plan with
-2 independent reviewer subagents (accuracy and adequacy) spawned through
-the proposing agent's own Agent tool. That tool is not available in the
-session that wrote this draft. `ToolSearch` found no `Agent`/`Task` tool.
-`docs/MULTI_AGENT_ORCHESTRATION.md` §4 says to stop and flag when a
-specified mechanism is missing, not to substitute another one silently.
-So this draft has **not** been reviewed. §8 records no review rounds, and
-this plan does not yet authorize a change-control entry or any
-implementation. The orchestrator must run the 2-reviewer gate itself, or
-explicitly approve a different reviewer mechanism.
+**Review mechanism.** The lane brief asked for 2 reviewer subagents spawned
+through the proposing agent's own Agent tool. That tool is not available in
+this lane's session (`ToolSearch` found no `Agent`/`Task` tool), so the lane
+stopped and flagged, per `docs/MULTI_AGENT_ORCHESTRATION.md` §4. The
+orchestrating session then ran the reviewers itself. This mirrors Lane 4's
+recorded arrangement (`docs/LAB_LANE4_SPRING_BOOT_PLAN.md`, status block).
+This plan does not yet authorize a change-control entry or any
+implementation.
 
 ## 0. Lessons from Lanes 1–2, applied from the start
 
@@ -166,8 +166,10 @@ explicitly approve a different reviewer mechanism.
 - **The twins share one path.** Both cells of a pair are decorated with
   `cell.route.path` (`__init__.py:198`), and the first-sorted module wins.
   So each secure twin (`PY-0002/0004/0006`) is **unreachable** in the
-  whole-app build. This predates this lane and is not a browsability defect
-  (see §7, F3).
+  whole-app build. This predates this lane. It is the same structural
+  problem as Lane 2's R1 (a secure twin with no URL of its own), so it gets
+  a decision rule in §2B-e/R-B7 (revised in round 1, adequacy gap 2). The
+  draft had only flagged it.
 - **There is no leakage/fingerprint gate over this sample's HTTP
   responses.** The chi-square fingerprint gate
   (`fuzzlab/labgen/fingerprint_gate.py`) runs over manifest corpus records
@@ -205,9 +207,9 @@ through `TestClient`:
 | # | Where | Bare request | Result | Class |
 |---|---|---|---|---|
 | D1 | `python_fastapi` `/products` (`PY-0001`, vulnerable) | `GET /products` | **500** (`str(None)` → `WHERE id = None`, SQLite `OperationalError`) | **PA-0053 absent-input**, same as BUG-0051/0052 |
-| D2 | `node_express` `/generated/labgen-ne-0001` (`/api/products`) | `GET` | **Node process exits, rc=1** (the SQL `… = undefined`, then an unhandled rejection in an `async` Express 4 handler; Node 22's default `--unhandled-rejections=throw` kills the process) | absent-input (**same class**) *combined with* F2 (different class, see §7) |
+| D2 | `node_express` `/generated/labgen-ne-0001` (`/api/products`) | `GET` | **Node process exits, rc=1**. In this environment the rejection observed was `ECONNREFUSED` to MySQL on 127.0.0.1:3306, because no DB is running. With a DB running, the undeclared `id` would instead produce the malformed SQL `… WHERE id = undefined`. Either way the rejection is unhandled in an `async` Express 4 handler, and Node 22's default `--unhandled-rejections=throw` kills the process. The exact failure mode varies by environment; the bug doc's RCA must say so (review round 1, accuracy footnote) | absent-input (**same class**) *combined with* F2 (different class, see §7) |
 | D3 | `node_express` `/api/search` (MeadowMart, `RD-0001`) | `GET /api/search` | 200, `<mark></mark>` between **every character** (`new RegExp(undefined)` = the empty pattern); the secure twin returns 200 plain content (`escapeRegExp(undefined)` = `"undefined"`, so no match) | **undeclared** absent-input that differs between the twins (a PA-0054 (1) violation, not a crash) |
-| D4 | `node_express` `/api/login` secure twin (`NE-0006`) | `POST` with no `username` | *suspected, not yet probed*: `mysql2` rejects an `undefined` bind value | same class. Verify at §5 step 1 before claiming it |
+| D4 | `node_express` `/api/login` secure twin (`NE-0006`) | `POST` with no `username` | The draft suspected that `mysql2` rejects an `undefined` bind value. The round-1 accuracy reviewer reproduced a process exit live, via the same `ECONNREFUSED` path as D2 in this DB-less environment. Which failure mode fires with a live DB (the undefined-bind rejection) is re-probed at §5 step 1 and recorded in the bug doc | same class |
 | F1 | `node_express` `/generated/labgen-ne-0007` (`/api/profile`) | `GET` | **500** on every request (`currentUser` is never defined, so `ReferenceError`) | **different class** (a render-context identifier with no definition) |
 
 Other live results from the same probe, for reference: `GET /` → 404,
@@ -294,18 +296,46 @@ built from the same `target_literal` already in `_ROUTE_PARAMS`.
 The fallback rule for this choice is under R3.
 
 **2A-d. Absent-input declarations (PA-0053/PA-0054, decided here).**
-These mirror Lane 2's key names exactly (`django/__init__.py:225-240`), so
-every emitter uses one vocabulary. Each route profile in `_ROUTE_PARAMS`
-declares its absent-input behavior according to the kind of source it
-uses:
+**Vocabulary (revised in review round 1, adequacy gap 1).** Each route
+profile carries **one required `absent_input` key**. This is the scheme
+concurrent Lanes 3 and 4 both adopted:
+- Lane 3: `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md` §2d, in worktree
+  `agent-a6d64ee43aef7a171`.
+- Lane 4: `docs/LAB_LANE4_SPRING_BOOT_PLAN.md` §2e, in worktree
+  `agent-ace983493fa0709aa`.
 
-| Route (cells) | Source | Declaration | Rendered (identical on both twins) |
+It is also the key Lane 4's shared cross-emitter check reads (S15, §6).
+The draft had mirrored Lane 2's separate `default_value`/`required_param`
+keys instead. Values use **Lane 4's spellings** (`default_value`,
+`required_param`, `empty_body_400`, `no_input`), because Lane 4's S15 file
+is the shared mechanism. Lane 3's spellings (`default:<v>`,
+`required:400`, …) differ, and that is flagged to the orchestrator in §6.
+A `default_value` declaration carries its literal in a render-only
+`default_literal` key. Each route in `_ROUTE_PARAMS` declares its
+absent-input behavior according to its source:
+
+| Route (cells) | Source | `absent_input` | Rendered (identical on both twins) |
 |---|---|---|---|
 | `/api/search` (RD-0001/0002, MeadowMart) | `get_query_param` | `required_param` | `if (!searchTerm) { return res.status(400).json({ error: 'missing required parameter: q' }); }` placed before the transform |
-| `/api/products`, `/api/posts` (NE-0001–0004) | `get_query_param` | `default_value: "1"` | `const id = req.query.id \|\| '1';` (the same `or`-semantics as Lane 2's `request.GET.get(...) or "1"`, and Lane 1's `?? '1'`) |
+| `/api/products`, `/api/posts` (NE-0001–0004) | `get_query_param` | `default_value` (`default_literal: "1"`) | `const id = req.query.id \|\| '1';` (the same `or`-semantics as Lane 2's `request.GET.get(...) or "1"`, and Lane 1's `?? '1'`) |
 | `/api/login` (NE-0005/0006) | `post_body_param` | `required_param` | the same 400 guard before the transform (no safe default username exists; this also closes D4) |
-| `/api/preferences` (PP-0001/0002, MeadowMart) | `post_body_json` (whole body) | *(no key; the source kind itself is the declaration)* | an absent or empty body parses to `{}` (body-parser), the merge does nothing, and the response is 200 with the defaults (probe-confirmed). The offline check asserts that neither key is present and that this source kind is on the whole-body allowlist |
-| `/api/profile` (NE-0007/0008) | `read_stored_field` | *(no request input)* | not applicable. F1 (`currentUser` undefined) is a different class, see §7 |
+| `/api/preferences` (PP-0001/0002, MeadowMart) | `post_body_json` (whole body) | `empty_body_400` | `if (Object.keys(incomingPreferences).length === 0) { return res.status(400).json({ error: 'missing request body' }); }` placed before the merge. See the note below |
+| `/api/profile` (NE-0007/0008) | `read_stored_field` | `no_input` | nothing rendered. F1 (`currentUser` undefined) is a different class, see §7 |
+
+**Why `/api/preferences` gets `empty_body_400` (revised in round 1).**
+- **What the draft said:** this route needed no declaration, because an
+  empty body parses to `{}` and the merge does nothing (probe-confirmed:
+  200).
+- **Why that falls short:** it still reaches the merge sink with absent
+  input, which falls short of PA-0053's literal "handled 4xx *before any
+  sink*". It would also be the one value in Lane 4's shared vocabulary that
+  Lane 4 deliberately did not use for whole-body routes (Lane 4 §2e:
+  `empty_body_400`).
+- **Effect on requests that carry a body:**
+  - A body carrying any key, `__proto__` included (`JSON.parse` makes it an
+    own property, so `Object.keys` counts it), behaves exactly as today.
+  - Every existing test and probe POSTs a non-empty body (§3A R9), so this
+    changes only the bare-POST response, from 200 to 400.
 
 - The guard or default lives in the **source** template region, identical
   on both twins apart from the handler identifier. So every minimal pair
@@ -376,17 +406,51 @@ the layout, and link them from a listing page (here the homepage).
   cell file.
 
 **2B-c. Absent-input declarations** (the same vocabulary as §2A-d):
-- `/products`: `default_value: "1"` →
+- `/products`: `absent_input: default_value` (`default_literal: "1"`) →
   `request.query_params.get("id") or "1"`. This fixes **D1**.
-- `/login`: `required_param` → the 400 guard before the transform.
-- `/profile`: no request input.
+- `/login`: `absent_input: required_param` → the 400 guard before the
+  transform.
+- `/profile`: `absent_input: no_input`.
 
 The offline check (§4B) covers all 3 routes.
 
 **2B-d. Not done here** (this is what keeps FastAPI narrower): no app
 identity or branding beyond a generic sample name, no realistic-URL work,
-no ground truth, no port, no spider crawl (§4B explains why), and no fix
-for the twin path collision (F3, §7).
+no ground truth, no port, no spider crawl (§4B explains why).
+
+**2B-e. Twin URLs (F3; decision rule in R-B7).** The homepage is required
+to link every page the build serves, but today a secure twin is not served
+at all, because its path is shadowed. **Default branch (a): fix this in
+the scaffold only.**
+- `_discover_and_include_routers` (`main.py.j2`) keeps a set of
+  `(method, path)` pairs it has already included.
+- A module whose router declares a pair that is already taken is included
+  with `include_router(router, prefix="/twin/<module-name-with-dashes>")`.
+  For example, `PY-0002` becomes `/twin/labgen-py-0002/products`.
+- The first owner in sorted module-name order keeps the real path. Today
+  that is the vulnerable cell, because each vulnerable cell has the lower
+  number.
+- The collision check reads the **per-module `APIRouter.routes`** (plain
+  `APIRoute`s with `.path`/`.methods`), not `app.routes` (see R-B3 for why
+  `app.routes` is fragile).
+- **No per-cell router file changes**, so the minimal-pair checker's
+  byte-level twin contract is untouched (R-B1). This is why the fix is in
+  the scaffold rather than in each cell's decorator: a twin-specific
+  decorator path would sit outside the transform/sink region.
+- The site table (§2B-a) lists twin URLs through the same derivation,
+  mirrored as a pure Python function `served_path_for(cell, cells)` in the
+  emitter. This is the `python_fastapi` analogue of `node_express`'s
+  `_served_url_for`, and the bare sweep (§4B) enumerates from it.
+
+**Branch (b) fallback:** keep the shadowing, pin it with a strict xfail,
+and flag it as a follow-up. Use this only if branch (a) breaks any of:
+- the minimal-pair checker, or Tier-3 regeneration;
+- FastAPI 0.141.1's `include_router(prefix=...)` semantics, for example if
+  a prefixed POST route becomes unreachable in `TestClient`;
+- the scaffold's determinism test.
+
+Whichever branch is used is recorded as an explicit **"F3 sign-off"** in
+`FR-LAB-169`, the way Lane 2's R1 sign-off was recorded in `FR-LAB-160`.
 
 ## 3. Risk register
 
@@ -432,6 +496,13 @@ page from a GET on the API URL itself, only if one of these holds:
 
 Whichever branch is used is recorded as an explicit **"R3 sign-off"** in
 `FR-LAB-168`, the way `CC-LAB-0241`'s R4 sign-off was recorded.
+
+**Cross-lane note.** Lanes 1 and 4 both use branch (b) for their POST-only
+APIs: in Lane 4 §2e, `GET` → 200 client page. Branch (a) is chosen here
+only because a BFF preferences *resource* is realistically GET+POST, and
+MeadowMart already has a separate client page (`/account/preferences`).
+The difference in precedent is deliberate and stated here, so the gate can
+overrule it if cross-lane uniformity matters more.
 
 **R4 — The new absent-input guard or default must not break the
 minimal-pair contract or existing tests.** Several existing tests assert
@@ -579,7 +650,29 @@ view).
 
 **R-B6 — The in-process check must also enforce PA-0054 (2).** See §4B.
 The bare sweep enumerates every served route from the emitter's own
-`_PAGE_PARAMS` plus the site table, not from whatever the homepage links.
+`_PAGE_PARAMS`, `served_path_for` (§2B-e) and the site table, not from
+whatever the homepage links.
+
+**R-B7 — F3, secure twins unreachable (added in round 1, adequacy gap 2).**
+This is the same structural problem as Lane 2's R1 (the secure twin's URL
+differs from the vulnerable twin's, or here does not exist at all).
+**Decision rule:** branch (a), scaffold-level twin prefixes (§2B-e), unless
+one of that section's three named conditions fails. Then use branch (b):
+keep the shadowing, add a `TestClient` strict xfail
+("each twin reachable at a distinct URL"), and flag it as a follow-up.
+
+Either way:
+- The result is recorded as the "F3 sign-off" in `FR-LAB-169`.
+- **Verification under (a):** `TestClient` asserts that each secure twin
+  answers at its `/twin/...` URL with the twin's own behavior:
+  - `/profile`'s twin returns the escaped bio;
+  - `/products`'s twin with `id=1` returns the found row;
+  - `/login`'s twin POST reaches the bound query.
+- The minimal-pair and Tier-3 suites stay green.
+
+**Leakage note:** the twin URL names a cell ID. That is the same accepted
+precedent as `node_express` (`-twin-<cell-id>`) and Lane 2's twin-suffixed
+URLs. No fingerprint gate reads this sample's HTTP responses (§1b).
 
 Accepted, not mitigated: none. Every risk above has a concrete
 verification or fix step, or a flagged follow-up (§7).
@@ -620,7 +713,8 @@ It mirrors `tests/test_labgen_django_navigability_live_boot.py`:
    declared inert routes (with R10's example). It is not taken from the
    crawl. Bare `GET` must be < 500 everywhere, and the declared statuses
    are asserted exactly: `/api/search` and its twin → 400, both preferences
-   URLs → 200. Bare `POST` (empty body) to both preferences URLs → 200.
+   URLs → 200. Bare `POST` (empty body) to both preferences URLs → 400
+   (`empty_body_400`, §2A-d).
 8. **R2 live gadget check**, in its own boot fixture (§3A R2).
 
 Offline companions (not slow), in new `tests/test_labgen_node_express_browsable.py`:
@@ -628,10 +722,17 @@ Offline companions (not slow), in new `tests/test_labgen_node_express_browsable.
   (`lab/manifests/*.yaml`, filtered by `stack_profile == "node_express"`
   and `supports()`, per PA-0027) has a profile in `_ROUTE_PARAMS`. For
   each one, the offline check asserts:
-  - a `get_query_param`/`post_body_param` source carries exactly one of
-    `default_value`/`required_param`;
-  - a `post_body_json` source carries neither key (it is whole-body);
-  - a `read_stored_field` source carries neither key.
+  - the profile carries an `absent_input` value that is allowed for its
+    source kind:
+    - `get_query_param`/`post_body_param`: `default_value` (with
+      `default_literal`) or `required_param`;
+    - `post_body_json`: `empty_body_400`;
+    - `read_stored_field`: `no_input`.
+  - `default_value`/`required_param`/`empty_body_400` are actually rendered
+    in the source region of both twins.
+
+  This emitter-scoped test is this lane's own gate. It is **not** a second
+  cross-emitter mechanism; see §6 for how it relates to Lane 4's S15 file.
 
   The expected route set is **hard-coded** (`/api/login`, `/api/posts`,
   `/api/preferences`, `/api/products`, `/api/profile`, `/api/search`), so
@@ -667,13 +768,15 @@ existing `TestClient` test module
    absent-input behavior under the same rules as §4A. The expected set is
    hard-coded: `/login`, `/products`, `/profile`.
 4. **PA-0054 (2), bare sweep:** a bare `GET` of every served path
-   (`_PAGE_PARAMS` plus the site table) returns < 500, with declared
+   (`served_path_for` over every cell, twins included, plus the site
+   table) returns < 500, with declared
    statuses: `/products` → 200 (default id 1), `/login` → 200 (form),
    `/profile` → 200, `/` → 200. A bare `POST /login` (empty body) → 400,
    skip-guarded per R-B4.
 5. R-B2's found/not-found difference, R-B5's GET/POST coexistence, and the
    existing verdict smoke assertions, updated from `r.json()` to the HTML
    view with the same intent: a found row for `id=1`.
+6. R-B7's twin reachability (branch (a)), or its strict xfail (branch (b)).
 
 If a reviewer holds that PA-0053's wording ("the live-boot navigability
 crawl … each Browsable Labs lane must extend that crawl to its own app")
@@ -684,8 +787,8 @@ assertions. That choice is settled at the gate.
 ## 5. Sequencing (each step has a named gate)
 
 1. **Absent-input declarations, both emitters (§2A-d, §2B-c).** Probe D4
-   first and record the result. Add `default_value`/`required_param` to the
-   templates and route profiles.
+   first and record the result. Add the `absent_input` key to every route
+   profile, and render its guard or default in the source templates.
    - **Gate:** the §4A and §4B PA-0054 (1) offline tests plus the
      twin-identical-lines test pass;
    - the existing `node_express`/`python_fastapi`/`redos`/
@@ -739,18 +842,68 @@ assertions. That choice is settled at the gate.
       (`tests/test_labgen_django_browsable.py` covers only `django`).
       Emitters no lane had reached yet (`python_fastapi`, `node_express`,
       `php_current`) stayed unchecked. That is a "not enforced, wrong
-      layer" failure. `PA-0058` must strengthen PA-0054 on that point.
-      The candidate rule is a registry-driven cross-emitter check.
-      - **Decision rule for PA-0058's own enforcement scope:** implement
-        the check here only for the emitters this lane owns
-        (`node_express`, `python_fastapi`), plus a strict-xfail offline pin
-        for `php_current` if the sweep finds instances there.
-      - Do **not** add a cross-emitter test that covers `go_net_http`,
-        `spring_boot` or `ruby_rails`, because Lanes 3–5 are converting
-        those concurrently and such a test would make their merges
-        collide. Instead, flag to the orchestrator (Lane 7) that it should
-        lift the check into one shared, registry-driven test once all
-        lanes have merged.
+      layer" failure.
+
+      **Reconciliation with Lane 4's S15 (revised in round 1, adequacy gap
+      1).** Lane 4's plan (`docs/LAB_LANE4_SPRING_BOOT_PLAN.md` S15,
+      worktree `agent-ace983493fa0709aa`) already **reserves** the shared
+      cross-emitter mechanism: `tests/test_absent_input_declarations_cross_emitter.py`.
+      - It is parametrized over every emitter.
+      - Its `node_express` and `python_fastapi` cases are
+        `xfail(strict=True)`, naming Lane 6 as the owner.
+      - It reads each emitter's own route-profile table plus its
+        manifests: `node_express/__init__.py:171` (`_ROUTE_PARAMS`) and
+        `python_fastapi/__init__.py:105` (`_PAGE_PARAMS`). Those are
+        exactly the tables §2A-d/§2B-c add `absent_input` to.
+
+      So this lane **adopts S15 as the one shared mechanism and does not
+      build a second, competing cross-emitter test**. The draft's "flag to
+      Lane 7 to lift it later" hand-off is withdrawn.
+      - **What this lane does build:** only emitter-scoped offline tests
+        (§4A companions, §4B item 3). They check what S15 does not: that
+        each value is allowed for the route's source kind, that the guard
+        is actually rendered, and that it is twin-identical. This mirrors
+        Lane 2's `test_labgen_django_browsable.py`, which S15 also leaves
+        in place.
+      - **Merge-order criterion, whichever merges first:**
+        - If **Lane 4 merges first**, Lane 6's merge makes the two S15
+          cases XPASS. The orchestrator deletes those two
+          `xfail(strict=True)` markers in the same merge, which is Lane 4's
+          own S15 rule ("delete that one xfail marker at merge time").
+        - If **Lane 6 merges first**, S15 does not exist yet in this
+          branch, and this lane edits no file it does not own. Lane 4's
+          merge must then land those two cases without their xfail
+          markers, because they would XPASS immediately.
+        - Either way it is a mechanical edit at merge, not a design
+          decision.
+      - **Value-spelling divergence, flagged:** Lane 3 spells values
+        `default:<v>`/`required:400`/`form_on_get`/`no_input`. Lane 4
+        spells them `default_value`/`required_param`/`form_when_absent`/
+        `empty_body_400`/`no_input`. This lane uses Lane 4's spellings
+        because S15 is Lane 4's file. Unifying the spellings, and making
+        S15 validate each value against one closed set rather than only
+        checking presence, is a cross-lane change no single lane owns.
+        **Recommended owner: Lane 7's reserved `CC-LAB-0247`**
+        (integration). This is flagged to the orchestrator as a Lane 7
+        scope addition, not self-assigned.
+      - **Several lanes each writing a PA for the same rule (PA-0055 Lane
+        3, PA-0056 Lane 4, PA-0058 here):** PAs are append-only and are
+        never renumbered, so the criterion is about content.
+        - At bug-doc time, `BUG-0056` reads PA-0055 and PA-0056 as they
+          then stand (merged, or in their worktrees), and PA-0058 states
+          **only its delta** over them.
+        - The working candidate delta, evidenced by this lane's
+          vocabulary finding above: presence of *a* declaration is not
+          enough. The declaration must come from one closed cross-emitter
+          value set that the shared check validates. The draft's
+          per-emitter fragmentation made one emitter's valid declaration
+          unreadable to another emitter's check.
+        - **Decision rule:** if the delta over PA-0055/PA-0056 is empty,
+          do not write a PA that restates them. Stop and flag to the
+          orchestrator instead, and record PA-0058 as unused.
+      - **`php_current`:** S15 already pins it ("no lane assigned"). This
+        lane's PA-0002 sweep records its instances in `BUG-0056` and
+        relies on S15's pin. It does not add a second one.
 - [ ] `ERROR_LOG.md` entry (newest on top), cross-referencing BUG-0056
       and PA-0058.
 - [ ] `docs/PREVENTIVE_ACTIONS.md`: `PA-0058`, plus the PA-0002 sweep's
@@ -765,28 +918,65 @@ assertions. That choice is settled at the gate.
       responses inside the layout, and the §4B in-process check green.
 - [ ] Offline companions green (§4A list), including R5's name-leak scan
       and R6's `innerHTML` pin.
-- [ ] Strict-xfail pins for the different-class findings, each naming its
-      follow-up (§7: F1, F2, F3; F4 is skip-guarded and flagged).
+- [ ] Strict-xfail pins for the different-class findings F1 and F2. F4 is
+      skip-guarded and flagged. F3 is now in scope (R-B7), and is pinned
+      only if branch (b) is used.
+      - **Corrected in round 1:** the draft claimed each pin "names its
+        follow-up".
+      - **What each pin actually names:** each xfail reason names its
+        finding ID and the text "follow-up CC-LAB number to be assigned by
+        the orchestrator". Per PA-0031, a lane must not self-assign
+        numbers beyond its reservation, and Lanes 1 and 4 handled their
+        own follow-ups the same way.
+      - The orchestrator's assigned numbers are recorded in the Lane 6 row
+        of `docs/LAB_BROWSABLE_APPS_PLAN.md` at merge.
 - [ ] Full non-slow suite, every `node_express` live suite and the
       `python_fastapi` TestClient suite green, with counts reported.
 - [ ] `docs/components/01-target-lab/change-control.md`: **one** entry,
       `CC-LAB-0246`, covering both targets in clearly separated
-      subsections. **Why one entry and not two:**
-      - both targets are one lane's single change, verified together;
-      - they share one bug (BUG-0056 spans both emitters) and one
-        preventive action;
-      - the two reserved FR numbers already map one-to-one onto the two
-        targets: `FR-LAB-168` is MeadowMart and `FR-LAB-169` is the
-        `python_fastapi` sample;
-      - a second CC-LAB entry would force a Lane 7 number bump that the
-        orchestrator would have to reconcile against 3 parallel lanes, for
-        no traceability gain.
+      subsections.
 
-      If the change-control gate's reviewers still conclude that two
-      entries are needed, bump Lane 7 to `CC-LAB-0248` in
-      `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately, before drafting the
-      second entry (the discipline from that doc's correction notes), and
-      flag it.
+      **Why one entry. The argument stands on its own and does not borrow
+      Lane 4's reason (rewritten in round 1, adequacy gap 3).** Lane 4
+      justifies one entry by **one shared emitter** (`LAB_LANE4` §1.9).
+      That reason does **not** apply here: MeadowMart (`node_express`) and
+      the sample (`python_fastapi`) are different emitters with no shared
+      mechanism beyond the absent-input vocabulary. The reasons that do
+      apply are these:
+      1. **Change-control is per component (`LAB`), not per emitter**
+         (`docs/components/README.md`). One entry spanning several
+         emitters has precedent: `CC-LAB-0040` covered `php_current`,
+         `node_express`, `python_fastapi` and `php_laravel` in one entry.
+      2. **One root cause, one bug and one gate across both emitters.**
+         BUG-0056 is a single defect class (undeclared absent input)
+         found in both (D1–D4). §5 step 1 fixes both under one gate, and
+         PA-0058 is a single rule. Splitting would mean either two entries
+         citing one bug, or two bug reports for one root cause. The bug
+         protocol forbids the second and makes the first awkward.
+      3. **The two targets' specs stay separate without two entries.**
+         `FR-LAB-168` (MeadowMart) and `FR-LAB-169` (the sample) carry the
+         per-target spec and each target's sign-off (R3, F3). The entry
+         has separate per-target subsections for description, risks,
+         Deliverables and Effectiveness.
+      4. **One close date.** Both targets are implemented and verified in
+         this one lane before hand-back, so neither entry would ever be
+         closed while the other stayed open.
+
+      **The honest counter-argument:** the two targets are independently
+      verifiable. MeadowMart uses a live crawl; the sample uses an
+      in-process check.
+
+      **Decision rule:** split into two entries if either of these holds:
+      - the change-control gate's reviewers find that either target could
+        be judged done while the other is not, meaning reason 4 fails in
+        practice;
+      - implementation ends up delivering the two targets in separate
+        commits with separate Effectiveness dates.
+
+      To split, bump Lane 7 to `CC-LAB-0248` (and its FR-LAB range by the
+      same amount) in `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately,
+      before drafting the second entry. That is the discipline from that
+      doc's correction notes. Flag the bump.
 - [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-168`
       (MeadowMart browsable site, client pages, preferences GET resource
       read, navigability test, and the **R3 sign-off**) and `FR-LAB-169`
@@ -809,8 +999,8 @@ assertions. That choice is settled at the gate.
   references `currentUser`, which is never defined. Every request 500s
   (probe-confirmed). It is pinned with an offline strict xfail that
   asserts each `stored_expr` root identifier is defined in the controller
-  or the scaffold. Recommended follow-up: the next free `CC-LAB` number
-  after Lane 7.
+  or the scaffold. Follow-up number: assigned by the orchestrator (PA-0031;
+  see §6).
 - **F2** (different class): `node_express` `async` handlers
   (`single_statement.js.j2`) have no error handling. Under Express 4 and
   Node 22, **any** SQL error, including an error-based SQLi probe, exits
@@ -820,13 +1010,27 @@ assertions. That choice is settled at the gate.
   into a response). Not fixed here: it changes the SQLi cells' error
   response shape, which is an oracle-facing decision
   (`SqliErrorStrategy`), and those cells have no live boot or ground
-  truth to verify against.
-- **F3** (different class): the `python_fastapi` twins share one path, so
-  the secure twins are unreachable in the whole-app build (§1b). It is
-  pinned with a strict xfail (a TestClient check that each twin is
-  reachable at a distinct URL). Fixing it needs a twin-URL mechanism in a
-  per-cell file, which the minimal-pair checker constrains, so it is its
-  own design.
+  truth to verify against. Follow-up number: assigned by the orchestrator
+  (PA-0031).
+- **F1 and F2 cannot affect MeadowMart's acceptance criteria** (stated
+  here in one place, added in round 1). Both live only in the generic
+  Tier-A sample's cells, `LABGEN-NE-0001`–`0008`, from
+  `lab/manifests/phase3_node_express_sample.yaml`.
+  - MeadowMart's build is exactly the PP and RD manifests (§1a), and its
+    ground truth covers only `MMART-0001`–`0004`.
+  - The navigability test (§4A) assembles only those 4 cells, and its bare
+    sweep enumerates only that build's served routes.
+  - So no `NE` cell is served, crawled or swept there, and neither F1 nor
+    F2 can make §4A pass or fail.
+  - Their only enforcement is offline: the §4A companion tests and F1/F2's
+    strict xfails. F2's async-crash path is also absent from MeadowMart's
+    own cells, because both of its handlers are synchronous
+    `render_only` functions (`complexities/render_only.js.j2`) with no DB
+    call.
+- **F3** (the `python_fastapi` twins share one path) is **no longer a
+  flagged follow-up**. Round 1 gave it a decision rule and brought it into
+  scope (§2B-e, R-B7). It returns here as a pinned follow-up only if
+  branch (b) is used.
 - **F4** (different class): the generated `python_fastapi`
   `requirements.txt` does not declare `python-multipart` (R-B4). It is
   flagged and skip-guarded, not fixed (PA-0049 lockfile scope).
@@ -837,9 +1041,54 @@ assertions. That choice is settled at the gate.
 
 ## 8. Review history
 
-**No review round has run yet.** The 2-reviewer gate (accuracy and
-adequacy) is **blocked**, because the proposing agent's session has no
-Agent tool to spawn independent reviewers (see the Status line). No
-agreement is claimed. The next step belongs to the orchestrator: run round
-1 with 2 independent reviewers on this document at this commit, or
-authorize a different review mechanism explicitly.
+**Mechanism.** This lane's session has no Agent tool, so the lane stopped
+and flagged at the gate (draft commit `49dda74`/`f1140fa`). The
+orchestrating session then ran both reviewers itself.
+
+**Round 1 (accuracy + adequacy, 2 independent reviewers run by the
+orchestrator, 2026-09-25): ACCURATE / NOT YET ADEQUATE.**
+
+- **Accuracy.** The reviewer had Node v22.22.2 and FastAPI 0.141.1 and
+  reproduced D1–D4 and F1/F3/F4 live, confirming all of them.
+  - **One footnote, not an inaccuracy:** D2/D4's live reproduction hit
+    `ECONNREFUSED` (no MySQL) rather than the malformed-SQL path the draft
+    named. The draft's own probe log had shown the same thing.
+  - **Fixed:** §1d D2 now names both failure modes and requires the bug
+    doc's RCA to say the exact mode varies by environment. The bug class
+    (no error handling on an async handler, so the process dies) is
+    unchanged.
+- **Adequacy: 3 gaps, all fixed in this revision.**
+  1. **The PA-0058 cross-lane hand-off was vague**, and it ignored that
+     Lane 4's S15 already reserves the shared cross-emitter test file,
+     with strict xfails naming Lane 6.
+     - **Fixed:** the lane read Lane 4's plan (§2e, S15, §1.9) and Lane
+       3's plan (§2d) directly. It adopts S15 as the one shared mechanism
+       and builds no competing file.
+     - It switches to the single `absent_input` key with Lane 4's value
+       spellings, so S15's `node_express`/`python_fastapi` cases will
+       XPASS. That also changes `/api/preferences` to `empty_body_400`
+       (§2A-d).
+     - It states the merge-order criterion and the rule for several lanes
+       writing a PA for the same rule. It flags the Lane 3 vs Lane 4
+       value-spelling divergence with a recommended owner (Lane 7's
+       reserved `CC-LAB-0247`) (§6).
+  2. **F3 had no resolution path**, unlike Lane 2's R1.
+     - **Fixed:** new §2B-e/R-B7 with a branch (a)/(b) decision rule
+       (scaffold-level twin prefixes, which leave per-cell files and so
+       the minimal-pair contract untouched) and a required "F3 sign-off"
+       in `FR-LAB-169`.
+     - The §6/§7 inconsistency ("each names its follow-up") is corrected:
+       follow-up numbers are assigned by the orchestrator per PA-0031, and
+       each pin names its finding ID.
+  3. **The one-entry justification leaned on Lane 4's shared-emitter
+     reasoning**, which does not hold across 2 emitters.
+     - **Fixed:** §6 now argues from component scope (with the
+       `CC-LAB-0040` multi-emitter precedent), one root cause and gate,
+       per-target FRs and one close date. It states the counter-argument
+       and gives a concrete split rule.
+- **Consolidation request (also done):** §7 now states in one place why
+  F1/F2 cannot reach MeadowMart's navigability acceptance criteria.
+- **Also aligned while fixing gap 1:** R3 now notes that Lanes 1 and 4 use
+  branch (b), so the gate can weigh cross-lane uniformity.
+
+**Round 2:** pending. No agreement is claimed yet.
