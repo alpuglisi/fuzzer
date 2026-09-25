@@ -16,7 +16,7 @@ from fuzzlab.oracle.strategies import PredictableTokenSourceStrategy
 
 
 def _cand():
-    return Candidate(url="http://h/generated/labgen-go-0009", param="body", method="POST",
+    return Candidate(url="http://h/sessions/refresh", param="body", method="POST",
                      location="body", vuln_class="weak_token_entropy",
                      category="weak-token-entropy", content_type="application/json")
 

@@ -52,8 +52,8 @@ def test_real_boot_proves_correct_and_incorrect_signature_for_both_twins() -> No
 
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         for cell_id, path in (
-            ("LABGEN-GO-0001", "/generated/labgen-go-0001"),  # vulnerable: naive ==
-            ("LABGEN-GO-0002", "/generated/labgen-go-0002"),  # secure: hmac.Equal
+            ("LABGEN-GO-0001", "/webhooks/eventsub"),  # vulnerable: naive ==
+            ("LABGEN-GO-0002", "/webhooks/eventsub.labgen-go-0002"),  # secure: hmac.Equal
         ):
             ok = harness.post(path, body=body, headers={"X-Signature-256": correct_digest})
             assert ok.status == 200, f"{cell_id}: correct signature was rejected"
@@ -151,7 +151,7 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
         with GoLiveBootHarness(emitter, manifest.cells) as harness:
             # (a) vulnerable twin: plain-HTTP loopback target accepted.
             vuln_resp = harness.request(
-                "GET", f"/generated/labgen-go-0003?url={plain_url}"
+                "GET", f"/api/clips/thumbnail?url={plain_url}"
             )
             assert vuln_resp.status == 200, (
                 f"vulnerable twin rejected an unvalidated loopback target (status {vuln_resp.status})"
@@ -160,7 +160,7 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
 
             # (b) secure twin: same plain-HTTP target rejected (scheme check).
             secure_http_resp = harness.request(
-                "GET", f"/generated/labgen-go-0004?url={plain_url}"
+                "GET", f"/api/clips/thumbnail.labgen-go-0004?url={plain_url}"
             )
             assert secure_http_resp.status == 403, (
                 f"secure twin accepted a plain-HTTP loopback target (status {secure_http_resp.status}) "
@@ -176,7 +176,7 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
                     https_port = https_server.server_address[1]
                     https_url = f"https://127.0.0.1:{https_port}/thumb.jpg"
                     secure_https_resp = harness.request(
-                        "GET", f"/generated/labgen-go-0004?url={https_url}"
+                        "GET", f"/api/clips/thumbnail.labgen-go-0004?url={https_url}"
                     )
                     assert secure_https_resp.status == 403, (
                         f"secure twin accepted an HTTPS loopback target (status {secure_https_resp.status}) "
@@ -209,7 +209,7 @@ def test_real_boot_proves_the_ssrf_differential_for_both_twins_at_clips_download
         with GoLiveBootHarness(emitter, manifest.cells) as harness:
             # (a) vulnerable twin: plain-HTTP loopback target accepted.
             vuln_resp = harness.request(
-                "GET", f"/generated/labgen-go-0015?source_url={plain_url}"
+                "GET", f"/clips/download?source_url={plain_url}"
             )
             assert vuln_resp.status == 200, (
                 f"vulnerable twin rejected an unvalidated loopback target (status {vuln_resp.status})"
@@ -218,7 +218,7 @@ def test_real_boot_proves_the_ssrf_differential_for_both_twins_at_clips_download
 
             # (b) secure twin: the same plain-HTTP target is rejected (scheme check).
             secure_resp = harness.request(
-                "GET", f"/generated/labgen-go-0016?source_url={plain_url}"
+                "GET", f"/clips/download.labgen-go-0016?source_url={plain_url}"
             )
             assert secure_resp.status == 403, (
                 f"secure twin accepted a plain-HTTP loopback target (status {secure_resp.status}) "
@@ -260,21 +260,21 @@ def test_real_boot_proves_the_ssrf_strategies_generalize_to_clips_download_route
                     resp = harness.request("GET", f"{self._path}?{param}={value}")
                     return Probe(resp.status, resp.body)
 
-            vuln_cand = Candidate(url="http://h/generated/labgen-go-0015", param="source_url",
+            vuln_cand = Candidate(url="http://h/clips/download", param="source_url",
                                   method="GET", location="query",
                                   vuln_class="ssrf", category="ssrf")
-            secure_cand = Candidate(url="http://h/generated/labgen-go-0016", param="source_url",
+            secure_cand = Candidate(url="http://h/clips/download.labgen-go-0016", param="source_url",
                                     method="GET", location="query",
                                     vuln_class="ssrf", category="ssrf")
 
             for strategy in (SsrfInBandMarkerStrategy(listener), SsrfOobStrategy(listener)):
-                verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0015"))
+                verdict = strategy.confirm(vuln_cand, _HarnessSender("/clips/download"))
                 assert verdict is not None and verdict.confirmed, (
                     f"{type(strategy).__name__} failed to confirm the real vulnerable twin"
                 )
                 assert verdict.vuln_class == "ssrf"
 
-                assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0016")) is None, (
+                assert strategy.confirm(secure_cand, _HarnessSender("/clips/download.labgen-go-0016")) is None, (
                     f"{type(strategy).__name__} incorrectly confirmed the real secure twin"
                 )
     finally:
@@ -303,7 +303,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins() -> None:
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: mismatched IDs still leak the data.
         vuln_resp = harness.request(
-            "GET", "/generated/labgen-go-0005?channel_id=victim-channel",
+            "GET", "/channels/analytics?channel_id=victim-channel",
             headers={"X-Broadcaster-Id": "attacker-channel"},
         )
         assert vuln_resp.status == 200, (
@@ -315,7 +315,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins() -> None:
 
         # (b) secure twin: the same mismatched request is rejected outright.
         secure_mismatch_resp = harness.request(
-            "GET", "/generated/labgen-go-0006?channel_id=victim-channel",
+            "GET", "/channels/analytics.labgen-go-0006?channel_id=victim-channel",
             headers={"X-Broadcaster-Id": "attacker-channel"},
         )
         assert secure_mismatch_resp.status == 403, (
@@ -326,7 +326,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins() -> None:
 
         # (c) secure twin: the legitimate, matching-identity request still works.
         secure_match_resp = harness.request(
-            "GET", "/generated/labgen-go-0006?channel_id=own-channel",
+            "GET", "/channels/analytics.labgen-go-0006?channel_id=own-channel",
             headers={"X-Broadcaster-Id": "own-channel"},
         )
         assert secure_match_resp.status == 200, (
@@ -362,18 +362,18 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
                 return Probe(resp.status, resp.body)
 
         strategy = AccessControlIdorStrategy()
-        vuln_cand = Candidate(url="http://h/generated/labgen-go-0005", param="channel_id",
+        vuln_cand = Candidate(url="http://h/channels/analytics", param="channel_id",
                               method="GET", location="query",
                               vuln_class="access_control", category="access-control")
-        secure_cand = Candidate(url="http://h/generated/labgen-go-0006", param="channel_id",
+        secure_cand = Candidate(url="http://h/channels/analytics.labgen-go-0006", param="channel_id",
                                 method="GET", location="query",
                                 vuln_class="access_control", category="access-control")
 
-        verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0005"))
+        verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/analytics"))
         assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
         assert verdict.vuln_class == "access_control"
 
-        assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0006")) is None, (
+        assert strategy.confirm(secure_cand, _HarnessSender("/channels/analytics.labgen-go-0006")) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
 
@@ -397,7 +397,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins_at_subscribers_ro
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: mismatched IDs still leak the data.
         vuln_resp = harness.request(
-            "GET", "/generated/labgen-go-0013?channel_id=victim-channel",
+            "GET", "/channels/subscribers?channel_id=victim-channel",
             headers={"X-Broadcaster-Id": "attacker-channel"},
         )
         assert vuln_resp.status == 200, (
@@ -409,7 +409,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins_at_subscribers_ro
 
         # (b) secure twin: the same mismatched request is rejected outright.
         secure_mismatch_resp = harness.request(
-            "GET", "/generated/labgen-go-0014?channel_id=victim-channel",
+            "GET", "/channels/subscribers.labgen-go-0014?channel_id=victim-channel",
             headers={"X-Broadcaster-Id": "attacker-channel"},
         )
         assert secure_mismatch_resp.status == 403, (
@@ -420,7 +420,7 @@ def test_real_boot_proves_the_idor_differential_for_both_twins_at_subscribers_ro
 
         # (c) secure twin: the legitimate, matching-identity request still works.
         secure_match_resp = harness.request(
-            "GET", "/generated/labgen-go-0014?channel_id=own-channel",
+            "GET", "/channels/subscribers.labgen-go-0014?channel_id=own-channel",
             headers={"X-Broadcaster-Id": "own-channel"},
         )
         assert secure_match_resp.status == 200, (
@@ -457,18 +457,18 @@ def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_subscr
                 return Probe(resp.status, resp.body)
 
         strategy = AccessControlIdorStrategy()
-        vuln_cand = Candidate(url="http://h/generated/labgen-go-0013", param="channel_id",
+        vuln_cand = Candidate(url="http://h/channels/subscribers", param="channel_id",
                               method="GET", location="query",
                               vuln_class="access_control", category="access-control")
-        secure_cand = Candidate(url="http://h/generated/labgen-go-0014", param="channel_id",
+        secure_cand = Candidate(url="http://h/channels/subscribers.labgen-go-0014", param="channel_id",
                                 method="GET", location="query",
                                 vuln_class="access_control", category="access-control")
 
-        verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0013"))
+        verdict = strategy.confirm(vuln_cand, _HarnessSender("/channels/subscribers"))
         assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
         assert verdict.vuln_class == "access_control"
 
-        assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0014")) is None, (
+        assert strategy.confirm(secure_cand, _HarnessSender("/channels/subscribers.labgen-go-0014")) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
 
@@ -511,7 +511,7 @@ def test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins() -> None
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: alg:none is honored, forged claims returned.
         vuln_resp = harness.request(
-            "GET", "/generated/labgen-go-0007",
+            "GET", "/channels/settings",
             headers={"Authorization": f"Bearer {alg_none_token}"},
         )
         assert vuln_resp.status == 200, (
@@ -523,7 +523,7 @@ def test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins() -> None
 
         # (b) vulnerable twin: a garbage HS256 signature is still rejected.
         vuln_garbage_resp = harness.request(
-            "GET", "/generated/labgen-go-0007",
+            "GET", "/channels/settings",
             headers={"Authorization": f"Bearer {garbage_hs256_token}"},
         )
         assert vuln_garbage_resp.status == 401, (
@@ -533,7 +533,7 @@ def test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins() -> None
 
         # (c) secure twin: the same alg:none token is rejected outright.
         secure_resp = harness.request(
-            "GET", "/generated/labgen-go-0008",
+            "GET", "/channels/settings.labgen-go-0008",
             headers={"Authorization": f"Bearer {alg_none_token}"},
         )
         assert secure_resp.status == 401, (
@@ -557,7 +557,7 @@ def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
     cells = {c.cell_id: c for c in manifest.cells}
 
     def _cand():
-        return Candidate(url="http://h/generated/labgen-go-0007", param="Authorization",
+        return Candidate(url="http://h/channels/settings", param="Authorization",
                          method="GET", location="header",
                          vuln_class="jwt_algorithm_confusion",
                          category="jwt-algorithm-confusion")
@@ -568,7 +568,7 @@ def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="GET",
                       location="header", content_type=None):
-                resp = harness.request("GET", "/generated/labgen-go-0007",
+                resp = harness.request("GET", "/channels/settings",
                                        headers={param: value})
                 return Probe(resp.status, resp.body)
 
@@ -580,7 +580,7 @@ def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="GET",
                       location="header", content_type=None):
-                resp = harness.request("GET", "/generated/labgen-go-0008",
+                resp = harness.request("GET", "/channels/settings.labgen-go-0008",
                                        headers={param: value})
                 return Probe(resp.status, resp.body)
 
@@ -612,8 +612,8 @@ def test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins() -
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: timestamp-derived, tracks real elapsed time.
         t0 = time.time()
-        vuln_r1 = harness.request("POST", "/generated/labgen-go-0009", body=b"")
-        vuln_r2 = harness.request("POST", "/generated/labgen-go-0009", body=b"")
+        vuln_r1 = harness.request("POST", "/sessions/refresh", body=b"")
+        vuln_r2 = harness.request("POST", "/sessions/refresh", body=b"")
         elapsed_ns = (time.time() - t0) * 1e9
         assert vuln_r1.status == 200 and vuln_r2.status == 200
         token1 = json.loads(vuln_r1.body)["session_token"]
@@ -625,8 +625,8 @@ def test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins() -
         )
 
         # (b) secure twin: neither token parses as a decimal integer at all.
-        secure_r1 = harness.request("POST", "/generated/labgen-go-0010", body=b"")
-        secure_r2 = harness.request("POST", "/generated/labgen-go-0010", body=b"")
+        secure_r1 = harness.request("POST", "/sessions/refresh.labgen-go-0010", body=b"")
+        secure_r2 = harness.request("POST", "/sessions/refresh.labgen-go-0010", body=b"")
         assert secure_r1.status == 200 and secure_r2.status == 200
         secure_token1 = json.loads(secure_r1.body)["session_token"]
         secure_token2 = json.loads(secure_r2.body)["session_token"]
@@ -650,7 +650,7 @@ def test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end() -> None:
     cells = {c.cell_id: c for c in manifest.cells}
 
     def _cand():
-        return Candidate(url="http://h/generated/labgen-go-0009", param="body",
+        return Candidate(url="http://h/sessions/refresh", param="body",
                          method="POST", location="body",
                          vuln_class="weak_token_entropy",
                          category="weak-token-entropy", content_type="application/json")
@@ -661,7 +661,7 @@ def test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0009",
+                resp = harness.request("POST", "/sessions/refresh",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -673,7 +673,7 @@ def test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0010",
+                resp = harness.request("POST", "/sessions/refresh.labgen-go-0010",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -704,7 +704,7 @@ def test_real_boot_proves_the_mass_assignment_differential_for_both_twins() -> N
 
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: is_partner reaches the persisted record.
-        vuln_resp = harness.request("POST", "/generated/labgen-go-0011", body=body)
+        vuln_resp = harness.request("POST", "/channels/profile", body=body)
         assert vuln_resp.status == 200
         vuln_record = json.loads(vuln_resp.body)
         assert vuln_record["display_name"] == "new_name"
@@ -714,7 +714,7 @@ def test_real_boot_proves_the_mass_assignment_differential_for_both_twins() -> N
         )
 
         # (b) secure twin: only display_name/bio ever reach the record.
-        secure_resp = harness.request("POST", "/generated/labgen-go-0012", body=body)
+        secure_resp = harness.request("POST", "/channels/profile.labgen-go-0012", body=body)
         assert secure_resp.status == 200
         secure_record = json.loads(secure_resp.body)
         assert secure_record["display_name"] == "new_name"
@@ -739,7 +739,7 @@ def test_real_boot_proves_the_mass_assignment_strategy_end_to_end() -> None:
     cells = {c.cell_id: c for c in manifest.cells}
 
     def _cand():
-        return Candidate(url="http://h/generated/labgen-go-0011", param="body",
+        return Candidate(url="http://h/channels/profile", param="body",
                          method="POST", location="body",
                          vuln_class="mass_assignment",
                          category="mass-assignment", content_type="application/json")
@@ -750,7 +750,7 @@ def test_real_boot_proves_the_mass_assignment_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0011",
+                resp = harness.request("POST", "/channels/profile",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -762,7 +762,7 @@ def test_real_boot_proves_the_mass_assignment_strategy_end_to_end() -> None:
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0012",
+                resp = harness.request("POST", "/channels/profile.labgen-go-0012",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -840,7 +840,7 @@ def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twi
         # (a) vulnerable twin: evil.html served back as text/html.
         html_body, html_ctype = _multipart_upload("evil.html", _INERT_HTML_PAYLOAD, "text/html")
         vuln_resp = harness.request(
-            "POST", "/generated/labgen-go-0017", body=html_body,
+            "POST", "/channels/emotes/upload", body=html_body,
             headers={"Content-Type": html_ctype},
         )
         assert vuln_resp.status == 200
@@ -853,7 +853,7 @@ def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twi
         # (b) secure twin: the same evil.html upload is rejected outright.
         html_body2, html_ctype2 = _multipart_upload("evil.html", _INERT_HTML_PAYLOAD, "text/html")
         secure_reject_resp = harness.request(
-            "POST", "/generated/labgen-go-0018", body=html_body2,
+            "POST", "/channels/emotes/upload.labgen-go-0018", body=html_body2,
             headers={"Content-Type": html_ctype2},
         )
         assert secure_reject_resp.status == 415, (
@@ -865,7 +865,7 @@ def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twi
         # .png extension) is still rejected -- the content-sniffing half.
         spoof_body, spoof_ctype = _multipart_upload("fake.png", _INERT_HTML_PAYLOAD, "image/png")
         secure_spoof_resp = harness.request(
-            "POST", "/generated/labgen-go-0018", body=spoof_body,
+            "POST", "/channels/emotes/upload.labgen-go-0018", body=spoof_body,
             headers={"Content-Type": spoof_ctype},
         )
         assert secure_spoof_resp.status == 415, (
@@ -877,7 +877,7 @@ def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twi
         # served back with the sniffed image/png content type.
         png_body, png_ctype = _multipart_upload("real.png", _PNG_SIGNATURE_BYTES, "image/png")
         secure_ok_resp = harness.request(
-            "POST", "/generated/labgen-go-0018", body=png_body,
+            "POST", "/channels/emotes/upload.labgen-go-0018", body=png_body,
             headers={"Content-Type": png_ctype},
         )
         assert secure_ok_resp.status == 200, (
@@ -918,14 +918,14 @@ def test_real_boot_proves_the_price_integrity_differential_for_both_twins() -> N
     with GoLiveBootHarness(emitter, manifest.cells) as harness:
         # (a) vulnerable twin: the client-supplied amount tracks verbatim.
         vuln_low = harness.request(
-            "POST", "/generated/labgen-go-0019",
+            "POST", "/subscriptions/purchase",
             body=json.dumps({"plan_tier": "standard", "monthly_charge": 0.01}).encode(),
         )
         assert vuln_low.status == 200
         assert json.loads(vuln_low.body)["monthly_charge"] == 0.01
 
         vuln_high = harness.request(
-            "POST", "/generated/labgen-go-0019",
+            "POST", "/subscriptions/purchase",
             body=json.dumps({"plan_tier": "standard", "monthly_charge": 999999.99}).encode(),
         )
         assert vuln_high.status == 200
@@ -937,7 +937,7 @@ def test_real_boot_proves_the_price_integrity_differential_for_both_twins() -> N
         # (b) secure twin: an unrecognized plan_tier fails closed, never
         # falling back to the client-supplied amount.
         secure_unknown = harness.request(
-            "POST", "/generated/labgen-go-0020",
+            "POST", "/subscriptions/purchase.labgen-go-0020",
             body=json.dumps({"plan_tier": "standard", "monthly_charge": 0.01}).encode(),
         )
         assert secure_unknown.status == 400, (
@@ -948,11 +948,11 @@ def test_real_boot_proves_the_price_integrity_differential_for_both_twins() -> N
         # (c) secure twin: two real tiers return two distinct, real, fixed
         # prices -- a genuine data-driven lookup, never a disguised constant.
         secure_tier1 = harness.request(
-            "POST", "/generated/labgen-go-0020",
+            "POST", "/subscriptions/purchase.labgen-go-0020",
             body=json.dumps({"plan_tier": "tier1", "monthly_charge": 0.01}).encode(),
         )
         secure_tier2 = harness.request(
-            "POST", "/generated/labgen-go-0020",
+            "POST", "/subscriptions/purchase.labgen-go-0020",
             body=json.dumps({"plan_tier": "tier2", "monthly_charge": 0.01}).encode(),
         )
         assert secure_tier1.status == 200 and secure_tier2.status == 200
@@ -986,7 +986,7 @@ def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_b
     cells = {c.cell_id: c for c in manifest.cells}
 
     def _cand():
-        return Candidate(url="http://h/generated/labgen-go-0019", param="body",
+        return Candidate(url="http://h/subscriptions/purchase", param="body",
                          method="POST", location="body",
                          vuln_class="price_integrity_bypass",
                          category="price-integrity-bypass", content_type="application/json")
@@ -997,7 +997,7 @@ def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_b
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0019",
+                resp = harness.request("POST", "/subscriptions/purchase",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -1009,7 +1009,7 @@ def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_b
         class _HarnessSender:
             def send(self, url, param, value, timing=False, method="POST",
                       location="body", content_type=None):
-                resp = harness.request("POST", "/generated/labgen-go-0020",
+                resp = harness.request("POST", "/subscriptions/purchase.labgen-go-0020",
                                        body=value.encode("utf-8"))
                 return Probe(resp.status, resp.body)
 
@@ -1067,18 +1067,18 @@ def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> No
 
         # (a) legitimate filename: both twins serve the real file back
         # identically -- the fix does not break the intended functionality.
-        vuln_ok = harness.request("GET", "/generated/labgen-go-0021?filename=clip123.mp4")
+        vuln_ok = harness.request("GET", "/clips/export?filename=clip123.mp4")
         assert vuln_ok.status == 200
         assert vuln_ok.body == legit_content.decode()
 
-        secure_ok = harness.request("GET", "/generated/labgen-go-0022?filename=clip123.mp4")
+        secure_ok = harness.request("GET", "/clips/export.labgen-go-0022?filename=clip123.mp4")
         assert secure_ok.status == 200
         assert secure_ok.body == legit_content.decode()
 
         # (b) vulnerable twin: the traversal payload escapes clipExportDir
         # and reaches the canary two directories up (CWE-22).
         vuln_escape = harness.request(
-            "GET", "/generated/labgen-go-0021?filename=../../secret_canary.txt"
+            "GET", "/clips/export?filename=../../secret_canary.txt"
         )
         assert vuln_escape.status == 200, (
             f"vulnerable twin did not serve the escaped canary (status={vuln_escape.status})"
@@ -1088,7 +1088,7 @@ def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> No
         # (c) secure twin: the identical traversal payload is rejected
         # outright, and the canary's marker never leaks into the response.
         secure_escape = harness.request(
-            "GET", "/generated/labgen-go-0022?filename=../../secret_canary.txt"
+            "GET", "/clips/export.labgen-go-0022?filename=../../secret_canary.txt"
         )
         assert secure_escape.status == 403, (
             f"secure twin did not reject the traversal payload (status={secure_escape.status})"
@@ -1100,7 +1100,7 @@ def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> No
         # error -- proving the confinement check and the existence check
         # are two genuinely distinct code paths.
         secure_missing = harness.request(
-            "GET", "/generated/labgen-go-0022?filename=does-not-exist.mp4"
+            "GET", "/clips/export.labgen-go-0022?filename=does-not-exist.mp4"
         )
         assert secure_missing.status == 404
 
@@ -1144,7 +1144,7 @@ def test_path_traversal_strategy_closes_the_fs_path_read_detection_gap() -> None
         strategy = PathTraversalFsPathReadStrategy()
 
         vuln_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0021", param="filename",
+            url=f"{harness.base_url}/clips/export", param="filename",
             method="GET", location="query",
         )
         verdict = strategy.confirm(vuln_candidate, sender)
@@ -1153,7 +1153,7 @@ def test_path_traversal_strategy_closes_the_fs_path_read_detection_gap() -> None
         assert "etc/passwd" in verdict.evidence["payload"]
 
         secure_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0022", param="filename",
+            url=f"{harness.base_url}/clips/export.labgen-go-0022", param="filename",
             method="GET", location="query",
         )
         assert strategy.confirm(secure_candidate, sender) is None
@@ -1195,7 +1195,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
     with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0023"]]) as harness:
         # (a) real field-access evaluation.
         resp = harness.post(
-            "/generated/labgen-go-0023",
+            "/channels/commands",
             body=b'{"trigger":"!uptime","template":"{{.Uptime}} since going live"}',
             headers={"Content-Type": "application/json"},
         )
@@ -1206,7 +1206,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
         # (b) real conditional/control-flow evaluation -- beyond simple
         # substitution.
         cond_resp = harness.post(
-            "/generated/labgen-go-0023",
+            "/channels/commands",
             body=(
                 b'{"trigger":"!check","template":'
                 b'"{{if eq .Uptime \\"3h27m\\"}}MATCHED{{else}}NO{{end}}"}'
@@ -1219,7 +1219,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
         # (c) a malformed template is a real parse error, not silently
         # echoed back or ignored.
         bad_resp = harness.post(
-            "/generated/labgen-go-0023",
+            "/channels/commands",
             body=b'{"trigger":"!broken","template":"{{.Uptime"}',
             headers={"Content-Type": "application/json"},
         )
@@ -1230,7 +1230,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
         # (d) the secure twin never evaluates the same payloads -- they
         # are simply unrecognized variable names.
         secure_field_resp = harness.post(
-            "/generated/labgen-go-0024",
+            "/channels/commands.labgen-go-0024",
             body=b'{"trigger":"!uptime","template":"{{.Uptime}} since going live"}',
             headers={"Content-Type": "application/json"},
         )
@@ -1238,7 +1238,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
         assert secure_field_resp.body == "!uptime: unknown variable"
 
         secure_cond_resp = harness.post(
-            "/generated/labgen-go-0024",
+            "/channels/commands.labgen-go-0024",
             body=(
                 b'{"trigger":"!check","template":'
                 b'"{{if eq .Uptime \\"3h27m\\"}}MATCHED{{else}}NO{{end}}"}'
@@ -1252,7 +1252,7 @@ def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
         # A real, pre-approved variable name still resolves correctly --
         # proving the lookup path itself genuinely runs.
         legit_resp = harness.post(
-            "/generated/labgen-go-0024",
+            "/channels/commands.labgen-go-0024",
             body=b'{"trigger":"!uptime","template":"uptime"}',
             headers={"Content-Type": "application/json"},
         )
@@ -1292,7 +1292,7 @@ def test_ssti_strategy_does_not_generalize_to_go_text_template() -> None:
     from fuzzlab.oracle.strategies import SstiStrategy
 
     def _cand():
-        return Candidate(url="http://h/generated/labgen-go-0023", param="body",
+        return Candidate(url="http://h/channels/commands", param="body",
                          method="POST", location="body",
                          vuln_class="ssti", category="server-side-template-injection")
 
@@ -1308,7 +1308,7 @@ def test_ssti_strategy_does_not_generalize_to_go_text_template() -> None:
                 # custom-command-creation client would.
                 import json as _json
                 body = _json.dumps({"trigger": "!probe", "template": value}).encode("utf-8")
-                resp = harness.request("POST", "/generated/labgen-go-0023", body=body,
+                resp = harness.request("POST", "/channels/commands", body=body,
                                        headers={"Content-Type": "application/json"})
                 return Probe(resp.status, resp.body)
 
@@ -1361,8 +1361,8 @@ def test_go_template_ssti_strategy_closes_the_generalization_gap() -> None:
 
     with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0023"]]) as harness:
         verdict = strategy.confirm(
-            _cand("/generated/labgen-go-0023"),
-            _HarnessSender(harness, "/generated/labgen-go-0023"),
+            _cand("/channels/commands"),
+            _HarnessSender(harness, "/channels/commands"),
         )
         assert verdict is not None and verdict.confirmed, (
             "GoTemplateSstiStrategy failed to confirm the real go_net_http vulnerable "
@@ -1373,8 +1373,8 @@ def test_go_template_ssti_strategy_closes_the_generalization_gap() -> None:
 
     with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0024"]]) as harness:
         verdict = strategy.confirm(
-            _cand("/generated/labgen-go-0024"),
-            _HarnessSender(harness, "/generated/labgen-go-0024"),
+            _cand("/channels/commands.labgen-go-0024"),
+            _HarnessSender(harness, "/channels/commands.labgen-go-0024"),
         )
         assert verdict is None, (
             "GoTemplateSstiStrategy incorrectly confirmed the real go_net_http secure "
@@ -1584,11 +1584,11 @@ def test_real_boot_proves_the_http_header_injection_differential_for_both_twins(
 
     with GoLiveBootHarness(emitter, list(cells.values())) as harness:
         # (a) a legitimate destination: both twins redirect identically.
-        vuln_ok = harness.request("GET", "/generated/labgen-go-0025?destination=/ok")
+        vuln_ok = harness.request("GET", "/channels/redirect?destination=/ok")
         assert vuln_ok.status == 302
         assert vuln_ok.headers.get("Location") == "/ok"
 
-        secure_ok = harness.request("GET", "/generated/labgen-go-0026?destination=/ok")
+        secure_ok = harness.request("GET", "/channels/redirect.labgen-go-0026?destination=/ok")
         assert secure_ok.status == 302
         assert secure_ok.headers.get("Location") == "/ok"
 
@@ -1597,7 +1597,7 @@ def test_real_boot_proves_the_http_header_injection_differential_for_both_twins(
         # Python's own http.client, not merely present in raw bytes this
         # test wrote itself.
         payload = quote(f"/ok\r\n{_HEADER_INJECTION_CANARY_HEADER}: injected", safe="")
-        vuln_injected = harness.request("GET", f"/generated/labgen-go-0025?destination={payload}")
+        vuln_injected = harness.request("GET", f"/channels/redirect?destination={payload}")
         assert vuln_injected.status == 302, vuln_injected.body
         assert vuln_injected.headers.get(_HEADER_INJECTION_CANARY_HEADER) == "injected", (
             f"vulnerable twin did not splice in the injected header -- headers were "
@@ -1607,7 +1607,7 @@ def test_real_boot_proves_the_http_header_injection_differential_for_both_twins(
         # (c) secure twin: the identical CRLF-bearing payload is rejected
         # outright, and the injected header never appears at all.
         secure_injected = harness.request(
-            "GET", f"/generated/labgen-go-0026?destination={payload}"
+            "GET", f"/channels/redirect.labgen-go-0026?destination={payload}"
         )
         assert secure_injected.status == 400, secure_injected.body
         assert _HEADER_INJECTION_CANARY_HEADER not in secure_injected.headers
@@ -1644,7 +1644,7 @@ def test_http_header_injection_strategy_closes_the_crlf_detection_gap() -> None:
         strategy = HttpHeaderInjectionCrlfStrategy()
 
         vuln_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0025", param="destination",
+            url=f"{harness.base_url}/channels/redirect", param="destination",
             method="GET", location="query",
         )
         verdict = strategy.confirm(vuln_candidate, sender)
@@ -1653,7 +1653,7 @@ def test_http_header_injection_strategy_closes_the_crlf_detection_gap() -> None:
         assert verdict.evidence["value"] and verdict.evidence["value"] in verdict.evidence["header"]
 
         secure_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0026", param="destination",
+            url=f"{harness.base_url}/channels/redirect.labgen-go-0026", param="destination",
             method="GET", location="query",
         )
         assert strategy.confirm(secure_candidate, sender) is None
@@ -1703,11 +1703,11 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
 
     with GoLiveBootHarness(emitter, list(cells.values())) as harness:
         # (a) a legitimate next: both twins redirect identically.
-        vuln_ok = harness.request("GET", "/generated/labgen-go-0027?next=/ok")
+        vuln_ok = harness.request("GET", "/auth/login-redirect?next=/ok")
         assert vuln_ok.status == 302
         assert vuln_ok.headers.get("Location") == "/ok"
 
-        secure_ok = harness.request("GET", "/generated/labgen-go-0028?next=/ok")
+        secure_ok = harness.request("GET", "/auth/login-redirect.labgen-go-0028?next=/ok")
         assert secure_ok.status == 302
         assert secure_ok.headers.get("Location") == "/ok"
 
@@ -1715,7 +1715,7 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
         # verbatim into Location -- no CRLF needed at all.
         external = "https://evil.example/phish"
         vuln_bad = harness.request(
-            "GET", f"/generated/labgen-go-0027?next={quote(external, safe='')}"
+            "GET", f"/auth/login-redirect?next={quote(external, safe='')}"
         )
         assert vuln_bad.status == 302, vuln_bad.body
         assert vuln_bad.headers.get("Location") == external, (
@@ -1725,7 +1725,7 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
 
         # (c) secure twin: rejects the identical external-URL payload...
         secure_bad = harness.request(
-            "GET", f"/generated/labgen-go-0028?next={quote(external, safe='')}"
+            "GET", f"/auth/login-redirect.labgen-go-0028?next={quote(external, safe='')}"
         )
         assert secure_bad.status == 400, secure_bad.body
         assert "evil.example" not in (secure_bad.headers.get("Location") or "")
@@ -1734,7 +1734,7 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
         # meant to close: protocol-relative and backslash-prefixed.
         for bypass in ("//evil.example", "/\\evil.example"):
             resp = harness.request(
-                "GET", f"/generated/labgen-go-0028?next={quote(bypass, safe='')}"
+                "GET", f"/auth/login-redirect.labgen-go-0028?next={quote(bypass, safe='')}"
             )
             assert resp.status == 400, (bypass, resp.status, resp.body)
             assert "evil.example" not in (resp.headers.get("Location") or "")
@@ -1748,7 +1748,7 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
         strategy = OpenRedirectStrategy()
 
         vuln_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0027", param="next",
+            url=f"{harness.base_url}/auth/login-redirect", param="next",
             method="GET", location="query",
         )
         verdict = strategy.confirm(vuln_candidate, sender)
@@ -1757,7 +1757,7 @@ def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> Non
         assert verdict.evidence.get("sink") == "location-header"
 
         secure_candidate = Candidate(
-            url=f"{harness.base_url}/generated/labgen-go-0028", param="next",
+            url=f"{harness.base_url}/auth/login-redirect.labgen-go-0028", param="next",
             method="GET", location="query",
         )
         assert strategy.confirm(secure_candidate, sender) is None

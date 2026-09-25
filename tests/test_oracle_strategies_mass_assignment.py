@@ -18,7 +18,7 @@ from fuzzlab.oracle.strategies import MassAssignmentPrivilegedFieldStrategy
 
 
 def _cand():
-    return Candidate(url="http://h/generated/labgen-go-0011", param="body",
+    return Candidate(url="http://h/channels/profile", param="body",
                      method="POST", location="body", vuln_class="mass_assignment",
                      category="mass-assignment", content_type="application/json")
 

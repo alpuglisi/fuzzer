@@ -5,18 +5,18 @@
 # FR-LAB-76, CC-LAB-0172/FR-LAB-78 (cells), CC-LAB-0174/FR-LAB-80 (this
 # ground truth).
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
-TWCH-0001,/generated/labgen-go-0001,POST,X-Signature-256,header,webhook_signature,true,/generated/labgen-go-0001,sink,,direct
-TWCH-0002,/generated/labgen-go-0003,GET,url,query,ssrf,true,/generated/labgen-go-0003,sink,,direct
-TWCH-0003,/generated/labgen-go-0005,GET,channel_id,query,access_control,true,/generated/labgen-go-0005,sink,,direct
-TWCH-0004,/generated/labgen-go-0007,GET,Authorization,header,jwt_algorithm_confusion,true,/generated/labgen-go-0007,sink,,direct
-TWCH-0005,/generated/labgen-go-0009,POST,body,body,weak_token_entropy,true,/generated/labgen-go-0009,sink,,direct
-TWCH-0006,/generated/labgen-go-0011,POST,body,body,mass_assignment,true,/generated/labgen-go-0011,sink,,direct
-TWCH-0007,/generated/labgen-go-0013,GET,channel_id,query,access_control,true,/generated/labgen-go-0013,sink,,direct
-TWCH-0008,/generated/labgen-go-0015,GET,source_url,query,ssrf,true,/generated/labgen-go-0015,sink,,direct
-TWCH-0009,/generated/labgen-go-0017,POST,file,body,unrestricted_file_upload,true,/generated/labgen-go-0017,sink,,direct
-TWCH-0010,/generated/labgen-go-0019,POST,body,body,price_integrity_bypass,true,/generated/labgen-go-0019,sink,,direct
-TWCH-0011,/generated/labgen-go-0021,GET,filename,query,path_traversal,true,/generated/labgen-go-0021,sink,,direct
-TWCH-0012,/generated/labgen-go-0023,POST,body,body,ssti,true,/generated/labgen-go-0023,sink,,direct
-TWCH-0013,/generated/labgen-go-0025,GET,destination,query,http_header_injection,true,/generated/labgen-go-0025,sink,,direct
-TWCH-0014,/generated/labgen-go-0027,GET,next,query,open_redirect,true,/generated/labgen-go-0027,sink,,direct
-TWCH-0015,/generated/labgen-go-0025,GET,destination,query,open_redirect,true,/generated/labgen-go-0025,sink,,direct
+TWCH-0001,/webhooks/eventsub,POST,X-Signature-256,header,webhook_signature,true,/webhooks/eventsub,sink,,direct
+TWCH-0002,/api/clips/thumbnail,GET,url,query,ssrf,true,/api/clips/thumbnail,sink,,direct
+TWCH-0003,/channels/analytics,GET,channel_id,query,access_control,true,/channels/analytics,sink,,direct
+TWCH-0004,/channels/settings,GET,Authorization,header,jwt_algorithm_confusion,true,/channels/settings,sink,,direct
+TWCH-0005,/sessions/refresh,POST,body,body,weak_token_entropy,true,/sessions/refresh,sink,,direct
+TWCH-0006,/channels/profile,POST,body,body,mass_assignment,true,/channels/profile,sink,,direct
+TWCH-0007,/channels/subscribers,GET,channel_id,query,access_control,true,/channels/subscribers,sink,,direct
+TWCH-0008,/clips/download,GET,source_url,query,ssrf,true,/clips/download,sink,,direct
+TWCH-0009,/channels/emotes/upload,POST,file,body,unrestricted_file_upload,true,/channels/emotes/upload,sink,,direct
+TWCH-0010,/subscriptions/purchase,POST,body,body,price_integrity_bypass,true,/subscriptions/purchase,sink,,direct
+TWCH-0011,/clips/export,GET,filename,query,path_traversal,true,/clips/export,sink,,direct
+TWCH-0012,/channels/commands,POST,body,body,ssti,true,/channels/commands,sink,,direct
+TWCH-0013,/channels/redirect,GET,destination,query,http_header_injection,true,/channels/redirect,sink,,direct
+TWCH-0014,/auth/login-redirect,GET,next,query,open_redirect,true,/auth/login-redirect,sink,,direct
+TWCH-0015,/channels/redirect,GET,destination,query,open_redirect,true,/channels/redirect,sink,,direct

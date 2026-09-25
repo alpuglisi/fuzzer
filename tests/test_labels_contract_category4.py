@@ -165,7 +165,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert webhook.expected_vulnerable
     assert webhook.vuln_class == "webhook_signature"
     assert webhook.sink_context == "webhook"
-    assert webhook.url == "/generated/labgen-go-0001"
+    assert webhook.url == "/webhooks/eventsub"
     assert webhook.method == "POST"
     assert webhook.param == "X-Signature-256"
     assert webhook.location == "header"
@@ -174,7 +174,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert ssrf.expected_vulnerable
     assert ssrf.vuln_class == "ssrf"
     assert ssrf.sink_context == "network"
-    assert ssrf.url == "/generated/labgen-go-0003"
+    assert ssrf.url == "/api/clips/thumbnail"
     assert ssrf.method == "GET"
     assert ssrf.param == "url"
     assert ssrf.location == "query"
@@ -183,7 +183,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert idor.expected_vulnerable
     assert idor.vuln_class == "access_control"
     assert idor.sink_context == "object_lookup"
-    assert idor.url == "/generated/labgen-go-0005"
+    assert idor.url == "/channels/analytics"
     assert idor.method == "GET"
     assert idor.param == "channel_id"
     assert idor.location == "query"
@@ -192,7 +192,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert jwt.expected_vulnerable
     assert jwt.vuln_class == "jwt_algorithm_confusion"
     assert jwt.sink_context == "jwt"
-    assert jwt.url == "/generated/labgen-go-0007"
+    assert jwt.url == "/channels/settings"
     assert jwt.method == "GET"
     assert jwt.param == "Authorization"
     assert jwt.location == "header"
@@ -201,7 +201,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert weak_token.expected_vulnerable
     assert weak_token.vuln_class == "weak_token_entropy"
     assert weak_token.sink_context == "session_token"
-    assert weak_token.url == "/generated/labgen-go-0009"
+    assert weak_token.url == "/sessions/refresh"
     assert weak_token.method == "POST"
     assert weak_token.param == "body"
     assert weak_token.location == "body"
@@ -210,7 +210,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert mass_assignment.expected_vulnerable
     assert mass_assignment.vuln_class == "mass_assignment"
     assert mass_assignment.sink_context == "mass_assignment"
-    assert mass_assignment.url == "/generated/labgen-go-0011"
+    assert mass_assignment.url == "/channels/profile"
     assert mass_assignment.method == "POST"
     assert mass_assignment.param == "body"
     assert mass_assignment.location == "body"
@@ -219,7 +219,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert subscribers_idor.expected_vulnerable
     assert subscribers_idor.vuln_class == "access_control"
     assert subscribers_idor.sink_context == "object_lookup"
-    assert subscribers_idor.url == "/generated/labgen-go-0013"
+    assert subscribers_idor.url == "/channels/subscribers"
     assert subscribers_idor.method == "GET"
     assert subscribers_idor.param == "channel_id"
     assert subscribers_idor.location == "query"
@@ -228,7 +228,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert clips_download_ssrf.expected_vulnerable
     assert clips_download_ssrf.vuln_class == "ssrf"
     assert clips_download_ssrf.sink_context == "network"
-    assert clips_download_ssrf.url == "/generated/labgen-go-0015"
+    assert clips_download_ssrf.url == "/clips/download"
     assert clips_download_ssrf.method == "GET"
     assert clips_download_ssrf.param == "source_url"
     assert clips_download_ssrf.location == "query"
@@ -237,7 +237,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert emote_upload.expected_vulnerable
     assert emote_upload.vuln_class == "unrestricted_file_upload"
     assert emote_upload.sink_context == "fs_web_root_write"
-    assert emote_upload.url == "/generated/labgen-go-0017"
+    assert emote_upload.url == "/channels/emotes/upload"
     assert emote_upload.method == "POST"
     assert emote_upload.param == "file"
     assert emote_upload.location == "body"
@@ -246,7 +246,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert price_integrity.expected_vulnerable
     assert price_integrity.vuln_class == "price_integrity_bypass"
     assert price_integrity.sink_context == "payment_charge"
-    assert price_integrity.url == "/generated/labgen-go-0019"
+    assert price_integrity.url == "/subscriptions/purchase"
     assert price_integrity.method == "POST"
     assert price_integrity.param == "body"
     assert price_integrity.location == "body"
@@ -257,7 +257,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert path_traversal.expected_vulnerable
     assert path_traversal.vuln_class == "path_traversal"
     assert path_traversal.sink_context == "fs_path_read"
-    assert path_traversal.url == "/generated/labgen-go-0021"
+    assert path_traversal.url == "/clips/export"
     assert path_traversal.method == "GET"
     assert path_traversal.param == "filename"
     assert path_traversal.location == "query"
@@ -269,7 +269,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert ssti.expected_vulnerable
     assert ssti.vuln_class == "ssti"
     assert ssti.sink_context == "template"
-    assert ssti.url == "/generated/labgen-go-0023"
+    assert ssti.url == "/channels/commands"
     assert ssti.method == "POST"
     assert ssti.param == "body"
     assert ssti.location == "body"
@@ -281,7 +281,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert header_injection.expected_vulnerable
     assert header_injection.vuln_class == "http_header_injection"
     assert header_injection.sink_context == "header"
-    assert header_injection.url == "/generated/labgen-go-0025"
+    assert header_injection.url == "/channels/redirect"
     assert header_injection.method == "GET"
     assert header_injection.param == "destination"
     assert header_injection.location == "query"
@@ -294,14 +294,14 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert open_redirect.expected_vulnerable
     assert open_redirect.vuln_class == "open_redirect"
     assert open_redirect.sink_context == "redirect"
-    assert open_redirect.url == "/generated/labgen-go-0027"
+    assert open_redirect.url == "/auth/login-redirect"
     assert open_redirect.method == "GET"
     assert open_redirect.param == "next"
     assert open_redirect.location == "query"
 
     # CC-LAB-0199/BUG-0045: Twitch's 15th real case is NOT a new page -- it
     # is a second, honest vuln_class label at TWCH-0013's own url/param
-    # (/generated/labgen-go-0025?destination=), found empirically once
+    # (/channels/redirect?destination=), found empirically once
     # open_redirect's runmode category mapping made it reachable: that
     # sink is genuinely ALSO open-redirect-vulnerable (a plain external
     # `destination` needs no CRLF at all), not just http_header_injection.
@@ -309,7 +309,7 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert second_label.expected_vulnerable
     assert second_label.vuln_class == "open_redirect"
     assert second_label.sink_context == "redirect"
-    assert second_label.url == "/generated/labgen-go-0025"
+    assert second_label.url == "/channels/redirect"
     assert second_label.method == "GET"
     assert second_label.param == "destination"
     assert second_label.location == "query"

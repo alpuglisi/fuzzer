@@ -749,3 +749,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   this class in an emitter it does not fix must pin each known instance with
   an `xfail(strict=True)` or an offline failing check -- never a prose
   deferral to a future lane. (from BUG-0052)
+
+- **PA-0055** — Completes `PA-0054`'s named sweep for `go_net_http` (Browsable
+  Labs Lane 3). No new rule: `PA-0054` already named `go_net_http` as a
+  remaining stack needing its own route-enumerated sweep before its pages
+  count as converted, and this lane's application of that exact mechanism
+  (an offline per-route `absent_input` declaration check, plus a live bare-
+  request sweep of every served route) found and fixed three instances
+  (`/api/clips/thumbnail`, `/clips/download`, `/clips/export`) on the first
+  attempt, with no residue needing an `xfail` pin. Recorded so the sweep's
+  completion for this emitter is traceable the same way `PA-0054` itself
+  is traceable to `BUG-0052`'s. Remaining stacks (`spring_boot`,
+  `ruby_rails`, `node_express`, `python_fastapi`) still owe their own
+  application of `PA-0054`, unchanged by this entry. (from BUG-0053)

@@ -102,12 +102,12 @@ def test_ssrf_tier1_and_tier2_confirm_both_twins() -> None:
             client = _GoSsrfTier12Client(harness)
             cases = {
                 "LABGEN-GO-0003": Tier1Case(  # vulnerable: unchecked_url_fetch
-                    cell_id="LABGEN-GO-0003", method="GET", path="/generated/labgen-go-0003",
+                    cell_id="LABGEN-GO-0003", method="GET", path="/api/clips/thumbnail",
                     param_name="url", location="query", payload=target_url,
                     evidence_marker="thumb-bytes", expected_vulnerable=True,
                 ),
                 "LABGEN-GO-0004": Tier1Case(  # secure: scheme_and_resolved_ip_allowlist
-                    cell_id="LABGEN-GO-0004", method="GET", path="/generated/labgen-go-0004",
+                    cell_id="LABGEN-GO-0004", method="GET", path="/api/clips/thumbnail.labgen-go-0004",
                     param_name="url", location="query", payload=target_url,
                     evidence_marker="thumb-bytes", expected_vulnerable=False,
                 ),

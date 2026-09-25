@@ -132,6 +132,19 @@ var siteFormPages = map[string]sitePageSpec{
 			"<p><button type=\"submit\">Run</button></p>" +
 			"</form>",
 	},
+	// Every POST route gets a GET client page (the accumulator registers
+	// one for every POST cell, CC-LAB-0243 §2b), not only the routes
+	// classified `form_on_get`: /sessions/refresh's own absent-input
+	// declaration is `no_input` (its source reads nothing), so this page
+	// has no form fields to submit, just a plain POST button.
+	"/sessions/refresh": {
+		title: "Session refresh",
+		body: "<h2>Session refresh</h2>" +
+			"<p>Refresh your session token.</p>" +
+			"<form method=\"post\">" +
+			"<p><button type=\"submit\">Refresh</button></p>" +
+			"</form>",
+	},
 }
 
 // sitePage returns the GET handler for a form_on_get route's page, keyed by
