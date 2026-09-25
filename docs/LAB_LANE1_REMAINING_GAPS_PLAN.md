@@ -1,12 +1,16 @@
 # Lane 1 step 5 — closing the remaining Browsable Labs gaps
 
-Status: **planning, pre-change review gate not yet run.** Reserved as
-`CC-LAB-0241` / `FR-LAB-159` ("Lane 1 step 5"). This collided with Lane 2's
-then-current reservation (also `CC-LAB-0241`/`FR-LAB-159-160`); fixed
-**already, not deferred** — `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table
-is bumped in this same change (Lanes 2-7's `CC-LAB` numbers +1, their
-`FR-LAB` ranges +1 again), so `CC-LAB-0241`/`FR-LAB-159` are genuinely free
-for this step as of this commit, not merely "will be free once implemented."
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round — see §7 Review history). Reserved as `CC-LAB-0241` / `FR-LAB-159`
+("Lane 1 step 5"). This collided with Lane 2's then-current reservation
+(also `CC-LAB-0241`/`FR-LAB-159-160`); fixed **already, not deferred** —
+`docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table is bumped in this same
+change (Lanes 2-7's `CC-LAB` numbers +1, their `FR-LAB` ranges +1 again),
+so `CC-LAB-0241`/`FR-LAB-159` are genuinely free as of this commit. **Next
+step: draft the condensed change-control entry and take it through its own
+2-reviewer gate**, mirroring `CC-LAB-0240`'s process exactly — this plan
+document's own convergence does not yet authorize implementation.
 
 ## 1. Scope — the three tracked, still-open Lane 1 gaps
 
@@ -313,4 +317,11 @@ unnamed sequencing gates (fixed — §3 steps 1-2 now name the exact test
 files); §2c's "iterate until green" language not checklist-able (fixed —
 split into §2c step 6 and this plan's own §6 checklist, drafted so the
 change-control entry can copy it directly); the lane-table edit not listed
-as its own deliverable (fixed — §6). All fixes applied in this revision.
+as its own deliverable (fixed — §6). All fixes applied in that revision.
+
+**Round 2 (accuracy + adequacy, same 2 reviewer agents, 2026-09-25):**
+ACCURATE / ADEQUATE. Both reviewers independently confirmed every round-1
+fix, with no new issues raised — 3/3 agreement (2 reviewers + proposing
+agent) reached. The plan is converged; implementation still requires its
+own change-control-entry gate (see Status line above), per this project's
+process.
