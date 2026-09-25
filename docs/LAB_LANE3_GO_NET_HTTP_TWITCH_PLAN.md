@@ -295,6 +295,23 @@ emitter's `supports()`-driven glob (PA-0027).
 pattern): hard-coded, measured minimums for GT points (14) and crawled
 URLs, asserted before any per-URL check.
 
+**R13 — concurrent edits to the shared point 6 contract text
+(cross-lane merge risk; added post-convergence during CC-LAB-0243's own
+gate).** Level: medium (`docs/MULTI_AGENT_ORCHESTRATION.md`: concurrent
+shared-file edits are the single biggest source of avoidable merge
+friction). Lanes 4-6 may independently hit the R6 situation and each
+write a point 6 paragraph, giving a git conflict or, worse, duplicate or
+contradictory conditions that merge cleanly. Detection: git conflicts at
+merge; for the silent case, a fixed greppable heading on this lane's
+paragraph (`R6 generalization (Lane 3, CC-LAB-0243, 2026-09-25)`) that
+the orchestrator greps for after each merge. Lane-side mitigation: one
+self-contained paragraph in its own dedicated commit, touching no other
+line of point 6. Resolution (orchestrator): the first amendment to land
+is the base; each later one is re-applied as a textual merge, with its
+conditions reconciled against i-iv into a single list; a genuine
+conflict goes back to the lanes and the user as an explicit decision; the
+outcome is recorded in the later lane's CC entry.
+
 Accepted, not mitigated: none.
 
 ## 4. Navigability acceptance test
@@ -361,7 +378,10 @@ cells:
 - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 amended in place with the
       dated, sourced "R6 generalization" paragraph (conditions i-iv, R8's
       format); "R6 sign-off" in `FR-LAB-162` points to it; flagged for
-      orchestrator reconciliation with Lanes 4-6.
+      orchestrator reconciliation with Lanes 4-6; landed as one
+      self-contained paragraph under the fixed heading `R6 generalization
+      (Lane 3, CC-LAB-0243, 2026-09-25)`, in its own dedicated commit,
+      touching no other line of point 6 (R13).
 - [ ] Navigability test built and green, including the every-route
       two-method bare sweep.
 - [ ] Same-class defects folded in; different-class findings flagged, not
@@ -415,3 +435,13 @@ ADEQUATE.
 Both reviewers confirmed the three round-1 fixes, with no new issues:
 3/3 agreement (2 reviewers + proposing agent). The plan is converged;
 implementation still requires the `CC-LAB-0243` entry's own gate.
+
+**Post-convergence addition (2026-09-25, during CC-LAB-0243's own gate,
+round 1):** the entry's adequacy reviewer found that the cross-lane risk
+of concurrent point 6 edits was only a one-line flag (in the plan's R6
+and the entry's Impact), not a risk item with a level and mitigation.
+Added as R13 (level, scenario, detection, lane-side mitigation,
+orchestrator resolution mechanism), plus a sharper point 6 deliverable
+(fixed heading, dedicated commit). This adds a risk and does not change
+any existing risk's content or conclusion, so it does not reopen the 3/3
+above; it is carried identically into the entry.

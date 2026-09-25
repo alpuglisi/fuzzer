@@ -5,8 +5,11 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0243 — Browsable labs Lane 3: go_net_http/Twitch clone conversion (2026-09-25, FR-LAB-162, `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`)
 
-**Status: DRAFT, pre-change review gate not yet run.** Implementation is
-not authorized. Condensed from `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`,
+**Status: DRAFT, pre-change review gate in progress.** Round 1: ACCURATE
+/ adequate except one gap (the cross-lane risk of concurrent point 6
+edits was only a one-line Impact flag), fixed by adding R13 here and in
+the plan, plus a sharper point 6 deliverable. Round 2 pending.
+Implementation is not authorized. Condensed from `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`,
 which reached 3/3 agreement on 2026-09-25 (2 independent reviewer agents,
 spawned by the orchestrating session because the proposing agent had no
 subagent tool, plus the proposing agent, after 1 revision round). That
@@ -48,10 +51,11 @@ compression.
   `fp == 0`). The shared design contract, `docs/LAB_BROWSABLE_APPS_PLAN.md`
   point 6, is amended (R6 generalization); Lanes 4-6 run in parallel and
   won't see it, so it is flagged for orchestrator reconciliation at
-  merge. The Lane 3 row is updated on completion. Lanes 4-7 are bumped
+  merge (its own risk item, R13). The Lane 3 row is updated on
+  completion. Lanes 4-7 are bumped
   only if this needs more than one CC-LAB number.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
-  Full register in the plan's §3 (R1-R12), each item named here:
+  Full register in the plan's §3 (R1-R13), each item named here:
   1. **R1** — *Twin URLs.* Default branch (a): twin-suffixed URLs. Fall
      back to (b), keep `/generated/...` plus a cross-URL equality test,
      only on a ServeMux pattern rejection or conflict. Recorded as the
@@ -98,6 +102,32 @@ compression.
       folded in: the list is derived via `supports()` (PA-0027).
   12. **R12** — *Non-vacuous-pass guard.* Hard-coded, measured minimums
       for GT points and crawled URLs, asserted before any per-URL check.
+  13. **R13** — *Concurrent edits to the shared point 6 contract text
+      (cross-lane merge risk).* **Level: medium** —
+      `docs/MULTI_AGENT_ORCHESTRATION.md` names concurrent shared-file
+      edits as the single biggest source of avoidable merge friction.
+      *Scenario:* Lanes 4-6 run in parallel worktrees and may
+      independently find the same owner-scoped-route situation (R6
+      itself names Netflix's `/api/account/billing` in Lane 4). Each could
+      write its own point 6 paragraph, which produces either a textual
+      conflict or, worse, two cleanly merging paragraphs with duplicate or
+      contradictory conditions. *Detection:* textual conflicts surface
+      in git at merge. The silent case is caught because this lane's
+      paragraph carries a fixed, greppable heading
+      (`R6 generalization (Lane 3, CC-LAB-0243, 2026-09-25)`), so the
+      orchestrator can grep point 6 for every `generalization`/exception
+      paragraph after each merge. *Lane-side mitigation:* the amendment is
+      one self-contained paragraph under that heading, in its own
+      dedicated commit, touching no other line of point 6, so it can be
+      cherry-picked, reverted or re-based on its own. *Resolution
+      mechanism (orchestrator, at merge):* land whichever lane's
+      amendment merges first as the base. Re-apply each later lane's
+      amendment as a textual merge on top. Before landing each one,
+      compare its conditions with the base's conditions i-iv and resolve
+      duplicates into one condition list, not two parallel ones. Any
+      genuinely conflicting condition goes back to the lanes and the user
+      as an explicit decision, never picked silently. Record the outcome
+      in the later lane's own CC entry.
   Accepted, not mitigated: none — every identified risk has a concrete
   mitigation.
 - **Deliverables:** (copied verbatim from the plan's §6)
@@ -119,7 +149,10 @@ compression.
   - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 amended in place with the
         dated, sourced "R6 generalization" paragraph (conditions i-iv, R8's
         format); "R6 sign-off" in `FR-LAB-162` points to it; flagged for
-        orchestrator reconciliation with Lanes 4-6.
+        orchestrator reconciliation with Lanes 4-6; landed as one
+        self-contained paragraph under the fixed heading `R6 generalization
+        (Lane 3, CC-LAB-0243, 2026-09-25)`, in its own dedicated commit,
+        touching no other line of point 6 (R13).
   - [ ] Navigability test built and green, including the every-route
         two-method bare sweep.
   - [ ] Same-class defects folded in; different-class findings flagged, not
