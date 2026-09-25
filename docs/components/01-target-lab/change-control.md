@@ -229,8 +229,8 @@ compression.
   previously 24 failing on the URL migration before it was applied),
   `tests/test_labgen_go_net_http.py`/`_conformance.py`/`_modules.py` (60
   passed), `tests/test_multitarget_category4.py` (2 passed, tp==14/fp==0
-  unchanged). Full non-slow suite count recorded once the run started
-  during this bookkeeping pass completes (see the session's own report).
+  unchanged). Full non-slow suite (`pytest -m "not slow"`): **2521 passed,
+  8 skipped, 207 deselected, 0 failed** (571.67s), 2026-09-25.
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
