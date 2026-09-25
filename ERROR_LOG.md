@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `php_laravel` nav/catalog links 500'd on a bare GET — absent query parameter reached the sink as null (fixed, BUG-0051/PA-0053)
+
+- **Symptom:** clicking the Puppy Fort Factory nav's "Product"/"Blog" links
+  (`/product.php`, `/blog_post.php`, no `?id=`) returned HTTP 500; the new
+  navigability crawl also found `/booking/continue` 500ing and
+  `/comments/share` sending an empty `Location:` redirect when reached bare
+  from `/catalog`.
+- **Root cause:** `get_param.php.j2` rendered `$request->query('<param>')`
+  with no default and page profiles had no way to declare one, so `null` hit
+  sinks only correct for a present value (`... WHERE id = ` invalid SQL;
+  `redirect(null)`); no test ever requested a generated page bare. Recurrence
+  of `BUG-0037`'s class, which `PA-0039` scoped too narrowly (cross-language
+  ports, type cast only).
+- **Remediation:** `CC-LAB-0241` — per-profile `default_value` key (`'1'` on
+  product/blog_post, the real pages' own `?? '1'`; `'/'` on the two redirect
+  pages), bare-URL live-boot assertions (SQLite + MariaDB), and the
+  navigability crawl as the standing check (PA-0053). Huddle Hub's
+  `/messages/unfurl` bare-GET 500 and the illustrative `/cell/labgen-pl-*`
+  bare-GET 500s are flagged follow-ups (BUG-0051's sweep section).
+- **Status:** Fixed (4 instances); 1 ground-truth instance open as a flagged
+  follow-up, pinned by a strict xfail.
+
 ## 2026-09-24 — CRAWL: crawler followed only loopback links; grabbed nothing on authorized external hosts (fixed, BUG-0050/PA-0052)
 
 - **Symptom:** operator pointed `fuzzlab crawl` (via the web UI) at authorized

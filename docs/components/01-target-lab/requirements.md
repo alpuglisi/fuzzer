@@ -5672,7 +5672,8 @@ lane) can submit a payload as
   spider-based crawl-from-`/` 100%-discovery navigability acceptance test
   (`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6) -- every URL was instead
   verified individually via real live-boot HTTP requests, which proves each
-  one is real and correct but is not the same proof as a full crawl.
+  one is real and correct but is not the same proof as a full crawl. (That
+  crawl now exists: `FR-LAB-159`, below.)
 - **FR-LAB-158** *(JSON→HTML conversion for Puppy Fort Factory's own migrated
   real pages; `php_laravel`; `CC-LAB-0240`, 2026-09-25,
   `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`).* `/product.php`, `/blog_post.php`,
@@ -5705,10 +5706,74 @@ lane) can submit a payload as
   context so only the complexity module sees them, and a page profile
   setting more than one raises `ValueError` instead of the template's elif
   chain silently preferring one. No ground-truth `url`/`rendering` edit
-  (`rendering: server` was already correct). Explicitly out of scope: the
-  bare-fragment (non-`@extends`) POST/error responses of `/contact.php`/
-  `/newsletter.php`/`/edit_profile.php` -- recommended as the next
-  CC-LAB-numbered step.
+  (`rendering: server` was already correct). Explicitly out of scope here:
+  the bare-fragment (non-`@extends`) POST/error responses of `/contact.php`/
+  `/newsletter.php`/`/edit_profile.php` -- since closed by `FR-LAB-159`.
+- **FR-LAB-159** *(Lane 1 step 5 -- closing the remaining browsability gaps;
+  `php_laravel`; `CC-LAB-0241`, 2026-09-25,
+  `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`).* Three parts:
+  1. **Missing-parameter defaults.** A per-profile `default_value` page-profile
+     key (`_DEFAULT_VALUE_KEY`), consumed by `get_param.php.j2`, renders
+     `$request->query('<param>', '<default>')`. Set on `/product.php` and
+     `/blog_post.php` (`'1'`, the real pages' own `$_GET['id'] ?? '1'`) so a
+     bare `GET` -- exactly what the site nav links to -- renders row 1
+     instead of concatenating `null` into the SQL and 500ing; and, surfaced by
+     the navigability crawl (same class, folded in), on `/booking/continue`
+     and `/comments/share` (`'/'`, the safe target the secure twins already
+     fall back to). Every other `get_param` cell renders byte-identically (no
+     blanket template change). Seed row `id = 1` exists in both harnesses'
+     `products`/`posts` (SQLite `_SEED_SQL`; MariaDB `lab/sql/schema.sql`).
+  2. **Layout for the `html_body_echo` sink.**
+     `html_body_echo.blade.php.j2` now `@extends('layouts.site')` with
+     `@section('title', '<page_title>')`/`@section('content')`, so
+     `/contact.php`, `/newsletter.php` and `/profile.php` (the page every
+     `/edit_profile.php` POST redirects to) respond inside the shared
+     nav/header/footer instead of as a bare `<div>`. `page_title` is an
+     optional page-profile key (`_PAGE_TITLE_KEY`: "Contact us",
+     "Newsletter", "Profile"); `HtmlBodyEchoSink.render()` defaults it to the
+     layout's own app name (`modules.DEFAULT_PAGE_TITLE`) for the other cells
+     sharing this sink (`/search.php`'s two XSS twins, `/example/profile`'s
+     pair), fails loud on a quote/backslash, and never passes it on.
+  3. **Spider-based navigability acceptance test**
+     (`tests/test_labgen_navigability_live_boot.py`, live-boot, `slow`): each
+     of PFF (default merged build), CircleFeed, Huddle Hub and Booking is
+     booted as its **whole** site -- `LiveBootHarness` gained an `app=` key
+     that overlays the split app's own `app_site.site_layer_files()` (the
+     same call `assemble_lab(app=...)` makes) -- and crawled from `/` with
+     `fuzzlab.tools.spider.LocalSpider` (`requests` engine, same-host scope,
+     depth cap 4 against a measured deepest ground-truth depth of 2). After
+     hard-coded non-vacuous guards on the ground-truth point count and the
+     crawled-page count, it asserts every served ground-truth
+     `injection-points.json` URL is discovered and returns the anonymous
+     visitor's response: 200 for a public page or an API's GET client page;
+     401 for CircleFeed's session-gated `/photos/view` (R8 sign-off,
+     `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6); 400 for CircleFeed's
+     `/settings/preferences` deserialization API called with no `pref`
+     cookie (a handled JSON error on both twins -- no single default can
+     serve both twins' decoders); and `GET /` = 200. Two gaps it surfaced
+     are tracked as `xfail(strict=True)` follow-ups, not fixed here: PFF's
+     ground truth lists `/track.php`, `/add_to_cart.php`, `/cart.php` and
+     `/checkout.php`, which no `php_laravel` cell or site route serves; and
+     Huddle Hub's `/messages/unfurl` vulnerable twin 500s on a bare GET.
+
+  **R4 sign-off (2026-09-25): branch (b), anonymous crawl.** Branch (a) --
+  attaching `browserauth`'s authenticated session to the crawl -- was tried
+  and does not attach to this test's engine: `browserauth` is wired into
+  `LocalSpider` only through the Playwright engine (`_start_browser()`,
+  `--identity`), needs a `fuzzlab.session` manager with stored credentials,
+  and Playwright is not installed in this environment, while the `requests`
+  engine has no identity hook; switching PFF (fully server-rendered) to the
+  Playwright engine just for this would be the scope question the plan's
+  decision rule names. More decisively, direct reading and a live request
+  showed `LABGEN-MA-0003`/`0004` are **not session-gated**: they are not in
+  `lab/ground-truth/injection-points.json`, and their sink
+  (`orm_entity_bulk_assign.php.j2`) deliberately degrades a missing session
+  to `WHERE id = NULL` via `$request->user()?->id`, so an authenticated crawl
+  would unlock nothing. The test therefore asserts what an anonymous visitor
+  actually gets: the public GET client page at `/example/account_settings`
+  (crawl-discovered, 200), the POST-only twin URL not GET-reachable, and an
+  anonymous POST to either twin answering 200 JSON while writing no row --
+  not the 401/redirect the plan anticipated, because none exists.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

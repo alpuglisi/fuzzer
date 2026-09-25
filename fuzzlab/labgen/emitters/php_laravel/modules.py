@@ -864,6 +864,12 @@ class SqlJoinAliasLookupSink(TemplateModule):
         super().__init__("sql_join_alias_lookup", "sink", _SINK_ENV, "sql_join_alias_lookup.php.j2")
 
 
+#: The ``html_body_echo`` view's ``@section('title', ...)`` when a page
+#: profile names no ``page_title`` (CC-LAB-0241, R1) -- the shared
+#: ``layouts.site`` layout's own ``@yield('title', ...)`` default.
+DEFAULT_PAGE_TITLE = "Puppy Fort Factory"
+
+
 class HtmlBodyEchoSink(TemplateModule):
     """Echoes the value into an HTML body position -- rendered as a **Blade
     view** body (``role="view"``), not a controller ``echo``: a Laravel
@@ -873,6 +879,23 @@ class HtmlBodyEchoSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("html_body_echo", "sink", _SINK_ENV, "html_body_echo.blade.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        """CC-LAB-0241 (``docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`` §2b): the
+        view extends the shared ``layouts.site`` layout, titled by the page
+        profile's optional ``page_title`` -- defaulted to
+        :data:`DEFAULT_PAGE_TITLE` so a profile that sets none (R1:
+        ``/search.php``'s XSS twins, ``/example/profile``) still renders.
+        The title lands inside a single-quoted Blade string, so a quote or
+        backslash in it fails loud rather than emitting a broken view."""
+        title = ctx.get("page_title", DEFAULT_PAGE_TITLE)
+        if not isinstance(title, str) or "'" in title or "\\" in title:
+            raise ValueError(
+                f"html_body_echo page_title {title!r} must be a plain string with no quote or "
+                "backslash -- it is rendered inside a single-quoted Blade @section('title', ...)"
+            )
+        result = super().render({**ctx, "page_title": title})
+        return RenderResult(code=result.code, context=dict(ctx))
 
 
 class HtmlJsUrlEchoSink(TemplateModule):

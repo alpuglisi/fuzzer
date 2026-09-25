@@ -701,6 +701,7 @@ class LiveBootHarness:
         *,
         install_timeout: float = 240.0,
         mariadb_server: "MariaDbServer | None" = None,
+        app: str | None = None,
     ) -> None:
         """``mariadb_server`` (``CC-LAB-0058``/``FR-LAB-55``): when given an
         already-started, already-provisioned :class:`MariaDbServer`, this
@@ -711,7 +712,25 @@ class LiveBootHarness:
         this harness does not re-seed on top of it). ``None`` (the default)
         keeps this class's original SQLite behavior byte-for-byte -- this
         parameter is additive, never a change to an existing caller's
-        behavior."""
+        behavior.
+
+        ``app`` (``CC-LAB-0241``, R6 of ``docs/LAB_LANE1_REMAINING_GAPS_PLAN.md``):
+        a key of :data:`fuzzlab.labgen.emitters.php_laravel.app_site.APP_REGISTRY`
+        -- after the cells are rendered, overlay that split app's own site
+        layer (branded layout/home and its ``routes/site.php``), exactly the
+        files :func:`fuzzlab.labgen.assemble.assemble_lab`'s ``app=`` writes
+        (the same :func:`~fuzzlab.labgen.emitters.php_laravel.app_site.site_layer_files`
+        call, never a second copy -- PA-0003/PA-0021). Without it a split
+        app's cells boot under Puppy Fort Factory's own skeleton site layer,
+        whose nav links to pages that app does not have, so a crawl of it
+        would not be a crawl of the real standalone app. ``None`` (the
+        default) is byte-for-byte the pre-existing behavior."""
+        if app is not None:
+            from fuzzlab.labgen.emitters.php_laravel.app_site import APP_REGISTRY
+
+            if app not in APP_REGISTRY:
+                raise ValueError(f"unknown app {app!r} -- known apps: {sorted(APP_REGISTRY)}")
+        self._app = app
         self._emitter = emitter
         self._cells = [c for c in cells if emitter.supports(c.vuln_class, c.sink_context)]
         self._install_timeout = install_timeout
@@ -747,6 +766,14 @@ class LiveBootHarness:
 
         routes_file = self._app_dir / "routes" / "web.php"
         routes_file.write_text(RouteAccumulator().render_file(fragments), encoding="utf-8")
+
+        if self._app is not None:
+            from fuzzlab.labgen.emitters.php_laravel.app_site import site_layer_files
+
+            for rel_path, content in site_layer_files(self._app).items():
+                dest = self._app_dir / rel_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(content)
 
     def _write_env(self) -> None:
         assert self._app_dir is not None

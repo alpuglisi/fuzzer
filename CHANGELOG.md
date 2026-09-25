@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 5 implemented: remaining browsability gaps, CC-LAB-0241/FR-LAB-159)
+- Implemented `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`: a per-profile
+  `default_value` stops bare `/product.php`/`/blog_post.php` (linked from the
+  site nav) from 500ing, and the `html_body_echo` sink now renders inside the
+  shared site layout, so `/contact.php`/`/newsletter.php`/`/profile.php`
+  (and so `/edit_profile.php`'s redirect target) are no longer bare
+  fragments; added the missing spider-based navigability acceptance test,
+  which crawls each of PFF, CircleFeed, Huddle Hub and Booking from `/` and
+  checks every ground-truth URL is reached with the anonymous visitor's
+  response -- because it was the one undone Browsable Labs acceptance check.
+  The crawl surfaced two more missing defaults (`/booking/continue`,
+  `/comments/share`, fixed here; the class is BUG-0051/PA-0053, a recurrence
+  of BUG-0037 that PA-0039 had scoped too narrowly) and two different-class
+  gaps tracked as strict xfails for follow-up (4 PFF ground-truth URLs no
+  cell serves; `/messages/unfurl`'s bare-GET 500).
+
 ## 2026-09-25 (Lane 1 step 4 implemented: JSON→HTML for PFF's own real pages, CC-LAB-0240/FR-LAB-158)
 - Implemented `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`: `/product.php`,
   `/blog_post.php`, `/products.php` and `/search.php`'s SQLi twins now render

@@ -525,6 +525,31 @@ _TAIL_FLAG_KEYS: tuple[str, ...] = (
     _HTML_LIST_VIEW_KEY,
 )
 
+#: Page-profile key (CC-LAB-0241, ``docs/LAB_LANE1_REMAINING_GAPS_PLAN.md``
+#: §2a): the literal default ``get_param``'s ``$request->query()`` read falls
+#: back to when the query parameter is absent -- rendered as Laravel's
+#: ``$request->query('<param>', '<default>')`` second argument. Reproduces a
+#: real page's own ``$_GET['id'] ?? '1'`` fallback (``product.php``/
+#: ``blog_post.php``, confirmed via ``git show 876d2f9^:puppy-fort-factory/
+#: blog_post.php``); without it a bare ``GET /product.php`` (the URL the site
+#: nav links to) concatenated ``null`` into the SQL text and 500'd. The
+#: navigability crawl (same change) surfaced the same missing default on
+#: ``/booking/continue`` and ``/comments/share`` (default ``/``). Set per
+#: profile, never as a blanket template change, so a page whose contract is
+#: "no parameter, no default" keeps rendering byte-identically. Optional.
+_DEFAULT_VALUE_KEY = "default_value"
+
+#: Page-profile key (CC-LAB-0241, ``docs/LAB_LANE1_REMAINING_GAPS_PLAN.md``
+#: §2b): the ``@section('title', ...)`` the ``html_body_echo`` sink's Blade
+#: view passes to the shared ``layouts.site`` layout. A short, static page
+#: label (never modelled/tainted data). Optional: a profile that sets none
+#: gets :data:`~fuzzlab.labgen.emitters.php_laravel.modules.DEFAULT_PAGE_TITLE`
+#: (applied by ``HtmlBodyEchoSink.render()``), so an unrelated
+#: ``html_body_echo`` cell -- ``/search.php``'s two XSS twins and
+#: ``/example/profile``'s pair, found by R1 -- can never fail to render on a
+#: missing key. Every other module ignores it.
+_PAGE_TITLE_KEY = "page_title"
+
 #: Page-profile keys that describe a **write** endpoint (a
 #: ``stored_second_order`` cell's ``cell.route``, looked up by
 #: ``cell.route.path``) rather than the render/sink endpoint every other
@@ -579,6 +604,13 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "param_name": "return_to",
         "real_page": True,
         "canonical_cell_id": "LABGEN-BC-0001",
+        # CC-LAB-0241 (§3 step 3, crawl-surfaced, same class as §2a): a bare
+        # `GET /booking/continue` (linked from `/catalog`) made the vulnerable
+        # twin `redirect(null)` and 500. Default to the site root -- the same
+        # safe target the secure twin's `redirect_target_allowlist` already
+        # collapses a missing/invalid value to. Source region, identical on
+        # both twins, so the pair still differs only in its transform.
+        _DEFAULT_VALUE_KEY: "/",
     },
     # CC-LAB-0211/CC-LAB-0239 (category 5, Booking.com pilot app): the
     # Extranet/partner-admin booking-list export view (docs/research/
@@ -742,6 +774,12 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "param_name": "next",
         "real_page": True,
         "canonical_cell_id": "LABGEN-CF-0005",
+        # CC-LAB-0241 (§3 step 3, crawl-surfaced, same class as §2a): a bare
+        # `GET /comments/share` (linked from `/catalog`) made the vulnerable
+        # twin send an empty `Location:` header (a dead-end 302) while the
+        # secure twin 400'd. Default to the site root, which both twins then
+        # redirect to (it passes the secure twin's own path allowlist).
+        _DEFAULT_VALUE_KEY: "/",
     },
     # CC-LAB-0220: CircleFeed's (category 2's Facebook pick) fourth and
     # final designed cell -- an account-settings page, `get_cookie` reads
@@ -836,6 +874,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-RPL-PRODUCT",
         "ground_truth_case": "PFF-0001",
+        # CC-LAB-0241: the real page's own `$_GET['id'] ?? '1'` fallback -- a
+        # bare `GET /product.php` (the site nav's own link) renders product 1
+        # instead of 500ing on `... WHERE id = ` + null.
+        _DEFAULT_VALUE_KEY: "1",
         # CC-LAB-0240: a real HTML product page (was `response()->json($rows)`),
         # shared byte-for-byte by both twins. `DB::select(...)` returns a
         # LIST, hence `html_list_view`, never `html_row_view`.
@@ -856,6 +898,8 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-RPL-BLOGPOST",
         "ground_truth_case": "PFF-0006",
+        # CC-LAB-0241: the real page's own `$_GET['id'] ?? '1'` fallback.
+        _DEFAULT_VALUE_KEY: "1",
         # CC-LAB-0240: real HTML blog post page, shared by both twins.
         _HTML_LIST_VIEW_KEY: "site.blog-post",
     },
@@ -979,6 +1023,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-PLRP-0401",
         "ground_truth_case": "PFF-0005",
+        # CC-LAB-0241 (§2b): the `html_body_echo` view now extends the shared
+        # site layout. This is also the page `/edit_profile.php`'s POST
+        # redirects to, so it is the "echo" a visitor sees after editing.
+        _PAGE_TITLE_KEY: "Profile",
     },
     # edit_profile.php is the WRITE endpoint (`Cell.route`): the POSTed `bio`
     # is persisted verbatim through Eloquent. The write-only keys
@@ -1017,6 +1065,8 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-PLRP-1005",
         "ground_truth_case": "PFF-1005",
+        # CC-LAB-0241 (§2b): title of the layout-wrapped echo response.
+        _PAGE_TITLE_KEY: "Contact us",
     },
     "/newsletter.php": {
         "var_name": "email",
@@ -1028,6 +1078,8 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-PLRP-1006",
         "ground_truth_case": "PFF-1006",
+        # CC-LAB-0241 (§2b): title of the layout-wrapped echo response.
+        _PAGE_TITLE_KEY: "Newsletter",
     },
     # --- L-P3.3c-G6: search.php, RESOLVED by L-P3.3c-CUT (Path B) -----------
     # puppy-fort-factory/search.php, the largest single page of the

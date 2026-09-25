@@ -1,5 +1,16 @@
 {# Blade view body for an HTML-body sink. Blade's RAW echo is used on purpose:
    a sink never escapes anything itself, so both twins of a minimal pair share
    this fragment and the cell's transform alone decides whether the value was
-   escaped (see modules.py's module docstring, decision 2). #}
+   escaped (see modules.py's module docstring, decision 2).
+
+   CC-LAB-0241 (docs/LAB_LANE1_REMAINING_GAPS_PLAN.md §2b): the echo renders
+   inside the shared `layouts.site` layout (nav/header/footer), the same
+   `@extends`/`@section` mechanism every other converted page uses, rather than
+   as a bare fragment. `page_title` is a static, profile-supplied label (never
+   tainted data); `HtmlBodyEchoSink.render()` defaults it so a profile that
+   sets none still renders. #}
+@extends('layouts.site')
+@section('title', '{{ page_title }}')
+@section('content')
 <div class="{{ css_class }}">{!! $value !!}</div>
+@endsection

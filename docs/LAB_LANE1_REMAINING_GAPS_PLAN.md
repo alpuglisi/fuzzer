@@ -7,10 +7,11 @@ round — see §7 Review history). Reserved as `CC-LAB-0241` / `FR-LAB-159`
 (also `CC-LAB-0241`/`FR-LAB-159-160`); fixed **already, not deferred** —
 `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table is bumped in this same
 change (Lanes 2-7's `CC-LAB` numbers +1, their `FR-LAB` ranges +1 again),
-so `CC-LAB-0241`/`FR-LAB-159` are genuinely free as of this commit. **Next
-step: draft the condensed change-control entry and take it through its own
-2-reviewer gate**, mirroring `CC-LAB-0240`'s process exactly — this plan
-document's own convergence does not yet authorize implementation.
+so `CC-LAB-0241`/`FR-LAB-159` are genuinely free as of this commit. The
+condensed change-control entry cleared its own 2-reviewer gate (3/3), and
+the plan was **implemented 2026-09-25** — see `CC-LAB-0241`'s Deliverables
+and Effectiveness for what was verified, the R4 decision (branch (b)), and
+the two different-class follow-ups the crawl surfaced.
 
 ## 1. Scope — the three tracked, still-open Lane 1 gaps
 
@@ -277,28 +278,31 @@ verification-or-fix step, no risk is waved through.
 ## 6. Deliverables checklist (drafted here so the change-control entry can
 copy it directly, per round-1 adequacy review)
 
-- [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
+- [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
       `CC-LAB-0241`/`FR-LAB-159` collision — **done as part of this plan's
       own commit**, ahead of the change-control entry.
-- [ ] §3 step 1 gate: missing-`?id=` default added for `/product.php` and
+- [x] §3 step 1 gate: missing-`?id=` default added for `/product.php` and
       `/blog_post.php`; the 3 named gate test files green.
-- [ ] §3 step 2 gate: `html_body_echo.blade.php.j2` extends the shared
+- [x] §3 step 2 gate: `html_body_echo.blade.php.j2` extends the shared
       layout with a `page_title` variable; all 4 cells' pages (`/contact.php`,
       `/newsletter.php`, `/edit_profile.php`, `/profile.php`) render inside
       the shared nav/header; the named gate test files green.
-- [ ] §2c navigability test built and green for all 4 apps (PFF; CircleFeed;
+- [x] §2c navigability test built and green for all 4 apps (PFF; CircleFeed;
       Huddle Hub; Booking), including the non-vacuous ground-truth-count and
       discovered-page-count guards (§2c step 3).
-- [ ] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry (which
+- [x] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry (which
       branch, (a) or (b), and why).
-- [ ] Any crawl-surfaced same-class defect (§3 step 3's scope-creep rule)
+- [x] Any crawl-surfaced same-class defect (§3 step 3's scope-creep rule)
       fixed and folded in; any different-class finding flagged with its own
       recommended next `CC-LAB` number, not silently absorbed.
-- [ ] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the new
+- [x] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the new
       navigability tests) green.
-- [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
+- [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
       entry.
-- [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241`.
+- [x] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241`.
+
+(All checked off 2026-09-25 at implementation; `CC-LAB-0241`'s own
+Deliverables list is the authoritative, annotated copy.)
 
 ## 7. Review history
 

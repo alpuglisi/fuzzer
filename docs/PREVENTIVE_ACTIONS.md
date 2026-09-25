@@ -717,3 +717,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   Generalises `PA-0050` (which fixed the same class — a lab-shape assumption
   baked into a *readiness* check) from reachability probes to every
   target-scoping filter. (from BUG-0050)
+
+- **PA-0053** — Strengthens/supersedes `PA-0039`'s scope. Every request
+  parameter a generated page reads must have a **defined absent-input
+  behavior** — the real page's own default (in `php_laravel`, the per-profile
+  `default_value` page-profile key) or a handled 4xx returned *before* any
+  sink — in **every** emitter and for every route, not only when porting a
+  module across languages. A type cast alone (`PA-0039`'s `str(...)`) does not
+  satisfy this: PHP's `.` already coerces `null` to `''` and the page still
+  fails at the SQL/redirect layer. When migrating a real page, reproduce its
+  absent-input behavior (e.g. `$_GET['id'] ?? '1'`) as deliberately as its
+  vulnerability. Enforced mechanically, not by memory (`PA-0020`/`PA-0033`):
+  the live-boot navigability crawl (`tests/test_labgen_navigability_live_boot.py`)
+  requests every link-reachable page bare and asserts the anonymous visitor's
+  status; each Browsable Labs lane must extend that crawl to its own app
+  before its pages count as converted, and a newly linked page must pass it.
+  A known exception is pinned by an `xfail(strict=True)` test naming its
+  follow-up, never by asserting the 500 as expected. (from BUG-0051)

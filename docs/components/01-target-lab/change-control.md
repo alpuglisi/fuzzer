@@ -14,7 +14,8 @@ to this plan's own §4 register instead of correctly cited as the same bug
 class `CC-LAB-0240`'s R2 found; both fixed by naming R1-R7 explicitly with
 their numbers and moving the vacuous-pass guard into its own clearly
 separate, correctly-attributed paragraph; both reviewers re-confirmed
-ACCURATE and ADEQUATE) — **implementation authorized, not yet landed.**
+ACCURATE and ADEQUATE) — **implementation authorized; implemented
+2026-09-25** (see Deliverables/Effectiveness).
 Condensed from `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`, which itself
 already went through 2 full review rounds and reached 3/3 agreement
 (2026-09-25); that document is the full detail, this entry is its
@@ -100,31 +101,88 @@ change-control-template compression.
   mitigation.
 - **Deliverables:** (copied directly from the plan's own §6, drafted for
   exactly this purpose)
-  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
+  - [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
         `CC-LAB-0241`/`FR-LAB-159` collision — done (applied in the plan's
-        own commit, ahead of this entry).
-  - [ ] Missing-`?id=` default added for `/product.php`/`/blog_post.php`;
+        own commit, ahead of this entry; Lane 1 row now marks 0241 done).
+  - [x] Missing-`?id=` default added for `/product.php`/`/blog_post.php`;
         gate: `tests/test_labgen_conformance_live_boot.py`,
         `tests/test_labgen_conformance_live_boot_mariadb.py`,
-        `tests/test_labgen_php_laravel_pff_html_pages.py` green — todo.
-  - [ ] `html_body_echo.blade.php.j2` extends the shared layout with a
+        `tests/test_labgen_php_laravel_pff_html_pages.py` green — done
+        (per-profile `_DEFAULT_VALUE_KEY` rendered by `get_param.php.j2` as
+        `$request->query('id', '1')`; gate cleared 65 passed / 0 skipped,
+        together with `test_labgen_php_laravel.py` +
+        `test_labgen_php_laravel_real_pages_numeric.py`, before step 2).
+  - [x] `html_body_echo.blade.php.j2` extends the shared layout with a
         `page_title` variable; all 4 cells' pages render inside the shared
         nav/header; gate: the 9 named test files in the plan's §3 step 2
-        green — todo.
-  - [ ] Navigability test built and green for all 4 apps, including the
-        non-vacuous-pass guard — todo.
-  - [ ] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry —
-        todo.
-  - [ ] Any crawl-surfaced same-class defect fixed and folded in; any
+        green — done (the 9 files plus 8 more the re-grep found:
+        296 passed / 0 skipped before step 3; `/edit_profile.php`'s POST
+        is a 302 to `/profile.php`, so `/profile.php`'s title covers it).
+  - [x] Navigability test built and green for all 4 apps, including the
+        non-vacuous-pass guard — done
+        (`tests/test_labgen_navigability_live_boot.py`: 5 passed, 2 strict
+        xfails for the flagged follow-ups below).
+  - [x] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry —
+        done (branch (b); see Effectiveness).
+  - [x] Any crawl-surfaced same-class defect fixed and folded in; any
         different-class finding flagged with its own recommended next
-        `CC-LAB` number — todo.
-  - [ ] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the
-        new navigability tests) green — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
-        entry — todo.
-  - [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241` — todo.
-- **Effectiveness (assessed <date> or pending):** pending — not yet
-  implemented.
+        `CC-LAB` number — done. Folded in: missing defaults on
+        `/booking/continue` and `/comments/share` (`'/'`); `LiveBootHarness`
+        gained an additive `app=` key (R6, below). Flagged, recommended as
+        one follow-up entry at the next CC-LAB number past Lanes 2-7's
+        reservations (0242-0247, so **CC-LAB-0248**, subject to the
+        orchestrator's lane-table re-derivation): (1) PFF ground truth lists
+        `/track.php`, `/add_to_cart.php`, `/cart.php`, `/checkout.php`, which
+        no `php_laravel` cell or site route serves (the product views even
+        post to `/add_to_cart.php`); (2) Huddle Hub `/messages/unfurl`
+        vulnerable twin 500s on a bare GET (needs a required-parameter 400
+        guard, not a default); (3) the illustrative `/cell/labgen-pl-0001`,
+        `-0007`, `-0009`, `-0011`, `-0013`, `-0014` cells 500 on a bare GET
+        (no ground-truth case; per-cell default decision needed).
+  - [x] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the
+        new navigability tests) green — done (see Effectiveness).
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
+        entry — done (FR-LAB-157/158 cross-references updated in place).
+  - [x] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241` — done.
+  - [x] Bug protocol (not in the original checklist; required by
+        `CLAUDE.md` because the step fixed a real crash class): `ERROR_LOG.md`
+        entry, `docs/bugs/BUG-0051-...md`, `PA-0053` (Lane 1's pre-assigned
+        BUG/PA numbers) — done; recurrence of `BUG-0037`, strengthens
+        `PA-0039`.
+- **Effectiveness (assessed 2026-09-25):** effective for the 3 scoped gaps;
+  2 different-class gaps flagged (above), not absorbed. Full non-slow suite
+  (`pytest -m "not slow"`): 2498 passed, 8 skipped, 195 deselected, 0 failed.
+  Full slow suite (`pytest -m slow`, every live-boot module): 192 passed,
+  3 skipped (2 Playwright-not-installed, 1 httpbin.org reachability), 2
+  xfailed (the strict follow-up xfails), 0 failed. Explicit per-file runs
+  (PA-0038): `test_labgen_conformance_live_boot.py` 7 passed;
+  `test_labgen_conformance_live_boot_mariadb.py` 6 passed;
+  `test_labgen_navigability_live_boot.py` 5 passed, 2 xfailed;
+  `test_labgen_php_laravel_lane1_gaps.py` (new, offline) 8 passed.
+  R1: every cell resolving to `html_body_echo` enumerated from the
+  manifests: the 4 tracked cells (contact, newsletter, profile x2) plus
+  `/search.php`'s XSS twins `LABGEN-PL-RP-0003`/`0004` and
+  `/example/profile`'s `LABGEN-PL-0005`/`0006`; those 4 take the
+  `DEFAULT_PAGE_TITLE` fallback, render fine, and their tests
+  (search-page, harder-shapes, tier1) re-ran green; none is a
+  `SqliBooleanStrategy` cell. R2: no test asserted the 500 as intended
+  (the only exact `query('id')` assertion is `/example/product`'s, which
+  keeps no default). R3: `id = 1` exists in both harnesses' `products`/
+  `posts` (SQLite `_SEED_SQL`; MariaDB `lab/sql/schema.sql`); bare-URL 200s
+  asserted live on both. R4: branch (b) — `browserauth` only attaches via
+  the Playwright engine (not installed here; `requests` engine has no
+  identity hook), and `LABGEN-MA-0003`/`0004` proved not session-gated
+  (sink degrades a missing session to `WHERE id = NULL`) and not in PFF's
+  ground truth; the test asserts the real anonymous response (public client
+  page 200; anonymous POST 200 writing no row). R5: every ground-truth URL
+  is reachable by `<a href>` (nav, home or `/catalog`); no form-only
+  endpoint needed a link. R6: `LiveBootHarness` did **not** serve a split
+  app's own site (it used PFF's skeleton site layer); fixed additively with
+  an `app=` key reusing `app_site.site_layer_files()`, offline-tested
+  byte-identical to `assemble_lab(app=...)`'s output. R7: measured deepest
+  ground-truth depth is 2 in every app; cap 4, asserted `< cap`.
+  Non-vacuous guards hard-coded from measurement (ground-truth points
+  24/4/3/3; crawled pages ≥ 40/8/6/6 against measured 63/10/8/8).
 
 ### CC-LAB-0240 — Browsable labs Lane 1 step 4: JSON→HTML conversion for PFF's own real pages (2026-09-25, FR-LAB-158, `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`)
 

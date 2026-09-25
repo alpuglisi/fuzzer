@@ -231,6 +231,20 @@ def test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload_mariadb() ->
                     harness, url, "id", found="1", not_found="999999", empty_text="Post not found."
                 )
 
+            # CC-LAB-0241 (§2a, R3): a bare URL with no `?id=` (the site
+            # nav's own link) falls back to the real page's `?? '1'` default
+            # and renders real seeded row 1 of `lab/sql/schema.sql` -- it
+            # used to concatenate `null` into the SQL and 500.
+            for url, row_text in (
+                (vuln_url, "Puppy Fort Deluxe"),
+                (secure_url, "Puppy Fort Deluxe"),
+                (served_url_for(cells["LABGEN-RPL-BLOGPOST"]), "Five signs your puppy has outgrown their fort"),
+                (served_url_for(cells["LABGEN-RPL-BLOGPOST-BOUND"]), "Five signs your puppy has outgrown their fort"),
+            ):
+                bare = harness.get(url)
+                assert bare.status == 200, (url, bare.status, bare.body[:500])
+                assert row_text in bare.body, (url, bare.body[:2000])
+
 
 @pytest.mark.slow
 def test_live_boot_g2_manifest_serves_real_listing_and_json_feed_mariadb() -> None:

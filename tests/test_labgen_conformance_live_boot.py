@@ -97,6 +97,16 @@ def _assert_found_not_found_delta(harness, url, param, *, found, not_found, empt
     )
 
 
+def _assert_in_site_layout(resp, title: str) -> None:
+    """CC-LAB-0241 (§2b): the response is a full page rendered inside the
+    shared `layouts.site` layout -- its `<title>`, its nav bar and its footer
+    -- never a bare `<div>` fragment."""
+    assert resp.body.lstrip().startswith("<!DOCTYPE html>"), resp.body[:300]
+    assert f"<title>{title}</title>" in resp.body, resp.body[:600]
+    assert '<a href="/search.php">Search</a>' in resp.body, resp.body[:2000]
+    assert "lab-only, authorized-testing target." in resp.body, resp.body[-600:]
+
+
 def _content_type(resp) -> str:
     """The response's Content-Type, looked up case-insensitively."""
     return {k.lower(): v for k, v in resp.headers.items()}.get("content-type", "")
@@ -115,9 +125,9 @@ def test_live_boot_forms_manifest_serves_real_pages() -> None:
     assert all(emitter.supports(c.vuln_class, c.sink_context) for c in cells)
 
     with LiveBootHarness(emitter, cells) as harness:
-        for cell, field, marker in (
-            (cells[0], "message", "<script>alert(1)</script>"),
-            (cells[1], "email", "<script>alert(2)</script>"),
+        for cell, field, marker, title in (
+            (cells[0], "message", "<script>alert(1)</script>", "Contact us"),
+            (cells[1], "email", "<script>alert(2)</script>", "Newsletter"),
         ):
             url = served_url_for(cell)
             resp = harness.post(url, data={field: marker})
@@ -127,6 +137,9 @@ def test_live_boot_forms_manifest_serves_real_pages() -> None:
             # cell's own `html_entity_escape` transform is supposed to grant.
             assert marker not in resp.body, (cell.cell_id, resp.body)
             assert "&lt;script&gt;" in resp.body, (cell.cell_id, resp.body)
+            # CC-LAB-0241 (§2b): the echo response renders inside the shared
+            # site layout, not as a bare `<div>` fragment.
+            _assert_in_site_layout(resp, title)
 
 
 @pytest.mark.slow
@@ -212,6 +225,20 @@ def test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload() -> None:
         assert "Welcome to the Fort" in blog_vuln.body, blog_vuln.body[:2000]
         assert "Welcome to the Fort" not in blog_secure.body, blog_secure.body[:2000]
         assert "Post not found." in blog_secure.body, blog_secure.body[:2000]
+
+        # CC-LAB-0241 (§2a): a bare URL with no `?id=` -- exactly what the
+        # site nav links to -- falls back to the real page's own `?? '1'`
+        # default and renders seeded row 1, on every twin; it used to
+        # concatenate `null` into the SQL and 500.
+        for url, row_text in (
+            (vuln_url, "Chew Toy"),
+            (secure_url, "Chew Toy"),
+            (blog_vuln_url, "Welcome to the Fort"),
+            (blog_secure_url, "Welcome to the Fort"),
+        ):
+            bare = harness.get(url)
+            assert bare.status == 200, (url, bare.status, bare.body[:500])
+            assert row_text in bare.body, (url, bare.body[:2000])
 
 
 @pytest.mark.slow
@@ -504,6 +531,11 @@ def test_live_boot_g4_manifest_stored_bio_round_trips_write_then_read() -> None:
         assert "&lt;script&gt;alert(&#039;secure-g4&#039;)&lt;/script&gt;" in read_resp2.body, (
             read_resp2.body[:800]
         )
+        # CC-LAB-0241 (§2b): `/profile.php` (the page every `/edit_profile.php`
+        # POST redirects to) renders inside the shared site layout on both
+        # twins, not as a bare `<div class="bio">` fragment.
+        _assert_in_site_layout(read_resp, "Profile")
+        _assert_in_site_layout(read_resp2, "Profile")
 
 
 @pytest.mark.slow

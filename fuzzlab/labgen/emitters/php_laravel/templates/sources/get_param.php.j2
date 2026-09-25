@@ -1,2 +1,6 @@
 // Query-string parameter -> local variable (Laravel Request accessor).
+{% if default_value is defined %}
+${{ var_name }} = $request->query('{{ param_name }}', '{{ default_value }}');
+{% else %}
 ${{ var_name }} = $request->query('{{ param_name }}');
+{% endif %}
