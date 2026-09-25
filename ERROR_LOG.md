@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — CRAWL/CORE: bare `requests.Session()`s sent default UA, causing 200-but-0-links against real external targets (fixed, BUG-0059/PA-0061)
+
+- **Symptom:** a crawl from the web UI against a real external, authorized test target
+  returned `200 OK` for the start URL but discovered 0 links, leaving the crawl map
+  empty with no error.
+- **Root cause:** `LocalSpider.__init__` (and, found by a wider sweep after an
+  incomplete first pass, `ContentFetcher`/`RequestsSender`/`RequestsProbeSender`/
+  `RequestsCorrelatingSender`/the session-manager's login-handshake fetcher) all created
+  a bare `requests.Session()` with no `User-Agent` override, so every request went out
+  as `requests`' own default (`python-requests/<version>`) — trivially fingerprintable,
+  and several real external sites serve reduced/interstitial content to it instead of
+  real markup. The local lab never surfaces this since it doesn't discriminate by UA.
+- **Remediation:** added `fuzzlab.core.http.DEFAULT_USER_AGENT` (a realistic
+  Chrome-on-Linux UA string) and applied it to every bare `requests.Session()` found
+  across the whole `fuzzlab/` package (6 call sites).
+- **Status:** Fixed (offline-verified; live re-verification against the operator's own
+  external target is a caller follow-up — this sandbox's outbound network is
+  proxied/restricted).
+
+---
+
 ## 2026-09-25 — LAB: `podman-compose ... --build` hung indefinitely on unqualified base images (fixed, BUG-0058/PA-0060)
 
 - **Symptom:** `PFF_PROFILE=apps ./labctl.sh up` hung forever partway through the build,

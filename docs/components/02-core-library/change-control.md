@@ -3,6 +3,22 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0024 — Add shared `DEFAULT_USER_AGENT` constant to `fuzzlab/core/http.py` (2026-09-25, BUG-0059/PA-0061)
+- **Change:** adds `DEFAULT_USER_AGENT` (a realistic Chrome-on-Linux UA string) to
+  `fuzzlab/core/http.py`, so every tool that opens its own bare `requests.Session()`
+  sets the same header from one place instead of a hand-copied literal per call site
+  (PA-0027).
+- **Why:** `requests`' own default UA (`python-requests/x.y`) caused a real,
+  live-reported failure (crawl returns `200` but `0` links against a real external
+  target) — see `CC-CRAWL-0009`/`BUG-0059` for the full incident; this entry is CORE's
+  own half, the shared constant 6 call sites across `fuzzlab/tools/`,
+  `fuzzlab/greybox/`, and `fuzzlab/session/` now import and apply.
+- **Verification:** offline only — no existing CORE test exercises `http.py`'s module
+  constants directly; covered indirectly by `tests/test_spider_scope.py` (unaffected)
+  continuing to pass after the importing side (`spider.py`) changed.
+- **Scope:** additive constant only, no change to `HttpClient`'s own behavior/contract
+  (`requirements.md` unaffected).
+
 ### CC-CORE-0023 — Map `csv_formula_injection` to the new `csv-formula-injection` category in `_VULN_TO_CATEGORY` (FR-CORE-13) (2026-09-23)
 - Change: Adds one entry to `fuzzlab/core/runmode.py`'s `_VULN_TO_CATEGORY` dict: `"csv_formula_injection": "csv-formula-injection"`. Mirrors `CC-CORE-0022`'s own `price_integrity_bypass` precedent: a genuinely new rule+strategy pair (`R-CSV-FORMULA-INJECTION`/`CsvFormulaInjectionStrategy`, built in `CC-FUZZ-0030` — that entry's own record has the full review-gate history: three blocking adequacy-review findings, all fixed pre-implementation) was needed, not a reuse of an existing one. This entry is the CORE-owned half: the one dict-entry mapping that lets `fuzzlab.harness.pipeline`'s own `evaluate()`/`category_to_oracle_class()` dispatch reach the new strategy at all for ground-truth-sourced runs.
 

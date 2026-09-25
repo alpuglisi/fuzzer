@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Crawler/CORE: fix 200-but-0-links against real external targets, BUG-0059/PA-0061/CC-CRAWL-0009)
+- `LocalSpider` and 5 other tools (`ContentFetcher`, `blind_sqli_fuzzer`'s
+  `RequestsSender`, `RequestsProbeSender`, `RequestsCorrelatingSender`, the
+  session-manager's login-handshake fetcher) each created a bare
+  `requests.Session()` with no `User-Agent`, so every request went out as
+  `requests`' own fingerprintable default. Several real external sites serve
+  reduced/interstitial content to that default instead of real markup (`200
+  OK`, but no links to find) — live-reported running a crawl from the web UI
+  against a real external authorized test target. Added a shared
+  `fuzzlab.core.http.DEFAULT_USER_AGENT` and applied it everywhere this
+  pattern occurred. See `BUG-0059`/`PA-0061`.
+
 ## 2026-09-25 (Lane 7 follow-up: fully-qualify base images to stop Podman's short-name-resolution hang, BUG-0058/PA-0060/CC-LAB-0249)
 - Fully qualified every base-image reference (`FROM`, `COPY --from=<image>`, compose
   `image:`) across `lab/web*.Dockerfile`,

@@ -261,7 +261,11 @@ def main(argv=None):
                                            store_path=args.store)
         sender = SeamSender(client, args.identity)
     else:
-        sender = RequestsSender(requests.Session())
+        # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
+        from fuzzlab.core.http import DEFAULT_USER_AGENT
+        _session = requests.Session()
+        _session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        sender = RequestsSender(_session)
 
     try:
         baseline = establish_baseline(

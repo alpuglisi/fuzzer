@@ -110,7 +110,11 @@ class RequestsCorrelatingSender:
                  id_factory: Callable[[], str] | None = None, session=None):
         import requests
         self._requests = requests
-        self._session = session or requests.Session()
+        if session is None:
+            from fuzzlab.core.http import DEFAULT_USER_AGENT
+            session = requests.Session()
+            session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        self._session = session
         self._header = header
         self._timeout = timeout
         self._cookie = cookie

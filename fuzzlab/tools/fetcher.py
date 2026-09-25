@@ -284,7 +284,10 @@ class ContentFetcher:
     def __init__(self, engine="auto", timeout_ms=10000, identity=None, seam_client=None,
                  session_manager=None, auth_base_url=None):
         self.timeout_ms = timeout_ms
+        # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
+        from fuzzlab.core.http import DEFAULT_USER_AGENT
         self.session = requests.Session()
+        self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
         # When an identity + seam client are given, the static-fetch path routes
         # through the core HTTP seam so pages are fetched authenticated (Option A).
         # The Playwright (browser) path authenticates by injecting the session

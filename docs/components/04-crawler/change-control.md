@@ -3,6 +3,30 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0009 — Default browser User-Agent, so real external targets don't silently serve 0-link content (2026-09-25, BUG-0059/PA-0061)
+- **Change:** `LocalSpider.__init__`'s `requests.Session()` now sets a realistic
+  Chrome-on-Linux `User-Agent` (`fuzzlab.core.http.DEFAULT_USER_AGENT`, a new shared
+  constant) instead of leaving `requests`' own default (`python-requests/x.y`). The
+  Playwright/rendered engine is unaffected (a real headless Chromium already sends an
+  authentic browser UA).
+- **Why:** live-reported running a crawl from the web UI against a real external,
+  authorized test target — `200 OK` on the start URL, 0 links discovered. Root cause: the
+  default UA is trivially fingerprintable, and several real external sites serve
+  reduced/interstitial content to it instead of real markup; the local lab never
+  surfaces this since it doesn't discriminate by UA. Full RCA:
+  `docs/bugs/BUG-0059-spider-default-ua-zero-links-external-targets.md`. Preventive
+  action: `PA-0061`. The same sweep found and fixed 5 other bare, UA-unset
+  `requests.Session()` instances across the codebase (`fetcher.py`,
+  `blind_sqli_fuzzer.py`, `probesender.py`, `greybox/run.py`, `session/manager.py`) —
+  see the CORE component's own log for the shared constant this entry and those all
+  route through.
+- **Verification:** offline — `tests/test_spider_scope.py`'s 12 tests pass unchanged.
+  Live re-verification against the operator's own external target that originally
+  showed 0 links is the operator's own follow-up (this sandbox's outbound network is
+  proxied/restricted and cannot reach arbitrary external hosts).
+- **Scope:** no interface/contract change (`requirements.md` unaffected) — an HTTP
+  client fidelity fix, not a behavior/scope change to what the crawler follows.
+
 ### CC-CRAWL-0008 — Scope link-following to the start URL's host, not a hardcoded loopback allowlist (2026-09-24, BUG-0050/PA-0052)
 - Change: `fuzzlab/tools/spider.py` — replaced `LocalSpider._is_local(url)` (which
   followed a link only if its hostname was `localhost`/`127.0.0.1`) with

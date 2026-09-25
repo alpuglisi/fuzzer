@@ -18,6 +18,17 @@ from urllib.parse import urlparse
 
 from fuzzlab.core.budget import RequestBudget
 
+# Shared default User-Agent for every tool that opens a bare `requests.Session()`
+# (crawler, auditor, blind-SQLi fuzzer). `requests`' own default
+# ("python-requests/x.y") is trivially fingerprintable, and several real external
+# targets serve reduced/interstitial content to it instead of real markup
+# (BUG-0059) -- a single shared constant here means fixing or rotating it never
+# needs a per-tool hand-maintained copy (PA-0027).
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 class OutOfScope(RuntimeError):
     """Raised when a request targets a host outside the configured scope."""

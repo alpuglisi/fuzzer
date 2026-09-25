@@ -861,3 +861,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   with a registry host, not a bare repository name (build-stage references like
   `--from=gen`/`--from=<stage-name>` are not images and are exempt). (from BUG-0058)
 
+- **PA-0061** — Every bare `requests.Session()` this project creates to send traffic to a
+  caller-supplied (possibly non-lab) target must set a realistic browser `User-Agent`
+  (`fuzzlab.core.http.DEFAULT_USER_AGENT`), never rely on `requests`' own default
+  (`python-requests/x.y`). Several real external targets serve reduced/interstitial
+  content (still `200 OK`) to that default UA instead of real markup, which silently
+  breaks link discovery, oracle confirmation, or coverage correlation with no error
+  (`BUG-0059`) — the local lab never surfaces this since it doesn't discriminate by UA,
+  so this class is only ever caught against a real external target. When adding a new
+  tool that opens its own `requests.Session()`, set this header at construction, and when
+  sweeping for this bug class, grep the **whole** `fuzzlab/` package for
+  `requests\.Session\(\)`, not just the directory the original report came from — this
+  bug's own first sweep pass wrongly asserted two files were already fixed without
+  checking, then missed three more instances entirely until a full-package grep was
+  actually run. (from BUG-0059)
+

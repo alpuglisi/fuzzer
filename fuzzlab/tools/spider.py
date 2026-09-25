@@ -114,7 +114,16 @@ class LocalSpider:
             self.storage.reset()
 
         # Using a Session enables connection pooling for the static engine.
+        # Set a realistic browser User-Agent (BUG-0059): `requests`' default
+        # ("python-requests/x.y") is trivially fingerprintable, and several
+        # real external targets serve a stripped-down/interstitial page (200
+        # OK, no <a href> tags) to it instead of real markup -- a live-observed
+        # crawl-returns-0-links failure this default UA reproduces and a real
+        # browser UA does not. The local lab never surfaced this since it
+        # doesn't discriminate by UA.
+        from fuzzlab.core.http import DEFAULT_USER_AGENT
         self.session = requests.Session()
+        self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
 
         # Resolve which engine to use.
         if engine == "auto":
