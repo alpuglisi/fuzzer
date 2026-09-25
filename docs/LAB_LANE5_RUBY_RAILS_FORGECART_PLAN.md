@@ -5,9 +5,10 @@ Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
 the proposing agent, after 5 rounds; see §8). Round 5 returned ACCURATE /
 ADEQUATE, with 1 trivial sequencing fix (O5 split into O5a/O5b) that the
 adequacy reviewer explicitly judged needed no further round. It is applied.
-**Next step: the `CC-LAB-0245` change-control entry's own 2-reviewer
-gate.** This plan's convergence does not by itself authorize implementation. The orchestrating
-session ran the review rounds (§8). The original drafting-time status is
+**Update 2026-09-25:** `CC-LAB-0245` cleared its own 2-reviewer gate (3/3,
+after 2 rounds). Implementation is therefore authorized; see that entry's
+Deliverables and Effectiveness for what was done. The orchestrating session
+ran every review round (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
 `BUG-0055` / `PA-0057`, per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table.

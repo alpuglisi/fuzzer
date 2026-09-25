@@ -5,16 +5,23 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
-**Status: DRAFT. This entry's own 2-reviewer gate is in round 1.**
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents, dispatched by the orchestrating session,
+plus the proposing agent, after 2 rounds). **Implementation authorized.**
 
 - **Round 1 accuracy:** NOT ACCURATE, 1 trivial fix. A stale sentence in
   this status paragraph contradicted the plan's convergence; the paragraph
-  has been rewritten.
+  was rewritten.
 - **Round 1 adequacy:** NOT ADEQUATE, 1 gap. The numbering-collision
   contingency covered CC-LAB and BUG/PA but omitted FR-LAB. Fixed in the
   Impact section and in the final Deliverables bullet (the latter mirrored
   word for word into plan §6).
-- **Next:** round 2 of both accuracy and adequacy.
+- **Round 2 accuracy:** ACCURATE. Both fixes confirmed. The post-convergence
+  plan §6 edit was confirmed as non-substantive bookkeeping, matching Lane 2's
+  precedent.
+- **Round 2 adequacy:** conditional pass with 1 trivial fix. This status
+  line still said "round 1"; it has been corrected. The reviewer judged this
+  administrative polish, not a sign of unresolved risk.
 
 The underlying plan **converged 3/3 on 2026-09-25 after 5 rounds**, with
 reviewers dispatched by the orchestrating session. Round 5 was its last
@@ -40,9 +47,9 @@ Following `docs/MULTI_AGENT_ORCHESTRATION.md` §4, the agent did not work
 around the denial and did not substitute a self-review. No reviewer
 agreement existed at that point, and none was claimed. The orchestrating
 session then dispatched the reviewers itself (see the plan's §8).
-**Implementation is not authorized** until this entry clears its own
-2-reviewer gate (3/3); the plan already has. This entry condenses the plan into the change-control
-template; the plan holds the full detail.
+Implementation was held until this entry cleared its own 2-reviewer gate,
+which it now has (see above). This entry condenses the plan into the
+change-control template; the plan holds the full detail.
 
 - **Change:** converts ForgeCart from JSON, plain-text and bare-fragment
   responses to real browsable HTML. ForgeCart is `ruby_rails`' existing,
