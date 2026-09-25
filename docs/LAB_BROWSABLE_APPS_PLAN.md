@@ -102,6 +102,22 @@ product being modelled. When unsure, choose `page`.
    applies to every session-gated cell in a split app; it does not apply to
    `LABGEN-MA-0003`/`0004` (built into the default merged PFF build, which
    has its own login flow from step 1).
+
+   **R6 generalization (Lane 3, CC-LAB-0243, 2026-09-25):** the same
+   acceptance rule extends to any owner-scoped route in **any** app whose
+   lab models caller identity with a stand-in header/token rather than a
+   real login flow (`go_net_http`'s LoopCast being the first instance:
+   `/channels/analytics`/`/channels/subscribers`, gated on
+   `X-Broadcaster-Id`), but only when **all four** conditions hold: (i) the
+   route's absent-input declaration is a handled `401` returned before any
+   sink runs; (ii) that `401` is rendered identically on both twins; (iii) a
+   request that *does* carry the identifier keeps the modelled
+   vulnerable/secure behavior completely unchanged; and (iv) the lane
+   records its own "R6 sign-off" in its change-control entry's requirements
+   doc, naming the specific routes it applies to. It does not, by itself,
+   cover any other cell — in particular it still does not cover
+   `LABGEN-MA-0003`/`0004` (PFF has a real login flow, so this rule's
+   premise does not hold there).
 7. **Detection must not regress.** After conversion, every ground-truth point
    that was detected before is still detected (live-boot differential tests +
    the existing oracle strategy tests), and `fp=0` on secure twins. A
@@ -121,7 +137,7 @@ additionally brings up every other app.
 | Huddle Hub | php_laravel | 8083 |
 | Booking clone | php_laravel | 8084 |
 | PicTrail | django | 8085 |
-| Twitch clone | go_net_http | 8086 |
+| LoopCast (Twitch clone) | go_net_http | 8086 |
 | TrackerNest | spring_boot | 8087 |
 | Netflix clone | spring_boot | 8088 |
 | Expedia clone | spring_boot | 8089 |
@@ -142,7 +158,7 @@ each in an isolated worktree. Lane 7 integrates.
 |---|---|---|---|---|---|
 | 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (5 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking, detailed implementation + risk plan in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` — done, except the spider-based navigability acceptance test; 0240 JSON→HTML conversion for PFF's *own* real pages (`/product.php`/`/products.php`/`/search.php`/`/blog_post.php`/`/register.php`), detailed implementation + risk plan in `docs/LAB_PFF_JSON_TO_HTML_PLAN.md` — done (plus `/login.php`'s failure tail); 0241 closing the 3 remaining tracked gaps (spider-based navigability acceptance test; bare-fragment layout on `/contact.php`/`/newsletter.php`/`/edit_profile.php`/`/profile.php`; missing-`?id=` 500 on `/product.php`/`/blog_post.php`), detailed implementation + risk plan in `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md` — done 2026-09-25; the crawl also surfaced 2 missing defaults, fixed in the same step, and 2 different-class gaps flagged as strict-xfail follow-ups: 4 PFF ground-truth URLs no cell serves (`/track.php`/`/add_to_cart.php`/`/cart.php`/`/checkout.php`) and Huddle Hub's `/messages/unfurl` bare-GET 500) | 0237–0241 | 155–159 | 0047 / 31 | 0051 / 0053 |
 | 2 | django: PicTrail (1 step, one CC-LAB: 0242 homepage + shared layout + `/catalog`, JSON→HTML conversion of `/post`/`/post/comments`/`/settings`/`/explore`/`/inbox`, `/upload` client page for the `/upload/link-preview` api, twin-suffixed secure-twin URLs (R1 branch (a)), ground-truth `rendering` correction, spider-based navigability test, detailed plan in `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md` — done 2026-09-25; the PA-0053 bare-GET sweep found 5 crashing routes, fixed as BUG-0052/PA-0054; only 1 CC-LAB and 1 FR-LAB number used, so Lanes 3-7 are not bumped; no different-class follow-up flagged) | 0242 | 160 (161 unused) | — (unused) | 0052 / 0054 |
-| 3 | go_net_http: Twitch clone | 0243 | 162–163 | 0049 / 33 | 0053 / 0055 |
+| 3 | go_net_http: LoopCast (Twitch clone) — homepage + shared layout, JSON/redirect→HTML client pages for every route, twin-suffixed secure-twin URLs (R1 branch (a)), realistic URLs replacing `/generated/{cell_id}` (R2), `/dashboard` site page (R7), spider-based navigability test, detailed plan in `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md` — done 2026-09-25; the PA-0053/PA-0054 bare-request sweep found 3 crashing routes, fixed as BUG-0053/PA-0055 (a completion of PA-0054's own named sweep, not a new rule); the export-directory-absent finding (R9) was missing scaffolding, not a defect, seeded with no bug entry; only 1 CC-LAB and 1 FR-LAB number used, so Lanes 4-7 are not bumped; point 6 below carries this lane's R6 generalization | 0243 | 162 (163 unused) | 0049 / 33 | 0053 / 0055 |
 | 4 | spring_boot: TrackerNest, Netflix, Expedia — Lane 1 step 3's `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` (R4) found `spring_boot`'s sink/transform templates (e.g. `no_ownership_check`) are separate files from `php_laravel`'s own, so this lane starts from `php_laravel`'s response format with no inherited constraint — apply the same `page`/`api` classification test independently per sink family, don't copy-render-format-verbatim | 0244 | 164–165 | 0050 / 34 | 0054 / 0056 |
 | 5 | ruby_rails: ForgeCart | 0245 | 166–167 | 0051 / 35 | 0055 / 0057 |
 | 6 | node_express (MeadowMart) + python_fastapi sample | 0246 | 168–169 | 0052 / 36 | 0056 / 0058 |

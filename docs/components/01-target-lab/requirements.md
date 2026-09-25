@@ -5849,6 +5849,71 @@ lane) can submit a payload as
   the vulnerable URL and at its twin's URL (live, all 6 pages). Ground truth
   still names only the vulnerable cell.
 
+- **FR-LAB-162** *(Browsable Labs Lane 3 -- LoopCast (Twitch clone),
+  `go_net_http`; `CC-LAB-0243`, 2026-09-25,
+  `docs/LAB_LANE3_GO_NET_HTTP_TWITCH_PLAN.md`).* LoopCast is a browsable
+  HTML site. Four parts:
+  1. **Homepage + site layer.** A new, hand-written, checked-in
+     `stack/skeleton/site.go`: `siteCSS` + `navHTML()` + `renderPage(w,
+     status, title, bodyHTML)` (shared layout: header/nav/main/footer,
+     inline CSS, no request-derived interpolation, byte-identical for both
+     twins), `homepageHandler` at `GET /{$}` (R5: an exact match, since a
+     bare `GET /` is a catch-all subtree under Go 1.22+ `ServeMux`) linking
+     every real page, and `sitePage(routePath)` serving one of 6 static
+     forms for the `form_on_get` POST routes, keyed by the route's
+     canonical path so a route's vulnerable and secure-twin registrations
+     render byte-identically (R1). `registerSiteRoutes` also serves
+     `/dashboard` (R7, below).
+  2. **Realistic URLs (R1/R2).** `served_url_for(cell)`
+     (`__init__.py:509-524`), mirroring `django`'s own: a vulnerable cell
+     (`_REAL_PAGE_CELL_IDS`, 14 IDs) at its manifest `route.path`; its
+     secure twin (`_REAL_PAGE_TWIN_CELL_IDS`, 14 IDs) at
+     `_twin_url_for(route.path, cell_id)`. Ground truth and every test's
+     literal `/generated/labgen-go-NNNN` references (193 occurrences
+     across 15 files) were mechanically replaced with this mapping, never
+     by hand.
+  3. **Absent-input contract (PA-0053/PA-0054).** `ABSENT_INPUT_KINDS`
+     (`default`, `required_400`, `default_caller_else_401`,
+     `auth_reject_401`, `form_on_get`, `no_input`) declared on every one of
+     the 16 named routes, checked offline
+     (`tests/test_labgen_go_net_http_browsable.py`) and live, both the
+     bare-`GET` and the route's own-method bare-request sweep
+     (`tests/test_labgen_go_net_http_navigability_live_boot.py`). Found and
+     fixed 3 crashing routes as `BUG-0053`/`PA-0055` (a completion of
+     `PA-0054`'s own named sweep for this emitter, not a new rule).
+  4. **Ground truth + navigability.** New
+     `tests/test_labgen_go_net_http_navigability_live_boot.py` crawls the
+     whole LoopCast build from `/` (`LocalSpider`, `requests` engine,
+     depth cap 4 vs. measured 1), with hard-coded non-vacuous guards (14
+     ground-truth points, >= 16 crawled pages), asserting every
+     ground-truth URL is discovered, `GET /` = 200, no crawled or served
+     route answers 5xx, each ground-truth URL's own-method bare status
+     matches its declared `absent_input`, and every real page is
+     byte-identical at its vulnerable and secure-twin URL (R1). The crawl
+     itself found and closed two real gaps the offline checks could not
+     see: 4 ground-truth URLs were not linked from anywhere (added to the
+     nav), and `/auth/login-redirect`'s own declared default target
+     (`/dashboard`) did not exist as a route (added, R7).
+
+  **R1 sign-off (2026-09-25): branch (a).** Go 1.22's `net/http.ServeMux`
+  accepts the twin-suffixed pattern with no conflict at startup (confirmed
+  live, all 28 cells booted in one process); no fallback to branch (b) was
+  needed.
+
+  **R6 sign-off (2026-09-25):** `/channels/analytics` and
+  `/channels/subscribers` (both twins) are the routes this lane's R6
+  generalization (`docs/LAB_BROWSABLE_APPS_PLAN.md` point 6) applies to --
+  each answers a bare anonymous `GET` with a handled `401` before any
+  sink runs, identical on both twins, and a request naming a real
+  `channel_id` is unaffected (confirmed live).
+
+  **R9 (export directory):** `static/clips_exports` did not exist in a
+  fresh boot. The bare-request case is `BUG-0053`'s own `required_400`
+  fix (independent of whether the directory exists); a present, legitimate
+  filename with the directory still absent is missing lab scaffolding, not
+  a defect (per R9's decision rule) -- seeded one sample file in the
+  skeleton, no bug entry.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

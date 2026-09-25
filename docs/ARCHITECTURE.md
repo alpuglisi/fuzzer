@@ -424,6 +424,22 @@ tracked in the requirements files, not here.
   (independent random marker lengths, cross-contamination-checked) —
   needing no `R-SSTI` rule change, since that rule already nominates on
   `sink_context`/location, not per-mechanism.
+  **LoopCast is browsable (`CC-LAB-0243`, Browsable Labs Lane 3):** the
+  `go_net_http` skeleton now carries a checked-in site layer
+  (`stack/skeleton/site.go`: shared `renderPage` layout, homepage `/`,
+  `/dashboard`, and `sitePage` client pages for the 6 `form_on_get`
+  routes); the 2 owner-scoped `access_control` pages
+  (`/channels/analytics`/`/channels/subscribers`) render real,
+  HTML-escaped HTML inside the layout; secure twins are served at
+  twin-suffixed URLs (`served_url_for`, `/webhooks/eventsub.labgen-go-0002`);
+  every named route declares an absent-input behavior (`BUG-0053`/
+  `PA-0055`, completing `PA-0054`'s own named sweep for this emitter); and
+  `tests/test_labgen_go_net_http_navigability_live_boot.py` crawls the
+  whole build from `/`. `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6 gained
+  an "R6 generalization" paragraph, first applied here, extending its
+  owner-scoped-page acceptance rule beyond `php_laravel`'s split apps to
+  any app whose lab models identity with a stand-in rather than a login
+  flow.
   `spring_boot`'s hosted Netflix cell has similarly grown to
   **10 real pages** (`CC-LAB-0173`, `0179`, `0187`/`0188`/`0191`/`0192`/
   `0193`/`0194`/`0195`) — insecure deserialization (2 instances), XXE,
