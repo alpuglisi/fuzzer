@@ -2,8 +2,26 @@
   "version": 1,
   "target": "php_laravel",
   "points": [
-    { "url": "/cell/labgen-hhb-0001", "method": "POST", "param": "X-Signature", "location": "header", "rendering": "server-json" },
-    { "url": "/cell/labgen-hhb-0003", "method": "GET", "param": "url", "location": "query", "rendering": "server-json" },
-    { "url": "/cell/labgen-hhb-0005", "method": "GET", "param": "triggerWord", "location": "query", "rendering": "server-json" }
+    {
+      "url": "/webhooks/events",
+      "method": "POST",
+      "param": "X-Signature",
+      "location": "header",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/messages/unfurl",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/integrations/outgoing-webhook",
+      "method": "GET",
+      "param": "triggerWord",
+      "location": "query",
+      "rendering": "server-json"
+    }
   ]
 }

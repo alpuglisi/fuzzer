@@ -114,10 +114,12 @@ def test_spel_injection_arithmetic_alone_would_have_been_a_false_positive():
 def test_price_integrity_bypass_confirmed_when_client_amount_echoed_back():
     class TrustedAmountSender:
         """Models the real vulnerable twin (`LABGEN-BC-0005`, empty transform
-        pipeline): the submitted amount is echoed back verbatim in the JSON
-        response, unmodified."""
+        pipeline): the submitted amount is echoed back verbatim in the
+        checkout confirmation page's `data-charged-amount` attribute
+        (`CC-LAB-0239`/`CC-FUZZ-0047`: a real HTML page since this step,
+        not the JSON body this fixture modeled before it)."""
         def send(self, url, param, value, timing=False, method="POST", location="body"):
-            return Probe(200, f'{{"charged_amount":"{value}"}}', headers={})
+            return Probe(200, f'<p data-charged-amount="{value}">Charged: ${value}</p>', headers={})
     v = PriceIntegrityBypassStrategy().confirm(_cand("price-integrity-bypass"), TrustedAmountSender())
     assert v is not None and v.confirmed and v.mechanism == "trusted-client-amount-echo"
 
@@ -128,7 +130,7 @@ def test_price_integrity_bypass_not_confirmed_when_server_recomputes_amount():
         the response always reflects the server's own rate-table lookup,
         regardless of what the client submitted."""
         def send(self, url, param, value, timing=False, method="POST", location="body"):
-            return Probe(200, '{"charged_amount":"89.00"}', headers={})
+            return Probe(200, '<p data-charged-amount="89.00">Charged: $89.00</p>', headers={})
     assert PriceIntegrityBypassStrategy().confirm(_cand("price-integrity-bypass"), RateTableSender()) is None
 
 
@@ -149,7 +151,7 @@ def test_price_integrity_bypass_canary_cannot_collide_with_the_real_rate_table()
 
         def send(self, url, param, value, timing=False, method="POST", location="body"):
             self.last_value = value
-            return Probe(200, f'{{"charged_amount":"{value}"}}', headers={})
+            return Probe(200, f'<p data-charged-amount="{value}">Charged: ${value}</p>', headers={})
 
     for _ in range(50):
         strategy = PriceIntegrityBypassStrategy()

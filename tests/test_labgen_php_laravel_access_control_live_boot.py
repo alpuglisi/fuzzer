@@ -97,15 +97,22 @@ def test_access_control_vulnerable_twin_leaks_another_users_private_photo() -> N
         # user is honored anyway.
         resp = harness.request("GET", url, params={"id": str(SEED_PHOTO_A_ID)}, headers={"Cookie": cookie_b})
         assert resp.status == 200, (resp.status, resp.body[:500])
-        assert f'"id":{SEED_PHOTO_A_ID}' in resp.body
-        assert '"owner_id":1' in resp.body, resp.body
-        assert "User A's private beach photo" in resp.body, resp.body
+        # CC-LAB-0239: the page is now real HTML (`site.photo-view.blade.php`),
+        # not JSON -- these substrings are what that template actually emits.
+        # The apostrophe is Blade's own `{{ }}` HTML-escaping of the stored
+        # caption (`&#039;`), not a literal quote -- the caption isn't this
+        # cell's own taint source, so escaping it is simply correct, real
+        # HTML output, not a security-relevant choice this test needs to
+        # weaken.
+        assert f"Photo #{SEED_PHOTO_A_ID}" in resp.body, resp.body
+        assert "Owner:</strong> 1" in resp.body, resp.body
+        assert "User A&#039;s private beach photo" in resp.body, resp.body
 
         # Sanity: user B can also fetch their own photo through this same
         # (never-checking) twin.
         resp_own = harness.request("GET", url, params={"id": str(SEED_PHOTO_B_ID)}, headers={"Cookie": cookie_b})
         assert resp_own.status == 200, (resp_own.status, resp_own.body[:500])
-        assert '"owner_id":2' in resp_own.body, resp_own.body
+        assert "Owner:</strong> 2" in resp_own.body, resp_own.body
 
 
 @pytest.mark.slow
@@ -125,15 +132,15 @@ def test_access_control_secure_twin_rejects_cross_user_access_but_allows_own() -
         # whether id=1 exists at all).
         resp = harness.request("GET", url, params={"id": str(SEED_PHOTO_A_ID)}, headers={"Cookie": cookie_b})
         assert resp.status == 404, (resp.status, resp.body[:500])
-        assert "User A's private beach photo" not in resp.body
+        assert "User A&#039;s private beach photo" not in resp.body
 
         # User B fetches their OWN photo through the same secure twin: a
         # real 200 -- proving this is a real ownership check, not a
         # blanket deny.
         resp_own = harness.request("GET", url, params={"id": str(SEED_PHOTO_B_ID)}, headers={"Cookie": cookie_b})
         assert resp_own.status == 200, (resp_own.status, resp_own.body[:500])
-        assert '"owner_id":2' in resp_own.body, resp_own.body
-        assert "User B's private beach photo" in resp_own.body, resp_own.body
+        assert "Owner:</strong> 2" in resp_own.body, resp_own.body
+        assert "User B&#039;s private beach photo" in resp_own.body, resp_own.body
 
 
 @pytest.mark.slow

@@ -6,7 +6,16 @@
    flags on this existing complexity rather than new composition modules on
    purpose -- see `php_laravel._SESSION_LOGIN_KEY`. Both twins of a minimal
    pair render the identical tail, so the pair still differs only in its
-   transform region. #}
+   transform region.
+
+   `html_row_view` (CC-LAB-0239, docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md step
+   3): a fourth tail, for a page whose sink produces a `$rows` associative
+   array that should render as a real HTML page instead of the default JSON
+   body -- `return view('<name>', $rows)` hands every `$rows` key to the
+   named Blade view as its own variable. The view itself is hand-authored
+   (not generated), shared byte-for-byte by both twins of the cell pair
+   (only the data differs), so it cannot itself leak which twin served the
+   request (leakage/fingerprint-independence, R5). #}
     public function {{ method_name }}(Request $request)
     {
 {{ body }}
@@ -18,6 +27,8 @@
             return redirect('{{ session_login.redirect_to }}');
         }
         return response()->json(['error' => '{{ session_login.error_message }}'], 401);
+{% elif html_row_view is defined %}
+        return view('{{ html_row_view }}', $rows);
 {% elif register_insert is defined %}
         if ($rows) {
             return response()->json(['error' => '{{ register_insert.taken_message }}'], 409);

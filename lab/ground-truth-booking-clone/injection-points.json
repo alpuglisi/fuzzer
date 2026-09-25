@@ -3,21 +3,21 @@
   "target": "php_laravel",
   "points": [
     {
-      "url": "/cell/labgen-bc-0001",
+      "url": "/booking/continue",
       "method": "GET",
       "param": "return_to",
       "location": "query",
       "rendering": "server"
     },
     {
-      "url": "/cell/labgen-bc-0003",
+      "url": "/extranet/export",
       "method": "GET",
       "param": "label",
       "location": "query",
       "rendering": "server"
     },
     {
-      "url": "/cell/labgen-bc-0005",
+      "url": "/booking/checkout",
       "method": "POST",
       "param": "amount",
       "location": "body",

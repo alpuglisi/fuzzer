@@ -4,7 +4,7 @@
   "cases": [
     {
       "case_id": "HHUB-0001",
-      "url": "/cell/labgen-hhb-0001",
+      "url": "/webhooks/events",
       "method": "POST",
       "param": "X-Signature",
       "location": "header",
@@ -16,7 +16,7 @@
     },
     {
       "case_id": "HHUB-0002",
-      "url": "/cell/labgen-hhb-0003",
+      "url": "/messages/unfurl",
       "method": "GET",
       "param": "url",
       "location": "query",
@@ -28,7 +28,7 @@
     },
     {
       "case_id": "HHUB-0003",
-      "url": "/cell/labgen-hhb-0005",
+      "url": "/integrations/outgoing-webhook",
       "method": "GET",
       "param": "triggerWord",
       "location": "query",

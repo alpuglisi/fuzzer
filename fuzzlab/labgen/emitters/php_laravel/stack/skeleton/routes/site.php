@@ -26,3 +26,10 @@ Route::get('/edit_profile.labgen-plrp-0401.php', fn () => app(SiteController::cl
     '/edit_profile.labgen-plrp-0401.php',
     '/profile.php',
 ));
+
+// CC-LAB-0239 (docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md step 3): a GET client
+// page for the POST-only /example/account_settings api cell, so it's
+// link-reachable from /catalog (a GET-only listing) -- mirrors the login/
+// register pattern above (GET shows a page, POST is the cell's own route,
+// registered separately in routes/web.php at the same URL).
+Route::get('/example/account_settings', fn () => view('site.account-settings'));

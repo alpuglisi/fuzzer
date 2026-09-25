@@ -113,6 +113,28 @@ def test_tier3_renders_one_unique_path_per_emitted_file(emitter, manifest) -> No
     assert len(tree) == expected
 
 
+def test_both_checkout_twins_render_via_the_same_shared_html_view_r5(emitter, manifest) -> None:
+    """R5 (leakage/fingerprint-independence, CC-LAB-0239): the automated
+    twin-diff proof the chi-square/leakage-probe build gate cannot itself
+    give here (`MIN_GROUPS_FOR_GATE=6` vs. this manifest's 2 cells, so that
+    gate structurally skips). Both twins hand their sink's `$rows` to the
+    exact same static, hand-authored Blade view -- not two separately
+    generated view files that could drift -- so the presentation layer is
+    provably byte-identical by construction."""
+    cells = {c.cell_id: c for c in manifest.cells}
+    vulnerable_src = emitter.render(cells["LABGEN-BC-0005"])[0].content.decode("utf-8")
+    secure_src = emitter.render(cells["LABGEN-BC-0006"])[0].content.decode("utf-8")
+    assert "return view('site.booking-checkout', $rows);" in vulnerable_src
+    assert "return view('site.booking-checkout', $rows);" in secure_src
+    view_path = (
+        "fuzzlab/labgen/emitters/php_laravel/stack/skeleton/resources/views/"
+        "site/booking-checkout.blade.php"
+    )
+    with open(view_path, encoding="utf-8") as f:
+        view_source = f.read()
+    assert "data-charged-amount" in view_source and "$charged_amount" in view_source
+
+
 def test_tier0_minimal_pair_holds_between_each_cell_and_its_weakened_twin(emitter, manifest) -> None:
     checker = tier0.get_minimal_pair_checker()
     for cell in manifest.cells:
@@ -173,9 +195,10 @@ def test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_sec
 
         # The vulnerable twin's real HTTP response already reflects the
         # attacker's amount (proving the endpoint accepted it at all) --
-        # $request->input() yields a string, so Laravel's JSON encoder
-        # quotes it verbatim.
-        assert f'"charged_amount":"{ATTACKER_AMOUNT}"' in vuln_resp.body.replace(" ", ""), vuln_resp.body
+        # CC-LAB-0239/CC-FUZZ-0047: the checkout confirmation is now a real
+        # HTML page, not JSON; `data-charged-amount` is
+        # PriceIntegrityBypassStrategy's own new anchor.
+        assert f'data-charged-amount="{ATTACKER_AMOUNT}"' in vuln_resp.body.replace(" ", ""), vuln_resp.body
 
         # ...and the real database row it wrote is checked directly, not
         # inferred from the response alone (CC-LAB-0056's own discipline):

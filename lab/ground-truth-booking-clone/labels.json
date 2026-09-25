@@ -4,7 +4,7 @@
   "cases": [
     {
       "case_id": "BKNG-0001",
-      "url": "/cell/labgen-bc-0001",
+      "url": "/booking/continue",
       "method": "GET",
       "param": "return_to",
       "location": "query",
@@ -16,7 +16,7 @@
     },
     {
       "case_id": "BKNG-0002",
-      "url": "/cell/labgen-bc-0003",
+      "url": "/extranet/export",
       "method": "GET",
       "param": "label",
       "location": "query",
@@ -28,14 +28,14 @@
     },
     {
       "case_id": "BKNG-0003",
-      "url": "/cell/labgen-bc-0005",
+      "url": "/booking/checkout",
       "method": "POST",
       "param": "amount",
       "location": "body",
       "vuln_class": "price_integrity_bypass",
       "sink_context": "sql",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "notes": "amount used unvalidated as the booking's charged total in a real DB insert -- modeled on Booking.com's real checkout total computation and the real QloApps (open-source hotel-booking engine) Cart::getOrderTotal() pattern, which always recomputes server-side (docs/research/category5-travel-functionality-and-cwe-research.md; docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml). Reuses the pre-existing price_integrity_bypass concern/payment_charge_amount sink family from CC-LAB-0063, first rendered by any emitter here. CC-LAB-0212/FR-LAB-100, category 5 pilot's own ground truth -- never a PFF-* case."
     }
   ]

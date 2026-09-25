@@ -85,7 +85,23 @@ product being modelled. When unsure, choose `page`.
    to be product pages.
 6. **Navigability acceptance test** (per app, live-boot): crawling from `/`
    with fuzzlab's own spider discovers **100%** of that app's ground-truth
-   injection-point URLs. Every nav link returns 200 HTML. `GET /` returns 200.
+   injection-point URLs, each returning **the response a real anonymous
+   visitor would get** — 200 HTML for a public page, or the correct
+   401/redirect for a page gated behind a login the crawl doesn't have (see
+   the decision below). `GET /` returns 200.
+
+   **Decision (R8 sign-off, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`,
+   2026-09-25):** the standalone `--app` split apps (CircleFeed, Huddle Hub,
+   Booking) register no login route of their own (their manifests carry no
+   login cell — that's PFF's own concern), so a session-gated cell like
+   `LABGEN-CF-0001` cannot be reached authenticated by an anonymous crawl.
+   Rather than build a login system these apps' manifests never asked for,
+   this is accepted as correct, realistic behavior — a real anonymous
+   visitor to a real social app also gets a login wall on a gated photo
+   page — and this acceptance criterion is worded above to match. This
+   applies to every session-gated cell in a split app; it does not apply to
+   `LABGEN-MA-0003`/`0004` (built into the default merged PFF build, which
+   has its own login flow from step 1).
 7. **Detection must not regress.** After conversion, every ground-truth point
    that was detected before is still detected (live-boot differential tests +
    the existing oracle strategy tests), and `fp=0` on secure twins. A

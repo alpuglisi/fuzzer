@@ -130,4 +130,7 @@ def test_booking_endpoints_are_really_live() -> None:
         price_cell = next(c for c in cells if c.cell_id == "LABGEN-BC-0005")
         resp = harness.post(served_url_for(price_cell), data={"amount": "0.01"})
         assert resp.status == 200, resp.body
-        assert '"charged_amount":"0.01"' in resp.body.replace(" ", ""), resp.body
+        # CC-LAB-0239/CC-FUZZ-0047: the checkout confirmation is now real
+        # HTML, not JSON -- `data-charged-amount` is
+        # PriceIntegrityBypassStrategy's own new anchor.
+        assert 'data-charged-amount="0.01"' in resp.body.replace(" ", ""), resp.body

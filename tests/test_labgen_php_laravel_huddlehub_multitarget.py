@@ -131,6 +131,12 @@ def test_huddlehub_endpoints_are_really_live() -> None:
     cells = _vulnerable_cells()
     emitter = LaravelEmitter()
     with LiveBootHarness(emitter, cells) as harness:
-        resp = harness.get("/cell/labgen-hhb-0003", params={"url": "http://example.com/"})
+        from fuzzlab.labgen.emitters.php_laravel import served_url_for
+
+        # CC-LAB-0239: LABGEN-HHB-0003 no longer serves at the generic
+        # `/cell/labgen-hhb-0003` -- its real URL is `/messages/unfurl`
+        # (`_PAGE_PROFILES`' `real_page`/`canonical_cell_id`).
+        ssrf_cell = next(c for c in cells if c.cell_id == "LABGEN-HHB-0003")
+        resp = harness.get(served_url_for(ssrf_cell), params={"url": "http://example.com/"})
         assert resp.status == 200
         assert '"requested_url":"http:\\/\\/example.com\\/"' in resp.body or "example.com" in resp.body

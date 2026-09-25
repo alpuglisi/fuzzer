@@ -74,6 +74,29 @@ class _DenialPageSender:
         return Probe(200, "Sorry, access denied for id " + value)
 
 
+class _RealPhotoViewPageSender:
+    """R3 (CC-LAB-0239, docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md): the actual
+    rendered markup `fuzzlab.labgen.emitters.php_laravel`'s
+    `resources/views/site/photo-view.blade.php` produces for
+    `LABGEN-CF-0001` (vulnerable, `db_row_by_id_lookup` + `no_ownership_check`)
+    -- copied from that real template, not a generic `<html>` stub, so this
+    is a genuine check that the strategy's denial-marker/echo/diff logic
+    still holds against the real HTML shape a photo id now renders as (it
+    was JSON before this step). Confirms R3's own "no change needed"
+    conclusion isn't just true against a stub."""
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+              content_type=None):
+        return Probe(
+            200,
+            f"<h2>Photo #{value}</h2>\n"
+            f"<p><strong>Owner:</strong> 1</p>\n"
+            f"<p>Photo caption {value}</p>\n"
+            f"<p><em>/uploads/{value}.jpg</em></p>\n"
+            "<p>Private</p>",
+        )
+
+
 def test_confirms_the_vulnerable_no_ownership_check_twin():
     strategy = AccessControlIdorStrategy()
     verdict = strategy.confirm(_cand(), _NoOwnershipCheckSender())
@@ -91,6 +114,14 @@ def test_fails_closed_on_the_secure_identity_match_twin():
 def test_fails_closed_when_the_body_never_differs():
     strategy = AccessControlIdorStrategy()
     assert strategy.confirm(_cand(), _CannedPageSender()) is None
+
+
+def test_confirms_against_the_real_rendered_photo_view_html_shape():
+    """R3: proves the strategy's own 'no change needed' conclusion against
+    the actual new HTML markup, not just a generic stub."""
+    strategy = AccessControlIdorStrategy()
+    verdict = strategy.confirm(_cand(), _RealPhotoViewPageSender())
+    assert verdict is not None and verdict.confirmed
 
 
 def test_fails_closed_on_a_200_with_a_denial_phrase():

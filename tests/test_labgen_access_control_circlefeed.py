@@ -80,6 +80,26 @@ def test_vulnerable_twin_has_no_ownership_filter_secure_twin_does() -> None:
     assert "firstOrFail()" in secure_src
 
 
+def test_both_twins_render_via_the_same_shared_html_view_r5() -> None:
+    """R5 (leakage/fingerprint-independence, CC-LAB-0239): the automated
+    twin-diff proof the chi-square/leakage-probe build gate cannot itself
+    give here (`MIN_GROUPS_FOR_GATE=6` vs. this manifest's 2 cells, so that
+    gate structurally skips). Both twins hand their sink's `$rows` to the
+    exact same static, hand-authored Blade view -- not two separately
+    generated view files that could drift -- so the presentation layer is
+    provably byte-identical by construction, not just by inspection."""
+    emitter = LaravelEmitter()
+    cells = _cells()
+    vulnerable_src = emitter.render(cells["LABGEN-CF-0001"])[0].content.decode("utf-8")
+    secure_src = emitter.render(cells["LABGEN-CF-0002"])[0].content.decode("utf-8")
+    assert "return view('site.photo-view', $rows);" in vulnerable_src
+    assert "return view('site.photo-view', $rows);" in secure_src
+    view_path = "fuzzlab/labgen/emitters/php_laravel/stack/skeleton/resources/views/site/photo-view.blade.php"
+    with open(view_path, encoding="utf-8") as f:
+        view_source = f.read()
+    assert "{{ $id }}" in view_source and "{{ $owner_id }}" in view_source and "{{ $caption }}" in view_source
+
+
 def test_access_control_controllers_have_disjoint_paths_from_huddlehub() -> None:
     """CircleFeed is a second, distinct app identity on this same
     `php_laravel` emitter (like Huddle Hub before it) -- its generated

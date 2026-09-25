@@ -369,10 +369,16 @@ class PriceIntegrityBypassStrategy(ConfirmationStrategy):
     canary could otherwise coincidentally collide with a real rate, caught
     by this component's own pre-change adequacy review before implementation.
 
-    **Match is anchored**: `"charged_amount":"<canary>"` (after stripping
+    **Match is anchored**: `data-charged-amount="<canary>"` (after stripping
     whitespace from the response body, mirroring the live-boot test's own
     normalization) -- not a bare substring search, which could false-match
-    an unrelated field that happens to contain the same digits."""
+    an unrelated field that happens to contain the same digits. **CC-FUZZ-0047**
+    (docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md step 3): this was a
+    `"charged_amount":"<canary>"` JSON-fragment match until `LABGEN-BC-0005`/
+    `0006`'s checkout response converted from `response()->json(...)` to a
+    real HTML confirmation page; the anchor moved to that page's own
+    `data-charged-amount` attribute in the same change (`CC-LAB-0239`),
+    since a JSON-shaped match can never appear in HTML."""
     vuln_class = "price_integrity_bypass"
     mechanism = "trusted-client-amount-echo"
     category = "price-integrity-bypass"
@@ -390,7 +396,7 @@ class PriceIntegrityBypassStrategy(ConfirmationStrategy):
             if canary not in self._RATE_TABLE_AMOUNTS:
                 break
         text = (self._send(sender, candidate, canary).text or "").replace(" ", "")
-        if f'"charged_amount":"{canary}"' in text:
+        if f'data-charged-amount="{canary}"' in text:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"payload": canary, "echoed": canary})
         return None

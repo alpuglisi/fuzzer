@@ -537,23 +537,49 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # unfiltered write can still reach, since they are simply absent from the
     # allowlist, not from the table itself. Mirrors
     # `fuzzlab.labgen.emitters.php_current`'s `/account_settings.php` profile.
-    # CC-LAB-0210 (category 5, Booking.com pilot app): the "continue to
-    # partner/payment provider" redirect a real Booking.com-style checkout
-    # flow issues (docs/research/category5-travel-functionality-and-cwe-
-    # research.md §1.1). No `table`/`column`: the source is an ordinary GET
-    # query parameter, not a database lookup.
-    "/booking/continue": {"var_name": "return_to", "param_name": "return_to"},
-    # CC-LAB-0211 (category 5, Booking.com pilot app): the Extranet/
-    # partner-admin booking-list export view (docs/research/category5-
-    # travel-functionality-and-cwe-research.md §1.1/§2.1). No `table`/
-    # `column`: the source is an ordinary GET query parameter, not a
+    # CC-LAB-0210/CC-LAB-0239 (category 5, Booking.com pilot app): the
+    # "continue to partner/payment provider" redirect a real Booking.com-
+    # style checkout flow issues (docs/research/category5-travel-
+    # functionality-and-cwe-research.md §1.1). No `table`/`column`: the
+    # source is an ordinary GET query parameter, not a database lookup.
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): this cell already
+    # returns a real 302 redirect (`return redirect($return_to)`) -- no
+    # body-format change, only the URL move off the generic `/cell/<slug>`
+    # it used before. Canonical = the vulnerable twin (`LABGEN-BC-0001`).
+    "/booking/continue": {
+        "var_name": "return_to",
+        "param_name": "return_to",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-BC-0001",
+    },
+    # CC-LAB-0211/CC-LAB-0239 (category 5, Booking.com pilot app): the
+    # Extranet/partner-admin booking-list export view (docs/research/
+    # category5-travel-functionality-and-cwe-research.md §1.1/§2.1). No
+    # `table`/`column`: the source is an ordinary GET query parameter, not a
     # database lookup.
-    "/extranet/export": {"var_name": "label", "param_name": "label"},
-    # CC-LAB-0212 (category 5, Booking.com pilot app): the checkout charge
-    # endpoint (docs/research/category5-travel-functionality-and-cwe-
-    # research.md §1.1/§2.1). `room_type_rates`/`default_room_type` are the
-    # secure twin's own fixed, server-owned rate table -- the vulnerable
-    # twin never reads them (its transform is empty).
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): already returns
+    # realistic `text/csv` -- no body-format change, only the URL move.
+    # Canonical = the vulnerable twin (`LABGEN-BC-0003`).
+    "/extranet/export": {
+        "var_name": "label",
+        "param_name": "label",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-BC-0003",
+    },
+    # CC-LAB-0212/CC-LAB-0239 (category 5, Booking.com pilot app): the
+    # checkout charge endpoint (docs/research/category5-travel-
+    # functionality-and-cwe-research.md §1.1/§2.1). `room_type_rates`/
+    # `default_room_type` are the secure twin's own fixed, server-owned rate
+    # table -- the vulnerable twin never reads them (its transform is
+    # empty). `real_page`/`canonical_cell_id` (CC-LAB-0239, step 3 of
+    # docs/LAB_BROWSABLE_APPS_PLAN.md, R9): canonical = the vulnerable twin
+    # (`LABGEN-BC-0005`), matching this stack's own convention; the secure
+    # twin (`LABGEN-BC-0006`) is served at `_twin_url_for`'s suffixed
+    # variant. `html_row_view` renders the checkout confirmation as a real
+    # HTML page (was `response()->json($rows)`) -- its
+    # `data-charged-amount` attribute is `PriceIntegrityBypassStrategy`'s
+    # new detection anchor (`CC-FUZZ-0047`, R1), replacing the old
+    # `"charged_amount":"..."` JSON-fragment match.
     "/booking/checkout": {
         "var_name": "amount",
         "param_name": "amount",
@@ -563,40 +589,93 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
             ("suite", "249.00"),
         ),
         "default_room_type": "standard",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-BC-0005",
+        "html_row_view": "site.booking-checkout",
     },
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): genuine `api`
+    # endpoint (JSON mass-assignment API, per docs/LAB_BROWSABLE_APPS_PLAN.md's
+    # own "JSON mass-assignment APIs... stay JSON" test) -- no body-format
+    # change, only the URL move. Lives only in the default merged PFF build
+    # (no `LABGEN-MA-` prefix in any `--app` split's filter), which already
+    # has a login flow, so it carries no per-app ground-truth entry (R6) and
+    # is outside the R8 sign-off's scope. Canonical = the vulnerable twin
+    # (`LABGEN-MA-0003`).
     "/example/account_settings": {
         "var_name": "postFields",
         "table": "users",
         "id_column": "id",
         "allowed_fields": ("display_name", "bio", "avatar_url"),
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-MA-0003",
     },
-    # CC-LAB-0133: Huddle Hub's (category 3's Slack pick) webhook-signature-
-    # verification cell -- a Slack-style Events-API-style callback receiver.
-    # This key is used only for template-context lookup (`_profile_for`);
-    # the cell is actually served at the illustrative `/cell/<slug>` URL
-    # (`_served_route_for`), since Huddle Hub has no migrated real page to
-    # anchor a pinned URL to. `secret` is a lab-only shared secret, never a
-    # real credential.
-    "/webhooks/events": {"var_name": "webhookRawBody", "secret": "lab-only-huddlehub-webhook-secret"},
+    # CC-LAB-0133/CC-LAB-0239: Huddle Hub's (category 3's Slack pick)
+    # webhook-signature-verification cell -- a Slack-style Events-API-style
+    # callback receiver. `real_page`/`canonical_cell_id` (R9): a genuine
+    # `api` endpoint (webhook receiver, stays JSON) -- no body-format
+    # change, only the URL move. `secret` is a lab-only shared secret,
+    # never a real credential. Canonical = the vulnerable twin
+    # (`LABGEN-HHB-0001`).
+    "/webhooks/events": {
+        "var_name": "webhookRawBody",
+        "secret": "lab-only-huddlehub-webhook-secret",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-HHB-0001",
+    },
     # CC-LAB-0134: Huddle Hub's SSRF-via-link-unfurling cell -- `get_param`
     # reads the pasted URL as `?url=`. Illustrative served URL, same
     # reasoning as `/webhooks/events` above.
-    "/messages/unfurl": {"var_name": "unfurlUrl", "param_name": "url"},
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): a genuine `api`
+    # endpoint (link-unfurl JSON metadata, per
+    # docs/LAB_BROWSABLE_APPS_PLAN.md's own "webhook receivers... stay
+    # JSON" test) -- no body-format change, only the URL move. Canonical =
+    # the vulnerable twin (`LABGEN-HHB-0003`).
+    "/messages/unfurl": {
+        "var_name": "unfurlUrl",
+        "param_name": "url",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-HHB-0003",
+    },
     # CC-LAB-0135: Huddle Hub's header-injection cell -- `get_param` reads
     # the admin-configured trigger word as `?triggerWord=`. Illustrative
     # served URL, same reasoning as `/webhooks/events`/`/messages/unfurl`
     # above.
-    "/integrations/outgoing-webhook": {"var_name": "triggerWord", "param_name": "triggerWord"},
-    # CC-LAB-0216: CircleFeed's (category 2's Facebook pick) photo/tag-detail
-    # page -- a Facebook-style single-photo view, reachable by anyone logged
-    # in who knows/guesses the id (docs/research/category2-social-ugc-
-    # functionality-and-cwe-research.md sec 3 item 4). Illustrative served
-    # URL (`_served_route_for`'s no-`real_page` branch), same reasoning as
-    # Huddle Hub's own pages: CircleFeed, like Huddle Hub, has no migrated
-    # real puppy-fort-factory page to anchor a pinned URL to. No
-    # `table`/`column`: `DbRowByIdLookupSink` names the `Photo` model and
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): a genuine `api`
+    # endpoint (webhook receiver, per docs/LAB_BROWSABLE_APPS_PLAN.md's own
+    # "webhook receivers... stay JSON" test) -- no body-format change, only
+    # the URL move. Canonical = the vulnerable twin (`LABGEN-HHB-0005`).
+    "/integrations/outgoing-webhook": {
+        "var_name": "triggerWord",
+        "param_name": "triggerWord",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-HHB-0005",
+    },
+    # CC-LAB-0216/CC-LAB-0239: CircleFeed's (category 2's Facebook pick)
+    # photo/tag-detail page -- a Facebook-style single-photo view, reachable
+    # by anyone logged in who knows/guesses the id (docs/research/
+    # category2-social-ugc-functionality-and-cwe-research.md sec 3 item 4).
+    # No `table`/`column`: `DbRowByIdLookupSink` names the `Photo` model and
     # its `id` column itself (an Eloquent fetch, not a raw `DB::select`).
-    "/photos/view": {"var_name": "id", "param_name": "id"},
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, step 3 of
+    # docs/LAB_BROWSABLE_APPS_PLAN.md): CircleFeed has no migrated real
+    # puppy-fort-factory page, so no `ground_truth_case` -- this is the
+    # step-3 "browsable app gets its own real URL" mechanism (R9,
+    # docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md), not a cutover migration.
+    # Canonical = the vulnerable twin (`LABGEN-CF-0001`), matching this
+    # stack's own convention (every existing `canonical_cell_id` names the
+    # vulnerable cell); the secure twin (`LABGEN-CF-0002`) is served at
+    # `_twin_url_for`'s suffixed variant. `html_row_view` renders the fetched
+    # photo as a real HTML page (was `response()->json($rows)`) -- the
+    # unauthenticated-guard's own 401 stays a JSON error response (never
+    # asked to become HTML; R8's sign-off is about anonymous reachability of
+    # the *page*, not this error body's format).
+    "/photos/view": {
+        "var_name": "id",
+        "param_name": "id",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-CF-0001",
+        "html_row_view": "site.photo-view",
+    },
     # CC-LAB-0217: CircleFeed's (category 2's Facebook pick) second designed
     # cell -- a Groups webhook receiver, modeling Meta's own publicly
     # documented Messenger Platform `X-Hub-Signature`-style webhook contract
@@ -611,14 +690,31 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # page to anchor a pinned URL to. `secret` is a lab-only shared secret,
     # never a real credential, and deliberately distinct from Huddle Hub's
     # own so the two apps' cells can never be confused by a shared value.
-    "/groups/webhook": {"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-webhook-secret"},
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): a genuine `api`
+    # endpoint (webhook receiver, stays JSON) -- no body-format change, only
+    # the URL move. Canonical = the vulnerable twin (`LABGEN-CF-0003`).
+    "/groups/webhook": {
+        "var_name": "webhookRawBody",
+        "secret": "lab-only-circlefeed-webhook-secret",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-CF-0003",
+    },
     # CC-LAB-0218: CircleFeed's (category 2's Facebook pick) third designed
     # cell -- a comment "share" redirect, `get_param` reads the redirect
     # target as `?next=`. Illustrative served URL (`_served_route_for`'s
     # no-`real_page` branch), same reasoning as every other CircleFeed/
     # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
     # page to anchor a pinned URL to.
-    "/comments/share": {"var_name": "next", "param_name": "next"},
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): already returns a
+    # real redirect (or, for the secure twin, a 400) -- no body-format
+    # change, only the URL move. Canonical = the vulnerable twin
+    # (`LABGEN-CF-0005`).
+    "/comments/share": {
+        "var_name": "next",
+        "param_name": "next",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-CF-0005",
+    },
     # CC-LAB-0220: CircleFeed's (category 2's Facebook pick) fourth and
     # final designed cell -- an account-settings page, `get_cookie` reads
     # the preference cookie as `pref`. This cookie name must also be listed
@@ -629,7 +725,17 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # client's raw bytes. Illustrative served URL (`_served_route_for`'s
     # no-`real_page` branch), same reasoning as every other CircleFeed/
     # Huddle Hub page.
-    "/settings/preferences": {"var_name": "pref", "param_name": "pref"},
+    # `real_page`/`canonical_cell_id` (CC-LAB-0239, R9): a genuine `api`
+    # endpoint (deserialization, per docs/LAB_BROWSABLE_APPS_PLAN.md's own
+    # "deserialization endpoints... stay JSON" test) -- no body-format
+    # change, only the URL move. Canonical = the vulnerable twin
+    # (`LABGEN-CF-0007`).
+    "/settings/preferences": {
+        "var_name": "pref",
+        "param_name": "pref",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-CF-0007",
+    },
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {
