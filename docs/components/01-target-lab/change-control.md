@@ -3,6 +3,101 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0241 — Browsable labs Lane 1 step 5: closing the remaining tracked gaps (2026-09-25, FR-LAB-159, `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`)
+
+**Status: DRAFT, pre-change review gate in progress.** The underlying plan
+(`docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`) already went through 2 full
+review rounds and reached 3/3 agreement (2026-09-25). This entry is that
+plan condensed into the change-control template, but the entry itself has
+not yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
+gate is the next step, mirroring `CC-LAB-0240`'s drafting process exactly.
+Implementation is **not authorized** until this entry reaches 3/3 (2
+reviewers + proposing agent).
+
+- **Change:** closes the 3 remaining, previously-flagged gaps in Browsable
+  Labs Lane 1:
+  1. **Missing `?id=` default** on `/product.php`/`/blog_post.php` (500
+     today, pre-existing, flagged in `CC-LAB-0240`) — add a per-profile
+     default (`$request->query('id', '1')`, matching the real historical
+     page's `?? '1'` fallback), scoped to these 2 profiles only.
+  2. **Bare-fragment layout gap** on `/contact.php`, `/newsletter.php`,
+     `/edit_profile.php`, and `/profile.php` (4 pages, not the 3 originally
+     flagged in `CC-LAB-0240` — `/profile.php` was found to share the same
+     `html_body_echo` sink during this step's own research) — make
+     `html_body_echo.blade.php.j2` extend the shared site layout with a
+     per-profile `page_title`.
+  3. **Spider-based navigability acceptance test**, never built (flagged as
+     the one undone deliverable in `CC-LAB-0239`'s own Effectiveness
+     assessment) — new live-boot pytest module crawling each of PFF,
+     CircleFeed, Huddle Hub, and Booking from `/` with the existing
+     `fuzzlab.tools.spider.LocalSpider`, asserting 100% ground-truth-URL
+     discovery and anonymous-visitor-correct status codes, with an explicit
+     non-vacuous-pass guard.
+- **Impact (other components / project):** LAB (this component) only.
+  `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table is corrected in this same
+  change (a real `CC-LAB-0241`/`FR-LAB-159` collision with Lane 2's
+  then-current reservation, found and fixed during this plan's own review —
+  Lanes 2-7 bumped by +1 again). No other component touched, unless the
+  navigability test itself surfaces a same-class LAB-only defect (folded in
+  per the plan's §3 step 3 scope-creep rule) or a different-class finding
+  (flagged with its own recommended next `CC-LAB` number, not absorbed
+  here).
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.**
+  Full register in the plan's §4 (R1-R7); the load-bearing ones:
+  1. *`html_body_echo` may be shared by cells beyond the 4 tracked pages.*
+     Mitigated: verify every consuming cell before changing the shared
+     template; keep the new `page_title` context key optional with a
+     fallback so an unrelated cell's render can't break.
+  2. *The missing-id default could invalidate a test that currently depends
+     on the 500.* Mitigated: grep the full suite for such an assertion
+     before changing the source template; if found, that assertion is the
+     bug's own artifact and gets updated, not worked around.
+  3. *PFF's session-gated cells (`LABGEN-MA-0003`/`0004`) aren't covered by
+     the split-apps' R8 401-exception.* Mitigated by a concrete decision
+     rule (try an authenticated crawl via `browserauth` first; fall back to
+     an anonymous-crawl 401 assertion if it doesn't attach cleanly) with a
+     mandatory durable sign-off recorded in `requirements.md`'s new
+     `FR-LAB-159` entry — not left as an implementation-time judgment call.
+  4. *The navigability test's "100% discovered" assertion could pass
+     vacuously* (empty ground-truth load, or a crawl that silently failed
+     to start). Mitigated by an explicit guard asserting both the
+     ground-truth count and the discovered-page count are non-trivial,
+     against hard-coded expected minimums, before any per-URL assertion —
+     the same bug class `CC-LAB-0240`'s R2 already found once
+     (`mariadb.py:431`).
+  5. *Seed-data / schema parity* (SQLite vs. MariaDB `id = 1` rows;
+     `LiveBootHarness` serving a full multi-page app, not one cell) —
+     mitigated by explicit per-harness confirmation before relying on it.
+  Accepted, not mitigated: none — every identified risk has a concrete
+  mitigation.
+- **Deliverables:** (copied directly from the plan's own §6, drafted for
+  exactly this purpose)
+  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table bumped for the
+        `CC-LAB-0241`/`FR-LAB-159` collision — done (applied in the plan's
+        own commit, ahead of this entry).
+  - [ ] Missing-`?id=` default added for `/product.php`/`/blog_post.php`;
+        gate: `tests/test_labgen_conformance_live_boot.py`,
+        `tests/test_labgen_conformance_live_boot_mariadb.py`,
+        `tests/test_labgen_php_laravel_pff_html_pages.py` green — todo.
+  - [ ] `html_body_echo.blade.php.j2` extends the shared layout with a
+        `page_title` variable; all 4 cells' pages render inside the shared
+        nav/header; gate: the 9 named test files in the plan's §3 step 2
+        green — todo.
+  - [ ] Navigability test built and green for all 4 apps, including the
+        non-vacuous-pass guard — todo.
+  - [ ] R4 sign-off recorded in `requirements.md`'s `FR-LAB-159` entry —
+        todo.
+  - [ ] Any crawl-surfaced same-class defect fixed and folded in; any
+        different-class finding flagged with its own recommended next
+        `CC-LAB` number — todo.
+  - [ ] Full non-slow suite + all live-boot suites (SQLite + MariaDB + the
+        new navigability tests) green — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-159`
+        entry — todo.
+  - [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0241` — todo.
+- **Effectiveness (assessed <date> or pending):** pending — not yet
+  implemented.
+
 ### CC-LAB-0240 — Browsable labs Lane 1 step 4: JSON→HTML conversion for PFF's own real pages (2026-09-25, FR-LAB-158, `docs/LAB_PFF_JSON_TO_HTML_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
