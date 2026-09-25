@@ -4,6 +4,25 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 pre-change review gate cleared: CC-LAB-0239/CC-FUZZ-0047 drafted, reviewed, 3/3 agreed; no code change)
+- Per `docs/components/README.md`'s pre-change review gate, drafted the two
+  change-control entries for the converged `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`
+  (`CC-LAB-0239`, `CC-FUZZ-0047`) before any implementation, spawned 2
+  independent reviewer agents (accuracy + adequacy) against them, and
+  revised twice based on their findings: the Risk section initially named
+  only 2 of the source plan's risk classes and was missing R5 (the
+  leakage-probe gate's structural silent skip for 2-cell manifests), R6
+  (ground-truth staleness), and R8 (an open, not-yet-resolved login-route
+  decision, initially buried only in Deliverables) — all 5 are now named
+  explicitly; a cross-stack out-of-scope note (R4) and a missing
+  `tests/test_labgen_cutover_gate.py` re-run deliverable were also added.
+  Both reviewer agents confirmed agreement (3/3, including the proposing
+  agent) after the second revision. Implementation is now authorized
+  (Effectiveness left `pending` until the code actually lands, per the
+  gate's own rule); the entries are updated in place to reflect the
+  divergence if implementation finds one, before the change is considered
+  done.
+
 ## 2026-09-25 (Lane 1 step 3 planning revision 4 — third round of 3 independent reviewer agents converges on the plan; no code change)
 - A third round of 3 fresh reviewer agents, aimed specifically at whether
   revision 3's new R9 section (the `_PAGE_PROFILES`/`_twin_url_for` routing

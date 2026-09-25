@@ -22,14 +22,14 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
-### CC-FUZZ-0047 — `PriceIntegrityBypassStrategy` anchor moves from a JSON fragment to an HTML attribute (DRAFT, pre-change review gate in progress) (2026-09-25, FR-FUZZ-31, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
+### CC-FUZZ-0047 — `PriceIntegrityBypassStrategy` anchor moves from a JSON fragment to an HTML attribute (2026-09-25, FR-FUZZ-31, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 
-**Status: draft, not yet implemented.** Per `docs/components/README.md`'s
-pre-change review gate, this entry is written before the change and does
-not authorize implementation until 2 independent reviewer agents plus the
-proposing agent agree 3/3. Tracked jointly with LAB's `CC-LAB-0239` — the
-sink-template change (LAB) and this strategy change (FUZZ) must land in the
-same commit, never split across two.
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25
+(2 independent reviewer agents plus the proposing agent — this entry was
+approved unchanged from its first draft) — implementation authorized, not
+yet landed.** Tracked jointly with LAB's `CC-LAB-0239` — the sink-template
+change (LAB) and this strategy change (FUZZ) must land in the same commit,
+never split across two.
 
 - **Change:** `LABGEN-BC-0005`/`0006`'s (Booking clone checkout,
   `price_integrity_bypass`) response body is converting from

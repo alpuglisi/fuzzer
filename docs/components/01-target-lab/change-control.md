@@ -3,16 +3,19 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0239 — Browsable labs Lane 1 step 3 (DRAFT, pre-change review gate in progress): JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
+### CC-LAB-0239 — Browsable labs Lane 1 step 3: JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 
-**Status: draft, not yet implemented.** Per `docs/components/README.md`'s
-pre-change review gate, this entry is written before the change and does
-not authorize implementation until 2 independent reviewer agents plus the
-proposing agent agree 3/3. Condensed from `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`,
-itself already converged through 3 rounds of 3 independent reviewer agents
+**Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25
+(2 independent reviewer agents plus the proposing agent, after 2 revision
+rounds — see the entry's own edit history) — implementation authorized, not
+yet landed.** Condensed from `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`, itself
+already converged through 3 rounds of 3 independent reviewer agents
 (accuracy/thoroughness/adequacy) plus a self-review pass — that document is
 the full detail; this entry is its change-control-template compression, not
-an independent redraft.
+an independent redraft. Per `docs/components/README.md`'s gate: "the code
+change that follows should match what the entry described (a real
+divergence found during implementation gets reflected back into the entry
+before the change is considered done)."
 
 - **Change:** for the 11 `php_laravel` cell pairs belonging to CircleFeed
   (`LABGEN-CF-0001`–`0008`), Huddle Hub (`LABGEN-HHB-0001`–`0006`), Booking
