@@ -446,3 +446,12 @@ R6 ("never reads the response body" overstated `identifier_sqli_oracle.py`'s
 format-agnostic body-diff check) was corrected in this same revision. The
 plan is converged; implementation still requires its own change-control-
 entry gate (see Status line above).
+
+**Post-convergence correction (2026-09-25, during CC-LAB-0242's own entry
+gate):** the CC-LAB-0242 entry's accuracy reviewer found this plan's own §6
+still cited stale "R3" for `/explore`'s shape-confirmation deliverable, a
+leftover from before round 1 redefined R3 to mean `/post`'s byte-delta risk
+and introduced R1b for `/explore`'s shape-confirmation history. Fixed here
+(§6 now cites R1b) and in the change-control entry to match verbatim — a
+citation-label fix, not a change to any risk's actual content or
+conclusion, so it does not reopen the plan's own 3/3 convergence above.
