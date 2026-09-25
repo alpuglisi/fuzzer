@@ -5,8 +5,11 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0246 — Browsable labs Lane 6: node_express/MeadowMart + python_fastapi generic sample (2026-09-25, FR-LAB-168/FR-LAB-169, `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`)
 
-**Status: DRAFT, in this entry's own pre-change review gate.**
-Implementation is **not** authorized.
+**Status: the pre-change review gate is cleared. 3/3 agreement was
+reached on 2026-09-25, after 3 rounds (the round 3 accuracy review
+confirmed ACCURATE, and adequacy was already ADEQUATE at round 2).
+Implementation is authorized.** See Deliverables and Effectiveness for
+the outcome.
 - **Entry gate, round 1 (run by the orchestrating session, 2026-09-25):**
   - **Accuracy:** one fixable inaccuracy. The one-entry justification
     cited `CC-LAB-0040` as though it were a same-shape precedent. In fact
@@ -42,7 +45,7 @@ Implementation is **not** authorized.
   - **Adequacy:** confirmed. The justification rests on the
     root-cause/bug/gate, separate-FRs and one-close-date reasons, not on
     precedent.
-  - Awaiting the orchestrator's re-confirmation of this fix.
+  - **Round 3 (accuracy):** ACCURATE. The gate is cleared at 3/3.
 
 This entry is condensed from `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`, which
 went through 2 review rounds and reached 3/3 agreement on 2026-09-25. The
