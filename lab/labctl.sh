@@ -61,11 +61,29 @@ fi
 # (BUG-0013 recurred because the earlier fix patched only `up`; see BUG-0017).
 _force_clean() {
   command -v podman >/dev/null 2>&1 || return 0
-  for c in pff-lab_frontend_1 pff-lab_web_1 pff-lab_db_1; do
+  # CC-LAB-0247 (Lane 7, Gate F): the 10 browsable-app containers/networks
+  # were missing from this list entirely (a real, live-discovered gap --
+  # `PFF_PROFILE=apps ./labctl.sh down` right after `up` left every one of
+  # them running and their dedicated networks undropped, since this
+  # function only ever knew about the pre-Lane-7 3 services). Every
+  # container-remove path must self-heal for every profile, not just the
+  # default one (the same PA-0018 discipline `up`/`down`/`reset` already
+  # cite for each other).
+  for c in pff-lab_frontend_1 pff-lab_web_1 pff-lab_db_1 \
+           pff-lab_circlefeed_1 pff-lab_huddlehub_1 pff-lab_booking_1 \
+           pff-lab_pictrail_1 pff-lab_loopcast_1 pff-lab_trackernest_1 \
+           pff-lab_reelqueue_1 pff-lab_wanderfare_1 pff-lab_forgecart_1 \
+           pff-lab_meadowmart_1; do
     podman rm -f "$c" >/dev/null 2>&1 || true      # -f removes even running/wedged ones
   done
   podman pod prune -f >/dev/null 2>&1 || true        # drop the emptied pod(s)
-  podman network rm pff-lab_default >/dev/null 2>&1 || true
+  for n in pff-lab_default \
+           pff-lab_circlefeed-net pff-lab_huddlehub-net pff-lab_booking-net \
+           pff-lab_pictrail-net pff-lab_loopcast-net pff-lab_trackernest-net \
+           pff-lab_reelqueue-net pff-lab_wanderfare-net pff-lab_forgecart-net \
+           pff-lab_meadowmart-net; do
+    podman network rm "$n" >/dev/null 2>&1 || true
+  done
   if [ "${1:-}" = "drop-volume" ]; then
     podman volume rm pff-lab_pff-db-data >/dev/null 2>&1 || true
   fi
@@ -96,8 +114,18 @@ case "${1:-}" in
     # remove "improper"/running containers, so on failure force-clean (keep-volume) — the
     # same self-heal as up/reset (PA-0018: every container-remove path routes through the
     # shared helper, keyed on the operation not the trigger).
-    if ! "${COMPOSE[@]}" down; then
-      echo "down failed; force-clearing wedged stack (DB volume kept)..." >&2
+    #
+    # CC-LAB-0247 (Lane 7, Gate F): `podman compose down`'s own exit code is
+    # NOT trustworthy here (a real, live-discovered defect) -- it printed
+    # per-container "container state improper"/per-network "is being used"
+    # errors for every one of the 10 apps-profile containers yet still
+    # exited 0, so the old `if ! down; then force-clean` never ran and
+    # `PFF_PROFILE=apps ./labctl.sh down` silently left the whole stack up.
+    # Checking real post-state (any `pff-lab_*` container still present)
+    # instead of trusting the exit code is what actually detects this.
+    "${COMPOSE[@]}" down || true
+    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^pff-lab_'; then
+      echo "down left containers behind; force-clearing wedged stack (DB volume kept)..." >&2
       _force_clean keep-volume
     fi
     ;;
