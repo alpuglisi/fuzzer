@@ -4,6 +4,41 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 planning revision 2 — 3 independent reviewer agents; corrects one load-bearing factual error and one previously-missed inventory gap, no code change)
+- 3 agents, briefed independently with no shared context, reviewed
+  `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` for accuracy, thoroughness, and
+  adequacy respectively, each doing its own code verification. Findings
+  independently re-confirmed before folding in: (1) **R1 named the wrong
+  test files** — `test_oracle_strategies_price_integrity.py` and its
+  live-boot variant test a different strategy
+  (`PriceTrustDifferentialStrategy`) against spring_boot Netflix cells, not
+  `PriceIntegrityBypassStrategy`/`LABGEN-BC-0005`/`0006`; the real files are
+  `tests/test_oracle_vectors.py` and `tests/test_labgen_price_integrity.py`
+  — this was the plan's highest-priority risk, pointing at entirely the
+  wrong strategy/stack/cells. (2) **R6's conclusion was reversed**: the
+  earlier revision checked only `lab/ground-truth/` and concluded no cell in
+  this step's scope has any hand-authored ground truth; the repo also has
+  per-app `lab/ground-truth-circlefeed/`, `-huddlehub/`, `-booking-clone/`
+  directories that do carry hardcoded `url`/`rendering` fields for nearly
+  every cell in scope, feeding real assertions in
+  `tests/test_labgen_open_redirect.py`/`test_labgen_csv_export_injection.py`
+  (`case.url == served_url_for(...)`) and `fuzzlab/harness/auto.py`'s live
+  JSON-body-encoding decision — these must be updated in the same commit as
+  each cell's relocation/conversion, restoring real work the prior revision
+  had incorrectly removed. (3) Two cell pairs were missing from the
+  inventory entirely — `LABGEN-CF-0003`/`0004` and `LABGEN-HHB-0001`/`0002`
+  (`webhook_signature_bypass`) — bringing the scope from 9 to 11 cell pairs.
+  (4) `LABGEN-MA-0003`/`0004` was clarified as living in the default merged
+  PFF build, not any of the three split apps, so R8's login-route gap
+  doesn't apply to it. (5) R8's chosen option was clarified as requiring an
+  edit to the *parent* plan's own design-contract wording (point 6), not
+  just this step's local checklist — the parent plan's Lane 4 row also
+  gained a one-line note per R4. (6) R3 and R5 were strengthened with a
+  concrete new test fixture and a named command + corpus-size-floor check,
+  respectively. Every correction was independently re-verified against the
+  repo (not taken on the reviewing agent's word) before being written in;
+  see the plan doc's new §9 review-history section for the full account.
+
 ## 2026-09-25 (Lane 1 step 3 planning revision — self-review pass corrects/simplifies the risk register, no code change)
 - Revised `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` after a deeper research
   pass verified (rather than assumed) three of its own claims: (1) read
