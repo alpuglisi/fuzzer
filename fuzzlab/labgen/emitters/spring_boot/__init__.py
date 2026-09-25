@@ -390,6 +390,193 @@ def _java_string_literal_escape(text: str) -> str:
     )
 
 
+#: CC-LAB-0244 (plan §2c): one entry per `api` route needing a client page.
+#: `kind` selects which generator `_site_client_page_method` uses.
+_CLIENT_PAGE_SPECS: dict[str, dict[str, Any]] = {
+    "/issues/import": {"kind": "xml_fetch", "title": "Import issues"},
+    "/integrations/webhook-payload": {"kind": "binary_fetch", "title": "Webhook payload"},
+    "/api/playback/resume": {"kind": "json_fetch", "title": "Resume playback"},
+    "/api/content/import": {"kind": "xml_fetch", "title": "Partner content import"},
+    "/api/profiles/switch": {"kind": "json_fetch", "title": "Switch profile"},
+    "/api/account/billing": {"kind": "get_form", "title": "Billing", "fields": (("Account ID", "account_id"),)},
+    "/api/subscription/change-plan": {"kind": "json_fetch", "title": "Change plan"},
+    "/api/profiles/avatar": {"kind": "multipart_form", "title": "Profile avatar"},
+    "/api/account/settings": {"kind": "json_fetch", "title": "Account settings"},
+    "/api/account/preferences": {"kind": "bearer_fetch", "title": "Preferences"},
+    "/api/content/thumbnail-import": {
+        "kind": "query_post_fetch", "title": "Thumbnail import",
+        "fields": (("Thumbnail URL", "thumbnail_url"),),
+    },
+    "/api/session/refresh": {"kind": "post_form", "title": "Session refresh"},
+    "/api/support/template-preview": {
+        "kind": "get_form", "title": "Support console", "fields": (("Expression", "expr"),),
+    },
+    "/api/hotels/search-sort": {"kind": "get_form", "title": "Search hotels", "fields": (("Sort by", "sortBy"),)},
+    "/api/trips/restore": {"kind": "json_fetch", "title": "Restore a trip"},
+}
+
+
+def _site_page_java(status: int, title: str, body_html: str) -> str:
+    """A ``SiteLayout.htmlResponse`` call returning ``body_html`` (plain
+    Python string, HTML-safe, never request-derived) rendered inside the
+    shared layout -- escaped once here into a Java string literal."""
+    body_lit = _java_string_literal_escape(body_html)
+    title_lit = _java_string_literal_escape(title)
+    return (
+        f"        return SiteLayout.htmlResponse({status}, "
+        f'SiteLayout.html(APP_NAME, BRAND, NAV, "{title_lit}", "{body_lit}"));\n'
+    )
+
+
+def _site_home_method(tagline: str) -> str:
+    body = f"<h2>Welcome</h2><p>{tagline}</p>"
+    return (
+        '    @GetMapping("/")\n'
+        "    public ResponseEntity<String> home() {\n"
+        f"{_site_page_java(200, 'Home', body)}"
+        "    }\n"
+    )
+
+
+def _site_catalog_method(cells: list[Cell]) -> str:
+    rows = "".join(
+        f"<tr><td>{c.route.method}</td><td>{served_url_for(c, site_build=True)}</td><td>{c.cell_id}</td></tr>"
+        for c in sorted(cells, key=lambda c: (served_url_for(c, site_build=True), c.cell_id))
+    )
+    body = f"<h2>Site map</h2><table><tr><th>Method</th><th>URL</th><th>Cell</th></tr>{rows}</table>"
+    return (
+        '    @GetMapping("/catalog")\n'
+        "    public ResponseEntity<String> catalog() {\n"
+        f"{_site_page_java(200, 'Site map', body)}"
+        "    }\n"
+    )
+
+
+def _site_method_name(route_path: str) -> str:
+    parts = [p for p in re.split(r"[/_-]", route_path) if p]
+    return "client" + "".join(p[:1].upper() + p[1:] for p in parts)
+
+
+def _site_client_page_method(route_path: str, method: str, spec: dict[str, Any],
+                              page_urls: list[str], api_urls: list[str]) -> str:
+    kind = spec["kind"]
+    title = spec["title"]
+    method_name = _site_method_name(route_path)
+    mapping = ", ".join(f'"{u}"' for u in page_urls)
+    api_url = api_urls[0]
+    fields = spec.get("fields", ())
+
+    js = ""
+    if kind == "get_form":
+        inputs = "".join(
+            f'<p><label>{label}<br><input type="text" name="{param}"></label></p>' for label, param in fields
+        )
+        body = f"<h2>{title}</h2><form method=\"get\" action=\"{api_url}\">{inputs}<button type=\"submit\">Go</button></form>"
+    elif kind == "post_form":
+        body = f'<h2>{title}</h2><form method="post"><button type="submit">Send</button></form><pre id="result"></pre>'
+    elif kind == "multipart_form":
+        body = (
+            f'<h2>{title}</h2><form method="post" enctype="multipart/form-data">'
+            '<p><label>File<br><input type="file" name="file"></label></p>'
+            '<button type="submit">Upload</button></form>'
+        )
+    elif kind == "bearer_fetch":
+        body = (
+            f'<h2>{title}</h2>'
+            '<p><label>Token<br><input type="text" id="token"></label></p>'
+            '<button id="go">Fetch</button><pre id="result"></pre>'
+        )
+        js = (
+            "<script>"
+            'document.getElementById("go").addEventListener("click", function() {'
+            f'fetch("{api_url}", {{headers: {{Authorization: "Bearer " + document.getElementById("token").value}}}})'
+            '.then(function(r) { return r.text(); })'
+            '.then(function(t) { document.getElementById("result").textContent = t; });'
+            "});"
+            "</script>"
+        )
+        body += js
+    elif kind == "json_fetch":
+        body = (
+            f'<h2>{title}</h2>'
+            '<p><textarea id="body" rows="6" cols="60">{}</textarea></p>'
+            '<button id="go">Send</button><pre id="result"></pre>'
+        )
+        js = (
+            "<script>"
+            'document.getElementById("go").addEventListener("click", function() {'
+            'fetch(location.pathname, {method: "POST", headers: {"Content-Type": "application/json"}, '
+            'body: document.getElementById("body").value})'
+            '.then(function(r) { return r.text(); })'
+            '.then(function(t) { document.getElementById("result").textContent = t; });'
+            "});"
+            "</script>"
+        )
+        body += js
+    elif kind == "xml_fetch":
+        body = (
+            f'<h2>{title}</h2>'
+            '<p><textarea id="body" rows="6" cols="60"></textarea></p>'
+            '<button id="go">Send</button><pre id="result"></pre>'
+        )
+        js = (
+            "<script>"
+            'document.getElementById("go").addEventListener("click", function() {'
+            'fetch(location.pathname, {method: "POST", headers: {"Content-Type": "application/xml"}, '
+            'body: document.getElementById("body").value})'
+            '.then(function(r) { return r.text(); })'
+            '.then(function(t) { document.getElementById("result").textContent = t; });'
+            "});"
+            "</script>"
+        )
+        body += js
+    elif kind == "binary_fetch":
+        body = (
+            f'<h2>{title}</h2>'
+            '<p><label>File<br><input type="file" id="file"></label></p>'
+            '<button id="go">Send</button><pre id="result"></pre>'
+        )
+        js = (
+            "<script>"
+            'document.getElementById("go").addEventListener("click", function() {'
+            'document.getElementById("file").files[0].arrayBuffer().then(function(buf) {'
+            'fetch(location.pathname, {method: "POST", headers: {"Content-Type": "application/octet-stream"}, body: buf})'
+            '.then(function(r) { return r.text(); })'
+            '.then(function(t) { document.getElementById("result").textContent = t; });'
+            "});"
+            "});"
+            "</script>"
+        )
+        body += js
+    elif kind == "query_post_fetch":
+        label, param = fields[0]
+        body = (
+            f'<h2>{title}</h2>'
+            f'<p><label>{label}<br><input type="text" id="qval"></label></p>'
+            '<button id="go">Send</button><pre id="result"></pre>'
+        )
+        js = (
+            "<script>"
+            'document.getElementById("go").addEventListener("click", function() {'
+            f'fetch(location.pathname + "?{param}=" + encodeURIComponent(document.getElementById("qval").value), '
+            '{method: "POST"})'
+            '.then(function(r) { return r.text(); })'
+            '.then(function(t) { document.getElementById("result").textContent = t; });'
+            "});"
+            "</script>"
+        )
+        body += js
+    else:
+        raise ValueError(f"unknown client page kind: {kind!r}")
+
+    return (
+        f'    @GetMapping({{{mapping}}})\n'
+        f"    public ResponseEntity<String> {method_name}() {{\n"
+        f"{_site_page_java(200, title, body)}"
+        "    }\n"
+    )
+
+
 def _class_name_for(cell_id: str) -> str:
     """A valid, deterministic Java class identifier from a cell id (e.g.
     ``"LABGEN-SSTI-0001"`` -> ``"LabgenSsti0001Controller"``) -- title-cased
@@ -496,4 +683,55 @@ class SpringBootEmitter(Emitter):
             f"{complexity_result.code}"
         )
         path = f"src/main/java/com/fuzzlab/trackernest/generated/{class_name}.java"
+        return (EmittedFile(path=path, content=java_source.encode("utf-8"), role="controller"),)
+
+    def render_site(self, cells: list[Cell], app_key: str) -> EmittedFiles:
+        """CC-LAB-0244 (plan §2c): one generated ``SiteController.java`` for
+        ``app_key``'s whole build -- the homepage, ``/catalog``, and a
+        client page for every ``api`` route this app owns. Static content
+        only: nothing here reads the request or a cell's own transform/sink
+        region."""
+        site = APP_REGISTRY[app_key]
+        app_cells = [c for c in cells if _PAGE_PARAMS.get(c.route.path, {}).get("app") == app_key]
+        class_name = "".join(p.capitalize() for p in app_key.split("_")) + "SiteController"
+        nav = _java_string_literal_escape(nav_html_for(app_key))
+        app_name = _java_string_literal_escape(site.name)
+        brand = _java_string_literal_escape(site.brand)
+
+        methods: list[str] = []
+        methods.append(_site_home_method(site.tagline))
+        methods.append(_site_catalog_method(app_cells))
+
+        seen_client_pages: set[str] = set()
+        for c in sorted(app_cells, key=lambda c: c.cell_id):
+            profile = _PAGE_PARAMS[c.route.path]
+            if profile.get("classification") != "api":
+                continue
+            spec = _CLIENT_PAGE_SPECS.get(c.route.path)
+            if spec is None or c.route.path in seen_client_pages:
+                continue
+            seen_client_pages.add(c.route.path)
+            api_urls = sorted({served_url_for(cc, site_build=True) for cc in app_cells if cc.route.path == c.route.path})
+            page_urls = [c.route.path.removeprefix("/api") or "/"] if c.route.method == "GET" else api_urls
+            methods.append(_site_client_page_method(c.route.path, c.route.method, spec, page_urls, api_urls))
+
+        java_source = (
+            f"// Generated by fuzzlab.labgen.emitters.spring_boot.render_site for app {app_key!r}\n"
+            "package com.fuzzlab.trackernest.generated.site;\n"
+            "\n"
+            "import org.springframework.web.bind.annotation.GetMapping;\n"
+            "import org.springframework.web.bind.annotation.RestController;\n"
+            "import org.springframework.http.ResponseEntity;\n"
+            "import com.fuzzlab.trackernest.SiteLayout;\n"
+            "\n"
+            "@RestController\n"
+            f"public final class {class_name} {{\n"
+            f"    private static final String APP_NAME = \"{app_name}\";\n"
+            f"    private static final String BRAND = \"{brand}\";\n"
+            f"    private static final String NAV = \"{nav}\";\n"
+            "\n"
+            + "\n".join(methods)
+            + "}\n"
+        )
+        path = f"src/main/java/com/fuzzlab/trackernest/generated/site/{class_name}.java"
         return (EmittedFile(path=path, content=java_source.encode("utf-8"), role="controller"),)

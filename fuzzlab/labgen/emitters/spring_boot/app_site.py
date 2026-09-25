@@ -53,18 +53,24 @@ APP_REGISTRY: dict[str, AppSite] = {
         brand="#b3121f",
         nav=(
             ("/", "Home"),
-            ("/account/billing", "Billing"),
-            ("/account/preferences", "Preferences"),
-            ("/account/settings", "Account settings"),
+            # CC-LAB-0244 (plan §2c): a POST api's client page lives at the
+            # api's own served URL (Lane 1's CircleFeed/Huddle Hub pattern);
+            # only a GET api's client page lives at a separate, non-`/api`
+            # URL. These two groups must not be confused -- fixed once,
+            # 2026-09-25, after a live boot showed the POST-route entries
+            # 404ing at their stripped-`/api` paths.
+            ("/account/billing", "Billing"),  # GET api -> separate URL
+            ("/account/preferences", "Preferences"),  # GET api -> separate URL
+            ("/api/account/settings", "Account settings"),  # POST api -> own URL
             ("/catalog", "Site map"),
-            ("/content/import", "Partner content import"),
-            ("/content/thumbnail-import", "Thumbnail import"),
-            ("/playback/resume", "Resume playback"),
-            ("/profiles/avatar", "Profile avatar"),
-            ("/profiles/switch", "Switch profile"),
-            ("/session/refresh", "Session refresh"),
-            ("/subscription/change-plan", "Change plan"),
-            ("/support/template-preview", "Support console"),
+            ("/api/content/import", "Partner content import"),  # POST api -> own URL
+            ("/api/content/thumbnail-import", "Thumbnail import"),  # POST api -> own URL
+            ("/api/playback/resume", "Resume playback"),  # POST api -> own URL
+            ("/api/profiles/avatar", "Profile avatar"),  # POST api -> own URL
+            ("/api/profiles/switch", "Switch profile"),  # POST api -> own URL
+            ("/api/session/refresh", "Session refresh"),  # POST api -> own URL
+            ("/api/subscription/change-plan", "Change plan"),  # POST api -> own URL
+            ("/support/template-preview", "Support console"),  # GET api -> separate URL
         ),
     ),
     "wanderfare": AppSite(
@@ -75,8 +81,8 @@ APP_REGISTRY: dict[str, AppSite] = {
         nav=(
             ("/", "Home"),
             ("/catalog", "Site map"),
-            ("/hotels/search-sort", "Search hotels"),
-            ("/trips/restore", "Restore a trip"),
+            ("/hotels/search-sort", "Search hotels"),  # GET api -> separate URL
+            ("/api/trips/restore", "Restore a trip"),  # POST api -> own URL
         ),
     ),
 }
