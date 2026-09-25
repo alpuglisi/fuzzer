@@ -749,3 +749,28 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   this class in an emitter it does not fix must pin each known instance with
   an `xfail(strict=True)` or an offline failing check -- never a prose
   deferral to a future lane. (from BUG-0052)
+
+- **PA-0058** — Strengthens `PA-0054`. `PA-0055` and `PA-0056` (the
+  concurrent Lanes 3 and 4) add each route's own request method, input
+  channels, and pinning other emitters right away. PA-0058 adds only what
+  none of those covers:
+  1. **Assert the declared absent-input result on both twins, not just "no
+     crash".** Every bare-request check (the sweep, or the offline render
+     check) must assert the route's **declared** status exactly, and
+     **identically on both twins**. A "< 500" assertion alone is not
+     enough: an undeclared absent-input path that does not crash but
+     differs between the twins passes it, and it hands a crawler or oracle
+     a way to tell the twins apart at the baseline URL. MeadowMart's bare
+     `/api/search` answered 200 on both twins, with different bodies
+     (BUG-0056, D3).
+  2. **Validate declarations against one closed value set.** An
+     `absent_input` declaration counts only if its value comes from **one
+     closed, cross-emitter value set** and is allowed for the route's
+     source kind (e.g. `ABSENT_INPUT_BY_SOURCE` in `node_express` and
+     `python_fastapi`). Checks must validate membership, not presence.
+     Otherwise each lane invents its own spelling, and a cross-emitter
+     check can neither read one emitter's valid declaration nor reject a
+     misspelled one.
+  Until the concurrent lanes' spellings (`default:<v>` vs `default_value`)
+  are unified, and the shared S15 check validates membership, that
+  reconciliation is flagged to Lane 7 (`CC-LAB-0247`). (from BUG-0056)

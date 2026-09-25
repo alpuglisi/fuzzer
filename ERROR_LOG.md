@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `python_fastapi` / `node_express` routes had no declared absent-input behavior — a bare request 500'd, exited the Node process, or answered twin-asymmetrically (fixed, BUG-0056/PA-0058)
+
+- **Symptom:** a bare `GET /products` in the `python_fastapi` sample answered
+  HTTP 500 (vulnerable twin); a bare `GET` of the `node_express` Tier-A SQL
+  cells (`/generated/labgen-ne-000N`) and a `POST` to the `/api/login` twin
+  without `username` exited the whole Node process; MeadowMart's bare
+  `GET /api/search` answered 200 on both twins but with different bodies
+  (the vulnerable twin marked every character). All reproduced live on
+  2026-09-25 (plan §1d, D1-D4).
+- **Root cause:** neither emitter's route profile could declare an
+  absent-input behavior, so the absent value (`None` / `undefined`) flowed
+  into sinks correct only for a present value; PA-0054's offline check
+  existed only for `django`, and every existing sweep asserts only "< 500",
+  which a non-crashing, twin-asymmetric bare response passes.
+- **Remediation:** `CC-LAB-0246` -- a required `absent_input` declaration on
+  every route of both emitters (`default_value` / `required_param` /
+  `empty_body_400` / `no_input`), rendered in the source region identically
+  on both twins; offline and live checks assert the declared status on both
+  twins. The Node async-rejection exit (F2) is a different class, pinned by
+  a strict xfail. See `docs/bugs/BUG-0056-*.md`, `PA-0058`.
+- **Status:** Fixed.
+
 ## 2026-09-25 — LAB: `django` (PicTrail) routes 500'd on a bare GET — absent query parameter reached the sink as None (fixed, BUG-0052/PA-0054)
 
 - **Symptom:** a bare `GET` (no query string) of `/post`, `/explore`,
