@@ -1,14 +1,16 @@
 # Browsable Labs Lane 4 — spring_boot: TrackerNest, Netflix clone, Expedia clone
 
-Status: **DRAFT — NOT REVIEWED (review gate blocked, 2026-09-25).** Phases 1-2
-of the lane pipeline (investigation, plan draft) are done. Phase 3 (two
-independent reviewer agents, accuracy + adequacy) **could not be run**: this
-lane's sub-agent has no agent-spawning tool in its toolset, and
-`docs/MULTI_AGENT_ORCHESTRATION.md` §4 requires stopping and flagging rather
-than silently substituting a different review mechanism (such as
-self-review). See §8. **This plan does not authorize implementation.** It must
-first clear its own 2-reviewer gate, and then the condensed `CC-LAB-0244`
-entry must clear its own gate, mirroring `CC-LAB-0242`'s process.
+Status: **revised after review round 1 (2026-09-25), awaiting round-2
+confirmation.**
+
+- Round 1 was run by the orchestrating session's own two reviewer agents
+  (accuracy + adequacy), because this lane's sub-agent has no agent-spawning
+  tool.
+- The result was ACCURATE / ADEQUATE contingent on 2 fixes, plus 1
+  recommended item. All three are applied in this revision (§8).
+- **This plan does not authorize implementation.** It needs round-2 3/3
+  agreement, and then the condensed `CC-LAB-0244` entry must clear its own
+  gate, mirroring `CC-LAB-0242`'s process.
 
 Reserved numbers, per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table, used
 exactly: `CC-LAB-0244`; `FR-LAB-164` (browsable site) and `FR-LAB-165`
@@ -422,7 +424,7 @@ query parameters:
 
 | Route | Channel | Declared `absent_input` | Bare-request result (both twins) |
 |---|---|---|---|
-| `/wiki/pages/render` | query `macroExpr` | `form_when_absent` (page; see decision rule below) | `GET` → 200 page, form only, sink not run |
+| `/wiki/pages/render` | query `macroExpr` | `form_when_absent` (page; accepted in review round 1, see below) | `GET` → 200 page, form only, sink not run |
 | `/api/support/template-preview` | query `expr` | `required_param` | `GET` → 400 `missing required parameter: expr` |
 | `/api/hotels/search-sort` | query `sortBy` | `default_value` = `'recommended'` (a SpEL string literal: "Sort result: recommended" on both twins) | `GET` → 200 |
 | `/api/account/billing` | query `account_id` | `required_param` (also closes the secure twin's `""==""` disclosure, §1.6.2) | `GET` → 400 |
@@ -435,22 +437,20 @@ query parameters:
 | `/integrations/webhook-payload` | whole body (`request_stream`) | `empty_body_400` via `getContentLengthLong() == 0`. A chunked empty body still reaches the sink's own handled 400 (EOF), which is recorded, not hidden. | `POST` → 400; `GET` → 200 client page |
 | `/api/session/refresh` | none | `no_input` (the modelled request has no input; a bare `POST` is the normal request) | `POST` → 200; `GET` → 200 client page |
 
-**Decision rule for `form_when_absent`** (the one value outside PA-0053's
-literal "default or 4xx"):
+**`form_when_absent`: decided in review round 1, adopted.** This is the one
+value outside PA-0053's literal "default or 4xx".
 
-- **Adopted default:** `form_when_absent`. It has the same safety property
-  (no sink is reached with absent input), and it has direct precedent in
-  Lane 2's `/settings`/`/inbox` `get_form_template` ("a bare GET should show
-  the form, not touch the sink").
-- **Fallback if review rejects it as outside PA-0053:**
-  `default_value = 'welcome'`, a quoted OGNL string literal. The vulnerable
-  twin answers "Rendered macro result: welcome", the secure twin "Unknown
-  macro", both 200.
-- **Rejected:** a bare `welcome` default, because the vulnerable twin would
-  answer 400.
-
-The `FR-LAB-165` entry records which branch was taken, as an explicit
-sign-off.
+- **Why the adequacy reviewer accepted it:** it satisfies PA-0053's safety
+  property (no sink is reached with absent input), and it matches Lane 2's
+  `/settings`/`/inbox` `get_form_template` precedent ("a bare GET should
+  show the form, not touch the sink").
+- **Rejected alternatives:**
+  - `default_value = 'welcome'` (a quoted OGNL string literal), which was
+    the draft's fallback;
+  - a bare `welcome` default, because the vulnerable twin would answer 400.
+- **Sign-off:** the `FR-LAB-165` entry records this as an explicit sign-off
+  ("`form_when_absent` accepted, review round 1"). It is not an
+  implementation-time choice.
 
 ### 2f. Ground truth: no edits
 
@@ -620,6 +620,82 @@ measured, and the deepest GT URL is asserted to be below the cap.
 - **Verification is by re-running** every live-boot and multitarget suite
   in §1.7, not by reading code.
 
+**S15 — the PA-0002 sweep across the other emitters, done by this lane
+(review round 1, adequacy fix 1).**
+
+The draft handed the other emitters to "the orchestrator reconciles". That
+is the same prose deferral this plan diagnoses in BUG-0052 (S4 failure
+mode 3), so this lane now pins them itself.
+
+**What exists today** (verified directly, 2026-09-25, not assumed):
+
+- `php_laravel`'s remaining known instances are already pinned by strict
+  xfails (`tests/test_labgen_navigability_live_boot.py`, from BUG-0051).
+- `django` is fixed and guarded by an offline declaration check
+  (`tests/test_labgen_django_browsable.py::test_every_get_param_route_declares_its_absent_input_behavior`,
+  BUG-0052).
+- The other five emitters have **no pin of any kind and no declaration
+  mechanism**. A search for `default_value`/`required_param` under
+  `fuzzlab/labgen/emitters/{go_net_http,ruby_rails,node_express,python_fastapi,php_current}/`
+  finds 0 files, and no test mentions PA-0053/PA-0054 for them:
+  - `go_net_http` and `node_express` have `_ROUTE_PARAMS`
+    (`go_net_http/__init__.py:361`, `node_express/__init__.py:171`);
+  - `python_fastapi` and `php_current` have `_PAGE_PARAMS`
+    (`python_fastapi/__init__.py:105`, `php_current/__init__.py:123`);
+  - `ruby_rails` has no per-route profile at all, only the shape-keyed
+    `_SHAPE_CTX` (`ruby_rails/__init__.py:118`) and
+    `_REAL_PAGE_URL_BY_CELL_ID` (`:192`).
+
+**What this lane adds** (a deliverable, not a hand-off): a new offline
+module, `tests/test_absent_input_declarations_cross_emitter.py`.
+
+- It is parametrized over **every** emitter package, and each case asserts
+  PA-0054(1): every route the emitter's manifests produce carries a declared
+  absent-input behavior.
+  - `spring_boot` passes. It is fixed by this lane: `absent_input` on every
+    `_PAGE_PARAMS` route.
+  - `django` passes, re-asserting its existing check against its
+    `default_value`/`required_param` keys.
+  - `php_laravel` is **not assumed to pass**. `default_value` appears once
+    in `php_laravel/__init__.py`, and its live pin covers only Huddle Hub's
+    `/messages/unfurl`
+    (`test_huddlehub_unfurl_bare_get_is_a_handled_error_not_a_crash`), so
+    its full declaration coverage is unverified.
+    - **Decision rule:** if every route declares, the case passes.
+    - Otherwise the case is marked `xfail(strict=True)`. Its reason lists
+      the undeclared routes and cites the existing live pin, and its owner
+      is a Lane 1 follow-up with a recommended next CC-LAB number from the
+      orchestrator.
+    - Either way the result is recorded in `CC-LAB-0244`'s Effectiveness.
+  - Each of `go_net_http`, `ruby_rails`, `node_express`, `python_fastapi`
+    and `php_current` is marked `xfail(strict=True, reason="PA-0054(1)
+    unmet: no absent-input declaration mechanism; owner: Browsable Labs
+    Lane N (see docs/LAB_BROWSABLE_APPS_PLAN.md)")`. The owner is Lane 3,
+    5, 6 or 6 respectively. `php_current` has no Browsable Labs lane, so it
+    names "no lane assigned — follow-up" and gets a recommended next
+    CC-LAB number from the orchestrator.
+- This is an **offline failing check pinned by a strict xfail** (PA-0054(3)'s
+  exact wording). When a lane adds declarations, its case XPASSes, the
+  strict marker turns the suite red, and the marker must be removed in that
+  same lane's change. That makes it mechanical, not remembered.
+- The check reads each emitter's own route enumeration (its route-profile
+  table plus its manifests via `supports()`), never a hand-kept list
+  (PA-0027).
+
+**Decision rule — interaction with concurrent Lanes 3/5/6:**
+
+- This lane owns only the new test file. It edits none of those emitters.
+- If a concurrent lane merges first and already declares absent-input
+  behavior, the merge makes that emitter's case XPASS, and the fix is to
+  delete that one `xfail` marker at merge time. This is expected and
+  intended; it is a signal, not a conflict. The plan states it here, so the
+  orchestrator's reconciliation is a known one-line edit, not a judgment
+  call.
+- **Scope of the pin, stated honestly:** it is an *offline declaration*
+  check (PA-0054(1)). It does not prove that those emitters' routes crash
+  live, because booting four more stacks is those lanes' own navigability
+  work (PA-0054(2)). The xfail reason says exactly that.
+
 ### Per app
 
 **T1 (TrackerNest) — the only JSON/text→HTML conversion.** Gated on:
@@ -708,17 +784,34 @@ For each app:
    - `served_url_for` and the `site_build` flag;
    - `SiteLayout.java` in the skeleton;
    - offline tests for S1, S7 (digit rule), S8, S9, S11 and S12's
-     scaffolding, and the §2f `body_content_type` pin.
+     scaffolding, and the §2f `body_content_type` pin;
+   - the S15 cross-emitter declaration module
+     (`tests/test_absent_input_declarations_cross_emitter.py`), with
+     `spring_boot`'s case expected to fail until step 2 lands. It is
+     written first so that its failure is observed.
 
    **Gate:** the offline suite is green, and one existing single-cell
    live-boot suite (`test_labgen_spring_boot_live_boot.py`) is green, which
    shows the skeleton still compiles.
-2. **§2e guards, one source module at a time.** **Gate per module:** a
-   bare request with the route's own method returns the declared status on
-   both twins (live), and that module's existing live-boot suites are
-   green. This is also where **the bug protocol for the two crashes
-   starts**: the ERROR_LOG line and the BUG-0054 draft, while the evidence
-   is fresh.
+2. **§2e guards, one source module at a time.**
+
+   **Gate per module:** a bare request with the route's own method returns
+   the declared status on both twins (live), and that module's existing
+   live-boot suites are green.
+
+   This is also where **the bug protocol for the two crashes starts**: the
+   ERROR_LOG line and the BUG-0054 draft, while the evidence is fresh.
+
+   **Before/after evidence (review round 1, recommended item 3):**
+   - The §4 step 6 own-method sweep, as a pytest function, is written
+     **first**.
+   - Its failing output is captured against the pre-fix emitter: avatar
+     500 on both twins, thumbnail-import 502 on the vulnerable twin, and
+     every other undeclared status.
+   - It is then re-run passing post-fix.
+   - Both runs (command, commit, per-route status table) are pasted into
+     BUG-0054's "Where encountered" and "Corrective action" sections, so the
+     check is demonstrated able to fail, not only seen passing (PA-0008).
 3. **§2b page conversion of `/wiki/pages/render`.** **Gate:** T1's checks,
    plus the TrackerNest multitarget recall unchanged (2/3).
 4. **§2c/§2d site layer and app-mode harness, one app at a time**
@@ -758,10 +851,13 @@ For each app:
   - `ERROR_LOG.md` line;
   - `docs/bugs/BUG-0054-*.md`: full RCA, Five Whys, and a recurrence review against `BUG-0051`/`PA-0053` and `BUG-0052`/`PA-0054` with a prior-PA failure analysis (S4's three failure modes);
   - `PA-0056`, strengthening PA-0054 on input channels, request method and pin-now;
-  - a PA-0002 sweep scoped to `spring_boot`, with the other emitters named as belonging to concurrent Lanes 3/5/6 **and pinned or flagged per PA-0054(3), not deferred in prose**. The orchestrator reconciles this against those lanes.
-- [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-164` and `FR-LAB-165`.
+  - the PA-0002 sweep: `spring_boot` fixed in full, plus **every other emitter pinned by this lane** via `tests/test_absent_input_declarations_cross_emitter.py` (S15). Strict-xfail cases for `go_net_http`/`ruby_rails`/`node_express`/`python_fastapi`/`php_current` name their owning lane; the `php_laravel` case follows S15's decision rule. There is no prose deferral;
+  - before/after sweep evidence (failing pre-fix, passing post-fix) captured in BUG-0054 (§5 step 2).
+- [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-164` (browsable site) and `FR-LAB-165` (absent-input contract, including the `form_when_absent` sign-off).
 - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0244` (and `BUG-0054`).
-- [ ] `docs/ARCHITECTURE.md` updated, if the harness API or site layer counts as a structural change (to be decided in the entry gate).
+- [ ] **`docs/ARCHITECTURE.md` updated (unconditional; review round 1, adequacy fix 2).** The harness app mode, the public `assemble_spring_boot_app`, the `render_site` site-layer generator, `SiteLayout.java` and the `site_build` twin-URL derivation are structural additions by `CLAUDE.md`'s own test. Two edits:
+  - amend the manifest-driven-generator status line's `spring_boot` clause (`ARCHITECTURE.md:162`) to say that all three `spring_boot` apps are browsable;
+  - add a "TrackerNest, Netflix clone and Expedia clone are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
 - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 4 row updated.
 
 ## 7. Out of scope
@@ -780,7 +876,45 @@ For each app:
 
 ## 8. Review history
 
-**Round 1 — NOT RUN (blocked, 2026-09-25).**
+**Round 1 (accuracy + adequacy, 2026-09-25): ACCURATE / ADEQUATE contingent
+on 2 fixes, plus 1 recommended item.**
+
+- **Who ran it:** the orchestrating session's own two reviewer agents,
+  since this lane has no agent-spawning tool (see "Original blocker note"
+  below).
+- **Accuracy (ACCURATE, no inaccuracies).** The reviewer booted the harness
+  live and independently reproduced:
+  - the twin collision (`BeanCreationException: Ambiguous mapping` when
+    `LABGEN-SSTI-0001`/`0002` are booted together);
+  - both crashes (avatar bare-`POST` 500 on both twins; thumbnail-import
+    502 on the vulnerable twin and 403 on the secure twin);
+  - S2 (an unescaped `200 text/html` reflection under a browser `Accept`);
+  - S6 (malformed JSON returns 500 on both twins).
+- **Adequacy** raised 3 items; all are fixed in this revision:
+  1. **The PA-0002 sweep across other emitters was a soft deferral** to the
+     orchestrator: the exact BUG-0052 failure mode this plan diagnoses.
+     - Fixed by new risk item **S15**. I verified directly that no pin
+       exists today for `go_net_http`/`ruby_rails`/`node_express`/
+       `python_fastapi`/`php_current`.
+     - This lane now adds the offline cross-emitter declaration check
+       itself, with strict xfails naming each owning lane, plus a
+       decision rule for concurrent-lane merges and for `php_laravel`.
+       `php_laravel` is not assumed to pass: its coverage was found
+       unverified.
+     - §6 is updated to match.
+  2. **The `docs/ARCHITECTURE.md` update was left undecided.** It is now an
+     unconditional §6 deliverable, with both concrete edit sites named
+     (`:162`, and beside `:918`).
+  3. *(Recommended, non-blocking)* **Before/after sweep evidence.** Added to
+     §5 step 2 and §6: the own-method sweep is written first, shown failing
+     pre-fix and passing post-fix, and both runs are captured in BUG-0054.
+- **The adequacy reviewer also decided the draft's one open design
+  question:** `form_when_absent` is **accepted** for `/wiki/pages/render`
+  (§2e, now recorded as decided, with the FR-LAB-165 sign-off).
+- **Round 2 is pending.** The same two reviewers are to confirm through the
+  orchestrator. 3/3 agreement is not yet claimed.
+
+**Original blocker note (draft, 2026-09-25), kept for the record:**
 
 - The lane instructions require two independent reviewer sub-agents
   (accuracy and adequacy), spawned with the lane's own agent tool.
