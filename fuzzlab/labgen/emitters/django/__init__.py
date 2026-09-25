@@ -623,3 +623,59 @@ def _indent_block(text: str, prefix: str) -> str:
     ``node_express._indent_block``."""
     lines = text.split("\n")
     return "\n".join((prefix + line) if line else line for line in lines)
+
+
+def app_cells() -> list[Cell]:
+    """CC-LAB-0247 (Lane 7, §2a): every real `django` cell across every
+    manifest under `lab/manifests/`, derived from the emitter's own
+    `supports()` predicate (PA-0027) -- PicTrail's whole build. The single
+    source of truth `assemble_django_app` and
+    `tests/test_labgen_django_navigability_live_boot.py`'s own
+    `_django_cells()` both use, so the two never drift apart."""
+    import glob
+
+    from fuzzlab.labgen.schema import load_manifest
+
+    emitter = DjangoEmitter()
+    seen: dict[str, Cell] = {}
+    for path in sorted(glob.glob("lab/manifests/*.yaml")):
+        for cell in load_manifest(path).cells:
+            if cell.stack_profile == "django" and emitter.supports(cell.vuln_class, cell.sink_context):
+                seen.setdefault(cell.cell_id, cell)
+    return list(seen.values())
+
+
+def assemble_django_app(dest: str) -> None:
+    """CC-LAB-0247 (Lane 7, §2a): write PicTrail's whole real build -- the
+    checked-in skeleton, every real cell's rendered files, the route
+    accumulator, and the generated `settings.py` -- into `dest`. Lifted
+    verbatim from `DjangoLiveBootHarness._assemble()` (never duplicated
+    logic, PA-0027's discipline applied to an assembly procedure instead of
+    a cell list) so the two code paths are provably identical, not merely
+    similar. A source tree only: no venv, no `pip install`, no migration,
+    no DB seed -- a real boot (live-boot harness or a container's own
+    entrypoint) still does those."""
+    import shutil
+    from pathlib import Path
+
+    from fuzzlab.labgen.emitters.django.stack_env import settings_py_content
+    from fuzzlab.labgen.conformance.django_live_boot import SKELETON_DIR
+
+    dest_path = Path(dest)
+    shutil.copytree(SKELETON_DIR, dest_path, dirs_exist_ok=True)
+
+    emitter = DjangoEmitter()
+    cells = app_cells()
+    for cell in cells:
+        for emitted in emitter.render(cell):
+            file_dest = dest_path / emitted.path
+            file_dest.parent.mkdir(parents=True, exist_ok=True)
+            file_dest.write_bytes(emitted.content)
+
+    accumulator_file = emitter.render_route_accumulator(cells)
+    file_dest = dest_path / accumulator_file.path
+    file_dest.parent.mkdir(parents=True, exist_ok=True)
+    file_dest.write_bytes(accumulator_file.content)
+
+    settings_dest = dest_path / "fuzlab_django_lab" / "settings.py"
+    settings_dest.write_bytes(settings_py_content())

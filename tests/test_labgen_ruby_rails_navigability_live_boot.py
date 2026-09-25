@@ -36,7 +36,6 @@ Skip-guarded on ``rails_boot_available()`` (PA-0005/PA-0035) and ``slow``.
 from __future__ import annotations
 
 import base64
-import glob
 import hashlib
 import hmac
 import sqlite3
@@ -48,9 +47,9 @@ import requests
 
 from fuzzlab.labels.contract import load_injection_points
 from fuzzlab.labgen.conformance.rails_live_boot import SKELETON_DIR, RailsLiveBootHarness, rails_boot_available
-from fuzzlab.labgen.emitters.ruby_rails import RailsEmitter, bare_request_status_for, url_path_for
+from fuzzlab.labgen.emitters.ruby_rails import RailsEmitter, app_cells, bare_request_status_for, url_path_for
 from fuzzlab.labgen.emitters.ruby_rails.route_accumulator import served_routes
-from fuzzlab.labgen.schema import Cell, Pipeline, Route, SinkContext, load_manifest
+from fuzzlab.labgen.schema import Cell, Pipeline, Route, SinkContext
 from fuzzlab.tools.spider import LocalSpider
 
 pytestmark = [
@@ -107,14 +106,12 @@ def _illustrative_cell(cell_id: str) -> Cell:
 
 
 def _forgecart_cells() -> list[Cell]:
-    """The whole ForgeCart build: every ruby_rails cell of every manifest
-    (PA-0027, via `supports()`), plus the test-only illustrative cell."""
-    emitter = RailsEmitter()
+    """The whole ForgeCart build: every real `ruby_rails` cell (`app_cells()`,
+    CC-LAB-0247 -- the same single source of truth `assemble_ruby_rails_app`
+    uses, PA-0027), plus the test-only illustrative cell."""
     seen: dict[str, Cell] = {"LABGEN-RR-0001": _illustrative_cell("LABGEN-RR-0001")}
-    for path in sorted(glob.glob("lab/manifests/*.yaml")):
-        for cell in load_manifest(path).cells:
-            if cell.stack_profile == "ruby_rails" and emitter.supports(cell.vuln_class, cell.sink_context):
-                seen.setdefault(cell.cell_id, cell)
+    for cell in app_cells():
+        seen.setdefault(cell.cell_id, cell)
     return list(seen.values())
 
 

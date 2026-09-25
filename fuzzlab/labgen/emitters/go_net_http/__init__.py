@@ -696,3 +696,52 @@ def _indent_block(text: str, prefix: str) -> str:
     ``_indent_block``."""
     lines = text.split("\n")
     return "\n".join((prefix + line) if line else line for line in lines)
+
+
+def app_cells() -> list[Cell]:
+    """CC-LAB-0247 (Lane 7, §2a): every real `go_net_http` cell across every
+    manifest under `lab/manifests/`, derived from the emitter's own
+    `supports()` predicate (PA-0027) -- LoopCast's whole build. The single
+    source of truth `assemble_go_net_http_app` and
+    `tests/test_labgen_go_net_http_navigability_live_boot.py`'s own
+    `_go_cells()` both use, so the two never drift apart."""
+    import glob
+
+    from fuzzlab.labgen.schema import load_manifest
+
+    emitter = GoEmitter()
+    seen: dict[str, Cell] = {}
+    for path in sorted(glob.glob("lab/manifests/*.yaml")):
+        for cell in load_manifest(path).cells:
+            if cell.stack_profile == "go_net_http" and emitter.supports(cell.vuln_class, cell.sink_context):
+                seen.setdefault(cell.cell_id, cell)
+    return list(seen.values())
+
+
+def assemble_go_net_http_app(dest: str) -> None:
+    """CC-LAB-0247 (Lane 7, §2a): write LoopCast's whole real build -- the
+    checked-in skeleton, every real cell's rendered files, and the route
+    accumulator -- into `dest`. Lifted verbatim from
+    `GoLiveBootHarness._assemble()` (never duplicated logic, PA-0027's
+    discipline applied to an assembly procedure instead of a cell list) so
+    the two code paths are provably identical, not merely similar. A source
+    tree only: no `go build`, no boot -- a real boot (live-boot harness or
+    a container's own build stage) still does that."""
+    import shutil
+    from pathlib import Path
+
+    from fuzzlab.labgen.conformance.go_live_boot import SKELETON_DIR
+
+    dest_path = Path(dest)
+    shutil.copytree(SKELETON_DIR, dest_path, dirs_exist_ok=True)
+
+    emitter = GoEmitter()
+    cells = app_cells()
+    for cell in cells:
+        for emitted in emitter.render(cell):
+            file_dest = dest_path / emitted.path
+            file_dest.parent.mkdir(parents=True, exist_ok=True)
+            file_dest.write_bytes(emitted.content)
+
+    accumulator = emitter.render_route_accumulator(cells)
+    (dest_path / accumulator.path).write_bytes(accumulator.content)

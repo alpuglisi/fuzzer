@@ -38,7 +38,6 @@ every other live-boot module.
 
 from __future__ import annotations
 
-import glob
 import sqlite3
 from urllib.parse import urlsplit
 
@@ -46,8 +45,7 @@ import pytest
 
 from fuzzlab.labels.contract import load_injection_points
 from fuzzlab.labgen.conformance.django_live_boot import DjangoLiveBootHarness, django_boot_available
-from fuzzlab.labgen.emitters.django import _SITE_ROUTES, DjangoEmitter, served_url_for
-from fuzzlab.labgen.schema import load_manifest
+from fuzzlab.labgen.emitters.django import _SITE_ROUTES, DjangoEmitter, app_cells, served_url_for
 from fuzzlab.tools.spider import LocalSpider
 
 pytestmark = [
@@ -88,21 +86,9 @@ _EXPECTED_STATUS = {
 }
 
 
-def _django_cells():
-    """Every django cell across every manifest, derived from the emitter's
-    own `supports()` predicate (PA-0027) -- PicTrail's whole build."""
-    emitter = DjangoEmitter()
-    seen = {}
-    for path in sorted(glob.glob("lab/manifests/*.yaml")):
-        for cell in load_manifest(path).cells:
-            if cell.stack_profile == "django" and emitter.supports(cell.vuln_class, cell.sink_context):
-                seen.setdefault(cell.cell_id, cell)
-    return list(seen.values())
-
-
 @pytest.fixture(scope="module")
 def crawl(tmp_path_factory):
-    cells = _django_cells()
+    cells = app_cells()
     harness = DjangoLiveBootHarness(DjangoEmitter(), cells)
     harness.build()
     try:

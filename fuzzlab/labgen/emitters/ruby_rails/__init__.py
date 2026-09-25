@@ -574,3 +574,57 @@ class RailsEmitter(Emitter):
             # CC-LAB-0245: a real page's GET form/client page on the same URL.
             get_page=profile.get_page if profile else None,
         )
+
+
+def app_cells() -> list[Cell]:
+    """CC-LAB-0247 (Lane 7, §2a): every real `ruby_rails` cell across every
+    manifest under `lab/manifests/`, derived from the emitter's own
+    `supports()` predicate (PA-0027) -- ForgeCart's whole build. The single
+    source of truth `assemble_ruby_rails_app` and
+    `tests/test_labgen_ruby_rails_navigability_live_boot.py`'s own
+    `_forgecart_cells()` both use, so the two never drift apart."""
+    import glob
+
+    from fuzzlab.labgen.schema import load_manifest
+
+    emitter = RailsEmitter()
+    seen: dict[str, Cell] = {}
+    for path in sorted(glob.glob("lab/manifests/*.yaml")):
+        for cell in load_manifest(path).cells:
+            if cell.stack_profile == "ruby_rails" and emitter.supports(cell.vuln_class, cell.sink_context):
+                seen.setdefault(cell.cell_id, cell)
+    return list(seen.values())
+
+
+def assemble_ruby_rails_app(dest: str) -> None:
+    """CC-LAB-0247 (Lane 7, §2a): write ForgeCart's whole real build -- the
+    checked-in skeleton, every real cell's rendered files, and
+    `config/routes.rb` -- into `dest`. Lifted verbatim from
+    `RailsLiveBootHarness._assemble()` (never duplicated logic, PA-0027's
+    discipline applied to an assembly procedure instead of a cell list) so
+    the two code paths are provably identical, not merely similar. A source
+    tree only: no `bundle install`, no `db:prepare`, no boot -- a real boot
+    (live-boot harness or a container's own entrypoint) still does those,
+    including this stack's own ephemeral `SECRET_KEY_BASE` generation
+    (never written here, never committed -- D12)."""
+    import shutil
+    from pathlib import Path
+
+    from fuzzlab.labgen.conformance.rails_live_boot import SKELETON_DIR
+    from fuzzlab.labgen.emitters.ruby_rails.route_accumulator import RouteAccumulator
+
+    dest_path = Path(dest)
+    shutil.copytree(SKELETON_DIR, dest_path, dirs_exist_ok=True)
+
+    emitter = RailsEmitter()
+    cells = app_cells()
+    fragments: dict[str, str] = {}
+    for cell in cells:
+        for emitted in emitter.render(cell):
+            file_dest = dest_path / emitted.path
+            file_dest.parent.mkdir(parents=True, exist_ok=True)
+            file_dest.write_bytes(emitted.content)
+        fragments[cell.cell_id] = emitter.route_fragment_for(cell)
+
+    routes_file = dest_path / "config" / "routes.rb"
+    routes_file.write_text(RouteAccumulator().render_file(fragments), encoding="utf-8")

@@ -38,7 +38,6 @@ other live-boot module.
 
 from __future__ import annotations
 
-import glob
 import sqlite3
 from urllib.parse import urlsplit
 
@@ -50,9 +49,9 @@ from fuzzlab.labgen.emitters.go_net_http import (
     _REAL_PAGE_CELL_IDS,
     _REAL_PAGE_TWIN_CELL_IDS,
     GoEmitter,
+    app_cells,
     served_url_for,
 )
-from fuzzlab.labgen.schema import load_manifest
 from fuzzlab.tools.spider import LocalSpider
 
 pytestmark = [
@@ -106,24 +105,9 @@ _EXPECTED_OWN_METHOD_STATUS = {
 }
 
 
-def _go_cells():
-    """Every `go_net_http` cell across every manifest, derived from the
-    emitter's own `supports()` predicate (PA-0027) -- LoopCast's whole
-    build."""
-    emitter = GoEmitter()
-    seen = {}
-    for path in sorted(glob.glob("lab/manifests/*.yaml")):
-        for cell in load_manifest(path).cells:
-            if cell.stack_profile == "go_net_http" and emitter.supports(
-                cell.vuln_class, cell.sink_context
-            ):
-                seen.setdefault(cell.cell_id, cell)
-    return list(seen.values())
-
-
 @pytest.fixture(scope="module")
 def crawl(tmp_path_factory):
-    cells = _go_cells()
+    cells = app_cells()
     harness = GoLiveBootHarness(GoEmitter(), cells)
     harness.build()
     try:
