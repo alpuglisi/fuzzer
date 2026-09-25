@@ -24,7 +24,25 @@ Implementation is **not** authorized.
     Deliverables copy, the R-B7 = F3 mapping, and the Status and
     reviewer-mechanism claim.
   - **Adequacy:** pending.
-- **Entry gate, round 2:** pending.
+- **Entry gate, round 2 (run by the orchestrating session, 2026-09-25):**
+  - **Accuracy:** one real inaccuracy in the round-1 fix. The claim
+    that the precedent search "found none that makes substantive
+    changes inside two different emitters" was false for `CC-LAB-0173`,
+    which adds new code in `spring_boot` and deletes the whole
+    `java_spring_boot` package in one entry.
+  - **Fixed:** the claim is qualified to "no entry in which two
+    emitters both gain new functionality in parallel". It names
+    `CC-LAB-0173` as spanning two emitters with one side a full
+    retirement. It is applied identically in the opening bullet, the
+    Deliverables copy and the plan's §6 (a logged post-convergence
+    correction), so the three stay in verbatim sync.
+  - Everything else was confirmed: the `CC-LAB-0040` rewording, the
+    verbatim match with plan §6, and the framing of the §8 correction
+    note.
+  - **Adequacy:** confirmed. The justification rests on the
+    root-cause/bug/gate, separate-FRs and one-close-date reasons, not on
+    precedent.
+  - Awaiting the orchestrator's re-confirmation of this fix.
 
 This entry is condensed from `docs/LAB_LANE6_NODE_FASTAPI_PLAN.md`, which
 went through 2 review rounds and reached 3/3 agreement on 2026-09-25. The
@@ -52,8 +70,10 @@ not apply. The entry rests on these reasons instead:
 - change-control is per component. `CC-LAB-0040` shows that one entry
   can legitimately span several emitters' concerns, but it is not a
   same-shape precedent: it was one cross-cutting schema/CLI-gate change
-  that only referenced four emitters' manifests. No closer precedent
-  was found (plan §6, reason 1), so the entry rests mainly on the
+  that only referenced four emitters' manifests. No entry was found in
+  which two emitters both gain new functionality in parallel.
+  `CC-LAB-0173` spans two emitters in one entry, but one side is a full
+  retirement (plan §6, reason 1). So the entry rests mainly on the
   following three reasons;
 - there is one root cause, one bug and one gate (`BUG-0056`);
 - each target keeps its own per-target FR;
@@ -473,10 +493,16 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
            substantive code changes inside each emitter. (Corrected by the
            `CC-LAB-0246` round-1 accuracy review.) A search of the LAB log
            for entries naming two or more emitter packages (`CC-LAB-0036`,
-           `-0044`, `-0064`, `-0170`, `-0173`) found none that makes
-           substantive changes inside two different emitters. So this
-           reason only shows that one entry is permitted, and the decision
-           rests mainly on reasons 2–4.
+           `-0044`, `-0064`, `-0170`, `-0173`) found no entry in which two
+           emitters both gain new functionality in parallel.
+           `CC-LAB-0173` does make substantive changes inside two emitters
+           in one entry: it adds new dispatch, sink and route code in
+           `spring_boot` and deletes the whole `java_spring_boot` package.
+           But one side of it is a full retirement, not a parallel feature
+           addition like `CC-LAB-0246`'s two targets. (Qualified by the
+           `CC-LAB-0246` round-2 accuracy review.) So this reason only
+           shows that one entry is permitted, and the decision rests
+           mainly on reasons 2–4.
         2. **One root cause, one bug and one gate across both emitters.**
            BUG-0056 is a single defect class (undeclared absent input)
            found in both (D1–D4). §5 step 1 fixes both under one gate, and

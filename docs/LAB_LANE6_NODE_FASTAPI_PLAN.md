@@ -957,10 +957,16 @@ assertions. That choice is settled at the gate.
          substantive code changes inside each emitter. (Corrected by the
          `CC-LAB-0246` round-1 accuracy review.) A search of the LAB log
          for entries naming two or more emitter packages (`CC-LAB-0036`,
-         `-0044`, `-0064`, `-0170`, `-0173`) found none that makes
-         substantive changes inside two different emitters. So this
-         reason only shows that one entry is permitted, and the decision
-         rests mainly on reasons 2–4.
+         `-0044`, `-0064`, `-0170`, `-0173`) found no entry in which two
+         emitters both gain new functionality in parallel.
+         `CC-LAB-0173` does make substantive changes inside two emitters
+         in one entry: it adds new dispatch, sink and route code in
+         `spring_boot` and deletes the whole `java_spring_boot` package.
+         But one side of it is a full retirement, not a parallel feature
+         addition like `CC-LAB-0246`'s two targets. (Qualified by the
+         `CC-LAB-0246` round-2 accuracy review.) So this reason only
+         shows that one entry is permitted, and the decision rests
+         mainly on reasons 2–4.
       2. **One root cause, one bug and one gate across both emitters.**
          BUG-0056 is a single defect class (undeclared absent input)
          found in both (D1–D4). §5 step 1 fixes both under one gate, and
@@ -1133,3 +1139,16 @@ emitters.
   mainly on reasons 2–4. That was already their weight in the reviewed
   argument, and the conclusion and split rule are unchanged. So this is a
   citation fix that does not reopen the 3/3 above.
+
+**Post-convergence correction (2026-09-25, `CC-LAB-0246` entry gate, round
+2, accuracy).** The round-1 fix overclaimed what the precedent search
+found. It said none of `CC-LAB-0036`/`-0044`/`-0064`/`-0170`/`-0173`
+makes substantive changes inside two different emitters, but
+`CC-LAB-0173` does: it adds new code in `spring_boot` and deletes the
+whole `java_spring_boot` package in one entry.
+- **Fixed:** reason 1 is qualified to "no entry in which two emitters
+  both gain new functionality in parallel". It names `CC-LAB-0173` as
+  spanning two emitters with one side a full retirement. It is fixed
+  identically in the entry's opening bullet and its Deliverables copy.
+- **Effect on the decision:** none. The decision already rests on
+  reasons 2–4, so this does not reopen the 3/3 above.
