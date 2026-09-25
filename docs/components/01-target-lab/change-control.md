@@ -72,28 +72,53 @@ an independent redraft.
   `docs/LAB_BROWSABLE_APPS_PLAN.md`'s own point 6 (navigability acceptance
   criterion) needs a one-line edit once the R8 sign-off below picks an
   option, since option (b) is a shared-contract exception, not a
-  step-3-local one.
+  step-3-local one. **Out of scope, deliberately:** `spring_boot`/
+  `go_net_http`/`ruby_rails` emitter templates are untouched — each stack
+  owns separate template files for the same sink/transform names (confirmed
+  via grep, no shared Jinja include), so this change cannot mechanically
+  affect them. The resulting cross-stack rendering-format inconsistency
+  (this lane makes `php_laravel`'s `db_row_by_id_lookup`-family sinks render
+  HTML pages while other stacks' equivalents keep whatever format they
+  already use) is a known, deliberately deferred design question for Lane 4,
+  tracked via the Deliverables note below (R4), not overlooked.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
-  Two real, identified risk classes, both mitigated by design rather than
-  accepted:
-  1. *Oracle-anchor coupling* (`PriceIntegrityBypassStrategy`'s JSON-fragment
-     match) — mitigated by changing the strategy and its two real dependent
-     tests (`tests/test_oracle_vectors.py`,
+  Four named risk classes from the source plan (`docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`'s
+  R1–R9), each mitigated by design rather than silently accepted; two
+  further open items tracked explicitly rather than folded away:
+  1. *Oracle-anchor coupling* (R1 — `PriceIntegrityBypassStrategy`'s
+     JSON-fragment match) — mitigated by changing the strategy and its two
+     real dependent tests (`tests/test_oracle_vectors.py`,
      `tests/test_labgen_price_integrity.py`) in the same commit as the
      sink-template change, plus re-running
      `tests/test_labgen_phase_d_tier12_category5.py` (an independent
      Tier1/Tier2 proof against the same cells via a different marker
      mechanism).
-  2. *Route-collision* (`DuplicateRouteError`, `route_accumulator.py`) —
-     mitigated by the `_PAGE_PROFILES` `real_page`/`canonical_cell_id`
+  2. *Route-collision* (R9 — `DuplicateRouteError`, `route_accumulator.py`)
+     — mitigated by the `_PAGE_PROFILES` `real_page`/`canonical_cell_id`
      wiring itself, the same mechanism already used for every one of PFF's
      own real pages; verified to genuinely matter for 2 of the 11 pairs
      (`LABGEN-CF-0001`/`0002`, `LABGEN-BC-0005`/`0006`, both built together
      with their twin in an existing live-boot test) and confirmed inert
      for the rest but still required for those pairs to serve at their real
      URL at all.
+  3. *Ground-truth staleness* (R6 — per-app `labels.json`/`injection-points.json`
+     `url`/`rendering` fields) — a stale field silently breaks 5 named
+     dependent tests (`test_labgen_open_redirect.py`,
+     `test_labgen_csv_export_injection.py`, 3 multitarget tests) and, for
+     `LABGEN-CF-0001`/`LABGEN-BC-0005`/`0006` specifically, could make a
+     live `fuzzlab auto` run send JSON request bodies to an endpoint that no
+     longer expects them. Mitigated by updating every relocated cell's
+     fields in the same commit as its own move/conversion, never deferred.
+  4. **Open, not yet resolved** (R8 — split apps have no login route): an
+     anonymous crawl of a standalone split app can never authenticate, so a
+     session-gated cell like `LABGEN-CF-0001` always shows its 401 branch to
+     an unauthenticated visitor. This is a genuine, currently-undecided
+     design question — not merely a checklist item — blocking
+     `LABGEN-CF-0001`/`0002` (Deliverables item 1 below) until sign-off
+     picks option (a) (build a login route) or (b) (recommended: document
+     the 401 as correct, edit the parent plan's point 6 accordingly).
   Accepted, not mitigated: `LABGEN-MA-0003`/`0004`'s new page's authenticated
-  reachability depends on the R8 sign-off below (this cell's page lives in
+  reachability depends on the same R8 sign-off (this cell's page lives in
   the default merged PFF build, which has a login flow, so R8 itself does
   not apply to it — no accepted risk here beyond the 10 pairs R8 covers).
 - **Deliverables:**
@@ -108,13 +133,20 @@ an independent redraft.
         added — todo.
   - [ ] 7 `GET`-only cells relocated (`_PAGE_PROFILES` wired + ground truth
         updated) — todo.
-  - [ ] 4 `POST`-only `api` cells given new client pages + `_PAGE_PROFILES`
-        wired where applicable — todo.
+  - [ ] 4 `POST`-only `api` cell pairs given new client pages +
+        `_PAGE_PROFILES` wired where applicable — todo.
   - [ ] `LABGEN-BC-0005`/`0006` converted to HTML + `_PAGE_PROFILES` wired +
         `PriceIntegrityBypassStrategy` updated (jointly with `CC-FUZZ-0047`)
-        + ground truth updated — todo.
+        + ground truth updated + `tests/test_labgen_cutover_gate.py` re-run
+        (confirms the new `real_page`/`canonical_cell_id` entry doesn't
+        perturb the unrelated PFF cutover-coverage computation) — todo.
   - [ ] New automated twin-diff byte-equality tests for both converted
         pairs — todo.
+  - [ ] One-line note added to `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 4
+        row (R4): `db_row_by_id_lookup`-family sinks render per-lane, per
+        that lane's own `page`/`api` classification — not copied verbatim
+        from `php_laravel` — so Lane 4 doesn't rediscover this question —
+        todo.
   - [ ] Full non-slow suite + this lane's live-boot suite green; every test
         named in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` §5's checklist
         passing — todo.
