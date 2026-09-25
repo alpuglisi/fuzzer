@@ -1,9 +1,12 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **rounds 1–4 reviewed 2026-09-25. Round 4 found 1 adequacy gap: the
-console script's error-path branch was not derived, and not confirmed live.
-It is fixed in this revision. Awaiting round-5 confirmation. Not yet
-converged, and implementation is not authorized.** The orchestrating
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents dispatched by the orchestrating session, plus
+the proposing agent, after 5 rounds; see §8). Round 5 returned ACCURATE /
+ADEQUATE, with 1 trivial sequencing fix (O5 split into O5a/O5b) that the
+adequacy reviewer explicitly judged needed no further round. It is applied.
+**Next step: the `CC-LAB-0245` change-control entry's own 2-reviewer
+gate.** This plan's convergence does not by itself authorize implementation. The orchestrating
 session ran the review rounds (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
 expected unused) / `CC-FUZZ-0051` / `FR-FUZZ-35` (expected unused, R11) /
@@ -595,15 +598,30 @@ The design rule for the §2c client page is unchanged. It reads
 raw text when parsing fails. That guard is **defense in depth**, not a
 response to live ambiguity: this script can reach only one branch. The guard
 keeps the page correct if the script, the browser's default Accept, or Rails'
-negotiation ever changes. O5 checks the guard offline, and §4 step 9d checks
+negotiation ever changes. O5b checks the guard offline, and §4 step 9d checks
 the predicted branch live.
 
 **One link cannot be settled from source.** The webhook action reads
 `request.body.read` and never `params`, so whether Rails parses (and
 rejects) the malformed body at all depends on something else touching the
-params during the request. That is probably Action Controller's
-instrumentation payload, which includes the filtered params. The predicted
-outcome is `400`; §4 step 9d measures it.
+params during the request.
+
+- **Instrumentation is probably not it.** Round 5's accuracy reviewer traced
+  this: the drafting agent's earlier candidate, Action Controller's
+  instrumentation payload, is probably not the trigger, because
+  `filtered_parameters` and `ParamsWrapper` both rescue the parse error
+  internally.
+- **CSRF is not it either.** The reviewer's alternative candidate is
+  `verify_authenticity_token`. This app skips it globally
+  (`skip_forgery_protection`, `application_controller.rb:23`), so that path
+  is inert here too.
+- **So `401 {"verified":false}` is a real possibility.** It would happen if
+  the request reaches the action and fails signature verification over the
+  raw bytes.
+
+The *derived branch prediction* for the case where Rails does reject the
+body stays `400` + static HTML. §4 step 9d measures which one actually
+happens, and R2's decision rule governs the outcome.
 
 **Decision rule:**
 - If the live result matches (`400`, `text/html`, body equal to the
@@ -765,8 +783,7 @@ Baseline in §1h.
   `tn == 1` (`FCART-0003`, the secure twin), and `fp` must not exceed 1 (see
   R5 for pinning);
 - `FCART-0002`/`0004`/`0005` stay FN; their strategies fail closed on these
-  shapes by design (§1h). No strategy is changed, so `CC-FUZZ-0051`/
-  `FR-FUZZ-35` stay unused. They are used only if a strategy must change to
+  shapes by design (§1h). No strategy is changed, so `CC-FUZZ-0051`/`FR-FUZZ-35` stay unused. They are used only if a strategy must change to
   keep an honest detection, which none of §1h's mechanisms requires.
 
 Re-run `test_multitarget_ruby_rails_forgecart.py` and
@@ -865,13 +882,20 @@ or fix step.
 - **O4.** `route_fragment_for` emits the GET page line for exactly the
   profiles with `get_page`, and `render_file` still rejects a duplicate
   URL.
-- **O5.** No skeleton view contains `form_with`, `form_tag` or
-  `csrf_meta_tags` (R3). The webhook console view does not contain the
-  webhook secret literal (R6). Its script sends no `Accept` override, which
-  is what R2's branch derivation assumes. And it parses the response only
-  inside a guard (`try`/`catch`, falling back to the raw text), as defense in
-  depth: per R2, this script's own error path deterministically receives
-  HTML, and §4 step 9d confirms that live.
+- **O5** is split into two sub-checks because they target files built at
+  different sequencing steps (round-5 fix):
+  - **O5a (skeleton views, valid from §5 step 3).** No skeleton view
+    contains `form_with`, `form_tag` or `csrf_meta_tags` (R3).
+  - **O5b (webhook console, valid from §5 step 5, when
+    `webhooks/console.html.erb` is created).**
+    - The webhook console view does not contain the webhook secret literal
+      (R6).
+    - Its script sends no `Accept` override, which is what R2's branch
+      derivation assumes.
+    - It parses the response only inside a guard (`try`/`catch`, falling
+      back to the raw text), as defense in depth: per R2, this script's own
+      error path deterministically receives HTML, and §4 step 9d confirms
+      that live.
 - **O6 (PA-0057 offline half, final wording set by `BUG-0055`).** The
   skeleton's `development.rb` sets `consider_all_requests_local = false` and
   `annotate_rendered_view_with_filenames = false`. Also a cross-emitter debug
@@ -1008,7 +1032,7 @@ Skip-guarded on `rails_boot_available()`.
      `ruby -c`, minimal pair, tier3) green; the per-shape live suites for
      deserialization, mass assignment and webhooks green.
 3. **Layout, homepage, inert pages and `/catalog` (§2b).**
-   - *Gate:* O2, O3, O5 green.
+   - *Gate:* O2, O3, O5a green.
    - *Live:* each skeleton page returns 200 inside the layout.
    - `test_labgen_ruby_rails_whole_app_live_boot.py` updated per R12 and
      green.
@@ -1019,8 +1043,8 @@ Skip-guarded on `rails_boot_available()`.
    - (iii) its §4 step-9 functional check passes live;
    - (iv) O4 green.
 5. **Webhook client page (§2c, R6).**
-   - *Gate:* both GETs return 200 and are byte-identical; the per-shape
-     webhook live suite is green (wire contract unchanged).
+   - *Gate:* O5b green; both GETs return 200 and are byte-identical; the
+     per-shape webhook live suite is green (wire contract unchanged).
 6. **Ground-truth `rendering` correction (§2e).**
    - *Gate:* `contract.load("lab/ground-truth-forgecart")` succeeds; the
      PA-0044 grep list is re-run.
@@ -1059,12 +1083,12 @@ Skip-guarded on `rails_boot_available()`.
       (§2d); O1 + O1-neg green; bare `POST /admin/products/import` → 400
       before the sink (was 200 with `nil` in the sink).
 - [ ] ForgeCart layout, homepage, HTML inert pages and `/catalog` (§2b); O2,
-      O3, O5 green; whole-app live test updated (R12) and green.
+      O3, O5a green; whole-app live test updated (R12) and green.
 - [ ] `/search` in the layout; customer and import GET form pages and escaped
       HTML result pages (§2c, R4/R5); each page's §5 step-4 gate green.
 - [ ] Webhook `fetch()` client page for both topics, no secret, byte-identical
-      (§2c, R6); JSON wire contract unchanged (webhook live suite green);
-      the console's malformed-JSON error branch is asserted live at R2's
+      (§2c, R6); O5b green; JSON wire contract unchanged (webhook live suite
+      green); the console's malformed-JSON error branch is asserted live at R2's
       predicted (or, per R2's decision rule, measured) status/content type
       (§4 step 9d).
 - [ ] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
@@ -1289,3 +1313,32 @@ claim against the installed gem source and found no errors.
   decision rule: on a mismatch, record the measured behavior and assert it
   exactly, never a looser "either" assertion.
 - **Next:** round-5 confirmation.
+
+**Round 5 (same 2 reviewers, dispatched by the orchestrating session,
+2026-09-25): ACCURATE / ADEQUATE. Converged, 3/3.**
+
+- **Accuracy:** all 6 of R2's branch-derivation citations were verified
+  byte-exact against the installed gem source.
+- **Adequacy:** the predict / verify-live / measured-fallback pattern for the
+  webhook branch was judged sound and sufficient; further rigor on this edge
+  case would be diminishing returns. A fresh adversarial pass found one
+  trivial sequencing gap: O5 was gated at §5 step 3, but part of it targets
+  `webhooks/console.html.erb`, which is not built until step 5. The reviewer
+  judged this needed no further round.
+  - **Fixed:** O5 is split into O5a (skeleton views, step 3 gate) and O5b
+    (webhook console, step 5 gate). §5 steps 3 and 5, R2 and the §6
+    deliverables now reference the right half. The earlier rounds' records
+    above keep their original "O5" wording as history.
+- **Accuracy note, applied as a context correction (not a defect finding).**
+  The reviewer traced R2's one source-unsettleable link further. The
+  drafting agent's named candidate (Action Controller instrumentation) is
+  probably not the trigger, because `filtered_parameters` and
+  `ParamsWrapper` both rescue the parse error. R2's paragraph is updated to
+  say so, and adds that the reviewer's alternative candidate (CSRF
+  `verify_authenticity_token`) is inert in this app because of the global
+  `skip_forgery_protection` (`application_controller.rb:23`). A `401` at §4
+  step 9d is therefore a real possibility. R2's existing decision rule
+  (record and assert the measured result exactly) already covers it; nothing
+  else changed.
+- **3/3 agreement** (2 reviewers plus the proposing agent). The plan is
+  converged. Implementation still requires `CC-LAB-0245`'s own gate.

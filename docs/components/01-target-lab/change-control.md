@@ -5,9 +5,12 @@ Component code: **LAB**. Entry format and required fields: see
 
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
-**Status: DRAFT. This entry's own review gate has NOT RUN.** The underlying
-plan has had 4 review rounds, with reviewers dispatched by the orchestrating
-session. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
+**Status: DRAFT. Awaiting this entry's own 2-reviewer gate (round 1 not yet
+run).** The underlying plan **converged 3/3 on 2026-09-25 after 5 rounds**,
+with reviewers dispatched by the orchestrating session. Round 5 returned
+ACCURATE / ADEQUATE plus one trivial sequencing fix (O5 split into O5a/O5b,
+reflected below). Earlier rounds, for the record: the plan had 4 review
+rounds before round 5. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
 Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
 had to become a standing check. That is fixed as O7. Round 3's adequacy
 review returned NOT ADEQUATE with 1 narrow gap: O7-neg did not test the
@@ -143,17 +146,20 @@ template; the plan holds the full detail.
          needs an explicit `Accept: application/json`, which the script
          never sends.
        - The guarded parse, with raw-text fallback, is defense in depth.
-         Offline check O5 verifies the guard and pins the absence of an
+         Offline check O5b (the webhook-console half of O5, gated at the
+         plan's §5 step 5) verifies the guard and pins the absence of an
          `Accept` override.
        - The plan's §4 step 9d asserts the predicted `400`/`text/html` live.
          One link cannot be settled from source: whether the action's body
-         is parsed at all. If step 9d measures something else, that
-         measured result is recorded and asserted exactly, never loosened
-         to "either".
+         is parsed at all. Round-5 review found the instrumentation
+         candidate probably inert, and CSRF verification is globally
+         skipped, so `401 {"verified":false}` is a real possibility. If
+         step 9d measures something else, that measured result is recorded
+         and asserted exactly, never loosened to "either".
   3. **R3: CSRF posture must neither gain nor lose protection.** Mitigated:
      plain `<form>` only (never `form_with`/`form_tag`), no
      `csrf_meta_tags`, global `skip_forgery_protection` untouched. Checked
-     offline.
+     offline (O5a).
   4. **R4: strong parameters and the fixed `shopper1` record.** Exposing
      `user[username]` would let one submit rename `shopper1` and break every
      later request. Mitigated: the form exposes only `user[bio]`, nested,
@@ -235,13 +241,13 @@ template; the plan holds the full detail.
         (§2d); O1 + O1-neg green; bare `POST /admin/products/import` → 400
         before the sink (was 200 with `nil` in the sink).
   - [ ] ForgeCart layout, homepage, HTML inert pages and `/catalog` (§2b);
-        O2, O3, O5 green; whole-app live test updated (R12) and green.
+        O2, O3, O5a green; whole-app live test updated (R12) and green.
   - [ ] `/search` in the layout; customer and import GET form pages and
         escaped HTML result pages (§2c, R4/R5); each page's §5 step-4 gate
         green.
   - [ ] Webhook `fetch()` client page for both topics, no secret,
-        byte-identical (§2c, R6); JSON wire contract unchanged (webhook live
-        suite green); the console's malformed-JSON error branch is asserted
+        byte-identical (§2c, R6); O5b green; JSON wire contract unchanged
+        (webhook live suite green); the console's malformed-JSON error branch is asserted
         live at R2's predicted (or, per R2's decision rule, measured)
         status/content type (§4 step 9d).
   - [ ] Ground-truth `rendering` for `FCART-0004`/`0005` → `server`, in both
@@ -262,8 +268,7 @@ template; the plan holds the full detail.
     - an `ERROR_LOG.md` entry (added **Open** with this plan; flipped to
       Fixed at implementation);
     - `docs/bugs/BUG-0055-*.md` with a full RCA (Five Whys) and a
-      recurrence review against `BUG-0051`/`PA-0053` and `BUG-0052`/
-      `PA-0054` (the absent-input class this lane was also asked to check)
+      recurrence review against `BUG-0051`/`PA-0053` and `BUG-0052`/`PA-0054` (the absent-input class this lane was also asked to check)
       and against the debug-page requirement's own history (`CC-LAB-0090`'s
       `DEBUG = False`, `php_laravel`'s `APP_DEBUG=false`,
       `docs/LAB_IMPLEMENTATION_PLAN.md:775`), including a
@@ -275,8 +280,7 @@ template; the plan holds the full detail.
       or strict-xfail check, per PA-0054(3), and flagged to the orchestrator
       because Lanes 3, 4 and 6 are running concurrently.
   - [ ] If the §2d bug decision rule, applied to implementation-time
-        measurements, finds an additional defect: state it. `BUG-0055`/
-        `PA-0057` are the only reserved numbers. Needing a second pair means
+        measurements, finds an additional defect: state it. `BUG-0055`/`PA-0057` are the only reserved numbers. Needing a second pair means
         bumping Lanes 6–7's BUG/PA reservations in
         `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately and flagging it. If
         none is found, say so explicitly in Effectiveness.
