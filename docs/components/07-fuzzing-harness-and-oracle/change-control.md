@@ -22,6 +22,73 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0047 — `PriceIntegrityBypassStrategy` anchor moves from a JSON fragment to an HTML attribute (DRAFT, pre-change review gate in progress) (2026-09-25, FR-FUZZ-31, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
+
+**Status: draft, not yet implemented.** Per `docs/components/README.md`'s
+pre-change review gate, this entry is written before the change and does
+not authorize implementation until 2 independent reviewer agents plus the
+proposing agent agree 3/3. Tracked jointly with LAB's `CC-LAB-0239` — the
+sink-template change (LAB) and this strategy change (FUZZ) must land in the
+same commit, never split across two.
+
+- **Change:** `LABGEN-BC-0005`/`0006`'s (Booking clone checkout,
+  `price_integrity_bypass`) response body is converting from
+  `response()->json($rows)` to a real HTML confirmation page as part of
+  `CC-LAB-0239`. `fuzzlab/oracle/strategies.py::PriceIntegrityBypassStrategy.confirm`
+  currently does an exact substring match on the literal JSON fragment
+  `f'"charged_amount":"{canary}"'` (after `.replace(" ", "")` whitespace
+  normalization) — this will not match an HTML body and would silently stop
+  detecting the vulnerability (false negative) if left unchanged. Fix:
+  change the anchor to match a `data-charged-amount="<canary>"` HTML
+  attribute instead (still an exact match, not a loose substring, to
+  preserve the canary's own collision-avoidance property — 3 decimal
+  places, explicit exclusion of the real rate-table values `89.00`/
+  `149.00`/`249.00`), with the same `.replace(" ", "")` normalization
+  discipline the live-boot test already uses. Update the strategy's own
+  unit tests (`tests/test_oracle_vectors.py`,
+  e.g. `test_price_integrity_bypass_confirmed_when_client_amount_echoed_back`)
+  and its live-boot proof
+  (`tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`)
+  to the new HTML shape. Also re-run
+  `tests/test_labgen_phase_d_tier12_category5.py`, an independent Tier1/
+  Tier2 conformance proof against the same cells via a different
+  `evaluate_tier1_response`/`build_tier1_case` marker mechanism (bare
+  `"0.01"` `evidence_marker`, not a JSON-fragment anchor) — expected to
+  still pass against the new attribute but must be confirmed, not assumed.
+- **Impact (other components / project):** LAB (01) — the paired sink-
+  template change (`CC-LAB-0239`). No other oracle strategy is affected;
+  `AccessControlIdorStrategy` (the other strategy touched by `CC-LAB-0239`'s
+  scope) is a generic body-diff strategy with no JSON dependency and needs
+  no change (verified directly against its own test suite, which already
+  includes a raw-HTML fixture). No change to `Probe`/`Candidate`/
+  `ConfirmationStrategy`'s own interfaces — this is a change to one
+  strategy's internal matching logic only.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium —
+  this is the single highest-risk change in the paired `CC-LAB-0239`/
+  `CC-FUZZ-0047` work,** since an anchor mismatch here is a silent false
+  negative (the strategy would simply stop confirming a real vulnerability,
+  with no error or test failure to flag it, if the sink-template and
+  strategy changes ever land out of step). Mitigated by: (a) requiring both
+  changes in the same commit, never split; (b) an exact, not
+  loose-substring, match on the new attribute value, preserving the
+  canary's existing collision-avoidance design; (c) re-running the
+  independent Tier1/Tier2 conformance test
+  (`test_labgen_phase_d_tier12_category5.py`) as a second, differently-
+  mechanised proof the new shape is still detected.
+- **Deliverables:**
+  - [ ] `PriceIntegrityBypassStrategy.confirm`'s anchor changed from the
+        JSON fragment to `data-charged-amount="<canary>"` — todo, blocked
+        on `CC-LAB-0239`'s `LABGEN-BC-0005`/`0006` HTML conversion landing
+        in the same commit.
+  - [ ] `tests/test_oracle_vectors.py`'s `PriceIntegrityBypassStrategy`
+        tests updated to the new shape — todo.
+  - [ ] `tests/test_labgen_price_integrity.py`'s live-boot proof updated —
+        todo.
+  - [ ] `tests/test_labgen_phase_d_tier12_category5.py` re-run and
+        confirmed green against the new HTML shape — todo.
+- **Effectiveness (assessed <date> or pending):** pending — not yet
+  implemented.
+
 ### CC-FUZZ-0046 — `PathTraversalFsPathReadStrategy` closes category 4's last known real, TRACKED detection gap (`path_traversal`/`fs_path_read`) (2026-09-23)
 
 - Change: new `fuzzlab/oracle/strategies.py::PathTraversalFsPathReadStrategy`

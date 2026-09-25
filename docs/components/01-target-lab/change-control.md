@@ -3,6 +3,126 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0239 — Browsable labs Lane 1 step 3 (DRAFT, pre-change review gate in progress): JSON→HTML conversion + realistic URLs for CircleFeed/Huddle Hub/Booking (2026-09-25, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
+
+**Status: draft, not yet implemented.** Per `docs/components/README.md`'s
+pre-change review gate, this entry is written before the change and does
+not authorize implementation until 2 independent reviewer agents plus the
+proposing agent agree 3/3. Condensed from `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`,
+itself already converged through 3 rounds of 3 independent reviewer agents
+(accuracy/thoroughness/adequacy) plus a self-review pass — that document is
+the full detail; this entry is its change-control-template compression, not
+an independent redraft.
+
+- **Change:** for the 11 `php_laravel` cell pairs belonging to CircleFeed
+  (`LABGEN-CF-0001`–`0008`), Huddle Hub (`LABGEN-HHB-0001`–`0006`), Booking
+  clone (`LABGEN-BC-0001`–`0006`), and the mass-assignment sample
+  (`LABGEN-MA-0003`/`0004`):
+  1. Convert `LABGEN-CF-0001`/`0002` (IDOR photo view) and
+     `LABGEN-BC-0005`/`0006` (checkout) from `response()->json(...)` to real
+     HTML pages — the only 2 pairs whose response body genuinely needs to
+     change; every other pair already returns a realistic non-JSON response
+     (redirect, CSV) or is a genuine JSON API by the parent plan's own
+     criteria (webhook receivers, deserialization endpoints, mass-assignment
+     APIs stay JSON, each with a client page).
+  2. Relocate all 11 pairs off generic `/cell/labgen-*` URLs onto their
+     manifests' own realistic paths (`/photos/view`, `/booking/checkout`,
+     `/groups/webhook`, `/webhooks/events`, `/messages/unfurl`,
+     `/integrations/outgoing-webhook`, `/comments/share`,
+     `/settings/preferences`, `/booking/continue`, `/extranet/export`,
+     `/example/account_settings`), by adding `"real_page": True` +
+     `"canonical_cell_id": "<vulnerable cell_id>"` to each pair's existing
+     `_PAGE_PROFILES` entry in
+     `fuzzlab/labgen/emitters/php_laravel/__init__.py` (no manifest edit —
+     `_PAGE_PROFILES` is already keyed by the manifest's own `route.path`).
+     The non-canonical (secure) twin of each pair is served at its
+     `_twin_url_for()`-derived suffixed variant.
+  3. Build a new GET-reachable page for each `POST`-only cell needing one to
+     be link-reachable at all: `LABGEN-BC-0005`/`0006` (checkout form),
+     `LABGEN-CF-0003`/`0004` + `LABGEN-HHB-0001`/`0002` (webhook client
+     pages), `LABGEN-MA-0003`/`0004` (account-settings client page, added to
+     the default merged PFF build, which is the only build this pair is
+     part of).
+  4. Update `fuzzlab/oracle/strategies.py::PriceIntegrityBypassStrategy`'s
+     JSON-fragment anchor to a `data-charged-amount="…"` HTML attribute
+     anchor, matching `LABGEN-BC-0005`/`0006`'s new HTML response (tracked
+     jointly with `CC-FUZZ-0047`, below — the sink-template change and the
+     strategy change must land in the same commit).
+  5. Update every relocated cell's `url` field (all 11 pairs) and
+     `LABGEN-CF-0001`/`LABGEN-BC-0005`/`0006`'s `rendering` field
+     (`server-json`→`server`) in the per-app ground-truth directories
+     (`lab/ground-truth-circlefeed/`, `-huddlehub/`, `-booking-clone/`
+     `labels.json` + `injection-points.json`) — these are live test
+     dependencies (`tests/test_labgen_open_redirect.py`,
+     `tests/test_labgen_csv_export_injection.py`, and 3 multitarget test
+     files assert against these literal fields), not dead files.
+  6. Add a new automated twin-diff byte-equality test (per twin pair
+     converted) proving the two twins' rendered HTML is identical outside
+     the sink region, since the corpus's leakage-probe/chi-square build gate
+     structurally skips (`MIN_GROUPS_FOR_GATE=6` vs. 2-cell manifests) and
+     cannot itself prove this.
+- **Impact (other components / project):** LAB (this component) — new/
+  changed views, controllers, `_PAGE_PROFILES` entries, and 3 per-app
+  ground-truth directories' `url`/`rendering` fields. FUZZ (07) —
+  `PriceIntegrityBypassStrategy` anchor change (tracked as `CC-FUZZ-0047`).
+  No other component's interface or contract changes. The default (no
+  `--app`) merged PFF build and every one of its own routes/tests are
+  unaffected except where explicitly listed (`LABGEN-MA-0003`/`0004`'s new
+  page, added there since that pair has no standalone `--app` split).
+  `docs/LAB_BROWSABLE_APPS_PLAN.md`'s own point 6 (navigability acceptance
+  criterion) needs a one-line edit once the R8 sign-off below picks an
+  option, since option (b) is a shared-contract exception, not a
+  step-3-local one.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.**
+  Two real, identified risk classes, both mitigated by design rather than
+  accepted:
+  1. *Oracle-anchor coupling* (`PriceIntegrityBypassStrategy`'s JSON-fragment
+     match) — mitigated by changing the strategy and its two real dependent
+     tests (`tests/test_oracle_vectors.py`,
+     `tests/test_labgen_price_integrity.py`) in the same commit as the
+     sink-template change, plus re-running
+     `tests/test_labgen_phase_d_tier12_category5.py` (an independent
+     Tier1/Tier2 proof against the same cells via a different marker
+     mechanism).
+  2. *Route-collision* (`DuplicateRouteError`, `route_accumulator.py`) —
+     mitigated by the `_PAGE_PROFILES` `real_page`/`canonical_cell_id`
+     wiring itself, the same mechanism already used for every one of PFF's
+     own real pages; verified to genuinely matter for 2 of the 11 pairs
+     (`LABGEN-CF-0001`/`0002`, `LABGEN-BC-0005`/`0006`, both built together
+     with their twin in an existing live-boot test) and confirmed inert
+     for the rest but still required for those pairs to serve at their real
+     URL at all.
+  Accepted, not mitigated: `LABGEN-MA-0003`/`0004`'s new page's authenticated
+  reachability depends on the R8 sign-off below (this cell's page lives in
+  the default merged PFF build, which has a login flow, so R8 itself does
+  not apply to it — no accepted risk here beyond the 10 pairs R8 covers).
+- **Deliverables:**
+  - [ ] R8 sign-off obtained (option (a): build a login route for each split
+        app; or (b), recommended: document the anonymous-401 result as
+        correct and edit `docs/LAB_BROWSABLE_APPS_PLAN.md` point 6
+        accordingly) — todo, blocks everything below that touches
+        `LABGEN-CF-0001`/`0002`.
+  - [ ] `LABGEN-CF-0001`/`0002` converted to HTML + `_PAGE_PROFILES` wired +
+        ground truth updated + `test_labgen_php_laravel_access_control_live_boot.py`
+        updated + new `AccessControlIdorStrategy` realistic-fixture test
+        added — todo.
+  - [ ] 7 `GET`-only cells relocated (`_PAGE_PROFILES` wired + ground truth
+        updated) — todo.
+  - [ ] 4 `POST`-only `api` cells given new client pages + `_PAGE_PROFILES`
+        wired where applicable — todo.
+  - [ ] `LABGEN-BC-0005`/`0006` converted to HTML + `_PAGE_PROFILES` wired +
+        `PriceIntegrityBypassStrategy` updated (jointly with `CC-FUZZ-0047`)
+        + ground truth updated — todo.
+  - [ ] New automated twin-diff byte-equality tests for both converted
+        pairs — todo.
+  - [ ] Full non-slow suite + this lane's live-boot suite green; every test
+        named in `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` §5's checklist
+        passing — todo.
+  - [ ] Navigability acceptance test (crawl-from-`/`) re-run for all 3 split
+        apps, scored per the R8 option chosen — todo.
+- **Effectiveness (assessed <date> or pending):** pending — not yet
+  implemented.
+
 ### CC-LAB-0238 — Browsable labs Lane 1 step 2: `--app` split gives CircleFeed, Huddle Hub, and Booking their own standalone apps (2026-09-24, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
 - Change: `fuzzlab.labgen.assemble.collect_cells` gained an optional
   `cell_id_prefix` filter; `assemble_lab` gained `app: str | None`, which
