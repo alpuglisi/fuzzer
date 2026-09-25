@@ -8,8 +8,8 @@ Component code: **LAB**. Entry format and required fields: see
 **Status: the pre-change review gate is cleared. 3/3 agreement was
 reached on 2026-09-25, after 3 rounds (the round 3 accuracy review
 confirmed ACCURATE, and adequacy was already ADEQUATE at round 2).
-Implementation is authorized.** See Deliverables and Effectiveness for
-the outcome.
+Implementation is authorized, and was completed on 2026-09-25.** See
+Deliverables and Effectiveness for the outcome.
 - **Entry gate, round 1 (run by the orchestrating session, 2026-09-25):**
   - **Accuracy:** one fixable inaccuracy. The one-entry justification
     cited `CC-LAB-0040` as though it were a same-shape precedent. In fact
@@ -372,10 +372,10 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
   Accepted, not mitigated: none. Every risk above has a concrete
   verification or fix step, or a flagged follow-up.
 - **Deliverables:** (copied verbatim from the plan's §6)
-  - [ ] §5 step 1: absent-input declarations for every `node_express` and
+  - [x] §5 step 1: absent-input declarations for every `node_express` and
         `python_fastapi` route, with offline PA-0054 (1) checks green; D1 fixed;
         D4 probed and recorded.
-  - [ ] `BUG-0056` (`docs/bugs/BUG-0056-*.md`), with a full RCA (Five Whys)
+  - [x] `BUG-0056` (`docs/bugs/BUG-0056-*.md`), with a full RCA (Five Whys)
         and a **recurrence review against BUG-0037/PA-0039, BUG-0051/PA-0053
         and BUG-0052/PA-0054**. It must include a prior-preventive-action
         failure analysis. The working hypothesis, to be confirmed in the doc
@@ -446,22 +446,22 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
         - **`php_current`:** S15 already pins it ("no lane assigned"). This
           lane's PA-0002 sweep records its instances in `BUG-0056` and
           relies on S15's pin. It does not add a second one.
-  - [ ] `ERROR_LOG.md` entry (newest on top), cross-referencing BUG-0056
+  - [x] `ERROR_LOG.md` entry (newest on top), cross-referencing BUG-0056
         and PA-0058.
-  - [ ] `docs/PREVENTIVE_ACTIONS.md`: `PA-0058`, plus the PA-0002 sweep's
+  - [x] `docs/PREVENTIVE_ACTIONS.md`: `PA-0058`, plus the PA-0002 sweep's
         results recorded in the bug doc.
-  - [ ] MeadowMart site layer: `scaffold/site.js`, the accumulator line, the
+  - [x] MeadowMart site layer: `scaffold/site.js`, the accumulator line, the
         preferences GET resource read (with the R3 sign-off recorded), and
         the fixtures refactored to `RUNTIME_SCAFFOLD_FILES`. The 3 existing
         live modules are green.
-  - [ ] MeadowMart navigability test green: crawl, the PA-0054 (2) sweep of
+  - [x] MeadowMart navigability test green: crawl, the PA-0054 (2) sweep of
         every route, and the R2 gadget boot.
-  - [ ] `python_fastapi`: homepage, layout, `/login` form page, cell
+  - [x] `python_fastapi`: homepage, layout, `/login` form page, cell
         responses inside the layout, twin URLs per R-B7 (branch (a), or the
         branch (b) strict xfail), and the §4B in-process check green.
-  - [ ] Offline companions green (§4A list), including R5's name-leak scan
+  - [x] Offline companions green (§4A list), including R5's name-leak scan
         and R6's `innerHTML` pin.
-  - [ ] Strict-xfail pins for the different-class findings F1 and F2. F4 is
+  - [x] Strict-xfail pins for the different-class findings F1 and F2. F4 is
         skip-guarded and flagged. F3 is now in scope (R-B7), and is pinned
         only if branch (b) is used.
         - **Corrected in round 1:** the draft claimed each pin "names its
@@ -473,9 +473,9 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
           own follow-ups the same way.
         - The orchestrator's assigned numbers are recorded in the Lane 6 row
           of `docs/LAB_BROWSABLE_APPS_PLAN.md` at merge.
-  - [ ] Full non-slow suite, every `node_express` live suite and the
+  - [x] Full non-slow suite, every `node_express` live suite and the
         `python_fastapi` TestClient suite green, with counts reported.
-  - [ ] `docs/components/01-target-lab/change-control.md`: **one** entry,
+  - [x] `docs/components/01-target-lab/change-control.md`: **one** entry,
         `CC-LAB-0246`, covering both targets in clearly separated
         subsections.
 
@@ -536,30 +536,98 @@ The plan's §6 split rule applies if that fails. A split bumps Lane 7 to
         same amount) in `docs/LAB_BROWSABLE_APPS_PLAN.md` immediately,
         before drafting the second entry. That is the discipline from that
         doc's correction notes. Flag the bump.
-  - [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-168`
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-168`
         (MeadowMart browsable site, client pages, preferences GET resource
         read, navigability test, and the **R3 sign-off**) and `FR-LAB-169`
         (`python_fastapi` homepage and layout, in-process check, and the
         **F3 sign-off**, R-B7).
-  - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0246`,
+  - [x] `CHANGELOG.md`: one dated line referencing `CC-LAB-0246`,
         `BUG-0056` and `PA-0058`.
-  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: the Lane 6 row updated to done,
+  - [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`: the Lane 6 row updated to done,
         naming what was used and what was not (`CC-FUZZ-0052`/`FR-FUZZ-36`
         are expected to stay unused, R9).
-  - [ ] `docs/ARCHITECTURE.md`: not expected to change. The new scaffold
+  - [x] `docs/ARCHITECTURE.md`: not expected to change. The new scaffold
         files sit inside existing emitter packages, and Lane 7 owns the
         compose/port and architecture integration. Check again at step 7
         and update if any structure or contract did change.
-- **Effectiveness:** pending. It will be assessed after implementation,
-  with:
-  - pass/fail/skip counts for the full non-slow suite and for every
-    `node_express` live suite and the `python_fastapi` TestClient suite,
-    each run explicitly (PA-0038);
-  - the R3 and F3 sign-offs;
-  - the measured R8 minimums and R-B2 byte difference;
-  - the D4 re-probe result;
-  - the BUG-0056/PA-0058 outcome, including whether PA-0058 had a
-    non-empty delta over PA-0055/PA-0056.
+- **Deliverables status (2026-09-25):** every checklist item above is
+  done. Each implementation step was committed on the lane branch,
+  granular like Lanes 1–2. The line is "exactly as designed" except for
+  four additions, each within the plan's own scope:
+  - the `python_fastapi` complexity module now passes `nav_label` to the
+    template;
+  - three existing exact-string assertions in the `python_fastapi` module
+    and sample tests were updated to the HTML shape, with the same intent
+    (plan R4). The updated tests are
+    `test_html_body_echo_sink_renders_jinja_template_and_returns_html_response`,
+    `test_single_statement_complexity_wraps_body_in_an_async_handler_with_db_dependency`
+    and the smoke test's `/products` row check;
+  - the S15 cross-emitter file does not yet exist on any branch, so there
+    was nothing to un-xfail here. Its `node_express`/`python_fastapi`
+    markers must be dropped when Lane 4 merges;
+  - no ground-truth `notes` were edited (§2A-f item 7 was optional).
+- **Effectiveness (assessed 2026-09-25): effective.**
+  - **Full non-slow suite** (`pytest -m "not slow"`): 2537 passed, 8
+    skipped, 209 deselected, 2 xfailed (F1/F2), 0 failed.
+  - **Every `node_express`/`python_fastapi` suite, run explicitly
+    (PA-0038):** 218 passed, 2 xfailed, 0 skipped, 0 failed.
+    - `test_labgen_node_meadowmart_navigability_live_boot.py` (new, slow): 5 passed.
+    - `test_labgen_node_bff_app.py`: 6 passed.
+    - `test_labgen_node_bff_multitarget.py`: 2 passed.
+    - `test_multitarget_category1_combined.py`: 1 passed.
+    - `test_labgen_redos.py`: 22 passed.
+    - `test_labgen_prototype_pollution.py`: 23 passed.
+    - `test_labgen_node_express_browsable.py` (new): 11 passed, 2 xfailed.
+    - `test_labgen_node_express.py`: 42 passed.
+    - `_conformance.py`: 2 passed.
+    - `_modules.py`: 18 passed.
+    - `_stack_env.py`: 6 passed.
+    - `test_labgen_python_fastapi_browsable.py` (new): 11 passed.
+    - `_sample.py`: 35 passed.
+    - `_conformance.py`: 5 passed.
+    - `_modules.py`: 17 passed.
+    - `test_oracle.py`: 12 passed.
+  - **Live boot was available and ran for both stacks:** node v22.22.2
+    with npm, the registry reachable; FastAPI 0.141.1 through `TestClient`.
+  - **D1–D4:** all fixed.
+    - D1: a bare `GET /products` now returns 200 (default id 1).
+    - D3: a bare `/api/search` returns 400 on both twins.
+    - D4 re-probed: with a live DB, `mysql2` formats an `undefined` bind as
+      `NULL` (no crash). It is now a declared 400 regardless.
+    - D2's process exit is F2, pinned.
+    - Bug protocol completed: `ERROR_LOG.md`,
+      `docs/bugs/BUG-0056-*.md` and `PA-0058`. PA-0058 has a non-empty
+      delta over the planned PA-0055/PA-0056: the declared status must be
+      asserted on both twins, and values validated against a closed set.
+  - **R1:** all MeadowMart endpoints stayed `api`, so no cell response
+    changed.
+  - **R2:** the gadget boot proves pollution happened, via the next
+    ordinary merge. All 7 site pages stayed byte-identical.
+  - **R3:** branch (a), recorded as the sign-off in FR-LAB-168.
+  - **R4:** all declaration lines are twin-identical, and the minimal-pair
+    and Tier-3 suites are green.
+  - **R5:** the name-leak scan is clean over `site.js` and `app.js`.
+  - **R6:** `site.js` has exactly 1 `innerHTML` write.
+  - **R7:** fixtures moved to `RUNTIME_SCAFFOLD_FILES`, with a drift test.
+  - **R8:** 4 points, 14 crawled URLs measured (floor 12), all
+    ground-truth paths at depth 2 (cap 4).
+  - **R9:** the ReDoS real-HTTP timing differential and all multitarget
+    runs are unchanged. `CC-FUZZ-0052`/`FR-FUZZ-36` unused.
+  - **R10:** `/api/orders/` gives 404, and the example URL gives 200.
+  - **R-B1:** minimal-pair green, with the layout in the sink region.
+  - **R-B2:** difference of 213 bytes (1,137 vs 924), floor 200.
+  - **R-B3:** static table, with a coverage test.
+  - **R-B4:** `/login` POST tests skip-guarded (python-multipart happens to
+    be present here, so they ran).
+  - **R-B5:** GET form and POST cell coexist on `/login`.
+  - **R-B7/F3:** branch (a), recorded as the sign-off in FR-LAB-169. Each
+    secure twin is now served at `/twin/<cell-id>`.
+  - **Bare-request sweep:** no crawled URL and no served route answers
+    ≥ 500.
+  - **Session gating:** none in either emitter.
+  - **Different-class follow-ups, flagged:** F1 and F2 (strict xfails),
+    F4, and the Lane 3/4 `absent_input` spelling unification (recommended
+    for `CC-LAB-0247`). The orchestrator assigns their numbers.
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 

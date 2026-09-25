@@ -6,6 +6,10 @@ proposing agent, after 1 revision round; see §8).
 **Next step:** draft the condensed `CC-LAB-0246` change-control entry and
 take it through its own 2-reviewer gate. This plan's own convergence does
 not yet authorize implementation.
+**Update 2026-09-25:** the `CC-LAB-0246` entry cleared its own gate (3/3,
+3 rounds), and the plan was **implemented** the same day. R3 and F3 both
+took branch (a). The bug protocol ran as `BUG-0056`/`PA-0058`. See that
+entry's Deliverables and Effectiveness.
 Reserved numbers per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table:
 `CC-LAB-0246` / `FR-LAB-168-169` / `CC-FUZZ-0052` / `FR-FUZZ-36` /
 `BUG-0056` / `PA-0058`. None has been used yet.
