@@ -27,17 +27,23 @@ public final class SiteLayout {
     }
 
     private static final String CSS = String.join("\n",
-        "body{margin:0;font-family:system-ui,sans-serif;color:#222;background:#f6f6f6}",
+        // CC-LAB-0244 (S7): a digit-only hex triplet like #222 is itself a
+        // 3+-digit run, so this dark grey mixes in a letter instead.
+        "body{margin:0;font-family:system-ui,sans-serif;color:#2a2a2a;background:#f6f6f6}",
         "header{color:#fff;padding:0.8em 1.5em}",
         "header h1{margin:0;font-size:1.4em}",
         "header h1 a{color:#fff;text-decoration:none}",
         "nav{margin-top:0.5em}",
         "nav a{color:#fff;margin-right:1em;text-decoration:underline}",
         "main{max-width:60em;margin:1.5em auto;padding:1em 1.5em;background:#fff}",
-        "footer{text-align:center;color:#777;font-size:0.8em;padding:1em}",
+        "footer{text-align:center;color:#7a7a7a;font-size:0.8em;padding:1em}",
         "pre{background:#f0f0f0;padding:0.8em;white-space:pre-wrap;word-break:break-all}",
-        "textarea{width:100%;min-height:8em;font-family:monospace}",
-        "input[type=text]{width:30em;max-width:100%}",
+        // CC-LAB-0244 (S7): width stays just under full width here -- a
+        // 3+-digit run in the layout chrome could coincidentally match an
+        // SSTI arithmetic-product canary; every other CSS value here
+        // already stays under 3 digits.
+        "textarea{width:99%;min-height:8em;font-family:monospace}",
+        "input[type=text]{width:30em;max-width:99%}",
         "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:0.3em 0.6em;text-align:left}");
 
     /** HTML-escapes any text before it goes into a page. */
