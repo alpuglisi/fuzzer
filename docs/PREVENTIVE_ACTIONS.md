@@ -749,3 +749,25 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   this class in an emitter it does not fix must pin each known instance with
   an `xfail(strict=True)` or an offline failing check -- never a prose
   deferral to a future lane. (from BUG-0052)
+
+- **PA-0057** — Strengthens `PA-0039`'s scope (from module ports to a stack's
+  skeleton/harness runtime configuration) and `PA-0054`'s live half. (1) Every
+  stack's **served** build -- the real deployment path **and** every test-time
+  live-boot launch -- runs with its framework's debug / exception-detail /
+  source-annotating output disabled (Rails `consider_all_requests_local = false`
+  and `annotate_rendered_view_with_filenames = false`, Laravel `APP_DEBUG=false`,
+  Django `DEBUG = False`, Express `NODE_ENV=production`, FastAPI docs routes off,
+  no Spring devtools/actuator, no Go `pprof`), enforced mechanically by
+  `tests/test_labgen_debug_pages_disabled.py` -- one check per stack reading the
+  governing setting where the running app takes it from; a new stack, harness,
+  or launch site extends it in the same change (the requirement had lived only
+  as prose, `docs/LAB_IMPLEMENTATION_PLAN.md:775`, and per-stack memory, so the
+  `ruby_rails` port's development-mode harness shipped Rails' detailed exception
+  pages, whose "Extracted source" revealed each twin's transform). (2) Every
+  live navigability / bare-request sweep asserts each response's **declared**
+  status, not a range, and that error-response **content** carries no debug or
+  generated-source markers -- a status-only "< 500" sweep cannot tell a debug
+  page from a static one, nor see an absent input a sink's catch-all rescue
+  turned into a 200. The PA-0002 sweep found one more instance (the test-time
+  `node app.js` launches, `node_express`), pinned by a strict xfail and
+  flagged, per `PA-0054`(3). (from BUG-0055)
