@@ -3,6 +3,138 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
+
+**Status: DRAFT, pre-change review gate in progress.** The underlying plan
+(`docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`) already went through 2 full
+review rounds and reached 3/3 agreement (2026-09-25). This entry is that
+plan condensed into the change-control template, but the entry itself has
+not yet been through its own 2-reviewer-agent accuracy/adequacy gate — that
+gate is the next step, mirroring `CC-LAB-0241`'s drafting process exactly.
+Implementation is **not authorized** until this entry reaches 3/3 (2
+reviewers + proposing agent).
+
+- **Change:** converts PicTrail (`django`, already a real, named identity
+  with 6 real pages and its own ground truth — unlike Lane 1's
+  CircleFeed/Huddle Hub/Booking, no `--app`-split step is needed here) from
+  JSON/bare-fragment responses to real browsable HTML:
+  1. **Homepage + shared layout** (`layouts/site.html`) — none exists
+     today; no `/` route is registered anywhere in the django emitter.
+  2. **JSON→HTML conversion for 5 `page`-classified real points**
+     (`/post`, `/post/comments`, `/settings`, `/explore`, `/inbox`), each
+     with an absent-input default decided up front (PA-0053) rather than
+     found later by a crawl, and each gated by its own live-boot assertion
+     (bare-GET status, layout wrapping; `/post` additionally gets a
+     designed found/not-found byte-delta, R3 below).
+  3. **`/upload/link-preview` stays `api`** (a real oEmbed/unfurl-style
+     JSON endpoint) — gets a `fetch()`-based client page, wire contract
+     unchanged, plus its own bare-GET 4xx-before-sink decision (no safe
+     default URL exists to fetch).
+  4. **Ground-truth `rendering` field correction** where conversion makes
+     the current value misleading (same wrong-inference risk Lane 1's
+     step 3 plan found for `php_laravel`).
+  5. **Spider-based navigability acceptance test**
+     (`tests/test_labgen_django_navigability_live_boot.py`), built from
+     this plan's own §4 design rather than deferred to a later step, and
+     applying PA-0053's bare-GET sweep to every reachable route (not only
+     the 6 real pages).
+- **Impact (other components / project):** LAB (this component) only. No
+  session/login mechanism exists for django (confirmed), so the R8
+  split-app 401-exception is not expected to apply here — if implementation
+  finds a session-gated cell was missed, that is itself a finding to
+  surface, not silently accommodate. `docs/LAB_BROWSABLE_APPS_PLAN.md`'s
+  Lane 2 row is updated on completion; Lanes 3-7's `CC-LAB`/`FR-LAB`
+  numbers shift by +1, applied immediately (not deferred), only if this
+  step needs more than its pre-reserved single `CC-LAB-0242` number — the
+  exact collision-avoidance discipline `CC-LAB-0241`'s own review required.
+- **Risk (level; mitigation or accepted-risk justification):** **Medium.**
+  Full register in the plan's §3 (R1-R7, plus R1b); named here in full,
+  matching `CC-LAB-0241`'s own disclosure discipline (none of this plan's
+  risks are settled no-risk findings):
+  1. **R1** — *Secure-twin URL asymmetry*: unlike `php_laravel`'s
+     `canonical_cell_id`/`_twin_url_for`, PicTrail's secure twins keep a
+     generic URL while only the vulnerable cell owns the real path
+     (confirmed, explicit in the emitter's own comment). Mitigated by a
+     concrete decision rule (default: extend `_REAL_PAGE_CELL_IDS`-style
+     pinning to the secure twin too; fall back only on a named concrete
+     failure mode) with a mandatory "R1 sign-off" recorded in
+     `requirements.md`'s `FR-LAB-160` entry — not left as an
+     implementation-time judgment call.
+  2. **R2** — *`DjangoLiveBootHarness` is a genuinely separate class from
+     `LiveBootHarness`*, not the same class with a different emitter arg.
+     Its API surface (`_base_url()`/`get()`/`post()`/`query_db()`) matches
+     what the navigability crawl needs, confirmed by direct reading — but
+     mitigated by actually running the crawl against it, not API-shape
+     inspection alone (a different internal request path could still
+     diverge, e.g. redirect/trailing-slash handling).
+  3. **R3** — *`/post`'s single-row lookup needs a designed found/not-found
+     byte-delta*, the same `CC-LAB-0240`-style mitigation `php_laravel`'s
+     structurally identical `/product.php`/`/blog_post.php` needed — found
+     and correctly targeted only after a round-1 review caught the first
+     draft's register misattributing this risk to `/explore` instead
+     (`/explore`'s own ground truth confirms it is "not a syntax-break
+     shape," an identifier/ORDER-BY-position injection, not a
+     length/boolean-differential one). Mitigated by designing and directly
+     testing that byte-delta, re-measured against PicTrail's own layout
+     size, not reused from `php_laravel`'s number unexamined.
+  4. **R4** — *`/upload/link-preview`'s bare-GET has no safe default to
+     fetch* (unlike `/post`'s numeric default). Mitigated by a
+     4xx-before-sink decision, checked against the real corpus source
+     (`docs/research/corpus-examples/ssrf/python/vulnerable-oembed-unfurl-4.py`)
+     for any intended default worth reproducing instead of inventing one.
+  5. **R5** — *Non-vacuous-pass guard for the navigability test* — the same
+     guard `CC-LAB-0241` built (hard-coded, measured minimums for both the
+     ground-truth count and the discovered-page count, asserted before any
+     per-URL check), built in from this plan's own design rather than
+     added after the fact.
+  6. **R6** — *Two distinct oracle mechanisms touch these cells, both
+     confirmed unaffected by the HTML conversion for different reasons*:
+     `fuzzlab/oracle/strategies.py`'s runtime detection strategies
+     (re-run after conversion, don't just read the source) and
+     `fuzzlab/labgen/identifier_sqli_oracle.py` (a build-time differential
+     prober for `/explore`'s shape — reads raw probe bodies but its check
+     is format-agnostic, so it is unaffected either way).
+  7. **R7** — *Illustrative (non-real-page) django cells reachable from the
+     new nav could 500 on a bare GET*, the same class of gap Lane 1's own
+     navigability crawl found (`BUG-0051`). Mitigated by applying PA-0053's
+     bare-GET sweep to every reachable route the crawl finds, not only the
+     6 real pages, before the navigability test is declared green.
+  Accepted, not mitigated: none — every identified risk has a concrete
+  mitigation.
+- **Deliverables:** (copied directly from the plan's own §6, drafted for
+  exactly this purpose)
+  - [ ] Homepage + shared layout template, structural gate green — todo.
+  - [ ] `/post` + `/post/comments` converted, bare-GET default decided,
+        found/not-found byte-delta designed and asserted (R3), twin
+        asymmetry (R1) resolved via its decision rule and recorded as an
+        "R1 sign-off" in `requirements.md`'s `FR-LAB-160` entry, live-boot
+        green — todo.
+  - [ ] `/settings` converted to a real form page, live-boot green — todo.
+  - [ ] `/explore` converted, actual SQL shape confirmed (R1b — already
+        done in the plan itself, carried forward here), oracle-strategy
+        tests re-run (R6), live-boot green — todo.
+  - [ ] `/inbox` converted to a form page, live-boot green — todo.
+  - [ ] `/upload/link-preview` client page + bare-GET 4xx (R4), live-boot
+        green — todo.
+  - [ ] Ground-truth `rendering` field corrected where wrong — todo.
+  - [ ] Navigability test built and green, including the PA-0053 bare-GET
+        sweep across every reachable route (not only the 6 real pages) —
+        todo.
+  - [ ] Any same-class defect the navigability test surfaces fixed and
+        folded in; any different-class finding flagged with its own
+        recommended next `CC-LAB` number, not absorbed — todo.
+  - [ ] Full non-slow suite + every django live-boot suite green — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-160`
+        entry — todo.
+  - [ ] `CHANGELOG.md` — one dated line referencing `CC-LAB-0242` — todo.
+  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`'s Lane 2 row updated — todo.
+  - [ ] Bug-protocol contingency: if PA-0053's bare-GET sweep finds a real
+        crash, full bug protocol using Lane 2's pre-assigned
+        `BUG-0052`/`PA-0054`; if none found, state that explicitly in
+        Effectiveness — todo.
+- **Effectiveness (assessed <date> or pending):** pending — not yet
+  implemented.
+
 ### CC-LAB-0241 — Browsable labs Lane 1 step 5: closing the remaining tracked gaps (2026-09-25, FR-LAB-159, `docs/LAB_LANE1_REMAINING_GAPS_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25**
