@@ -1,8 +1,12 @@
 # Browsable Labs Lane 2 — django: PicTrail
 
-Status: **planning, pre-change review gate not yet run.** Reserved as
-`CC-LAB-0242` / `FR-LAB-160` per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane
-table.
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents plus the proposing agent, after 1 revision
+round — see §8 Review history). Reserved as `CC-LAB-0242` / `FR-LAB-160`
+per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table. **Next step: draft the
+condensed change-control entry and take it through its own 2-reviewer
+gate**, mirroring `CC-LAB-0241`'s process exactly — this plan document's
+own convergence does not yet authorize implementation.
 
 ## 0. What Lane 1 taught us, applied here from the start
 
@@ -287,10 +291,14 @@ lumped together:
    just read the strategy source.
 2. `fuzzlab/labgen/identifier_sqli_oracle.py` (R1b above) is a **build-time**
    differential prober for `/explore`'s identifier/ORDER-BY-position shape,
-   confirming the generated cell is really vulnerable/secure — it never
-   reads the converted HTML response body, so it is unaffected by this
-   change either way; named here so its irrelevance is a confirmed finding,
-   not a silent omission.
+   confirming the generated cell is really vulnerable/secure. It does read
+   the raw TRUE/FALSE probe response bodies (`_classify_response_diff`),
+   but its check is a plain body-equality/inequality comparison — format-
+   agnostic, so it works identically whether the body is JSON or HTML — and
+   is therefore unaffected by this change either way (round-2 accuracy
+   review: "reads it but doesn't depend on its format" is the precise
+   framing, corrected from an earlier "never reads" overstatement); named
+   here so its irrelevance is a confirmed finding, not a silent omission.
 
 **R7 — illustrative (non-real-page) django cells' bare-GET behavior.**
 Apply PA-0053's rule proactively to every django route reachable from the
@@ -428,3 +436,13 @@ branches; the scope-creep rule restated in full rather than only cited;
 claim narrowed to what's actually true (the spec exists early; the crawl
 still runs operationally last); a bug-protocol contingency deliverable
 added to §6.
+
+**Round 2 (accuracy + adequacy, same 2 reviewer agents, 2026-09-25):**
+ACCURATE / ADEQUATE. Both reviewers independently re-verified the R1b/R3/R6
+retargeting directly against the sink templates and ground truth, confirmed
+the other 5 fixes, and found no new issues — 3/3 agreement (2 reviewers +
+proposing agent) reached. One minor, non-blocking wording imprecision in
+R6 ("never reads the response body" overstated `identifier_sqli_oracle.py`'s
+format-agnostic body-diff check) was corrected in this same revision. The
+plan is converged; implementation still requires its own change-control-
+entry gate (see Status line above).
