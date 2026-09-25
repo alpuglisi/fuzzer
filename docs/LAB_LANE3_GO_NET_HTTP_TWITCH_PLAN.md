@@ -1,7 +1,10 @@
 # Browsable Labs Lane 3 — go_net_http: Twitch clone
 
-Status: **DRAFT, revised after review round 1 (2026-09-25); round 2
-pending, not gate-cleared** (see §8). Reserved as `CC-LAB-0243` /
+Status: **plan reviewed and converged, 3/3 agreement reached 2026-09-25**
+(2 independent reviewer agents, spawned by the orchestrating session, plus
+the proposing agent, after 1 revision round; see §8). **Next step:** draft
+the condensed `CC-LAB-0243` entry and take it through its own 2-reviewer
+gate. This plan's convergence does not by itself authorize implementation. Reserved as `CC-LAB-0243` /
 `FR-LAB-162-163` (and `CC-FUZZ-0049`/`FR-FUZZ-33`, `BUG-0053`/`PA-0055` if
 needed) per `docs/LAB_BROWSABLE_APPS_PLAN.md`'s lane table. **Review gate
 not yet run:** the proposing agent for this draft had no subagent-spawning
@@ -408,4 +411,7 @@ ADEQUATE.
   amends point 6 of `docs/LAB_BROWSABLE_APPS_PLAN.md` in place (R8's
   format, conditions i-iv), flagged for cross-lane reconciliation.
 
-**Round 2:** pending (orchestrator to resend to the same 2 reviewers).
+**Round 2 (same 2 reviewer agents, 2026-09-25):** ACCURATE / ADEQUATE.
+Both reviewers confirmed the three round-1 fixes, with no new issues:
+3/3 agreement (2 reviewers + proposing agent). The plan is converged;
+implementation still requires the `CC-LAB-0243` entry's own gate.
