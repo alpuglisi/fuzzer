@@ -1,8 +1,8 @@
 # Browsable Labs Lane 5 — ruby_rails: ForgeCart
 
-Status: **rounds 1–2 reviewed 2026-09-25. Round 2 found 1 remaining gap: the
-blast-radius grep needs to be a standing check. It is fixed in this revision
-as O7. Awaiting round-3 confirmation. Not yet converged, and implementation
+Status: **rounds 1–3 reviewed 2026-09-25. Round 3 found 1 narrow gap: O7-neg
+now also proves the exclusions and allowlist neither swallow nor over-match.
+Fixed in this revision. Awaiting round-4 confirmation. Not yet converged, and implementation
 is not authorized.** The orchestrating
 session ran the review rounds (§8). The original drafting-time status is
 kept below for the record. Reserved as `CC-LAB-0245` / `FR-LAB-166` (`FR-LAB-167` reserved,
@@ -837,11 +837,31 @@ or fix step.
   The allowlist is a literal set in the test. Adding to it needs a code
   change reviewed like any other, never a pattern match. O7 fails on any
   other hit and names the file and line.
-- **O7-neg (PA-0034(2)).** Call O7's scanner on a synthetic temporary tree
-  that holds one non-allowlisted file containing `Extracted source`, and one
-  containing `ActionController::RoutingError` inside `fuzzlab/`. It must
-  report both hits. This proves the check can fail, and is not validated
-  only against today's clean codebase.
+- **O7-neg (PA-0034(2)): checks both directions.** O7's scanner takes the
+  scan root as a parameter. Exclusions and the allowlist are matched on
+  paths relative to that root, by exact equality or exact directory prefix,
+  never by substring or glob. The scanner is called on a synthetic temporary
+  tree holding six planted files, each containing one of the listed strings:
+  - **Must be reported** (the positive path):
+    - (p1) a non-allowlisted `tests/test_synthetic_scrape.py` containing
+      `Extracted source`;
+    - (p2) `fuzzlab/synthetic_oracle.py` containing
+      `ActionController::RoutingError`.
+  - **Must NOT be reported** (exclusions are honoured; round-3 addition):
+    - (n1) `fuzzlab/labgen/emitters/ruby_rails/synthetic_module.py`, a hit
+      inside the emitter exclusion;
+    - (n2) `tests/test_labgen_ruby_rails_browsable.py`, a hit in a file with
+      an allowlisted name.
+  - **Must still be reported** (exclusions are exact, not broad; this guards
+    against O7 being too loose):
+    - (m1) `fuzzlab/labgen/emitters/ruby_rails_extra/synthetic.py`, a
+      sibling that merely shares the excluded directory's name as a prefix;
+    - (m2) `tests/test_labgen_ruby_rails_browsable_extra.py`, a name that
+      merely extends an allowlisted one.
+
+  The test asserts the reported set is **exactly** {p1, p2, m1, m2}. That
+  proves the check can fail, and that neither the directory exclusion nor
+  the allowlist quietly swallows a real hit next to it.
 
 ### Live: `tests/test_labgen_ruby_rails_navigability_live_boot.py` (new, `slow`)
 
@@ -1121,3 +1141,24 @@ ADEQUATE with 2 minor gaps.**
     falling back to the raw text.
   - O5 checks this offline.
 - **Next:** round-3 confirmation.
+
+**Round 3 (adequacy reviewer, dispatched by the orchestrating session,
+2026-09-25): NOT ADEQUATE, 1 narrow gap.** The accuracy reviewer's round 3
+had not reported when this fix was made.
+
+- **Gap:** O7-neg only proved the positive detection path. Nothing checked
+  that the emitter/harness exclusion or the allowlist does *not* over-match.
+  A broad skip could quietly swallow a real regression.
+- **Fixed:** O7-neg's synthetic tree now also plants:
+  - a hit under the emitter exclusion (n1) and a hit in an
+    allowlisted-name file (n2), both of which must **not** be reported;
+  - two near-miss files (m1, m2), one sharing the excluded directory's name
+    as a prefix and one extending an allowlisted name. Both **must** still
+    be reported.
+
+  The test asserts the exact reported set, and O7's matching is specified as
+  exact path or exact directory prefix, never substring. This makes O7-neg
+  prove both that exclusions are honoured and that they are not broader than
+  intended. The reviewer judged this a refinement of the existing design,
+  not a new risk item.
+- **Next:** round-4 confirmation.

@@ -6,11 +6,13 @@ Component code: **LAB**. Entry format and required fields: see
 ### CC-LAB-0245 — Browsable labs Lane 5: ruby_rails/ForgeCart conversion (2026-09-25, FR-LAB-166, `docs/LAB_LANE5_RUBY_RAILS_FORGECART_PLAN.md`)
 
 **Status: DRAFT. This entry's own review gate has NOT RUN.** The underlying
-plan has had 2 review rounds, with reviewers dispatched by the orchestrating
+plan has had 3 review rounds, with reviewers dispatched by the orchestrating
 session. Round 1 returned ACCURATE / ADEQUATE with 2 minor gaps, both fixed.
 Round 2 returned ACCURATE / NOT ADEQUATE with 1 gap: the blast-radius grep
-had to become a standing check. That is fixed as O7 (see the plan's §8). The
-plan is awaiting round-3 confirmation. Text below the next
+had to become a standing check. That is fixed as O7. Round 3's adequacy
+review returned NOT ADEQUATE with 1 narrow gap: O7-neg did not test the
+exclusion side. That is fixed too (see the plan's §8). The plan is awaiting
+round-4 confirmation. Text below the next
 sentence records the drafting-time situation. At drafting time, neither this
 entry nor the underlying plan had been reviewed. The dispatch
 required two independent reviewer subagents for each document; the drafting
@@ -115,8 +117,12 @@ template; the plan holds the full detail.
        `tests/` and `fuzzlab/` detection code on every test invocation for
        debug-page-specific content (stack traces, the 404 route table,
        "Extracted source", Rails exception class names). Its allowlist of
-       absence-only files is pinned and literal, and it has an adversarial
-       self-test (O7-neg). It must be green before the setting is flipped.
+       absence-only files is pinned and literal, matched by exact path or
+       exact directory prefix. Its adversarial self-test (O7-neg) plants
+       hits that must be reported, hits inside the exclusion and allowlist
+       that must not be, and near-miss paths that must still be reported,
+       then asserts the exact reported set. It must be green before the
+       setting is flipped.
        A grep at plan revision found 0 hits; the only Rails non-2xx
        assertion is the sink's own JSON 401.
      - **Side effect:** a malformed-JSON webhook POST now gets the static
