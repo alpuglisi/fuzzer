@@ -1,6 +1,8 @@
 # Lane 1 step 3 — JSON→HTML conversion, detailed implementation + risk plan
 
-Status: **planning only, not yet implemented** (2026-09-24). Scopes the third
+Status: **planning only, not yet implemented** (2026-09-24, revised
+2026-09-25 after a self-review research pass — see the dated CHANGELOG
+entries for what changed). Scopes the third
 and last step of Lane 1 (`docs/LAB_BROWSABLE_APPS_PLAN.md`), reserved as
 `CC-LAB-0239`/`FR-LAB-156` (LAB side) plus `CC-FUZZ-0047`/`FR-FUZZ-31` (FUZZ
 side, oracle-strategy and live-boot-test updates only — no new FUZZ feature).
@@ -45,8 +47,37 @@ already found in the repo materially shrink the scope:
    So the **only** cells whose response body genuinely needs to become HTML
    are **`LABGEN-CF-0001`/`0002`** (photo detail view) and
    **`LABGEN-BC-0005`/`0006`** (checkout confirmation). Everything else in
-   the table needs, at most, a URL move (off `/cell/labgen-*`) and a nav
-   link — not a rendering change.
+   the table needs, at most, a URL move (off `/cell/labgen-*`) — not a
+   rendering change. (§3a below finds that for `GET` cells this URL move
+   needs *no separate nav-wiring step at all*; only the two `POST` cells,
+   `LABGEN-BC-0005`/`0006` and the `api`-classified `LABGEN-MA-0003`/`0004`,
+   need an actual new page built.)
+   `LABGEN-HHB-0003`/`0004` and `LABGEN-HHB-0005`/`0006` were re-verified
+   directly against a fresh `assemble_lab(app="huddlehub")` build (not just
+   inferred from the manifest) — both still `response()->json(...)`,
+   confirming the table above.
+
+### 3a. Finding: the catalog page auto-discovers routes — most relocations need no nav code
+
+Read `SiteController::catalog()` (the skeleton controller `app_site.py`'s
+split apps also use, unchanged): it does not carry a hand-maintained link
+list. It walks `Route::getRoutes()` at request time, keeps every registered
+`GET` route (excluding `/`, `/up`, `/catalog` itself), sorts it, and renders
+it. This means:
+
+- **Every `GET` cell's URL relocation is automatically picked up by
+  `/catalog`** the moment `routes/web.php` registers the new path — no
+  `app_site.py` or nav-list change needed for
+  `LABGEN-CF-0001/0002/0005/0006/0007/0008`, `LABGEN-HHB-0003/0004`, or
+  `LABGEN-BC-0001/0002/0003/0004`. Their "nav link" work in §4/§5 below is
+  purely the route-path change itself.
+- **`POST`-only cells are invisible to `catalog()`** (it filters to `GET`
+  only, matching the parent plan's own point 4: a POST endpoint needs a
+  *page* — a GET-answerable form or client page — to be link-reachable at
+  all). `LABGEN-BC-0005`/`0006` (checkout) and the `api`-classified
+  `LABGEN-MA-0003`/`0004` (account settings) are the only two cells that
+  genuinely need a new GET-reachable page built for this reason, independent
+  of whether their response body also changes format.
 
 ## 2. `page` vs `api` classification, justified per the parent plan's own test
 
@@ -193,57 +224,141 @@ before merge — they are not optional/manual checks, they are the same
 automated gate every other page went through, so treat a gate failure as a
 build failure, not a warning.
 
-### R6 — regression/additive-only gate (`T-LAB0.9`)
+### R6 — regression/additive-only gate (`T-LAB0.9`) — reassessed, verified inapplicable to these cells
 
-**Found:** `L-P0.9` wired an additive-only regression gate. Moving a cell's
-route from `/cell/labgen-cf-0001` to `/photos/view` is **not** additive by
-that gate's own definition (a URL is being removed and a new one added) —
-this needs the same explicit "this is an intentional relocation, not
-regression" acknowledgment mechanism CC-LAB-0238's own change-control entry
-already flagged as a deferred concern. **Mitigation:** before moving any
-cell's URL, read `T-LAB0.9`'s gate implementation to find its documented
-override/exemption path (`lab/ground-truth/migration-exemptions.yaml` exists
-in the repo already and is the likely mechanism — confirm by reading it
-before use) and use it explicitly, recording the old→new URL mapping in the
-same change-control entry. Never silence the gate by deleting or renaming
-its check.
+**Originally flagged as a risk needing an exemption; re-checked against the
+gate's actual implementation and found not to apply here.** Read
+`fuzzlab/labgen/regression_gate.py` directly: it diffs two
+`fuzzlab.labels.contract.GroundTruth` snapshots, and `GroundTruth` is loaded
+*only* from `lab/ground-truth/labels.json` + `injection-points.json`
+(`fuzzlab/labels/contract.py`'s `load()`). Checked those two files directly:
+every `case_id` in `labels.json` has the `PFF-` prefix (verified by
+extracting and de-duplicating every `case_id` in the file — `PFF` is the
+only prefix present), and `injection-points.json`'s `target` is
+`php_laravel` covering only PFF's own 24 real-page points. **None of
+`LABGEN-CF-*`/`LABGEN-HHB-*`/`LABGEN-BC-*`/`LABGEN-MA-*` appear in either
+file** — these cells were never hand-authored ground truth, so this gate has
+no baseline entry to diff for them at all. Moving their route does not
+touch any `case_id` this gate tracks.
 
-### R7 — CSRF posture on the two new form-bearing pages
+`lab/ground-truth/migration-exemptions.yaml` (read directly) is a different
+mechanism than what R6 originally guessed: it records which `PFF-NNNN`
+cases the `php_laravel` *cutover* gate (`L-P3.3c-CUT`/`cutover_gate.py`,
+comparing against `puppy-fort-factory/`) knows are deliberately unreproduced
+— unrelated to relocating an already-`php_laravel`-native cell's route, and
+not a mechanism this step needs to touch or add an entry to.
 
-`LABGEN-BC-0005`/`0006` is a `POST` cell; converting its *response* to HTML
-must not touch its *request*-side CSRF handling (the parent plan's design
-contract, point 4, is explicit on this). **Mitigation:** grep the existing
-generated controller/route registration for this cell's current CSRF
-middleware/`@csrf` posture before touching it, and keep it byte-identical;
-the new confirmation-page template only changes what is returned after the
-POST succeeds, not how the POST is authenticated or protected.
+**Revised conclusion: no exemption, override, or migration-exemptions.yaml
+entry is needed for any relocation in this step.** This *removes* work from
+§4/§5 rather than adding it — kept as its own numbered item (rather than
+deleted) so a future implementer sees that this was checked and ruled out,
+not overlooked. If a future cell in this family ever gains a real
+`labels.json`/`injection-points.json` entry (none currently do), re-run this
+check before moving its URL.
+
+### R7 — CSRF: verified as a single blanket app-wide setting, not per-cell
+
+**Found (corrects an earlier, more cautious framing):** read
+`bootstrap/app.php` in a real assembled build directly —
+`$middleware->validateCsrfTokens(except: ['*'])`, with a comment recording
+why: these cells model plain PHP forms with no CSRF framework of their own,
+so Laravel's default session-CSRF middleware would add unmodeled protection.
+CSRF is disabled **for every route in the app, uniformly** — there is no
+per-cell or per-route CSRF posture to preserve, discover, or accidentally
+change. **Mitigation, simplified accordingly:** confirm this one file
+(`bootstrap/app.php`'s `validateCsrfTokens` line) is untouched by this
+step's diff — that single line is the entire request-side CSRF contract,
+for `LABGEN-BC-0005`/`0006` and every other cell alike. No per-cell grep is
+needed.
+
+### R8 — split apps have no login route: an authenticated page can never be reached by an anonymous crawl
+
+**Found:** `LABGEN-CF-0001`/`0002`'s controller gates its real (non-401)
+branch on `$request->session()->get('user_id')`. The standalone
+`--app circlefeed` build's `routes/site.php` (`app_site.py`, step 2)
+registers only `GET /` and `GET /catalog` — CircleFeed's own manifests carry
+no login cell of any kind (login-capable cells are PFF's own
+`LABGEN-PLA-*`, a different prefix, absent from the `LABGEN-CF-` filter).
+**This means an anonymous crawl of the standalone CircleFeed app, or of
+Huddle Hub/Booking similarly, can never establish a session, so
+`GET /photos/view` will always hit the `401 unauthenticated` branch when
+reached this way** — the ownership-differential content this step converts
+to HTML is real and correctly detectable by a live-boot harness that sets
+up a session directly (as `test_labgen_php_laravel_access_control_live_boot.py`
+already does, independent of the `--app` split), but is not reachable by
+*browsing* the standalone app end to end.
+
+This is a genuine gap the parent plan's design contract point 6 ("crawling
+from `/` … discovers 100% of that app's ground-truth injection-point URLs")
+does not resolve on its own, and it predates this step (it was already true
+the moment step 2 shipped the standalone split) — surfaced here because
+converting `/photos/view` to a real page is the first place it actually
+matters for this step's own acceptance criteria. Two options, not yet
+decided — **needs sign-off before §4 step 2 starts**, not a call this plan
+makes unilaterally:
+
+- **(a) Give each split app a minimal login route/page**, reusing PFF's
+  existing session-cookie mechanism and seeded demo users, so a real
+  browser/crawler can authenticate and reach the gated branch. More
+  realistic, more work, and it's new scope beyond "split the app" (step 2)
+  or "convert this cell's response" (this step) — arguably its own small
+  step.
+- **(b) Document the 401 as the correct, expected anonymous-crawl result**
+  for this and any other session-gated cell in a split app, and adjust the
+  navigability acceptance test's wording to "every URL returns the response
+  a real anonymous visitor would get" (200 for public pages, 401/redirect
+  for gated ones) rather than "every URL returns 200" — matching how a real
+  social app actually behaves for a logged-out crawler. No new login system
+  needed.
+
+This plan's authors' recommendation is **(b)**: it matches real product
+behavior more closely than inventing a login flow these apps' own manifests
+never asked for, and it keeps this step's scope to "convert response
+format," not "add authentication." Recorded as a recommendation, not a
+decision — flag for explicit user sign-off (or reviewer consensus) before
+starting §4 step 2, and record whichever is chosen in the `CC-LAB-0239`
+change-control entry.
 
 ## 4. Sequencing (safest-first, independently verifiable steps)
 
 Do these as **separate commits**, each independently green, in this order:
 
+0. **R8 sign-off**: get explicit agreement on option (a) or (b) before
+   starting step 2 below — `LABGEN-CF-0001`/`0002`'s acceptance criteria
+   differ depending on the answer (a reachable authenticated page vs. a
+   documented 401-for-anonymous-crawl page).
 1. **R3 negative control first**: re-run `test_oracle_strategies_access_control.py`
    unchanged, record that it's untouched by this step (paper trail for R3).
 2. **`LABGEN-CF-0001`/`0002`** (access_control → HTML page): lowest oracle
-   risk (R3 says the *strategy* is safe), but does require the R2 live-boot
-   test update and the R6 URL-migration-exemption mechanism. Ship and verify
+   risk (R3 says the *strategy* is safe), needs the R2 live-boot test
+   update and the R8 sign-off from step 0. R6 confirmed no
+   migration-exemption entry is needed for the route move. Ship and verify
    this alone before touching price integrity.
-3. **URL-only moves for the six already-realistic cells**
-   (`LABGEN-CF-0005/0006`, `LABGEN-BC-0001/0002`, and the three `api`-only
-   URL relocations `LABGEN-CF-0007/0008`, `LABGEN-HHB-0003/0004`,
-   `LABGEN-HHB-0005/0006`, `LABGEN-MA-0003/0004`, `LABGEN-BC-0003/0004`):
-   no body-format risk, just routing + nav-link + client-page wiring. Safe
-   to batch together.
-4. **`LABGEN-BC-0005`/`0006`** (price_integrity → HTML page) **last**,
+3. **URL-only moves for the seven already-realistic/already-JSON-as-designed
+   cells** (`LABGEN-CF-0005/0006`, `LABGEN-BC-0001/0002`, and the `api`-only
+   relocations `LABGEN-CF-0007/0008`, `LABGEN-HHB-0003/0004`,
+   `LABGEN-HHB-0005/0006`, `LABGEN-BC-0003/0004`): no body-format risk. Per
+   §3a, every one of these is a `GET` route, so `/catalog` picks each new
+   path up automatically — this step is the route-path edit alone, no
+   separate nav code.
+4. **`LABGEN-MA-0003`/`0004`** (mass_assignment `api`, `/example/account_settings`):
+   the one remaining `POST`-only `api` cell. Per §3a it needs an actual new
+   GET-reachable client page (a settings form whose inline `fetch()` POSTs
+   JSON, per the parent plan's "minimal inline `fetch()`" client-page
+   pattern) — batch with step 3 only if that page is ready; otherwise its
+   own commit.
+5. **`LABGEN-BC-0005`/`0006`** (price_integrity → HTML page) **last**,
    in its own commit, because it's R1 — the one genuine oracle-anchor
-   change. Update `PriceIntegrityBypassStrategy` and its two test files in
-   the same commit as the sink-template change; never split them across
-   commits (a red build between them would mean an active, silent
-   detection gap).
-5. Only after all four land: re-run the full navigability acceptance test
-   (crawl-from-`/` discovers 100% of ground-truth injection points) and the
-   full non-slow suite + this lane's live-boot suite together, once, as the
-   final integration check.
+   change, and (per §3a) also needs a new GET-reachable page (the checkout
+   form) since it's `POST`-only. Update `PriceIntegrityBypassStrategy` and
+   its two test files in the same commit as the sink-template change; never
+   split them across commits (a red build between them would mean an
+   active, silent detection gap).
+6. Only after all five land: re-run the full navigability acceptance test
+   (crawl-from-`/` discovers every ground-truth/detection-bearing URL, per
+   whichever R8 option was chosen in step 0) and the full non-slow suite +
+   this lane's live-boot suite together, once, as the final integration
+   check.
 
 ## 5. Verification checklist (maps 1:1 to the parent plan's own contract)
 
@@ -259,31 +374,39 @@ Do these as **separate commits**, each independently green, in this order:
       realistic path serves the same cell).
 - [ ] Leakage-probe / chi-square build gate — green on both new page
       templates (R5).
-- [ ] Regression/additive-only gate — passes via the documented exemption
-      path, with old→new URL mapping recorded (R6).
-- [ ] CSRF middleware/posture on `LABGEN-BC-0005`/`0006` diffed against
-      pre-change and confirmed byte-identical on the request side (R7).
+- [ ] Regression/additive-only gate — confirmed still green with no new
+      exemption entry needed (R6; verified inapplicable, not skipped).
+- [ ] `bootstrap/app.php`'s `validateCsrfTokens(except: ['*'])` line diffed
+      against pre-change and confirmed unchanged (R7).
+- [ ] R8 sign-off obtained and recorded in the `CC-LAB-0239` entry *before*
+      `LABGEN-CF-0001`/`0002` is converted; its acceptance criteria below
+      match whichever option was chosen.
 - [ ] Full non-slow suite green; pass/skip counts stated in the CC entry.
-- [ ] Live-boot: `GET /` and every nav link on the CircleFeed/Huddle
-      Hub/Booking apps fetched for real and returns 200 (or the correct
-      redirect/CSV content-type where that's the realistic response).
-- [ ] Crawl-from-`/` navigability check discovers 100% of these apps'
-      ground-truth/detection-bearing URLs.
+- [ ] Live-boot: `GET /` and every `/catalog`-listed link on the
+      CircleFeed/Huddle Hub/Booking apps fetched for real and returns 200
+      (or the correct redirect/CSV content-type, or — if R8 option (b) was
+      chosen — the correct 401 for a session-gated page fetched
+      anonymously).
+- [ ] Crawl-from-`/` navigability check discovers every one of these apps'
+      ground-truth/detection-bearing URLs, scored per whichever R8 option
+      was chosen (100% 200 under option (a); 100% "correct response for an
+      anonymous visitor" under option (b)).
 
 ## 6. Rollback plan
 
-Each of the four commits in §4 is independently revertable (no commit
-depends on a later one). If R1's price-integrity commit fails verification
-after merge, revert just that commit — `LABGEN-CF-0001`'s page conversion
-and the URL-only moves stand on their own and are not affected. If a
-build-gate failure (R5/R6) surfaces after merge that CI didn't catch
+Each of the five commits in §4 (steps 2–5) is independently revertable (no
+commit depends on a later one). If R1's price-integrity commit fails
+verification after merge, revert just that commit — `LABGEN-CF-0001`'s page
+conversion and the URL-only moves stand on their own and are not affected.
+If a build-gate failure (R5) surfaces after merge that CI didn't catch
 locally, the same per-commit revert applies; there is no combined/squashed
 commit to unwind.
 
 ## 7. Bookkeeping for this step
 
 - `CC-LAB-0239`/`FR-LAB-156` (already reserved, `docs/LAB_BROWSABLE_APPS_PLAN.md`) —
-  LAB-side: template/route/nav changes for all cells in §1.
+  LAB-side: template/route changes for all cells in §1, and the R8 (a)/(b)
+  decision once made (§3, R8).
 - `CC-FUZZ-0047`/`FR-FUZZ-31` (already reserved for Lane 1's FUZZ-side work) —
   the `PriceIntegrityBypassStrategy` update (R1) and both of its test files.
 - A `BUG-NNNN` entry is **not** warranted for R1/R2 themselves — these are

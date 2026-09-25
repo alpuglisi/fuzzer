@@ -4,6 +4,31 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 1 step 3 planning revision — self-review pass corrects/simplifies the risk register, no code change)
+- Revised `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md` after a deeper research
+  pass verified (rather than assumed) three of its own claims: (1) read
+  `SiteController::catalog()` directly — it auto-discovers every registered
+  `GET` route at request time (no hand-maintained nav list), so most URL
+  relocations in this step need zero nav-wiring, only the route-path edit;
+  only the two `POST`-only cells genuinely need a new page built. (2) Read
+  `regression_gate.py` and `fuzzlab/labels/contract.py` directly and
+  confirmed `LABGEN-CF-*`/`LABGEN-HHB-*`/`LABGEN-BC-*`/`LABGEN-MA-*` have no
+  entries in `lab/ground-truth/labels.json` or `injection-points.json` (both
+  files hold only `PFF-*` cases) — the regression/additive-only gate has no
+  baseline to diff for these cells, so the originally-assumed
+  migration-exemption mechanism doesn't apply and isn't needed; the actual
+  `migration-exemptions.yaml` file turned out to be for a different gate
+  entirely (the `php_laravel`/`puppy-fort-factory` cutover) than originally
+  guessed. (3) Read `bootstrap/app.php` directly — CSRF is a single blanket
+  `validateCsrfTokens(except: ['*'])` for the whole app, not a per-cell
+  posture, simplifying that verification step to one line-diff. Also
+  surfaced a new, previously-missed gap (R8): the standalone split apps
+  (step 2) register no login route, so a session-gated cell like
+  `LABGEN-CF-0001` can never be reached authenticated by an anonymous
+  crawl — flagged for explicit sign-off (recommends documenting the 401 as
+  correct anonymous-visitor behavior over building a login system) rather
+  than decided unilaterally.
+
 ## 2026-09-24 (Lane 1 step 3 planning — JSON→HTML conversion detailed plan, no code change)
 - Added `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`: a from-the-repo inventory
   (not a from-the-plan assumption) of every CircleFeed/Huddle Hub/Booking
