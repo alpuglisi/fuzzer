@@ -50,7 +50,7 @@
       "vuln_class": "mass_assignment",
       "sink_context": "mass_assignment",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "ruby_rails",
       "notes": "merchant-admin customer-account update; unrestricted permit! (CWE-915, LABGEN-RR-RP-0004) lets an attacker also set the privileged role column"
     },
@@ -63,7 +63,7 @@
       "vuln_class": "insecure_deserialization",
       "sink_context": "deserialization",
       "expected_vulnerable": true,
-      "rendering": "server-json",
+      "rendering": "server",
       "stack": "ruby_rails",
       "notes": "merchant-admin bulk product import; YAML.unsafe_load (CWE-502, LABGEN-RR-RP-0005) honors a !ruby/object:... tag"
     }
