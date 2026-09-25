@@ -52,7 +52,11 @@ entry reaches 3/3 (2 reviewers + proposing agent).
   here.
 - **Risk (level; mitigation or accepted-risk justification):** **Medium.**
   One genuinely novel risk, found by a dedicated research pass, not
-  present in CC-LAB-0239's precedent:
+  present in CC-LAB-0239's precedent, plus 4 more carried through from the
+  plan's full R1-R8 register (named here in full, matching CC-LAB-0239's
+  own drafting discipline — R4/R7/R8 are omitted as genuine no-risk
+  findings with nothing to mitigate, confirmed by direct code reading in
+  the plan):
   1. *`SqliBooleanStrategy` length-ratio detection could silently break*
      once responses are wrapped in a shared ~1,947-byte layout (its
      `_similar` check scales its ~5%-of-length threshold up with page
@@ -67,7 +71,23 @@ entry reaches 3/3 (2 reviewers + proposing agent).
      one (`mariadb.py:431`) would otherwise pass *vacuously* rather than
      fail, a silent false-pass. Mitigated by rewriting all 8 to check
      HTML-appropriate content, verified re-run.
-  3. *SQLite vs MariaDB schema mismatch* (`posts` lacks `author`/
+  3. *`/search.php`'s shared page profile also covers 4 XSS cells*
+     (`LABGEN-PL-RP-0003..0006`) that must stay unaffected by wiring
+     `html_list_view` onto the SQLi twins' profile. Mitigated: confirmed
+     those 4 cells use a different complexity (`render_only`, not
+     `single_statement`) whose `render()` receives none of the tail-flag
+     keys (`body`/`method_name`/`view_name`/`value_expr` only), so they
+     cannot pick up `html_list_view`; a direct assertion re-confirms this
+     at implementation time rather than relying on the read alone.
+  4. *Leakage/fingerprint-independence gate is structurally out of scope*
+     for this change (`MIN_GROUPS_FOR_GATE=6` groups and ≥40 cells,
+     neither reached here), so it cannot itself catch a vulnerable/secure
+     twin pair whose new shared Blade view accidentally diverges.
+     Mitigated by adding a direct, non-gate-dependent twin-diff test per
+     converted page pair, asserting both twins `return view()` the exact
+     same shared Blade file — the same substitute mechanism CC-LAB-0239
+     used for the identical structural gap.
+  5. *SQLite vs MariaDB schema mismatch* (`posts` lacks `author`/
      `published_at` in the SQLite harness) — mitigated by templates that
      only reference columns present in both harnesses (`products`/`users`
      columns cross-checked too; only `posts` differs), re-run against both
@@ -101,6 +121,11 @@ entry reaches 3/3 (2 reviewers + proposing agent).
         next CC-LAB-numbered step, added somewhere durable (this entry's
         Impact section already does; also add to
         `docs/LAB_BROWSABLE_APPS_PLAN.md` if not otherwise tracked) — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-158`
+        requirement added in place, describing this capability (mirroring
+        how CC-LAB-0239 added `FR-LAB-157`) — todo.
+  - [ ] `CHANGELOG.md` — one dated, high-level line for this change,
+        referencing `CC-LAB-0240` — todo.
 - **Effectiveness (assessed <date> or pending):** pending — not yet
   implemented.
 
