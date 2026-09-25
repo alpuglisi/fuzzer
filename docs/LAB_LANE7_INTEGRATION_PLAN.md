@@ -5,9 +5,35 @@ Reserved bookkeeping (`docs/LAB_BROWSABLE_APPS_PLAN.md` row 7, PA-0031): `CC-LAB
 number is reserved and none is expected to be needed (this lane touches serving/packaging,
 not detection).
 
-Status: **draft, revised after round-1 review (2026-09-25)**. Round-1 verdicts: ACCURATE
-WITH CORRECTIONS (2 fixes, both applied below) / ADEQUATE CONTINGENT ON 8 items (all
-applied below). Round 2 re-review pending.
+Status: **draft, revised after round-2 review (2026-09-25)**. Round-1 verdicts: ACCURATE
+WITH CORRECTIONS (2 fixes) / ADEQUATE CONTINGENT ON 8 items -- all applied. Round 2
+verdicts: ACCURATE (no further corrections) / ADEQUATE CONTINGENT ON 3 items -- all
+applied below (see §8). Round 3 re-review pending.
+
+## §0. What Lanes 1-6 taught us, applied here from the start
+
+- **Pre-assigned bookkeeping avoids merge friction** (PA-0031, every lane's own precedent):
+  `CC-LAB-0247`/`FR-LAB-170`-`171`/`BUG-0057`/`PA-0059` are reserved above, not claimed
+  ad hoc.
+- **A cross-cutting fix that touches an already-merged lane needs before/after evidence,
+  not just "still green"** (Lane 4's own S9-equivalent discipline for `BUG-0054`): the
+  `go_net_http` vocabulary rename (2e) inherits this directly (S9).
+- **"Flag, never silently build or skip"** (the multi-agent orchestration policy, applied
+  by Lane 5 to ForgeCart's stale citations and by this lane to S13's `go_net_http` S7 gap
+  and to the process-doc suggestion, §1 item 7): a lane's own reviewers, not the lane
+  itself, get the final call on deferring something it notices but doesn't strictly own.
+- **A strict-xfail marker shared across concurrent lanes' own cross-emitter checks
+  resolves itself at merge time** (observed twice already: Lane 3/Lane 6 landing their own
+  mechanisms concurrently with Lane 4, XPASSing Lane 4's own markers) -- worth codifying
+  once rather than rediscovering a third time (§1 item 7, 2i).
+- **A living port/identity table needs one source of truth** (Lane 4's own post-convergence
+  ReelQueue/WanderFare rename left a stale table entry elsewhere, S12): this lane's own
+  runbook explicitly copies from, and stays in sync with, `docs/LAB_BROWSABLE_APPS_PLAN.md`'s
+  table rather than forking a second copy (2g).
+- **A lab whose purpose is hosting real, exploitable sinks must reason about those sinks
+  when changing its own network topology**, not just about the host-level loopback rule
+  every earlier lane's own compose work already honored -- new for this lane specifically,
+  since no earlier lane put multiple vulnerable apps on the same Docker network (S17).
 
 ## §1. Scope (live pre-scan, 2026-09-25)
 
@@ -186,7 +212,13 @@ passthrough exists there today):
     live-verified SSRF: an `unchecked_url_fetch` on a caller-supplied URL). Compose's
     default same-project network would otherwise let that sink's fetch reach e.g.
     `http://picktrail:8000/` by service-name DNS even though every host port stays
-    loopback-only -- host-level isolation alone does not close this.
+    loopback-only -- host-level isolation alone does not close this. Mechanically: a
+    compose service that declares its own `networks:` key stops auto-joining the
+    project's implicit default network (it does not additionally join both), so PFF's
+    own `db`/`web` services -- which declare no `networks:` key today -- keep using the
+    implicit default network completely unchanged; only the 10 new services gain an
+    explicit, per-app `networks:` key, which removes each one from the default network
+    rather than adding a second network alongside it (round-2 clarification).
 - `lab/labctl.sh`: `PROFILE_ARGS` currently supports exactly one `--profile` value
   (`PFF_PROFILE`). Compose supports multiple `--profile` flags simultaneously; this lane
   extends `PFF_PROFILE` to accept a comma-separated list (e.g. `PFF_PROFILE=apps,desync`),
@@ -419,8 +451,11 @@ adequacy fix: this section did not exist in the previous draft):
 2. **Gate B** -- Per-stack assemble functions (2a) green, including each one's dual-path
    test (S1, S8).
 3. **Gate C** -- Absent-input vocabulary rename (2e) landed, with S9's before/after
-   evidence captured, **before** Gate E touches `go_net_http` again (the cross-app run
-   must run against the renamed, already-verified vocabulary, not the old one).
+   evidence captured, **before** Gate F touches `go_net_http` again (round-2 correction:
+   the dependency is on Gate F, the cross-app navigability run, not Gate E's
+   compose/labctl wiring, which never touches the absent-input vocabulary at all -- the
+   cross-app run must run against the renamed, already-verified vocabulary, not the old
+   one).
 4. **Gate D** -- Every Dockerfile (2b) built and booted individually (S10), including the
    `web.Dockerfile`/`web-spring.Dockerfile` `ARG APP` addition.
 5. **Gate E** -- compose.yaml + labctl (2c) wired: per-app networks (S17), loopback-only
@@ -472,7 +507,23 @@ adequacy fix: this section did not exist in the previous draft):
   a real compose boot stays the one required manual step, §4/§6).
 - R3 (= S13): fix `go_net_http`'s S7 blind spot now, or flag-and-defer.
 
+## §8. Review history
+
+- **Round 1** (2026-09-25): ACCURATE WITH CORRECTIONS (2 fixes: §1 item 1's vocabulary
+  citation was wrongly attributed to `PA-0056` instead of `BUG-0056`/`PA-0058`; §2b's
+  claimed `--app` build-arg precedent in `lab/web.Dockerfile` did not exist) /
+  ADEQUATE CONTINGENT ON 8 items (a missing 7th flagged-item + 2i, a missing §5
+  Sequencing section, S9/S14 needing explicit deliverable lines, S15 `SECRET_KEY_BASE`/D12,
+  a required full-profile compose-up deliverable, S16 resource contention, S17 network
+  leakage). All 10 items applied in the round-1 revision.
+- **Round 2** (2026-09-25): ACCURATE, no further corrections / ADEQUATE CONTINGENT ON 3
+  items (Gate C's dependency wrongly named Gate E instead of Gate F; missing §0/§8
+  sections against the established template; 2c's network-isolation mitigation needed one
+  clarifying sentence on the underlying compose mechanic and on PFF's own services being
+  unaffected). All 3 applied in this revision.
+- **Round 3**: pending.
+
 ---
 
-*Revised after round-1 review; round-2 re-review pending before implementation begins,
+*Revised after round-2 review; round-3 re-review pending before implementation begins,
 per this project's process (`CLAUDE.md`).*
