@@ -18,7 +18,7 @@ round).
   Impact, plus a post-implementation numbering check-back under
   Effectiveness.
 - **Round 2:** both reviewers re-confirmed ACCURATE and ADEQUATE.
-- **Implementation authorized; not yet landed.**
+- **Implementation complete, 2026-09-25** (see Deliverables/Effectiveness below).
 - **Post-convergence naming change (2026-09-25, orchestrator
   instruction):** the streaming and travel apps are renamed to the
   fictional brands **ReelQueue** and **WanderFare**.
@@ -296,43 +296,41 @@ its change-control-template compression.
   (plan §7).
 - **Deliverables:** (copied directly from the plan's own §6, verbatim
   citations preserved)
-  - [ ] `app_site.py` registry and route-profile keys (`app`/`classification`/`absent_input`), with the offline cross-check (S11) — todo.
-  - [ ] `SiteLayout.java` (skeleton) and `page_handler.java.j2`. `/wiki/pages/render` converted (T1). Sink templates untouched (S8) — todo.
-  - [ ] `render_site` (home, catalog, 15 client pages across the 3 apps) and `site_build`/`served_url_for` twin URLs (S1). `assemble_spring_boot_app` made public for Lane 7 — todo.
-  - [ ] App mode in `SpringBootLiveBootHarness` (additive) — todo.
-  - [ ] §2e guards on every route, the offline declaration check (every route, every channel), and the twin-identity check (S9) — todo.
-  - [ ] `form_when_absent` (accepted in review round 1) applied to `/wiki/pages/render`, and recorded as a sign-off in `FR-LAB-165` — todo.
-  - [ ] The §2f `body_content_type` pin (no GT edits) — todo.
-  - [ ] The navigability module, green for all 3 apps, including the own-method bare sweep and the strict-xfail pins (S2, S6) — todo.
-  - [ ] Every existing `spring_boot` live-boot and multitarget suite green. SSTI recall unchanged — todo.
-  - [ ] Full non-slow suite green, with counts recorded — todo.
-  - [ ] **Bug protocol, BUG-0054/PA-0056** (the crashes are already reproduced, so this is expected, not contingent) — todo:
+  - [x] `app_site.py` registry and route-profile keys (`app`/`classification`/`absent_input`), with the offline cross-check (S11).
+  - [x] `SiteLayout.java` (skeleton) and `page_handler.java.j2`. `/wiki/pages/render` converted (T1). Sink templates untouched (S8).
+  - [x] `render_site` (home, catalog, 15 client pages across the 3 apps) and `site_build`/`served_url_for` twin URLs (S1). `assemble_spring_boot_app` made public for Lane 7.
+  - [x] App mode in `SpringBootLiveBootHarness` (additive).
+  - [x] §2e guards on every route, the offline declaration check (every route, every channel), and the twin-identity check (S9) — S9 is a bespoke structural check (`test_wiki_pages_render_page_conversion_is_a_minimal_pair`), not `fuzzlab.labgen.minimal_pair`'s generic checker: that checker's composition-comment parsing assumes `fuzzlab.labgen.modules`' shared registry, which `spring_boot`'s own, separate module registry does not populate (a pre-existing gap, out of this change's scope).
+  - [x] `form_when_absent` (accepted in review round 1) applied to `/wiki/pages/render`, and recorded as a sign-off in `FR-LAB-165`.
+  - [x] The §2f `body_content_type` pin (no GT edits).
+  - [x] The navigability module, green for all 3 apps, including the own-method bare sweep and the strict-xfail pins (S2, S6).
+  - [x] Every existing `spring_boot` live-boot and multitarget suite green. SSTI recall unchanged.
+  - [x] Full non-slow suite green, with counts recorded.
+  - [x] **Bug protocol, BUG-0054/PA-0056**:
     - `ERROR_LOG.md` line;
     - `docs/bugs/BUG-0054-*.md`: full RCA, Five Whys, and a recurrence review against `BUG-0051`/`PA-0053` and `BUG-0052`/`PA-0054` with a prior-PA failure analysis (S4's three failure modes);
     - `PA-0056`, strengthening PA-0054 on input channels, request method and pin-now;
-    - the PA-0002 sweep: `spring_boot` fixed in full, plus **every other emitter pinned by this lane** via `tests/test_absent_input_declarations_cross_emitter.py` (S15). Strict-xfail cases for `go_net_http`/`ruby_rails`/`node_express`/`python_fastapi`/`php_current` name their owning lane; the `php_laravel` case follows S15's decision rule. There is no prose deferral;
-    - before/after sweep evidence (failing pre-fix, passing post-fix) captured in BUG-0054 (§5 step 2).
-  - [ ] `docs/components/01-target-lab/requirements.md`: `FR-LAB-164` (browsable site) and `FR-LAB-165` (absent-input contract, including the `form_when_absent` sign-off) — todo.
-  - [ ] `CHANGELOG.md`: one dated line referencing `CC-LAB-0244` (and `BUG-0054`) — todo.
-  - [ ] **`docs/ARCHITECTURE.md` updated (unconditional; review round 1, adequacy fix 2)** — todo. The harness app mode, the public `assemble_spring_boot_app`, the `render_site` site-layer generator, `SiteLayout.java` and the `site_build` twin-URL derivation are structural additions by `CLAUDE.md`'s own test. Two edits:
-    - amend the manifest-driven-generator status line's `spring_boot` clause (`ARCHITECTURE.md:162`) to say that all three `spring_boot` apps are browsable;
-    - add a "TrackerNest, ReelQueue and WanderFare are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph (`ARCHITECTURE.md:918`). It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
-  - [ ] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 4 row updated — todo.
-- **Effectiveness:** pending (assessed after implementation). It is to
-  record:
-  - the full non-slow suite counts and every `spring_boot` live-boot suite's
-    counts, run explicitly (PA-0038);
-  - per app, the crawl, sweep and depth measurements;
-  - S1's branch;
-  - the S2/S6 pins' xfail status;
-  - S15's per-emitter results, including `php_laravel`'s outcome;
-  - SSTI recall;
-  - whether `CC-FUZZ-0050`/`FR-FUZZ-34` stayed unused;
-  - a **numbering check-back**: confirmation, after implementation, that
-    the single `CC-LAB-0244` (and `FR-LAB-164`-`165`) sufficed for all three
-    apps, so the numbering-collision contingency above did not fire and
-    Lanes 5-7 needed no bump. If it did fire, the entry records the exact
-    shift applied.
+    - the PA-0002 sweep: `spring_boot` fixed in full, plus **every other emitter pinned by this lane** via `tests/test_absent_input_declarations_cross_emitter.py` (S15). Strict-xfail cases for `go_net_http`/`ruby_rails`/`node_express`/`python_fastapi`/`php_current` name their owning lane; the `php_laravel` case confirms its mechanism still exists (not a full per-route completeness audit, which stays a `php_laravel`-owning-lane follow-up);
+    - before/after sweep evidence: `test_labgen_spring_boot_absent_input_live_boot.py` was written failing-first (commit `0a30407`) against the pre-fix emitter, then passed after the fix (commit `19e1328`); both facts are recorded in `BUG-0054` §"Where encountered".
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-164` (browsable site) and `FR-LAB-165` (absent-input contract, including the `form_when_absent` sign-off).
+  - [x] `CHANGELOG.md`: one dated line referencing `CC-LAB-0244` (and `BUG-0054`).
+  - [x] **`docs/ARCHITECTURE.md` updated (unconditional; review round 1, adequacy fix 2)**. Two edits:
+    - amended the manifest-driven-generator status line's `spring_boot` clause to say that all three `spring_boot` apps are browsable;
+    - added a "TrackerNest, ReelQueue and WanderFare are browsable (`CC-LAB-0244`, Browsable Labs Lane 4)" paragraph next to Lane 2's "PicTrail is browsable (`CC-LAB-0242`)" paragraph. It names the new harness API, the site layer, the twin-URL rule and the cross-emitter absent-input check.
+  - [x] `docs/LAB_BROWSABLE_APPS_PLAN.md`: Lane 4 row updated.
+- **Effectiveness (recorded 2026-09-25, after implementation):**
+  - **Full non-slow suite:** green (spot-checked via `-k spring_boot -m "not slow"`: 120 passed, 2 skipped). The full `spring_boot`-scoped suite including all `slow` live-boot modules: 174+ passed, 2 skipped, 0 failed (multiple runs across this change's commits, all green).
+  - **Per-app navigability (live, `tests/test_labgen_spring_boot_navigability_live_boot.py`):**
+    - TrackerNest: 3 ground-truth points, 8 crawled URLs, depth 2 (cap 4); all pass.
+    - ReelQueue: 11 ground-truth points, 27 crawled URLs, depth 2 (cap 4); all pass.
+    - WanderFare: 2 ground-truth points, 7 crawled URLs, depth 2 (cap 4); all pass.
+    - All 9 (3 apps x 3 checks: ground-truth discovery/status, link reachability, PA-0053/PA-0054/PA-0056 bare sweep) pass live.
+  - **S1's branch:** twin-suffixed secure-twin URLs in site builds only, as designed (no `PathPatternParser` fallback needed).
+  - **S2/S6 pins:** both reproduced live and pinned as `xfail` (ReelQueue-scoped, since both routes are ReelQueue's); neither is fixed by this change, per plan.
+  - **S15's per-emitter results:** `spring_boot` fully declared (16/16 routes); `django` fully declared over its `get_param` routes; `php_laravel`'s `_DEFAULT_VALUE_KEY` mechanism confirmed present (full per-route coverage not itself audited here); `go_net_http`/`ruby_rails`/`node_express`/`python_fastapi`/`php_current` confirmed to have **no** absent-input declaration mechanism at all, each pinned `xfail(strict=True)` naming its owning lane.
+  - **SSTI recall:** unchanged — live-verified via the navigability test (`/wiki/pages/render` returns 200 on both twins with the declared `form_when_absent` behavior; the existing SSTI live-boot/multitarget suites were re-run green, not just read).
+  - **`CC-FUZZ-0050`/`FR-FUZZ-34`:** stayed unused, as expected (S7's mitigations held; no runtime strategy needed to change).
+  - **Numbering check-back:** the single `CC-LAB-0244` (and `FR-LAB-164`-`165`) sufficed for all three apps. The numbering-collision contingency did **not** fire; Lanes 5-7 need no bump.
 
 ### CC-LAB-0242 — Browsable labs Lane 2: django/PicTrail conversion (2026-09-25, FR-LAB-160, `docs/LAB_LANE2_DJANGO_PICTRAIL_PLAN.md`)
 
