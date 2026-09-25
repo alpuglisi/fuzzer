@@ -23,7 +23,7 @@
 #     podman inspect --format='{{index .RepoDigests 0}}' node:22-bookworm-slim
 # or, without pulling the full image:
 #   skopeo inspect --raw docker://docker.io/library/node:22-bookworm-slim
-FROM node@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2
+FROM docker.io/library/node@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2
 
 LABEL org.opencontainers.image.title="fuzzlab-lab-node-express" \
       org.opencontainers.image.description="fuzzlab lab-only Node/Express Tier-A vulnerable app -- loopback-only, never exposed" \

@@ -11,7 +11,7 @@
 #
 # Build context is the REPO ROOT (`lab/compose.yaml`'s `build.context: ..`).
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 WORKDIR /src
 COPY . /src
 RUN pip install --no-cache-dir -e . \
@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -e . \
 # Digest-pinned per CR-LAB-0001 Addendum D (node:22-bookworm-slim, live-
 # verified `linux/amd64` -- see the scaffold Dockerfile's own comment for
 # how/when this was confirmed).
-FROM node@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2
+FROM docker.io/library/node@sha256:25330af3531fb5e23318554a0aa911125b6e91b1b777edf7655501d207c067a2
 
 LABEL org.opencontainers.image.title="fuzzlab-lab-node-express" \
       org.opencontainers.image.description="fuzzlab lab-only Node/Express Tier-A vulnerable app (MeadowMart) -- loopback-only, never exposed" \

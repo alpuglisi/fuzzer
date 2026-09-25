@@ -12,7 +12,7 @@
 # Build context is the REPO ROOT (see lab/compose.yaml's `build.context: ..`),
 # not lab/, so the `gen` stage can see fuzzlab/ and lab/manifests/.
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 # CC-LAB-0247 (Lane 7, §2b): optional split-app selector, passed through to
 # `assemble.py`'s own `--app` flag. Empty (the default) is byte-for-byte
 # today's behavior -- the merged PFF build with every cell. A caller sets
@@ -25,7 +25,7 @@ COPY . /src
 RUN pip install --no-cache-dir -e . \
     && python3 -m fuzzlab.labgen.assemble --out /app $( [ -n "$APP" ] && echo "--app $APP" )
 
-FROM php:8.3-apache-bookworm
+FROM docker.io/library/php:8.3-apache-bookworm
 
 # mysqli for the app's legacy DB helpers plus pdo_mysql for Laravel's own query
 # builder (the migrated controllers go through DB::table()/DB::select(), which
@@ -56,7 +56,7 @@ RUN apt-get update \
 # Composer, for the generated app's real `composer install` (Laravel's own
 # framework dependencies -- the migrated app is not vendor-free like the
 # hand-built one was).
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=docker.io/library/composer:2 /usr/bin/composer /usr/bin/composer
 
 # Laravel's document root is public/, and its own public/.htaccess (shipped
 # in the skeleton) needs AllowOverride to take effect -- the base image's

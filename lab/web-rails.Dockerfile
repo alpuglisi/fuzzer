@@ -9,14 +9,14 @@
 #
 # Build context is the REPO ROOT (`lab/compose.yaml`'s `build.context: ..`).
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 WORKDIR /src
 COPY . /src
 RUN pip install --no-cache-dir -e . \
     && python3 -c "from fuzzlab.labgen.emitters.ruby_rails import assemble_ruby_rails_app; assemble_ruby_rails_app('/app')"
 
 # .ruby-version pins `ruby-3.3.6` -- matches this stage's tag exactly.
-FROM ruby:3.3.6-bookworm
+FROM docker.io/library/ruby:3.3.6-bookworm
 WORKDIR /app
 COPY --from=gen /app /app
 RUN bundle install

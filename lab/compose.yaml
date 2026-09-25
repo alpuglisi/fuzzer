@@ -14,7 +14,7 @@ name: pff-lab
 
 services:
   db:
-    image: mariadb:11.4
+    image: docker.io/library/mariadb:11.4
     environment:
       MARIADB_DATABASE: ${PFF_DB_NAME:-puppy_fort}
       MARIADB_USER: ${PFF_DB_USER:-pff}
@@ -85,7 +85,7 @@ services:
   #   docker compose --profile desync up -d   (or: PFF_PROFILE=desync ./labctl.sh up)
   # Loopback only; lab-only; on infrastructure we own.
   frontend:
-    image: nginx:1.27
+    image: docker.io/library/nginx:1.27
     profiles: ["desync"]
     depends_on:
       web:

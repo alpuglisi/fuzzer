@@ -22,13 +22,13 @@
 # content, unlike PFF's own seeded MariaDB, which is seeded via a
 # shared `sql/schema.sql` this stack has no equivalent of).
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 WORKDIR /src
 COPY . /src
 RUN pip install --no-cache-dir -e . \
     && python3 -c "from fuzzlab.labgen.emitters.django import assemble_django_app; assemble_django_app('/app')"
 
-FROM python:3.12-slim
+FROM docker.io/library/python:3.12-slim
 
 # Matches `fuzzlab.labgen.conformance.django_live_boot.DJANGO_PIN`/`REQUESTS_PIN`
 # exactly (the link-preview SSRF shape's generated view imports `requests`,

@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Lane 7 follow-up: fully-qualify base images to stop Podman's short-name-resolution hang, BUG-0058/PA-0060/CC-LAB-0249)
+- Fully qualified every base-image reference (`FROM`, `COPY --from=<image>`, compose
+  `image:`) across `lab/web*.Dockerfile`,
+  `fuzzlab/labgen/emitters/node_express/scaffold/Dockerfile`, and `lab/compose.yaml`
+  with an explicit `docker.io/library/` prefix. A short name resolves silently under
+  `docker build`'s single implicit registry, but hangs `podman-compose ... --build`
+  indefinitely on a `Please select an image:` prompt when the host has more than one
+  unqualified-search registry configured, live-discovered running the real `apps`-profile
+  boot on a Podman host. See `BUG-0058`/`PA-0060`.
+
 ## 2026-09-25 (Lane 7 implemented: browsable-labs integration, all 10 apps containerized, CC-LAB-0247/FR-LAB-170/171)
 - Implemented `docs/LAB_LANE7_INTEGRATION_PLAN.md` (`CC-LAB-0247`, Gates
   A-G) so every app built by Lanes 1-6 is now a real, individually

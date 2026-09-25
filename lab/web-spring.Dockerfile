@@ -14,7 +14,7 @@
 #
 # Build context is the REPO ROOT (`lab/compose.yaml`'s `build.context: ..`).
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 ARG APP
 WORKDIR /src
 COPY . /src
@@ -24,12 +24,12 @@ RUN pip install --no-cache-dir -e . \
 
 # pom.xml pins `<java.version>21</java.version>` -- matches this build
 # stage's JDK exactly.
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM docker.io/library/maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY --from=gen /app /app
 RUN mvn -B -q package -DskipTests
 
-FROM eclipse-temurin:21-jre
+FROM docker.io/library/eclipse-temurin:21-jre
 WORKDIR /app
 # Every spring_boot app's pom.xml shares the same `trackernest` artifactId
 # (`assemble_spring_boot_app` only varies each app's rendered site/cell

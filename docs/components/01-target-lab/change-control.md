@@ -3,6 +3,37 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0249 — Fully-qualify base images to stop Podman short-name-resolution hang (2026-09-25, `BUG-0058`/`PA-0060`)
+
+**Status: fixed, offline-verified.**
+
+- **Change:** every base-image reference in `lab/web.Dockerfile`, `lab/web-django.Dockerfile`,
+  `lab/web-go.Dockerfile`, `lab/web-node.Dockerfile`, `lab/web-rails.Dockerfile`,
+  `lab/web-spring.Dockerfile`, `lab/web-fastapi.Dockerfile`,
+  `fuzzlab/labgen/emitters/node_express/scaffold/Dockerfile`, and `lab/compose.yaml`'s
+  `db`/`frontend` `image:` keys, now carries an explicit `docker.io/library/` registry
+  prefix instead of a bare short name (`FROM`/`COPY --from=<image>` build-stage
+  references such as `--from=gen`/`--from=build` are untouched, since those name build
+  stages, not images).
+- **Why:** live-running the full `apps`-profile boot on a real Podman host (Lane 7 Gate
+  F's own required verification step, `docs/LAB_LANE7_GATES_D_TO_G_HANDOFF.md` §F1)
+  hung indefinitely at a `Please select an image:` prompt for several base images.
+  Podman's short-name resolution prompts interactively to disambiguate a short image
+  name whenever more than one unqualified-search registry is configured, and a
+  non-interactive `podman-compose ... --build`/`up` can never answer that prompt — it
+  just hangs forever with no error. Docker's single implicit `docker.io` registry never
+  exposes this ambiguity, which is why the Dockerfiles built fine under prior Docker-based
+  authoring/validation. Full RCA: `docs/bugs/BUG-0058-unqualified-base-images-hang-podman-build.md`.
+  Preventive action: `PA-0060`.
+- **Verification:** offline — confirmed every `FROM`/`COPY --from=<image>` line in
+  `lab/web*.Dockerfile` and the node_express scaffold Dockerfile, plus both
+  `lab/compose.yaml` `image:` keys, now starts with `docker.io/`, with build-stage
+  references correctly excluded. This sandbox has no working Podman/Docker daemon (the
+  same limitation Gates A-C worked under), so a live re-run of the previously-hung build
+  against the exact host that hit this is a caller follow-up, not blocking this fix.
+- **Scope:** no interface/contract change (`requirements.md` unaffected) — purely an
+  image-reference correctness fix within the existing `CC-LAB-0247` Lane 7 deliverables.
+
 ### CC-LAB-0247 — Browsable labs Lane 7: compose/labctl integration, all 10 apps (2026-09-25, FR-LAB-170/FR-LAB-171, `docs/LAB_LANE7_INTEGRATION_PLAN.md`)
 
 **Status: plan converged 3/3 on round 3 (0 accuracy/adequacy fixes needed); implemented

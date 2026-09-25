@@ -10,19 +10,19 @@
 # Build context is the REPO ROOT (see `lab/compose.yaml`'s
 # `build.context: ..`), same reason as `web.Dockerfile`.
 
-FROM python:3.12-slim AS gen
+FROM docker.io/library/python:3.12-slim AS gen
 WORKDIR /src
 COPY . /src
 RUN pip install --no-cache-dir -e . \
     && python3 -c "from fuzzlab.labgen.emitters.go_net_http import assemble_go_net_http_app; assemble_go_net_http_app('/app')"
 
 # go.mod pins `go 1.22` -- matches this build stage's toolchain exactly.
-FROM golang:1.22-bookworm AS build
+FROM docker.io/library/golang:1.22-bookworm AS build
 WORKDIR /app
 COPY --from=gen /app /app
 RUN go build -o server .
 
-FROM debian:bookworm-slim
+FROM docker.io/library/debian:bookworm-slim
 COPY --from=build /app/server /server
 EXPOSE 8080
 

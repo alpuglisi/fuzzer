@@ -18,6 +18,26 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — LAB: `podman-compose ... --build` hung indefinitely on unqualified base images (fixed, BUG-0058/PA-0060)
+
+- **Symptom:** `PFF_PROFILE=apps ./labctl.sh up` hung forever partway through the build,
+  after printing `Please select an image:` prompts for `composer:2`,
+  `maven:3.9-eclipse-temurin-21`, `ruby:3.3.6-bookworm`, and other base images.
+- **Root cause:** every Lane 7 Gate D Dockerfile (plus the pre-existing node_express
+  scaffold Dockerfile and `lab/compose.yaml`'s `mariadb`/`nginx` `image:` entries)
+  referenced base images by short name only. Podman's short-name resolution prompts
+  interactively to disambiguate a short name when more than one unqualified-search
+  registry is configured (this host has that config; Docker's single implicit registry
+  never exposes the ambiguity), and a non-interactive `--build`/`up` run can never answer
+  that prompt.
+- **Remediation:** fully qualified every `FROM`/`COPY --from=<image>`/compose `image:`
+  reference with an explicit `docker.io/library/` prefix across `lab/web*.Dockerfile`,
+  `fuzzlab/labgen/emitters/node_express/scaffold/Dockerfile`, and `lab/compose.yaml`.
+- **Status:** Fixed (offline-verified; live re-verification against the host that
+  originally hung is a caller follow-up, matching this lane's sandbox/real-host split).
+
+---
+
 ## 2026-09-25 — LAB: `labctl.sh down` silently left an `apps`-profile stack running (fixed, BUG-0057/PA-0059)
 
 - **Symptom:** `PFF_PROFILE=apps ./labctl.sh down`, run right after Lane 7 Gate F's

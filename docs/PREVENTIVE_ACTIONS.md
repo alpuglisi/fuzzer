@@ -846,3 +846,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      directly the next time this file is touched for that reason, rather than continuing
      to hand-list them. (from BUG-0057)
 
+- **PA-0060** — Every container base-image reference (`FROM`, `COPY --from=<image>`, a
+  compose `image:` key) must be a **fully registry-qualified** name
+  (`docker.io/library/<name>:<tag>`, or the appropriate non-Docker-Hub registry), never a
+  bare short name. A short name resolves silently under `docker build`'s single implicit
+  registry, but Podman's short-name resolution prompts interactively
+  (`Please select an image:`) whenever more than one unqualified-search registry is
+  configured, and that prompt hangs forever under a non-interactive `--build`/`up` run
+  with no error and no timeout (`BUG-0058`). Since this project explicitly supports
+  `docker compose`/`podman compose`/`podman-compose` as interchangeable (`lab/labctl.sh`'s
+  own header), a Dockerfile or compose file is not done until every image reference in it
+  is qualified this way — verify with
+  `grep -nE '^\s*FROM |COPY --from=[a-zA-Z0-9]|image:' <file>` and check each match starts
+  with a registry host, not a bare repository name (build-stage references like
+  `--from=gen`/`--from=<stage-name>` are not images and are exempt). (from BUG-0058)
+
