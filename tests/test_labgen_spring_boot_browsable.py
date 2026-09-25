@@ -24,6 +24,9 @@ from fuzzlab.labgen.emitters.spring_boot import (
     app_cells_for,
 )
 from fuzzlab.labgen.emitters.spring_boot.app_site import APP_REGISTRY, ROUTE_APP
+from fuzzlab.labgen.schema import load_manifest
+from fuzzlab.harness.auto import points_from_ground_truth
+from fuzzlab.labels import contract
 
 #: Plan §1.5: 1 `page`, 15 `api`.
 _EXPECTED_CLASSIFICATION = {
@@ -83,6 +86,47 @@ def test_every_api_route_has_a_client_page_spec() -> None:
     assert api_routes == set(_CLIENT_PAGE_SPECS), (api_routes, set(_CLIENT_PAGE_SPECS))
 
 
+#: S3: `rendering` doubles as `fuzzlab.harness.auto`'s request-encoding hint
+#: (`auto.py:92-96`) -- 9 of the 16 points are whole-body (`param="body"`),
+#: 6 of them `rendering: server-json`. This pins that ground truth is
+#: genuinely unedited (S3's own rule: no ground-truth edits by this
+#: change) by asserting `points_from_ground_truth`'s derived
+#: `body_content_type` is exactly what it always was for all 16 points.
+_EXPECTED_BODY_CONTENT_TYPE = {
+    ("lab/ground-truth-trackernest", "/integrations/webhook-payload", "POST", "body"): None,
+    ("lab/ground-truth-trackernest", "/issues/import", "POST", "body"): None,
+    ("lab/ground-truth-trackernest", "/wiki/pages/render", "GET", "macroExpr"): None,
+    ("lab/ground-truth-netflix-clone", "/api/account/billing", "GET", "account_id"): None,
+    ("lab/ground-truth-netflix-clone", "/api/account/preferences", "GET", "Authorization"): None,
+    ("lab/ground-truth-netflix-clone", "/api/account/settings", "POST", "body"): "application/json",
+    ("lab/ground-truth-netflix-clone", "/api/content/import", "POST", "body"): None,
+    ("lab/ground-truth-netflix-clone", "/api/content/thumbnail-import", "POST", "thumbnail_url"): None,
+    ("lab/ground-truth-netflix-clone", "/api/playback/resume", "POST", "body"): "application/json",
+    ("lab/ground-truth-netflix-clone", "/api/profiles/avatar", "POST", "file"): None,
+    ("lab/ground-truth-netflix-clone", "/api/profiles/switch", "POST", "body"): "application/json",
+    ("lab/ground-truth-netflix-clone", "/api/session/refresh", "POST", "body"): "application/json",
+    ("lab/ground-truth-netflix-clone", "/api/subscription/change-plan", "POST", "body"): "application/json",
+    ("lab/ground-truth-netflix-clone", "/api/support/template-preview", "GET", "expr"): None,
+    ("lab/ground-truth-expedia-clone", "/api/hotels/search-sort", "GET", "sortBy"): None,
+    ("lab/ground-truth-expedia-clone", "/api/trips/restore", "POST", "body"): "application/json",
+}
+
+
+def test_ground_truth_body_content_type_is_unchanged() -> None:
+    """S3: no ground-truth edit changed `points_from_ground_truth`'s
+    derived request encoding for any of the 16 real points."""
+    actual = {}
+    for gt_dir in ("lab/ground-truth-trackernest", "lab/ground-truth-netflix-clone", "lab/ground-truth-expedia-clone"):
+        gt = contract.load(gt_dir)
+        points = points_from_ground_truth(gt, "http://x")[0]
+        for p in points:
+            actual[(gt_dir, p.url.removeprefix("http://x"), p.method, p.param)] = p.body_content_type
+    assert actual == _EXPECTED_BODY_CONTENT_TYPE, (
+        sorted(set(actual) ^ set(_EXPECTED_BODY_CONTENT_TYPE)),
+        {k: v for k, v in actual.items() if _EXPECTED_BODY_CONTENT_TYPE.get(k) != v},
+    )
+
+
 def test_app_cells_for_partitions_every_cell_exactly_once() -> None:
     """Every real cell belongs to exactly one app (plan §1.3's 6/22/4 split,
     32 total)."""
@@ -121,3 +165,46 @@ def test_site_layer_renders_deterministically() -> None:
         first = emitter.render_site(cells, app_key)
         second = emitter.render_site(cells, app_key)
         assert first[0].content == second[0].content, app_key
+
+
+#: S9: the page_handler.java.j2-specific lines that must be byte-identical
+#: on both `/wiki/pages/render` twins -- everything the page-layer wrapping
+#: itself contributes (the declared-absent-input guard and the call into
+#: the shared layout). `fuzzlab.labgen.minimal_pair`'s generic checker
+#: assumes `fuzzlab.labgen.modules`' own SOURCES/TRANSFORMS/SINKS/
+#: COMPLEXITIES registry for its "// Module composition: ..." parsing,
+#: which does not cover `spring_boot`'s own, separate module registry
+#: (a pre-existing gap, out of this change's scope) -- so this is a
+#: bespoke structural check instead, in the same spirit as BUG-0027.
+_PAGE_HANDLER_INVARIANT_LINES = (
+    'String pageInput = request.getParameter(',
+    'org.springframework.http.ResponseEntity<String> result =',
+    '(pageInput == null || pageInput.isEmpty()) ? null : compute(request);',
+    'return com.fuzzlab.trackernest.SiteLayout.page(',
+)
+
+
+def test_wiki_pages_render_page_conversion_is_a_minimal_pair() -> None:
+    """S9: `page_handler.java.j2` (T1's `/wiki/pages/render` conversion)
+    wraps the vulnerable and secure `ssti` cells identically -- every line
+    the page layer itself contributes (the declared `form_when_absent`
+    guard and the call into the shared layout) is byte-identical between
+    the real `LABGEN-SSTI-0001`/`0002` twins; only the wrapped `compute()`
+    body (the existing, separately-tested transform/sink region) may
+    differ."""
+    cells = {}
+    for path in ("lab/manifests/ssti_spring_boot_sample.yaml",):
+        for cell in load_manifest(path).cells:
+            if cell.cell_id in ("LABGEN-SSTI-0001", "LABGEN-SSTI-0002"):
+                cells[cell.cell_id] = cell
+    assert set(cells) == {"LABGEN-SSTI-0001", "LABGEN-SSTI-0002"}, sorted(cells)
+
+    emitter = SpringBootEmitter()
+    vulnerable = emitter.render(cells["LABGEN-SSTI-0001"])[0].content.decode("utf-8")
+    secure = emitter.render(cells["LABGEN-SSTI-0002"])[0].content.decode("utf-8")
+    for needle in _PAGE_HANDLER_INVARIANT_LINES:
+        assert needle in vulnerable, (needle, vulnerable)
+        assert needle in secure, (needle, secure)
+    v_lines = {ln.strip() for ln in vulnerable.splitlines() if any(n in ln for n in _PAGE_HANDLER_INVARIANT_LINES)}
+    s_lines = {ln.strip() for ln in secure.splitlines() if any(n in ln for n in _PAGE_HANDLER_INVARIANT_LINES)}
+    assert v_lines == s_lines, (v_lines, s_lines)
