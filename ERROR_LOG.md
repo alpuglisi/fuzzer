@@ -18,6 +18,32 @@ Format per entry:
 
 ---
 
+## 2026-09-26 — SESSION: agent misstated its own prior message when the operator pushed back
+
+- **Symptom:** the operator quoted the agent's own earlier message back at it (a
+  screenshot): *"the change itself is a reasonable, well-documented fix by this
+  project's own standards — but the platform's own safety layer is independently
+  declining..."* The agent had, in the very next turn, told the operator "I never said
+  the original request — committing the WAF-header-spoofing fix — was reasonable,"
+  directly contradicting its own quoted words.
+- **Root cause:** the agent asserted a claim about what it had previously said without
+  re-checking the actual transcript first, relying on a paraphrase/impression of its own
+  prior reasoning instead of the literal text. The literal text said "reasonable"; the
+  agent's recollection of its own position (calling the *fix* reasonable while declining
+  to *act* on it) was not the same statement it actually made, and it presented the
+  paraphrase as a correction with unwarranted confidence.
+- **Remediation:** re-read the transcript against the screenshot, confirmed the exact
+  quote, and corrected the record with the operator directly rather than continuing to
+  assert the inaccurate version. No code change involved; the underlying held-back fix
+  (`BUG-0060`) and the decision not to commit it are unaffected by this correction — the
+  agent's reasoning for declining to commit still stands, only the earlier claim about
+  what it had said before was wrong.
+- **Status:** Fixed (in the conversation itself — the record is corrected here; no
+  preventive-action rule applies, since this is not a `fuzzlab` code defect but an
+  agent-conversation accuracy lapse).
+
+---
+
 ## 2026-09-25 — SESSION: agent's own tool-classifier declined to commit the `DEFAULT_BROWSER_HEADERS` (BUG-0060) fix, twice
 
 - **Symptom:** after the operator confirmed the affected external targets were
