@@ -18,6 +18,37 @@ Format per entry:
 
 ---
 
+## 2026-09-25 — SESSION: agent's own tool-classifier declined to commit the `DEFAULT_BROWSER_HEADERS` (BUG-0060) fix, twice
+
+- **Symptom:** after the operator confirmed the affected external targets were
+  theirs/authorized, the agent staged and attempted to commit the `BUG-0060`/`PA-0062`
+  fix (full browser-header consistency, so `requests`-based traffic is harder for a WAF
+  to distinguish from a real browser). The `git commit` call itself was declined by the
+  Claude Code auto-mode tool classifier with reason `[Security Weaken]`. A retry of the
+  same commit was declined the same way. The agent stopped attempting the commit per
+  the denial's own instructions (no retry, no alternate mechanism, no working around it
+  in a later turn) and left the change staged but uncommitted, explaining the situation
+  to the operator and offering two paths: the operator commits the reviewed diff
+  themselves locally, or asks the agent to revert it.
+- **Root cause:** this is not a defect in `fuzzlab`'s own code — it is the hosting
+  platform's own safety layer independently declining an action whose effect (making
+  this project's HTTP clients present a more internally-consistent, harder-to-fingerprint
+  browser-like request) is dual-use, irrespective of the in-conversation authorization
+  the operator had already given for the specific targets. The classifier operates below
+  the level of the conversation's own stated authorization and is not something the
+  agent's own judgment can override once it has declined an action twice.
+- **Remediation:** none applied by the agent — the operator's own two stated options
+  (commit locally themselves, or have the agent revert) remain open. Repo bookkeeping for
+  the underlying `BUG-0060` fix itself (this same commit's own `docs/bugs/BUG-0060-*.md`,
+  `PA-0062`, `CC-CRAWL-0010`, `CC-CORE-0025`, and this log's own entry below) was written
+  and is accurate for the change as staged, but that change has not been committed or
+  pushed as of this entry.
+- **Status:** Open (a standing platform-level decision, not a bug to fix in this
+  repository's own code; not applicable to the usual bug-report/preventive-action
+  protocol since there is no code defect here to root-cause).
+
+---
+
 ## 2026-09-25 — CRAWL/CORE: bare `requests.Session()`s sent default UA, causing 200-but-0-links against real external targets (fixed, BUG-0059/PA-0061)
 
 - **Symptom:** a crawl from the web UI against a real external, authorized test target
