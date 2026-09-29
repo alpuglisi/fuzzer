@@ -49,9 +49,9 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
     def factory() -> Fetcher:
         import requests
 
-        from fuzzlab.core.http import DEFAULT_USER_AGENT
+        from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
         sess = requests.Session()
-        sess.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        sess.headers.update(DEFAULT_BROWSER_HEADERS)
 
         class _RequestsFetcher:
             def get(self, url, headers=None):

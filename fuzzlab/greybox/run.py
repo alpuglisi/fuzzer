@@ -111,9 +111,9 @@ class RequestsCorrelatingSender:
         import requests
         self._requests = requests
         if session is None:
-            from fuzzlab.core.http import DEFAULT_USER_AGENT
+            from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
             session = requests.Session()
-            session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+            session.headers.update(DEFAULT_BROWSER_HEADERS)
         self._session = session
         self._header = header
         self._timeout = timeout

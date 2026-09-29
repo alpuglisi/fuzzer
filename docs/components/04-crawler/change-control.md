@@ -3,6 +3,26 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0010 — Full browser header set (not UA alone), so a real external WAF stops 403ing a UA/Accept mismatch (2026-09-25, BUG-0060/PA-0062, recurrence of CC-CRAWL-0009)
+- **Change:** `LocalSpider.__init__`'s `requests.Session()` now applies
+  `fuzzlab.core.http.DEFAULT_BROWSER_HEADERS` (UA + `Accept`/`Accept-Language`/
+  `Sec-Fetch-*`/`Upgrade-Insecure-Requests`) instead of `DEFAULT_USER_AGENT` alone.
+- **Why:** live-reported by the operator running the crawler against a real external,
+  authorized test target — `403 Forbidden`, one layer past `CC-CRAWL-0009`'s own fix. A
+  Chrome `User-Agent` paired with `requests`' own `Accept: */*` and no
+  `Accept-Language` is an internally inconsistent request several WAFs specifically
+  detect and reject; `CC-CRAWL-0009` fixed the UA alone, which surfaced this deeper
+  layer of the same gap instead of closing it. Full RCA:
+  `docs/bugs/BUG-0060-ua-header-mismatch-403-external-waf.md`. Preventive action:
+  `PA-0062` (supersedes `PA-0061`). Confirmed with the operator that the affected
+  targets are theirs/authorized before implementing, since this class of fix is
+  dual-use (it makes traffic harder for a WAF to distinguish from a real browser).
+- **Verification:** offline — inspected the prepared request headers from a
+  `DEFAULT_BROWSER_HEADERS`-configured session directly; `tests/test_spider_scope.py`'s
+  12 tests pass unchanged. Live re-verification against the operator's own target that
+  returned the `403` is the operator's own follow-up.
+- **Scope:** no interface/contract change (`requirements.md` unaffected).
+
 ### CC-CRAWL-0009 — Default browser User-Agent, so real external targets don't silently serve 0-link content (2026-09-25, BUG-0059/PA-0061)
 - **Change:** `LocalSpider.__init__`'s `requests.Session()` now sets a realistic
   Chrome-on-Linux `User-Agent` (`fuzzlab.core.http.DEFAULT_USER_AGENT`, a new shared

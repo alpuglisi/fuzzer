@@ -63,9 +63,9 @@ class RequestsProbeSender:
     def __init__(self, session=None, timeout: float = 15.0):
         import requests
         if session is None:
-            from fuzzlab.core.http import DEFAULT_USER_AGENT
+            from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
             session = requests.Session()
-            session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+            session.headers.update(DEFAULT_BROWSER_HEADERS)
         self._session = session
         self._timeout = timeout
 

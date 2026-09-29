@@ -3,6 +3,22 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0025 — Add `DEFAULT_BROWSER_HEADERS` (full header set, not UA alone) to `fuzzlab/core/http.py` (2026-09-25, BUG-0060/PA-0062)
+- **Change:** adds `DEFAULT_BROWSER_HEADERS` (a dict: `DEFAULT_USER_AGENT` plus a
+  matching `Accept`, `Accept-Language`, `Sec-Fetch-*` set, and
+  `Upgrade-Insecure-Requests`) to `fuzzlab/core/http.py`, applied in place of
+  `DEFAULT_USER_AGENT` alone at the same 6 call sites `CC-CORE-0024` introduced.
+- **Why:** `CC-CORE-0024`'s UA-only constant fixed `BUG-0059`'s symptom but left every
+  other header at `requests`' own non-browser defaults, which a WAF checks for as an
+  internal-consistency signal independent of the UA string — see `CC-CRAWL-0010`/
+  `BUG-0060` for the full incident; this entry is CORE's own half, the widened shared
+  constant.
+- **Verification:** offline — inspected a `DEFAULT_BROWSER_HEADERS`-configured
+  session's prepared request headers directly; covered indirectly by the 6 importing
+  tools' own test suites (83 tests total) continuing to pass.
+- **Scope:** additive/widened constant only, no change to `HttpClient`'s own
+  behavior/contract (`requirements.md` unaffected).
+
 ### CC-CORE-0024 — Add shared `DEFAULT_USER_AGENT` constant to `fuzzlab/core/http.py` (2026-09-25, BUG-0059/PA-0061)
 - **Change:** adds `DEFAULT_USER_AGENT` (a realistic Chrome-on-Linux UA string) to
   `fuzzlab/core/http.py`, so every tool that opens its own bare `requests.Session()`

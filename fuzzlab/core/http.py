@@ -18,16 +18,34 @@ from urllib.parse import urlparse
 
 from fuzzlab.core.budget import RequestBudget
 
-# Shared default User-Agent for every tool that opens a bare `requests.Session()`
-# (crawler, auditor, blind-SQLi fuzzer). `requests`' own default
-# ("python-requests/x.y") is trivially fingerprintable, and several real external
-# targets serve reduced/interstitial content to it instead of real markup
-# (BUG-0059) -- a single shared constant here means fixing or rotating it never
-# needs a per-tool hand-maintained copy (PA-0027).
+# Shared default browser headers for every tool that opens a bare
+# `requests.Session()` (crawler, auditor, blind-SQLi fuzzer). `requests`' own
+# defaults (`User-Agent: python-requests/x.y`, `Accept: */*`, no
+# `Accept-Language`) are trivially fingerprintable, and several real external
+# targets serve reduced/interstitial content -- or an outright 403 -- to a
+# request whose headers don't hang together as a real browser's would
+# (BUG-0059/BUG-0060): a UA claiming Chrome with a bare `Accept: */*` and no
+# `Accept-Language` is itself a mismatch several WAFs specifically check for,
+# a UA fix alone does not clear it. A single shared dict here means fixing or
+# rotating this never needs a per-tool hand-maintained copy (PA-0027).
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+DEFAULT_BROWSER_HEADERS = {
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 
 class OutOfScope(RuntimeError):

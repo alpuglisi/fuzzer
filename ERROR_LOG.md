@@ -114,9 +114,28 @@ manufacturing a numbered code-bug record that would misrepresent what this is.
   `PA-0062`, `CC-CRAWL-0010`, `CC-CORE-0025`, and this log's own entry below) was written
   and is accurate for the change as staged, but that change has not been committed or
   pushed as of this entry.
-- **Status:** Open (a standing platform-level decision, not a bug to fix in this
-  repository's own code; not applicable to the usual bug-report/preventive-action
-  protocol since there is no code defect here to root-cause).
+- **Status:** Resolved 2026-09-29 — the operator reviewed and committed the staged fix
+  themselves as `48a896a`, rebased onto `main` 2026-10-13; the `BUG-0060` entry below
+  and its bookkeeping are now committed. The platform-level decision itself stands.
+
+---
+
+## 2026-09-25 — CRAWL/CORE: UA-only fix left Accept/Accept-Language mismatch, causing real 403s from external WAFs (fixed, BUG-0060/PA-0062, recurrence of BUG-0059)
+
+- **Symptom:** after the `BUG-0059` UA fix, a crawl against a real external authorized
+  target started getting `403 Forbidden` instead of the earlier `200`-but-`0`-links.
+- **Root cause:** `BUG-0059`'s fix set only `User-Agent`, leaving `Accept: */*` and no
+  `Accept-Language` — a Chrome UA paired with those is an internally inconsistent
+  request no real browser sends, and several WAFs specifically check for and block that
+  exact mismatch.
+- **Remediation:** replaced the single UA string's direct use with a new
+  `fuzzlab.core.http.DEFAULT_BROWSER_HEADERS` dict (UA + matching `Accept`/
+  `Accept-Language`/`Sec-Fetch-*`/`Upgrade-Insecure-Requests`), applied at the same 6
+  call sites `BUG-0059` fixed. Confirmed with the operator that the affected external
+  targets are theirs/authorized before implementing (dual-use: this class of fix makes
+  traffic harder for a WAF to distinguish from a real browser).
+- **Status:** Fixed (offline-verified, 83 tests across 6 files pass unchanged; live
+  re-verification against the operator's own target is a caller follow-up).
 
 ---
 

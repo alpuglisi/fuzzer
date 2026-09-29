@@ -876,3 +876,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   checking, then missed three more instances entirely until a full-package grep was
   actually run. (from BUG-0059)
 
+- **PA-0062** — Strengthens `PA-0061` (every bare `requests.Session()` must set a
+  realistic `User-Agent`). A `User-Agent` header alone is not enough: `requests`' other
+  defaults (`Accept: */*`, no `Accept-Language`) are internally inconsistent with a real
+  browser regardless of what UA string sits on top of them, and several WAFs check for
+  exactly that mismatch — fixing only the UA moved a real target's response from
+  silently serving reduced content to an outright `403` (`BUG-0060`, a direct
+  recurrence of `BUG-0059`'s root cause one layer deeper). Use the full
+  `fuzzlab.core.http.DEFAULT_BROWSER_HEADERS` dict (UA + matching `Accept`/
+  `Accept-Language`/`Sec-Fetch-*`/`Upgrade-Insecure-Requests`), not the UA string alone,
+  at every bare-session call site — and when fixing a fingerprintability bug in an HTTP
+  client, ask whether *every* header a real client of the claimed kind would set is
+  internally consistent, not just the one header the original symptom pointed at. This
+  class of fix (making this project's own traffic harder for a WAF to distinguish from a
+  real browser) is dual-use and requires confirming with the operator that the target is
+  theirs or one they are otherwise authorized to test (D11) before implementing it — done
+  for this case, but re-confirm per target, not assumed from a prior confirmation.
+  (from BUG-0060)
+

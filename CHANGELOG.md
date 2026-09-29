@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-25 (Crawler/CORE: fix real 403s from external WAFs, header-consistency follow-up to BUG-0059, BUG-0060/PA-0062/CC-CRAWL-0010/CC-CORE-0025)
+- The prior UA-only fix (below) left every other header at `requests`' defaults
+  (`Accept: */*`, no `Accept-Language`), a mismatch against a Chrome UA that
+  several WAFs specifically detect and block -- moving a real external
+  authorized target's response from silently-empty (`BUG-0059`) to an outright
+  `403` once the UA alone was fixed. Replaced `DEFAULT_USER_AGENT`'s direct use
+  with a new `fuzzlab.core.http.DEFAULT_BROWSER_HEADERS` dict (UA + matching
+  `Accept`/`Accept-Language`/`Sec-Fetch-*`) at the same 6 call sites. Confirmed
+  with the operator that the affected targets are theirs/authorized before
+  implementing this, since it's a dual-use header-fidelity fix. See
+  `BUG-0060`/`PA-0062` (supersedes `PA-0061`).
+
 ## 2026-09-25 (Crawler/CORE: fix 200-but-0-links against real external targets, BUG-0059/PA-0061/CC-CRAWL-0009)
 - `LocalSpider` and 5 other tools (`ContentFetcher`, `blind_sqli_fuzzer`'s
   `RequestsSender`, `RequestsProbeSender`, `RequestsCorrelatingSender`, the

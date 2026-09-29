@@ -262,9 +262,9 @@ def main(argv=None):
         sender = SeamSender(client, args.identity)
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
-        from fuzzlab.core.http import DEFAULT_USER_AGENT
+        from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
         _session = requests.Session()
-        _session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        _session.headers.update(DEFAULT_BROWSER_HEADERS)
         sender = RequestsSender(_session)
 
     try:
