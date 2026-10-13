@@ -3,6 +3,50 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0017 — The ML stages as built-in plugins (2026-10-13)
+- Change: new `fuzzlab/ml/plugins.py`.
+  - **The stages:**
+    - `ClassifierPlugin(train_on, model_kind="auto")`, `ml-classifier`, priority 10;
+    - `RankerPlugin(train_on)`, `ml-ranker`, 20;
+    - `AnomalyPlugin(contamination)`, `ml-anomaly`, 30, which also returns the top
+      flagged rows (`top_flagged`, moved from `auto_cli`);
+    - `BudgetPlugin(method, seed)`, `ml-budget`, a `register_prioritizer` →
+      `partial(prioritize, …)`.
+  - **Every plugin carries:**
+    - `version = ML_PLUGIN_VERSION = "1"`, which names option semantics; the model's
+      `params_sha256` stays the real pin and is in the result;
+    - a `config` dict of its options, recorded on the run;
+    - the `flag` of the `fuzzlab auto` option that attaches it.
+  - **One mapping.** `stage_plugins(...)` is the only options→plugins mapping
+    (PA-0003), and `STAGE_NAMES` is derived from the classes.
+  - **No entry points.** The stages are not registered as entry points, so `--plugins`
+    is unchanged. The alternative, a separate `fuzzlab.stages` group, is flagged.
+- Impact:
+  - The stages compute exactly what they computed when `auto_cli` called them
+    directly.
+  - FR-ML-6 is implemented, with simulated absence tested (CC-UI-0041). A packaged
+    no-ML build is flagged.
+  - ML requirements §5 is aligned.
+- Risk: low.
+- Deliverables:
+  - [x] `fuzzlab/ml/plugins.py` — done
+  - [x] `tests/test_ml_plugins.py` (11) — done:
+    - Through the guarded manager, each stage's result and written state (scores,
+      model rows with sha and calibration, metrics) equal the direct call's, on two
+      identical stores. Covered: classifier run and earlier, ranker run and earlier,
+      anomaly.
+    - The budget plugin's order, method and model sha equal `prioritize`'s for all four
+      methods, under the read-only guard.
+    - The options→plugins mapping; option values reach the plugins and the run record
+      as canonical JSON.
+- Implementation divergence: each plugin carries its `flag`, so `auto_cli` keys the
+  summary by plugin name without hard-coding the names.
+- Review: pre-change review gate cleared 3/3. The proposing agent and 2 independent reviewer agents went through DRAFT v1 to v4.
+  - Reviewer A focused on architecture and spec fit; reviewer B on adversarial correctness, safety and tests, with SQLite experiments.
+  - Every raised issue was adopted.
+  - v1's guard was bypassable (a rename round-trip, a later-firing trigger, a temp shadow table, label state outside `finding`, an unguarded prioritizer). v1's failed-stage writes could also be committed by the next stage. Both were redesigned before any code.
+- Effectiveness (assessed 2026-10-13): effective offline. `tests/test_ml_plugins.py` 11 passed: each stage, run through the guarded manager, reproduces the direct call's result and stored state exactly. Every existing ML suite passes unchanged. The `ml-plugin-wrong-train_on` mutant is killed (CC-PLUG-0005). Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 3062 passed, 33 failed, 68 skipped, 9 xfailed. The 33 failures are the identical environmental labgen set as at `a3b782d` and `882cda8` (diffed: no scipy, scikit-learn or `gitleaks` binary here). Every skip is in lab/labgen/corpus tests guarded on toolchains or services, none in a file this change touches; the +3 against `882cda8`'s run is in that environment-dependent set.
+
 ### CC-ML-0016 — Train on earlier runs; score and rank this run without its labels (2026-10-13)
 - Change:
   - **Shared target helper.** `dataset.target_of(store, run_id) -> str | None` reads the

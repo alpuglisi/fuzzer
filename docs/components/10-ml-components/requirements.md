@@ -33,7 +33,19 @@ the oracle owns truth (the oracle/advisory split).
 - **FR-ML-5** Read features via the `core/` versioned feature store; a model
   records the `feature_version` it was trained against.
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
-  config change, not a code change.
+  config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
+  CC-FUZZ-0050 / CC-UI-0041.)*
+  - **Plugins:** the classifier, ranker and anomaly stages are `after_run` plugins, and
+    the budget order is a `register_prioritizer` plugin (`fuzzlab/ml/plugins.py`). They
+    run under the advisory write guard (FR-PLUG-6), one unit of work each (FR-PLUG-7),
+    and are recorded on the run with their options.
+  - **Attachment:** `fuzzlab auto`'s `--score/--rank/--anomaly/--confirm-budget` flags
+    attach them. Nothing outside `fuzzlab/ml/` imports ML except through
+    `plugins.optional.import_ml` (FR-PLUG-9).
+  - **Without the package:** the scan, report and web app work (tested by simulated
+    absence).
+  - **Not built (flagged):** a packaged no-ML distribution. The knob is
+    `[tool.setuptools.packages.find] exclude = ["fuzzlab.ml*"]`.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
 - **FR-ML-9** *(added CC-ML-0010, lane U4)* Model internals already written to the
@@ -203,7 +215,9 @@ the oracle owns truth (the oracle/advisory split).
 Reads `attempt`/`candidate`/`flow` features and oracle `finding` labels (for
 training); writes `candidate.score`, attempt scores/uncertainty, `model` rows
 (versions, calibration — including `run_id` scope and `oof_*` metrics, read back only
-through `model_registry.select_latest`, FR-ML-10). Never writes `finding`. Runs as `core/` plugins.
+through `model_registry.select_latest`, FR-ML-10). Never writes `finding`. Attaches as plugins on the
+`after_run` / `register_prioritizer` hooks under the advisory write guard (FR-ML-6); the rest of
+the toolkit reaches it only through `fuzzlab.plugins.optional.import_ml`.
 Optionally writes `core/`'s `metric_series` rows (`source="gbt"`/`"logreg"`,
 `key` a slash-delimited path such as `train/loss`) via `log_scalar`/
 `MetricLogger` when training is given a `run_id` (FR-ML-8) — read-only from

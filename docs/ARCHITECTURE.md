@@ -1132,7 +1132,7 @@ tracked in the requirements files, not here.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 
-### 2. `core/` shared library `[built; plugin registry planned]`
+### 2. `core/` shared library `[built]` (plugin registry: component 13)
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
   session context; records raw bytes (`core/http.py`).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
@@ -1358,7 +1358,15 @@ tracked in the requirements files, not here.
 - **Depends on (components):** `core/`, the oracle (labels), and the component
   that produces each model's inputs (auditor for the ranker, fuzzing harness for
   the classifier, proxy/flows for the anomaly detector).
-- **Attach as:** plugins on `core/` hooks. Shipping without ML is a config change.
+- **Attach as:** plugins `[built]` (CC-ML-0017, FR-ML-6).
+  - The classifier, ranker and anomaly stages are `after_run` plugins, and the budget
+    order is a `register_prioritizer` plugin (`ml/plugins.py`). `fuzzlab auto`'s flags
+    attach them.
+  - They run under the advisory write guard, one unit of work each, and are recorded on
+    the run with their options.
+  - Nothing outside `fuzzlab/ml/` imports ML except `plugins/optional.import_ml`.
+    Without the package the scan, report and web app still work (simulated-absence
+    tested). A packaged no-ML build is not built here.
 
 ### 11. Intercepting proxy `[partial — full offline stack built; live TLS serving on-host]` (Phase 6)
 - **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**
@@ -1566,13 +1574,24 @@ tracked in the requirements files, not here.
   and the oracle/advisory-split guard (observation returns ignored; only `register_oracle`
   reaches the finding-writer). `PluginManager` records the active set to `run_plugin`
   (migration 10). Zero plugins is a full no-op (D6).
+- **Post-run and budget-order hooks** `[built]` (CC-PLUG-0005):
+  - `after_run(store, run_id)` runs after the pipeline, each plugin as one unit of work
+    (commit on success, rollback on failure, metric-shadowing check).
+    `register_prioritizer` contributes the confirmation-budget order: one at most, and a
+    failure keeps the cap, in row order.
+  - Both run under an **allowlist advisory write guard**, a SQLite authorizer: no
+    `finding` or label-state writes, no DDL, no ATTACH. It prevents accidents; it is not
+    a trust boundary.
+  - `run_plugin` records each plugin's config and final status (migration 15).
+  - `plugins/optional.py` is the single door into the optional ML package.
 - **Pipeline attachment** `[built]` (T10.2): `on_request`/`on_response` at the HTTP seam
   (`core/http.py`), `register_rules`/`on_candidate` in the auditor, `register_oracle`/
   `on_finding` in the oracle; `plugins` threads through `run_pipeline`/`run_auto`
   (`fuzzlab auto --plugins`). `register_payload_source` is consumed by the mutation
   engine's `PayloadPool` (`MutationSearch.search_pool`) — all seven hooks are wired.
 - **Depends on (components):** `core/`.
-- **Consumed by:** ML components, extra rules, and custom oracles.
+- **Consumed by:** ML components (the built-in ML stages, FR-ML-6), extra rules, and
+  custom oracles.
 
 ## The store as the contract
 
@@ -1591,6 +1610,7 @@ detail):
 | `bandit_posteriors` | scheduler | scheduler |
 | `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
 | `request_budget` | all tools | budget manager, UI |
+| `run_plugin` (attached plugins: name, version, priority; `config`, `status`, `error` — migration 15) | `PluginManager.record` / `finalize` | `fuzzlab report` (per run) |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
 | `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |
 
@@ -1732,6 +1752,8 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) and the `register_payload_source` consumer
     (mutation `PayloadPool`) are built — all seven hooks wired.
+    - CC-PLUG-0005 adds `after_run` and `register_prioritizer` under the advisory write
+      guard, and the ML stages now attach through them (FR-ML-6).
   - **Oracle mechanisms:** M8 (out-of-band, `oracle/oob.py` — blind command
     injection, via `fuzzlab auto --oob`) is built; M10 (grey-box,
     `GreyboxConfirmationStrategy` — sql-injection/xss, via `fuzzlab auto

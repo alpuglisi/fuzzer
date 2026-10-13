@@ -48,10 +48,15 @@ def test_build_report_captures_the_run(tmp_path):
         assert rep["metrics"] == {"tp": 4.0, "fp": 0.0}
         assert rep["findings"][0]["vuln_class"] == "sqli"
         assert {"name": "logistic", "version": 1, "feature_version": 1} in rep["models"]
-        assert rep["plugins"] == [{"name": "sample", "version": "1.0", "priority": 10}]
+        # a legacy (pre-migration-15) plugin row: config/status/error read NULL
+        assert rep["plugins"] == [{"name": "sample", "version": "1.0", "priority": 10,
+                                   "config": None, "status": None, "error": None}]
         repro = rep["reproducibility"]
         assert repro["feature_versions"] == [1] and repro["model_versions"] == {"logistic": 1}
         assert repro["plugins"] == {"sample": "1.0"} and repro["schema_version"] >= 10
+        assert repro["plugin_config"] == {"sample": None}       # CC-UI-0041 siblings
+        assert repro["plugin_status"] == {"sample": None}
+        assert "models_unavailable" not in rep
 
 
 def test_report_json_is_deterministic(tmp_path):

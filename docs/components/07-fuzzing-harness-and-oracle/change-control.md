@@ -22,6 +22,87 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0050 — `fuzzlab auto` attaches ML through plugins; `run_auto` dispatches the post-run hooks (2026-10-13)
+- Change:
+  - **`run_auto`**:
+    - after `record()`, it takes the budget prioritizer from the plugins when none is
+      passed (two raise `RunModeError`);
+    - after the pipeline, it runs `plugins.after_run`, then `plugins.finalize`, into
+      `result.plugin_outcomes`.
+    - So every caller gets the hooks. `run_targets` is one, and `TargetOutcome` gains
+      `plugin_outcomes`.
+  - **`run_pipeline`**:
+    - A `FailedBudgetOrder` records `confirm_budget_error=1`, so
+      `pipeline_confirm_budget_error` lands in `run_metrics`, and `budget_error`
+      (result only).
+    - `budget_plugin` names the source.
+    - The cap holds, in row order.
+  - **`auto_cli`**:
+    - It builds the plugin set **before the store is opened** (`_build_plugins`): the ML
+      stages through `import_ml("fuzzlab.ml.plugins")` → `stage_plugins`, plus
+      `--plugins` entry points, with built-ins registered first.
+    - **Usage errors, exit 2, before any run row:**
+      - ML flags with ML absent;
+      - `--confirm-budget` with neither ML nor a plugin prioritizer;
+      - two prioritizers.
+    - It no longer imports `fuzzlab.ml`.
+    - **Summary.** It reads the outcomes by plugin name:
+      - `<stage>: FAILED — <error>` for a failed or missing requested stage;
+      - `oracle budget: <plugin> FAILED — <error>; confirmed the first N of M
+        confirmable candidate(s) in row order` (the "trained on" line is suppressed);
+      - `plugin <name>: after_run done` / `FAILED` for third-party post-run plugins;
+      - `plugins disabled after an error:` lists every other disabled plugin;
+      - `plugin refused (duplicate name)`.
+    - **Exit 1** when a post-run plugin or the prioritizer failed, or a requested stage
+      did not run. A third-party scan-hook failure is printed and keeps exit 0.
+  - **Behaviour preserved:**
+    - The flags, defaults, validation messages and the existing summary lines are
+      byte-identical to the pre-change capture (`tests/data/auto_summary/`).
+    - With no ML flags and no `--plugins`, `plugins` stays `None`: no `run_plugin` rows
+      and no hooks.
+  - **Behaviour changes:**
+    1. Runs with ML flags record `run_plugin` rows, so `fuzzlab report` gains a
+       `plugins:` line.
+    2. A failing ML stage no longer aborts with a traceback. Its uncommitted writes are
+       rolled back, later stages run, and the CLI exits 1.
+    3. A raising budget prioritizer no longer aborts the run. The cap holds in row order,
+       and the CLI exits 1.
+    4. ML usage errors are raised before the store is opened.
+    5. The ML stages now run inside `run_auto`, before `auto_cli`'s
+       `scheduler.flush_metrics()` / `save()` and `oob.stop()`. Nothing is pending there,
+       so this is harmless, and an ML failure can no longer skip the scheduler save.
+    6. With ML installed, `--confirm-budget` always attaches `ml-budget`, so a
+       `--plugins` prioritizer cannot also be used (exit 2).
+- Impact: CLI and harness. FR-FUZZ-34 is added.
+  `scripts/on_host_full_run.sh:255,299` still imports `fuzzlab.ml` directly. It is an
+  on-host script that needs ML anyway, so it is flagged and not changed.
+- Risk: medium-low. Guarded by the golden summaries and the unchanged `test_auto*.py`.
+- Deliverables:
+  - [x] `run_auto` / `run_pipeline` / `run_targets` / `auto_cli` — done
+  - [x] `tests/test_auto_plugins.py` (14) — done:
+    - four golden summaries;
+    - the stages recorded with their config and `ok`;
+    - no ML flags → `plugins is None` and no rows;
+    - the injected `dumps_model` failure: classifier scores NULL and no classifier model
+      row, ranker and anomaly still written, FAILED line, exit 1, `failed` status with
+      the error;
+    - the raising prioritizer: exactly 2 keys confirmed, `pipeline_confirm_budget_error=1`,
+      no "trained on" line, exit 1;
+    - two prioritizers → exit 2 with no run row;
+    - a third-party prioritizer works without ML;
+    - ML flags without ML → exit 2 with no run row;
+    - a failing third-party post-run plugin → exit 1;
+    - `run_targets`: dispatched once per target run; a failure on target 1 is recorded
+      `failed`, and the plugin is retried and `ok` on target 2.
+  - [x] `tests/test_ml_import_guard.py` (3) — done. An AST scan of `fuzzlab/` outside
+    `fuzzlab/ml/` rejects every import form and every module-path string except
+    `import_ml("…")` arguments. Proven on 11 synthetic offenders and 6 allowed forms.
+- Review: pre-change review gate cleared 3/3. The proposing agent and 2 independent reviewer agents went through DRAFT v1 to v4.
+  - Reviewer A focused on architecture and spec fit; reviewer B on adversarial correctness, safety and tests, with SQLite experiments.
+  - Every raised issue was adopted.
+  - v1's guard was bypassable (a rename round-trip, a later-firing trigger, a temp shadow table, label state outside `finding`, an unguarded prioritizer). v1's failed-stage writes could also be committed by the next stage. Both were redesigned before any code.
+- Effectiveness (assessed 2026-10-13): effective offline. `tests/test_auto_plugins.py` 14 passed, including four summaries byte-identical to the pre-change capture, and `tests/test_ml_import_guard.py` 3 passed. `test_auto.py`, `test_auto_budget.py`, `test_auto_train_on.py` and `test_multitarget*.py` pass unchanged. The CLI, `run_auto` and pipeline mutants are killed (CC-PLUG-0005). Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 3062 passed, 33 failed, 68 skipped, 9 xfailed. The 33 failures are the identical environmental labgen set as at `a3b782d` and `882cda8` (diffed: no scipy, scikit-learn or `gitleaks` binary here). Every skip is in lab/labgen/corpus tests guarded on toolchains or services, none in a file this change touches; the +3 against `882cda8`'s run is in that environment-dependent set.
+
 ### CC-FUZZ-0049 — `fuzzlab auto --train-on {run,earlier}` (2026-10-13)
 - Change:
   - **Flag.** `auto_cli` gains `--train-on {run,earlier}` (default `run`), passed to

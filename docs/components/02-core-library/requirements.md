@@ -129,6 +129,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   `params` (canonical JSON of the trained model) and `params_sha256` (sha256 of that
   exact text). Only the ML trainers write them, through `fuzzlab.ml.persist`; rows
   from before migration 14 read NULL and are not reloadable.
+- **FR-CORE-16** *(migration 15; `CC-CORE-0028`, 2026-10-13).* `run_plugin` carries
+  `config` (canonical JSON of the plugin's options), `status` (`attached`, then `ok` /
+  `failed`) and `error`. They are written by `PluginManager.record` / `finalize`
+  (FR-PLUG-7) and read per run by `fuzzlab report`. Legacy rows read NULL.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

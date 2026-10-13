@@ -3,6 +3,29 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0028 — Migration 15: `run_plugin.config` / `status` / `error` (2026-10-13)
+- Change: `ALTER TABLE run_plugin ADD COLUMN config TEXT`, `status TEXT` and
+  `error TEXT`. They are nullable; legacy rows are NULL. Head 14 → 15.
+- Impact:
+  - A run now records how each attached plugin, the ML stages included, was configured
+    and how it ended (CC-PLUG-0005).
+  - **PA-0063 reader audit:** the only reader is `report.py` (`build_report`). It is per
+    run and filtered by `run_id`, so it matches its reader's scope.
+  - The optional-ML helper was moved to `fuzzlab/plugins/optional.py` during review, so
+    `core/` does not mention `fuzzlab.ml`.
+  - FR-CORE-16 is added.
+- Risk: low. Additive.
+- Deliverables:
+  - [x] Migration 15 — done
+  - [x] Tests: the head is derived from `MIGRATIONS` and the columns exist
+    (`test_plugins_post_run.py::test_migration_15_adds_run_plugin_config_status_error`);
+    legacy rows read NULL (`test_report.py`) — done
+- Review: pre-change review gate cleared 3/3. The proposing agent and 2 independent reviewer agents went through DRAFT v1 to v4.
+  - Reviewer A focused on architecture and spec fit; reviewer B on adversarial correctness, safety and tests, with SQLite experiments.
+  - Every raised issue was adopted.
+  - v1's guard was bypassable (a rename round-trip, a later-firing trigger, a temp shadow table, label state outside `finding`, an unguarded prioritizer). v1's failed-stage writes could also be committed by the next stage. Both were redesigned before any code.
+- Effectiveness (assessed 2026-10-13): effective offline. Migration 15 is applied at head; config, status and error are written and read back; legacy rows read NULL. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 3062 passed, 33 failed, 68 skipped, 9 xfailed. The 33 failures are the identical environmental labgen set as at `a3b782d` and `882cda8` (diffed: no scipy, scikit-learn or `gitleaks` binary here). Every skip is in lab/labgen/corpus tests guarded on toolchains or services, none in a file this change touches; the +3 against `882cda8`'s run is in that environment-dependent set.
+
 ### CC-CORE-0027 — Migration 14: `model.params` + `model.params_sha256` (2026-10-13)
 - Change: `_M0014`:
   ```sql

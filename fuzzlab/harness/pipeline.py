@@ -42,6 +42,7 @@ class PipelineResult:
     findings: int
     report: ScoreReport | None = None      # None when the run is unscored (D15)
     metrics: dict = field(default_factory=dict)
+    plugin_outcomes: list = field(default_factory=list)   # `after_run` results (FR-PLUG-7)
 
 
 def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[InjectionPoint]:
@@ -143,6 +144,12 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                                budget_training_positives=plan_order.training_positives,
                                budget_seed=getattr(plan_order, "seed", 0),
                                budget_model_sha256=getattr(plan_order, "model_sha256", None))
+            budget_plugin = getattr(prioritizer, "plugin_name", None)
+            if budget_plugin is not None:
+                budget_info["budget_plugin"] = budget_plugin
+            if getattr(plan_order, "error", None) is not None:
+                # the prioritizer failed: the cap still holds, spent in row order
+                budget_info.update(confirm_budget_error=1, budget_error=plan_order.error)
 
     confirmed_keys: set[tuple] = set()
     if selected is None:

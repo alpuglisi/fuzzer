@@ -14,7 +14,7 @@ another `TargetSpec`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -37,6 +37,7 @@ class TargetOutcome:
     run_id: int
     findings: int
     report: object | None = None            # a scoring.ScoreReport, or None (unscored)
+    plugin_outcomes: list = field(default_factory=list)   # this run's `after_run` results
 
     @property
     def scored(self) -> bool:
@@ -77,7 +78,8 @@ def run_targets(specs: list[TargetSpec], store, sender_for: SenderFor, *,
                           browser=browser, scheduler=scheduler, plugins=plugins,
                           oob=oob, coverage=coverage, dbfault=dbfault)
         outcomes.append(TargetOutcome(name=spec.name, run_id=run_id,
-                                      findings=result.findings, report=result.report))
+                                      findings=result.findings, report=result.report,
+                                      plugin_outcomes=result.plugin_outcomes))
     return outcomes
 
 

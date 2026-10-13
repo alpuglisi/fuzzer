@@ -184,6 +184,11 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              prioritizer=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
+    ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
+    prioritizer when ``prioritizer`` is not given (exactly one may; two raise
+    `RunModeError`), and has its ``after_run`` stages dispatched once the pipeline is
+    done — their outcomes land on ``result.plugin_outcomes`` (CC-FUZZ-0050).
+
     ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
     detection benchmark, decoupled from crawl coverage); ``"crawl"`` audits what the
     crawl discovered (a discovery run); ``"auto"`` (default) picks ground-truth when a
@@ -218,6 +223,11 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
+        if prioritizer is None and confirm_budget is not None:
+            try:                               # a plugin-contributed budget order
+                prioritizer = plugins.guarded_prioritizer()
+            except ValueError as exc:          # PluginConflict: two would order it
+                raise RunModeError(str(exc)) from exc
     counting = _CountingSender(sender)
     result = run_pipeline(points, store, run_id, counting, plan,
                           ground_truth=ground_truth, pages_html=pages_html,
@@ -227,4 +237,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           prioritizer=prioritizer)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
+    if plugins is not None:
+        # post-run stages (the ML stages, FR-ML-6), each its own guarded unit of work;
+        # then close the run's plugin record with each plugin's final status
+        result.plugin_outcomes = plugins.after_run(store, run_id)
+        plugins.finalize(store, run_id)
     return result

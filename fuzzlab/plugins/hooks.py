@@ -8,7 +8,11 @@ Three kinds of hook, dispatched differently by the registry:
   value is **ignored** (this is where the oracle/advisory split is enforced — an
   ``on_finding`` observer cannot cause a write, FR-PLUG-5);
 - **registration** — collected: at startup, plugins contribute capability (rules,
-  payload sources, an oracle), and the returns are gathered.
+  payload sources, an oracle, a confirmation-budget prioritizer), and the returns are
+  gathered;
+- **post-run** — run one by one after the pipeline, each as its own unit of work under
+  the advisory write guard (`guard.py`), with its result or contained error reported
+  back (CC-PLUG-0005; the ML stages attach here, FR-ML-6).
 """
 
 from __future__ import annotations
@@ -20,8 +24,12 @@ ON_FINDING = "on_finding"
 REGISTER_RULES = "register_rules"
 REGISTER_PAYLOAD_SOURCE = "register_payload_source"
 REGISTER_ORACLE = "register_oracle"
+REGISTER_PRIORITIZER = "register_prioritizer"
+AFTER_RUN = "after_run"
 
 MUTATION_HOOKS = frozenset({ON_REQUEST})
 OBSERVATION_HOOKS = frozenset({ON_RESPONSE, ON_CANDIDATE, ON_FINDING})
-REGISTRATION_HOOKS = frozenset({REGISTER_RULES, REGISTER_PAYLOAD_SOURCE, REGISTER_ORACLE})
-ALL_HOOKS = MUTATION_HOOKS | OBSERVATION_HOOKS | REGISTRATION_HOOKS
+REGISTRATION_HOOKS = frozenset({REGISTER_RULES, REGISTER_PAYLOAD_SOURCE, REGISTER_ORACLE,
+                                REGISTER_PRIORITIZER})
+POST_RUN_HOOKS = frozenset({AFTER_RUN})
+ALL_HOOKS = MUTATION_HOOKS | OBSERVATION_HOOKS | REGISTRATION_HOOKS | POST_RUN_HOOKS

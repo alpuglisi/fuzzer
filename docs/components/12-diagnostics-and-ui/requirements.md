@@ -360,6 +360,19 @@ bugs — the research-platform diagnostics of decision D2.
   [...]}` for a model trained on earlier runs (FR-ML-14), and `{"trained_on": "run",
   "train_run_ids": null}` for a `run`-mode or legacy row. The text report marks an
   earlier-trained model "(trained on earlier runs …)".
+  *(Extended CC-UI-0041.)* `plugins` items carry `config`, `status` and `error`.
+  `reproducibility` gains `plugin_config` and `plugin_status`. A failed plugin is
+  marked `(FAILED)` in the text report.
+- **FR-UI-18** *(added CC-UI-0041, 2026-10-13)* The web app and report work without the
+  `fuzzlab.ml` package (FR-ML-6).
+  - **ML tab:** its ML-backed panels (classifier, weights, ranker, conformal, anomaly,
+    disagreement) report "ML components are not installed". Bandit and mutation are
+    unaffected.
+  - **Run page:** it still lists the stored scores, with decision `n/a` and that
+    reason.
+  - **Report:** it gives `models_unavailable` instead of claiming no models.
+  - **No direct imports:** nothing in `web/` or `report/` imports `fuzzlab.ml` except
+    through `import_ml`.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

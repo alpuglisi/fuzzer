@@ -121,6 +121,10 @@ def main(argv: list[str]) -> int:
     if args.train_on != "run" and not (args.score or args.rank):
         p.error("--train-on needs --score and/or --rank")
 
+    # Plugins (the ML stages included, FR-ML-6) are settled before the store is opened,
+    # so a missing ML package or a prioritizer conflict leaves no run row behind.
+    plugins = _build_plugins(p, args)
+
     selected = [c.strip() for c in args.categories.split(",")] if args.categories else None
     try:
         ground_truth = contract.load(args.ground_truth) if args.ground_truth else None
@@ -159,23 +163,13 @@ def main(argv: list[str]) -> int:
             scheduler.load(store)                # resume posteriors + costs from prior runs
             from fuzzlab.core.store import MetricLogger
             scheduler.attach_metrics(MetricLogger(store, run_id, source="bandit"))
-        plugins = None
-        if args.plugins:
-            from fuzzlab.plugins import PluginManager
-            plugins = PluginManager.from_entry_points()   # entry-point discovery (Phase 10)
-        prioritizer = None
-        if args.confirm_budget is not None:
-            from functools import partial
-            from fuzzlab.ml.active import prioritize
-            prioritizer = partial(prioritize, method=args.budget_method,
-                                  seed=args.budget_seed)
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
                               selected_categories=selected, points_source=args.points,
                               browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
                               scheduler=scheduler, plugins=plugins,
-                              confirm_budget=args.confirm_budget, prioritizer=prioritizer)
+                              confirm_budget=args.confirm_budget)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
         finally:
@@ -185,49 +179,61 @@ def main(argv: list[str]) -> int:
         if scheduler is not None:
             scheduler.flush_metrics()            # commit any buffered per-pull metrics
             scheduler.save(store)                # persist what this run learned
-        ml = None
-        if args.score:
-            from fuzzlab.ml.train import train_and_score
-            # advisory scores + model (best of logistic/GBT by out-of-fold PR-AUC);
-            # never labels.
-            ml = train_and_score(store, run_id, model_kind="auto", train_on=args.train_on)
-        rank = None
-        if args.rank:
-            from fuzzlab.ml.rank_train import train_and_rank
-            # advisory rank scores + NDCG@k/Precision@k vs random; never labels.
-            rank = train_and_rank(store, run_id, train_on=args.train_on)
-        anomaly = None
-        if args.anomaly:
-            from fuzzlab.ml.anomaly import detect_anomalies
-            # advisory per-candidate anomaly score/flag (persisted); never labels.
-            anomaly = detect_anomalies(store, run_id, contamination=args.anomaly_contamination)
-            anomaly["top"] = _top_flagged(store, anomaly)
-        _print_summary(args, counts, result, ml, rank, anomaly)
-    return 0
+        # the ML stages ran inside `run_auto` as `after_run` plugins (CC-FUZZ-0050)
+        return _print_summary(args, counts, result, plugins)
 
 
-def _top_flagged(store, anomaly: dict, limit: int = 5) -> list[dict]:
-    """The most anomalous flagged candidates (path, param, category, score)."""
-    import json
-    from fuzzlab.core.urls import to_path
-    flagged = sorted(((s, cid) for cid, s, f in zip(anomaly["ids"], anomaly["scores"],
-                                                     anomaly["flags"]) if f), reverse=True)
-    out = []
-    for score, cid in flagged[:limit]:
-        row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
+def _build_plugins(p, args):
+    """The run's `PluginManager`: the ML stages the flags ask for (registered first)
+    plus any `--plugins` entry points — or ``None`` when neither is asked for, exactly
+    as before. Every error here is a usage error raised before any traffic."""
+    from fuzzlab.plugins.optional import ML_UNAVAILABLE, import_ml
+    stages: list = []
+    ml_absent = False
+    if args.score or args.rank or args.anomaly or args.confirm_budget is not None:
+        ml_plugins = import_ml("fuzzlab.ml.plugins")
+        if ml_plugins is None:
+            ml_absent = True
+            if args.score or args.rank or args.anomaly:
+                p.error(f"{ML_UNAVAILABLE}: --score/--rank/--anomaly need fuzzlab.ml")
+        else:
+            stages = ml_plugins.stage_plugins(
+                score=args.score, rank=args.rank, anomaly=args.anomaly,
+                contamination=args.anomaly_contamination, train_on=args.train_on,
+                confirm_budget=args.confirm_budget, budget_method=args.budget_method,
+                budget_seed=args.budget_seed)
+    args.stage_names = {st.flag: st.name for st in stages}
+    if not stages and not args.plugins:
+        if args.confirm_budget is not None:
+            p.error(f"{ML_UNAVAILABLE}: --confirm-budget needs fuzzlab.ml or a "
+                    f"--plugins plugin that contributes a prioritizer")
+        return None
+    from fuzzlab.plugins import PluginManager
+    plugins = (PluginManager.from_entry_points(extra=stages) if args.plugins
+               else PluginManager(plugins=stages))   # entry-point discovery (Phase 10)
+    if args.confirm_budget is not None:
         try:
-            ev = json.loads(row["evidence"] or "{}") if row else {}
-        except (ValueError, TypeError):
-            ev = {}
-        out.append({"path": to_path(ev.get("url", "")), "param": ev.get("param", ""),
-                    "category": ev.get("category", ""), "score": round(score, 3)})
-    return out
+            found = plugins.guarded_prioritizer()
+        except ValueError as exc:                    # PluginConflict
+            p.error(str(exc))
+        if found is None:
+            p.error(f"{ML_UNAVAILABLE}: --confirm-budget needs fuzzlab.ml or a "
+                    f"--plugins plugin that contributes a prioritizer" if ml_absent else
+                    "--confirm-budget: no plugin could provide the budget order "
+                    f"({plugins.errors() or 'none contributed one'})")
+    return plugins
 
 
 def _print_budget(m: dict) -> None:
     if "confirm_budget" not in m:
         return
     confirmable = m.get("confirmable_keys", 0)
+    if m.get("confirm_budget_error"):
+        print(f"  oracle budget: {m.get('budget_plugin', 'prioritizer')} FAILED — "
+              f"{m.get('budget_error')}; confirmed the first "
+              f"{m.get('oracle_checked_keys', 0)} of {confirmable} confirmable "
+              f"candidate(s) in row order")
+        return
     if m.get("confirm_budget_fallback"):
         print(f"  oracle budget NOT applied: no usable earlier labels for this target — "
               f"confirmed all {confirmable} confirmable candidate(s)")
@@ -268,7 +274,28 @@ def _print_earlier(label: str, verb: str, r: dict, metric: str, key: str,
     print(line + "  (advisory — never labels)")
 
 
-def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> None:
+def _print_summary(args, counts, result, plugins=None) -> int:
+    """Print the run summary; returns the exit code (1 when a post-run stage or the
+    budget prioritizer failed, or a requested ML stage did not run)."""
+    stage_names = getattr(args, "stage_names", {})        # flag -> plugin name
+    outcomes = {o.info.name: o for o in getattr(result, "plugin_outcomes", [])}
+    failed = False
+    reported: set[str] = set()
+
+    def stage(flag: str):
+        """A requested stage's result, or None after printing why it has none."""
+        nonlocal failed
+        name = stage_names.get(flag, flag)
+        reported.add(name)
+        outcome = outcomes.get(name)
+        if outcome is not None and outcome.ok:
+            return outcome.result
+        failed = True
+        why = outcome.error if outcome is not None else (
+            (plugins.errors().get(name) if plugins is not None else None) or "not run")
+        print(f"  {name}: FAILED — {why}")
+        return None
+
     plan = result.plan
     m = result.metrics
     print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
@@ -296,6 +323,9 @@ def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> No
               f"capability; they score as false negatives):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
+    ml = stage("score") if args.score else None
+    rank = stage("rank") if args.rank else None
+    anomaly = stage("anomaly") if args.anomaly else None
     if ml is not None and ml.get("train_on") == "earlier":
         _print_earlier("ml", "scored", ml, "PR-AUC", "pr_auc", "prevalence",
                        "baseline_prevalence_forward")
@@ -321,3 +351,25 @@ def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> No
               f"candidate(s)  (advisory — unusual is not vulnerable)")
         for t in anomaly.get("top", []):
             print(f"    - {t['path']} [{t['param']}] {t['category']}  score {t['score']}")
+    for name, outcome in outcomes.items():          # third-party post-run plugins
+        if name in reported:
+            continue
+        reported.add(name)
+        if outcome.ok:
+            print(f"  plugin {name}: after_run done")
+        else:
+            failed = True
+            print(f"  plugin {name}: FAILED — {outcome.error}")
+    if m.get("confirm_budget_error"):
+        failed = True
+        reported.add(m.get("budget_plugin"))
+    if plugins is not None:
+        errors = plugins.errors()
+        others = sorted(n for n in plugins.disabled() if n not in reported)
+        if others:
+            print("  plugins disabled after an error:")
+            for name in others:
+                print(f"    - {name}: {errors.get(name)}")
+        for info in plugins.rejected():
+            print(f"  plugin refused (duplicate name): {info.name}")
+    return 1 if failed else 0

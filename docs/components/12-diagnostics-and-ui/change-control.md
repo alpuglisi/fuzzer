@@ -3,6 +3,50 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0041 — Web app and report work without `fuzzlab.ml`; report shows plugin config and status (2026-10-13)
+- Change:
+  - **`mlview`:**
+    - No module-level ML import. `_ml()` loads the modules through `import_ml`
+      (cached).
+    - The ML-backed panels (`@_ml_panel`: classifier, weights, ranker, conformal,
+      anomaly, disagreement) return `{"available": false, "reason": "ML components are
+      not installed"}`. The bandit and mutation panels are unaffected.
+  - **`results`:**
+    - `_scored_candidates` still lists the stored scores, with no model and decision
+      `n/a`.
+    - The run detail gains `ml_unavailable`, which the run page's "Model:" line shows
+      (`run.html`, text only).
+  - **`report`:**
+    - **ML absent:** `models: []` plus `models_unavailable` (also in `reproducibility`);
+      the text report reads `models: unavailable (…)`. It never claims "no models" and
+      never falls back to an inline `model` query.
+    - **`plugins` items** gain `config`, `status` and `error`. `reproducibility` gains
+      `plugin_config` and `plugin_status`, and `plugins` stays name→version.
+    - **Text report:** a failed plugin is marked `(FAILED)`.
+- Impact: read-only. FR-UI-18 is added and FR-UI-17 extended. `test_report.py` was
+  updated explicitly for the new plugin item keys.
+- Risk: low.
+- Deliverables:
+  - [x] `mlview`, `results`, `run.html` and `report` — done
+  - [x] `tests/test_no_ml.py` (8) — done.
+    - **Setup:** a store is seeded with ML (`--score --rank --anomaly`). A child process
+      (`tests/_no_ml_child.py`) installs a meta-path finder that **raises**
+      `ModuleNotFoundError(name="fuzzlab.ml")`; the child proves ML is genuinely blocked.
+    - **Scan:** a scan works; `--score` exits 2 with the message, no run row and no
+      traceback.
+    - **Report:** models unavailable, the ML stages still listed with their config.
+    - **Web:** every HTML route returns 200. The ML panels are unavailable with the
+      reason, and bandit/mutation are not. The run page lists the stored scores with
+      `n/a`.
+    - **Real Chromium** against a server child running without ML: `/ml` shows the
+      reason in the calibration and ranker panels, the run page shows it, and there are
+      zero page errors, console errors and CSP violations.
+- Review: pre-change review gate cleared 3/3. The proposing agent and 2 independent reviewer agents went through DRAFT v1 to v4.
+  - Reviewer A focused on architecture and spec fit; reviewer B on adversarial correctness, safety and tests, with SQLite experiments.
+  - Every raised issue was adopted.
+  - v1's guard was bypassable (a rename round-trip, a later-firing trigger, a temp shadow table, label state outside `finding`, an unguarded prioritizer). v1's failed-stage writes could also be committed by the next stage. Both were redesigned before any code.
+- Effectiveness (assessed 2026-10-13): effective, including in a real browser. `tests/test_no_ml.py` 8 passed under `FUZZLAB_REQUIRE_BROWSER=1`. The child genuinely cannot import `fuzzlab.ml`, and real Chromium renders `/ml` and the run page without ML, with zero errors and zero CSP violations. With ML present, `test_web_*.py` and the browser smoke pass, and `test_report.py` passes as updated. The `mlview`, report and run-page mutants are killed. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 3062 passed, 33 failed, 68 skipped, 9 xfailed. The 33 failures are the identical environmental labgen set as at `a3b782d` and `882cda8` (diffed: no scipy, scikit-learn or `gitleaks` binary here). Every skip is in lab/labgen/corpus tests guarded on toolchains or services, none in a file this change touches; the +3 against `882cda8`'s run is in that environment-dependent set.
+
 ### CC-UI-0040 — ML tab and report say how the scoring model was trained (2026-10-13)
 - Change:
   - **`mlview.classifier_panel` / `ranker_panel`:**

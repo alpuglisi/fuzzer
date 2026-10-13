@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/PLUG/FUZZ/CORE/UI: ML attaches as plugins; the toolkit runs without it — CC-ML-0017, CC-PLUG-0005, CC-FUZZ-0050, CC-CORE-0028, CC-UI-0041)
+- **ML now attaches through the plugin system** (step 3 of the user's order; FR-ML-6).
+  - **What changed:** the classifier, ranker, anomaly tripwire and budget order are
+    built-in plugins on two new hooks, `after_run` and `register_prioritizer`.
+    `fuzzlab auto`'s ML flags attach them, and nothing outside `fuzzlab/ml/` imports ML
+    except one helper.
+  - **Why:** the spec requires that shipping without ML is a config change, not a code
+    change. Until now `fuzzlab auto` called ML directly, and the web app could not even
+    start without it.
+- **Guards:**
+  - **Write guard.** Post-run plugins run under an allowlist SQLite write guard: no
+    writes to `finding`, label-defining state, or the schema.
+  - **Unit of work.** Each plugin is one unit of work, so a failed stage's partial
+    scores are rolled back and the CLI reports it and exits 1.
+  - **Budget prioritizer.** A crashing prioritizer still respects the confirmation cap.
+- **Run record.** Each run now records which plugins, the ML stages included, ran,
+  with their options and outcome (migration 15).
+- **Without the package.** The scan, report and web app work when `fuzzlab.ml` is
+  absent. This is tested in a subprocess with ML blocked, including a real browser.
+- **Unchanged.** The summary output is byte-identical to before (golden-tested).
+- **Review.** Pre-change review gate cleared 3/3 over four draft rounds. v1's guard was
+  bypassable, and was redesigned before any code was written.
+- **Tests:** full suite 3062 passed, 68 skipped. 33 failed: the same environmental labgen set as before (no scipy, scikit-learn or gitleaks), none caused by this change. 26 of 26 mutants killed.
+
 ## 2026-10-13 (ML/FUZZ/UI: `--score`/`--rank` can train on earlier runs — CC-ML-0016, CC-FUZZ-0049, CC-UI-0040)
 - **`fuzzlab auto --score/--rank --train-on earlier`** (step 2 of the user's order:
   save models, then train on earlier runs, then plugins).

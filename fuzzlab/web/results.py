@@ -46,9 +46,11 @@ def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None
 
     The model is read through the shared run-scoped reader, never as "the newest
     `model` row": the ranker writes that table too, and other runs train their own
-    classifiers (BUG-0061)."""
-    from fuzzlab.ml.train import latest_classifier
-    clf = latest_classifier(store, run_id)
+    classifiers (BUG-0061). Without the ML package (FR-ML-6) the stored scores are
+    still listed — with no model and decision "n/a" — never hidden as "unscored"."""
+    from fuzzlab.plugins.optional import import_ml
+    train = import_ml("fuzzlab.ml.train")
+    clf = train.latest_classifier(store, run_id) if train is not None else None
     model = gate = None
     if clf is not None:
         model = {"name": clf.name, "version": clf.version, "calibration": clf.calibration}
@@ -343,6 +345,7 @@ def run_detail(store, run_id: int) -> dict | None:
 
     score = {k: metrics[k] for k in _SCORE_KEYS if k in metrics} or None
     model, scored = _scored_candidates(store, run_id)
+    from fuzzlab.plugins.optional import ML_UNAVAILABLE, ml_available
 
     return {
         "id": run["id"], "tool": run["tool"], "target": run["config_hash"],
@@ -360,6 +363,7 @@ def run_detail(store, run_id: int) -> dict | None:
         "score": score,
         "model": model,
         "scored": scored,
+        "ml_unavailable": None if ml_available() else ML_UNAVAILABLE,
     }
 
 

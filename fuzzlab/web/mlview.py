@@ -21,11 +21,38 @@ from __future__ import annotations
 import math
 from typing import Any, Sequence
 
-from fuzzlab.ml.dataset import build_dataset
-from fuzzlab.ml.metrics import pr_auc
-from fuzzlab.ml.rank_train import latest_ranker
-from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k
-from fuzzlab.ml.train import latest_classifier
+from functools import lru_cache, wraps
+from types import SimpleNamespace
+
+from fuzzlab.plugins.optional import ML_UNAVAILABLE, import_ml
+
+
+@lru_cache(maxsize=1)
+def _ml() -> SimpleNamespace | None:
+    """The `fuzzlab.ml` functions this view reads through, or ``None`` when the ML
+    package is not installed (FR-ML-6, CC-UI-0041) — never a module-level import, so
+    the web app starts without it. Only the ML-backed panels need it."""
+    mods = {"dataset": import_ml("fuzzlab.ml.dataset"),
+            "metrics": import_ml("fuzzlab.ml.metrics"),
+            "rank_train": import_ml("fuzzlab.ml.rank_train"),
+            "ranking": import_ml("fuzzlab.ml.ranking"),
+            "train": import_ml("fuzzlab.ml.train"),
+            "anomaly": import_ml("fuzzlab.ml.anomaly"),
+            "active": import_ml("fuzzlab.ml.active"),
+            "persist": import_ml("fuzzlab.ml.persist")}
+    if any(m is None for m in mods.values()):
+        return None
+    return SimpleNamespace(**mods)
+
+
+def _ml_panel(fn):
+    """An ML-backed panel: reports `ML_UNAVAILABLE` instead of failing without ML."""
+    @wraps(fn)
+    def panel(*args, **kwargs):
+        if _ml() is None:
+            return {"available": False, "reason": ML_UNAVAILABLE}
+        return fn(*args, **kwargs)
+    return panel
 
 #: Stored `candidate.score` / `rank_score` are the deploy fit's scores on its own training
 #: rows, so metrics recomputed from them here are in-sample — labelled as such, beside the
@@ -60,12 +87,12 @@ def _evaluation(store, run_id: int | None, column: str, reader) -> str:
 
 
 def _clf_calibration(store, run_id):
-    clf = latest_classifier(store, run_id)
+    clf = _ml().train.latest_classifier(store, run_id)
     return clf.calibration if clf is not None else None
 
 
 def _rank_calibration(store, run_id):
-    found = latest_ranker(store, run_id)
+    found = _ml().rank_train.latest_ranker(store, run_id)
     return found[1] if found is not None else None
 
 
@@ -90,7 +117,7 @@ def _oof_source(calibration: dict, run_id: int | None) -> bool:
 
 
 def _classifier_oof(store, run_id: int | None) -> dict | None:
-    clf = latest_classifier(store, run_id)
+    clf = _ml().train.latest_classifier(store, run_id)
     if clf is None or "oof_pr_auc" not in clf.calibration \
             or not _oof_source(clf.calibration, run_id):
         return None                       # no model / fallback / legacy row / mixed runs
@@ -101,7 +128,7 @@ def _classifier_oof(store, run_id: int | None) -> dict | None:
 
 
 def _ranker_oof(store, run_id: int | None) -> dict | None:
-    found = latest_ranker(store, run_id)
+    found = _ml().rank_train.latest_ranker(store, run_id)
     if found is None:
         return None
     c = found[1]
@@ -204,9 +231,10 @@ def _scored_pairs(store, ds, run_id: int | None) -> tuple[list[float], list[int]
     return scores, labels
 
 
+@_ml_panel
 def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
     """PR curve + operating point, reliability diagram + ECE (the advisory anchor)."""
-    ds = build_dataset(store, run_id)
+    ds = _ml().dataset.build_dataset(store, run_id)
     if not len(ds):
         return {"available": False, "reason": "no candidates in the store yet", "n": 0}
     scores, labels = _scored_pairs(store, ds, run_id)
@@ -220,16 +248,17 @@ def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
         "evaluation": _evaluation(store, run_id, "score", _clf_calibration),
         "oof": _classifier_oof(store, run_id),
         "baseline_prevalence": round(positives / n, 4) if n else 0.0,
-        "pr_auc": pr_auc(labels, scores),
+        "pr_auc": _ml().metrics.pr_auc(labels, scores),
         "pr_curve": _pr_curve(labels, scores),
         "reliability": _reliability(labels, scores),
     }
 
 
+@_ml_panel
 def ranker_panel(store, run_id: int | None = None, k: int = 10,
                  max_scatter: int = 500) -> dict[str, Any]:
     """nDCG@k / precision@k vs a random baseline + rank score/uncertainty distributions."""
-    ds = build_dataset(store, run_id)
+    ds = _ml().dataset.build_dataset(store, run_id)
     if not len(ds):
         return {"available": False, "reason": "no candidates in the store yet"}
     where = "WHERE run_id=?" if run_id is not None else ""
@@ -255,8 +284,8 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
         "available": True, "n": len(scores), "k": k,
         "evaluation": _evaluation(store, run_id, "rank_score", _rank_calibration),
         "oof": _ranker_oof(store, run_id),
-        "ndcg_at_k": mean_ndcg_at_k(labels, scores, groups, k=k),
-        "precision_at_k": mean_precision_at_k(labels, scores, groups, k=k),
+        "ndcg_at_k": _ml().ranking.mean_ndcg_at_k(labels, scores, groups, k=k),
+        "precision_at_k": _ml().ranking.mean_precision_at_k(labels, scores, groups, k=k),
         "random_baseline_precision_at_k": round(prevalence, 4),
         "score_hist": _histogram(scores, bins=12),
         "uncertainty_hist": _histogram(uncertainties, bins=12),
@@ -264,13 +293,14 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
     }
 
 
+@_ml_panel
 def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
     """Flag/abstain/drop split (tab summary) + the nonconformity histogram + thresholds.
 
     Gated by the classifier that scored the run (`latest_classifier`, BUG-0061). Known
     limitation: the all-runs view (``run_id=None``) applies the newest classifier's one
     set of thresholds to every run's scores; per-run views are exact."""
-    clf = latest_classifier(store, run_id)
+    clf = _ml().train.latest_classifier(store, run_id)
     if clf is None:
         return {"available": False, "reason": "no trained classifier yet"}
     if clf.gate is None:
@@ -296,6 +326,7 @@ def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
     }
 
 
+@_ml_panel
 def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) -> dict[str, Any]:
     """ECOD outlier score histogram + threshold/flagged-rate. 'unusual != malicious'.
 
@@ -304,10 +335,10 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
     Label-free, so it covers every candidate — the same population `detect_anomalies`
     scores, budget-skipped ones included.
     """
-    ds = build_dataset(store, run_id, include_unlabelled=True)
+    ds = _ml().dataset.build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 5:
         return {"available": False, "reason": "not enough candidates to fit an anomaly model"}
-    from fuzzlab.ml.anomaly import ECOD, flag_top
+    ECOD, flag_top = _ml().anomaly.ECOD, _ml().anomaly.flag_top
     ecod = ECOD().fit(ds.X)
     scores = ecod.scores(ds.X)
     flags = flag_top(scores, contamination)
@@ -322,13 +353,14 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
     }
 
 
+@_ml_panel
 def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
                        top_n: int = 10) -> dict[str, Any]:
     """Committee (bootstrap ranker ensemble) disagreement histogram + top-N query queue.
 
     The committee is fit on labelled candidates only; the queue covers every candidate,
     including ones the oracle skipped for budget — the ones actually left to query."""
-    ds = build_dataset(store, run_id, include_unlabelled=True)
+    ds = _ml().dataset.build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 10:
         return {"available": False, "reason": "not enough candidates to train a committee"}
     n = len(ds)
@@ -340,8 +372,8 @@ def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
     ids_sub = [ds.ids[i] for i in idxs]
     X_sub = [ds.X[i] for i in idxs]
     y_sub = [ds.y[i] for i in idxs]
-    from fuzzlab.ml.active import Committee, disagreement
-    from fuzzlab.ml.rank_train import _candidate_texts
+    Committee, disagreement = _ml().active.Committee, _ml().active.disagreement
+    _candidate_texts = _ml().rank_train._candidate_texts
     texts = _candidate_texts(store, run_id, ids_sub)
     fit_idx = [j for j, i in enumerate(idxs) if ds.labelled[i]]      # never fit on a
     if len(fit_idx) < 10:                                            # placeholder label
@@ -446,15 +478,17 @@ def mutation_panel(store, run_id: int | None = None, limit: int = 100) -> dict[s
             "variants": variants}
 
 
+@_ml_panel
 def weights_panel(store, run_id: int | None = None) -> dict[str, Any]:
     """The saved logistic classifier's coefficients (CC-UI-0038). Read-only.
 
     These are **standardised** log-odds coefficients — per standard deviation of each
     feature, other features held fixed. They are not feature importance: correlated
     features share weight under L2, and "per SD" reads oddly for 0/1 features."""
-    from fuzzlab.ml.persist import ModelIncompatibleError, ModelParamsError
-    from fuzzlab.ml.train import load_classifier
-    clf = latest_classifier(store, run_id)
+    ModelIncompatibleError = _ml().persist.ModelIncompatibleError
+    ModelParamsError = _ml().persist.ModelParamsError
+    load_classifier = _ml().train.load_classifier
+    clf = _ml().train.latest_classifier(store, run_id)
     if clf is None:
         return {"available": False, "reason": "no trained classifier yet"}
     model_info = {"name": clf.name, "version": clf.version,

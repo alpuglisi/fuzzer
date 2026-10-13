@@ -1004,6 +1004,20 @@ rewards) derives from it.
   - **Refused summary:** "NOT scored" / "NOT ranked" with the reason, pointing at
     `--train-on run`. Nothing is written.
   - The launcher shows the flag as a choice field via `commandspec`.
+- **FR-FUZZ-34** *(ML attached as plugins; `CC-FUZZ-0050`, 2026-10-13).*
+  - **Plugins.** `fuzzlab auto`'s ML flags attach the built-in ML stage plugins
+    (FR-ML-6). `run_auto` records the plugin set, takes the budget prioritizer from the
+    plugins when none is passed, and dispatches `after_run` and `finalize` after the
+    pipeline, so `run_targets` gets them per target run.
+  - **Usage errors** are raised before the store is opened (exit 2): ML flags without
+    the ML package, `--confirm-budget` with no prioritizer available, and two
+    prioritizers.
+  - **Summary.** It is unchanged for successful stages (golden-tested). A failed or
+    missing requested stage prints `FAILED`. A failed prioritizer prints the
+    row-order budget line.
+  - **Exit 1** when a post-run plugin or the prioritizer failed, or a requested stage
+    did not run.
+  - With no ML flags and no `--plugins`, no plugin manager is created.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

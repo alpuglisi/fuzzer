@@ -133,19 +133,27 @@ def test_discovery_accepts_a_factory():
     assert p.name == "made"
 
 
-# --- reproducibility: record active plugins ----------------------------------
-def test_record_writes_active_plugins(tmp_path):
+# --- reproducibility: record the attached plugins (CC-PLUG-0005) --------------
+def test_record_writes_every_attached_plugin_and_marks_a_failed_one(tmp_path):
+    """Every attached plugin is recorded; one that already failed (here before the
+    run's first `record`) is `failed` with its error, not silently left out."""
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")
         m = PluginManager(plugins=[Boom(), Tagger("a", 10), Tagger("b", 20)])
         m.on_candidate({})                     # disables boom
         n = m.record(store, run_id)
-        assert n == 2
+        assert n == 3
         rows = store.conn.execute(
-            "SELECT name, version, priority FROM run_plugin WHERE run_id=? ORDER BY priority",
-            (run_id,)).fetchall()
-        assert [r["name"] for r in rows] == ["a", "b"]   # boom excluded (disabled)
-        assert rows[0]["version"] == "1.0"
+            "SELECT name, version, priority, status, error FROM run_plugin "
+            "WHERE run_id=? ORDER BY priority", (run_id,)).fetchall()
+        assert [r["name"] for r in rows] == ["boom", "a", "b"]
+        assert [r["status"] for r in rows] == ["failed", "attached", "attached"]
+        assert "kaboom" in rows[0]["error"] and rows[1]["error"] is None
+        assert rows[1]["version"] == "1.0"
+        m.finalize(store, run_id)
+        assert [r["status"] for r in store.conn.execute(
+            "SELECT status FROM run_plugin WHERE run_id=? ORDER BY priority",
+            (run_id,))] == ["failed", "ok", "ok"]
 
 
 def test_registry_defaults_for_bare_plugin():

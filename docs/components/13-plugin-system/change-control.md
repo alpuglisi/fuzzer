@@ -3,6 +3,136 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0005 — Post-run and budget-order hooks; advisory write guard; the run record (2026-10-13)
+- Change:
+  - **Two new hooks** (`plugins/hooks.py`):
+    - **`after_run(store, run_id)`**, a new post-run kind. It runs after the pipeline,
+      in ascending priority, through `PluginManager.after_run(store, run_id) ->
+      list[HookOutcome(info, ok, result, error)]`.
+    - **`register_prioritizer()`**, a registration hook. It returns a
+      confirmation-budget prioritizer `(store, run_id, candidate_ids) -> order | None`.
+      `PluginManager.prioritizers()` collects them once per manager, and
+      `guarded_prioritizer()` returns the single one wrapped. Two contributors raise
+      `PluginConflict`.
+  - **Each `after_run` plugin is one unit of work** (`manager.py`):
+    - Outstanding work (the scan's results) is committed first.
+    - After each plugin: **commit** on success, **rollback** on failure.
+    - **Metric shadowing:** the manager snapshots `max(run_metrics.id)` and the run's
+      metric keys before **each** plugin. It deletes, explicitly, any row the plugin
+      inserted that belongs to another run, repeats a key the run already had, or
+      repeats a key the plugin inserted twice. The plugin then fails. An explicit delete
+      is needed because plugins, the built-ins included, commit their own writes.
+    - **Transaction mode:** switching `isolation_level` / `autocommit` fails the plugin.
+      The mode is restored and then rolled back, in that order.
+    - **Honest limit:** a plugin's own commits cannot be undone. That includes
+      `MetricLogger`'s mid-fit `with conn:`, and every write once the transaction mode
+      was switched.
+  - **Advisory write guard** (`plugins/guard.py`, FR-PLUG-6). An allowlist SQLite
+    authorizer sits on the shared connection while these hooks run, and is removed in
+    `finally`.
+    - **Prioritizer:** read-only.
+    - **`after_run`:** the read-only set, plus exactly `ADVISORY_WRITES`:
+      - INSERT into `model`, `run_metrics` and `metric_series`;
+      - UPDATE of `candidate.score`, `rank_score`, `rank_uncertainty`, `anomaly_score`
+        and `anomaly_flag`.
+    - **Everything else is denied:** any write to `finding`, label-defining `candidate`
+      state, and UPDATE/DELETE on the output tables; every CREATE/DROP/ALTER (closing the
+      rename round-trip, trigger and temp-shadow vectors); ATTACH/DETACH; and PRAGMA
+      assignment.
+    - **Scope:** accident prevention on the shared connection. It is not a trust
+      boundary, and it checks tables and columns, not rows. DDL is denied even as
+      `IF NOT EXISTS`, so `Store.schema_version()` cannot run inside a guarded hook.
+  - **Prioritizer failure.** A raise, a malformed order, or a transaction-mode switch
+    fails the plugin. The wrapper then returns `FailedBudgetOrder`: the given ids in row
+    order with `error`, so the confirmation cap still holds. A valid `None` still means
+    "confirm everything" (thin data).
+  - **Registry** (`registry.py`):
+    - A duplicate name is refused and listed in `rejected()`.
+    - The first contained error per plugin is kept (`errors()`).
+    - `handlers`, `contain`, `fail`, `reset` and `registered` are public.
+    - `PluginInfo` gains `config`: canonical JSON of the plugin's `config` dict, built
+      in one place by `plugin_config`. A non-dict or non-serialisable config gives `""`.
+  - **Run record:**
+    - `record()` starts a run scope. From the second run on it resets containment; a
+      failure before the first run (e.g. at registration) is kept.
+    - It writes **every** registered plugin, with config and `status='attached'`, or
+      `'failed'` plus the error if it had already failed.
+    - New `finalize()` marks each one `ok` or `failed` with its error (migration 15,
+      CC-CORE-0028).
+    - `from_entry_points(extra=…)` registers built-ins ahead of entry points.
+  - **New `plugins/optional.py`** (FR-PLUG-9) is the one door into `fuzzlab.ml`.
+    - `import_ml(module)` returns `None` only when `fuzzlab.ml` itself is missing, or
+      is a namespace leftover with no `__file__`. Any other import error re-raises.
+    - It also provides `ml_available()` and `ML_UNAVAILABLE`.
+- Impact:
+  - The ML stages attach here (CC-ML-0017), and `run_auto` dispatches the new hooks
+    (CC-FUZZ-0050).
+  - With zero plugins everything is a no-op.
+  - **Behaviour changes for existing plugin users:**
+    - a duplicate name is refused;
+    - `record()` now writes disabled plugins too, as `failed`. `test_plugins.py`'s
+      record test was updated to this contract.
+  - FR-PLUG-2 extended; FR-PLUG-6/7/8/9 added; header `[planned]` → `[built]`.
+- Risk: medium-low. The guard is an allowlist, so a new legitimate write needs a
+  declared entry. The tests run every real stage under it (CC-ML-0017).
+- Deliverables:
+  - [x] Hooks, unit of work, guard, prioritizer wrapper, registry and record changes — done
+  - [x] `tests/test_plugins_post_run.py` (56) — done:
+    - dispatch order and containment;
+    - rollback of a failed stage's uncommitted writes;
+    - 23 guard vectors, each asserting the write is absent: a self-swallowing plugin
+      tries INSERT/UPDATE/DELETE/REPLACE/INSERT…SELECT on `finding`, `executescript`,
+      the rename round-trip, DROP COLUMN/TABLE, persistent and temp triggers, a view
+      with an INSTEAD OF trigger, a temp shadow table, `writable_schema`, `oracle_status`
+      (alone and alongside `score`), `evidence`, `run_id`, INSERT/DELETE on `candidate`,
+      UPDATE/DELETE on `run_metrics`, and DELETE on `model`;
+    - a statement prepared before dispatch is re-checked;
+    - exactly the advisory writes pass, and the guard is removed afterwards;
+    - DDL is denied with `IF NOT EXISTS`; the read-only guard denies writes;
+    - metric shadowing: committed by the plugin, for another run, the same plugin twice,
+      a key from an earlier plugin;
+    - a transaction-mode switch;
+    - the prioritizer: read-only, five failure shapes giving `FailedBudgetOrder`, `None`
+      passing through, conflict, collected once;
+    - a duplicate name; per-run reset; a pre-run failure recorded; canonical config;
+    - migration 15;
+    - the authorizer itself denies each DDL, ATTACH and PRAGMA-assignment action, and
+      any non-`main` database, in both modes. DDL is also refused through the
+      schema-table writes it implies, so the behavioural vectors alone cannot show which
+      layer acted; this test pins the first layer;
+    - `import_ml`: present, absent, namespace leftover, a broken submodule, and a present
+      package whose own dependency is missing (which must raise, not read as "not
+      installed"), the last four in subprocesses.
+- Implementation divergence (written back per the review gate):
+  1. The prioritizer wrapper returns `FailedBudgetOrder` when its plugin was already
+     disabled earlier in the run. It also checks the transaction mode and rolls back
+     after the read-only call.
+  2. A non-callable returned by `register_prioritizer` is a failure.
+  3. `import_ml` raises `ValueError` for a non-ML module name.
+- Preventive-action compliance:
+  - **PA-0003:** one options→plugins mapping, one config serialisation, one ML door.
+  - **PA-0021:** typed `import_ml` errors.
+  - **PA-0034(2):** every guard is proven on bad input.
+  - **PA-0063/0067:** `run_plugin` is read per run by its only reader.
+  - **PA-0064(1):** a crashed prioritizer gives an explicit failed order, never a stand-in
+    that looks valid.
+  - **PA-0065:** web changes verified with `FUZZLAB_REQUIRE_BROWSER=1`.
+- Review: pre-change review gate cleared 3/3. The proposing agent and 2 independent reviewer agents went through DRAFT v1 to v4.
+  - Reviewer A focused on architecture and spec fit; reviewer B on adversarial correctness, safety and tests, with SQLite experiments.
+  - Every raised issue was adopted.
+  - v1's guard was bypassable (a rename round-trip, a later-firing trigger, a temp shadow table, label state outside `finding`, an unguarded prioritizer). v1's failed-stage writes could also be committed by the next stage. Both were redesigned before any code.
+- Effectiveness (assessed 2026-10-13): effective offline. `tests/test_plugins_post_run.py` 56 passed and `tests/test_plugins.py` 12 passed. Mutation-checked on a copy of the tree, with bytecode caches cleared and `FUZZLAB_REQUIRE_BROWSER=1`: all 26 mutants are killed. The first run left two survivors, and each got a new test:
+  - allowing DDL in the guard was masked by its second layer (DDL implies schema-table writes), so a direct authorizer test was added;
+  - treating any missing module as "ML absent" was uncovered for a present package whose own dependency is missing, so that subprocess case was added.
+  Killed:
+  - **guard:** inserts, update columns, the read-only mode;
+  - **unit of work:** rollback, metric shadowing, duplicate key, transaction-mode restore;
+  - **run record:** run-scope reset, pre-run failure recorded, duplicate names;
+  - **budget prioritizer:** failed order → confirm-all, foreign ids, `pipeline` budget error, CLI budget line;
+  - **without ML:** module-level ML import in `mlview`, no panel degrade, report marker, run-page marker, the ML-absent CLI error, `import_ml` namespace;
+  - **dispatch and wiring:** `run_auto` dispatch, CLI exit code, a plugin's `train_on`;
+  - **output:** a one-character summary drift. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 3062 passed, 33 failed, 68 skipped, 9 xfailed. The 33 failures are the identical environmental labgen set as at `a3b782d` and `882cda8` (diffed: no scipy, scikit-learn or `gitleaks` binary here). Every skip is in lab/labgen/corpus tests guarded on toolchains or services, none in a file this change touches; the +3 against `882cda8`'s run is in that environment-dependent set. Whether a third-party plugin uses the hooks well in practice is still to be shown (T10.6).
+
 ### CC-PLUG-0004 — register_payload_source consumer (payload pool) (2026-09-21)
 - Change: wired the last hook end-to-end. `fuzzlab/mutation/payloads.py::PayloadPool`
   aggregates seed payloads per vuln class from a small built-in catalog plus any plugin

@@ -1,0 +1,22 @@
+rc=0
+
+auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-truth)
+  points from: ground-truth
+  points audited: 23   candidates: 46   negatives: 2
+  findings (oracle-confirmed): 0
+  oracle budget: checked 2 of 44 confirmable candidate(s); 42 skipped (ordered by score, trained on 40 earlier labelled candidate(s) from this target; model 184ee66b22cc)
+    skipped candidates count as misses in the score
+  score vs ground truth: tp=0 fp=0 fn=8 tn=8
+  requests: 29
+  not audited (3 enumerated point(s) — scoped as future capability; they score as false negatives):
+    - GET /reviews.php [author]: client-only/DOM (needs browser execution, M6)
+    - GET /feedback.php [ref]: client-only/DOM (needs browser execution, M6)
+    - GET /profile.php [bio]: stored XSS (needs browser execution, M6)
+  ml (prevalence-fallback): scored 46 candidate(s)  (advisory — never labels)
+  ranker (rank-prevalence-fallback): ranked 46 candidate(s)  (advisory — never labels)
+  anomaly: flagged 8 of 46 candidate(s)  (advisory — unusual is not vulnerable)
+    - /search.php [q] xss  score 7.957
+    - /search.php [q] sql-injection  score 7.957
+    - /search.php [q] xss  score 7.957
+    - /search.php [q] sql-injection  score 7.957
+    - /blog_post.php [id] xss  score 6.571

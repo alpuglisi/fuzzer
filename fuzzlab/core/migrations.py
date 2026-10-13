@@ -401,6 +401,19 @@ ALTER TABLE model ADD COLUMN params TEXT;
 ALTER TABLE model ADD COLUMN params_sha256 TEXT;
 """
 
+# --- migration 15: plugin config + outcome on the run record (CC-CORE-0028) -------
+# `run_plugin` recorded which plugins were *attached*; it now also records how each was
+# configured (`config`: canonical JSON from `plugins.registry.plugin_info`) and how it
+# ended (`status`: 'attached' at record time, then 'ok' / 'failed' from
+# `PluginManager.finalize`; `error`: the contained error of a failed plugin). The ML
+# stages are attached as plugins (FR-ML-6), so this is where a run records which ML
+# ran and with which options. Additive; legacy rows read NULL.
+_M0015 = """
+ALTER TABLE run_plugin ADD COLUMN config TEXT;
+ALTER TABLE run_plugin ADD COLUMN status TEXT;
+ALTER TABLE run_plugin ADD COLUMN error TEXT;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -417,6 +430,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (12, _M0012),
     (13, _M0013),
     (14, _M0014),
+    (15, _M0015),
 ]
 
 

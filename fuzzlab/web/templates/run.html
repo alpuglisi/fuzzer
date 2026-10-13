@@ -50,7 +50,7 @@
 {% if model or scored %}
 <div class="card">
   <h2>Model scores (advisory)</h2>
-  {% set name = (model.name ~ ' v' ~ model.version) if model else 'none' %}
+  {% set name = (model.name ~ ' v' ~ model.version) if model else (detail.ml_unavailable or 'none') %}
   {% if scored %}
   <p class="muted">Model: <code>{{ name }}</code>. Scores rank candidates and the
     conformal gate triages them (flag / abstain / drop); they never confirm &mdash;
