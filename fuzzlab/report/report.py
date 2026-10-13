@@ -27,9 +27,18 @@ def latest_run_id(store) -> int | None:
     return int(row["id"]) if row and row["id"] is not None else None
 
 
-def _run_models(store, run_id: int) -> tuple[list[dict], dict[str, str | None]]:
+def _training(calibration: dict) -> dict:
+    """What a model was trained on (CC-UI-0040): ``earlier`` runs (listed) or this
+    ``run``'s own labels — the default for a legacy or run-mode row without the key."""
+    if calibration.get("trained_on") == "earlier":
+        return {"trained_on": "earlier", "train_run_ids": calibration.get("train_run_ids")}
+    return {"trained_on": "run", "train_run_ids": None}
+
+
+def _run_models(store, run_id: int) -> tuple[list[dict], dict[str, str | None], dict]:
     """The classifier and ranker whose scope covers ``run_id`` (FR-ML-10), plus each
-    one's saved-params sha (None: trained before models were saved, migration 14)."""
+    one's saved-params sha (None: trained before models were saved, migration 14) and
+    what it was trained on."""
     from fuzzlab.ml.model_registry import params_sha256_for
     from fuzzlab.ml.rank_train import latest_ranker
     from fuzzlab.ml.train import latest_classifier
@@ -37,15 +46,17 @@ def _run_models(store, run_id: int) -> tuple[list[dict], dict[str, str | None]]:
     clf = latest_classifier(store, run_id)
     if clf is not None:
         found.append(({"name": clf.name, "version": clf.version,
-                       "feature_version": clf.feature_version}, clf.params_sha256))
+                       "feature_version": clf.feature_version}, clf.params_sha256,
+                      _training(clf.calibration)))
     ranked = latest_ranker(store, run_id)
     if ranked is not None:
-        row = ranked[0]
+        row, calibration = ranked
         found.append(({"name": row["name"], "version": row["version"],
                        "feature_version": row["feature_version"]},
-                      params_sha256_for(store, row["id"])))
-    found.sort(key=lambda pair: pair[0]["name"])
-    return [m for m, _ in found], {m["name"]: sha for m, sha in found}
+                      params_sha256_for(store, row["id"]), _training(calibration)))
+    found.sort(key=lambda entry: entry[0]["name"])
+    return ([m for m, _, _ in found], {m["name"]: sha for m, sha, _ in found},
+            {m["name"]: t for m, _, t in found})
 
 
 def build_report(store, run_id: int | None = None) -> dict:
@@ -84,7 +95,7 @@ def build_report(store, run_id: int | None = None) -> dict:
     # The models THIS run used (classifier + ranker), for reproducibility — read through
     # the run-scoped readers, never "the newest version of each name" store-wide, which
     # would cite a later run's model in an earlier run's report (BUG-0066).
-    models, model_shas = _run_models(store, run_id)
+    models, model_shas, model_training = _run_models(store, run_id)
 
     plugins = [dict(r) for r in store.conn.execute(
         "SELECT name, version, priority FROM run_plugin WHERE run_id=? "
@@ -107,10 +118,18 @@ def build_report(store, run_id: int | None = None) -> dict:
             "feature_versions": feature_versions,
             "model_versions": {m["name"]: m["version"] for m in models},
             "model_params_sha256": model_shas,
+            "model_training": model_training,
             "plugins": {p["name"]: p["version"] for p in plugins},
             "schema_version": store.schema_version(),
         },
     }
+
+
+def _trained_note(training: dict | None) -> str:
+    if not training or training.get("trained_on") != "earlier":
+        return ""
+    runs = ", ".join(str(r) for r in training.get("train_run_ids") or [])
+    return f" (trained on earlier runs {runs})"
 
 
 def format_json(report: dict) -> str:
@@ -136,8 +155,10 @@ def format_text(report: dict) -> str:
     for key in sorted(report["metrics"]):
         lines.append(f"  metric {key} = {report['metrics'][key]}")
     if report["models"]:
+        training = report["reproducibility"].get("model_training", {})
         lines.append("  models: " + ", ".join(
-            f"{m['name']} v{m['version']}" for m in report["models"]))
+            f"{m['name']} v{m['version']}" + _trained_note(training.get(m["name"]))
+            for m in report["models"]))
     if report["plugins"]:
         lines.append("  plugins: " + ", ".join(
             f"{p['name']} v{p['version']}" for p in report["plugins"]))

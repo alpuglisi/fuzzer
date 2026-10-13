@@ -31,6 +31,55 @@ from fuzzlab.ml.train import latest_classifier
 #: rows, so metrics recomputed from them here are in-sample — labelled as such, beside the
 #: scoring model's own out-of-fold numbers (BUG-0062, CC-UI-0035).
 IN_SAMPLE = "in-sample (deploy fit)"
+#: Scores written by a model trained on earlier runs (`train_on="earlier"`, CC-ML-0016):
+#: this run's labels were never read — but its endpoints may recur (see `seen_fraction`),
+#: so this is deliberately not called "out-of-sample" (CC-UI-0040).
+NOT_TRAINED_ON_RUN = "not trained on this run's labels (trained on earlier runs)"
+#: All-runs view pooling runs scored both ways (PA-0064(2)): no single label is true.
+MIXED = "mixed"
+
+
+def _earlier_trained(calibration: dict | None) -> bool:
+    return bool(calibration) and calibration.get("trained_on") == "earlier"
+
+
+def _evaluation(store, run_id: int | None, column: str, reader) -> str:
+    """How the stored scores shown for ``run_id`` relate to their model's training data.
+
+    Per run: from that run's scoring model. All runs: from every pooled run's scoring
+    model — one label only when they all agree, else `MIXED`."""
+    if run_id is not None:
+        runs = [run_id]
+    else:
+        runs = [int(r["run_id"]) for r in store.conn.execute(
+            f"SELECT DISTINCT run_id FROM candidate WHERE {column} IS NOT NULL")]
+    kinds = {_earlier_trained(reader(store, r)) for r in runs}
+    if kinds == {True}:
+        return NOT_TRAINED_ON_RUN
+    return MIXED if len(kinds) > 1 else IN_SAMPLE
+
+
+def _clf_calibration(store, run_id):
+    clf = latest_classifier(store, run_id)
+    return clf.calibration if clf is not None else None
+
+
+def _rank_calibration(store, run_id):
+    found = latest_ranker(store, run_id)
+    return found[1] if found is not None else None
+
+
+def _oof_extras(c: dict, prefix_keys: tuple[str, ...]) -> dict:
+    """`scope`, plus — for an earlier-trained model — its forward evaluation on this
+    run's own labels (or why there is none) and `seen_fraction`."""
+    out: dict = {"scope": c.get("oof_scope", "this run")}
+    if _earlier_trained(c):
+        forward = {k: c[f"forward_{k}"] for k in prefix_keys if f"forward_{k}" in c}
+        out.update(forward=forward or None,
+                   forward_skipped_reason=c.get("forward_skipped_reason"),
+                   seen_fraction=c.get("seen_fraction"),
+                   train_run_ids=c.get("train_run_ids"))
+    return out
 
 
 def _oof_source(calibration: dict, run_id: int | None) -> bool:
@@ -47,7 +96,8 @@ def _classifier_oof(store, run_id: int | None) -> dict | None:
         return None                       # no model / fallback / legacy row / mixed runs
     c = clf.calibration
     return {"pr_auc": c["oof_pr_auc"], "pr_auc_prevalence": c.get("oof_pr_auc_prevalence"),
-            "pr_auc_sigma": c.get("oof_pr_auc_sigma")}
+            "pr_auc_sigma": c.get("oof_pr_auc_sigma"),
+            **_oof_extras(c, ("pr_auc", "pr_auc_prevalence"))}
 
 
 def _ranker_oof(store, run_id: int | None) -> dict | None:
@@ -59,7 +109,8 @@ def _ranker_oof(store, run_id: int | None) -> dict | None:
         return None
     return {"at_k": c.get("at_k"), "ndcg": c["oof_ndcg"],
             "precision": c.get("oof_precision"), "ndcg_random": c.get("oof_ndcg_random"),
-            "precision_random": c.get("oof_precision_random")}
+            "precision_random": c.get("oof_precision_random"),
+            **_oof_extras(c, ("ndcg", "precision", "ndcg_random", "precision_random"))}
 
 # Committee disagreement is O(n_members * n) to fit; cap the dataset so the read route
 # stays fast even against a large store (deterministic stride sample, not random).
@@ -166,7 +217,8 @@ def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
     positives = sum(labels)
     return {
         "available": True, "n": n, "positives": positives,
-        "evaluation": IN_SAMPLE, "oof": _classifier_oof(store, run_id),
+        "evaluation": _evaluation(store, run_id, "score", _clf_calibration),
+        "oof": _classifier_oof(store, run_id),
         "baseline_prevalence": round(positives / n, 4) if n else 0.0,
         "pr_auc": pr_auc(labels, scores),
         "pr_curve": _pr_curve(labels, scores),
@@ -201,7 +253,8 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
               for s, u, y in zip(scores, uncertainties, labels)]
     return {
         "available": True, "n": len(scores), "k": k,
-        "evaluation": IN_SAMPLE, "oof": _ranker_oof(store, run_id),
+        "evaluation": _evaluation(store, run_id, "rank_score", _rank_calibration),
+        "oof": _ranker_oof(store, run_id),
         "ndcg_at_k": mean_ndcg_at_k(labels, scores, groups, k=k),
         "precision_at_k": mean_precision_at_k(labels, scores, groups, k=k),
         "random_baseline_precision_at_k": round(prevalence, 4),

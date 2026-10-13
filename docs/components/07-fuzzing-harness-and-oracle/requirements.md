@@ -993,6 +993,17 @@ rewards) derives from it.
   - **`--anomaly [--anomaly-contamination F]`** runs the persisted ECOD tripwire after
     the run (FR-ML-12) and prints the top flagged candidates.
   - All flags appear in the launcher form, as number inputs, via `commandspec`.
+- **FR-FUZZ-33** *(`--train-on`; `CC-FUZZ-0049`, 2026-10-13).* `fuzzlab auto --train-on
+  {run,earlier}` (default `run`) chooses what `--score` / `--rank` train on.
+  - It needs `--score` and/or `--rank`, otherwise it is a usage error.
+  - **`earlier`** trains on earlier runs against the same target, never this run's
+    labels (FR-ML-14).
+  - **Trained summary:** how many earlier labelled candidates from which runs, "not on
+    this run's labels", the share of this run's candidates seen in training, and the
+    forward metric with its baseline (or why there is none).
+  - **Refused summary:** "NOT scored" / "NOT ranked" with the reason, pointing at
+    `--train-on run`. Nothing is written.
+  - The launcher shows the flag as a choice field via `commandspec`.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

@@ -211,6 +211,16 @@ bugs — the research-platform diagnostics of decision D2.
     `model` row (ranker's at that model's own training `at_k`). `oof` is `null` when no
     such model exists, for a fallback or legacy row, or in the all-runs view unless the
     selected row is a store-wide train. `run_metrics` is not read for these.
+  *(Note, CC-UI-0040.)*
+  - **Earlier-trained scores.** For scores written by a model trained on earlier runs
+    (FR-ML-14), `evaluation` reads `"not trained on this run's labels (trained on
+    earlier runs)"`.
+  - **All-runs view.** It labels the pool from every pooled run's scoring model, and
+    reads `"mixed"` when they disagree.
+  - **`oof` payload.** It carries `scope` (`"this run"` / `"earlier runs"`). For an
+    earlier-trained model it also carries `forward` (or `null`), its
+    `forward_skipped_reason`, `seen_fraction` and `train_run_ids`.
+  - **Display.** `ml.js` shows all of these. It never calls them out-of-sample.
 - **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
   layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
   (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +
@@ -345,6 +355,11 @@ bugs — the research-platform diagnostics of decision D2.
   the store's newest version of each name. `reproducibility.model_params_sha256` gives
   each pinned model's saved-params sha (FR-ML-13), or `null` for a model trained
   before models were saved.
+  *(Extended CC-UI-0040.)* `reproducibility.model_training` gives each pinned model's
+  `{trained_on, train_run_ids}`. This is `{"trained_on": "earlier", "train_run_ids":
+  [...]}` for a model trained on earlier runs (FR-ML-14), and `{"trained_on": "run",
+  "train_run_ids": null}` for a `run`-mode or legacy row. The text report marks an
+  earlier-trained model "(trained on earlier runs …)".
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

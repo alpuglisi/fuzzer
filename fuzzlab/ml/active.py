@@ -19,7 +19,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from fuzzlab.ml.dataset import build_dataset
+from fuzzlab.ml.dataset import build_dataset, target_of
 from fuzzlab.ml.ranker import Ranker
 
 
@@ -132,12 +132,6 @@ class Prioritized:
     seed: int = 0
 
 
-def _target_of(store, run_id: int) -> str | None:
-    row = store.conn.execute(
-        "SELECT base_url FROM target WHERE run_id=? ORDER BY id LIMIT 1", (run_id,)).fetchone()
-    return row["base_url"] if row else None
-
-
 def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str = "score",
                n_members: int = 5, seed: int = 0, min_rows: int = 20,
                min_positives: int = 5, min_groups: int = 2) -> Prioritized | None:
@@ -169,7 +163,7 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
         random.Random(seed).shuffle(order)
         return Prioritized(order=order, method=method, seed=seed)
 
-    target = _target_of(store, run_id)
+    target = target_of(store, run_id)
     if target is None:
         return None
     prior = build_dataset(store, before_run_id=run_id, target=target)

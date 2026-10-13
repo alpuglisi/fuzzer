@@ -146,3 +146,45 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
         ds.ids.append(int(c["id"]))
         ds.labelled.append(not unlabelled)
     return ds
+
+
+def target_of(store, run_id: int) -> str | None:
+    """The pipeline's recorded target (`target.base_url`) for a run, or ``None`` when the
+    run has no target row (the pipeline writes one only when it had points). The one
+    definition of "same target" for cross-run training (PA-0003)."""
+    row = store.conn.execute(
+        "SELECT base_url FROM target WHERE run_id=? ORDER BY id LIMIT 1", (run_id,)).fetchone()
+    return row["base_url"] if row else None
+
+
+def candidate_keys(store, ids) -> list[tuple[str, str, str]]:
+    """`(path, param, category)` of each candidate id, in order — the key a repeated
+    endpoint shares across runs (used for `seen_fraction`)."""
+    out = []
+    for cid in ids:
+        row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
+        try:
+            ev = json.loads(row["evidence"] or "{}") if row else {}
+        except (ValueError, TypeError):
+            ev = {}
+        out.append((to_path(ev.get("url", "")), ev.get("param", ""), ev.get("category", "")))
+    return out
+
+
+def run_ids_of(store, ids) -> list[int]:
+    """The distinct runs the given candidate ids belong to, sorted."""
+    runs = set()
+    for cid in ids:
+        row = store.conn.execute("SELECT run_id FROM candidate WHERE id=?", (cid,)).fetchone()
+        if row is not None:
+            runs.add(int(row["run_id"]))
+    return sorted(runs)
+
+
+def seen_fraction(store, train_ids, now_ids) -> float:
+    """Share of ``now_ids`` whose (path, param, category) key occurs among ``train_ids``:
+    how much of this run a model trained on earlier runs has effectively seen."""
+    if not now_ids:
+        return 0.0
+    seen = set(candidate_keys(store, train_ids))
+    return round(sum(1 for k in candidate_keys(store, now_ids) if k in seen) / len(now_ids), 6)

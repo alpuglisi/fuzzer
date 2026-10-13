@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from fuzzlab.core.store import MetricLogger
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
-from fuzzlab.ml.dataset import build_dataset
+from fuzzlab.ml.dataset import build_dataset, run_ids_of, seen_fraction, target_of
 from fuzzlab.ml.gbt import GradientBoostedTrees
 from fuzzlab.ml.logistic import LogisticRegression
 from fuzzlab.ml.metrics import oof_folds, pr_auc
@@ -71,16 +71,75 @@ def _next_version(store, name: str) -> int:
     return int(row["v"]) + 1 if row and row["v"] is not None else 1
 
 
+def _thin(n: int, pos: int, groups: int, min_rows: int, min_positives: int,
+          min_groups: int, k: int) -> bool:
+    """The trainers' thin-data gate (CC-ML-0012): too few rows or positives, no
+    negatives, too few endpoints for a held-out split, or k < 2."""
+    return (n < min_rows or pos < min_positives or (n - pos) < 1
+            or groups < max(2, min_groups) or k < 2)
+
+
+def _select_and_evaluate(ds, model_kind: str, k: int, alpha: float):
+    """Out-of-fold model selection + evaluation + conformal calibration on ``ds``.
+
+    Returns ``(name, pr_auc, prevalence, sigma, gate, selection)``; ``selection`` is the
+    per-model OOF PR-AUC for ``auto``, else None."""
+    selection = None
+    if model_kind == "auto":
+        oof_by = {k2: _oof_scores(ds, f, k) for k2, f in _MODELS.items()}
+        praucs = {k2: pr_auc(ds.y, s) for k2, s in oof_by.items()}
+        name = max(praucs, key=lambda m: praucs[m])   # deploy the OOF winner
+        oof, prauc = oof_by[name], praucs[name]
+        selection = {k2: round(v, 6) for k2, v in praucs.items()}
+    else:
+        name = model_kind if model_kind in _MODELS else "logistic"
+        oof = _oof_scores(ds, _MODELS[name], k)
+        prauc = pr_auc(ds.y, oof)
+    prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
+    sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
+    gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
+    return name, prauc, prevalence, sigma, gate, selection
+
+
+def _metric(store, run_id: int, key: str, value: float) -> None:
+    store.conn.execute("INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                       (run_id, key, float(value)))
+
+
+def forward_skip_reason(store, run_id: int, labels) -> str | None:
+    """Why a forward evaluation on this run's own labels would not be honest, or None.
+
+    With a confirmation budget the labels are the ones the prioritizer chose (grading the
+    model on rows it picked itself); one-class labels make PR-AUC / NDCG meaningless."""
+    skipped = store.conn.execute(
+        "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND oracle_status='skipped_budget'",
+        (run_id,)).fetchone()["c"]
+    if skipped:
+        return "budget-selected labels"
+    if not labels or sum(labels) == 0 or sum(labels) == len(labels):
+        return "one-class labels"
+    return None
+
+
 def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logistic",
                     min_rows: int = 20, min_positives: int = 5, k: int = 5,
                     alpha: float = 0.1, hybrid: bool = False,
-                    min_groups: int = 2) -> dict:
+                    min_groups: int = 2, train_on: str = "run") -> dict:
     """Train and write advisory scores. ``model_kind``: ``logistic``, ``gbt``, or
     ``auto`` (out-of-fold-select the better of the two). ``hybrid=True`` appends the
     unsupervised ECOD anomaly score as an extra feature (XGBOD-style; label-free, so no
     leakage). Falls back to the prevalence baseline on thin data — including fewer than
     ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
-    exists and any "OOF" metric would be in-sample (BUG-0062)."""
+    exists and any "OOF" metric would be in-sample (BUG-0062).
+
+    ``train_on="earlier"`` (CC-ML-0016) instead trains on earlier runs against the same
+    target and scores this run without reading its labels — see `_score_from_earlier`."""
+    if train_on == "earlier":
+        return _score_from_earlier(store, run_id, model_kind=model_kind, min_rows=min_rows,
+                                   min_positives=min_positives, k=k, alpha=alpha,
+                                   hybrid=hybrid, min_groups=min_groups)
+    if train_on != "run":
+        raise ValueError(f"train_on must be 'run' or 'earlier', got {train_on!r}")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
     ecod = None                                  # the hybrid's fitted detector, if any
@@ -97,27 +156,17 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     calibration: dict = {"alpha": alpha, "feature_version": ds.feature_version,
                          "run_id": run_id}
 
-    if (n < min_rows or pos < min_positives or (n - pos) < 1
-            or groups < max(2, min_groups) or k < 2):
+    if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
         # Fallback: not enough labelled data for a model — score with the base rate.
         model = PrevalenceBaseline().fit(ds.X, ds.y)
         scores = model.predict_proba(every.X)
         gate, name, kind = None, PREVALENCE_FALLBACK_NAME, "prevalence"
         result.update(model=name, fallback=True)
     else:
-        if model_kind == "auto":
-            oof_by = {k2: _oof_scores(ds, f, k) for k2, f in _MODELS.items()}
-            praucs = {k2: pr_auc(ds.y, s) for k2, s in oof_by.items()}
-            name = max(praucs, key=lambda m: praucs[m])   # deploy the OOF winner
-            oof, prauc = oof_by[name], praucs[name]
-            result["model_selection"] = {k2: round(v, 6) for k2, v in praucs.items()}
-        else:
-            name = model_kind if model_kind in _MODELS else "logistic"
-            oof = _oof_scores(ds, _MODELS[name], k)
-            prauc = pr_auc(ds.y, oof)
-        prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
-        sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
-        gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
+        name, prauc, prevalence, sigma, gate, selection = _select_and_evaluate(
+            ds, model_kind, k, alpha)
+        if selection is not None:
+            result["model_selection"] = selection
         model, kind = _MODELS[name](), name
         _fit_with_metrics(model, ds.X, ds.y, store, run_id, name)   # deploy: fit on all labels
         # advisory scores for EVERY row, including candidates the oracle skipped for
@@ -149,6 +198,103 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         "INSERT INTO model (name, version, feature_version, calibration, params, "
         "params_sha256) VALUES (?,?,?,?,?,?)",
         (name, version, ds.feature_version, json.dumps(calibration), params, params_sha))
+    store.conn.commit()
+    result.update(version=version, scored=len(scores), params_sha256=params_sha)
+    return result
+
+
+def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k, alpha,
+                        hybrid, min_groups) -> dict:
+    """Train on EARLIER runs against the same target; score EVERY candidate of this run.
+
+    This run's labels are never read for training, model selection or calibration, so
+    its scores are "not trained on this run's labels" — but not truly out-of-sample:
+    endpoints recur across runs of the same target (see ``seen_fraction``). The conformal
+    gate is calibrated on earlier out-of-fold scores, so its error bound is nominal, valid
+    only under exchangeability, which repeated endpoints and drift break.
+
+    Refuses — writes nothing — when the run has no target row or the earlier data is too
+    thin to train on; it never falls back to in-sample training under this mode."""
+    if run_id is None:
+        raise ValueError("train_on='earlier' needs the run to score")
+    base: dict = {"train_on": "earlier", "hybrid": hybrid, "train_rows": 0,
+                  "train_positives": 0}
+    target = target_of(store, run_id)
+    if target is None:
+        return {**base, "refused": True, "reason": "no target recorded for this run"}
+    prior = build_dataset(store, before_run_id=run_id, target=target)       # labelled
+    every = build_dataset(store, run_id, include_unlabelled=True)           # to score
+    n, pos, groups = len(prior), prior.positives, len(set(prior.groups))
+    base.update(train_rows=n, train_positives=pos)
+    if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
+        return {**base, "refused": True,
+                "reason": "no usable earlier labels for this target"}
+    train_ids = list(prior.ids)
+    ecod = None
+    if hybrid:
+        # label-free: fit ONCE on the earlier rows (labelled or not) and apply that same
+        # detector to the training rows and this run's rows
+        from fuzzlab.ml.anomaly import ECOD, augment
+        ecod = ECOD().fit(build_dataset(store, before_run_id=run_id, target=target,
+                                        include_unlabelled=True).X)
+        prior.X = augment(prior.X, ecod)
+        every.X = augment(every.X, ecod) if len(every) else every.X
+        prior.feature_names = list(prior.feature_names) + ["anomaly_ecod"]
+
+    name, prauc, prevalence, sigma, gate, selection = _select_and_evaluate(
+        prior, model_kind, k, alpha)
+    model = _MODELS[name]().fit(prior.X, prior.y)      # deploy: all earlier labels
+    scores = model.predict_proba(every.X)              # this run: never its labels
+    for cid, s in zip(every.ids, scores):
+        store.conn.execute("UPDATE candidate SET score=? WHERE id=?", (round(s, 6), cid))
+
+    seen = seen_fraction(store, train_ids, every.ids)
+    train_runs = run_ids_of(store, train_ids)
+    result = {**base, "refused": False, "model": name, "fallback": False,
+              "rows": len(every), "train_run_ids": train_runs, "seen_fraction": seen,
+              "pr_auc_earlier": prauc, "baseline_prevalence_earlier": prevalence,
+              "baseline_sigma_earlier": sigma}
+    if selection is not None:
+        result["model_selection"] = selection
+    for key, val in (("ml_pr_auc_earlier", prauc),
+                     ("ml_pr_auc_prevalence_earlier", prevalence),
+                     ("ml_pr_auc_sigma_earlier", sigma), ("ml_seen_fraction", seen)):
+        _metric(store, run_id, key, val)
+
+    # Forward evaluation: this run's scores against this run's OWN oracle labels, after
+    # the fact (never fed back). Only when those labels weren't budget-selected.
+    now = build_dataset(store, run_id)                 # labelled rows of this run
+    by_id = dict(zip(every.ids, scores))
+    reason = forward_skip_reason(store, run_id, now.y)
+    if reason is None:
+        fwd = pr_auc(now.y, [by_id[c] for c in now.ids])
+        fwd_prev = pr_auc(now.y, [now.positives / len(now)] * len(now))
+        result.update(pr_auc_forward=fwd, baseline_prevalence_forward=fwd_prev)
+        _metric(store, run_id, "ml_pr_auc_forward", fwd)
+        _metric(store, run_id, "ml_pr_auc_prevalence_forward", fwd_prev)
+    else:
+        result["forward_skipped_reason"] = reason
+
+    calibration = {"alpha": alpha, "feature_version": prior.feature_version,
+                   "run_id": run_id, "trained_on": "earlier", "train_run_ids": train_runs,
+                   "train_rows": n, "train_positives": pos, "seen_fraction": seen,
+                   "seed": 0, "k": k, "min_rows": min_rows, "min_positives": min_positives,
+                   "min_groups": min_groups, "model_kind": model_kind,
+                   "oof_scope": "earlier runs", "oof_pr_auc": prauc,
+                   "oof_pr_auc_prevalence": prevalence, "oof_pr_auc_sigma": sigma,
+                   "t_lo": gate.t_lo, "t_hi": gate.t_hi}
+    if reason is not None:
+        calibration["forward_skipped_reason"] = reason
+    else:
+        calibration.update(forward_pr_auc=result["pr_auc_forward"],
+                           forward_pr_auc_prevalence=result["baseline_prevalence_forward"])
+    params, params_sha = dumps_model(name, model, feature_names=prior.feature_names,
+                                     feature_version=prior.feature_version, ecod=ecod)
+    version = _next_version(store, name)
+    store.conn.execute(
+        "INSERT INTO model (name, version, feature_version, calibration, params, "
+        "params_sha256) VALUES (?,?,?,?,?,?)",
+        (name, version, prior.feature_version, json.dumps(calibration), params, params_sha))
     store.conn.commit()
     result.update(version=version, scored=len(scores), params_sha256=params_sha)
     return result

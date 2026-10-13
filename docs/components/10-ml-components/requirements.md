@@ -140,6 +140,38 @@ the oracle owns truth (the oracle/advisory split).
   - **Budget prioritizer:** not saved as a `model` row. Its `Prioritized.model_sha256`
     pins the model that ordered a budget: a ranker sha, or for `committee`
     `sha256("committee/1:" + member shas)`.
+- **FR-ML-14 (train on earlier runs, CC-ML-0016)** `train_and_score` and
+  `train_and_rank` take `train_on="run"` (the default, unchanged) or `"earlier"`.
+  - **Training data.** `earlier` trains on the labelled, non-budget-skipped candidates
+    of **earlier runs against the same target** (`dataset.target_of`, `build_dataset(…,
+    before_run_id=run_id, target=…)`), each labelled from its own run. It scores or
+    ranks **every** candidate of this run with that model.
+  - **No leakage.** This run's labels are never read for training, model selection or
+    calibration. The saved model's sha and training calibration do not change when this
+    run, a later run, or another target's run changes.
+  - **Refusal.** With no target row, or earlier data too thin for the trainers' gate,
+    it refuses and writes nothing (no scores, model row or metrics). It never falls
+    back to in-sample training. After a refusal this run has no model row of its own,
+    so a store-wide or legacy row that covers every run may still be selected for its
+    run page / ML tab (existing FR-ML-10 behaviour).
+  - **Saved row.** Its calibration records `trained_on: "earlier"`, `train_run_ids`,
+    `train_rows`, `train_positives`, `seen_fraction`, the seed, `k`, `min_*`,
+    `feature_version`, `oof_scope: "earlier runs"` and the OOF numbers on the earlier
+    data.
+  - **Metrics.** `*_earlier` (out-of-fold on the earlier data) and `*_seen_fraction`.
+    The `*_forward` metrics (this run's stored scores against its own oracle labels,
+    after the fact) are written only when no label was budget-selected and both
+    classes are present; otherwise the skip reason is recorded. No `run`-mode metric
+    keys and no training curves are written.
+  - **Wording.** The scores are "not trained on this run's labels", **not
+    out-of-sample**: endpoints recur across runs of one target, and `seen_fraction` (the
+    share of this run's `(path, param, category)` keys present in training) says how
+    much.
+  - **Conformal gate.** Calibrated on earlier out-of-fold scores, its error bound is
+    nominal, valid only under exchangeability, which recurring endpoints and drift
+    break.
+  - Wired as `fuzzlab auto --train-on earlier` (FR-FUZZ-33). Making it the default
+    waits on the on-host T5.5 / T7.4 runs.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
@@ -160,6 +192,10 @@ the oracle owns truth (the oracle/advisory split).
     `< max(2, min_groups)` (default `min_groups=2`, the correctness floor) or `k < 2`.
   - Metrics recomputed from stored `candidate.score`/`rank_score` are in-sample (deploy
     fit) and must be labelled so wherever shown (PA-0064).
+  - *(Note, CC-ML-0016.)* `train_on="earlier"` scores a run with a model whose
+    training, selection and calibration never read that run's labels, pinned by
+    model-identity tests. Such scores are labelled "not trained on this run's labels",
+    not out-of-sample (FR-ML-14).
 - **NFR-ML-calibrated** Classifier probabilities are calibrated; abstention is
   preferred to a confident wrong screen.
 

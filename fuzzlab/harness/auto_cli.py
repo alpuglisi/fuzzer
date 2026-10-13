@@ -70,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rank", action="store_true",
                    help="After the run, train the candidate ranker and write advisory "
                         "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
+    p.add_argument("--train-on", choices=["run", "earlier"], default="run",
+                   help="What --score/--rank train on: run = this run's own labels "
+                        "(in-sample deploy fit); earlier = earlier runs against the same "
+                        "target, never this run's labels (refuses when there are none)")
     p.add_argument("--confirm-budget", type=int, default=None, metavar="N",
                    help="Send at most N distinct candidates to the oracle, chosen by a "
                         "model trained on EARLIER runs against the same target (active "
@@ -114,6 +118,8 @@ def main(argv: list[str]) -> int:
         p.error("--confirm-budget must be at least 1")
     if not 0 < args.anomaly_contamination <= 0.5:
         p.error("--anomaly-contamination must be in (0, 0.5]")
+    if args.train_on != "run" and not (args.score or args.rank):
+        p.error("--train-on needs --score and/or --rank")
 
     selected = [c.strip() for c in args.categories.split(",")] if args.categories else None
     try:
@@ -184,12 +190,12 @@ def main(argv: list[str]) -> int:
             from fuzzlab.ml.train import train_and_score
             # advisory scores + model (best of logistic/GBT by out-of-fold PR-AUC);
             # never labels.
-            ml = train_and_score(store, run_id, model_kind="auto")
+            ml = train_and_score(store, run_id, model_kind="auto", train_on=args.train_on)
         rank = None
         if args.rank:
             from fuzzlab.ml.rank_train import train_and_rank
             # advisory rank scores + NDCG@k/Precision@k vs random; never labels.
-            rank = train_and_rank(store, run_id)
+            rank = train_and_rank(store, run_id, train_on=args.train_on)
         anomaly = None
         if args.anomaly:
             from fuzzlab.ml.anomaly import detect_anomalies
@@ -240,6 +246,28 @@ def _print_budget(m: dict) -> None:
         print("    skipped candidates count as misses in the score")
 
 
+def _print_earlier(label: str, verb: str, r: dict, metric: str, key: str,
+                   baseline: str, baseline_key: str) -> None:
+    """Summary line for a model trained on earlier runs (CC-FUZZ-0049): what it was
+    trained on, how much of this run it had seen, and the forward evaluation."""
+    if r.get("refused"):
+        print(f"  {label}: NOT {verb} — {r.get('reason')} (use --train-on run to train "
+              f"on this run's labels)")
+        return
+    runs = ", ".join(str(x) for x in r.get("train_run_ids") or [])
+    line = (f"  {label} ({r['model']}): {verb} {r.get(verb, 0)} candidate(s); trained on "
+            f"{r.get('train_rows', 0)} earlier labelled candidate(s) from this target "
+            f"(runs {runs}), not on this run's labels; "
+            f"{round(100 * (r.get('seen_fraction') or 0.0))}% of this run's candidates "
+            f"were seen in training; ")
+    if f"{key}_forward" in r:
+        line += (f"forward {metric}={r[f'{key}_forward']} "
+                 f"({baseline} {r.get(baseline_key)})")
+    else:
+        line += f"no forward {metric} ({r.get('forward_skipped_reason')})"
+    print(line + "  (advisory — never labels)")
+
+
 def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> None:
     plan = result.plan
     m = result.metrics
@@ -268,13 +296,19 @@ def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> No
               f"capability; they score as false negatives):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
-    if ml is not None:
+    if ml is not None and ml.get("train_on") == "earlier":
+        _print_earlier("ml", "scored", ml, "PR-AUC", "pr_auc", "prevalence",
+                       "baseline_prevalence_forward")
+    elif ml is not None:
         line = f"  ml ({ml['model']}): scored {ml.get('scored', 0)} candidate(s)"
         if not ml.get("fallback"):
             line += (f"; PR-AUC={ml.get('pr_auc')} vs prevalence "
                      f"{ml.get('baseline_prevalence')} / sigma {ml.get('baseline_sigma')}")
         print(line + "  (advisory — never labels)")
-    if rank is not None:
+    if rank is not None and rank.get("train_on") == "earlier":
+        _print_earlier("ranker", "ranked", rank, f"NDCG@{rank.get('at_k')}", "ndcg",
+                       "random", "baseline_ndcg_forward")
+    elif rank is not None:
         line = f"  ranker ({rank['model']}): ranked {rank.get('ranked', 0)} candidate(s)"
         if not rank.get("fallback"):
             line += (f"; NDCG@{rank.get('at_k')}={rank.get('ndcg')} "

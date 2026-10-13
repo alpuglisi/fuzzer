@@ -3,6 +3,59 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0040 — ML tab and report say how the scoring model was trained (2026-10-13)
+- Change:
+  - **`mlview.classifier_panel` / `ranker_panel`:**
+    - **`evaluation`, per run:**
+      - `"in-sample (deploy fit)"` for a `run`-trained, store-wide or legacy model
+        (unchanged);
+      - `NOT_TRAINED_ON_RUN` = `"not trained on this run's labels (trained on earlier
+        runs)"` for an earlier-trained one.
+    - **`evaluation`, all-runs view:** from every pooled run's scoring model (the runs
+      with stored scores). One label when they all agree, else `"mixed"` (PA-0064(2)).
+    - **`oof`** gains `scope` (`"this run"` / `"earlier runs"`). An earlier-trained
+      model adds:
+      - `forward` (the forward numbers, or `null`) and `forward_skipped_reason`;
+      - `seen_fraction` and `train_run_ids`.
+  - **`ml.js`** shows the label, "out-of-fold … on <scope>", the forward numbers (or
+    "no forward evaluation (<reason>)") and "N% of this run's candidates seen in
+    training".
+  - **`report.py`:**
+    - The reproducibility block gains `model_training: {name: {trained_on,
+      train_run_ids}}` next to `model_params_sha256`.
+    - A legacy or `run`-mode row reports `{"trained_on": "run", "train_run_ids": null}`.
+    - The text report appends "(trained on earlier runs …)" to an earlier-trained model.
+- Impact: read-only. FR-UI-11 gets a note; FR-UI-17 is extended.
+- Risk: low.
+- Deliverables:
+  - [x] Panels, `ml.js`, report — done
+  - [x] Tests — done:
+    - The per-run label for each mode, and the exact `oof` payload with forward and
+      seen fraction.
+    - The forward-skip reason is shown.
+    - The all-runs view is `mixed` for in-sample plus earlier-trained runs, and
+      `NOT_TRAINED_ON_RUN` once only earlier-trained runs are pooled.
+    - The report training block, for both modes and for a legacy row.
+    - Real-browser test (g): the label, forward numbers, skip reason and seen
+      percentage render with zero console errors or CSP violations.
+    - The existing in-sample test is updated for `scope`.
+- Implementation divergence (written back per the review gate):
+  1. The all-runs view keeps `"in-sample (deploy fit)"` when every pooled run was
+     run-trained. It is `"mixed"` only when pooled runs disagree. The draft's literal
+     "mixed unless every pooled run is earlier-trained" would have relabelled every
+     existing store-wide view, contradicting "the default `run` path is unchanged".
+  2. `oof` also carries `train_run_ids` and `forward_skipped_reason`.
+  3. The text report shows the training note.
+- Preventive-action compliance:
+  - **PA-0064(2):** in-sample, earlier-trained and mixed pools are each labelled for
+    what they are.
+  - **PA-0065:** verified under `FUZZLAB_REQUIRE_BROWSER=1` with a new real-browser
+    test. No template change, so the CSP template guard is unaffected.
+  - **PA-0067(1):** every pooled run's model is read per run through `latest_*`
+    (reader scope: one run each).
+- Review: pre-change review gate cleared 3/3 (with CC-ML-0016).
+- Effectiveness (assessed 2026-10-13): effective, including in a real browser. `tests/test_web_pages_browser.py` 8 passed under `FUZZLAB_REQUIRE_BROWSER=1`, including the new (g): the label, `out-of-fold … on earlier runs`, the forward numbers, the skip reason and the seen percentage render with zero console errors or CSP violations. The payload and report tests pass. The UI-never-earlier, UI-no-mixed and report-always-run mutants are killed. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 2973 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are exactly the same labgen `--check`/fingerprint-gate tests as at `a3b782d` and `369e887`, which fail identically in this environment because it has no scipy, scikit-learn or `gitleaks` binary. None is caused by this change.
+
 ### CC-UI-0039 — Per-run report pins the run's own models, not the store's newest (BUG-0066) (2026-10-13)
 - Change: in `report/report.py::build_report`, `models` and `reproducibility.model_versions`
   come from `latest_classifier(store, run_id)` and `latest_ranker(store, run_id)`: the
@@ -23,7 +76,7 @@ Newest first.
     BUG-0061's wrong sweep verdict — done
 - Implementation divergence (reflected back per the review gate): per PA-0067 the model-table guard (`tests/test_ml_model_selection.py`) now also flags `MAX(version)` reads of `model` without a name filter; the old report query moved from its must-not-match fixtures to its must-match fixtures.
 - Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
-- Effectiveness (assessed 2026-10-13): effective offline — `test_report_pins_the_runs_own_models_not_the_newest` and the extended model-table guard both fail on the old `MAX(version) … GROUP BY name` query and pass on the fix; `tests/test_report.py` passes unchanged.
+- Effectiveness (assessed 2026-10-13): effective offline — `test_report_pins_the_runs_own_models_not_the_newest` and the extended model-table guard both fail on the old `MAX(version) … GROUP BY name` query and pass on the fix; `tests/test_report.py` passes unchanged. Full suite at `a3b782d` (2026-10-13, whole `tests/`, `FUZZLAB_REQUIRE_BROWSER=1`): 2915 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are the same environmental labgen tests as at `369e887` (diffed, identical set); none is caused by this change.
 
 ### CC-UI-0038 — ML tab shows the saved logistic coefficients; report pins model params (2026-10-13)
 - Change:
@@ -56,7 +109,7 @@ Newest first.
     - the report sha equals the row's sha, and is null for legacy — done
   - [ ] FR-UI-11 — done
 - Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
-- Effectiveness (assessed 2026-10-13): effective offline — weights payload equals the saved model's `w` mapped to names (the hybrid's ECOD weight labelled), sorted by |weight|; reasons for none / gbt / fallback / legacy; the report's sha block equals the row's sha and is null for a legacy row; the browser smoke renders the coefficients chart (its panel is available in the seeded store) with zero page/console errors and zero CSP violations (`test_web*.py` 270 passed under `FUZZLAB_REQUIRE_BROWSER=1`).
+- Effectiveness (assessed 2026-10-13): effective offline — weights payload equals the saved model's `w` mapped to names (the hybrid's ECOD weight labelled), sorted by |weight|; reasons for none / gbt / fallback / legacy; the report's sha block equals the row's sha and is null for a legacy row; the browser smoke renders the coefficients chart (its panel is available in the seeded store) with zero page/console errors and zero CSP violations (`test_web*.py` 270 passed under `FUZZLAB_REQUIRE_BROWSER=1`). Full suite at `a3b782d` (2026-10-13, whole `tests/`, `FUZZLAB_REQUIRE_BROWSER=1`): 2915 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are the same environmental labgen tests as at `369e887` (diffed, identical set); none is caused by this change.
 
 ### CC-UI-0037 — Templates comply with the app's own CSP: no inline script/style (BUG-0064) (2026-10-13)
 - Change:

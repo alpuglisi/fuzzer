@@ -147,11 +147,13 @@ def test_ml_tab_labels_in_sample_and_shows_the_scoring_models_oof(tmp_path):
         assert cp["evaluation"] == rp["evaluation"] == mlview.IN_SAMPLE
         assert cp["oof"] == {"pr_auc": clf["pr_auc"],
                              "pr_auc_prevalence": clf["baseline_prevalence"],
-                             "pr_auc_sigma": clf["baseline_sigma"]}
+                             "pr_auc_sigma": clf["baseline_sigma"],
+                             "scope": "this run"}
         assert rp["oof"] == {"at_k": rank["at_k"], "ndcg": rank["ndcg"],
                              "precision": rank["precision"],
                              "ndcg_random": rank["baseline_ndcg"],
-                             "precision_random": rank["baseline_precision"]}
+                             "precision_random": rank["baseline_precision"],
+                             "scope": "this run"}
 
 
 def test_ml_tab_shows_no_oof_for_a_fallback_or_mixed_runs(tmp_path):

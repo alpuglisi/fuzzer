@@ -20,7 +20,7 @@ Newest first.
   - [ ] Migration test — done
   - [ ] FR-CORE-15 — done
 - Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
-- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 14 with `model.params` / `params_sha256` (`tests/test_ml_persist.py::test_migration_14_adds_the_model_params_columns`, head derived from `MIGRATIONS`).
+- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 14 with `model.params` / `params_sha256` (`tests/test_ml_persist.py::test_migration_14_adds_the_model_params_columns`, head derived from `MIGRATIONS`). Full suite at `a3b782d` (2026-10-13, whole `tests/`, `FUZZLAB_REQUIRE_BROWSER=1`): 2915 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are the same environmental labgen tests as at `369e887` (diffed, identical set); none is caused by this change.
 
 ### CC-CORE-0026 — Migration 13: candidate oracle status + anomaly score/flag (2026-10-13)
 - Change: `fuzzlab/core/migrations.py` gains `_M0013`, appended as `(13, _M0013)`:

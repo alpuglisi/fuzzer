@@ -1331,6 +1331,20 @@ tracked in the requirements files, not here.
     and never unpickles. A compatibility check guards the feature layout.
   - The ML tab shows the saved logistic coefficients. `fuzzlab report` pins each run's
     own models and their shas (BUG-0066 fixed).
+- **Train on earlier runs** `[built; on-host exits pending]` (CC-ML-0016, CC-FUZZ-0049,
+  CC-UI-0040, FR-ML-14):
+  - `fuzzlab auto --score/--rank --train-on earlier` trains the classifier / ranker
+    on earlier runs against the same target, then scores / ranks this run without
+    reading its labels.
+  - **Refusal.** It refuses, writing nothing, when there are no usable earlier labels.
+  - **What it records:**
+    - out-of-fold metrics on the earlier data;
+    - a forward evaluation against this run's own labels, when those labels were not
+      budget-selected;
+    - `seen_fraction`, the share of this run's endpoints present in training. It is why
+      these scores are "not trained on this run's labels" rather than out-of-sample.
+  - The ML tab and the report say how each model was trained.
+  - `run` stays the default until the on-host T5.5 / T7.4 runs.
 - **Model registry + honest evaluation** `[built]` (CC-ML-0011/0012, BUG-0061/0062):
   - The `model` table is shared by the classifier and ranker families and by every
     run's training. Each row's `calibration` records its `run_id` scope and its

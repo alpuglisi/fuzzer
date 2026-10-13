@@ -22,6 +22,45 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0049 — `fuzzlab auto --train-on {run,earlier}` (2026-10-13)
+- Change:
+  - **Flag.** `auto_cli` gains `--train-on {run,earlier}` (default `run`), passed to
+    `train_and_score` / `train_and_rank` (CC-ML-0016). It needs `--score` and/or
+    `--rank`, otherwise `p.error` (a clean exit, no traceback).
+  - **Summary line when trained** (`_print_earlier`), e.g.:
+
+    > ml (logistic): scored N candidate(s); trained on M earlier labelled candidate(s)
+    > from this target (runs 1, 2), not on this run's labels; X% of this run's
+    > candidates were seen in training; forward PR-AUC=… (prevalence …)
+
+    - The ranker line is the same, with `forward NDCG@k=… (random …)`.
+    - Without forward metrics it reads `no forward PR-AUC (<reason>)`.
+  - **Summary line when refused:** "ml: NOT scored — <reason> (use --train-on run to
+    train on this run's labels)", and "ranker: NOT ranked — …".
+  - **Launcher.** It shows the flag as a choice field, automatically via `commandspec`.
+- Impact: CLI only. FR-FUZZ-33 is added.
+- Risk: low.
+- Deliverables:
+  - [x] Flag, validation and summary — done
+  - [x] Tests (`tests/test_auto_train_on.py`) — done:
+    - **End to end:** two earlier `_seed_rich` runs with target rows, then a
+      ground-truth run with `--score --rank --train-on earlier`. Both saved models are
+      scoped to this run and earlier-trained from runs [1, 2]. Every candidate is
+      scored and ranked. Forward and seen-fraction metrics are recorded, with no
+      `run`-mode keys. The summary wording and seen percentage are exact.
+    - **Refusal** with no earlier runs and with only another target's runs: both lines
+      printed; no model row, metric or score written.
+    - `--train-on earlier` without `--score`/`--rank` is rejected.
+    - The launcher renders the flag as a `run`/`earlier` choice defaulting to `run`.
+  - [x] FR-FUZZ-33 — done
+- Implementation divergence (written back per the review gate):
+  1. The trained line also prints the forward baseline (prevalence / random) next to
+     the forward number.
+  2. The refusal line prints the actual reason, so a run with no target row reads
+     "no target recorded for this run".
+- Review: pre-change review gate cleared 3/3 (with CC-ML-0016).
+- Effectiveness (assessed 2026-10-13): effective offline. `tests/test_auto_train_on.py` 5 passed: end to end with exact summary wording, refusal writing nothing, validation, and the launcher choice field. The CLI-validation-removed and flag-ignored mutants are killed (CC-ML-0016). `test_auto.py` and `test_auto_budget.py` pass unchanged. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 2973 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are exactly the same labgen `--check`/fingerprint-gate tests as at `a3b782d` and `369e887`, which fail identically in this environment because it has no scipy, scikit-learn or `gitleaks` binary. None is caused by this change.
+
 ### CC-FUZZ-0048 — `fuzzlab auto --confirm-budget N` and `--anomaly` (2026-10-13)
 - Change:
   - **`harness/pipeline.py::run_pipeline(..., confirm_budget: int | None = None,

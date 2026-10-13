@@ -3,6 +3,127 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0016 — Train on earlier runs; score and rank this run without its labels (2026-10-13)
+- Change:
+  - **Shared target helper.** `dataset.target_of(store, run_id) -> str | None` reads the
+    pipeline's `target.base_url`. It moves from `active._target_of`, and `prioritize`
+    imports it (PA-0003/0021). `dataset` also gains `candidate_keys`, `run_ids_of` and
+    `seen_fraction`.
+  - **New keyword.** `train_and_score(store, run_id, *, train_on="run"|"earlier", …)`
+    and `train_and_rank(…, train_on=…)`. The default `"run"` path is unchanged. Any
+    other value raises `ValueError`.
+  - **`train_on="earlier"`** (`train._score_from_earlier`,
+    `rank_train._rank_from_earlier`):
+    - **Preconditions.** `run_id=None` raises `ValueError`. A run with no target row is a
+      refusal: `{"refused": True, "reason": "no target recorded for this run"}`.
+    - **Training set.** `prior = build_dataset(store, before_run_id=run_id,
+      target=target_of(store, run_id))`. Labelled rows only (`skipped_budget` excluded),
+      each labelled from its own run (CC-ML-0014). The ranker's texts come from
+      `_candidate_texts(store, None, prior.ids)`.
+    - **Refusal.** If `prior` fails the trainers' thin-data gate (`train._thin`: rows,
+      positives, no negatives, `min_groups`, `k < 2`), nothing is written (no scores,
+      no model row, no metrics). The result reads `{"train_on": "earlier", "refused":
+      True, "reason": "no usable earlier labels for this target", "train_rows",
+      "train_positives"}`. It never falls back to in-sample training.
+    - **Hybrid.** ECOD is fitted once on the earlier rows of the target, including
+      unlabelled rows (label-free). It augments the training rows and this run's rows,
+      and is stored with the model.
+    - **Evaluation and fit.**
+      - Model selection (`auto`), PR-AUC against both baselines, NDCG/precision@k
+        against random, and the conformal thresholds are computed out-of-fold on
+        `prior` (`train._select_and_evaluate`, `rank_train._evaluate`).
+      - The deploy model is fitted on all of `prior`, and every candidate of this run
+        is scored or ranked with it.
+      - This run's labels are never read for training, selection or calibration.
+    - **Saved row.** The model is saved through `persist`. Its calibration holds:
+      - `run_id` (this run), `trained_on: "earlier"`, `train_run_ids`, `train_rows`,
+        `train_positives`, `seen_fraction`;
+      - `seed`, `k`, `min_rows`, `min_positives`, `min_groups`, `feature_version`
+        (classifier also `model_kind` and `alpha`; ranker `at_k`);
+      - `oof_scope: "earlier runs"`, the `oof_*` keys and the conformal `t_lo`/`t_hi`;
+      - `forward_*`, or `forward_skipped_reason`.
+    - **Run metrics** (exact keys):
+      - Out-of-fold on the earlier data: `ml_pr_auc_earlier`,
+        `ml_pr_auc_prevalence_earlier`, `ml_pr_auc_sigma_earlier`, `rank_ndcg_earlier`,
+        `rank_precision_earlier`, `rank_ndcg_random_earlier` and
+        `rank_precision_random_earlier`.
+      - `ml_seen_fraction` and `rank_seen_fraction`.
+      - Forward evaluation of this run's stored scores against its own oracle labels,
+        computed after scoring and never fed back: `ml_pr_auc_forward`,
+        `ml_pr_auc_prevalence_forward`, `rank_ndcg_forward`, `rank_precision_forward`,
+        `rank_ndcg_random_forward` and `rank_precision_random_forward`.
+      - The forward keys are written only when this run has no `skipped_budget` row and
+        its labels include both classes (`train.forward_skip_reason`). Otherwise
+        `forward_skipped_reason` is `"budget-selected labels"` or `"one-class labels"`.
+      - No `run`-mode keys (`ml_pr_auc`, `rank_ndcg`, …) and no `metric_series` training
+        curves are written in this mode.
+    - **Result dict.** It gains `train_on`, `refused`, `train_run_ids`, `train_rows`,
+      `train_positives`, `seen_fraction`, the `*_earlier` and `*_forward` numbers, and
+      `forward_skipped_reason`.
+  - **Wording.** Results, docstrings and the UI say "not trained on this run's labels",
+    never "out-of-sample". `seen_fraction` is the share of this run's candidates whose
+    `(path, param, category)` key occurs among the training rows.
+  - **Conformal gate.** It is calibrated on earlier out-of-fold scores grouped by
+    endpoint and applied to this run, whose endpoints mostly recur. Its error bound is
+    therefore nominal: valid only under exchangeability, which repeated endpoints and
+    drift break (FR-ML-14).
+- Impact:
+  - Same tables, no schema change. The CLI is covered in CC-FUZZ-0049, and the UI and
+    report in CC-UI-0040.
+  - FR-ML-14 is added; NFR-ML-no-leak gets a note.
+  - `train.py` is refactored into shared helpers (`_thin`, `_select_and_evaluate`,
+    `_metric`, `forward_skip_reason`), which `rank_train` reuses. The `run` path's
+    behaviour is unchanged, and its existing tests pass unmodified.
+- Risk: medium-low. The `run` path is untouched in behaviour. Because `earlier` refuses,
+  it never quietly changes meaning.
+- Deliverables:
+  - [x] `dataset.target_of` (`prioritize` uses it), `candidate_keys`, `run_ids_of`,
+    `seen_fraction` — done
+  - [x] `train_on` in both trainers — done
+  - [x] Tests (`tests/test_ml_train_on_earlier.py`) — done:
+    - **Model identity** (`params_sha256` and the training-related calibration) is
+      unchanged when this run gains findings (including keys unlabelled in every
+      earlier run), loses its findings, gains or loses candidates, when a later run is
+      added, and when another target's run is added. Covered for logistic, hybrid,
+      `auto` and the ranker, with a check that the identity can change (an earlier
+      run's label).
+    - A key labelled only in this run trains as negative.
+    - Earlier `skipped_budget` rows are excluded: the same sha as deleting them.
+    - Stored scores and ranks equal the saved model applied to this run's rows
+      (hybrid included).
+    - The ranker vocabulary comes from the earlier texts only.
+    - `latest_classifier` / `latest_ranker` select the earlier-trained row for this
+      run, and it does not cover the runs it trained on.
+    - `seen_fraction` is exact.
+    - The exact metric-key set; no `run`-mode keys; no `metric_series` rows.
+    - The forward metrics equal PR-AUC / NDCG of this run's labels against the stored
+      scores. They are absent, with the reason recorded, on a budget-skipped row or
+      one-class labels.
+    - Refusal with no earlier runs, with only another target's runs, and with no
+      target row, each writing nothing.
+    - `ValueError` for `run_id=None` and for an unknown `train_on`.
+    - `run` mode unchanged.
+  - [x] FR-ML-14; NFR-ML-no-leak note — done
+- Implementation divergence (written back per the review gate):
+  1. Calibration also records `forward_skipped_reason` when forward metrics are skipped,
+     so the ML tab can say why.
+  2. The classifier records `seed: 0`, the fixed seed of its folds.
+  3. The shared-helper refactor of `train.py` described under Impact.
+- Preventive-action compliance:
+  - **PA-0064(2):** the earlier-data numbers go through `oof_folds`, and forward
+    numbers are named as such.
+  - **PA-0064(3):** every refusal and forward-skip branch has a test that enters it.
+  - **PA-0066(2):** tests seed several runs and targets.
+  - **PA-0063/0067:** every new `model` read goes through `latest_classifier` /
+    `latest_ranker` with the run's id. The new `dataset` helpers read `candidate` by
+    id, and `seen_fraction` compares content keys across runs on purpose (recurrence is
+    what it measures).
+  - **PA-0034(2):** the identity check is proven able to fail.
+  - **PA-0003:** one `target_of`.
+- Review: pre-change review gate cleared 3/3 (proposing agent and 2 independent
+  reviewer agents, rounds v1 to v3; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline. `tests/test_ml_train_on_earlier.py` and `tests/test_auto_train_on.py`: 57 passed. Existing ML suites pass unchanged, except `test_ml_oof.py`'s exact `oof` payload, which gains `scope`. Mutation-checked with bytecode caches cleared before each run (`PYTHONDONTWRITEBYTECODE=1`, on a copy of the tree). 18 of 19 mutants are killed: training on this run, ranking on this run, dropping the target filter, filtering ranker texts to this run, fitting ECOD on this run, removing the thin-data refusal, removing the no-target refusal, removing either forward-skip condition, an ungated ranker forward, an inverted `seen_fraction`, writing a `run`-mode key, the UI never or always in-sample, the report always `run`, the CLI validation removed, the CLI flag ignored, and `seen_fraction` not saved. The survivor (forward PR-AUC over `scores[:len(now)]` instead of by id) is equivalent: forward metrics are written only when no row is budget-skipped, and then this run's labelled rows are exactly its scored rows, in the same order. Full suite (2026-10-13, whole `tests/` with this change, `FUZZLAB_REQUIRE_BROWSER=1`): 2973 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are exactly the same labgen `--check`/fingerprint-gate tests as at `a3b782d` and `369e887`, which fail identically in this environment because it has no scipy, scikit-learn or `gitleaks` binary. None is caused by this change. The on-host question (does an earlier-trained model beat the baselines on a fresh lab run: T5.5 / T7.4) is still open.
+
 ### CC-ML-0015 — Trained models are saved as verified JSON and reload to identical predictions (2026-10-13)
 - Change:
   - **Per-class serialisation.** Each class gains `to_params()` and
@@ -127,7 +248,7 @@ Newest first.
   - [ ] FR-ML-13, FR-ML-9, NFR-ML-reproducible — done
 - Implementation divergence (reflected back per the review gate): (1) `model_registry` also gained `params_sha256_for(store, id)`, so `latest_classifier` reads only the sha (not the params text) on every call; (2) the trainers' result dicts gain `params_sha256`; (3) the loader also requires that a classifier's names end in `anomaly_ecod` exactly when an ECOD is stored, a gap found while debugging the stale-bytecode episode.
 - Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
-- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_persist.py` 47 passed: exact-equality round trips for logistic, gbt, prevalence, hybrid logistic+ECOD, ranker and constant; rows written by the trainers reload and reproduce the stored `score` / `rank_score` (logistic, gbt, hybrid; ranker); fallbacks saved; legacy NULL rows load as None; identical canonical text and sha on re-dump; fail-closed rejection of tampering, a pickle payload, non-JSON text, NaN/Infinity tokens (asserted to be refused at parse time), runaway nesting, unknown format/kind, length/type/key errors, a zero std, malformed and over-deep trees, an unsorted ECOD, and a hybrid name without its ECOD (and vice versa); non-finite models refused at dump (asserted at the serialiser); no pickle/marshal import; `check_compatible` rejects reordered names and a version bump; wrong-width rows refused; the prioritizer sha is deterministic per seed and None for random. Mutation-checked with bytecode caches cleared before every run (a stale-.pyc false result was caught and corrected during this work): removing the sha check, the NaN dump/parse guards, the depth check, the ECOD sort check, the row-width check, `check_compatible`, or saving the hybrid's ECOD each make a test fail. Related suites (ML, report, budget, web incl. browser smoke under `FUZZLAB_REQUIRE_BROWSER=1`): 174 + 270 passed.
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_persist.py` 47 passed: exact-equality round trips for logistic, gbt, prevalence, hybrid logistic+ECOD, ranker and constant; rows written by the trainers reload and reproduce the stored `score` / `rank_score` (logistic, gbt, hybrid; ranker); fallbacks saved; legacy NULL rows load as None; identical canonical text and sha on re-dump; fail-closed rejection of tampering, a pickle payload, non-JSON text, NaN/Infinity tokens (asserted to be refused at parse time), runaway nesting, unknown format/kind, length/type/key errors, a zero std, malformed and over-deep trees, an unsorted ECOD, and a hybrid name without its ECOD (and vice versa); non-finite models refused at dump (asserted at the serialiser); no pickle/marshal import; `check_compatible` rejects reordered names and a version bump; wrong-width rows refused; the prioritizer sha is deterministic per seed and None for random. Mutation-checked with bytecode caches cleared before every run (a stale-.pyc false result was caught and corrected during this work): removing the sha check, the NaN dump/parse guards, the depth check, the ECOD sort check, the row-width check, `check_compatible`, or saving the hybrid's ECOD each make a test fail. Related suites (ML, report, budget, web incl. browser smoke under `FUZZLAB_REQUIRE_BROWSER=1`): 174 + 270 passed. Full suite at `a3b782d` (2026-10-13, whole `tests/`, `FUZZLAB_REQUIRE_BROWSER=1`): 2915 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are the same environmental labgen tests as at `369e887` (diffed, identical set); none is caused by this change.
 
 ### CC-ML-0014 — Store-wide dataset keys labels and rule counts by run (BUG-0065) (2026-10-13)
 - Change: `ml/dataset.py::build_dataset` builds `positives` from

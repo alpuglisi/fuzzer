@@ -62,15 +62,30 @@ function histChart(elId, hist, label) {
   bars(elId, cats, [{ label, data: hist.counts }], { caption: `${label} histogram` });
 }
 
+// --- trained on earlier runs (CC-UI-0040) ------------------------------------------
+// An earlier-trained model's OOF numbers are on the earlier runs; its forward numbers
+// grade this run's scores against this run's own labels; seen = this run's candidates
+// whose endpoint/param/category the model trained on (not out-of-sample when high).
+function earlierNote(o, fmt) {
+  if (!o || o.scope !== "earlier runs") return "";
+  const fwd = o.forward ? ` · forward ${fmt(o.forward)}`
+    : ` · no forward evaluation (${o.forward_skipped_reason || "not recorded"})`;
+  const seen = o.seen_fraction != null
+    ? ` · ${Math.round(o.seen_fraction * 100)}% of this run's candidates seen in training` : "";
+  return fwd + seen;
+}
+
 // --- classifier + calibration ---------------------------------------------------
 function renderClassifier(d) {
   if (!d.available) { showEmpty("calibration", d.reason); return; }
   // Metrics recomputed from stored scores are in-sample (the deploy fit scored its own
   // training rows); the honest number is the scoring model's own out-of-fold PR-AUC.
   const oof = d.oof
-    ? ` · out-of-fold PR-AUC ${d.oof.pr_auc.toFixed(3)}`
+    ? ` · out-of-fold PR-AUC ${d.oof.pr_auc.toFixed(3)} on ${d.oof.scope || "this run"}`
       + (d.oof.pr_auc_prevalence != null
         ? ` (prevalence ${d.oof.pr_auc_prevalence.toFixed(3)})` : "")
+      + earlierNote(d.oof, (f) => `PR-AUC ${(f.pr_auc ?? 0).toFixed(3)}`
+        + (f.pr_auc_prevalence != null ? ` (prevalence ${f.pr_auc_prevalence.toFixed(3)})` : ""))
     : "";
   setMeta("calibration", `${d.evaluation} PR-AUC ${d.pr_auc.toFixed(3)} (baseline prevalence `
     + `${d.baseline_prevalence.toFixed(3)})${oof} · N=${d.n} (${d.positives} confirmed) `
@@ -108,8 +123,10 @@ function renderRanker(d) {
   if (!d.available) { showEmpty("ranker", d.reason); return; }
   // In-sample (deploy fit) vs the ranker's own out-of-fold numbers, at its training k.
   const oof = d.oof
-    ? ` · out-of-fold nDCG@${d.oof.at_k} ${d.oof.ndcg.toFixed(3)}`
+    ? ` · out-of-fold nDCG@${d.oof.at_k} ${d.oof.ndcg.toFixed(3)} on ${d.oof.scope || "this run"}`
       + (d.oof.ndcg_random != null ? ` (random ${d.oof.ndcg_random.toFixed(3)})` : "")
+      + earlierNote(d.oof, (f) => `nDCG@${d.oof.at_k} ${(f.ndcg ?? 0).toFixed(3)}`
+        + (f.ndcg_random != null ? ` (random ${f.ndcg_random.toFixed(3)})` : ""))
     : "";
   setMeta("ranker", `${d.evaluation} nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} · precision@${d.k} `
     + `${d.precision_at_k.toFixed(3)} (random baseline ${d.random_baseline_precision_at_k.toFixed(3)})`

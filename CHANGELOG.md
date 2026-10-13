@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/FUZZ/UI: `--score`/`--rank` can train on earlier runs — CC-ML-0016, CC-FUZZ-0049, CC-UI-0040)
+- **`fuzzlab auto --score/--rank --train-on earlier`** (step 2 of the user's order:
+  save models, then train on earlier runs, then plugins).
+  - The classifier and ranker train on earlier runs against the same target, then score
+    and rank this run **without reading its labels**.
+  - **Why:** until now every score was in-sample (the model graded rows it trained on),
+    which says little about how it would do on a new run.
+  - **Refusal.** It refuses and writes nothing when there are no usable earlier labels.
+    It never quietly falls back to in-sample training.
+  - **Evidence recorded:**
+    - out-of-fold metrics on the earlier data;
+    - a forward evaluation against this run's own oracle labels (skipped, with the
+      reason, when a confirmation budget chose those labels);
+    - `seen_fraction`, since recurring endpoints make this "not trained on this run's
+      labels", not out-of-sample.
+  - **Tests.** Model-identity tests pin the no-leak guarantee: the sha does not change
+    when this run, a later run or another target changes.
+  - **UI and report.** The ML tab and `fuzzlab report` now say how each model was
+    trained.
+  - `run` stays the default. Pre-change review gate cleared 3/3. Tests: 2973 passed, 65 skipped. 33 failed, the same environmental labgen set as before (no scipy, sklearn or gitleaks); none caused by this change. 18 of 19 mutants killed; the survivor is equivalent.
+
 ## 2026-10-13 (ML/CORE/UI: trained models are saved and reloadable; BUG-0066/PA-0067 — CC-CORE-0027, CC-ML-0015, CC-UI-0038/0039)
 - **Trained models are now saved** (step 1 of the user's order: save models, then
   `--score`/`--rank` from earlier runs, then plugins). Every classifier and ranker row

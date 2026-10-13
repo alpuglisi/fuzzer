@@ -14,7 +14,8 @@ loads each HTML page in real Chromium against a seeded store and asserts:
     metric updates the chart's accessible name;
 (d) /ml: one panel that throws no longer blanks the panels after it;
 (e) a persisted theme is applied on load;
-(f) /: the severity bar's segments render with widths proportional to the counts.
+(f) /: the severity bar's segments render with widths proportional to the counts;
+(g) /ml: an earlier-trained model's evaluation label, forward numbers and seen share show.
 
 Skips only if the browser genuinely cannot run, and fails instead under
 `FUZZLAB_REQUIRE_BROWSER=1` (see `tests/_browser.py`).
@@ -253,6 +254,35 @@ def test_one_broken_ml_panel_does_not_blank_the_rest(site, tab):
     assert page.locator("#panel-ranker .uplot").count() >= 1
     # the failure is still reported, not swallowed
     assert any("could not render panel" in e for e in tab.errors)
+
+
+# --- (g) /ml: an earlier-trained model's labels, forward numbers, seen share --
+
+def test_ml_tab_shows_an_earlier_trained_models_evaluation(site, tab):
+    real = tab.page.request.get(site["base"] + "/api/ml/data").json()
+    note = "not trained on this run's labels (trained on earlier runs)"
+    clf = dict(real["classifier"], evaluation=note, oof={
+        "pr_auc": 0.8, "pr_auc_prevalence": 0.3, "pr_auc_sigma": 0.4,
+        "scope": "earlier runs", "seen_fraction": 0.75, "train_run_ids": [1, 2],
+        "forward": {"pr_auc": 0.61, "pr_auc_prevalence": 0.25},
+        "forward_skipped_reason": None})
+    rank = dict(real["ranker"], evaluation=note, oof={
+        "at_k": 10, "ndcg": 0.9, "precision": 0.5, "ndcg_random": 0.4,
+        "precision_random": 0.2, "scope": "earlier runs", "seen_fraction": 0.5,
+        "train_run_ids": [1, 2], "forward": None,
+        "forward_skipped_reason": "budget-selected labels"})
+    payload = dict(real, classifier=clf, ranker=rank)
+    tab.page.route("**/api/ml/data", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(payload)))
+    page = tab.open("/ml", "#panel-ranker .uplot")
+    cal, rnk = page.inner_text("#panel-calibration"), page.inner_text("#panel-ranker")
+    assert note in cal and note in rnk
+    assert "out-of-fold PR-AUC 0.800 on earlier runs" in cal
+    assert "forward PR-AUC 0.610 (prevalence 0.250)" in cal
+    assert "75% of this run's candidates seen in training" in cal
+    assert "no forward evaluation (budget-selected labels)" in rnk
+    assert "50% of this run's candidates seen in training" in rnk
+    assert tab.problems() == []
 
 
 # --- (e) a persisted theme is applied on load --------------------------------
