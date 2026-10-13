@@ -3,6 +3,41 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0035 — Plural-aware secret names (BUG-0090); complete, fsynced, atomic secret files (BUG-0096) (2026-10-13)
+- Change:
+  - **`core/redaction.py` (BUG-0090).** `_fold` drops a trailing plural `s` only when
+    the folded form is itself sensitive (`passwords`, `secrets`, `sessions`, `jwts`,
+    `pwds`, `apiKeys`). `keys` follows `key`'s rule. `passes`, `passage`, `hotkeys`,
+    `monkeys` and `keystrokes` stay readable, and `pass` is never folded to `pas`.
+    Accepted harmless false redactions: the whole names `codes` / `pins`, and
+    `session_count`.
+  - **`core/secretfile.py` (BUG-0096).**
+    - `write_secret` loops `os.write` over a `memoryview` until complete, raises
+      `OSError` on no progress, and `fsync`s.
+    - New `create_secret`: `O_EXCL|O_NOFOLLOW` 0600; a partial file is removed on
+      failure.
+    - New `replace_secret`: a unique temp file (via `create_secret`), `os.replace`, and a
+      guarded directory `fsync`. On error the temp file is removed and the original is
+      untouched.
+  - **`core/credentials.py`:** the encrypted-file keyring saves through
+    `replace_secret` instead of a fixed `.tmp` name plus an unconditional replace.
+- Impact (other components / project):
+  - **PROXY** (CC-PROXY-0020): the redactor and the CA use these.
+  - **Logs:** `core.obs` redaction gains the plural fold through the shared predicate.
+  - No interface removed: `write_secret` keeps its signature.
+- Risk: low. Each helper is tested with a real kernel short write (`RLIMIT_FSIZE`, in a
+  child process), injected zero-progress, rename failures and symlinks. The keyring
+  round-trip and its failure path are tested.
+- Deliverables:
+  - [x] plural fold — done
+  - [x] `write_secret` loop + fsync; `create_secret`; `replace_secret` — done
+  - [x] keyring on `replace_secret` — done
+  - [x] tests: `test_secretfile` (new), `test_proxy_redaction` (names) — done
+  - [x] FR-CORE-25 amended — done
+- Implementation divergence: none.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-CORE-0034 — Shared safety helpers (`core.net`, `core.redaction`, `core.secretfile`); atomic, race-safe migrations (BUG-0080, BUG-0084, BUG-0079 sweep, BUG-0087) (2026-10-13)
 - Change:
   - **`core/net.py` (BUG-0080):** `is_loopback_host` (`localhost`, 127/8, `::1`,

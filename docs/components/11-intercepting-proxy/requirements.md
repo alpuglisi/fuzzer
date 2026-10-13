@@ -54,15 +54,25 @@ that shares the store, never a mandatory pipeline (D5).
   for a valid host: an IP literal, or an IDNA, lower-cased `[a-z0-9_-]` label
   hostname, at most 253 characters. The leaf file lives directly in `<ca_dir>/leaves/`
   (IPv6 as `ip6-<hex>`, with a resolved-path backstop). Every key (leaf and CA) is
-  created 0600 with `O_NOFOLLOW` (`core.secretfile.write_secret`), and the CA
-  directories are 0700. `fuzzlab proxy` and `AsyncProxyServer` bind loopback only
+  created 0600 with `O_NOFOLLOW`, and the CA directories are 0700. *(CC-PROXY-0020,
+  BUG-0096:)*
+  - **The CA key** is created with `O_EXCL` (`core.secretfile.create_secret`), so a
+    trust root is never silently replaced. It is written key first, then the
+    certificate (atomically).
+  - **On load**, the key must match the certificate, and a half CA is refused. Both
+    raise `CAError`, naming the fix.
+  - **Leaf key and cert** are replaced atomically and in full
+    (`core.secretfile.replace_secret`). `fuzzlab proxy` and `AsyncProxyServer` bind loopback only
   (`core.net.require_loopback`, BUG-0080).
 - **FR-PROXY-11 (persisted-copy redaction, CC-PROXY-0019, BUG-0084)** Before history is
   written, these are redacted:
   - sensitively named headers;
   - query parameters of the request target and of `Location` / `Content-Location` /
     `Refresh`;
-  - form, JSON (any depth) and multipart (non-file) request and response bodies;
+  - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
+    BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
+    (scalar, list, object or nested), and plural names are sensitive
+    (`core.redaction`);
   - `flow.url` and the separately stored bodies.
 
   Sensitivity is by name token (`core.redaction.is_sensitive_name`). Benign messages

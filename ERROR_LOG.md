@@ -18,6 +18,48 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Storage: a short write left a truncated secret file and reported success (fixed, BUG-0096/PA-0097)
+- **Symptom:** under a real file-size limit, `write_secret` returned normally with 4 of 11 bytes on disk; the keyring would rename such a temp over the good keyring.
+- **Root cause:** a single `os.write` with its count ignored; no fsync; a non-atomic replace.
+- **Remediation:** complete-or-raise writes with fsync; atomic `replace_secret` and `O_EXCL` `create_secret`; the keyring and the CA use them, and the CA pair is checked on load. CC-CORE-0035, CC-PROXY-0020. `docs/bugs/BUG-0096-short-write-truncates-secret-file.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: a huge JSON integer escaped the model loader's typed refusal (fixed, BUG-0095/PA-0096)
+- **Symptom:** `rate = 10**1000` with a valid sha raised a raw `OverflowError`; sizes were unbounded.
+- **Root cause:** `_is_num` could raise, and the boundary enumerated exception classes.
+- **Remediation:** a total `_is_num`; `OverflowError` / `MemoryError` wrapped; byte, element, tree and depth limits on dump and load. CC-ML-0024. `docs/bugs/BUG-0095-huge-json-int-escapes-model-loader.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: `flag_top` counted tie groups quadratically (fixed, BUG-0094/PA-0095)
+- **Symptom:** 1.6 M comparisons at n=4000; 3.9 s at 40k scores.
+- **Root cause:** a full rescan per distinct score.
+- **Remediation:** one `Counter` pass with an operation-count test; NaN raises. CC-ML-0024. `docs/bugs/BUG-0094-flag-top-quadratic-tie-counting.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Oracle: a reflection in a script that never runs was confirmed as XSS (fixed, BUG-0093/PA-0094)
+- **Symptom:** CONFIRMED for JSON, ld+json, `<template>` and `src` scripts.
+- **Root cause:** any `<script>` was treated as JavaScript.
+- **Remediation:** `script_executes` per the HTML standard's type rules; inert scripts are text in a raw-text element. CC-FUZZ-0058. `docs/bugs/BUG-0093-inert-script-confirmed-as-xss.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Session: credentials could be sent over a downgrade from https to http (fixed, BUG-0092/PA-0093)
+- **Symptom:** an https login page allowed an http same-host or in-scope-port destination.
+- **Root cause:** allow rules OR-ed with no prior deny; the agreed "never a downgrade" was waived as "moot".
+- **Remediation:** a transport deny before every allow, with an https floor from `base_url`, discovery hops, the page and redirects. CC-SESS-0012. `docs/bugs/BUG-0092-credentials-sent-over-https-downgrade.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: sealed holdout labels moved public forward metrics (fixed, BUG-0091/PA-0092)
+- **Symptom:** flipping 9 held-out labels moved the public forward PR-AUC from 0.668 to 0.761, with no reveal recorded.
+- **Root cause:** the seal was per model and per enumerated reader; forward evaluation and non-holdout trainers were outside it.
+- **Remediation:** per-target sealing: every trainer gets an implied holdout, forward evaluations and ML-tab panels read public rows only, and an unknown membership fails closed. CC-ML-0024, CC-UI-0050. `docs/bugs/BUG-0091-sealed-holdout-labels-move-public-metrics.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: sensitive JSON containers kept their secrets in history (fixed, BUG-0090/PA-0091)
+- **Symptom:** `{"tokens":[...],"credentials":{...}}` was persisted unchanged.
+- **Root cause:** only scalar values of a sensitive key were replaced; plurals were not sensitive.
+- **Remediation:** a sensitive key's whole value is replaced; plural fold in `core.redaction`. CC-PROXY-0020, CC-CORE-0035. `docs/bugs/BUG-0090-json-container-secrets-in-proxy-history.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Oracle: in-band SSRF/XXE confirmed on a reflection of the callback URL (fixed, BUG-0089/PA-0090)
 - **Symptom:** a page that only echoed the submitted callback URL confirmed SSRF / XXE in-band.
 - **Root cause:** the listener served the token as its body, and the token is in the URL.

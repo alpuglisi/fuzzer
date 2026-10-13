@@ -1,4 +1,4 @@
-"""Reflected-XSS confirmation is structural (BUG-0083, FR-FUZZ-15, PA-0084).
+"""Reflected-XSS confirmation is structural (BUG-0083, FR-FUZZ-39, PA-0084).
 
 A break-out fragment appearing "unescaped" somewhere used to confirm: `javascript:TOK`
 mid-URL in an html-escaped href, and `';TOK;//` inside a json_encode'd (double-quoted)
@@ -139,3 +139,94 @@ def test_the_guard_catches_an_offender():
     offender = ("class S:\n    def confirm(self, candidate, sender):\n"
                 "        return candidate.sink_context or 'html'\n")
     assert sink_context_reads(offender) == [3]
+
+
+# --- BUG-0093 / PA-0094: the container's executability is part of the structure -------
+
+def _in_script(open_tag: str, close: str = "</script>", wrap=("", "")):
+    return lambda v: f"{wrap[0]}{open_tag}var x='{v}';{close}{wrap[1]}"
+
+
+INERT_SCRIPTS = {
+    # the finding's four shapes
+    "json": _in_script('<script type="application/json">'),
+    "ld+json": _in_script('<script type="application/ld+json">'),
+    "template": _in_script("<script>", wrap=("<template>", "</template>")),
+    "external src": _in_script('<script src="/a.js">'),
+    # the rest of the spec's non-running scripts
+    "empty src": _in_script('<script src="">'),
+    "importmap": _in_script('<script type="importmap">'),
+    "text/template": _in_script('<script type="text/template">'),
+    "text/plain": _in_script('<script type="text/plain">'),
+    "type with parameters": _in_script('<script type="text/javascript;charset=utf-8">'),
+    "whitespace-only type": _in_script('<script type=" ">'),
+    "vbscript language": _in_script('<script language="vbscript">'),
+    "nomodule": _in_script("<script nomodule>"),
+    "noscript": _in_script("<script>", wrap=("<noscript>", "</noscript>")),
+}
+
+EXECUTING_SCRIPTS = {
+    "no type": _in_script("<script>"),
+    "text/javascript": _in_script('<script type="text/javascript">'),
+    "upper-case, padded": _in_script('<script type=" TEXT/JavaScript ">'),
+    "module": _in_script('<script type="module">'),
+    "empty type": _in_script('<script type="">'),
+    "x-ecmascript": _in_script('<script type="application/x-ecmascript">'),
+    "language javascript": _in_script('<script language="javascript">'),
+    "language JavaScript1.2": _in_script('<script language="JavaScript1.2">'),
+    "empty language": _in_script('<script language="">'),
+    "nomodule on a module": _in_script('<script type="module" nomodule>'),
+}
+
+
+@pytest.mark.parametrize("name", sorted(INERT_SCRIPTS))
+def test_a_reflection_in_a_script_that_never_runs_does_not_confirm(name):
+    """The finding: CONFIRMED for JSON, ld+json, template and src scripts. A raw
+    reflection there is still tried with the `</script>` break-out, which these pages
+    entity-escape `<` for, so nothing confirms."""
+    def render(v):
+        return INERT_SCRIPTS[name](v.replace("<", "&lt;"))
+    v, page = _confirm(render)
+    assert v is None, (name, page.sent)
+
+
+@pytest.mark.parametrize("name", sorted(EXECUTING_SCRIPTS))
+def test_a_reflection_in_a_running_script_confirms(name):
+    assert _confirm(EXECUTING_SCRIPTS[name])[0] is not None, name
+
+
+def test_a_data_block_that_reflects_a_raw_close_tag_is_real_xss():
+    """`</script>` ends a data block too: a real break-out of a JSON block is XSS."""
+    v, page = _confirm(_in_script('<script type="application/json">'))
+    assert v is not None and any("</script>" in s for s in page.sent)
+
+
+def test_an_escaped_close_tag_in_json_does_not_confirm():
+    """json_encode's `<\\/script>` keeps the data block closed."""
+    v, _ = _confirm(lambda val: '<script type="application/json">{"q":%s}</script>'
+                    % json.dumps(val).replace("</", "<\\/"))
+    assert v is None
+
+
+def test_a_break_out_under_template_does_not_confirm():
+    """`</script><TOK>` inside a <template> still lands in an inert subtree."""
+    v, _ = _confirm(_in_script("<script>", wrap=("<template>", "</template>")))
+    assert v is None
+
+
+def test_a_javascript_url_under_an_inert_ancestor_does_not_confirm():
+    v, _ = _confirm(lambda val: f'<template><a href="javascript:{val}">x</a></template>')
+    assert v is None
+
+
+def test_script_executes_is_the_one_predicate():
+    from bs4 import BeautifulSoup
+
+    from fuzzlab.oracle.context import script_executes, type_reflection
+    for name, render in INERT_SCRIPTS.items():
+        tag = BeautifulSoup(render("x"), "html.parser").find("script")
+        assert not script_executes(tag), name
+        assert type_reflection(render("MARK"), "MARK") != "js", name
+    for name, render in EXECUTING_SCRIPTS.items():
+        tag = BeautifulSoup(render("x"), "html.parser").find("script")
+        assert script_executes(tag), name

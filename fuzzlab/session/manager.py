@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import base64
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urljoin, urlparse
 
@@ -35,6 +35,15 @@ class FetchResponse:
     status: int
     headers: dict[str, str]
     text: str
+    #: the final URL after any redirects (None: the fetcher does not say)
+    url: str | None = None
+    #: the scheme of every hop, the final one included (empty: the fetcher does not say)
+    history_schemes: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _hops(r) -> tuple[str, ...]:
+    return tuple(urlparse(h.url).scheme.lower() for h in r.history) + \
+        (urlparse(r.url).scheme.lower(),)
 
 
 class Fetcher:
@@ -58,12 +67,14 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
         class _RequestsFetcher:
             def get(self, url, headers=None):
                 r = sess.get(url, headers=headers, timeout=15, allow_redirects=True)
-                return FetchResponse(r.status_code, dict(r.headers), r.text)
+                return FetchResponse(r.status_code, dict(r.headers), r.text, r.url,
+                                     _hops(r))
 
             def post(self, url, data=None, headers=None, allow_redirects=True):
                 r = sess.post(url, data=data, headers=headers, timeout=15,
                               allow_redirects=allow_redirects)
-                return FetchResponse(r.status_code, dict(r.headers), r.text)
+                return FetchResponse(r.status_code, dict(r.headers), r.text, r.url,
+                                     _hops(r))
 
             def cookies(self):
                 return sess.cookies.get_dict()
@@ -217,7 +228,11 @@ class SessionManager:
         cred = self._creds.require(host, identity)   # CredentialError if missing
         fetcher = self._fetch_factory()
 
-        form, login_page_url, challenge = self._discover_login_form(fetcher, base_url)
+        form, login_page_url, challenge, https_seen = \
+            self._discover_login_form(fetcher, base_url)
+        # The transport floor (BUG-0092): once the operator's base URL, or any hop on the
+        # way to the login page, was https, nothing after it may be plain http.
+        floor_https = https_seen or urlparse(base_url).scheme.lower() == "https"
         if form is None and challenge == "basic":
             # HTTP Basic has no form: the base URL itself challenges (BUG-0081). The
             # header goes only to that same in-scope origin.
@@ -228,14 +243,20 @@ class SessionManager:
                 f"from {base_url} (multi-step/CAPTCHA/SPA logins are not auto-detected; "
                 f"capture via the proxy post-Phase 6)"
             )
-        if not self._credential_destination_ok(form.action_url, login_page_url):
+        if not self._transport_ok(login_page_url, floor_https):
+            raise SessionAuthError(
+                f"refusing to log {identity}@{host} in: the login page {login_page_url} "
+                f"was reached by a downgrade from https to http")
+        if not self._credential_destination_ok(form.action_url, login_page_url,
+                                               floor_https=floor_https):
             raise SessionAuthError(
                 f"refusing to send {identity}@{host} credentials to "
-                f"{canonical_origin(form.action_url)}: not the login page's origin, an "
-                f"in-scope host, or an authorised auth origin (pass auth_origins=[...] "
-                f"to allow it)")
+                f"{canonical_origin(form.action_url)}: a downgrade from https to http, "
+                f"or not the login page's origin, an in-scope host, or an authorised auth "
+                f"origin (pass auth_origins=[...] to allow it)")
         resp = self._post_credentials(fetcher, form.action_url,
-                                      form.fill(cred.username, cred.password), login_page_url)
+                                      form.fill(cred.username, cred.password), login_page_url,
+                                      floor_https=floor_https)
         if resp.status == 401 and "basic" in {k.lower(): v for k, v in
                                               resp.headers.items()}.get(
                                                   "www-authenticate", "").lower():
@@ -283,8 +304,10 @@ class SessionManager:
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str):
         """Look for a login form from the base URL and a few common login paths.
-        Returns ``(form, login_page_url, challenge)``; ``challenge`` is ``"basic"`` when
-        the base URL answered 401 with a Basic ``WWW-Authenticate`` (no form needed)."""
+        Returns ``(form, login_page_url, challenge, https_seen)``; ``challenge`` is
+        ``"basic"`` when the base URL answered 401 with a Basic ``WWW-Authenticate`` (no
+        form needed). ``login_page_url`` is the page's final URL when the fetcher reports
+        it, and ``https_seen`` says whether any hop to it was https (BUG-0092)."""
         candidates = [base_url] + [urljoin(base_url, p) for p in
                                    ("login", "login.php", "signin", "users/login")]
         challenge = None
@@ -298,17 +321,34 @@ class SessionManager:
                     "www-authenticate", "")
                 if www.lower().startswith("basic"):
                     challenge = "basic"
-            form = detect.find_login_form(resp.text, url)
+            page = getattr(resp, "url", None) or url       # where the page really is
+            form = detect.find_login_form(resp.text, page)
             if form is not None:
-                return form, url, challenge
-        return None, base_url, challenge
+                https_seen = "https" in (getattr(resp, "history_schemes", ()) or ())
+                return form, page, challenge, https_seen
+        return None, base_url, challenge, False
 
-    # -- credential destinations (BUG-0081) --------------------------------
-    def _credential_destination_ok(self, target: str, login_page_url: str) -> bool:
-        """May credentials be sent to ``target``? Its origin must be the login page's
-        own, that host upgraded http→https (never downgraded), an in-scope host, or
-        an authorised ``auth_origins`` entry. A URL taken from response content (a form
-        action, a redirect) is never trusted otherwise."""
+    # -- credential destinations (BUG-0081, BUG-0092) -----------------------
+    @staticmethod
+    def _transport_ok(target: str, floor_https: bool) -> bool:
+        """The transport deny: an http(s) URL, and https whenever the floor is https."""
+        scheme = urlparse(target).scheme.lower()
+        return scheme == "https" or (scheme == "http" and not floor_https)
+
+    def _credential_destination_ok(self, target: str, login_page_url: str, *,
+                                   floor_https: bool = False) -> bool:
+        """May credentials be sent to ``target``?
+
+        **Deny first** (BUG-0092, PA-0093): the transport rule is checked before any
+        allow and nothing overrides it — the scheme must be http or https, and https
+        whenever the floor is (the operator's base URL, any discovery hop, or the login
+        page itself was https). Only then may it be allowed: its origin is the login
+        page's own, that host upgraded http→https, an in-scope host (any port, same or
+        upgraded scheme), or an authorised ``auth_origins`` entry. A URL taken from
+        response content (a form action, a redirect) is never trusted otherwise."""
+        floor_https = floor_https or urlparse(login_page_url).scheme.lower() == "https"
+        if not self._transport_ok(target, floor_https):
+            return False
         origin, page = canonical_origin(target), canonical_origin(login_page_url)
         if origin is None:
             return False
@@ -322,15 +362,17 @@ class SessionManager:
         return host in self._scope or f"{host}:{t.port}" in self._scope
 
     def _post_credentials(self, fetcher: Fetcher, url: str, data: dict,
-                          login_page_url: str) -> FetchResponse:
+                          login_page_url: str, *, floor_https: bool = False) -> FetchResponse:
         """POST the credentials without letting the HTTP client follow redirects: a 307 /
         308 re-sends the body (the credentials) to wherever ``Location`` says. A 301 /
-        302 / 303 becomes a body-less GET, followed only to an allowed origin."""
+        302 / 303 becomes a body-less GET, followed only to an allowed origin over an
+        allowed transport (the same deny-first predicate)."""
         resp = _post_no_redirects(fetcher, url, data)
         location = {k.lower(): v for k, v in resp.headers.items()}.get("location")
         if resp.status in (301, 302, 303) and location:
             nxt = urljoin(url, location)
-            if self._credential_destination_ok(nxt, login_page_url):
+            floor = floor_https or urlparse(url).scheme.lower() == "https"
+            if self._credential_destination_ok(nxt, login_page_url, floor_https=floor):
                 return fetcher.get(nxt)
         return resp                          # 307/308 never followed: judged as is
 

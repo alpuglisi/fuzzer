@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import bisect
 import math
+from collections import Counter
 from typing import Sequence
 
 
@@ -198,12 +199,19 @@ def flag_top(scores: Sequence[float], contamination: float = 0.1) -> list[bool]:
     taking **whole tie groups only**: identical scores are equally unusual, so a group is
     flagged entirely or not at all (CC-ML-0019, BUG-0070's sweep — the earlier rule
     flagged every score tied with the k-th, e.g. 30% at contamination 0.1). When the top
-    tie group alone exceeds the budget nothing is flagged: nothing stands out."""
+    tie group alone exceeds the budget nothing is flagged: nothing stands out.
+
+    One counting pass, ``O(n + u log u)`` for ``u`` distinct scores (BUG-0094, PA-0095:
+    the tie groups were once counted by rescanning every score per distinct value). A
+    non-finite score raises ``ValueError``: NaN has no place in an ordering."""
+    if not all(math.isfinite(s) for s in scores):
+        raise ValueError("flag_top: anomaly scores must be finite")
     k = flag_budget(len(scores), contamination)
+    sizes = Counter(scores)
     cutoff = None                        # lowest score still flagged
     taken = 0
-    for value in sorted(set(scores), reverse=True):
-        size = sum(1 for s in scores if s == value)
+    for value in sorted(sizes, reverse=True):
+        size = sizes[value]
         if taken + size > k:
             break
         taken += size

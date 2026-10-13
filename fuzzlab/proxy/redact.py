@@ -10,7 +10,8 @@ redacts:
 - **URL query parameters:** sensitively named ones, in the request target and in
   ``Location`` / ``Content-Location`` / ``Refresh`` response headers;
 - **bodies:** sensitively named fields of form-urlencoded, JSON (any depth) and
-  multipart (non-file) bodies, in requests and responses alike.
+  multipart (non-file) bodies, in requests and responses alike. A sensitive JSON key's
+  **whole value** is replaced, whatever its type (list, object, scalar; BUG-0090).
 
 Sensitivity is by name **token** (`core.redaction`, BUG-0084), so benign fields such as
 ``author`` stay readable. A body whose bytes the proxy cannot safely rewrite — chunked
@@ -70,9 +71,11 @@ def redact_url(url: str) -> str:
 
 
 def _redact_json(value):
+    # A sensitive key's whole value is the secret, whatever its shape: a scalar, a list
+    # or a nested object is replaced by the placeholder (BUG-0090, PA-0091).
     if isinstance(value, dict):
-        return {k: (_TEXT if is_sensitive_name(str(k)) and not isinstance(v, (dict, list))
-                    else _redact_json(v)) for k, v in value.items()}
+        return {k: (_TEXT if is_sensitive_name(str(k)) else _redact_json(v))
+                for k, v in value.items()}
     if isinstance(value, list):
         return [_redact_json(v) for v in value]
     return value

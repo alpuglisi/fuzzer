@@ -3,6 +3,38 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0012 — Credentials never over a downgrade from https to http: deny before allow (BUG-0092) (2026-10-13)
+- Change:
+  - `SessionManager._transport_ok(target, floor_https)` is the transport deny, checked
+    **first** in `_credential_destination_ok` and never overridden: the scheme must be
+    http or https, and https whenever the floor is.
+  - **The floor** is https when any of these was https:
+    - the operator's `base_url`;
+    - any hop of the discovery redirect chain;
+    - the login page itself;
+    - the URL a POST redirect comes from.
+  - **The login page reached by discovery** is checked before any POST. Its final URL
+    is used as the login page URL.
+  - **The manual 301/302/303 follow** uses the same predicate.
+  - **`FetchResponse` gains `url` and `history_schemes`.** The default fetcher fills
+    them from `requests`. A double without them falls back to `base_url`'s scheme.
+- Impact (other components / project):
+  - The interface addition is backward compatible: the new fields have defaults.
+  - **Behaviour change, listed:** an https login can no longer send credentials to an
+    http in-scope host or `auth_origins` entry.
+  - Host scope is unchanged (host-level, any port, same or upgraded scheme).
+- Risk: low. This is a stricter rule. Every allow path is tested against the deny, and
+  the same and upgraded transports are tested as still allowed.
+- Deliverables:
+  - [x] deny-first predicate, floor from base, hops, page and redirects — done
+  - [x] `FetchResponse.url` / `.history_schemes` — done
+  - [x] tests: `test_session_credential_destination` (7 new tests, 14 cases; 10 fail on `5eb4be9`) — done
+  - [x] FR-SESS-12 amended — done
+- Implementation divergence: none. BUG-0081's "moot" note is superseded by this entry
+  and BUG-0092.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-SESS-0011 — Credentials only to authorised origins, never on redirects; HTTP Basic at discovery (BUG-0081) (2026-10-13)
 - Change:
   - **`_credential_destination_ok`.** Allowed destinations are the login page's

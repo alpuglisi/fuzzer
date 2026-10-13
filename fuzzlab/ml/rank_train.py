@@ -24,7 +24,8 @@ from fuzzlab.ml.persist import LoadedModel, dumps_model, loads_model
 from fuzzlab.ml.ranker import Ranker
 from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k, ndcg_at_k, precision_at_k
 from fuzzlab.ml.train import (SCORE_DEPLOY, SCORE_EARLIER, SCORE_OOF_LABELLED, SCORE_SAVED,
-                              _insert_model, _metric, _saved_oof_scope, _seal, _thin,
+                              _apply_seal, _insert_model, _metric, _record_holdout,
+                              _saved_oof_scope, _seal, _thin, forward_rows,
                               forward_skip_reason, saved_training_rows)
 from fuzzlab.ml.text_features import candidate_text
 
@@ -150,13 +151,9 @@ def _holdout_ranking(store, run_id: int, held, scores_by_id: dict, at_k: int,
             "holdout_rows": len(held), "holdout_positives": held.positives}, None
 
 
-def _holdout_record(calibration: dict, result: dict, held, sealed, reason) -> None:
-    from fuzzlab.ml.holdout import record
-    if held is not None:
-        calibration["holdout"] = {**record(), "rows": len(held)}
+def _holdout_record(calibration: dict, result: dict, sealed, reason) -> None:
+    """Saved mode: no training, so no record of its own (the source's is carried)."""
     result["holdout"] = {"sealed": sealed is not None}
-    if held is not None:
-        result["holdout"]["rows"] = len(held)
     if reason is not None:
         calibration["holdout_skipped_reason"] = reason
         result["holdout"]["skipped_reason"] = reason
@@ -205,10 +202,9 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     if holdout and run_id is None:
         raise ValueError("holdout needs a run: membership is per target")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
-    held = None
-    if holdout:
-        from fuzzlab.ml import holdout as ho
-        ds, held = ho.split(store, ds)           # held-out rows never train (FR-ML-19)
+    # sealed rows never train, evaluate or choose the objective — explicit or implied
+    # by a sealed target (FR-ML-19, BUG-0091)
+    ds, held, hplan, store_seal = _apply_seal(store, run_id, ds, holdout)
     texts = _candidate_texts(store, run_id, ds.ids)
     every = build_dataset(store, run_id, include_unlabelled=True)   # rank: every row
     every_texts = _candidate_texts(store, run_id, every.ids)
@@ -268,7 +264,11 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
         # a store-wide row covers exactly the runs it ranked (BUG-0074)
         calibration["scored_run_ids"] = run_ids_of(store, every.ids)
     if held is not None:
-        _holdout_record(calibration, result, held, sealed, holdout_reason)
+        _record_holdout(calibration, result, hplan, held, sealed, holdout_reason)
+    elif store_seal is not None:
+        calibration["holdout"] = store_seal
+        result["holdout"] = {"rows": store_seal["rows"], "sealed": False,
+                             "implied": True, "skipped_reason": "store-wide train"}
 
     version, new_id = _insert_model(store, name, ds.feature_version, calibration, params,
                                     params_sha)
@@ -294,11 +294,12 @@ def _write_ranks(store, ids, scores, oof_by_id=None, probabilistic: bool = True)
              None if oof is None else round(oof, 6), cid))
 
 
-def _forward_ranking(store, run_id: int, ids, scores, at_k: int, seed: int):
+def _forward_ranking(store, run_id: int, ids, scores, at_k: int, seed: int, plan=None):
     """This run's stored rank scores against its OWN oracle labels, after the fact,
-    for a ranker that never read them (earlier / saved): result and calibration
-    updates, or the skip reason (budget-selected or one-class labels)."""
-    now = build_dataset(store, run_id)
+    for a ranker that never read them (earlier / saved), on the public rows only
+    (`train.forward_rows`, BUG-0091): result and calibration updates, or the skip
+    reason (budget-selected or one-class labels)."""
+    now = forward_rows(store, run_id, plan)
     by_id = dict(zip(ids, scores))
     reason = forward_skip_reason(store, run_id, now.y)
     if reason is not None:
@@ -334,6 +335,10 @@ def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
     target = target_of(store, run_id)
     if target is None:
         return {**base, "refused": True, "reason": "no target recorded for this run"}
+    from fuzzlab.ml import holdout as ho
+    if ho.sealing_for_run(store, run_id) == ho.UNKNOWN:
+        return {**base, "refused": True, "reason": "holdout membership unknown for this "
+                "target: a model recorded a membership not in holdout.MEMBERSHIPS"}
     earlier = [r for r in target_runs(store, target) if r < run_id]
     row, source, reason = saved_source(store, (RANKER_NAME,), run_id, earlier,
                                        model_id=model_id)
@@ -370,14 +375,13 @@ def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
                        oof_scope=_saved_oof_scope(source, row["id"]), **fwd_calibration)
     sealed = None
     if holdout:
-        from fuzzlab.ml import holdout as ho
         if ho.matches_current(source.get("holdout")):
-            held = ho.split(store, build_dataset(store, run_id))[1]
+            held = ho.sealed_split(store, build_dataset(store, run_id))[1]
             sealed, reason = _holdout_ranking(store, run_id, held,
                                               dict(zip(every.ids, scores)), at_k, seed)
         else:
             reason = "source model not trained with the current holdout"
-        _holdout_record(calibration, result, None, sealed, reason)
+        _holdout_record(calibration, result, sealed, reason)
     params, params_sha = params_for(store, row["id"])
     version, new_id = _insert_model(store, RANKER_NAME, row["feature_version"],
                                     calibration, params, params_sha)
@@ -399,12 +403,17 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     target = target_of(store, run_id)
     if target is None:
         return {**base, "refused": True, "reason": "no target recorded for this run"}
+    from fuzzlab.ml import holdout as ho
+    try:
+        hplan = ho.holdout_plan(store, run_id, holdout)    # explicit, or implied
+    except ho.SealingUnknown as exc:
+        return {**base, "refused": True, "reason": str(exc)}
     prior = build_dataset(store, before_run_id=run_id, target=target)       # labelled
     held = None
-    if holdout:
-        from fuzzlab.ml import holdout as ho
-        prior = ho.split(store, prior)[0]        # held-out endpoints never train
-        held = ho.split(store, build_dataset(store, run_id))[1]
+    if hplan is not None:
+        prior = ho.sealed_split(store, prior, run_id=run_id, plan=hplan)[0]
+        held = ho.sealed_split(store, build_dataset(store, run_id), run_id=run_id,
+                               plan=hplan)[1]
     n, pos, groups = len(prior), prior.positives, len(set(prior.groups))
     base.update(train_rows=n, train_positives=pos)
     if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
@@ -443,7 +452,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
                    "oof_ndcg": ndcg, "oof_precision": prec, "oof_ndcg_random": ndcg_rand,
                    "oof_precision_random": prec_rand}
     fwd_result, fwd_calibration = _forward_ranking(store, run_id, every.ids, scores,
-                                                   at_k, seed)
+                                                   at_k, seed, plan=hplan)
     result.update(fwd_result)
     calibration.update(fwd_calibration)
     _objective_record(calibration, result, obj_info, ranker)
@@ -451,7 +460,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     if held is not None:
         sealed, reason = _holdout_ranking(store, run_id, held,
                                           dict(zip(every.ids, scores)), at_k, seed)
-        _holdout_record(calibration, result, held, sealed, reason)
+        _record_holdout(calibration, result, hplan, held, sealed, reason)
 
     params, params_sha = dumps_model("ranker", ranker, feature_names=ranker.feature_names,
                                      feature_version=prior.feature_version)

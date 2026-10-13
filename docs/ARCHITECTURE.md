@@ -1149,9 +1149,13 @@ tracked in the requirements files, not here.
 - **Shared safety helpers** `[built]` (CC-CORE-0034, FR-CORE-25):
   - `core/net.py`: the one loopback listener gate, enforced at every listener by an
     AST guard test;
-  - `core/redaction.py`: the one secret-name predicate, by name token, for logs and
-    proxy history;
-  - `core/secretfile.py`: secret files are 0600 from creation.
+  - `core/redaction.py`: the one secret-name predicate, by name token (plurals folded,
+    CC-CORE-0035), for logs and proxy history. A sensitive JSON key's whole value is
+    redacted (CC-PROXY-0020);
+  - `core/secretfile.py`: secret files are 0600 from creation, complete or an error
+    (`fsync`ed), and replaced atomically (`replace_secret`). A trust root is created
+    with `O_EXCL` (`create_secret`). Used by the keyring and the proxy CA, which checks
+    its key/cert pair on load (CC-CORE-0035, CC-PROXY-0020).
 - **Migrations are atomic and race-safe** (CC-CORE-0034, FR-CORE-24): one
   `BEGIN IMMEDIATE` per migration, the version re-checked under the lock,
   statement-by-statement, with rollback on error.
@@ -1364,6 +1368,12 @@ tracked in the requirements files, not here.
     prioritizer's training. Their metrics are sealed in `holdout_metric` (migration 17)
     and read only with the counted `fuzzlab reveal-holdout`. The lab cell/transform split
     and external validation (D10) are not built.
+  - **Sealed per target** (CC-ML-0024 / CC-UI-0050, BUG-0091). Once any model of a
+    target records a holdout, every later trainer applies an implied holdout, and every
+    forward evaluation and ML-tab panel reads public rows only. One mechanism decides
+    it (`holdout.sealed_split` / `held_ids`), from the target's recorded memberships
+    and the registry `holdout.MEMBERSHIPS`. An unknown membership fails closed: trainers
+    refuse, and the prioritizer raises so the budget cap holds.
   - **Calibration.** `--calibrate platt` Platt-scales the classifier (cross-fitted
     calibrated `score_oof` feeds the gate; the full map is saved with the model, persist
     format 2) and records out-of-fold ECE / Brier before and after.

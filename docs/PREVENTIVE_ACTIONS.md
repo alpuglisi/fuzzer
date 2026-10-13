@@ -1252,3 +1252,70 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      token the request carries.
   2. **Each such strategy has a "reflects the request but does nothing"
      false-positive fixture.** (from BUG-0089)
+
+- **PA-0091** — Strengthens `PA-0085`, after BUG-0090: JSON lists and objects under a
+  sensitive key (`tokens: [...]`, `credentials: {...}`) kept their secrets in history,
+  because every planted test secret was a scalar.
+  1. **A redaction test plants each name form × each value shape.** Name forms are
+     singular, plural and qualified. Value shapes are scalar, list, object, nested, and
+     list of objects. Each combination is searched in every persisted copy.
+  2. **A sensitive key redacts its whole subtree.** A redactor never recurses into a
+     sensitive container looking for a second sensitive name. (from BUG-0090)
+
+- **PA-0092** — Strengthens `PA-0068`, after BUG-0091: sealed holdout labels moved
+  public forward metrics and every later non-holdout model. The seal had been enforced
+  at an enumerated set of readers, and a second producer (forward evaluation), as well
+  as trainers called without `--holdout`, were outside it.
+  1. **A sealed set is enforced at every producer of public label-derived numbers, by
+     one predicate** (`ml.holdout.sealed_split` / `held_ids`). It is keyed on durable
+     state (the target's recorded memberships), never on a per-call flag.
+  2. **A seal test flips the sealed labels and asserts every public number and every
+     trained artefact is unchanged**, with a control flip proving the check is live.
+  3. **The sealing argument is required where it can be forgotten** (`metric_input`'s
+     `held`), with an AST guard. (from BUG-0091)
+
+- **PA-0093** — Strengthens `PA-0082`, after BUG-0092: credentials could be sent over a
+  downgrade from https to http. The allow-list had no deny, and the agreed "never a
+  downgrade" constraint was waived in implementation as "moot".
+  1. **In an allow-list, the deny rules (transport, scheme) are evaluated before any
+     allow, and each is tested directly.** A test makes every allow path admit a
+     destination that the deny then refuses.
+  2. **A safety constraint from an agreed draft is never waived in implementation
+     without going back to the reviewers.** A deviation is recorded as a reviewed
+     change, never as an implementation note. (from BUG-0092)
+
+- **PA-0094** — Strengthens `PA-0084`, after BUG-0093: a reflection in a JSON /
+  ld+json / `<template>` / `src` script was confirmed as XSS.
+  1. **Structural evidence includes the container's executability under the platform's
+     own rules** (script type, `src`, `nomodule`, inert ancestors), implemented as one
+     predicate.
+  2. **Each structural check has a fixture where the structure matches but the container
+     is inert.** (from BUG-0093)
+
+- **PA-0095** — New, after BUG-0094: `flag_top` counted tie groups by rescanning every
+  score for each distinct value, which is O(n²).
+  1. **A per-element loop over a collection, inside a loop over the same collection's
+     values, is O(n²).** Count with `Counter` or a sort.
+  2. **Any function on a per-candidate or per-flow path has a test bounding its
+     operation count** at a size where the quadratic form would be visibly worse. (from
+     BUG-0094)
+
+- **PA-0096** — Strengthens `PA-0021`, after BUG-0095: a saved model with `10**1000`
+  escaped the loader as a raw `OverflowError`, and sizes were unbounded.
+  1. **A typed error boundary is tested with values at every numeric extreme** (huge
+     integers, `1e400`, NaN, ±inf, `-0.0`, bools) **and with oversized inputs** (bytes,
+     element counts, depth). Sizes are bounded before allocation.
+  2. **Validation predicates are total:** they return False and never raise. (from
+     BUG-0095)
+
+- **PA-0097** — Strengthens `PA-0080`, and extends `PA-0088` from the store to files,
+  after BUG-0096: one `os.write` left a truncated secret behind a normal return, and
+  the keyring renamed it over the good file.
+  1. **A file write is complete or raises:** loop on short writes, raise on no progress,
+     and `fsync` before returning.
+  2. **Replacing a file is atomic:** a unique temp file, fsync, rename, and a directory
+     fsync. On failure the temp file is removed and the original is intact.
+  3. **A file that must never be replaced silently (a trust root) is created with
+     `O_EXCL`.**
+  4. **Each is tested with an injected mid-write failure**, including a real kernel short
+     write where the platform allows it. (from BUG-0096)

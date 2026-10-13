@@ -404,3 +404,145 @@ def test_weights_panel_explains_when_there_are_no_coefficients(tmp_path, setup, 
             store.conn.commit()
         panel = mlview.weights_panel(store, run_id)
         assert panel["available"] is False and reason in panel["reason"]
+
+
+# --- BUG-0095 / PA-0096: numeric extremes and sizes stay inside the typed boundary -----
+
+_HUGE = 10 ** 1000                                   # an int no float can hold
+
+
+def _calibrated_env():
+    from fuzzlab.ml.calibration import PlattScaler
+    X, y = _data()
+    text, _ = dumps_model("logistic", LogisticRegression().fit(X, y),
+                          feature_names=FEATURE_NAMES, feature_version=FEATURE_VERSION,
+                          calibrator=PlattScaler(a=1.5, b=-0.2))
+    return json.loads(text)
+
+
+def _hybrid_env():
+    X, y = _data()
+    ecod = ECOD().fit(X)
+    text, _ = dumps_model("logistic", LogisticRegression().fit(
+        [r + [ecod.score(r)] for r in X], y), feature_names=FEATURE_NAMES
+        + ["anomaly_ecod"], feature_version=FEATURE_VERSION, ecod=ecod)
+    return json.loads(text)
+
+
+def _prevalence_env():
+    text, _ = dumps_model("prevalence", PrevalenceBaseline().fit([[0.0]], [1]),
+                          feature_names=FEATURE_NAMES, feature_version=FEATURE_VERSION)
+    return json.loads(text)
+
+
+@pytest.mark.parametrize("make,mutate", [
+    (_prevalence_env, lambda e: e["params"].update(rate=_HUGE)),          # the finding
+    (_good, lambda e: e["params"]["w"].__setitem__(0, _HUGE)),            # logistic weight
+    (_good, lambda e: e["params"].update(b=-_HUGE)),                      # logistic bias
+    (_calibrated_env, lambda e: e["calibrator"].update(a=_HUGE)),         # platt a
+    (_hybrid_env, lambda e: e["ecod"]["skew"].__setitem__(0, _HUGE)),     # ecod value
+    (_gbt_env, lambda e: e["params"].update(f0=_HUGE)),                   # gbt prior
+    (_gbt_env, lambda e: _deepest_split(e["params"]["trees"][0]).update(t=_HUGE)),
+])
+def test_an_int_too_large_for_a_float_is_a_typed_refusal(make, mutate):
+    env = copy.deepcopy(make())
+    mutate(env)
+    text, sha = _resealed(env)
+    with pytest.raises(ModelParamsError):
+        loads_model(text, sha)
+
+
+@pytest.mark.parametrize("literal", ["1e400", "-1e400", "1" + "0" * 5000])
+def test_extreme_literals_are_a_typed_refusal(literal):
+    """`1e400` parses to inf; a 5001-digit int trips Python's int-string limit
+    (ValueError) — both surface as ModelParamsError, never a raw exception."""
+    text, _ = _resealed(_prevalence_env())
+    text = text.replace('"rate":1.0', f'"rate":{literal}')
+    assert literal in text
+    with pytest.raises(ModelParamsError):
+        loads_model(text, persist._sha(text))
+
+
+@pytest.mark.parametrize("value", [_HUGE, float("nan"), float("inf"), -0.0, True, "1",
+                                   None, [1.0], 2 ** 1024],
+                         ids=["huge", "nan", "inf", "-0.0", "bool", "str", "none", "list",
+                              "2**1024"])
+def test_is_num_is_total(value):
+    """PA-0096: a validation predicate never raises, whatever it is given."""
+    assert persist._is_num(value) is (value == 0 and not isinstance(value, bool))
+
+
+def test_oversized_text_is_refused_before_parsing(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("json.loads must not run on oversized text")
+    text = '{"x":"' + "a" * persist.MAX_PARAMS_BYTES + '"}'
+    monkeypatch.setattr(persist.json, "loads", boom)
+    with pytest.raises(ModelParamsError, match="MAX_PARAMS_BYTES"):
+        loads_model(text, persist._sha(text))
+
+
+def test_a_model_over_the_element_budget_is_refused(monkeypatch):
+    text, sha = _resealed(_good())                   # 11-feature logistic: > 50 values
+    monkeypatch.setattr(persist, "MAX_MODEL_ELEMENTS", 50)
+    with pytest.raises(ModelParamsError, match="MAX_MODEL_ELEMENTS"):
+        loads_model(text, sha)
+    X, y = _data()
+    with pytest.raises(ModelParamsError, match="MAX_MODEL_ELEMENTS"):  # and on save
+        dumps_model("logistic", LogisticRegression().fit(X, y),
+                    feature_names=FEATURE_NAMES, feature_version=FEATURE_VERSION)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda e: e["params"].update(n_estimators=persist.MAX_TREES + 1,
+                                 trees=e["params"]["trees"] * 400),
+    lambda e: e["params"].update(max_depth=persist.MAX_DEPTH + 1),
+])
+def test_gbt_tree_count_and_depth_limits(mutate):
+    env = copy.deepcopy(_gbt_env())
+    mutate(env)
+    text, sha = _resealed(env)
+    with pytest.raises(ModelParamsError, match="trees of depth"):
+        loads_model(text, sha)
+
+
+def test_a_real_trained_model_fits_the_limits(tmp_path):
+    with Store(tmp_path / "a.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id, hybrid=True)
+        clf = latest_classifier(store, run_id)
+        assert load_classifier(store, clf) is not None
+
+
+def test_saved_mode_refuses_a_huge_int_cleanly(tmp_path):
+    """The finding's path end to end: a resealed stored row → a refusal, not a crash."""
+    from tests.test_ml_saved_and_decisions import _target, _two_trained_runs
+    with Store(tmp_path / "a.db") as store:
+        _two_trained_runs(store)
+        for row in store.conn.execute("SELECT id, params FROM model WHERE params IS NOT "
+                                      "NULL").fetchall():
+            env = json.loads(row["params"])
+            if env["kind"] == "logistic":
+                env["params"]["b"] = _HUGE
+            elif env["kind"] == "gbt":
+                env["params"]["f0"] = _HUGE
+            text, sha = _resealed(env)
+            store.conn.execute("UPDATE model SET params=?, params_sha256=? WHERE id=?",
+                               (text, sha, row["id"]))
+        store.conn.commit()
+        run_id = _seed_rich(store)
+        _target(store, run_id)
+        result = train_and_score(store, run_id, train_on="saved")
+        assert result["refused"] is True and "cannot be applied" in result["reason"]
+
+
+@pytest.mark.parametrize("exc", [OverflowError("int too large"), MemoryError()])
+def test_the_loader_boundary_types_every_extreme_failure(monkeypatch, exc):
+    """PA-0021 / PA-0096: whatever raises inside the loader, the caller sees one typed
+    error — an OverflowError / MemoryError from a rebuild included."""
+    text, sha = _resealed(_good())
+
+    def boom(env, sha256):
+        raise exc
+    monkeypatch.setattr(persist, "_build", boom)
+    with pytest.raises(ModelParamsError, match="out of range"):
+        loads_model(text, sha)

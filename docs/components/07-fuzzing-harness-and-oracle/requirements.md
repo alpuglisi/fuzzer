@@ -1264,3 +1264,19 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 
   Verified against the four lab XSS sink templates, each vulnerable and as its secure
   twin.
+  - **Executability (CC-FUZZ-0058, BUG-0093).** A `<script>` counts as JavaScript only
+    when `context.script_executes` says its inline body runs. The rules are the HTML
+    standard's:
+    - **type:** `type` is empty, or a JavaScript MIME essence matched exactly
+      (case-insensitive, whitespace stripped, so a type with parameters is a data
+      block), or `module`. With no `type`, `language` is absent or empty, or
+      `"text/"+language` is such an essence;
+    - **no `src`**, even an empty one;
+    - **not `nomodule`** on a classic script;
+    - **no inert ancestor.**
+
+    A marker in a script that never runs is text in a raw-text element: its only try is
+    `</script><TOK>` with element evidence. `javascript:` URLs count only with no inert
+    ancestor. **Stated limit:** structural state is not proof of execution, and
+    client-rendered `text/template` blocks are a false negative here. Browser-backed
+    confirmation (M6) is the stronger path.

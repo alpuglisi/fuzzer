@@ -101,7 +101,9 @@ def propose_queries(store, run_id: int | None, budget: int,
 
     if method == "committee":
         from fuzzlab.ml.rank_train import _candidate_texts
+        from fuzzlab.ml.train import _apply_seal
         ds = build_dataset(store, run_id)                         # fit on labelled rows
+        ds = _apply_seal(store, run_id, ds, False)[0]       # never on sealed rows
         if not len(ds):
             return []
         every = build_dataset(store, run_id, include_unlabelled=True)   # query any row
@@ -161,7 +163,11 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     re-testing, but a "beats random" claim must be measured on held-out endpoints.
 
     ``holdout=True`` (CC-ML-0020, FR-ML-19) leaves the blind holdout's endpoints out of
-    the earlier-run training, so a held-out endpoint never teaches the order.
+    the earlier-run training, so a held-out endpoint never teaches the order. On a
+    **sealed** target this is implied, ``--holdout`` or not (BUG-0091); a target whose
+    membership is unknown raises `holdout.SealingUnknown` — never ``None``, which would
+    mean "confirm everything" past the budget cap (the guarded wrapper then spends the
+    cap in row order and the run exits 1).
     """
     if method not in BUDGET_METHODS:
         raise ValueError(f"unknown budget method: {method!r} (choose from {BUDGET_METHODS})")
@@ -174,10 +180,11 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     target = target_of(store, run_id)
     if target is None:
         return None
+    from fuzzlab.ml import holdout as ho
+    hplan = ho.holdout_plan(store, run_id, holdout)    # raises SealingUnknown
     prior = build_dataset(store, before_run_id=run_id, target=target)
-    if holdout:
-        from fuzzlab.ml.holdout import split
-        prior = split(store, prior)[0]
+    if hplan is not None:
+        prior = ho.sealed_split(store, prior, run_id=run_id, plan=hplan)[0]
     n, pos = len(prior), prior.positives
     if (n < min_rows or pos < min_positives or (n - pos) < 1
             or len(set(prior.groups)) < max(2, min_groups)):

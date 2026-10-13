@@ -76,12 +76,18 @@ def gate_input(calibration: dict, oracle_status, score, score_oof):
     return score
 
 
-def metric_input(calibration: dict | None, oracle_status, score, score_oof):
+def metric_input(calibration: dict | None, oracle_status, score, score_oof, *, held):
     """The stored score an out-of-fold metric may use for one **labelled** row, or
     ``None`` to leave the row out (CC-ML-0020): its out-of-fold score when stored; a
     run-mode model's labelled row without one is a sealed held-out row, never pooled
     into the out-of-fold numbers; otherwise (legacy, earlier, saved, fallback) the
-    stored score, labelled by the reader as before."""
+    stored score, labelled by the reader as before.
+
+    ``held`` — required, no default (BUG-0091, PA-0092): whether the row is sealed on
+    its target (`holdout.held_ids`), whatever model scored it. A sealed row never feeds
+    a public metric."""
+    if held:
+        return None
     if score_oof is not None:
         return score_oof
     if (calibration or {}).get("score_source") == SCORE_OOF_LABELLED \
@@ -347,10 +353,9 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         raise ValueError("holdout needs a run: membership is per target")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
-    held = None
-    if holdout:
-        from fuzzlab.ml import holdout as ho
-        ds, held = ho.split(store, ds)           # held-out rows never train (FR-ML-19)
+    # sealed rows never train, select, cross-validate, calibrate or set the gate —
+    # with --holdout, or implied once the target is sealed (FR-ML-19, BUG-0091)
+    ds, held, hplan, store_seal = _apply_seal(store, run_id, ds, holdout)
     ecod = None                                  # the hybrid's fitted detector, if any
     if hybrid and len(every):
         # ECOD is label-free: fit it ONCE on every row and apply that same detector to
@@ -424,12 +429,11 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     if gate is not None:
         calibration.update(_gate_record(gate, ds.y))
     if held is not None:
-        from fuzzlab.ml.holdout import record
-        calibration["holdout"] = {**record(), "rows": len(held)}
-        result["holdout"] = {"rows": len(held), "sealed": sealed is not None}
-        if holdout_reason is not None:
-            calibration["holdout_skipped_reason"] = holdout_reason
-            result["holdout"]["skipped_reason"] = holdout_reason
+        _record_holdout(calibration, result, hplan, held, sealed, holdout_reason)
+    elif store_seal is not None:
+        calibration["holdout"] = store_seal
+        result["holdout"] = {"rows": store_seal["rows"], "sealed": False,
+                             "implied": True, "skipped_reason": "store-wide train"}
     # Save the deployed model itself (CC-ML-0015): reloadable, sha-pinned.
     params, params_sha = dumps_model(kind, model, feature_names=ds.feature_names,
                                      feature_version=ds.feature_version, ecod=ecod,
@@ -440,6 +444,43 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     store.conn.commit()
     result.update(version=version, scored=len(scores), params_sha256=params_sha)
     return result
+
+
+def _apply_seal(store, run_id, ds, explicit: bool):
+    """``(ds, held, plan, store_seal)``: the labelled rows a trainer may learn from.
+
+    Run-scoped: under the holdout plan (`holdout.holdout_plan` — explicit, or implied
+    by a sealed target) the sealed rows are split off into ``held``; an unknown
+    membership raises `holdout.SealingUnknown`. Store-wide (``run_id=None``): every
+    sealed target's sealed rows are left out per row, an unknown target's labelled rows
+    entirely, and ``store_seal`` is the record to store (no sealed metrics: no run)."""
+    from fuzzlab.ml import holdout as ho
+    if run_id is not None:
+        hplan = ho.holdout_plan(store, run_id, explicit)
+        if hplan is None:
+            return ds, None, None, None
+        public, held = ho.sealed_split(store, ds, run_id=run_id, plan=hplan)
+        return public, held, hplan, None
+    unknown = ho.unknown_origins(store, ds)
+    public, dropped = ho.sealed_split(store, ds, skip_unknown=True)
+    if not len(dropped):
+        return ds, None, None, None
+    seal = {**ho.record(), "rows": len(dropped), "implied": True, "scope": "store"}
+    if unknown:
+        seal["excluded_unknown_targets"] = unknown
+    return public, None, None, seal
+
+
+def _record_holdout(calibration: dict, result: dict, hplan, held, sealed, reason) -> None:
+    """The model's holdout record and the label-free result facts (CC-ML-0020)."""
+    from fuzzlab.ml.holdout import model_record
+    calibration["holdout"] = model_record(hplan, len(held))
+    result["holdout"] = {"rows": len(held), "sealed": sealed is not None}
+    if hplan.get("implied"):
+        result["holdout"]["implied"] = True
+    if reason is not None:
+        calibration["holdout_skipped_reason"] = reason
+        result["holdout"]["skipped_reason"] = reason
 
 
 def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k, alpha,
@@ -466,13 +507,20 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
     target = target_of(store, run_id)
     if target is None:
         return {**base, "refused": True, "reason": "no target recorded for this run"}
+    from fuzzlab.ml import holdout as ho
+    try:
+        hplan = ho.holdout_plan(store, run_id, holdout)    # explicit, or implied
+    except ho.SealingUnknown as exc:
+        return {**base, "refused": True, "reason": str(exc)}
     prior = build_dataset(store, before_run_id=run_id, target=target)       # labelled
     every = build_dataset(store, run_id, include_unlabelled=True)           # to score
     held = None
-    if holdout:
-        from fuzzlab.ml import holdout as ho
-        prior = ho.split(store, prior)[0]        # held-out endpoints never train
-        held = ho.split(store, build_dataset(store, run_id))[1]   # this run's, labelled
+    if hplan is not None:
+        # sealed endpoints never train; this run's sealed labelled rows give the sealed
+        # metrics and stay out of the forward evaluation (BUG-0091)
+        prior = ho.sealed_split(store, prior, run_id=run_id, plan=hplan)[0]
+        held = ho.sealed_split(store, build_dataset(store, run_id), run_id=run_id,
+                               plan=hplan)[1]
     n, pos, groups = len(prior), prior.positives, len(set(prior.groups))
     base.update(train_rows=n, train_positives=pos)
     if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
@@ -517,7 +565,8 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
                      ("ml_pr_auc_sigma_earlier", sigma), ("ml_seen_fraction", seen)):
         _metric(store, run_id, key, val)
 
-    fwd_result, fwd_calibration = _forward_evaluation(store, run_id, every.ids, scores)
+    fwd_result, fwd_calibration = _forward_evaluation(store, run_id, every.ids, scores,
+                                                      plan=hplan)
     result.update(fwd_result)
 
     calibration = {"alpha": alpha, "feature_version": prior.feature_version,
@@ -535,14 +584,9 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
         result["calibration"] = cal_info
     sealed = None
     if held is not None:
-        from fuzzlab.ml.holdout import record
         sealed, reason = _holdout_metrics(store, run_id, held,
                                           dict(zip(every.ids, scores)), gate)
-        calibration["holdout"] = {**record(), "rows": len(held)}
-        result["holdout"] = {"rows": len(held), "sealed": sealed is not None}
-        if reason is not None:
-            calibration["holdout_skipped_reason"] = reason
-            result["holdout"]["skipped_reason"] = reason
+        _record_holdout(calibration, result, hplan, held, sealed, reason)
     params, params_sha = dumps_model(name, model, feature_names=prior.feature_names,
                                      feature_version=prior.feature_version, ecod=ecod,
                                      calibrator=calibrator)
@@ -554,12 +598,22 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
     return result
 
 
-def _forward_evaluation(store, run_id: int, ids, scores) -> tuple[dict, dict]:
+def forward_rows(store, run_id: int, plan=None):
+    """This run's labelled rows a forward evaluation may read: the **public** ones —
+    every sealed row of the run's target left out (BUG-0091, PA-0092), under the
+    target's recorded versions plus ``plan``'s. Raises `holdout.SealingUnknown`."""
+    from fuzzlab.ml import holdout as ho
+    now = build_dataset(store, run_id)
+    return ho.sealed_split(store, now, run_id=run_id, plan=plan)[0]
+
+
+def _forward_evaluation(store, run_id: int, ids, scores, plan=None) -> tuple[dict, dict]:
     """This run's stored scores against this run's OWN oracle labels, after the fact
-    (never fed back) — for a model that never read them (earlier / saved). Written only
-    when those labels were not budget-selected and have both classes; otherwise the
-    reason. Returns the result-dict and calibration updates."""
-    now = build_dataset(store, run_id)                 # labelled rows of this run
+    (never fed back) — for a model that never read them (earlier / saved), on the
+    public rows only (`forward_rows`). Written only when those labels were not
+    budget-selected and have both classes; otherwise the reason. Returns the
+    result-dict and calibration updates."""
+    now = forward_rows(store, run_id, plan)            # public labelled rows of this run
     by_id = dict(zip(ids, scores))
     reason = forward_skip_reason(store, run_id, now.y)
     if reason is not None:
@@ -620,6 +674,10 @@ def _score_from_saved(store, run_id, *, model_id=None, holdout=False) -> dict:
     target = target_of(store, run_id)
     if target is None:
         return {**base, "refused": True, "reason": "no target recorded for this run"}
+    from fuzzlab.ml import holdout as ho
+    if ho.sealing_for_run(store, run_id) == ho.UNKNOWN:
+        return {**base, "refused": True, "reason": "holdout membership unknown for this "
+                "target: a model recorded a membership not in holdout.MEMBERSHIPS"}
     earlier = [r for r in target_runs(store, target) if r < run_id]
     row, source, reason = saved_source(store, SAVED_CLASSIFIER_NAMES, run_id, earlier,
                                        model_id=model_id)
@@ -651,11 +709,10 @@ def _score_from_saved(store, run_id, *, model_id=None, holdout=False) -> dict:
                        oof_scope=_saved_oof_scope(source, row["id"]), **fwd_calibration)
     sealed = None
     if holdout:
-        from fuzzlab.ml import holdout as ho
         if ho.matches_current(source.get("holdout")):
             gate = (ConformalGate(t_lo=source["t_lo"], t_hi=source["t_hi"])
                     if "t_lo" in source and "t_hi" in source else None)
-            held = ho.split(store, build_dataset(store, run_id))[1]
+            held = ho.sealed_split(store, build_dataset(store, run_id))[1]
             sealed, reason = _holdout_metrics(store, run_id, held,
                                               dict(zip(every.ids, scores)), gate)
         else:

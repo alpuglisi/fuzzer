@@ -7,6 +7,13 @@ compared with the set. Substring matching redacted ``author`` (``auth``), ``side
 (``sid``) and ``tokenizer``. A name that merely contains a sensitive word inside a
 longer token is not redacted, so benign fields stay readable. A sensitive token anywhere
 in the name redacts it, so ``session_count`` is redacted: harmless, and stated.
+
+**Plurals (BUG-0090).** A token ending in ``s`` is also compared with that ``s`` folded
+off, but only when the folded form is itself sensitive: ``passwords``, ``secrets``,
+``sessions``, ``jwts`` and ``apiKeys`` are secrets, while ``passes`` (→ ``passe``) and
+``passage`` stay readable. ``keys`` follows ``key``'s rule (whole name, or qualified), so
+``hotkeys`` and ``monkeys`` stay readable. Accepted harmless false redactions: the whole
+names ``codes`` / ``pins``, and ``session_count``.
 """
 
 from __future__ import annotations
@@ -34,9 +41,19 @@ def name_tokens(name: str) -> list[str]:
     return [t.lower() for t in _SPLIT.split(name or "") if t]
 
 
+def _fold(token: str) -> str:
+    """``token`` with a trailing plural ``s`` removed, when that leaves a sensitive word."""
+    if len(token) > 2 and token.endswith("s"):
+        stem = token[:-1]
+        if stem in SENSITIVE_TOKENS or stem in ("key", "code") \
+                or stem.endswith(("sessid", "sessionid")):
+            return stem
+    return token
+
+
 def is_sensitive_name(name: str) -> bool:
     """True when the field or parameter ``name`` holds a secret."""
-    tokens = name_tokens(name)
+    tokens = [_fold(t) for t in name_tokens(name)]
     if not tokens:
         return False
     if any(t in SENSITIVE_TOKENS or t.endswith(("sessid", "sessionid")) for t in tokens):

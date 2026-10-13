@@ -173,3 +173,108 @@ def test_a_401_without_a_challenge_is_still_rejected():
     site = _Site("/login", post_resp=FetchResponse(401, {}, ""))
     with pytest.raises(SessionAuthError, match="rejected"):
         _manager(site).ensure("127.0.0.1", "user", "http://127.0.0.1:8080/")
+
+
+# --- BUG-0092 / PA-0093: the transport deny runs before every allow ------------------
+
+class _HttpsSite(_Site):
+    """``_Site`` served at https://lab.example, with an optional discovery redirect."""
+
+    def __init__(self, action, *, login_redirect=None, **kw):
+        super().__init__(action, **kw)
+        self.login_redirect = login_redirect
+
+    def get(self, url, headers=None):
+        resp = super().get(url, headers)
+        if url.endswith("/login") and self.login_redirect:
+            # the fetcher followed an https -> http redirect to the real login page
+            return FetchResponse(resp.status, resp.headers, resp.text,
+                                 url=self.login_redirect,
+                                 history_schemes=("https", "http"))
+        return resp
+
+
+_HTTPS = "https://lab.example/"
+
+
+@pytest.mark.parametrize("action,kw", [
+    ("http://lab.example/login", {}),                              # in scope, same host
+    ("http://lab.example:9999/login", {}),                         # in scope, other port
+    ("http://auth.lab:7000/sso", {"auth_origins": ["http://auth.lab:7000"]}),
+    ("http://lab.example/login", {"auth_origins": ["http://lab.example"]}),
+    ("ftp://lab.example/login", {}),                               # not http(s) at all
+])
+def test_an_https_login_never_sends_credentials_over_http(action, kw):
+    """The finding: every allow (scope, auth_origins) used to override the downgrade."""
+    site = _HttpsSite(action)
+    with pytest.raises(SessionAuthError, match="downgrade"):
+        _manager(site, scope=["lab.example"], **kw).ensure("lab.example", "user", _HTTPS)
+    assert not [e for e in site.log if e[0] == "POST"]
+
+
+def test_every_allow_path_is_overridden_by_the_deny():
+    """A destination each allow rule admits (same origin, in-scope host, auth_origins)
+    is refused once the transport floor is https (PA-0093: deny before allow)."""
+    m = _manager(_Site("/login"), scope=["lab.example"],
+                 auth_origins=["http://lab.example", "http://auth.lab"])
+    for target in ("http://lab.example/login",            # same origin as the page
+                   "http://lab.example:81/x",             # in scope
+                   "http://auth.lab/sso"):                # auth_origins
+        assert m._credential_destination_ok(target, "http://lab.example/login")
+        assert not m._credential_destination_ok(target, "http://lab.example/login",
+                                                 floor_https=True)
+        assert not m._credential_destination_ok(target, "https://lab.example/login")
+
+
+def test_a_discovery_redirect_from_https_to_http_is_refused():
+    """base_url https -> 302 -> an http login page: refused before any POST."""
+    site = _HttpsSite("/login", login_redirect="http://lab.example/login")
+    with pytest.raises(SessionAuthError, match="downgrade"):
+        _manager(site, scope=["lab.example"]).ensure("lab.example", "user", _HTTPS)
+    assert not [e for e in site.log if e[0] == "POST"]
+
+
+def test_a_post_redirect_from_https_to_http_is_not_followed():
+    site = _HttpsSite("/login", post_resp=FetchResponse(
+        302, {"Location": "http://lab.example/home", "Set-Cookie": "s=1"}, ""))
+    _manager(site, scope=["lab.example"]).ensure("lab.example", "user", _HTTPS)
+    assert ("GET", "http://lab.example/home") not in site.log
+
+
+@pytest.mark.parametrize("action,base,kw", [
+    ("https://lab.example/login", _HTTPS, {}),                         # https -> https
+    ("https://lab.example:8443/login", _HTTPS, {}),                    # in scope, https
+    ("https://lab.example/login", "http://lab.example/", {}),          # upgrade
+    ("http://lab.example:9000/login", "http://lab.example/", {}),      # http in scope
+])
+def test_same_or_upgraded_transport_is_still_allowed(action, base, kw):
+    site = _HttpsSite(action)
+    state = _manager(site, scope=["lab.example"], **kw).ensure("lab.example", "user", base)
+    assert state.valid and any(e[0] == "POST" for e in site.log)
+
+
+def test_the_default_fetcher_reports_the_final_url_and_every_hop():
+    from types import SimpleNamespace
+
+    from fuzzlab.session.manager import _hops
+    r = SimpleNamespace(url="http://lab.example/login",
+                        history=[SimpleNamespace(url="https://lab.example/")])
+    assert _hops(r) == ("https", "http")
+
+
+def test_an_https_hop_in_discovery_sets_the_floor_even_for_an_http_base():
+    """http base -> https hop -> http login page: the chain went down from https, so
+    the page (and its form) is refused before any POST."""
+    class Chain(_Site):
+        def get(self, url, headers=None):
+            resp = super().get(url, headers)
+            if url.endswith("/login"):
+                return FetchResponse(resp.status, resp.headers, resp.text,
+                                     url="http://lab.example/login",
+                                     history_schemes=("http", "https", "http"))
+            return resp
+    site = Chain("/login")
+    with pytest.raises(SessionAuthError, match="downgrade"):
+        _manager(site, scope=["lab.example"]).ensure("lab.example", "user",
+                                                     "http://lab.example/")
+    assert not [e for e in site.log if e[0] == "POST"]

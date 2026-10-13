@@ -61,7 +61,22 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   per-host config. On expiry of an interactive login, prompt for re-capture rather
   than attempting an automated re-login. Depends on the proxy (component #11).
 
-- **FR-SESS-12 (credential destinations, CC-SESS-0011, BUG-0081)**
+- **FR-SESS-12 (credential destinations, CC-SESS-0011, BUG-0081; amended CC-SESS-0012,
+  BUG-0092)**
+  - **Transport deny, before every allow (CC-SESS-0012).** The destination's scheme must
+    be `http` or `https`. It must be `https` whenever the floor is https, that is when
+    any of these was https:
+    - the operator's `base_url`;
+    - any hop of the discovery redirect chain;
+    - the login page;
+    - the URL a POST redirect comes from.
+
+    No allow rule overrides it, `auth_origins` included. A login page reached by a
+    downgrade is refused before any POST. `FetchResponse.url` / `.history_schemes`
+    report the final URL and every hop; a fetcher that does not report them falls back
+    to `base_url`'s scheme. Host scope stays host-level: an in-scope other port over
+    the same or an upgraded scheme is allowed, and `auth_origins` is the origin-precise
+    alternative.
   - **Where credentials may go.** They are POSTed only to the login page's own
     canonical origin, that host upgraded to https, an in-scope host, or an origin in
     `SessionManager(auth_origins=[...])`. Anything else fails loudly, naming the

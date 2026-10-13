@@ -3,6 +3,29 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0050 — The ML tab never shows a number computed from sealed labels (BUG-0091) (2026-10-13)
+- Change:
+  - `mlview._scored_pairs` (classifier panel: PR, reliability, ECE) and `ranker_panel`
+    compute `holdout.held_ids(store, ds)` once and pass `held=` to
+    `train.metric_input`, so every sealed row is left out, whatever model scored it.
+  - `disagreement_panel` never fits its committee on a sealed row, and is unavailable
+    on an unknown holdout membership.
+  - `_ml()` exposes `fuzzlab.ml.holdout`.
+- Impact (other components / project):
+  - **ML** (CC-ML-0024): the predicate.
+  - On a sealed target, the panels show fewer rows (the public ones).
+  - The conformal panel (decisions, no labels) and the anomaly panel (label-free) are
+    unchanged, by design.
+- Risk: low. The panels are covered by the flip-sealed-labels test and the existing
+  ML-tab and browser suites.
+- Deliverables:
+  - [x] readers sealed — done
+  - [x] tests: `test_ml_holdout_seal` (panels flipped, unknown membership) — done
+  - [x] the UI requirements note amended — done
+- Implementation divergence: none.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-UI-0049 — Proxy API rule validation; one loopback gate; IPv6 repeater seeding; pooled bandit rows (BUG-0080, BUG-0085, BUG-0086, BUG-0088) (2026-10-13)
 - Change:
   - **Rule validation (BUG-0085).** `POST /api/proxy/scope` answers **400** on an

@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Error review 8: an external review's seven findings fixed — BUG-0090..0096)
+- A third-party review of `5eb4be9` reported seven defects, and each was reproduced
+  before fixing.
+  - **BUG-0090:** JSON lists and objects under a sensitive key now redact whole, and
+    plural names are sensitive (CC-PROXY-0020, CC-CORE-0035).
+  - **BUG-0091:** the blind holdout is sealed per target. Every trainer applies an
+    implied holdout once a target is sealed, and forward evaluations and ML-tab panels
+    read public rows only (CC-ML-0024, CC-UI-0050).
+  - **BUG-0092:** credentials are never sent over a downgrade from https to http (deny
+    before allow, CC-SESS-0012).
+  - **BUG-0093:** a reflection in a script that never runs (JSON, `<template>`, `src`)
+    is no longer confirmed as XSS (CC-FUZZ-0058).
+  - **BUG-0094:** `flag_top` runs in one pass.
+  - **BUG-0095:** the model loader types numeric extremes and bounds sizes.
+  - **BUG-0096:** secret files are written completely, fsynced and replaced
+    atomically, and the CA key is never silently replaced (CC-CORE-0035,
+    CC-PROXY-0020).
+- Why: four of these were gaps in this project's own review-7 fixes (BUG-0081 / 0083 /
+  0084 / 0079). Each bug doc carries a prior-preventive-action failure analysis, and
+  PA-0091..0097 strengthen the rules that did not catch them.
+
 ## 2026-10-13 (Doc fix: the structural-XSS code cited FR-FUZZ-15; it is FR-FUZZ-39)
 - `oracle/context.py` and `oracle/strategies.py` comments now name FR-FUZZ-39, the
   requirement CC-FUZZ-0057 actually added, and the `context.py` module docstring no

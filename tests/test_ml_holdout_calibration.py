@@ -339,7 +339,7 @@ def test_held_rows_have_no_oof_score_and_are_judged_on_score(tmp_path):
                 assert gate_input(clf.calibration, row["oracle_status"], row["score"],
                                   None) == row["score"]
                 assert metric_input(clf.calibration, row["oracle_status"], row["score"],
-                                    None) is None
+                                    None, held=True) is None
         ds = build_dataset(store, r)
         assert mlview.classifier_panel(store, r)["n"] == len(ds) - len(held)
 
@@ -403,18 +403,22 @@ def test_earlier_mode_and_the_prioritizer_drop_held_endpoints(tmp_path):
         now = _seed(store, seed=5)
         prior = build_dataset(store, before_run_id=now, target=TARGET)
         kept = len(prior) - sum(ho.mask(store, prior))
+        ids = build_dataset(store, now, include_unlabelled=True).ids
+        # before the target is sealed, only --holdout drops the held endpoints
+        assert prioritize(store, now, ids).training_rows == len(prior)
+        unsealed_sha = prioritize(store, now, ids).model_sha256
+        assert prioritize(store, now, ids, holdout=True).training_rows == kept
         res = train_and_score(store, now, train_on="earlier", holdout=True)
         assert res["train_rows"] == kept < len(prior)
         assert res["holdout"]["rows"] == len(_held_ids(store, now))
-        ids = build_dataset(store, now, include_unlabelled=True).ids
-        assert prioritize(store, now, ids, holdout=True).training_rows == kept
-        assert prioritize(store, now, ids).training_rows == len(prior)
-        # identity: held-out earlier labels never move the prioritizer's model
+        # once sealed, the holdout is implied (BUG-0091): --holdout or not
+        assert prioritize(store, now, ids).training_rows == kept
         sha = prioritize(store, now, ids, holdout=True).model_sha256
+        assert prioritize(store, now, ids).model_sha256 == sha != unsealed_sha
+        # identity: held-out earlier labels never move the prioritizer's model
         assert _flip_labels(store, a, _held_ids(store, a)) > 0
         assert prioritize(store, now, ids, holdout=True).model_sha256 == sha
-        assert prioritize(store, now, ids).model_sha256 != \
-            prioritize(store, now, ids, holdout=True).model_sha256
+        assert prioritize(store, now, ids).model_sha256 == sha
 
 
 def test_saved_mode_reports_holdout_only_for_the_current_membership(tmp_path, monkeypatch):

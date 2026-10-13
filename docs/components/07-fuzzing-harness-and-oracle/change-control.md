@@ -22,6 +22,43 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0058 — Reflected-XSS confirmation models script executability (BUG-0093); CLI says when a holdout is implied (BUG-0091) (2026-10-13)
+- Change:
+  - **`oracle/context.script_executes(tag)`** applies the HTML standard's script type
+    rules exactly:
+    - the type string, then an exact, case-insensitive JavaScript MIME essence match,
+      or `module`;
+    - `language` when there is no `type`;
+    - `nomodule` on a classic script;
+    - any `src`;
+    - inert ancestors.
+  - **`locate_reflection`** types a marker only in an executing script as `script`. A
+    marker in an inert script falls through to text with `inert_parent="script"`, whose
+    only try is the `</script>` element break-out.
+  - **`js_executes`** reads only executing scripts, and `javascript:` URLs with no
+    inert ancestor.
+  - **`type_reflection`** uses the same predicate.
+  - **`harness/auto_cli._print_ml_extras`** appends "(implied: target sealed)" to the
+    holdout line. `ml/plugins._with_held_endpoints` counts held endpoints for an
+    implied holdout too.
+- Impact (other components / project):
+  - **ML** (CC-ML-0024): the implied-holdout line.
+  - The oracle produces fewer false confirmations, which become fewer positive labels
+    for the ML.
+  - The lab sink templates' verdicts are unchanged (existing tests).
+- Risk: low. The predicate is tested on 13 inert and 10 executing shapes, plus
+  break-out, escaped and inert-ancestor cases.
+- Deliverables:
+  - [x] `script_executes` and its use in the three readers — done
+  - [x] CLI implied-holdout line — done
+  - [x] tests: `test_oracle_xss_structural` (17 failing before), `test_ml_holdout_seal`
+        (CLI line) — done
+  - [x] FR-FUZZ-39 amended — done
+- Implementation divergence: none. The test file's docstring still cited FR-FUZZ-15 and
+  is corrected to FR-FUZZ-39.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-FUZZ-0057 — Structural reflected-XSS confirmation (BUG-0083); in-band OOB proof (BUG-0089); greybox destructive send gate (BUG-0082) (2026-10-13)
 - Change:
   - **XSS (BUG-0083), in `oracle/context.py`.**

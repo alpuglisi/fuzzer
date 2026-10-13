@@ -147,9 +147,19 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `core.net.is_loopback_host` / `require_loopback`: the one listener gate (D11),
     accepting `localhost`, 127/8, `::1` and IPv4-mapped loopback;
   - `core.redaction.is_sensitive_name`: the one secret-name predicate (by name token),
-    used by obs and proxy redaction;
-  - `core.secretfile.write_secret`: secret files are created 0600 with `O_NOFOLLOW`
-    (CA keys, the encrypted keyring).
+    used by obs and proxy redaction. *(CC-CORE-0035, BUG-0090:)* a trailing plural `s`
+    is folded only when the folded form is sensitive (`passwords`, `secrets`,
+    `apiKeys`; never `passes`, and never `pass` → `pas`). The whole names `codes` /
+    `pins` are accepted false redactions;
+  - `core.secretfile`: secret files are created 0600 with `O_NOFOLLOW`. *(CC-CORE-0035,
+    BUG-0096:)* every write is complete or raises (a loop over short writes, then
+    `fsync`):
+    - `write_secret` writes in place;
+    - `create_secret` refuses an existing file (`O_EXCL`), for a trust root;
+    - `replace_secret` is atomic (unique temp file, fsync, rename, directory fsync; on
+      failure the original is intact and no temp is left).
+
+    The encrypted keyring saves through `replace_secret`.
 - **FR-CORE-23** *(aborted runs; `CC-CORE-0033`, 2026-10-13, BUG-0078).*
   `Store.mark_aborted(run_id, exc)` records on a run that failed after it started
   `run.notes = "aborted: <Type>: <message>"`, or `"aborted: exit N"` for `SystemExit`,

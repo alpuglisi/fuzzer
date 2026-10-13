@@ -183,6 +183,10 @@ the oracle owns truth (the oracle/advisory split).
   - *(CC-ML-0022, BUG-0069)* When it persists flags for a run it records
     `run_metrics.anomaly_feature_version` (the candidate feature version read); the
     read-only refit records nothing.
+  - *(CC-ML-0024, BUG-0094)* `flag_top` counts tie groups in one pass,
+    `O(n + u log u)`, with an operation-count bound under test. A non-finite score
+    raises `ValueError` (contained as a FAILED stage); ECOD and Isolation Forest score
+    finite features finitely.
 
 - **FR-ML-13 (saved models, CC-ML-0015)** Every `model` row written by
   `train_and_score` / `train_and_rank` carries the trained model itself.
@@ -204,6 +208,17 @@ the oracle owns truth (the oracle/advisory split).
     or pickle input, NaN/Infinity, runaway nesting, unknown format or kind, bad types or
     lengths, malformed trees, unsorted ECOD columns). It never uses
     `pickle`/`marshal`/`eval` (CWE-502).
+  - *(CC-ML-0024, BUG-0095)* **Extremes and sizes are typed refusals too.**
+    - An int too large for a float (`10**1000`), `1e400` and an int literal past
+      Python's digit limit are `ModelParamsError`. `OverflowError` / `MemoryError` are
+      wrapped at the boundary, and the validation predicates are total.
+    - **Size limits, enforced on dump and load:**
+      - `MAX_PARAMS_BYTES` = 8 MiB, checked before hashing or parsing;
+      - `MAX_MODEL_ELEMENTS` = 2,000,000 values model-wide;
+      - `MAX_TREES` = 1000 and `MAX_DEPTH` = 32.
+
+      A hybrid model's stored ECOD columns bound it to about 35k training rows, and a
+      larger one is refused at save time (stated limit).
   - **Identity, not authentication:** the sha detects corruption and pins identity;
     anyone who can write the store can recompute it.
   - **Compatibility:** `LoadedModel.check_compatible()` raises `ModelIncompatibleError`
@@ -317,16 +332,59 @@ the oracle owns truth (the oracle/advisory split).
     any pooled gate lacks it.
 
 - **FR-ML-19 (blind holdout, CC-ML-0020; FR-ML-7 partial)**
-  - **Membership.** `ml/holdout.in_holdout(origin, endpoint)` — `sha256(salt | canonical
-    origin | endpoint) / 2^256 < 0.2` (`HOLDOUT_VERSION = 1`, `HOLDOUT_FRACTION = 0.2`,
-    `HOLDOUT_SALT`). The endpoint is `dataset.endpoint_key` (the group-k-fold group), so
+  - **Membership.** `ml/holdout.in_holdout(origin, endpoint, version=None)` —
+    `sha256(salt | canonical origin | endpoint) / 2^256 < fraction` for the version's
+    registered `(salt, fraction)` in `holdout.MEMBERSHIPS` (today `{1:
+    ("fuzzlab-holdout-v1", 0.2)}`; `HOLDOUT_VERSION = 1`). A version bump adds a
+    registry entry and never removes one (CC-ML-0024). The endpoint is `dataset.endpoint_key` (the group-k-fold group), so
     folds and the holdout never split an endpoint; a run with no target row is never
     held out.
-  - **Guarantee (per model).** With `holdout=True` the classifier, ranker (run, earlier,
-    saved modes) and budget prioritizer never train on, select with or calibrate on a
-    held-out endpoint — including earlier runs' held-out endpoints. Label-free
-    components (the hybrid's ECOD) may see their features (transductive). A store-wide
-    train with `holdout=True` raises `ValueError`.
+  - **Guarantee (per model)** — *superseded by the per-target seal below
+    (CC-ML-0024)*, which keeps it. With `holdout=True` the classifier, ranker (run,
+    earlier, saved modes) and budget prioritizer never train on, select with or
+    calibrate on a held-out endpoint, including earlier runs' held-out endpoints.
+    Label-free components (the hybrid's ECOD) may see their features (transductive). A
+    store-wide train with `holdout=True` raises `ValueError`.
+  - **Seal per target (CC-ML-0024, BUG-0091).** Once any model of a target records a
+    holdout, the target is **sealed**: `holdout.sealing_for_run` returns `("sealed",
+    versions)`. Sealing never turns off.
+    - From then on, every producer of a label-derived ML **evaluation** number for the
+      target leaves out the rows held out under every version the target recorded,
+      through one mechanism (`holdout.sealed_split`, and `held_ids` for readers):
+      - **every trainer** applies an **implied holdout** without `--holdout`:
+        `train_and_score` and `train_and_rank` in run and earlier mode (model
+        selection and the ranker's `auto` objective included), the budget prioritizer
+        and its committee, and `propose_queries`. The model records `holdout: {version,
+        fraction, rows, "implied": true}`, sealed metrics are written as for an explicit
+        holdout, and the CLI says "(implied: target sealed)";
+      - **forward evaluations** (classifier and ranker, earlier and saved) read the
+        public rows only (`train.forward_rows`);
+      - **the ML tab's panels** (FR-UI, CC-UI-0050).
+    - `train.metric_input(..., *, held)` takes `held` as a required keyword; an AST
+      guard checks every call.
+    - **Store-wide trains** leave out, per row, every sealed target's held rows. They
+      write no sealed metrics, and their record says `"scope": "store"`.
+    - **Unknown membership** (a recorded version not in the registry, or a fraction that
+      differs) fails closed:
+      - run-scoped trainers raise `holdout.SealingUnknown`;
+      - earlier and saved modes refuse with the reason;
+      - the prioritizer raises, never returning `None` ("confirm everything"), so the
+        guarded wrapper keeps the budget cap and the run exits 1;
+      - a store-wide train leaves that target's labelled rows out and records
+        `excluded_unknown_targets`;
+      - readers treat every row of the target as sealed, and the disagreement panel is
+        unavailable.
+    - **Behaviour change:** later runs of a sealed target train on about 20% fewer
+      endpoints.
+    - **Scope:** ML evaluation numbers only. Findings lists and counts, oracle coverage
+      and anomaly flags are the product, and public by design.
+    - **Residuals:**
+      - forward metrics written before CC-ML-0024 are not rewritten;
+      - a saved-mode copy carries its source's pre-seal numbers, which were already
+        public.
+    - **Tested** by flipping every sealed label and asserting every public number and
+      every trained artefact is unchanged, with a control flip proving the check is
+      live.
   - **Stored facts.** Held-out labelled rows keep `score_oof` NULL; the model's
     calibration records `holdout: {version, fraction, rows}` (no label counts). A labelled
     row of such a model with no `score_oof` is held out, so `gate_input` judges it on

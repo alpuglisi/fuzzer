@@ -361,6 +361,8 @@ def _print_ml_extras(r: dict, run_id) -> None:
         held = h.get("endpoints")
         where = f"{held} endpoint(s) of this run held out" if held is not None else \
             "holdout"
+        if h.get("implied"):                         # BUG-0091: the target is sealed
+            where += " (implied: target sealed)"
         if h.get("sealed"):
             print(f"    holdout: {where}; metrics sealed — read with `fuzzlab "
                   f"reveal-holdout --run {run_id if run_id is not None else 'N'}` "

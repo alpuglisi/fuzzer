@@ -27,7 +27,7 @@ def type_reflection(html: str, marker: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
 
     for script in soup.find_all("script"):
-        if marker in (script.get_text() or ""):
+        if marker in (script.get_text() or "") and script_executes(script):
             return "js"
 
     for tag in soup.find_all(True):
@@ -49,6 +49,11 @@ def type_reflection(html: str, marker: str) -> str:
 # inside a <textarea> are all inert. Confirmation is judged on the parsed response by
 # the effect the break-out would have: an element exists outside any inert element, an
 # attribute was injected, or the token sits in JavaScript **code** state.
+#
+# "Inside <script>" is not "JavaScript" (BUG-0093, PA-0094): a JSON / ld+json / template
+# data block, an import map, a `nomodule` classic script, the inline body of a script
+# with `src`, and any script under an inert ancestor (`<template>`, ...) never run. The
+# container's executability is part of the structure: `script_executes`.
 
 #: Elements whose content the browser does not parse as markup (or never renders).
 INERT_ELEMENTS = frozenset({"textarea", "title", "script", "style", "xmp", "noscript",
@@ -58,6 +63,15 @@ _EXEC_ATTRS = {"href": {"a", "area"}, "action": {"form"},
                "formaction": {"button", "input"}, "src": {"iframe", "frame", "embed"},
                "data": {"object"}}
 UNSURE = "unsure"
+#: JavaScript MIME type essences (HTML standard, "JavaScript MIME type"): a script's
+#: type string must equal one of these, ASCII case-insensitively, to run as classic JS.
+JS_MIME_TYPES = frozenset({
+    "application/ecmascript", "application/javascript", "application/x-ecmascript",
+    "application/x-javascript", "text/ecmascript", "text/javascript",
+    "text/javascript1.0", "text/javascript1.1", "text/javascript1.2",
+    "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript",
+    "text/livescript", "text/x-ecmascript", "text/x-javascript"})
+_ASCII_WS = " \t\n\f\r"
 _REGEX_PREV = set("(,=:[!&|?{};+-*%<>~^") | {""}
 
 
@@ -125,6 +139,50 @@ def js_states(src: str) -> list[str]:
     if state != "code":
         return [UNSURE] * n
     return out
+
+
+def _attr(tag, name: str) -> str | None:
+    value = tag.attrs.get(name)
+    if isinstance(value, list):                   # a multi-valued attribute in bs4
+        value = " ".join(value)
+    return value
+
+
+def _has_inert_ancestor(tag) -> bool:
+    return any(p.name in INERT_ELEMENTS for p in tag.parents if p.name)
+
+
+def script_executes(tag) -> bool:
+    """Whether a ``<script>`` element's **inline** body runs, per the HTML standard's
+    "prepare the script element" type rules (BUG-0093):
+
+    - the type string: ``type`` when present (empty → JavaScript; otherwise ASCII
+      whitespace stripped), else ``"text/" + language`` when ``language`` is present
+      and non-empty, else JavaScript;
+    - it runs as a classic script when the type string is a JavaScript MIME type
+      essence match (exact, case-insensitive: ``text/javascript;charset=utf-8`` is a
+      data block), and as a module when it is ``module``; anything else (JSON,
+      ``importmap``, ``text/template``) is a data block and never runs;
+    - a classic script with ``nomodule`` does not run; with ``src`` the inline body is
+      never run (even ``src=""``); under an inert ancestor (``<template>``,
+      ``<noscript>``, ...) nothing runs.
+    """
+    if tag.name != "script" or "src" in tag.attrs or _has_inert_ancestor(tag):
+        return False
+    stype = _attr(tag, "type")
+    if stype is None:
+        language = _attr(tag, "language")
+        kind = "classic" if not language else \
+            ("classic" if f"text/{language}".lower() in JS_MIME_TYPES else None)
+    elif stype == "":
+        kind = "classic"
+    else:
+        stype = stype.strip(_ASCII_WS).lower()
+        kind = "classic" if stype in JS_MIME_TYPES else \
+            ("module" if stype == "module" else None)
+    if kind is None:
+        return False
+    return not (kind == "classic" and "nomodule" in tag.attrs)
 
 
 def _js_state_at(src: str, needle: str) -> str | None:
@@ -198,13 +256,16 @@ class Reflection:
 
 
 def locate_reflection(html: str, marker: str) -> Reflection | None:
-    """Type the first reflection of ``marker`` (script, then attribute, then text)."""
+    """Type the first reflection of ``marker`` (executing script, then attribute, then
+    text). A marker in a script that never runs (`script_executes`) is text inside a
+    raw-text element: ``html`` with ``inert_parent="script"``, whose only try is the
+    ``</script>`` element break-out (BUG-0093)."""
     if not html or marker not in html:
         return None
     soup = BeautifulSoup(html, "html.parser")
     for script in soup.find_all("script"):
         text = script.get_text() or ""
-        if marker in text:
+        if marker in text and script_executes(script):
             return Reflection("script", js_state=_js_state_at(text, marker))
     for tag in soup.find_all(True):
         for attr, value in tag.attrs.items():
@@ -239,13 +300,16 @@ def attribute_injected(html: str, name: str) -> bool:
 
 
 def js_executes(html: str, token: str) -> bool:
-    """True when ``token`` is in JavaScript code state in a ``<script>`` or in an
-    executing ``javascript:`` URL."""
+    """True when ``token`` is in JavaScript code state in an executing ``<script>``
+    (`script_executes`) or in an executing ``javascript:`` URL on an element with no
+    inert ancestor."""
     soup = BeautifulSoup(html, "html.parser")
     for script in soup.find_all("script"):
-        if js_token_in_code(script.get_text() or "", token):
+        if script_executes(script) and js_token_in_code(script.get_text() or "", token):
             return True
     for tag in soup.find_all(True):
+        if _has_inert_ancestor(tag):
+            continue
         for attr, value in tag.attrs.items():
             if not _is_exec_attr(tag.name, attr):
                 continue

@@ -3,6 +3,65 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0024 — The holdout is sealed per target, at every producer (BUG-0091); `flag_top` in one pass (BUG-0094); the model loader types extremes and bounds sizes (BUG-0095) (2026-10-13)
+- Change:
+  - **Holdout seal (BUG-0091), `ml/holdout.py`:**
+    - the registry `MEMBERSHIPS`, and `in_holdout(..., version)`;
+    - `sealing_for_run` (None / `("sealed", versions)` / `"unknown"`, from every model
+      row of the run's target);
+    - `holdout_plan` (explicit, or implied by a sealed target; raises
+      `SealingUnknown`), and `model_record`;
+    - `sealed_split` (the one mechanism) and `held_ids` (its reader form);
+    - `unknown_origins`, and a batched `_origins`.
+  - **The trainers:**
+    - `train._apply_seal` / `_record_holdout`: `train_and_score` and `train_and_rank`
+      (run and earlier) split sealed rows off before selection, cross-validation,
+      calibration and the gate, recording `"implied": true` when not asked for.
+    - **Store-wide trains** leave sealed rows out per row (an unknown target's labelled
+      rows entirely, recorded in `excluded_unknown_targets`).
+    - **Forward evaluations** read `train.forward_rows` (public rows only).
+    - **Saved mode** refuses an unknown target, and computes sealed metrics with
+      `sealed_split`.
+  - **`active.prioritize`** applies the plan and raises `SealingUnknown`, never `None`.
+    `propose_queries` (committee) never fits on sealed rows.
+  - **`train.metric_input(..., *, held)`**: `held` is required.
+  - **`flag_top` (BUG-0094):** one `Counter` pass. A non-finite score raises
+    `ValueError`.
+  - **`persist` (BUG-0095):**
+    - a total `_is_num`;
+    - `OverflowError` / `MemoryError` wrapped at the boundary;
+    - `MAX_PARAMS_BYTES` (8 MiB, before parsing), `MAX_MODEL_ELEMENTS` (2 M,
+      model-wide), `MAX_TREES` (1000) and `MAX_DEPTH` (32), on dump and load.
+- Impact (other components / project):
+  - **UI** (CC-UI-0050): the ML-tab readers.
+  - **FUZZ** (CC-FUZZ-0058): the CLI line.
+  - **Behaviour changes, listed:**
+    - later runs of a sealed target train on about 20% fewer endpoints, `--holdout` or
+      not;
+    - an unknown membership refuses to train;
+    - `flag_top` raises on NaN;
+    - a hybrid model beyond about 35k training rows is refused at save time.
+  - **Stated residuals:** older stored forward metrics are not rewritten, and a
+    saved-mode copy carries its source's pre-seal numbers.
+- Risk: medium. The seal changes what later models train on. Mitigations:
+  - the central test flips every sealed label and asserts every public number and
+    artefact is unchanged, with a control flip proving the check is live;
+  - the existing holdout and ML suites pass, with two tests updated for the stated
+    behaviour change.
+- Deliverables:
+  - [x] per-target sealing, registry, plan, `sealed_split` / `held_ids` — done
+  - [x] implied holdout in every trainer, the prioritizer and `propose_queries` — done
+  - [x] forward evaluations on public rows; saved-mode refusal — done
+  - [x] required `held` + AST guard; today-only-split guard — done
+  - [x] `flag_top` single pass — done
+  - [x] loader totality and size limits — done
+  - [x] tests: `test_ml_holdout_seal` (new), `test_ml_holdout_calibration` (2 updated),
+        `test_ml_anomaly`, `test_ml_persist` — done
+  - [x] FR-ML-12 / FR-ML-13 notes, FR-ML-19 amended; ARCHITECTURE — done
+- Implementation divergence: none from v4 plus the two adopted nits.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-ML-0023 — Tie-averaged ranking metrics and one metric/baseline function (BUG-0073); store-wide models cover only the runs they scored (BUG-0074); method-aware labels (BUG-0075) (2026-10-13)
 - Change:
   - **BUG-0073:**

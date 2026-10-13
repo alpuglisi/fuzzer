@@ -39,7 +39,8 @@ def _ml() -> SimpleNamespace | None:
             "train": import_ml("fuzzlab.ml.train"),
             "anomaly": import_ml("fuzzlab.ml.anomaly"),
             "active": import_ml("fuzzlab.ml.active"),
-            "persist": import_ml("fuzzlab.ml.persist")}
+            "persist": import_ml("fuzzlab.ml.persist"),
+            "holdout": import_ml("fuzzlab.ml.holdout")}
     if any(m is None for m in mods.values()):
         return None
     return SimpleNamespace(**mods)
@@ -238,9 +239,11 @@ def _scored_pairs(store, ds, run_id: int | None, column: str = "score",
     with each row's own run's scoring model (``reader``): a labelled row's out-of-fold
     score where the trainer stored one (CC-ML-0018), else its deploy score — except a
     sealed **held-out** row of a run-mode model, which is left out (CC-ML-0020): the
-    holdout's numbers are never pooled into the shown metrics. Returns ``(scores,
-    labels, groups)``."""
+    holdout's numbers are never pooled into the shown metrics. Once a target is sealed,
+    every one of its sealed rows is left out whatever model scored it (BUG-0091,
+    `holdout.held_ids`). Returns ``(scores, labels, groups)``."""
     reader = reader or _clf_calibration
+    held = _ml().holdout.held_ids(store, ds)
     where = "WHERE run_id=?" if run_id is not None else ""
     args: tuple = (run_id,) if run_id is not None else ()
     rows = store.conn.execute(
@@ -254,7 +257,7 @@ def _scored_pairs(store, ds, run_id: int | None, column: str = "score",
         if r["run_id"] not in calib:
             calib[r["run_id"]] = reader(store, r["run_id"])
         value = _ml().train.metric_input(calib[r["run_id"]], r["oracle_status"], r["s"],
-                                         r["o"])
+                                         r["o"], held=r["id"] in held)
         if value is not None:
             scored[r["id"]] = value
     scores, labels, groups = [], [], []
@@ -321,7 +324,8 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
         f"SELECT id, run_id, oracle_status, rank_score, rank_uncertainty, rank_score_oof "
         f"FROM candidate {where}", args).fetchall()
     # metrics judge a labelled row's out-of-fold rank score where stored (CC-ML-0018),
-    # and leave a sealed held-out row out (CC-ML-0020) — `train.metric_input`
+    # and leave a sealed row out (CC-ML-0020, BUG-0091) — `train.metric_input`
+    held = _ml().holdout.held_ids(store, ds)
     calib: dict = {}
     rank_map = {}
     for r in rows:
@@ -330,7 +334,8 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
         if r["run_id"] not in calib:
             calib[r["run_id"]] = _rank_calibration(store, r["run_id"])
         value = _ml().train.metric_input(calib[r["run_id"]], r["oracle_status"],
-                                         r["rank_score"], r["rank_score_oof"])
+                                         r["rank_score"], r["rank_score_oof"],
+                                         held=r["id"] in held)
         if value is not None:
             rank_map[r["id"]] = (value, r["rank_uncertainty"])
     scores, uncertainties, labels, groups = [], [], [], []
@@ -527,9 +532,16 @@ def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
                        top_n: int = 10) -> dict[str, Any]:
     """Committee (bootstrap ranker ensemble) disagreement histogram + top-N query queue.
 
-    The committee is fit on labelled candidates only; the queue covers every candidate,
-    including ones the oracle skipped for budget — the ones actually left to query."""
+    The committee is fit on labelled candidates only, never on a sealed row (BUG-0091:
+    an unknown holdout membership makes the panel unavailable); the queue covers every
+    candidate, including ones the oracle skipped for budget — the ones actually left to
+    query."""
     ds = _ml().dataset.build_dataset(store, run_id, include_unlabelled=True)
+    holdout = _ml().holdout
+    if holdout.unknown_origins(store, ds):
+        return {"available": False, "reason": "holdout membership unknown for this "
+                "target: the committee cannot be fit without sealed labels"}
+    sealed = holdout.held_ids(store, ds)
     if len(ds) < 10:
         return {"available": False, "reason": "not enough candidates to train a committee"}
     n = len(ds)
@@ -544,7 +556,8 @@ def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
     Committee, disagreement = _ml().active.Committee, _ml().active.disagreement
     _candidate_texts = _ml().rank_train._candidate_texts
     texts = _candidate_texts(store, run_id, ids_sub)
-    fit_idx = [j for j, i in enumerate(idxs) if ds.labelled[i]]      # never fit on a
+    fit_idx = [j for j, i in enumerate(idxs)                         # never fit on a
+               if ds.labelled[i] and ds.ids[i] not in sealed]       # sealed row, nor on a
     if len(fit_idx) < 10:                                            # placeholder label
         return {"available": False, "reason": "not enough labelled candidates to train a committee"}
     try:

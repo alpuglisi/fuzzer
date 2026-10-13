@@ -19,8 +19,9 @@ import ipaddress
 import re
 from pathlib import Path
 
-from fuzzlab.core.secretfile import write_secret
 from typing import Callable
+
+from fuzzlab.core.secretfile import create_secret, replace_secret
 
 
 def _utcnow() -> datetime.datetime:
@@ -67,6 +68,10 @@ def _leaf_filename(host: str) -> str:
     return f"ip6-{ip.packed.hex()}" if ip.version == 6 else host
 
 
+class CAError(RuntimeError):
+    """The on-disk CA is incomplete or its key does not match its certificate."""
+
+
 class LocalCA:
     """A local CA that mints and caches per-host leaf certs.
 
@@ -106,7 +111,11 @@ class LocalCA:
         """Materialize ``host``'s leaf cert+key to files and return their paths.
 
         ``ssl.SSLContext.load_cert_chain`` needs file paths, so the cached PEMs are
-        written under ``<ca_dir>/leaves/`` (the key 0600). On-host (needs a real leaf).
+        written under ``<ca_dir>/leaves/`` (both 0600), key first, then cert, each
+        replaced atomically and in full (BUG-0096): a failed write raises and never
+        leaves a partial PEM. The files are always rewritten from the in-memory pair, so
+        what is on disk is that pair; ``load_cert_chain`` itself refuses a mismatch.
+        On-host (needs a real leaf).
         """
         cert_pem, key_pem = self.leaf_cert(host)
         safe = _leaf_filename(leaf_host(host))
@@ -118,8 +127,8 @@ class LocalCA:
         for p in (cert_path, key_path):               # backstop: never outside leaves/
             if p.resolve().parent != root:
                 raise ValueError(f"leaf path escapes {root}: {p}")
-        cert_path.write_bytes(cert_pem)
-        write_secret(key_path, key_pem)
+        replace_secret(key_path, key_pem)
+        replace_secret(cert_path, cert_pem)
         return cert_path, key_path
 
     def cached_hosts(self) -> list[str]:
@@ -130,20 +139,47 @@ class LocalCA:
 
     # --- on-host: real CA + leaf minting (lazy cryptography) ----------------
     def ensure_ca(self) -> tuple[bytes, bytes]:
-        """Load the CA from disk, or create and persist it (0600). On-host."""
+        """Load the CA from disk, or create and persist it. On-host.
+
+        The trust root is never replaced silently (BUG-0096): the key is created with
+        ``O_EXCL`` (0600 from creation, BUG-0079), then the certificate is written
+        atomically. On load the key must match the certificate, and a half-written CA
+        (one file without the other) is refused, each with `CAError` naming the fix."""
         if self._ca_cert_pem is not None:
             return self._ca_cert_pem, self._ca_key_pem
-        if self.ca_cert_path.exists() and self.ca_key_path.exists():
-            self._ca_cert_pem = self.ca_cert_path.read_bytes()
-            self._ca_key_pem = self.ca_key_path.read_bytes()
-            return self._ca_cert_pem, self._ca_key_pem
+        have_cert, have_key = self.ca_cert_path.exists(), self.ca_key_path.exists()
+        if have_cert and have_key:
+            cert_pem = self.ca_cert_path.read_bytes()
+            key_pem = self.ca_key_path.read_bytes()
+            if not self._pair_matches(cert_pem, key_pem):
+                raise CAError(f"the CA key {self.ca_key_path} does not match its "
+                              f"certificate {self.ca_cert_path}; remove both to create a "
+                              f"new CA (and re-trust it)")
+            self._ca_cert_pem, self._ca_key_pem = cert_pem, key_pem
+            return cert_pem, key_pem
+        if have_cert or have_key:
+            present = self.ca_cert_path if have_cert else self.ca_key_path
+            raise CAError(f"incomplete CA: {present} exists without its pair; remove it "
+                          f"to create a new CA (and re-trust it)")
         cert_pem, key_pem = self._mint_ca()
         self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        write_secret(self.ca_key_path, key_pem)      # 0600 from creation (BUG-0079)
-        self.ca_cert_path.write_bytes(cert_pem)
-        self.ca_cert_path.chmod(0o644)
+        create_secret(self.ca_key_path, key_pem)     # never replaces an existing key
+        replace_secret(self.ca_cert_path, cert_pem)
+        self.ca_cert_path.chmod(0o644)               # the certificate is public
         self._ca_cert_pem, self._ca_key_pem = cert_pem, key_pem
         return cert_pem, key_pem
+
+    def _pair_matches(self, cert_pem: bytes, key_pem: bytes) -> bool:
+        """Whether ``key_pem`` is the private key of ``cert_pem`` (False if unparsable)."""
+        x509, _hashes, serialization, _rsa, _oid = self._crypto()
+        try:
+            cert = x509.load_pem_x509_certificate(cert_pem)
+            key = serialization.load_pem_private_key(key_pem, password=None)
+        except (ValueError, TypeError):
+            return False
+        spki = serialization.PublicFormat.SubjectPublicKeyInfo
+        return (cert.public_key().public_bytes(serialization.Encoding.DER, spki)
+                == key.public_key().public_bytes(serialization.Encoding.DER, spki))
 
     def _crypto(self):
         from cryptography import x509

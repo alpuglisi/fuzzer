@@ -239,7 +239,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     pre-BUG-0070 note when any pooled gate lacks `gate_rule`. The anomaly panel shows
     "at most k" (`anomaly.flag_budget`) and the tie reason.
   - *(Note CC-UI-0045.)* Recomputed out-of-fold metrics leave out a run-mode model's
-    sealed held-out rows (`train.metric_input`, per row with its own run's model). The
+    sealed held-out rows (`train.metric_input`, per row with its own run's model).
+    *(CC-UI-0050, BUG-0091:)* Every sealed row is left out of the classifier panel
+    (PR, reliability, ECE) and the ranker panel, whatever model scored it:
+    `holdout.held_ids` is passed as `metric_input`'s required `held`. The disagreement
+    panel never fits its committee on a sealed row. On an unknown holdout membership,
+    every row of the target is sealed and the disagreement panel is unavailable. The
     reliability panel shows a calibrated classifier's out-of-fold ECE raw → cross-fitted
     (FR-ML-20), or "calibration: none (degenerate fit)".
   - *(Note CC-UI-0046.)* Ranker panel: a pairwise ranker shows its objective, the

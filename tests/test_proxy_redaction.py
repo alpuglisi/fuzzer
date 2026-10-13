@@ -128,3 +128,82 @@ def test_the_redaction_opt_out_keeps_raw_bytes(tmp_path):
                             raw_response=b"HTTP/1.1 200 OK\r\n\r\n"))
         fid = store.conn.execute("SELECT id, url FROM flow").fetchone()
         assert fid["url"].endswith("token=keepme") and h.raw_request(fid["id"]) == req
+
+
+# --- BUG-0090 / PA-0091: every name form × every value shape --------------------------
+
+_CONTAINER_NAMES = ["token", "tokens", "credential", "credentials", "password", "passwords",
+                    "secret", "secrets", "session", "sessions", "jwt", "jwts", "apiKey",
+                    "apiKeys", "auth", "cookies"]
+
+
+def _shapes(tag: str):
+    """One planted secret ``tag`` under every value shape a JSON key can hold."""
+    return {"scalar": f"S-{tag}",
+            "list": [f"S-{tag}-1", f"S-{tag}-2"],
+            "object": {"value": f"S-{tag}"},
+            "nested": {"inner": {"deeper": [f"S-{tag}"]}},
+            "list_of_objects": [{"id": 1, "value": f"S-{tag}"}]}
+
+
+@pytest.mark.parametrize("name", _CONTAINER_NAMES)
+def test_a_sensitive_key_redacts_its_whole_value_whatever_its_shape(tmp_path, name):
+    """The review's finding: `tokens: [..]` / `credentials: {..}` kept their secrets,
+    because a container value under a sensitive key was recursed into without the
+    parent's sensitivity. Planted through HistoryWriter and searched in every copy."""
+    for shape, value in _shapes(name).items():
+        doc = {name: value, "author": {"name": "bob"}, "items": [{"title": "pup"}]}
+        body = json.dumps(doc).encode()
+        req = (b"POST /api HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nContent-Type: "
+               b"application/json\r\nContent-Length: " + str(len(body)).encode()
+               + b"\r\n\r\n" + body)
+        resp = (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                + str(len(body)).encode() + b"\r\n\r\n" + body)
+        with Store(tmp_path / f"{name}-{shape}.db") as store:
+            h = HistoryWriter(store, store.start_run("proxy", "x"), batch_size=1)
+            h.record(FlowRecord("POST", "http://127.0.0.1:8080/api", "127.0.0.1:8080", 200,
+                                raw_request=req, raw_response=resp, req_body=body,
+                                resp_body=body))
+            blob = _persisted(store)
+            assert f"S-{name}".encode() not in blob, (name, shape)
+            assert h.search(f"S-{name}") == []
+            # benign containers stay readable, with their shape
+            assert b'"author":{"name":"bob"}' in blob and b'"title":"pup"' in blob
+
+
+def test_the_reviews_payload_is_redacted_by_both_entry_points():
+    body = b'{"tokens":["SECRET_A","SECRET_B"],"credentials":{"value":"SECRET_C"}}'
+    from fuzzlab.proxy.redact import redact_body
+    out = redact_body(body, "application/json")
+    assert b"SECRET" not in out and json.loads(out) == {"tokens": "__REDACTED__",
+                                                        "credentials": "__REDACTED__"}
+    msg = (b"POST / HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n"
+           b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+    assert b"SECRET" not in redact(msg)
+
+
+@pytest.mark.parametrize("name", ["passwords", "secrets", "sessions", "pwds", "jwts",
+                                  "apiKeys", "api_keys", "keys", "accessTokens", "otps"])
+def test_plural_sensitive_names(name):
+    assert is_sensitive_name(name)
+
+
+@pytest.mark.parametrize("name", ["passes", "passage", "hotkeys", "monkeys", "keystrokes",
+                                  "status", "news", "address", "sessionstorage",
+                                  "authors", "keywords"])
+def test_plural_folding_does_not_over_match(name):
+    assert not is_sensitive_name(name)
+
+
+@pytest.mark.parametrize("name", ["codes", "pins", "session_count"])
+def test_accepted_harmless_false_redactions(name):
+    """Stated in core.redaction: these whole names are redacted though often benign."""
+    assert is_sensitive_name(name)
+
+
+@pytest.mark.parametrize("name", ["pass", "x_pass", "tokens", "credentials", "cookies",
+                                  "sessid"])
+def test_a_sensitive_word_ending_in_s_is_not_folded_away(name):
+    """The fold applies only when the folded form is sensitive: `pass` must not become
+    `pas` (and stop being a secret)."""
+    assert is_sensitive_name(name)

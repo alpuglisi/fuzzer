@@ -20,8 +20,15 @@ be a strictly increasing Platt map (finite ``a > 0``, finite ``b``).
 * The loader **fails closed** with `ModelParamsError` on anything it cannot prove well
   formed: a sha mismatch, non-text or non-JSON input (a pickle payload included),
   NaN/Infinity, runaway nesting, an unknown format or kind, wrong types, inconsistent
-  lengths, malformed trees, unsorted ECOD columns (PA-0021: one typed error at the
-  boundary, never a raw library exception).
+  lengths, malformed trees, unsorted ECOD columns, numbers too large for a float,
+  oversized text or models (PA-0021, PA-0096: one typed error at the boundary, never a
+  raw library exception — ``OverflowError`` / ``MemoryError`` included, BUG-0095).
+* **Size limits** (BUG-0095), enforced on both dump and load so a stored model is
+  always loadable: the text is at most `MAX_PARAMS_BYTES`, checked *before* parsing; the
+  model holds at most `MAX_MODEL_ELEMENTS` values in total (every array item and object
+  member, all arrays together); a GBT has at most `MAX_TREES` trees of depth at most
+  `MAX_DEPTH`. A hybrid's ECOD stores its training columns, so the byte limit bounds a
+  hybrid model to roughly 35k training rows — a stated limit.
 * No ``pickle``/``marshal``/``eval``: a store file can travel between machines, and
   unpickling it would be arbitrary code execution (CWE-502).
 * The sha detects corruption and pins a model's identity for reproducibility. It is
@@ -44,6 +51,10 @@ CLASSIFIER_KINDS = ("logistic", "gbt", "prevalence")
 RANKER_KINDS = ("ranker", "constant")
 KINDS = CLASSIFIER_KINDS + RANKER_KINDS
 ANOMALY_FEATURE = "anomaly_ecod"
+MAX_PARAMS_BYTES = 8 * 1024 * 1024    # stored text, checked before json.loads (BUG-0095)
+MAX_MODEL_ELEMENTS = 2_000_000        # array items + object members, model-wide
+MAX_TREES = 1000                      # gbt n_estimators
+MAX_DEPTH = 32                        # gbt max_depth
 
 
 class ModelParamsError(ValueError):
@@ -79,7 +90,31 @@ def _fail(msg: str):
 
 
 def _is_num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    """A finite int or float, as a float can hold it. Total: never raises (PA-0096) —
+    an int too large for a float (``10**1000``) is simply not a number here."""
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return False
+    try:
+        return math.isfinite(x)
+    except OverflowError:
+        return False
+
+
+def _check_size(env) -> None:
+    """Refuse a model holding more than `MAX_MODEL_ELEMENTS` values (iterative walk)."""
+    count, stack = 0, [env]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            items = list(node.values())
+        elif isinstance(node, list):
+            items = node
+        else:
+            continue
+        count += len(items)
+        if count > MAX_MODEL_ELEMENTS:
+            _fail(f"model holds more than MAX_MODEL_ELEMENTS={MAX_MODEL_ELEMENTS} values")
+        stack.extend(v for v in items if isinstance(v, (dict, list)))
 
 
 def _is_int(x) -> bool:
@@ -133,6 +168,8 @@ def _check_gbt(p, width: int) -> None:
             and _is_int(p["min_leaf"]) and isinstance(p["class_balanced"], bool)
             and _is_num(p["f0"])):
         _fail("gbt: bad hyperparameter types")
+    if not (1 <= p["n_estimators"] <= MAX_TREES and 1 <= p["max_depth"] <= MAX_DEPTH):
+        _fail(f"gbt: expected 1..{MAX_TREES} trees of depth 1..{MAX_DEPTH}")
     if not isinstance(p["trees"], list) or len(p["trees"]) != p["n_estimators"]:
         _fail("gbt: tree count does not match n_estimators")
     for t in p["trees"]:
@@ -174,6 +211,7 @@ def _check_calibrator(c) -> None:
 def _validate(env) -> None:
     if not isinstance(env, dict):
         _fail(f"envelope: expected an object, got {type(env).__name__}")
+    _check_size(env)
     fmt = env.get("format")
     if fmt == FORMAT and not isinstance(fmt, bool):
         _keys(env, _ENVELOPE_KEYS, "envelope")
@@ -249,8 +287,14 @@ def dumps_model(kind: str, model, *, feature_names: Sequence[str], feature_versi
     if calibrator is not None:
         env.update(format=FORMAT_CALIBRATED, calibrator=calibrator.to_params())
     text = _canonical(env)
+    _check_bytes(text)
     _validate(json.loads(text))                      # never store what we couldn't load
     return text, _sha(text)
+
+
+def _check_bytes(text: str) -> None:
+    if len(text) > MAX_PARAMS_BYTES:     # chars; canonical text is ASCII (ensure_ascii)
+        _fail(f"stored params exceed MAX_PARAMS_BYTES={MAX_PARAMS_BYTES}")
 
 
 def _reject_constant(name: str):
@@ -261,6 +305,7 @@ def loads_model(text, sha256: str | None) -> "LoadedModel":
     """Verify and rebuild a stored model. Raises `ModelParamsError` on any doubt."""
     if not isinstance(text, str):
         _fail(f"stored params are {type(text).__name__}, not JSON text")
+    _check_bytes(text)                               # before hashing or parsing
     try:
         if not isinstance(sha256, str) or _sha(text) != sha256:
             _fail("stored params do not match their sha256 (corrupted or altered)")
@@ -271,6 +316,8 @@ def loads_model(text, sha256: str | None) -> "LoadedModel":
         raise
     except RecursionError:
         _fail("stored params are nested too deeply")
+    except (OverflowError, MemoryError) as exc:      # BUG-0095: extreme magnitudes/sizes
+        _fail(f"stored params hold a value or size out of range: {type(exc).__name__}")
     except (ValueError, TypeError, KeyError) as exc:
         _fail(f"stored params are not a well-formed model: {exc}")
 

@@ -3,6 +3,53 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0020 — Whole-subtree JSON redaction (BUG-0090); CA key never silently replaced, pair checked, atomic leaf writes (BUG-0096) (2026-10-13)
+- Change:
+  - **Redaction (BUG-0090).** `proxy.redact._redact_json` replaces a sensitive key's
+    **whole value**, whatever its type (scalar, list, object or nested). It no longer
+    recurses into a sensitive container. Plural names are sensitive through
+    `core.redaction` (CC-CORE-0035).
+  - **CA (BUG-0096).**
+    - `ensure_ca` creates the CA key with `core.secretfile.create_secret` (`O_EXCL`), so
+      a trust root is never silently replaced. It is written key first, then the cert,
+      atomically.
+    - On load the key must match the certificate (SPKI comparison), and a half CA (one
+      file without the other) is refused. Both raise the new `CAError`, naming the fix.
+    - `leaf_cert_files` writes the key, then the cert, each with `replace_secret`
+      (complete, atomic, 0600).
+- Impact (other components / project):
+  - **CORE** (CC-CORE-0035): `create_secret`, `replace_secret`, the plural fold.
+  - **Behaviour change, listed:** a JSON container under a sensitive key is now stored
+    as the placeholder string, and its shape is not kept. A store whose CA directory
+    holds only one of the two files, or a mismatched pair, now stops with `CAError`
+    instead of re-minting the CA silently.
+  - Leaf certs are now 0600 (they were umask-default). They are only read by the proxy
+    itself.
+- Risk: low to medium. These are safety controls, with hostile and benign fixtures. A
+  user-visible stop on a broken CA is intended (re-trusting a new root is a deliberate
+  act).
+- Deliverables:
+  - [x] whole-subtree JSON redaction — done
+  - [x] CA `O_EXCL` key, pair check, half-CA refusal — done
+  - [x] atomic leaf writes — done
+  - [x] tests: `test_proxy_redaction` (name forms × value shapes through
+        `HistoryWriter`), `test_secretfile` (CA and leaf cases) — done
+  - [x] FR-PROXY-10 / FR-PROXY-11 amended — done
+- Implementation divergence: the draft's "a mismatched leaf pair is re-minted on load".
+  Leaves are never loaded from disk: they are rewritten from the in-memory pair on
+  every use, and `ssl.load_cert_chain` refuses a mismatch itself. Stated in BUG-0096
+  rather than built as dead code.
+  - **Reviewed:** taken back to both reviewers under PA-0093(2), and AGREED 3/3.
+  - **Cross-process residual (both reviewers' nit).** Two proxies sharing one `ca_dir`
+    (the web panel's in-process proxy and `fuzzlab proxy`) each mint their own leaf
+    for a host. The two files are replaced one at a time, so one process can load
+    the other's key. `load_cert_chain` then raises, and per-connection containment
+    closes that connection: a handshake failure, never a wrong certificate. A
+    re-mint would not fix it; per-process leaf names would, if it ever matters.
+  - **Pinned by** `test_a_corrupted_leaf_on_disk_heals_on_the_next_use`.
+- Review: the review-8 draft (all seven findings reproduced first) went v1 → v4 through both reviewers. v1→v2: B, 4 should-fix + 4 nits. v2→v3: A, 1 must-fix + 4 should-fix + 3 nits. v3→v4: A and B, the same must-fix (an implied holdout for every trainer). v4 was AGREED 3/3, and the final optional nits (A: store-wide trains skip, not refuse, an unknown target; B: the prioritizer raises, never returns None) were adopted.
+- Effectiveness (assessed 2026-10-13): effective offline. Every finding's reproduction is now a test that fails on `5eb4be9` (counts in each bug doc). Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 38 mutants across the seven fixes, 35 killed on the first pass. The 3 survivors each showed a test gap (the plural fold of `pass`, the loader boundary's `OverflowError` catch, the discovery-hop https floor), and each gap was closed with a new test, after which 3/3 were killed (38/38). Full non-labgen suite (145 files, `FUZZLAB_REQUIRE_BROWSER=1`): 1869 passed, 13 skipped, 2 xfailed, 0 failed. The review-8 test files, re-run after the gap tests: 327 passed, and `test_secretfile` 13/13 with the reviewers' self-healing test. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-PROXY-0019 — CA leaf hardening (BUG-0079); loopback-only bind (BUG-0080); persisted-copy redaction (BUG-0084); rule validation and per-connection containment (BUG-0085); one scope decision and IPv6 authorities (BUG-0086) (2026-10-13)
 - Change:
   - **CA (BUG-0079).**

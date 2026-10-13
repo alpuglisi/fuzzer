@@ -36,9 +36,11 @@ class _Stage:
 
 
 def _with_held_endpoints(store, run_id, result: dict, config: dict) -> dict:
-    """With the holdout on, add how many of the run's endpoints are held out — a
-    label-free count, the only holdout fact the summary prints (CC-ML-0020)."""
-    if config.get("holdout") and "holdout" in result:
+    """With the holdout on — asked for, or implied by a sealed target (BUG-0091) — add
+    how many of the run's endpoints are held out: a label-free count, the only holdout
+    fact the summary prints (CC-ML-0020)."""
+    if (config.get("holdout") or (result.get("holdout") or {}).get("implied")) \
+            and "holdout" in result and run_id is not None:
         from fuzzlab.ml.holdout import held_endpoints
         result["holdout"]["endpoints"] = held_endpoints(store, run_id)
     return result
