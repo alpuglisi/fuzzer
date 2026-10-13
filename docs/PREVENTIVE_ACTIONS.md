@@ -1016,3 +1016,23 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Sweep by consumer.** The PA-0002 sweep for this class covers every consumer of a
      calibrated artefact (each `gate.decide`, each threshold comparison, each
      calibration applied), not only the producers. (from BUG-0067)
+
+- **PA-0069** — Strengthens `PA-0064(3)/(4)` and `PA-0017` from *which data* an
+  honest-evaluation artefact sees to *the statistic it computes*, after BUG-0070: the
+  conformal gate's quantile index exceeded its stated α at lab sizes, and the anomaly
+  tripwire's "fraction flagged" counted whole tie groups past its budget.
+  1. **A stated guarantee is tested as stated.** An error bound, a coverage level or a
+     "fraction flagged" gets a test that asserts it **as stated** (≤ α, ≤ k — not a
+     loose tolerance), at the smallest sample size the toolkit accepts, ties included,
+     plus a non-vacuity check that it is not merely conservative.
+  2. **An order-statistic threshold states its whole rule, in one helper.** Its
+     finite-sample rule (index), its comparison operator and its tie handling are
+     derived and documented **together**, in one shared helper (PA-0003; e.g.
+     `conformal.upper_index` / `lower_index`, `anomaly.flag_budget` / `flag_top`), with
+     ranks computed exactly where α is fractional. The test asserts the claimed
+     fraction or bound with ties.
+  3. **Calibrate on what is compared.** A threshold is calibrated on the exact values
+     its consumers compare it with, after any storage rounding.
+  4. **Sweep every order-statistic threshold.** The PA-0002 sweep for this class covers
+     every order-statistic threshold in the codebase (`sorted(…)[k]`, quantiles,
+     fractions, contamination), not only the reported one. (from BUG-0070)

@@ -29,3 +29,29 @@ def top_flagged(store, run_id: int, limit: int = 5) -> list[dict]:
         out.append({"path": to_path(ev.get("url", "")), "param": ev.get("param", ""),
                     "category": ev.get("category", ""), "score": round(row["anomaly_score"], 3)})
     return out
+
+
+#: The rule `detect_anomalies` records as ``run_metrics.anomaly_flag_rule`` since
+#: CC-ML-0019 (`fuzzlab.ml.anomaly.FLAG_RULE`; a plain number here so this core
+#: reader needs no ML import).
+FLAG_RULE_TIES_NOT_SPLIT = 2.0
+
+
+def flag_note(store, run_id: int, metrics: dict) -> str | None:
+    """What a reader must say beside a run's stored flags (CC-ML-0019, BUG-0070):
+
+    - flags written before the tie rule (flags stored, no ``anomaly_flag_rule``) may
+      exceed the contamination fraction — said so;
+    - under the tie rule, fewer flags than the budget means a tie group at the cut was
+      not split."""
+    flagged_rows = store.conn.execute(
+        "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND anomaly_flag=1",
+        (run_id,)).fetchone()["c"]
+    if metrics.get("anomaly_flag_rule") != FLAG_RULE_TIES_NOT_SPLIT:
+        return ("flags from the pre-BUG-0070 rule (tie groups may exceed the fraction)"
+                if flagged_rows else None)
+    flagged, budget = metrics.get("anomaly_flagged"), metrics.get("anomaly_flag_budget")
+    if flagged is not None and budget is not None and flagged < budget:
+        return (f"flagged {int(flagged)} of at most {int(budget)}: a tie group at the cut "
+                "is never split (identical scores are equally unusual)")
+    return None

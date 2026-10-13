@@ -991,7 +991,9 @@ rewards) derives from it.
     `pipeline_confirm_budget`.
   - **Without a budget**, every row is confirmed exactly as before.
   - **`--anomaly [--anomaly-contamination F]`** runs the persisted ECOD tripwire after
-    the run (FR-ML-12) and prints the top flagged candidates.
+    the run (FR-ML-12) and prints the top flagged candidates. *(CC-FUZZ-0052:)* `F` is
+    an upper bound — at most that fraction, whole tie groups only — and the summary
+    prints `note: <reason>` when ties left fewer flagged.
   - All flags appear in the launcher form, as number inputs, via `commandspec`.
 - **FR-FUZZ-33** *(`--train-on`; `CC-FUZZ-0049`, 2026-10-13).* `fuzzlab auto --train-on
   {run,earlier}` (default `run`) chooses what `--score` / `--rank` train on.

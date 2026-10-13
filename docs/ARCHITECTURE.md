@@ -1322,6 +1322,8 @@ tracked in the requirements files, not here.
   vectors. It gives advisory scores/flags, never labels. **Wired as
   `fuzzlab auto --anomaly`**, which persists `candidate.anomaly_score` /
   `anomaly_flag` for every candidate (migration 13) and records `anomaly_flagged`.
+  It flags at most its contamination fraction, whole tie groups only, and records the
+  budget and rule (CC-ML-0019, BUG-0070).
   It also offers **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
   that feeds the anomaly score into the classifier.
 - **Saved models** `[built]` (CC-ML-0015, CC-CORE-0027, FR-ML-13):
@@ -1339,6 +1341,11 @@ tracked in the requirements files, not here.
     for (`train.gate_input`).
   - **Training set.** `no_confirmer` rows are unlabelled.
   - **Targets** match as canonical origins (`core.urls`).
+- **Conformal gate bound** `[built]` (CC-ML-0019, BUG-0070, FR-ML-18): thresholds are
+  finite-sample split-conformal order statistics (exact ranks, strict inequalities
+  stored as `nextafter` thresholds), so each side errs on at most α of the calibration
+  set. Small classes never flag / never drop, and readers say why; pre-BUG-0070 rows are
+  applied as recorded and labelled.
 - **Train on earlier runs** `[built; on-host exits pending]` (CC-ML-0016, CC-FUZZ-0049,
   CC-UI-0040, FR-ML-14):
   - `fuzzlab auto --score/--rank --train-on earlier` trains the classifier / ranker

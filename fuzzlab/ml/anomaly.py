@@ -85,13 +85,52 @@ class ECOD:
         return e
 
 
+#: Recorded as ``run_metrics.anomaly_flag_rule`` by `detect_anomalies` since
+#: CC-ML-0019: flags never split a tie group and never exceed `flag_budget`. A run with
+#: stored flags and no such metric used the earlier rule (tie groups could exceed it).
+FLAG_RULE = 2
+
+
+def flag_budget(n: int, contamination: float) -> int:
+    """The most candidates a ``contamination`` fraction may flag among ``n``:
+    ``max(1, round(n·contamination))`` (0 when there are none). One definition for the
+    detector and the ML tab (PA-0003)."""
+    return max(1, int(round(n * contamination))) if n else 0
+
+
 def flag_top(scores: Sequence[float], contamination: float = 0.1) -> list[bool]:
-    """Flag the top ``contamination`` fraction of scores as anomalies (advisory)."""
-    if not scores:
-        return []
-    k = max(1, int(round(len(scores) * contamination)))
-    threshold = sorted(scores, reverse=True)[k - 1]
-    return [s >= threshold for s in scores]
+    """Flag **at most** `flag_budget` of the highest scores as anomalies (advisory),
+    taking **whole tie groups only**: identical scores are equally unusual, so a group is
+    flagged entirely or not at all (CC-ML-0019, BUG-0070's sweep — the earlier rule
+    flagged every score tied with the k-th, e.g. 30% at contamination 0.1). When the top
+    tie group alone exceeds the budget nothing is flagged: nothing stands out."""
+    k = flag_budget(len(scores), contamination)
+    cutoff = None                        # lowest score still flagged
+    taken = 0
+    for value in sorted(set(scores), reverse=True):
+        size = sum(1 for s in scores if s == value)
+        if taken + size > k:
+            break
+        taken += size
+        cutoff = value
+    return [cutoff is not None and s >= cutoff for s in scores]
+
+
+def flag_reason(scores: Sequence[float], flags: Sequence[bool],
+                contamination: float) -> str | None:
+    """Why fewer than `flag_budget` were flagged (a tie group straddles the cut), or
+    ``None`` when the budget was met."""
+    k = flag_budget(len(scores), contamination)
+    flagged = sum(1 for f in flags if f)
+    if flagged >= k:
+        return None
+    rest = [s for s, f in zip(scores, flags) if not f]
+    top = max(rest)
+    size = sum(1 for s in rest if s == top)
+    if not flagged:
+        return f"top tie group of {size} exceeds k={k}: nothing stands out"
+    return (f"flagged {flagged} of at most k={k}: the next tie group of {size} would "
+            f"exceed it")
 
 
 def augment(X: Sequence[Sequence[float]], ecod: ECOD) -> list[list[float]]:
@@ -105,9 +144,11 @@ def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.
 
     Label-free, so every candidate is scored — including ones the oracle skipped for
     budget. With ``persist`` (default) each candidate's ``anomaly_score`` /
-    ``anomaly_flag`` is written to the store (migration 13), and the flagged count is
-    recorded in `run_metrics` as ``anomaly_flagged``. Writes **no** labels — this is a
-    tripwire, not a confirmer.
+    ``anomaly_flag`` is written to the store (migration 13), and the flagged count, the
+    budget k and the flag rule are recorded in `run_metrics` (``anomaly_flagged``,
+    ``anomaly_flag_budget``, ``anomaly_flag_rule``). At most k are flagged, whole tie
+    groups only (`flag_top`); ``flag_reason`` says why fewer were. Writes **no** labels —
+    this is a tripwire, not a confirmer.
 
     A flag is relative to the candidates scored together: call it per run (the CLI
     does); a later store-wide call (``run_id=None``) would overwrite per-run flags.
@@ -117,19 +158,24 @@ def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.
     from fuzzlab.ml.dataset import build_dataset
     ds = build_dataset(store, run_id, include_unlabelled=True)
     if not len(ds):
-        return {"rows": 0, "flagged": 0, "scores": [], "flags": [], "ids": []}
+        return {"rows": 0, "flagged": 0, "flag_budget": 0, "flag_reason": None,
+                "scores": [], "flags": [], "ids": []}
     ecod = ECOD().fit(ds.X)
     scores = ecod.scores(ds.X)
     flags = flag_top(scores, contamination)
+    k = flag_budget(len(scores), contamination)
     if persist:
         for cid, sc, fl in zip(ds.ids, scores, flags):
             store.conn.execute(
                 "UPDATE candidate SET anomaly_score=?, anomaly_flag=? WHERE id=?",
                 (sc, 1 if fl else 0, cid))
     if run_id is not None:
-        store.conn.execute(
-            "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
-            (run_id, "anomaly_flagged", float(sum(flags))))
+        for key, value in (("anomaly_flagged", sum(flags)), ("anomaly_flag_budget", k),
+                           ("anomaly_flag_rule", FLAG_RULE)):
+            store.conn.execute(
+                "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                (run_id, key, float(value)))
     store.conn.commit()
-    return {"rows": len(ds), "flagged": sum(flags), "scores": scores,
+    return {"rows": len(ds), "flagged": sum(flags), "flag_budget": k,
+            "flag_reason": flag_reason(scores, flags, contamination), "scores": scores,
             "flags": flags, "ids": ds.ids}

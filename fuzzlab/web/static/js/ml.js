@@ -152,13 +152,15 @@ function renderConformal(d) {
   if (meta) {
     meta.replaceChildren(
       document.createTextNode(`${d.model.name} v${d.model.version} · N=${d.n} · `
-        + `t_lo=${d.t_lo} t_hi=${d.t_hi}`
+        // null = a "never drops / never flags" threshold (BUG-0070), explained in notes
+        + `t_lo=${d.t_lo ?? "never"} t_hi=${d.t_hi ?? "never"}`
         + (d.per_run_gates ? " (each run gated by its own model)" : "") + " · "),
       band("flag", `flag ${d.counts.flag}`), document.createTextNode(" "),
       band("abstain", `abstain ${d.counts.abstain}`), document.createTextNode(" "),
       band("drop", `drop ${d.counts.drop}`),
       // BUG-0067: rows with no score the gate was calibrated for are not decided
       document.createTextNode(d.counts["n/a"] ? ` · n/a ${d.counts["n/a"]} (in-sample score)` : ""),
+      document.createTextNode((d.notes || []).map((n) => ` · ${n}`).join("")),
     );
   }
   bars("chart-conformal-split", ["flag", "abstain", "drop"], [
@@ -170,8 +172,9 @@ function renderConformal(d) {
 // --- anomaly --------------------------------------------------------------------
 function renderAnomaly(d) {
   if (!d.available) { showEmpty("anomaly", d.reason); return; }
-  setMeta("anomaly", `flagged ${d.flagged}/${d.n} (${(d.flagged_rate * 100).toFixed(1)}%) `
-    + `· threshold ${d.threshold} · unusual ≠ malicious`);
+  setMeta("anomaly", `flagged ${d.flagged}/${d.n} (${(d.flagged_rate * 100).toFixed(1)}%, `
+    + `at most ${d.flag_budget}) · threshold ${d.threshold ?? "—"}`
+    + (d.reason ? ` · ${d.reason}` : "") + " · unusual ≠ malicious");
   histChart("chart-anomaly-hist", d.hist, "ECOD score");
 }
 

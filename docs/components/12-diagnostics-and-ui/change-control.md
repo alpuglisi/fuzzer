@@ -3,6 +3,48 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0044 — Gate and anomaly-flag notes on the run page and ML tab; "never" thresholds (BUG-0070) (2026-10-13)
+- Change (readers of CC-ML-0019's corrected gate and tripwire):
+  - **Run page** (`results.py`, `templates/run.html`):
+    - The "Model scores" card lists `model.gate_notes` (`train.gate_notes`) as
+      `[data-field="gate-note"]` lines, e.g. "Conformal gate: never drops: needs ≥ 9
+      positives at α=0.1 (has 6)", or the pre-BUG-0070 label for an old row.
+    - The anomaly card gains `budget` and `note` (`core.anomaly_flags.flag_note`): an
+      old-rule label, or why fewer than k were flagged. The card now also shows when
+      nothing was flagged but there is a note, so a run flagged 0 because of ties says
+      so.
+  - **ML tab conformal panel** (`mlview.conformal_panel`, `ml.js`):
+    - `t_lo` / `t_hi` are shown via `_threshold`: 4 dp, `null` for a "never" sentinel
+      (rendered "never"), never `-0.0`.
+    - New `notes` field: the selected gate's `gate_notes`, plus the old-rule note when
+      **any** pooled run's gate lacks `gate_rule`.
+  - **ML tab anomaly panel** (`mlview.anomaly_panel`, `ml.js`):
+    - k comes from `anomaly.flag_budget` instead of being recomputed here (PA-0003).
+    - `threshold` is the lowest flagged score, or `null` when nothing was flagged.
+    - New fields `flag_budget` and `reason`. The meta line reads "flagged F/N (P%, at
+      most k) · threshold … · <reason>".
+  - All new text is inserted as text (`textContent` / Jinja autoescape).
+- Impact: read-only views. No API removed; `conformal_panel` and `anomaly_panel` gain
+  fields, and `t_lo`/`t_hi`/`threshold` may now be `null`. `ml.js` handles that. The
+  run page works without ML: the anomaly note is a core store read, and gate notes come
+  through `import_ml` only when a classifier exists.
+- Risk: low. Nullable thresholds are covered by the browser test.
+- Deliverables:
+  - [x] run page gate notes + anomaly note — done
+  - [x] conformal panel "never" display, notes, pooled old-rule note — done
+  - [x] anomaly panel `flag_budget` / `reason` — done
+  - [x] `tests/test_web_ml_context.py::test_gate_and_anomaly_notes_show_as_text` in real
+    Chromium (`FUZZLAB_REQUIRE_BROWSER=1`) — done. It covers the run-page gate note
+    text, the run-page anomaly note for a tie-limited run, the ML tab "t_lo=never" plus
+    the never-drops note and anomaly reason, and no `-0`.
+- Review: covered by CC-ML-0019's 3/3 pre-change review (the reader items came from A1,
+  A6, B3 and B v2-1).
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - The browser test passes in real Chromium, and `test_web_ml_context.py` passes
+    (15).
+  - These mutants are killed: the panel's `-0.0` / never display, the pooled old-rule
+    note, and the run-page gate note (CC-ML-0019's mutation check).
+
 ### CC-UI-0043 — ML tab run picker; run page shows oracle coverage, anomaly flags and the plugin record (2026-10-13)
 - Change:
   - **ML tab** (`sections/ml.html`, `static/js/ml.js`):

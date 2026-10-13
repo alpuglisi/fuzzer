@@ -328,6 +328,15 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
     }
 
 
+def _threshold(t: float) -> float | None:
+    """A gate threshold for display: rounded to 4 dp, ``None`` when it lies outside
+    [0, 1] — a "never flags / never drops" sentinel (BUG-0070), which the panel's notes
+    explain — and never ``-0.0``."""
+    if t < 0 or t > 1:
+        return None
+    return round(t, 4) + 0.0
+
+
 @_ml_panel
 def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
     """Flag/abstain/drop split (tab summary) + the nonconformity histogram + thresholds.
@@ -371,10 +380,16 @@ def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
         counts[owner.gate.decide(judged)] += 1
         judged_scores.append(judged)
     distinct = {(g.name, g.version) for g in gates.values() if g is not None}
+    notes = train.gate_notes(calib)
+    # the pooled all-runs view: say so when ANY run's gate used the earlier rule
+    if any(g is not None and g.gate is not None and "gate_rule" not in g.calibration
+           for g in gates.values()) and train.OLD_GATE_NOTE not in notes:
+        notes.append(train.OLD_GATE_NOTE)
     return {
         "available": True, "n": len(rows), "judged": len(judged_scores),
         "model": {"name": row["name"], "version": row["version"]},
-        "t_lo": round(calib["t_lo"], 4), "t_hi": round(calib["t_hi"], 4),
+        "t_lo": _threshold(calib["t_lo"]), "t_hi": _threshold(calib["t_hi"]),
+        "notes": notes,
         "per_run_gates": len(distinct) > 1,
         "counts": counts,
         "nonconformity_hist": _histogram(judged_scores, bins=20, lo=0.0, hi=1.0),
@@ -393,17 +408,18 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
     ds = _ml().dataset.build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 5:
         return {"available": False, "reason": "not enough candidates to fit an anomaly model"}
-    ECOD, flag_top = _ml().anomaly.ECOD, _ml().anomaly.flag_top
-    ecod = ECOD().fit(ds.X)
+    anomaly = _ml().anomaly
+    ecod = anomaly.ECOD().fit(ds.X)
     scores = ecod.scores(ds.X)
-    flags = flag_top(scores, contamination)
-    k = max(1, int(round(len(scores) * contamination)))
-    threshold = sorted(scores, reverse=True)[k - 1]
+    flags = anomaly.flag_top(scores, contamination)        # whole tie groups (BUG-0070)
     flagged = sum(flags)
+    threshold = min((s for s, f in zip(scores, flags) if f), default=None)
     return {
         "available": True, "n": len(scores), "flagged": flagged,
+        "flag_budget": anomaly.flag_budget(len(scores), contamination),
         "flagged_rate": round(flagged / len(scores), 4) if scores else 0.0,
-        "threshold": round(threshold, 4),
+        "threshold": None if threshold is None else round(threshold, 4),
+        "reason": anomaly.flag_reason(scores, flags, contamination),
         "hist": _histogram(scores, bins=15),
     }
 

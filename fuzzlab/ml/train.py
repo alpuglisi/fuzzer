@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from fuzzlab.core.oracle_status import SKIPPED_BUDGET, UNLABELLED
 from fuzzlab.core.store import MetricLogger
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
-from fuzzlab.ml.conformal import ConformalGate
+from fuzzlab.ml.conformal import GATE_RULE, ConformalGate, check_alpha
 from fuzzlab.ml.dataset import build_dataset, run_ids_of, seen_fraction, target_of
 from fuzzlab.ml.gbt import GradientBoostedTrees
 from fuzzlab.ml.logistic import LogisticRegression
@@ -67,6 +67,31 @@ def gate_input(calibration: dict, oracle_status, score, score_oof):
             return score_oof
         return score if oracle_status in UNLABELLED else None
     return score
+
+
+#: Said beside decisions from a gate calibrated before CC-ML-0019 (BUG-0070).
+OLD_GATE_NOTE = "thresholds from the pre-BUG-0070 rule (may exceed α at small n)"
+
+
+def gate_notes(calibration: dict) -> list[str]:
+    """What a reader must say beside a model's conformal decisions (BUG-0070): that its
+    thresholds come from the earlier rule, or why it can never flag / never drop (too
+    few calibration rows of a class for the bound — `conformal.min_class_size`)."""
+    from fuzzlab.ml.conformal import NEVER_DROP, NEVER_FLAG, min_class_size
+    if "t_lo" not in calibration or "t_hi" not in calibration:
+        return []
+    if "gate_rule" not in calibration:
+        return [OLD_GATE_NOTE]
+    alpha = calibration.get("alpha")
+    need = min_class_size(alpha)
+    notes = []
+    if calibration["t_hi"] >= NEVER_FLAG:
+        notes.append(f"never flags: needs ≥ {need} negatives at α={alpha} "
+                     f"(has {calibration.get('n_neg')})")
+    if calibration["t_lo"] <= NEVER_DROP:
+        notes.append(f"never drops: needs ≥ {need} positives at α={alpha} "
+                     f"(has {calibration.get('n_pos')})")
+    return notes
 
 
 def _write_scores(store, ids, scores, oof_by_id=None) -> None:
@@ -143,8 +168,19 @@ def _select_and_evaluate(ds, model_kind: str, k: int, alpha: float):
         prauc = pr_auc(ds.y, oof)
     prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
     sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
-    gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
+    # calibrated on the values exactly as `_write_scores` stores them — the values every
+    # reader's `gate_input` hands to the gate (PA-0069(3), BUG-0070)
+    gate = ConformalGate.calibrate([round(s, 6) for s in oof], ds.y, alpha=alpha)
     return name, prauc, prevalence, sigma, gate, selection, oof
+
+
+def _gate_record(gate: ConformalGate, labels) -> dict:
+    """A gate's calibration keys: thresholds, the rule they were computed with
+    (`conformal.GATE_RULE`, absent on pre-BUG-0070 rows) and the class sizes behind them
+    (so a reader can say why a gate never flags / never drops)."""
+    n_pos = sum(1 for y in labels if y)
+    return {"t_lo": gate.t_lo, "t_hi": gate.t_hi, "gate_rule": GATE_RULE,
+            "n_pos": n_pos, "n_neg": len(labels) - n_pos}
 
 
 def _metric(store, run_id: int, key: str, value: float) -> None:
@@ -179,6 +215,9 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
     exists and any "OOF" metric would be in-sample (BUG-0062).
 
+    ``alpha`` (the gate's per-side error rate) must be in (0, 1) — checked before any
+    write (BUG-0070).
+
     ``train_on="earlier"`` (CC-ML-0016) instead trains on earlier runs against the same
     target and scores this run without reading its labels — see `_score_from_earlier`;
     ``train_on="saved"`` (CC-ML-0018) scores it with a saved earlier model, no training
@@ -186,6 +225,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
 
     In run mode a labelled row's out-of-fold score is also stored (``score_oof``), the
     score its conformal gate is calibrated for (BUG-0067)."""
+    check_alpha(alpha)
     if train_on == "saved":
         if hybrid:
             raise ValueError("hybrid does not apply to a saved model (it keeps its own)")
@@ -252,7 +292,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     _write_scores(store, every.ids, scores, oof_by_id)
 
     if gate is not None:
-        calibration.update(t_lo=gate.t_lo, t_hi=gate.t_hi)
+        calibration.update(_gate_record(gate, ds.y))
     # Save the deployed model itself (CC-ML-0015): reloadable, sha-pinned.
     params, params_sha = dumps_model(kind, model, feature_names=ds.feature_names,
                                      feature_version=ds.feature_version, ecod=ecod)
@@ -334,7 +374,7 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
                    "oof_scope": "earlier runs", "score_source": SCORE_EARLIER,
                    "oof_pr_auc": prauc,
                    "oof_pr_auc_prevalence": prevalence, "oof_pr_auc_sigma": sigma,
-                   "t_lo": gate.t_lo, "t_hi": gate.t_hi}
+                   **_gate_record(gate, prior.y)}
     calibration.update(fwd_calibration)
     params, params_sha = dumps_model(name, model, feature_names=prior.feature_names,
                                      feature_version=prior.feature_version, ecod=ecod)
@@ -370,8 +410,8 @@ def _forward_evaluation(store, run_id: int, ids, scores) -> tuple[dict, dict]:
 SAVED_CLASSIFIER_NAMES = tuple(_MODELS)
 #: Calibration keys a saved-mode copy carries over from its original (the original's
 #: own out-of-fold evaluation and gate; not re-derived from this run).
-_SAVED_CARRY = ("alpha", "feature_version", "model_kind", "t_lo", "t_hi", "oof_pr_auc",
-                "oof_pr_auc_prevalence", "oof_pr_auc_sigma")
+_SAVED_CARRY = ("alpha", "feature_version", "model_kind", "t_lo", "t_hi", "gate_rule",
+                "n_pos", "n_neg", "oof_pr_auc", "oof_pr_auc_prevalence", "oof_pr_auc_sigma")
 
 
 def saved_training_rows(store, calibration: dict) -> list[int]:

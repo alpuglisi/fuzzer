@@ -19,7 +19,8 @@ the oracle owns truth (the oracle/advisory split).
 ## 3. Functional requirements
 - **FR-ML-1 (classifier, A.1)** Gradient-boosted trees over `attempt.features_json`
   with probability calibration and a conformal flag/abstain/drop decision; writes
-  scores + uncertainty, never labels.
+  scores + uncertainty, never labels. *(Note CC-ML-0019, BUG-0070: the conformal
+  decision keeps its stated per-side bound — see FR-ML-18.)*
 - **FR-ML-2 (ranker, A.2)** Learning-to-rank over parameters/forms from candidate
   features; writes `candidate.score`; costs **zero** requests.
 - **FR-ML-3 (anomaly, A.5)** ECOD / Isolation Forest tripwire over flows, later an
@@ -126,6 +127,13 @@ the oracle owns truth (the oracle/advisory split).
   - It writes `candidate.anomaly_score` / `anomaly_flag` and records
     `run_metrics.anomaly_flagged`.
   - `contamination` must be in (0, 0.5].
+  - *(Amended CC-ML-0019, BUG-0070's sweep.)* At most `k = max(1, round(n·c))`
+    candidates are flagged (`anomaly.flag_budget`), **whole tie groups only**: when the
+    top tie group alone exceeds k, nothing is flagged. `detect_anomalies` records
+    `anomaly_flag_budget` and `anomaly_flag_rule = 2`, and returns `flag_reason` when
+    fewer than k were flagged. A run with stored flags and no `anomaly_flag_rule` used
+    the earlier rule (ties could exceed k), and readers label it
+    (`core.anomaly_flags.flag_note`).
   - A flag is relative to the candidates scored together. The CLI scores per run; a
     later store-wide call would overwrite per-run flags.
   - Advisory only: unusual is not vulnerable, and it writes no labels.
@@ -225,6 +233,28 @@ the oracle owns truth (the oracle/advisory split).
   - **Canonical targets.** Target matching for cross-run training and budget ordering
     compares `core.urls.canonical_origin`, so loopback aliases are one target and an
     unusable origin matches nothing.
+- **FR-ML-18 (conformal gate rule, CC-ML-0019, BUG-0070)**
+  - **Finite-sample split-conformal thresholds.** For n negative and m positive
+    calibration scores, the gate flags `score > q_hi` (the `ceil((n+1)(1-α))`-th
+    smallest negative) and drops `score < q_lo` (the `floor((m+1)α)`-th smallest
+    positive), with ranks computed exactly from α's binary value.
+  - **The bound.** On the calibration set at most α·n negatives are flagged and α·m
+    positives dropped, ties included. On new exchangeable data each side errs with
+    probability ≤ α.
+  - **Small classes.** With fewer than `min_class_size(α) = ceil(1/α) - 1` rows of a
+    class (9 at α = 0.1) the gate **never flags** (negatives) / **never drops**
+    (positives). Readers say so, with the counts (`train.gate_notes`).
+  - **Stored as non-strict thresholds.** `decide` keeps `>= t_hi` / `<= t_lo`, so
+    stored rows keep their meaning: `t_hi = nextafter(q_hi, +inf)`, `t_lo =
+    nextafter(q_lo, -inf)`; "never" is `nextafter(1.0, inf)` / `nextafter(0.0, -inf)`.
+  - **Calibrated on stored values.** The gate is calibrated on the out-of-fold scores
+    rounded as `score_oof` stores them.
+  - **α** must be in (0, 1); `train_and_score` checks it before any write.
+  - **Provenance.** New rows record `gate_rule: "split-conformal"`, `n_pos`, `n_neg`,
+    and saved copies carry them. A row without `gate_rule` used the earlier rule (it
+    could exceed α by about 1/n). It is applied as recorded and labelled
+    "pre-BUG-0070" on the run page and in the ML tab, including the pooled view when
+    any pooled gate lacks it.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

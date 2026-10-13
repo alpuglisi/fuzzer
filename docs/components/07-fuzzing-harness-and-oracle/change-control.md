@@ -22,6 +22,29 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0052 — `fuzzlab auto --anomaly` prints why fewer were flagged; contamination help says "at most" (BUG-0070) (2026-10-13)
+- Change (`harness/auto_cli.py`):
+  - The anomaly summary prints `    note: <flag_reason>` when ties left fewer than k
+    flagged (CC-ML-0019).
+  - The `--anomaly-contamination` help text changes from "Fraction of candidates
+    --anomaly flags" to "At most this fraction of candidates is flagged by --anomaly,
+    whole tie groups only".
+  - The validation (0, 0.5] is unchanged.
+- Impact: the CLI summary output changes where the tripwire's ties bind. The golden
+  summaries `tests/data/auto_summary/run.txt` and `earlier.txt` were regenerated
+  deliberately ("flagged 8 of 46" becomes "flagged 4 of 46" plus the note line, and one
+  listed row fewer; every other line is byte-identical). No flag or exit code changes.
+- Risk: low.
+- Deliverables:
+  - [x] reason line + help text — done
+  - [x] goldens regenerated with the reason recorded; `test_auto_budget` asserts
+    `0 < flagged ≤ anomaly_flag_budget` — done
+- Review: covered by CC-ML-0019's 3/3 pre-change review (B1, B v2-1, A v2-2).
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - `test_auto_plugins.py` passes with the regenerated goldens, and so does
+    `test_auto_budget.py`.
+  - The "no CLI reason" mutant is killed (CC-ML-0019's mutation check).
+
 ### CC-FUZZ-0051 — `--train-on saved`, `--model-id`, `--ranker-model-id`, `--hybrid` (2026-10-13)
 - Change:
   - **`auto_cli`:**

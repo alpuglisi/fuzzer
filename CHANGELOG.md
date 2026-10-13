@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML: conformal gate keeps its α bound; anomaly flags keep their fraction — BUG-0070)
+- **Conformal gate fixed.** The gate's thresholds now use the finite-sample
+  split-conformal rule, so on its calibration set it flags at most α of the negatives
+  and drops at most α of the positives, ties included. Before, it could reach 2α at the
+  lab's data sizes. With too few rows of a class, a gate now never flags or never drops,
+  and the run page and ML tab say why. Old models' thresholds are applied as recorded
+  and labelled "pre-BUG-0070".
+- **Anomaly tripwire fixed.** It now flags at most its contamination fraction, whole
+  tie groups only. The CLI, run page and ML tab say when ties left fewer flagged.
+- Records: CC-ML-0019, CC-UI-0044, CC-FUZZ-0052; BUG-0070, PA-0069.
+
 ## 2026-10-13 (UI: ML tab run picker; run page ML context — CC-UI-0043)
 - **ML tab run picker.** The tab gains a run picker, so a single run's own out-of-fold
   numbers and gate can be inspected; until now the tab only showed all runs pooled.

@@ -18,6 +18,7 @@ require_modules()
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
+from fuzzlab.core.anomaly_flags import flag_note  # noqa: E402
 from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET  # noqa: E402
 from fuzzlab.core.store import Store  # noqa: E402
 from fuzzlab.ml.anomaly import detect_anomalies  # noqa: E402
@@ -59,11 +60,19 @@ def _seed(path) -> dict:
         store.conn.execute("INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
                            (trained, "anomaly_flagged", 5.0))
         unscored = _seed_rich(store)                      # run 2: candidates, no models
+        detect_anomalies(store, unscored, contamination=0.1)   # ties: fewer than k
         crawl = store.start_run(HOSTILE, "127.0.0.1:8080")    # run 3: no candidates
         store.conn.commit()
         oof_line = mlview.classifier_panel(store, trained)["oof"]
+        metrics = {r["key"]: r["value"] for r in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=? ORDER BY id", (trained,))}
+        anomaly_note = flag_note(store, trained, metrics)
+        unscored_note = flag_note(store, unscored, {r["key"]: r["value"] for r in
+                                  store.conn.execute("SELECT key, value FROM run_metrics "
+                                                     "WHERE run_id=?", (unscored,))})
     return {"trained": trained, "unscored": unscored, "crawl": crawl,
-            "oof_pr_auc": oof_line["pr_auc"]}
+            "oof_pr_auc": oof_line["pr_auc"], "anomaly_note": anomaly_note,
+            "unscored_note": unscored_note}
 
 
 # --- data -------------------------------------------------------------------------
@@ -238,3 +247,25 @@ def test_a_run_without_candidates_in_the_query_falls_back(site, tab):
     page = tab.open(f"/ml?run={site['crawl']}", ".uplot")
     assert page.input_value("#ml-run") == ""
     assert all("run_id=" not in u for u in tab.ml_requests)
+
+
+def test_gate_and_anomaly_notes_show_as_text(site, tab):
+    """BUG-0070: the run's gate cannot drop (6 positives < 9 at alpha 0.1) and says so
+    beside its decisions, on the run page and in the ML tab's conformal panel; the run
+    page's anomaly card carries the flag note."""
+    page = tab.open(f"/runs/{site['trained']}")
+    notes = page.locator('[data-field="gate-note"]').all_inner_texts()
+    assert notes == ["Conformal gate: never drops: needs ≥ 9 positives at α=0.1 (has 6)."]
+    if site["anomaly_note"]:
+        assert site["anomaly_note"] in page.inner_text("#run-anomaly")
+    assert site["unscored_note"] and site["unscored_note"].startswith("flagged ")
+    page = tab.open(f"/runs/{site['unscored']}")
+    assert page.inner_text('[data-field="anomaly-note"]') == f"Note: {site['unscored_note']}."
+    page = tab.open(f"/ml?run={site['trained']}", ".uplot")
+    page.wait_for_timeout(800)
+    anomaly = page.inner_text('#panel-anomaly [data-field="summary"]')
+    assert "at most 2" in anomaly and "the next tie group of 6 would exceed it" in anomaly
+    summary = page.inner_text('#panel-conformal [data-field="summary"]')
+    assert "t_lo=never" in summary and "never drops: needs ≥ 9 positives" in summary
+    assert "-0" not in summary.split("t_hi=")[1].split(" ")[0]
+    assert tab.problems() == []

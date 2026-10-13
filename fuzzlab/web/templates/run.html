@@ -57,6 +57,9 @@
     the oracle owns findings. The gate judges the <em>decision score</em>: a labelled
     row's out-of-fold score, or a score the model never trained on &mdash; never an
     in-sample score.</p>
+  {% for n in (model.gate_notes if model else []) %}
+  <p class="muted" data-field="gate-note">Conformal gate: {{ n }}.</p>
+  {% endfor %}
   <table>
     <thead><tr><th>url</th><th>param</th><th>category</th><th>score</th>
       <th>decision score</th><th>decision</th></tr></thead>
@@ -91,7 +94,7 @@
 {% endif %}
 
 {% set an = detail.anomaly %}
-{% if an and an.top %}
+{% if an and (an.top or an.note) %}
 <div class="card" id="run-anomaly">
   <h2>Anomaly tripwire (advisory)</h2>
   <p class="muted">The most unusual candidates by the stored anomaly score &mdash;
@@ -99,6 +102,8 @@
     {{ an.flagged|int if an.flagged is not none else 'unknown' }}{% if an.config %}
     (stage config <code>{{ an.config }}</code>){% endif %}. These are the last anomaly
     fit's values for this run.</p>
+  {% if an.note %}<p class="muted" data-field="anomaly-note">Note: {{ an.note }}.</p>{% endif %}
+  {% if an.top %}
   <table>
     <thead><tr><th>path</th><th>param</th><th>category</th><th>anomaly score</th></tr></thead>
     <tbody>
@@ -108,6 +113,7 @@
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 </div>
 {% endif %}
 

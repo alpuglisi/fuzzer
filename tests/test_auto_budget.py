@@ -212,6 +212,8 @@ def test_cli_budgeted_run_trained_on_earlier_runs(tmp_path, monkeypatch, capsys,
             "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND anomaly_flag=1",
             (run_id,)).fetchone()["c"]
         assert flagged == _metric(store, run_id, "anomaly_flagged") > 0
+        # never more than the contamination budget, whole tie groups only (BUG-0070)
+        assert flagged <= _metric(store, run_id, "anomaly_flag_budget")
         assert store.conn.execute(
             "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND anomaly_score IS NULL",
             (run_id,)).fetchone()["c"] == 0

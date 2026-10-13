@@ -14,9 +14,9 @@ auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-
     - GET /profile.php [bio]: stored XSS (needs browser execution, M6)
   ml (logistic): scored 46 candidate(s); trained on 40 earlier labelled candidate(s) from this target (runs 1, 2), not on this run's labels; 0% of this run's candidates were seen in training; no forward PR-AUC (budget-selected labels)  (advisory — never labels)
   ranker (ranker): ranked 46 candidate(s); trained on 40 earlier labelled candidate(s) from this target (runs 1, 2), not on this run's labels; 0% of this run's candidates were seen in training; no forward NDCG@10 (budget-selected labels)  (advisory — never labels)
-  anomaly: flagged 8 of 46 candidate(s)  (advisory — unusual is not vulnerable)
+  anomaly: flagged 4 of 46 candidate(s)  (advisory — unusual is not vulnerable)
+    note: flagged 4 of at most k=5: the next tie group of 4 would exceed it
     - /search.php [q] xss  score 7.957
     - /search.php [q] sql-injection  score 7.957
     - /search.php [q] xss  score 7.957
     - /search.php [q] sql-injection  score 7.957
-    - /blog_post.php [id] xss  score 6.571

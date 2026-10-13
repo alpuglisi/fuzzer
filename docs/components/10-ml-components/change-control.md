@@ -3,6 +3,133 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0019 — The conformal gate keeps its α bound (BUG-0070); anomaly flags never exceed their fraction (2026-10-13)
+- **Context:** found while building batch 3 (calibration). Its agreed invariant test
+  (each side's error ≤ α on the calibration set, ties included) failed on today's gate
+  with no calibration at all. This is fixed first, as its own bug. Batch 3 becomes
+  CC-ML-0020 and batch 4 becomes CC-ML-0021 (renumbered before anything was committed,
+  PA-0031).
+- Change:
+  - **`conformal.py`: finite-sample split-conformal order statistics.**
+    - The gate flags `score > q_hi`, where `q_hi` is the `ceil((n+1)(1-α))`-th smallest
+      negative. It drops `score < q_lo`, where `q_lo` is the `floor((m+1)α)`-th smallest
+      positive.
+    - Ranks are computed in exact arithmetic with `fractions.Fraction(α)`. The helpers
+      are `upper_index`, `lower_index` and `min_class_size = ceil(1/α) - 1`.
+    - Out of range means the gate **never flags / never drops**.
+    - `decide` (`>=` / `<=`) is unchanged, and the strict inequalities are stored as
+      `t_hi = nextafter(q_hi, +inf)` and `t_lo = nextafter(q_lo, -inf)`. The "never"
+      thresholds are `nextafter(1.0, inf)` and `nextafter(0.0, -inf)`. Stored rows
+      therefore keep their exact meaning.
+    - `check_alpha`: α must be a real number in (0, 1).
+    - `_quantile` is removed.
+  - **`train.py`:**
+    - The gate is calibrated on `round(oof, 6)`, the stored values (PA-0069(3)).
+    - `alpha` is checked before any write.
+    - `_gate_record` adds `gate_rule: "split-conformal"`, `n_pos` and `n_neg` to new
+      rows, in run and earlier modes. `_SAVED_CARRY` carries them to saved copies.
+    - `gate_notes(calibration)` and `OLD_GATE_NOTE` are the reader text.
+  - **`anomaly.py`:**
+    - `flag_budget(n, c)` is the one definition of k.
+    - `flag_top` flags **at most k, whole tie groups only**. Nothing is flagged when the
+      top tie group alone exceeds k.
+    - `flag_reason` explains a shortfall.
+    - `FLAG_RULE = 2`. `detect_anomalies` also records `anomaly_flag_budget` and
+      `anomaly_flag_rule`, and returns `flag_budget` and `flag_reason`.
+- Behaviour changes, stated in FR-ML-1, FR-ML-12 and FR-ML-18:
+  - at α = 0.1 a gate never drops with fewer than 9 positives and never flags with fewer
+    than 9 negatives;
+  - an empty negative class never flags (before, it flagged a score of exactly 1.0);
+  - the tripwire flags fewer candidates when scores tie, possibly none.
+
+  Every reader shows the reason.
+- Impact:
+  - **UI (CC-UI-0044):**
+    - the run page shows gate notes and the anomaly note;
+    - the ML tab shows "never" thresholds and the notes, including the pooled
+      old-rule note;
+    - the anomaly panel uses `flag_budget` and `flag_reason`.
+  - **FUZZ (CC-FUZZ-0052):** the CLI prints the anomaly reason, and the
+    `--anomaly-contamination` help text changes.
+  - **CORE:** `core/anomaly_flags.flag_note` is a plain store read, no ML import. It is
+    a reader added inside the existing module, recorded here and in CC-UI-0044 because
+    no CORE contract changes.
+  - **Store:** no schema change. New `run_metrics` keys `anomaly_flag_budget` and
+    `anomaly_flag_rule`, and new calibration keys `gate_rule`, `n_pos` and `n_neg`.
+  - **Old rows** are not rewritten. Their thresholds and flags are applied as recorded
+    and labelled "pre-BUG-0070".
+  - `ML_PLUGIN_VERSION` stays "2": the plugin config's meaning is unchanged, and the
+    run's metrics record the rule.
+- Risk: low-medium.
+  - **Fewer automated decisions and flags on thin data.** That is the honest reading of
+    the stated guarantee, and each reader says why.
+  - **Two golden summaries regenerated deliberately.** In
+    `tests/data/auto_summary/run.txt` and `earlier.txt`, "anomaly: flagged 8 of 46"
+    becomes "flagged 4 of 46" plus a note: k = 5, and a tie group of 4 at 7.957 is
+    followed by a tie group of 4 more. The fifth listed row (`/blog_post.php [id] xss
+    6.571`) is gone.
+  - Every other line is byte-identical.
+- Deliverables:
+  - [x] `conformal.py` split-conformal helpers and α validation — done
+  - [x] `train.py` stored-value calibration, `_gate_record`, `gate_notes`, `_SAVED_CARRY` — done
+  - [x] `anomaly.py` `flag_budget` / `flag_top` / `flag_reason`, budget and rule metrics — done
+  - [x] Tests: `tests/test_conformal_bound.py` (new, 104) — done. It covers:
+    - the calibration-set bound with ties at n ∈ {1..200} and α ∈ {0.05, 0.1, 0.2, 0.5};
+    - non-vacuity, where exactly `n - k_hi` are flagged;
+    - the overlap swap;
+    - the sentinels;
+    - `min_class_size`;
+    - exact indices against a brute-force `Fraction` count over 157 α values;
+    - α validation, including the trainer writing nothing;
+    - the held-out Monte Carlo on both sides, two-sided;
+    - new-row keys and the never-drop note;
+    - old rows deciding as before;
+    - stored-value calibration;
+    - rounding across a threshold;
+    - `flag_budget`, ties, the two-group cases, and the property "never above k, whole
+      groups only";
+    - `detect_anomalies` metrics and the old-run label.
+  - [x] Updated tests:
+    - `test_ml_saved_and_decisions.py`: a saved copy carries `gate_rule`, `n_pos`,
+      `n_neg` and the thresholds;
+    - `test_auto_budget.py`: flagged ≤ `anomaly_flag_budget`, still > 0;
+    - `test_web_ml_context.py`: a browser test for the gate notes, anomaly note and
+      reason; its fixture also anomaly-scores run 2;
+    - the two golden files above;
+    - `test_ml.py::test_conformal_decisions_and_calibration`: the tolerance tightens
+      from 2α to α + 3·SE (A4).
+  - [x] BUG-0070, ERROR_LOG, PA-0069, FR-ML-1 note, FR-ML-12 amended, FR-ML-18 new,
+    CHANGELOG — done
+- Review: the pre-change review gate cleared 3/3. Draft v1 drew 5 issues from A and 5
+  from B; v2 drew 3 from A and 4 from B. Every issue was adopted. The main additions:
+  - B: the `flag_top` sweep instance, α validation, the run-page marker, the reason text
+    and `flag_budget`;
+  - A: small-n disclosure, exact `Fraction` indices, the golden files named, and
+    old-flag labelling.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (ML, auto, web incl. real-browser, plugins, report, no-ML,
+    harness, multitarget, pipeline, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1`): 813
+    passed, 1 skipped, 1 failed.
+    - The failure, `test_multitarget_category4.py::test_both_apps_run_through_multitarget_for_real`,
+      boots real lab servers with timeouts. It ran while a concurrent full suite held
+      the CPU.
+    - It passes alone and with its file (2 passed). It is not in the area changed; the
+      next full suite re-checks it.
+  - `tests/test_conformal_bound.py`: 104 passed.
+  - **Mutation check.** On a copy, bytecode caches cleared: all 22 mutants are killed.
+    - The first pass left 4 survivors, and each got a new test:
+      - no overlap swap: the swap test now places the classes so the thresholds cross
+        and asserts the swap;
+      - no stored-value rounding: a constructed out-of-fold value that rounds up across
+        the threshold;
+      - no early α check: the thin-data path refuses a bad α and writes nothing;
+      - no pooled old-rule note: the pooled view whose newest row is new-rule.
+    - Killed: ceil→round, n instead of n+1 (both sides), no nextafter (both sides),
+      float α instead of `Fraction`, no α check, `min_class_size` off by one, no
+      `gate_rule`, no saved carry, no old-row note, ties split, budget off by one, no
+      rule metric, no old-flag note, `-0.0` / never display, no CLI reason, no run-page
+      gate note.
+
 ### CC-ML-0018 — no_confirmer unlabelled; canonical target matching; out-of-fold columns (BUG-0067); saved-model scoring; `--hybrid` (2026-10-13)
 - **Context:** the user asked me to build the remaining ML work while away, taking my
   own recommendation at each decision point. This settles the three decisions flagged

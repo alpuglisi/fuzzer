@@ -146,5 +146,7 @@ def test_conformal_decisions_and_calibration():
         else:
             neg += 1
             neg_flag += gate.decide(s) == "flag"
-    assert neg_flag / neg < 0.2                      # bounded false-positive rate
-    assert pos_drop / pos < 0.2                      # bounded false-negative rate
+    # bounded at alpha (seeded; 3 standard errors of the held-out estimate) — the old
+    # 2·alpha tolerance hid BUG-0070; the exact bound is in test_conformal_bound.py
+    assert neg_flag / neg <= 0.1 + 3 * math.sqrt(0.1 * 0.9 / neg)
+    assert pos_drop / pos <= 0.1 + 3 * math.sqrt(0.1 * 0.9 / pos)

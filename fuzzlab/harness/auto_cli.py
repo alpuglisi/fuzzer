@@ -102,7 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "tripwire and store anomaly_score/anomaly_flag (Phase 10; "
                         "unusual != vulnerable; never labels)")
     p.add_argument("--anomaly-contamination", type=float, default=0.1, metavar="F",
-                   help="Fraction of candidates --anomaly flags, in (0, 0.5] (default 0.1)")
+                   help="At most this fraction of candidates is flagged by --anomaly, "
+                        "whole tie groups only, in (0, 0.5] (default 0.1)")
     p.add_argument("--plugins", action="store_true",
                    help="Discover and attach entry-point plugins (Phase 10); the active "
                         "set is recorded on the run. Default off (runs with no plugins).")
@@ -373,6 +374,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     if anomaly is not None:
         print(f"  anomaly: flagged {anomaly.get('flagged', 0)} of {anomaly.get('rows', 0)} "
               f"candidate(s)  (advisory — unusual is not vulnerable)")
+        if anomaly.get("flag_reason"):               # ties are never split (BUG-0070)
+            print(f"    note: {anomaly['flag_reason']}")
         for t in anomaly.get("top", []):
             print(f"    - {t['path']} [{t['param']}] {t['category']}  score {t['score']}")
     for name, outcome in outcomes.items():          # third-party post-run plugins

@@ -228,6 +228,10 @@ bugs — the research-platform diagnostics of decision D2.
     earlier-trained model it also carries `forward` (or `null`), its
     `forward_skipped_reason`, `seen_fraction` and `train_run_ids`.
   - **Display.** `ml.js` shows all of these. It never calls them out-of-sample.
+  - *(Note CC-UI-0044, BUG-0070.)* The conformal panel shows a "never flags / never
+    drops" threshold as "never" (never `1.0` or `-0.0`) with `train.gate_notes`, and the
+    pre-BUG-0070 note when any pooled gate lacks `gate_rule`. The anomaly panel shows
+    "at most k" (`anomaly.flag_budget`) and the tie reason.
 - **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
   layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
   (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +
@@ -389,7 +393,11 @@ bugs — the research-platform diagnostics of decision D2.
   - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded counts.
   - **Anomaly flags:** the stored top flagged candidates (`core.anomaly_flags`), with the
     run's own `anomaly_flagged` and the anomaly stage's config as provenance. The flags
-    are the last fit's values for that run.
+    are the last fit's values for that run. *(CC-UI-0044:)* the card also shows
+    `core.anomaly_flags.flag_note` — the pre-BUG-0070 label, or why fewer than k were
+    flagged — and appears for a note even when nothing was flagged.
+  - **Gate notes** *(CC-UI-0044):* the "Model scores" card lists `train.gate_notes`
+    (pre-BUG-0070 thresholds, or never flags / never drops with the counts).
   - **Plugins and ML stages:** each attached plugin with its config and status
     (unknown / attached — run did not finish / FAILED: error / ok).
   - **Safety:** every value renders as text.

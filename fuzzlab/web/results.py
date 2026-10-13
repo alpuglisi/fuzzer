@@ -59,7 +59,9 @@ def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None
     clf = train.latest_classifier(store, run_id) if train is not None else None
     model = gate = None
     if clf is not None:
-        model = {"name": clf.name, "version": clf.version, "calibration": clf.calibration}
+        model = {"name": clf.name, "version": clf.version, "calibration": clf.calibration,
+                 # pre-BUG-0070 thresholds / never-flag / never-drop, said beside decisions
+                 "gate_notes": train.gate_notes(clf.calibration) if clf.gate else []}
         gate = clf.gate
     scored = []
     for c in store.conn.execute(
@@ -396,7 +398,7 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
     """The run's ML context for its page (CC-UI-0043, FR-UI-19): what the oracle checked,
     the stored anomaly flags, and the plugins (ML stages included) that were attached —
     all plain per-run store reads, so they show without the ML package."""
-    from fuzzlab.core.anomaly_flags import top_flagged
+    from fuzzlab.core.anomaly_flags import flag_note, top_flagged
     from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET
     counts = dict.fromkeys((CHECKED, SKIPPED_BUDGET, NO_CONFIRMER, None), 0)
     for r in store.conn.execute(
@@ -422,6 +424,8 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
                           "no_confirmer": counts[NO_CONFIRMER], "unrecorded": counts[None]},
         "anomaly": {"top": top_flagged(store, run_id, limit=10),
                     "flagged": metrics.get("anomaly_flagged"),
+                    "budget": metrics.get("anomaly_flag_budget"),
+                    "note": flag_note(store, run_id, metrics),
                     "config": anomaly_config},
         "plugins": plugins,
     }

@@ -18,6 +18,26 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — ML: the conformal gate exceeded its α; anomaly flags exceeded their fraction (fixed, BUG-0070/PA-0069)
+
+- **Symptom:** while building batch 3, its invariant test (each side's error ≤ α on the
+  calibration set) failed on today's gate with no calibration applied. At α = 0.1 the
+  gate flagged 20% of negatives at n = 10 and 15% at n = 20 (the same on the drop
+  side). The anomaly tripwire flagged 30% / 33% at contamination 0.1 on the repo's own
+  fixtures.
+- **Root cause:** order-statistic thresholds were hand-rolled without a finite-sample
+  rule that fixes the index, the comparison and the ties together. The gate used
+  `round(q·(n-1))` with `>=`, and the tripwire flagged every score tied with the k-th.
+  The tests asserted only a loose 2α tolerance at n = 400.
+- **Remediation:** split-conformal ranks (`ceil((n+1)(1-α))`, `floor((m+1)α)`) are
+  computed exactly and stored as `nextafter` thresholds. `decide` is unchanged, so old
+  rows keep their meaning. The gate is calibrated on stored rounded values, α is
+  validated, and new rows record `gate_rule` / `n_pos` / `n_neg`. Readers explain
+  "never flags / never drops" and label old rows. The tripwire flags at most k, whole
+  tie groups only, and records the budget and rule. CC-ML-0019, CC-UI-0044,
+  CC-FUZZ-0052; `docs/bugs/BUG-0070-conformal-gate-exceeds-alpha.md`; PA-0069.
+- **Status:** Fixed
+
 ## 2026-10-13 — ML/UI: conformal thresholds were applied to in-sample deploy scores (fixed, BUG-0067/PA-0068, recurrence of the BUG-0062/PA-0064 class)
 
 - **Symptom:** the run page's "Model scores (advisory)" decisions and the ML tab's

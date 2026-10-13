@@ -252,6 +252,8 @@ def test_saved_mode_applies_the_newest_earlier_model_exactly(tmp_path):
         assert copy.params_sha256 == source.params_sha256
         assert copy.calibration["oof_scope"] == f"run #{second} (saved model #{source.id})"
         assert copy.calibration["seen_fraction_recomputed"] is True
+        for key in ("gate_rule", "n_pos", "n_neg", "t_lo", "t_hi"):   # BUG-0070
+            assert copy.calibration[key] == source.calibration[key]
         every = build_dataset(store, run_id, include_unlabelled=True)
         loaded = load_classifier(store, copy)
         assert [round(p, 6) for p in loaded.predict_proba(every.X)] == \
