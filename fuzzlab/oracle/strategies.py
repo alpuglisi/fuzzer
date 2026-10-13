@@ -242,7 +242,7 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         """Type where a marker reflects, then try the break-outs that context allows
         (at most 3) and confirm only on their **structural** effect in the parsed
         response: an element outside any inert element, an injected attribute, or the
-        token in JavaScript code state (BUG-0083, FR-FUZZ-15). The context is always
+        token in JavaScript code state (BUG-0083, FR-FUZZ-39). The context is always
         observed: no strategy reads the auditor's coarse ``sink_context`` (``html``,
         ``sql``, …), which keeps one confirmation per key sound (BUG-0072; guarded by
         ``tests/test_oracle_xss_structural.py``)."""

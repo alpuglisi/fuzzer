@@ -2,8 +2,8 @@
 
 Classifies *where* a reflected marker lands in a response — the sink context —
 which tells the reflected-XSS mechanism (M5) whether a break-out would execute and
-which break-out to use. Also checks whether a context-breaking fragment survived
-unescaped.
+which break-out to use, and judges a break-out by its **structural** effect on the
+parsed response (BUG-0083), never by a substring surviving somewhere.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def type_reflection(html: str, marker: str) -> str:
     return "html"   # present but unclassified (e.g. raw between tags)
 
 
-# --- structural reflected-XSS confirmation (BUG-0083, FR-FUZZ-15, PA-0084) ------------
+# --- structural reflected-XSS confirmation (BUG-0083, FR-FUZZ-39, PA-0084) ------------
 #
 # A substring of the break-out fragment appearing "unescaped" somewhere is not proof:
 # `javascript:TOK` mid-URL, `';TOK;//` inside a double-quoted JS string, or `<TOK>`

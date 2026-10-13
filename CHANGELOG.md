@@ -4,6 +4,11 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Doc fix: the structural-XSS code cited FR-FUZZ-15; it is FR-FUZZ-39)
+- `oracle/context.py` and `oracle/strategies.py` comments now name FR-FUZZ-39, the
+  requirement CC-FUZZ-0057 actually added, and the `context.py` module docstring no
+  longer describes the removed substring check. No behaviour change.
+
 ## 2026-10-13 (Error review 7: eleven safety and correctness defects fixed — BUG-0079..0089)
 - **Proxy hardened.**
   - **CA leaves (BUG-0079):** minted only for a valid host, inside the CA directory, so a
