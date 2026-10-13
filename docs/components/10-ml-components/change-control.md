@@ -59,7 +59,7 @@ Newest first.
   - [x] Isolation Forest + method selection — done
   - [x] flow anomalies — done
   - [x] candidate features from core — done
-  - [x] Tests: `tests/test_ml_batch4.py` (31) — done. It covers:
+  - [x] Tests: `tests/test_ml_batch4.py` (30) — done. It covers:
     - the pointwise sha pin;
     - pairs (positive/negative only, seeded, capped, empty);
     - the pairwise symmetric fit with zero intercept, the round trip, and the
