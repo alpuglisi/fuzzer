@@ -41,20 +41,18 @@ def severity_of(vuln_class: str | None) -> str:
 
 
 def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None, list[dict]]:
-    """The latest model + this run's top advisory-scored candidates (with the conformal
-    decision). Advisory only — these are scores, never findings."""
-    row = store.conn.execute(
-        "SELECT name, version, calibration FROM model ORDER BY id DESC LIMIT 1").fetchone()
+    """The classifier that scored this run + its top advisory-scored candidates (with the
+    conformal decision). Advisory only — these are scores, never findings.
+
+    The model is read through the shared run-scoped reader, never as "the newest
+    `model` row": the ranker writes that table too, and other runs train their own
+    classifiers (BUG-0061)."""
+    from fuzzlab.ml.train import latest_classifier
+    clf = latest_classifier(store, run_id)
     model = gate = None
-    if row is not None:
-        try:
-            calib = json.loads(row["calibration"] or "{}")
-        except (ValueError, TypeError):
-            calib = {}
-        model = {"name": row["name"], "version": row["version"], "calibration": calib}
-        if "t_lo" in calib and "t_hi" in calib:
-            from fuzzlab.ml.conformal import ConformalGate
-            gate = ConformalGate(t_lo=calib["t_lo"], t_hi=calib["t_hi"])
+    if clf is not None:
+        model = {"name": clf.name, "version": clf.version, "calibration": clf.calibration}
+        gate = clf.gate
     scored = []
     for c in store.conn.execute(
         "SELECT evidence, score FROM candidate WHERE run_id=? AND score IS NOT NULL "

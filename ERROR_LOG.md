@@ -18,6 +18,51 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — ML: one-endpoint datasets reported in-sample PR-AUC / nDCG as out-of-fold (fixed, BUG-0062/PA-0064, recurrence of the BUG-0016/PA-0017 class)
+
+- **Symptom:** `train_and_score` / `train_and_rank` on a run whose candidates all sit on
+  one endpoint (24 rows, 6 positives, one path) returned `fallback=False`,
+  `pr_auc=1.0`, `beats_baselines=True` (ranker: `ndcg=1.0`, `beats_baseline=True`) —
+  the T5.5/T7.4 "beats the control" exit signals — from numbers that were in-sample.
+  The same happened for any call with `k < 2`.
+- **Root cause:** `fuzzlab.ml.metrics.group_kfold`'s degenerate branch (fewer than 2
+  groups, or `k < 2`) yielded one `(idx, idx)` fold — every row in both train and test
+  — instead of no fold, silently switching off the function's own "never split a
+  group / leakage-free" contract; the trainers' thin-data gate counted rows and
+  positives but not groups, and no test exercised that branch. Separately (PA-0002
+  sweep) the ML tab recomputed PR-AUC/nDCG from the deploy fit's own training-row
+  scores and showed them unlabelled, as if held-out.
+- **Remediation:** `group_kfold` yields no fold when no held-out split exists; new
+  `metrics.oof_folds` (used by both `_oof_scores`) fails closed unless every row is
+  held out exactly once; both trainers fall back when distinct groups `< max(2,
+  min_groups)` or `k < 2` and report `groups`; the ML tab labels its numbers
+  "in-sample (deploy fit)" and shows the scoring model's own OOF numbers, now stored
+  in its `model` row (CC-ML-0012, CC-UI-0035).
+- **Status:** Fixed (offline; `tests/test_ml_oof.py` 19 passed, and 7 of them fail with
+  the old branch restored).
+
+---
+## 2026-10-13 — UI/ML: run page lost every conformal decision after `fuzzlab auto --score --rank` (fixed, BUG-0061/PA-0063, recurrence of the BUG-0003/BUG-0007 class)
+
+- **Symptom:** after `fuzzlab auto --score --rank`, the run page's "Model scores
+  (advisory)" card showed decision `n/a` for every candidate under model "ranker", and
+  the ML tab's conformal panel said "latest model has no conformal calibration". After
+  a second run trained, the first run's page gated its scores with the second run's
+  thresholds.
+- **Root cause:** the classifier and the ranker both write the shared `model` table
+  (no family or run column) and every run trains its own; the two readers
+  (`web/results.py::_scored_candidates`, `web/mlview.py::conformal_panel`) each inlined
+  `SELECT … FROM model ORDER BY id DESC LIMIT 1` — "the newest row of any family, any
+  run" — written when only the classifier wrote that table and copied unchanged after
+  the ranker (CC-ML-0006) began writing to it.
+- **Remediation:** one run-scoped reader, `fuzzlab.ml.model_registry.select_latest`
+  (wrapped by `train.latest_classifier` / `rank_train.latest_ranker`); trainers record
+  `run_id` in the row's calibration; both web readers use it; a source-scan guard test
+  fails on any inline "newest row" read of `model` (CC-ML-0011, CC-UI-0034).
+- **Status:** Fixed (offline; `tests/test_ml_model_selection.py` 14 passed, and its
+  regression + guard tests fail with the old query restored).
+
+---
 ## 2026-09-26 — SESSION: agent misstated its own prior message when the operator pushed back
 
 Note: `docs/bugs/BUG-NNNN-*.md` + `PA-NNNN` is this project's mechanism for **code**

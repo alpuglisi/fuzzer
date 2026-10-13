@@ -18,14 +18,48 @@ non-dismissible advisory banner. This module never labels anything a finding.
 
 from __future__ import annotations
 
-import json
 import math
 from typing import Any, Sequence
 
-from fuzzlab.ml.conformal import ConformalGate
 from fuzzlab.ml.dataset import build_dataset
 from fuzzlab.ml.metrics import pr_auc
+from fuzzlab.ml.rank_train import latest_ranker
 from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k
+from fuzzlab.ml.train import latest_classifier
+
+#: Stored `candidate.score` / `rank_score` are the deploy fit's scores on its own training
+#: rows, so metrics recomputed from them here are in-sample — labelled as such, beside the
+#: scoring model's own out-of-fold numbers (BUG-0062, CC-UI-0035).
+IN_SAMPLE = "in-sample (deploy fit)"
+
+
+def _oof_source(calibration: dict, run_id: int | None) -> bool:
+    """Whether a model row's stored OOF numbers describe the scores shown for ``run_id``:
+    always for a per-run view (the row was selected for that run); in the all-runs view
+    only for a store-wide train, the one model that scored every run."""
+    return run_id is not None or calibration.get("run_id", 0) is None
+
+
+def _classifier_oof(store, run_id: int | None) -> dict | None:
+    clf = latest_classifier(store, run_id)
+    if clf is None or "oof_pr_auc" not in clf.calibration \
+            or not _oof_source(clf.calibration, run_id):
+        return None                       # no model / fallback / legacy row / mixed runs
+    c = clf.calibration
+    return {"pr_auc": c["oof_pr_auc"], "pr_auc_prevalence": c.get("oof_pr_auc_prevalence"),
+            "pr_auc_sigma": c.get("oof_pr_auc_sigma")}
+
+
+def _ranker_oof(store, run_id: int | None) -> dict | None:
+    found = latest_ranker(store, run_id)
+    if found is None:
+        return None
+    c = found[1]
+    if "oof_ndcg" not in c or not _oof_source(c, run_id):
+        return None
+    return {"at_k": c.get("at_k"), "ndcg": c["oof_ndcg"],
+            "precision": c.get("oof_precision"), "ndcg_random": c.get("oof_ndcg_random"),
+            "precision_random": c.get("oof_precision_random")}
 
 # Committee disagreement is O(n_members * n) to fit; cap the dataset so the read route
 # stays fast even against a large store (deterministic stride sample, not random).
@@ -132,6 +166,7 @@ def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
     positives = sum(labels)
     return {
         "available": True, "n": n, "positives": positives,
+        "evaluation": IN_SAMPLE, "oof": _classifier_oof(store, run_id),
         "baseline_prevalence": round(positives / n, 4) if n else 0.0,
         "pr_auc": pr_auc(labels, scores),
         "pr_curve": _pr_curve(labels, scores),
@@ -166,6 +201,7 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
               for s, u, y in zip(scores, uncertainties, labels)]
     return {
         "available": True, "n": len(scores), "k": k,
+        "evaluation": IN_SAMPLE, "oof": _ranker_oof(store, run_id),
         "ndcg_at_k": mean_ndcg_at_k(labels, scores, groups, k=k),
         "precision_at_k": mean_precision_at_k(labels, scores, groups, k=k),
         "random_baseline_precision_at_k": round(prevalence, 4),
@@ -176,18 +212,18 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
 
 
 def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
-    """Flag/abstain/drop split (tab summary) + the nonconformity histogram + thresholds."""
-    row = store.conn.execute(
-        "SELECT name, version, calibration FROM model ORDER BY id DESC LIMIT 1").fetchone()
-    if row is None:
-        return {"available": False, "reason": "no trained model yet"}
-    try:
-        calib = json.loads(row["calibration"] or "{}")
-    except (ValueError, TypeError):
-        calib = {}
-    if "t_lo" not in calib or "t_hi" not in calib:
-        return {"available": False, "reason": "latest model has no conformal calibration"}
-    gate = ConformalGate(t_lo=calib["t_lo"], t_hi=calib["t_hi"])
+    """Flag/abstain/drop split (tab summary) + the nonconformity histogram + thresholds.
+
+    Gated by the classifier that scored the run (`latest_classifier`, BUG-0061). Known
+    limitation: the all-runs view (``run_id=None``) applies the newest classifier's one
+    set of thresholds to every run's scores; per-run views are exact."""
+    clf = latest_classifier(store, run_id)
+    if clf is None:
+        return {"available": False, "reason": "no trained classifier yet"}
+    if clf.gate is None:
+        return {"available": False, "reason": "latest classifier has no conformal calibration"}
+    calib, gate = clf.calibration, clf.gate
+    row = {"name": clf.name, "version": clf.version}
     where = "WHERE score IS NOT NULL" + (" AND run_id=?" if run_id is not None else "")
     args: tuple = (run_id,) if run_id is not None else ()
     scores = [r["score"] for r in

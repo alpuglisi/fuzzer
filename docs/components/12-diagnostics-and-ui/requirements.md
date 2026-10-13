@@ -196,6 +196,19 @@ bugs — the research-platform diagnostics of decision D2.
   (`fuzzlab/web/mlview.py`) is the sole data source — read-only over the store,
   optionally filtered by `run_id`; degrades to a documented "not available" reason per
   panel (never an error) on an empty or partially-populated store.
+  *(Amended CC-UI-0034/CC-UI-0035, BUG-0061/BUG-0062.)*
+  - The conformal split is gated by the classifier that scored the run, read through
+    `fuzzlab.ml.train.latest_classifier(store, run_id)` (FR-ML-10). It is never "the
+    newest `model` row", which may be the ranker's or another run's. **Known
+    limitation:** the all-runs view (`run_id` omitted) applies the newest classifier's
+    one set of thresholds to every run's scores; per-run views are exact.
+  - PR-AUC/ECE and nDCG@k/precision@k recomputed from stored scores are **in-sample**
+    (the deploy fit scored its own training rows). Each panel carries
+    `evaluation: "in-sample (deploy fit)"`, which `ml.js` shows. Beside it is an `oof`
+    object: the out-of-fold numbers of the model that wrote those scores, from its
+    `model` row (ranker's at that model's own training `at_k`). `oof` is `null` when no
+    such model exists, for a fallback or legacy row, or in the all-runs view unless the
+    selected row is a store-wide train. `run_metrics` is not read for these.
 - **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
   layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
   (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +
@@ -305,6 +318,15 @@ bugs — the research-platform diagnostics of decision D2.
   Rendering the page runs nothing (no-auto-run, D11); the switches are explicit POSTs
   behind the control-plane gate (NFR-UI-control-plane-hardened). Nothing on the route
   sends traffic to a target, so it is not `--authorized`-gated.
+
+- **FR-UI-16** *(added CC-UI-0034, 2026-10-13, BUG-0061)* The run-detail page
+  (`/runs/{id}`, `web/results.py::run_detail`) shows a read-only **"Model scores
+  (advisory)"** card. It lists the run's top advisory-scored candidates (`candidate.score`)
+  with the conformal flag/abstain/drop decision of the classifier that scored that run.
+  The classifier is read through `fuzzlab.ml.train.latest_classifier(store, run_id)`
+  (FR-ML-10): never another model family's row (e.g. the ranker's), never another
+  run's. The decision is `n/a` only when that classifier has no conformal calibration
+  (a `prevalence-fallback`). Scores are advisory and never presented as findings.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

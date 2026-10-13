@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/UI: two ML defects fixed with full bug protocol — BUG-0061/PA-0063, BUG-0062/PA-0064; CC-ML-0011/0012, CC-UI-0034/0035)
+- **BUG-0061: the wrong `model` row was read.** The run page and the ML tab took "the
+  newest `model` row of any kind". After `fuzzlab auto --score --rank` that row was the
+  ranker's, so every conformal decision showed `n/a`; a later run's training also
+  re-gated earlier runs with its own thresholds.
+  - Fix: a single run-scoped reader, `fuzzlab/ml/model_registry.py::select_latest` (used
+    via `latest_classifier`/`latest_ranker`). Trainers now record `run_id` in the model
+    row's calibration. A source-scan guard test blocks the inline pattern.
+- **BUG-0062: "out-of-fold" metrics could be in-sample.** `group_kfold` returned a
+  train == test fold when there was only one endpoint or `k < 2`. Both trainers then
+  reported in-sample PR-AUC/nDCG as out-of-fold, which could falsely "beat the
+  baselines" (the T5.5/T7.4 exit signals).
+  - Fix: `group_kfold` yields no fold in those cases, and the trainers take the
+    thin-data fallback (`min_groups`, `k < 2`). A new fail-closed `metrics.oof_folds`
+    checks that every row is held out exactly once.
+  - The ML tab now labels its recomputed numbers "in-sample (deploy fit)" and shows the
+    scoring model's own out-of-fold numbers, stored on its `model` row.
+- **Process:** the change-control entries passed the pre-change review gate 3/3 (two
+  independent reviewer agents, four rounds). Specs updated: FR-ML-10, NFR-ML-no-leak,
+  FR-UI-11, FR-UI-16, and `docs/ARCHITECTURE.md` §10 and its store-contract row.
+
 ## 2026-10-13 (UI/LAB: a Lab page with an on/off switch per lab container, CC-UI-0033/CC-LAB-0250, FR-UI-15/FR-LAB-172)
 - The control panel gained a **Lab** section (`/lab`, sidebar "Lab") listing every
   service in `lab/compose.yaml` -- the PFF app and its database, the opt-in downgrade

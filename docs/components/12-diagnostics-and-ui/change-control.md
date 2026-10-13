@@ -3,6 +3,62 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0035 — ML tab labels in-sample metrics and shows the scoring model's own out-of-fold metrics (BUG-0062 sweep) (2026-10-13)
+- Change: `fuzzlab/web/mlview.py::classifier_panel` / `ranker_panel` compute PR-AUC /
+  ECE / nDCG@k / precision@k from stored `candidate.score` / `rank_score`, i.e. the
+  deploy fit's scores on its own training rows (`train.py:95-97`, `rank_train.py:75-76`)
+  — in-sample — and `static/js/ml.js:68,91` show them unlabelled beside a baseline as if
+  held-out. Both panels gain `"evaluation": "in-sample (deploy fit)"` and an `oof`
+  object read from the calibration of the model that wrote those scores
+  (`latest_classifier(store, run_id)` / `latest_ranker(store, run_id)`): classifier
+  `{pr_auc, pr_auc_prevalence, pr_auc_sigma}` <- `oof_pr_auc`, `oof_pr_auc_prevalence`,
+  `oof_pr_auc_sigma`; ranker `{at_k, ndcg, precision, ndcg_random, precision_random}` <-
+  `at_k`, `oof_ndcg`, `oof_precision`, `oof_ndcg_random`, `oof_precision_random`. `oof`
+  is `null` when there is no such model, it is a fallback, it is a legacy row without the
+  keys, or (all-runs view, `run_id=None`) the selected row is not a store-wide train
+  (`run_id` null) — so OOF numbers are only ever shown next to the scores of the model
+  that produced them. `run_metrics` is not read. `ml.js` meta lines read "in-sample
+  PR-AUC … · out-of-fold PR-AUC … (prevalence …)" and "in-sample nDCG@k … ·
+  out-of-fold nDCG@{oof.at_k} …", omitting the OOF part when `oof` is null. Charts
+  unchanged.
+- Impact (other components / project): read-only, additive payload keys; no write. ML —
+  consumes `CC-ML-0011`'s readers and calibration keys. FR-UI-11 wording updated.
+- Risk (level; mitigation or accepted-risk justification): low; display-only.
+- Deliverables:
+  - [ ] panels add `evaluation` + `oof` — done
+  - [ ] `ml.js` labels — done
+  - [ ] tests: after real `train_and_score`/`train_and_rank` the panels carry `evaluation` and `oof` equal to the trainer's returned OOF numbers; `oof` null after a fallback train, with no model, and in the all-runs view over per-run rows — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, four rounds v1→v4; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — panel payload tests in `tests/test_ml_oof.py` pass; rendered in Chromium against a seeded store, the ML tab's classifier line now reads `in-sample (deploy fit) PR-AUC …` (on `main`: unlabelled `PR-AUC …`). `oof` is null in that view, as specified, because `ml.js` always requests the all-runs view and the rows are per-run. The ranker line could not be browser-checked: a pre-existing `chart.js` error (`classList.add` given `"fl-chart fl-chart--line"`), present on `main` too, aborts rendering after the classifier panel — flagged, not in scope. Full-suite run: pending.
+
+### CC-UI-0034 — Run page + ML tab conformal split read the run's own classifier (BUG-0061) (2026-10-13)
+- Change: `fuzzlab/web/results.py::_scored_candidates` (run page "Model scores
+  (advisory)" card) and `fuzzlab/web/mlview.py::conformal_panel` drop their inline
+  `SELECT name, version, calibration FROM model ORDER BY id DESC LIMIT 1` + JSON parse +
+  `ConformalGate(...)` and call `fuzzlab.ml.train.latest_classifier(store, run_id)`
+  (`results.py` imports it inside the function, as it already does `ConformalGate`, to
+  stay dependency-light). Before: after `fuzzlab auto --score --rank`
+  (`auto_cli.py:153-162`) every decision shows `n/a` under model "ranker" and the ML tab
+  says "latest model has no conformal calibration"; after a later run trains, an earlier
+  run's page gates its scores with the later run's thresholds. After: the newest
+  classifier whose scope covers the run. Unavailable reasons become "no trained
+  classifier yet" / "latest classifier has no conformal calibration".
+- Impact (other components / project): ML — consumes `CC-ML-0011`. Read-only contract
+  unchanged; `/runs/{id}` and `/api/ml/data` shapes unchanged except the two reason
+  strings (no test or JS asserts them). **Known limitation, kept:** the ML tab's
+  all-runs view (`conformal_panel(store, None)`, the `/api/ml/data` default) gates every
+  run's scores with the newest classifier's thresholds — one set of thresholds is all
+  that panel can display; per-run views are exact. Recorded in FR-UI-11. New FR-UI-16
+  states the run-page panel's contract (it had none).
+- Risk (level; mitigation or accepted-risk justification): low. Lazy import; no import
+  cycle. Existing tests seed `logistic` rows without `run_id` (legacy -> still selected).
+- Deliverables:
+  - [ ] `_scored_candidates`, `conformal_panel` use `latest_classifier` — done
+  - [ ] regression tests: score -> rank -> run page decision is a gate decision under the classifier's name; `conformal_panel` available; two runs each trained -> each run page shows its own model version — done
+  - [ ] FR-UI-16 added; FR-UI-11 conformal wording + all-runs limitation — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, four rounds v1→v4; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_model_selection.py` run-page and conformal-panel regressions pass (score → rank keeps real gate decisions; each run uses its own classifier); fail with the old query restored. Full-suite run: pending.
+
 ### CC-UI-0033 — Lab page: an on/off switch per lab container (2026-10-13, FR-UI-15; pairs with CC-LAB-0250)
 - Change: a new **Lab** section (`GET /lab`, sidebar entry "Lab" in the Workbench
   group) that lists every compose service of the target lab with its live state and a

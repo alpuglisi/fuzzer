@@ -894,3 +894,47 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   for this case, but re-confirm per target, not assumed from a prior confirmation.
   (from BUG-0060)
 
+- **PA-0063** — Strengthens `PA-0003`/`PA-0021`, which are worded around normalizing a
+  *value* and fire only when someone *adds a derivation*. Three additions:
+  1. **Row selection is a convention too.** Choosing "the current row" of a table that
+     more than one producer writes (several model families, tools, or runs) lives in
+     **one shared reader**. That reader is scoped by the producer and by whatever the row
+     is current *for* (e.g. the run). It is never an inline `ORDER BY id DESC LIMIT 1`
+     at a read site. If the table has no column for the producer or scope, record it
+     where the reader can see it (here, the `model` row's calibration JSON carries
+     `run_id`) rather than guessing "newest".
+  2. **A new writer audits the existing readers.** A change that makes a new producer
+     write rows into an existing table must, in the same change, grep every reader of
+     that table (`FROM <table>`) and check each one for single-producer or single-run
+     assumptions. A reader that was correct when written can break when a second
+     producer appears.
+  3. **Enforced, not remembered.** For `model`, every read goes through
+     `fuzzlab.ml.model_registry.select_latest`. `tests/test_ml_model_selection.py::
+     test_no_module_reads_model_as_newest_row_of_any_family` fails on any inline "newest
+     row" read. Extend that guard, or add a sibling guard, when another shared
+     multi-producer table gets a selection convention.
+
+  Distinct from `PA-0048`, which is a one-to-many *lookup* collapsing at point-build
+  time; this is many producers sharing one table at read time. (from BUG-0061)
+
+- **PA-0064** — Strengthens `PA-0017` (a metric must measure what it claims) and extends
+  `PA-0029` (a gated-off branch needs a test that enters it) from checkers to
+  **evaluation machinery**: splitters, scorers, metrics, and anything that produces a
+  number presented as held-out or as an exit criterion.
+  1. **Fail empty, never fail wrong.** An evaluation helper that cannot satisfy its
+     contract for some input returns no result or raises. It never returns a
+     contract-violating stand-in, such as a train == test fold "so the caller still gets
+     scores". Callers treat "no result" as thin data, through their documented fallback.
+  2. **Held-out numbers come from a verified partition.** Out-of-fold or holdout numbers
+     are computed only through a path that checks every row is held out exactly once
+     (`fuzzlab.ml.metrics.oof_folds`). A number recomputed from in-sample scores is
+     labelled in-sample wherever it is displayed. It is shown only beside the held-out
+     numbers of the model that produced those scores.
+  3. **Test the degenerate branch.** Every degenerate or fallback branch of an
+     evaluation helper (too few groups, `k < 2`, one class, empty input) has a test that
+     enters it and asserts the contract there, not only on typical inputs.
+  4. **Sweep by mechanism, not by artifact type** (as `PA-0018` did for container
+     operations). The `PA-0002` sweep for this class covers every place a held-out
+     number is produced or displayed, not only the module where it was found. Enforced
+     for `fuzzlab/ml/` by `tests/test_ml_oof.py::test_no_out_of_fold_scorer_bypasses_oof_folds`
+     and that file's degenerate-branch tests. (from BUG-0062)

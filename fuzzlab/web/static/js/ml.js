@@ -65,8 +65,15 @@ function histChart(elId, hist, label) {
 // --- classifier + calibration ---------------------------------------------------
 function renderClassifier(d) {
   if (!d.available) { showEmpty("calibration", d.reason); return; }
-  setMeta("calibration", `PR-AUC ${d.pr_auc.toFixed(3)} (baseline prevalence `
-    + `${d.baseline_prevalence.toFixed(3)}) · N=${d.n} (${d.positives} confirmed) `
+  // Metrics recomputed from stored scores are in-sample (the deploy fit scored its own
+  // training rows); the honest number is the scoring model's own out-of-fold PR-AUC.
+  const oof = d.oof
+    ? ` · out-of-fold PR-AUC ${d.oof.pr_auc.toFixed(3)}`
+      + (d.oof.pr_auc_prevalence != null
+        ? ` (prevalence ${d.oof.pr_auc_prevalence.toFixed(3)})` : "")
+    : "";
+  setMeta("calibration", `${d.evaluation} PR-AUC ${d.pr_auc.toFixed(3)} (baseline prevalence `
+    + `${d.baseline_prevalence.toFixed(3)})${oof} · N=${d.n} (${d.positives} confirmed) `
     + `· ECE ${d.reliability.ece.toFixed(3)}`);
   const rel = d.reliability.bins.filter((b) => b.count > 0);
   if (rel.length) {
@@ -88,9 +95,14 @@ function renderClassifier(d) {
 // --- ranker -----------------------------------------------------------------------
 function renderRanker(d) {
   if (!d.available) { showEmpty("ranker", d.reason); return; }
-  setMeta("ranker", `nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} · precision@${d.k} `
-    + `${d.precision_at_k.toFixed(3)} (random baseline ${d.random_baseline_precision_at_k.toFixed(3)}) `
-    + `· N=${d.n}`);
+  // In-sample (deploy fit) vs the ranker's own out-of-fold numbers, at its training k.
+  const oof = d.oof
+    ? ` · out-of-fold nDCG@${d.oof.at_k} ${d.oof.ndcg.toFixed(3)}`
+      + (d.oof.ndcg_random != null ? ` (random ${d.oof.ndcg_random.toFixed(3)})` : "")
+    : "";
+  setMeta("ranker", `${d.evaluation} nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} · precision@${d.k} `
+    + `${d.precision_at_k.toFixed(3)} (random baseline ${d.random_baseline_precision_at_k.toFixed(3)})`
+    + `${oof} · N=${d.n}`);
   bars("chart-rank-bars", ["nDCG@k", "precision@k"], [
     { label: "ranker", data: [d.ndcg_at_k, d.precision_at_k] },
     { label: "random baseline", data: [0, d.random_baseline_precision_at_k] },

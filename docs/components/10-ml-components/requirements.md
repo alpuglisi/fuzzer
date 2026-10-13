@@ -1,6 +1,6 @@
 # ML Components — Requirement Specification
 
-Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-22
+Component code: **ML** · Status: `[built offline — classifier, ranker, active learner, anomaly detector; held-out exits on-host]` (Phases 5, 7, 10) · Last updated: 2026-10-13
 
 Related: `ARCHITECTURE.md` #10; `DECISIONS_AND_ROADMAP.md` (D1, D2, D10);
 `./change-control.md`.
@@ -44,8 +44,9 @@ the oracle owns truth (the oracle/advisory split).
   no `run_metrics` write even where the equivalent training-time helper
   (`fuzzlab.ml.anomaly.detect_anomalies`) does. **Known gap:** the logistic
   classifier's coefficients (log-odds weights) are not persisted anywhere in the store
-  — `train_and_score` fits a fresh model per request and only ever writes the
-  conformal calibration thresholds to `model.calibration`, never `_w`/`_b` — so the
+  — `train_and_score` fits a fresh model per request and writes only the
+  conformal calibration thresholds (plus, since CC-ML-0011, its run scope and
+  out-of-fold numbers — FR-ML-10) to `model.calibration`, never `_w`/`_b` — so the
   UI's "logistic weights diverging bar" panel (R-06) renders a documented
   not-available state rather than a value; making it real needs either a schema change
   (persist trained weights) or a training-time change (write on every `train_and_score`
@@ -61,20 +62,44 @@ the oracle owns truth (the oracle/advisory split).
   changes what is fit or what scores/labels are written (`NFR-ML-advisory`,
   `NFR-ML-reproducible` both hold unchanged).
 
+- **FR-ML-10 (model-row selection, CC-ML-0011, BUG-0061)** The `model` table is
+  written by more than one model family (classifier: `train.CLASSIFIER_MODEL_NAMES` =
+  `logistic`/`gbt`/`prevalence-fallback`, derived from `_MODELS`; ranker:
+  `rank_train.RANKER_MODEL_NAMES` = `ranker`/`rank-prevalence-fallback`) and by every
+  run's training. Each trainer records in the row's `calibration` JSON the `run_id` it
+  trained on (null = store-wide train, which re-scores every run). On a non-fallback
+  train it also records its out-of-fold evaluation: classifier `oof_pr_auc`,
+  `oof_pr_auc_prevalence`, `oof_pr_auc_sigma`; ranker `oof_ndcg`, `oof_precision`,
+  `oof_ndcg_random`, `oof_precision_random`, at its `at_k`. Every reader that needs "the
+  deployed model of a family for a run" goes through
+  `fuzzlab.ml.model_registry.select_latest` (via `train.latest_classifier` /
+  `rank_train.latest_ranker`). That returns the newest row of that family whose scope
+  covers the run (same `run_id`, null, or absent for legacy rows), never "the newest row
+  of any kind" (PA-0063, enforced by a source-scan guard test).
+
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
   the oracle's verdict is final and independent.
 - **NFR-ML-reproducible** Deterministic pipeline: fixed seeds, versioned features,
   versioned models, recorded metrics.
 - **NFR-ML-no-leak** Train/test split prevents leakage across cells/transforms; the
-  blind holdout is never trained on.
+  blind holdout is never trained on. *(Amended CC-ML-0012, BUG-0062.)*
+  - `group_kfold` never yields a fold whose train and test overlap. With `k < 2` or
+    fewer than 2 distinct groups it yields no fold.
+  - Every out-of-fold scorer goes through `metrics.oof_folds`, which fails closed unless
+    each row is held out exactly once.
+  - Both trainers fall back (no OOF metrics) when distinct endpoints
+    `< max(2, min_groups)` (default `min_groups=2`, the correctness floor) or `k < 2`.
+  - Metrics recomputed from stored `candidate.score`/`rank_score` are in-sample (deploy
+    fit) and must be labelled so wherever shown (PA-0064).
 - **NFR-ML-calibrated** Classifier probabilities are calibrated; abstention is
   preferred to a confident wrong screen.
 
 ## 5. Interfaces and data contracts
 Reads `attempt`/`candidate`/`flow` features and oracle `finding` labels (for
 training); writes `candidate.score`, attempt scores/uncertainty, `model` rows
-(versions, calibration). Never writes `finding`. Runs as `core/` plugins.
+(versions, calibration — including `run_id` scope and `oof_*` metrics, read back only
+through `model_registry.select_latest`, FR-ML-10). Never writes `finding`. Runs as `core/` plugins.
 Optionally writes `core/`'s `metric_series` rows (`source="gbt"`/`"logreg"`,
 `key` a slash-delimited path such as `train/loss`) via `log_scalar`/
 `MetricLogger` when training is given a `run_id` (FR-ML-8) — read-only from

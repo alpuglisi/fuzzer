@@ -1314,6 +1314,16 @@ tracked in the requirements files, not here.
   vectors — advisory scores/flags (`detect_anomalies` records `anomaly_flagged`), never
   labels — plus the **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
   that feeds the anomaly score into the classifier.
+- **Model registry + honest evaluation** `[built]` (CC-ML-0011/0012, BUG-0061/0062):
+  - The `model` table is shared by the classifier and ranker families and by every
+    run's training. Each row's `calibration` records its `run_id` scope and its
+    out-of-fold numbers (`oof_*`).
+  - Every reader goes through `ml/model_registry.py::select_latest`, wrapped by
+    `train.latest_classifier` / `rank_train.latest_ranker`. A guard test forbids
+    inline "newest row" reads.
+  - Out-of-fold scoring goes only through `metrics.oof_folds`, which fails closed unless
+    each row is held out exactly once. One-endpoint data or `k < 2` takes the thin-data
+    fallback.
 - **Depends on (components):** `core/`, the oracle (labels), and the component
   that produces each model's inputs (auditor for the ranker, fuzzing harness for
   the classifier, proxy/flows for the anomaly detector).
@@ -1536,7 +1546,7 @@ detail):
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |
-| `model` (versions, calibration) | ML training | ML inference |
+| `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics) | ML training (classifier, ranker) | ML inference, UI — only via `ml/model_registry.select_latest` (FR-ML-10) |
 | `request_budget` | all tools | budget manager, UI |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
 | `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |

@@ -3,6 +3,93 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0012 — Out-of-fold evaluation can never be in-sample (BUG-0062) (2026-10-13)
+- Change:
+  - `fuzzlab/ml/metrics.py::group_kfold`: `k < 2` or fewer than 2 distinct groups yields
+    **no folds** (was one `(idx, idx)` fold — train == test, contradicting its own
+    "never splitting a group" contract). Docstring states it.
+  - `train.py::train_and_score` / `rank_train.py::train_and_rank`: new keyword
+    `min_groups: int = 2`; `groups = len(set(ds.groups))` computed **before** the gate and
+    in the result on every path; gate becomes `n < min_rows or pos < min_positives or
+    (n - pos) < 1 or groups < max(2, min_groups) or k < 2` -> the existing fallback (no
+    `ml_pr_auc*`/`rank_*` run_metrics, no OOF calibration keys, `*-fallback` model row).
+    Rationale for 2: the correctness floor — the least that makes any held-out split
+    exist, which is exactly what the bug violated. Quality floors (positives spread across
+    groups; labgen's `MIN_GROUPS_FOR_GATE = 6` serves a permutation test, a different
+    purpose) are separate policy like `min_positives`, left to callers and the on-host
+    T5.5/T7.4 exits; a one-class training fold yields a weak model, not leakage.
+  - Both `_oof_scores` raise `ValueError` unless every row index was scored exactly once
+    across the folds (fail closed: an unscored row would silently stay 0.0 and skew
+    PR-AUC / conformal thresholds). Unreachable through the public trainers once the gate
+    holds; guards direct callers.
+- Impact (other components / project): new keyword + `groups` result key; the OOF numbers
+  the trainers now also write into calibration (`CC-ML-0011`) inherit this guarantee.
+  Behavior changes only for one-endpoint datasets and `k < 2` calls: documented fallback
+  instead of in-sample metrics labelled out-of-fold and a possibly false
+  `beats_baselines` (the T5.5/T7.4 exit signals, `docs/ON_HOST_TASKS.md`). labgen's
+  grouped CV (sklearn `StratifiedGroupKFold` + `MIN_GROUPS_FOR_GATE`) already correct,
+  untouched. Existing `group_kfold` tests use 10–24 groups, unaffected. UI: CC-UI-0035.
+- Risk (level; mitigation or accepted-risk justification): low. Only non-test callers of
+  `group_kfold` are the two `_oof_scores`; the re-exported contract becomes stricter.
+- Deliverables:
+  - [ ] `group_kfold` degenerate branch yields nothing — done
+  - [ ] `min_groups` + `k<2` gate, `groups` in result (both trainers) — done
+  - [ ] exactly-once check in both `_oof_scores` — done
+  - [ ] tests: `group_kfold` 1 group / k=1 / k=0 yields nothing; randomized property — every fold non-empty, disjoint train/test groups, each row tested exactly once; both trainers on >=20 rows / >=5 positives all on one path -> `fallback=True`, `groups == 1`, no OOF metric rows or calibration keys; both trainers with `k=1` on 10 groups -> fallback, no raise; `_oof_scores` raises on a one-group dataset — done
+  - [ ] `requirements.md` NFR-ML-no-leak amended — done
+- Implementation divergence (reflected back per the review gate): the exactly-once check is one shared helper, `fuzzlab.ml.metrics.oof_folds` (also raising on a fold whose train and test overlap), called by both `_oof_scores` instead of being duplicated in each (PA-0003). A guard test, `tests/test_ml_oof.py::test_no_out_of_fold_scorer_bypasses_oof_folds`, fails if any module outside `metrics.py` calls `group_kfold` directly (PA-0064). Tests live in `tests/test_ml_oof.py`.
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, four rounds v1→v4; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_oof.py` 19 passed; with `group_kfold`'s old `(idx, idx)` branch restored, 7 of them fail (degenerate-branch, partition, fail-closed). The one-endpoint / `k=1` reproductions now take the documented fallback with `groups` reported and no OOF metrics. Related files (`tests/test_ml*.py`, `test_gbt.py`, `test_web_ml.py`, `test_web_results.py`, `test_report.py`, `test_web_diagnostics.py`, `test_auto*.py`): 160 passed. Full-suite run: pending (recorded in a follow-up).
+
+### CC-ML-0011 — One run-scoped reader for the shared `model` table; OOF metrics stored on the model row (BUG-0061) (2026-10-13)
+- Change:
+  - **New `fuzzlab/ml/model_registry.py`** — the one place the "which `model` row is the
+    deployed model of a family for a run" convention lives (PA-0003/PA-0021).
+    `select_latest(store, names, run_id=None) -> tuple[sqlite3.Row, dict] | None`: walks
+    `SELECT id, name, version, feature_version, calibration FROM model WHERE name IN (...)
+    ORDER BY id DESC` and returns the first row whose scope covers `run_id`, with its
+    calibration JSON parsed (bad/absent JSON -> `{}`). Scope covers when `run_id is None`,
+    or calibration `run_id` equals it, or calibration `run_id` is null (store-wide train,
+    which re-scores every run's candidates), or the key is absent (legacy row written
+    before this change — its scope is unknowable, old behavior kept). It is the only
+    `FROM model ... ORDER BY id DESC` query in `fuzzlab/`.
+  - `fuzzlab/ml/train.py`: `PREVALENCE_FALLBACK_NAME = "prevalence-fallback"` (replaces
+    the inline literal); `CLASSIFIER_MODEL_NAMES = tuple(_MODELS) + (PREVALENCE_FALLBACK_NAME,)`
+    (derived from `_MODELS` — PA-0001/PA-0027); the `calibration` JSON `train_and_score`
+    writes gains `run_id` (null for a store-wide train) and, on a non-fallback train, the
+    OOF evaluation it already computes: `oof_pr_auc`, `oof_pr_auc_prevalence`,
+    `oof_pr_auc_sigma` (same values as the `ml_pr_auc*` `run_metrics` rows, which are
+    still written unchanged as the T5.5 exit signal). New plain dataclass
+    `ClassifierModel(name, version, feature_version, calibration: dict, gate:
+    ConformalGate | None)` and `latest_classifier(store, run_id=None)` =
+    `select_latest(store, CLASSIFIER_MODEL_NAMES, run_id)` + gate built only when
+    `t_lo`/`t_hi` are present.
+  - `fuzzlab/ml/rank_train.py`: `RANKER_NAME = "ranker"`, `RANK_FALLBACK_NAME =
+    "rank-prevalence-fallback"`, `RANKER_MODEL_NAMES` (replace literals at
+    `rank_train.py:65,77`); the ranker's `calibration` gains `run_id` and, on a
+    non-fallback train, `oof_ndcg`, `oof_precision`, `oof_ndcg_random`,
+    `oof_precision_random` (the `at_k` they were computed at is the existing `at_k`
+    key); `run_metrics` `rank_*` rows unchanged (T7.4 exit signal). New
+    `latest_ranker(store, run_id=None) -> (row, calibration) | None` =
+    `select_latest(store, RANKER_MODEL_NAMES, run_id)`.
+- Impact (other components / project): UI readers switch to these (`CC-UI-0034`,
+  `CC-UI-0035`). Unchanged readers, checked: `report/report.py:65` (`GROUP BY name`,
+  per-family correct), `web/diagnostics.py:219-222` (lists every row, passes calibration
+  JSON through). Calibration JSON gains keys; every existing reader ignores unknown keys.
+  `model_registry` imports nothing from `train`/`rank_train` (no cycle). FR-ML-10 added.
+- Risk (level; mitigation or accepted-risk justification): low. Read helpers + extra JSON
+  keys; nothing trained/scored/written changes otherwise. New classifier kinds in
+  `_MODELS` are picked up automatically. Legacy rows keep today's behavior (accepted).
+- Deliverables:
+  - [ ] `fuzzlab/ml/model_registry.py::select_latest` — done
+  - [ ] `train.py`: constants, `run_id` + OOF keys in calibration, `ClassifierModel`, `latest_classifier` — done
+  - [ ] `rank_train.py`: constants, `run_id` + OOF keys in calibration, `latest_ranker` — done
+  - [ ] `tests/test_ml_model_selection.py`: `select_latest` scope rules (per-run, store-wide null covers all, legacy absent key covers all, newest covering row wins, bad JSON -> `{}`, no matching family -> `None`); classifier then ranker -> `latest_classifier` returns the classifier with a gate; ranker-only -> `None`; two runs -> each run gets its own row, `None` -> newest; `prevalence-fallback` -> `gate is None`, no OOF keys; OOF keys equal the returned `pr_auc`/`ndcg`; `CLASSIFIER_MODEL_NAMES` derived from `_MODELS` and disjoint from `RANKER_MODEL_NAMES` — done
+  - [ ] guard test (same file): `ast`-walk `fuzzlab/**/*.py`, collect string `Constant`s and `JoinedStr`s (constant parts joined, formatted parts -> placeholder); flag a string matching `\bFROM\s+model\b` AND (`\bDESC\b` or `\bLIMIT\s+1\b`) AND NOT `\bWHERE\s+name\b`, exempting only `model_registry.select_latest`'s body; plus `latest_classifier`/`latest_ranker` contain no `FROM model` string. Proven first on fixtures (PA-0034(2)/PA-0022): must trip — the old one-line query, a split-literal variant, an f-string variant; must not — diagnostics timeline query, report.py's `GROUP BY` query, `_next_version`'s `WHERE name=?`, a `FROM model_variant ... DESC` string — done
+  - [ ] `requirements.md` FR-ML-10 — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, four rounds v1→v4; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_model_selection.py` 14 passed; with the old inline query restored in `results.py`, the two regression tests and the source-scan guard fail. Related files: 160 passed. Full-suite run: pending (recorded in a follow-up).
+
 ### CC-ML-0010 — Lane U4: read-only ML-internals surfacing for the web panel's ML tab (2026-09-22)
 - Change: no change to any ML training/scoring/inference code in this component — this
   entry records the **consumer-side** change: `fuzzlab/web/mlview.py` (component #12,
