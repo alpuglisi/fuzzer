@@ -27,7 +27,7 @@ Newest first.
   - [ ] Test: a fresh store has the columns, and a store at 12 migrates to 13 with NULLs — done
   - [ ] FR-CORE-14 — done
 - Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; the budget-ordering objective was put to the user, who chose `score` as the default; every raised issue adopted).
-- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 13 with `oracle_status`, `anomaly_score`, `anomaly_flag` (`tests/test_ml_budget_and_scope.py::test_migration_13_adds_the_candidate_columns`, head derived from `MIGRATIONS`); head-version tests in `test_ml_ranker.py`/`test_plugins.py` pass unchanged. Full suite: see the follow-up record.
+- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 13 with `oracle_status`, `anomaly_score`, `anomaly_flag` (`tests/test_ml_budget_and_scope.py::test_migration_13_adds_the_candidate_columns`, head derived from `MIGRATIONS`); head-version tests in `test_ml_ranker.py`/`test_plugins.py` pass unchanged. Full suite (2026-10-13, whole `tests/` at `369e887`, `FUZZLAB_REQUIRE_BROWSER=1`): 2868 passed, 33 failed, 65 skipped, 9 xfailed. The 33 failures are the same labgen `--check`/fingerprint-gate tests that fail identically on `origin/main` in this environment (no scipy, scikit-learn or `gitleaks` binary); none is caused by this change.
 
 ### CC-CORE-0025 — Add `DEFAULT_BROWSER_HEADERS` (full header set, not UA alone) to `fuzzlab/core/http.py` (2026-09-25, BUG-0060/PA-0062)
 - **Change:** adds `DEFAULT_BROWSER_HEADERS` (a dict: `DEFAULT_USER_AGENT` plus a
