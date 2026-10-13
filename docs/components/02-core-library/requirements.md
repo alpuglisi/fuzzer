@@ -132,6 +132,14 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
   is defined once in `core/oracle_status.py`.
+- **FR-CORE-19** *(migration 17; `CC-CORE-0030`, 2026-10-13).*
+  - **Migration 17** adds `holdout_metric(id, run_id, model_id, holdout_version, key,
+    value)` and `holdout_reveal(id, run_id, holdout_version, revealed_at)` (FR-ML-19).
+  - **`core/sealed.py`:** `SEALED_TABLES` (no generic store view lists or browses them),
+    `write_metrics` (the trainers, under the advisory guard) and `reveal(store, run_id)`
+    — the one reader, which records a `holdout_reveal` row and returns the store-wide
+    reveal count for the version (none recorded when there is nothing to reveal). No ML
+    import, so a reveal works without the ML package.
 - **FR-CORE-18** *(migration 16; `CC-CORE-0029`, 2026-10-13).*
   - **Canonical origin.** `core/urls.canonical_origin(url)` is the canonical
     `scheme://host:port` used to compare targets (loopback aliases → `127.0.0.1`;

@@ -3,6 +3,37 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0030 — Migration 17: the sealed holdout tables; `core/sealed.py` (2026-10-13)
+- Change:
+  - **Migration 17** adds two tables, plus an index on `holdout_metric.run_id`:
+    - `holdout_metric(id, run_id → run, model_id → model, holdout_version, key, value)`;
+    - `holdout_reveal(id, run_id → run, holdout_version, revealed_at)`.
+  - **New `core/sealed.py`:**
+    - `SEALED_TABLES`;
+    - `write_metrics(store, run_id, model_id, version, metrics)` (no commit; the
+      trainers commit);
+    - `reveal(store, run_id) -> {metrics, reveals, version}`, which records a reveal
+      row only when there are metrics. The count is store-wide per version.
+  - It has no ML import, so a reveal works without the ML package.
+- Impact:
+  - The schema head moves 16 → 17. It is additive, and no existing table changes.
+  - **ML (CC-ML-0020)** writes `holdout_metric`.
+  - **UI (CC-UI-0045)** hides both tables.
+  - **FUZZ (CC-FUZZ-0053)** `reveal-holdout` reads through `reveal`.
+  - **PLUG (CC-PLUG-0007)** guard: INSERT on `holdout_metric` is allowed.
+  - Nothing reads `holdout_metric` except `reveal`.
+- Risk: low. The migration only adds tables, and the version tests read
+  `max(MIGRATIONS)`.
+- Deliverables:
+  - [x] migration 17 — done
+  - [x] `core/sealed.py` — done
+  - [x] FR-CORE-19 — done
+  - [x] tests: reveal counter, nothing-to-reveal, sealed surfaces
+    (`tests/test_ml_holdout_calibration.py`) — done
+- Review: covered by CC-ML-0020's 3/3 pre-change review (A1, B3v2-1, the final B nit
+  2). Pre-assigned number (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (58 files: ML, auto, web incl. real-browser, plugins, report, no-ML, harness, multitarget, pipeline, diagnostics, core, CLI, store, migrations; `FUZZLAB_REQUIRE_BROWSER=1`): 901 passed. `tests/test_ml_holdout_calibration.py`: 42 passed. Its mutants are among CC-ML-0020's 27, all killed.
+
 ### CC-CORE-0029 — `oracle_status` vocabulary in one place; canonical target origin; migration 16 (2026-10-13)
 - Change:
   - **New `fuzzlab/core/oracle_status.py`** holds `CHECKED`, `SKIPPED_BUDGET`,

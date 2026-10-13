@@ -33,6 +33,7 @@ commands:
   proxy [args]        run the intercepting proxy / export its CA (requires --authorized)
   mutate-run [args]   learn + evade the live lab WAF, record variants (requires --authorized)
   report [args]       print a reproducible evaluation report for a stored run (read-only)
+  reveal-holdout [args] print a run's sealed blind-holdout metrics (counts the reveal)
   lab-generate [args] render a lab manifest to source files via an emitter (read-only; --check runs build gates)
   build-db [args]     rebuild the indicator database
   version             print the version
@@ -80,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "report":
         from fuzzlab.report import cli as report_cli
         return report_cli.main(rest)
+
+    if command == "reveal-holdout":
+        from fuzzlab.harness import reveal_cli
+        return reveal_cli.main(rest)
 
     if command == "lab-generate":
         from fuzzlab.labgen import cli as labgen_cli

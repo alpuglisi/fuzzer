@@ -73,6 +73,13 @@ def _features(ev: dict, sink_context, rules_fired: int) -> list[float]:
     ]
 
 
+def endpoint_key(ev: dict) -> str:
+    """The endpoint a candidate belongs to — its URL path. The one definition for the
+    group-k-fold groups and for blind-holdout membership (PA-0003, CC-ML-0020): folds
+    and the holdout never split an endpoint."""
+    return to_path(ev.get("url", ""))
+
+
 def target_runs(store, target: str) -> list[int]:
     """Runs whose recorded target is ``target``, compared as canonical origins — so
     ``localhost:8080`` and ``127.0.0.1:8080`` are one target (CC-ML-0018, D-b)."""
@@ -146,7 +153,7 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
         except (ValueError, TypeError):
             ev = {}
         rid = int(c["run_id"])
-        path = to_path(ev.get("url", ""))
+        path = endpoint_key(ev)
         param = ev.get("param", "")
         cat = ev.get("category", "")
         label = 1 if (rid, path, param, cat) in positives else 0

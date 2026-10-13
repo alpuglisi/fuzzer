@@ -76,6 +76,15 @@ function earlierNote(o, fmt) {
 }
 
 // --- classifier + calibration ---------------------------------------------------
+// CC-UI-0045: the classifier's probability calibration (FR-ML-20) — out-of-fold ECE raw
+// vs cross-fitted calibrated, or why it was left uncalibrated. Text only.
+function calibrationNote(c) {
+  if (!c) return "";
+  if (c.calibrator !== "platt") return ` · calibration: ${c.calibrator}`;
+  return ` · Platt-calibrated: out-of-fold ECE ${c.ece_oof_raw} raw → `
+    + `${c.ece_oof_calibrated} cross-fitted`;
+}
+
 function renderClassifier(d) {
   if (!d.available) { showEmpty("calibration", d.reason); return; }
   // Metrics recomputed from stored scores are in-sample (the deploy fit scored its own
@@ -89,7 +98,7 @@ function renderClassifier(d) {
     : "";
   setMeta("calibration", `${d.evaluation} PR-AUC ${d.pr_auc.toFixed(3)} (baseline prevalence `
     + `${d.baseline_prevalence.toFixed(3)})${oof} · N=${d.n} (${d.positives} confirmed) `
-    + `· ECE ${d.reliability.ece.toFixed(3)}`);
+    + `· ECE ${d.reliability.ece.toFixed(3)}` + calibrationNote(d.calibration));
   const rel = d.reliability.bins.filter((b) => b.count > 0);
   if (rel.length) {
     const xs = rel.map((b) => b.mean_pred);

@@ -243,13 +243,15 @@ _IDENT_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def list_tables(store) -> list[str]:
-    """Every ordinary user table in the store (never sqlite's own
-    `sqlite_%`-prefixed internal tables)."""
+    """Every ordinary user table in the store — never sqlite's own
+    `sqlite_%`-prefixed internal tables, nor the sealed holdout tables
+    (`core.sealed.SEALED_TABLES`, CC-UI-0045)."""
+    from fuzzlab.core.sealed import SEALED_TABLES
     rows = store.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
-    return [r["name"] for r in rows]
+    return [r["name"] for r in rows if r["name"] not in SEALED_TABLES]
 
 
 def _resolve_table(store, name: str) -> str | None:
@@ -257,8 +259,9 @@ def _resolve_table(store, name: str) -> str | None:
     to interpolate, or None if it does not name a real table (rejects both
     malformed identifiers and anything not actually in `sqlite_master`,
     including views/virtual tables this explorer does not expose)."""
-    if not name or not _IDENT_RE.match(name):
-        return None
+    from fuzzlab.core.sealed import SEALED_TABLES
+    if not name or not _IDENT_RE.match(name) or name in SEALED_TABLES:
+        return None                     # a sealed table reads as "no such table"
     row = store.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone()

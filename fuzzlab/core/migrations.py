@@ -426,6 +426,30 @@ ALTER TABLE candidate ADD COLUMN score_oof REAL;
 ALTER TABLE candidate ADD COLUMN rank_score_oof REAL;
 """
 
+# Migration 17 (CC-CORE-0030, CC-ML-0020): the sealed blind holdout (FR-ML-19).
+# Holdout metrics never go into `run_metrics` — every summary surface reads that table —
+# but into `holdout_metric`, keyed by the model that produced them and the holdout
+# membership version. `holdout_reveal` counts each deliberate read
+# (`fuzzlab auto --reveal-holdout`), per version: tuning on the holdout uses it up.
+# Both are `core.sealed.SEALED_TABLES`: the store browser does not list them.
+_M0017 = """
+CREATE TABLE IF NOT EXISTS holdout_metric (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES run(id),
+    model_id INTEGER NOT NULL REFERENCES model(id),
+    holdout_version INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_holdout_metric_run ON holdout_metric(run_id);
+CREATE TABLE IF NOT EXISTS holdout_reveal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES run(id),
+    holdout_version INTEGER NOT NULL,
+    revealed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -444,6 +468,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (14, _M0014),
     (15, _M0015),
     (16, _M0016),
+    (17, _M0017),
 ]
 
 

@@ -1346,6 +1346,16 @@ tracked in the requirements files, not here.
   stored as `nextafter` thresholds), so each side errs on at most α of the calibration
   set. Small classes never flag / never drop, and readers say why; pre-BUG-0070 rows are
   applied as recorded and labelled.
+- **Blind holdout and calibration** `[built; opt-in; on-host defaults pending]`
+  (CC-ML-0020, CC-CORE-0030, CC-FUZZ-0053, FR-ML-19/20):
+  - **Holdout.** `fuzzlab auto --holdout` keeps a fixed, versioned 20% of each target's
+    endpoints (`ml/holdout.py`) out of the classifier's, ranker's and budget
+    prioritizer's training. Their metrics are sealed in `holdout_metric` (migration 17)
+    and read only with the counted `fuzzlab reveal-holdout`. The lab cell/transform split
+    and external validation (D10) are not built.
+  - **Calibration.** `--calibrate platt` Platt-scales the classifier (cross-fitted
+    calibrated `score_oof` feeds the gate; the full map is saved with the model, persist
+    format 2) and records out-of-fold ECE / Brier before and after.
 - **Train on earlier runs** `[built; on-host exits pending]` (CC-ML-0016, CC-FUZZ-0049,
   CC-UI-0040, FR-ML-14):
   - `fuzzlab auto --score/--rank --train-on earlier` trains the classifier / ranker
@@ -1629,6 +1639,7 @@ detail):
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |
+| `holdout_metric`, `holdout_reveal` (sealed blind-holdout metrics and the reveal count; migration 17) | ML trainers via `core.sealed.write_metrics`; `fuzzlab reveal-holdout` (reveal rows) | only `core.sealed.reveal` (`fuzzlab reveal-holdout`); hidden from the store browser (`SEALED_TABLES`) |
 | `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
 | `request_budget` | all tools | budget manager, UI |
 | `run_plugin` (attached plugins: name, version, priority; `config`, `status`, `error` — migration 15) | `PluginManager.record` / `finalize` | `fuzzlab report` (per run) |

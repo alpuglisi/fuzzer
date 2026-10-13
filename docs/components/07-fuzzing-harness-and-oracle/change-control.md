@@ -22,6 +22,41 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0053 — `fuzzlab auto --holdout` / `--calibrate`; `fuzzlab reveal-holdout` (2026-10-13)
+- Change:
+  - **`--holdout`** passes `holdout=True` to the classifier, ranker and budget stages.
+    It needs `--score`, `--rank` or `--confirm-budget`.
+  - **`--calibrate {none,platt}`** needs `--score`. It is a usage error with
+    `--train-on saved`.
+  - Both reach the stages through `stage_plugins`, and appear in a stage's config only
+    when set.
+  - **Summary lines** (`_print_ml_extras`):
+    - the out-of-fold ECE / Brier raw → cross-fitted, or why nothing was calibrated;
+    - `holdout: N endpoint(s) of this run held out; metrics sealed — read with
+      fuzzlab reveal-holdout --run R`, or `no sealed metrics (<reason>)`.
+
+    Never a holdout number.
+  - **New `harness/reveal_cli.py`** and `fuzzlab reveal-holdout --store --run`
+    (registered in `fuzzlab/cli.py`, kept out of the web launcher). It prints the
+    sealed metrics per model and the reveal count, or "nothing to reveal". A missing
+    store is a usage error.
+- Impact: new flags and a new command. The defaults are unchanged, and the golden
+  summaries are byte-identical. The launcher shows `--holdout` / `--calibrate` through
+  `commandspec` automatically.
+- Risk: low.
+- Deliverables:
+  - [x] flags, validation and summary lines — done
+  - [x] reveal command — done
+  - [x] FR-FUZZ-36 — done
+  - [x] tests: four usage errors with no run row, label-free summary lines (regex
+    shape), plugin configs, the reveal CLI (counted / nothing to reveal / missing
+    store), default configs unchanged — done
+- Implementation divergence: the reveal is its own command, not `fuzzlab auto
+  --reveal-holdout` (see CC-ML-0020).
+- Review: covered by CC-ML-0020's 3/3 pre-change review. Renumbered from CC-FUZZ-0052
+  after BUG-0070 took that number (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (58 files: ML, auto, web incl. real-browser, plugins, report, no-ML, harness, multitarget, pipeline, diagnostics, core, CLI, store, migrations; `FUZZLAB_REQUIRE_BROWSER=1`): 901 passed. `tests/test_ml_holdout_calibration.py`: 42 passed. Its mutants are among CC-ML-0020's 27, all killed.
+
 ### CC-FUZZ-0052 — `fuzzlab auto --anomaly` prints why fewer were flagged; contamination help says "at most" (BUG-0070) (2026-10-13)
 - Change (`harness/auto_cli.py`):
   - The anomaly summary prints `    note: <flag_reason>` when ties left fewer than k

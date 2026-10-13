@@ -12,7 +12,10 @@ of its options (recorded on the run, migration 15). ``version`` names the stage'
 semantics; the trained model's own identity is its ``params_sha256`` (FR-ML-13), which the
 stage's result carries. The post-run hooks run under the advisory write guard
 (`fuzzlab.plugins.guard`): these stages only INSERT into `model` / `run_metrics` /
-`metric_series` and UPDATE the advisory `candidate` columns.
+`metric_series` / `holdout_metric` and UPDATE the advisory `candidate` columns.
+
+New options (``calibrate``, ``holdout``, CC-ML-0020) appear in a stage's config only when
+set, so a run without them records exactly the config it always did.
 """
 
 from __future__ import annotations
@@ -32,23 +35,40 @@ class _Stage:
         self.config = config
 
 
+def _with_held_endpoints(store, run_id, result: dict, config: dict) -> dict:
+    """With the holdout on, add how many of the run's endpoints are held out — a
+    label-free count, the only holdout fact the summary prints (CC-ML-0020)."""
+    if config.get("holdout") and "holdout" in result:
+        from fuzzlab.ml.holdout import held_endpoints
+        result["holdout"]["endpoints"] = held_endpoints(store, run_id)
+    return result
+
+
 class ClassifierPlugin(_Stage):
     """`fuzzlab auto --score`: train the detection classifier, write advisory scores."""
     flag = "score"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-classifier", 10
 
     def __init__(self, train_on: str = "run", model_kind: str = "auto", hybrid: bool = False,
-                 model_id: int | None = None):
+                 model_id: int | None = None, calibrate: str = "none",
+                 holdout: bool = False):
         super().__init__(train_on=train_on, model_kind=model_kind, hybrid=hybrid)
         if model_id is not None:                  # only when pinned (keeps old configs)
             self.config["model_id"] = model_id
+        if calibrate != "none":
+            self.config["calibrate"] = calibrate
+        if holdout:
+            self.config["holdout"] = True
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.train import train_and_score
-        return train_and_score(store, run_id, model_kind=self.config["model_kind"],
+        result = train_and_score(store, run_id, model_kind=self.config["model_kind"],
                                train_on=self.config["train_on"],
                                hybrid=self.config["hybrid"],
-                               model_id=self.config.get("model_id"))
+                               model_id=self.config.get("model_id"),
+                               calibrate=self.config.get("calibrate", "none"),
+                               holdout=self.config.get("holdout", False))
+        return _with_held_endpoints(store, run_id, result, self.config)
 
 
 class RankerPlugin(_Stage):
@@ -56,15 +76,20 @@ class RankerPlugin(_Stage):
     flag = "rank"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-ranker", 20
 
-    def __init__(self, train_on: str = "run", model_id: int | None = None):
+    def __init__(self, train_on: str = "run", model_id: int | None = None,
+                 holdout: bool = False):
         super().__init__(train_on=train_on)
         if model_id is not None:
             self.config["model_id"] = model_id
+        if holdout:
+            self.config["holdout"] = True
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.rank_train import train_and_rank
-        return train_and_rank(store, run_id, train_on=self.config["train_on"],
-                              model_id=self.config.get("model_id"))
+        result = train_and_rank(store, run_id, train_on=self.config["train_on"],
+                                model_id=self.config.get("model_id"),
+                                holdout=self.config.get("holdout", False))
+        return _with_held_endpoints(store, run_id, result, self.config)
 
 
 class AnomalyPlugin(_Stage):
@@ -88,12 +113,15 @@ class BudgetPlugin(_Stage):
     flag = "confirm_budget"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-budget", 10
 
-    def __init__(self, method: str = "score", seed: int = 0):
+    def __init__(self, method: str = "score", seed: int = 0, holdout: bool = False):
         super().__init__(method=method, seed=seed)
+        if holdout:
+            self.config["holdout"] = True
 
     def register_prioritizer(self):
         from fuzzlab.ml.active import prioritize
-        return partial(prioritize, method=self.config["method"], seed=self.config["seed"])
+        return partial(prioritize, method=self.config["method"], seed=self.config["seed"],
+                       holdout=self.config.get("holdout", False))
 
 
 #: Stage plugin name per `fuzzlab auto` option (each plugin also carries its ``flag``).
@@ -105,16 +133,19 @@ def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = Fa
                   contamination: float = 0.1, train_on: str = "run", hybrid: bool = False,
                   model_id: int | None = None, ranker_model_id: int | None = None,
                   confirm_budget: int | None = None, budget_method: str = "score",
-                  budget_seed: int = 0) -> list:
+                  budget_seed: int = 0, calibrate: str = "none",
+                  holdout: bool = False) -> list:
     """The plugins a set of `fuzzlab auto` options asks for — the one options→plugins
     mapping (PA-0003)."""
     out: list = []
     if confirm_budget is not None:
-        out.append(BudgetPlugin(method=budget_method, seed=budget_seed))
+        out.append(BudgetPlugin(method=budget_method, seed=budget_seed, holdout=holdout))
     if score:
-        out.append(ClassifierPlugin(train_on=train_on, hybrid=hybrid, model_id=model_id))
+        out.append(ClassifierPlugin(train_on=train_on, hybrid=hybrid, model_id=model_id,
+                                    calibrate=calibrate, holdout=holdout))
     if rank:
-        out.append(RankerPlugin(train_on=train_on, model_id=ranker_model_id))
+        out.append(RankerPlugin(train_on=train_on, model_id=ranker_model_id,
+                                holdout=holdout))
     if anomaly:
         out.append(AnomalyPlugin(contamination=contamination))
     return out

@@ -199,7 +199,7 @@ def test_guard_ignores_legitimate_model_queries():   # PA-0022: no false positiv
         # diagnostics.model_registry_timeline (lists every row on purpose)
         'q = ("SELECT name, version, feature_version, calibration, created_at FROM model "\n'
         '     "ORDER BY created_at, id")',
-        # train/rank_train._next_version
+        # train._next_version (the ranker shares it via train._insert_model)
         'q = "SELECT MAX(version) v FROM model WHERE name=?"',
         # a different table whose name merely starts with "model"
         'q = "SELECT * FROM model_variant ORDER BY id DESC LIMIT 1"',

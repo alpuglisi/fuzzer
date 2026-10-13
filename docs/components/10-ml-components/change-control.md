@@ -3,6 +3,129 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0020 — Sealed blind holdout (FR-ML-19, FR-ML-7 partial) and Platt calibration (FR-ML-20) (2026-10-13)
+- **Context:** the user asked me to build the remaining ML work while away, taking my
+  own recommendation at each decision point. This is batch 3 of that work. It builds on
+  CC-ML-0018 (`score_oof`, `gate_input`) and CC-ML-0019 (the split-conformal gate).
+  Decisions taken:
+  - **H-1:** the holdout is opt-in, with fixed, versioned membership;
+  - **C-1 / C-2:** calibration is opt-in and Platt only.
+- Change:
+  - **`ml/holdout.py` (new):**
+    - `HOLDOUT_VERSION` / `HOLDOUT_FRACTION` (0.2) / `HOLDOUT_SALT`, and `in_holdout(origin,
+      endpoint)` (sha256, keyed by canonical origin plus endpoint);
+    - `record()`, `matches_current()`, `mask()`, `split()`, `subset()` and
+      `held_endpoints()`.
+  - **`dataset.endpoint_key(ev)`** is the one endpoint definition, used both for the
+    fold groups and for holdout membership (PA-0003).
+  - **`ml/calibration.py` (new):** `PlattScaler`, and `fit_platt` (Newton with smoothed
+    targets; `None` when degenerate). `cross_fit` returns `None` if any fold fit is
+    degenerate.
+  - **`ml/metrics.py`:** adds `brier`, `reliability` / `ece` (the ML tab's binning,
+    moved here; `mlview._reliability` delegates), `mcc` and `precision_at_recall`.
+  - **`ml/persist.py`:** format 2 (see FR-ML-13). A model without a calibrator keeps
+    byte-identical format-1 text.
+  - **`train_and_score(calibrate=, holdout=)`** (run and earlier modes; saved mode takes
+    `holdout`). It adds:
+    - `metric_input`, the shared metric rule;
+    - the `gate_input` held-out rule;
+    - helpers `_calibrate`, `_gate_on`, `_holdout_metrics`, `_insert_model` and `_seal`.
+  - **`train_and_rank(holdout=)`** (all three modes), with `_holdout_ranking` and
+    `_holdout_record`. Its duplicate `_next_version` is removed; it uses
+    `train._insert_model`.
+  - **`active.prioritize(holdout=)`** drops held-out endpoints from the earlier-run
+    training.
+  - **`ml/plugins.py`:**
+    - `ClassifierPlugin(calibrate, holdout)`, `RankerPlugin(holdout)` and
+      `BudgetPlugin(holdout)`;
+    - each config key appears only when set;
+    - `stage_plugins(calibrate, holdout)`;
+    - the label-free `holdout.endpoints` count is added to stage results.
+    `ML_PLUGIN_VERSION` stays "2": these are new options, not changed meanings.
+- Impact:
+  - **CORE (CC-CORE-0030):** migration 17 and `core/sealed.py`.
+  - **PLUG (CC-PLUG-0007):** `holdout_metric` is INSERT-allowed.
+  - **FUZZ (CC-FUZZ-0053):** `--holdout`, `--calibrate` and `fuzzlab reveal-holdout`.
+  - **UI (CC-UI-0045):** held-out rows are excluded from the shown out-of-fold metrics,
+    the calibration evidence is shown, and the sealed tables are hidden.
+  - **Bit-identical without the new options.** Without `calibrate` / `holdout`, the
+    stored scores, model rows (params, sha, calibration keys), `run_metrics` and plugin
+    configs are exactly as before. The existing suites pass unchanged, apart from one
+    test that pinned the guard's insert set.
+- Risk: medium-low.
+  - **Mitigations:**
+    - both features are opt-in;
+    - all-or-nothing calibration;
+    - fail-closed format-2 validation;
+    - the sealed tables have no reader except the counted reveal;
+    - held-out status is read from stored facts, so a version bump is safe.
+  - **Accepted, and stated in FR-ML-19:**
+    - the endpoint key is an interim deviation from D10's cell/transform split;
+    - the seal is against summary surfaces, not inspection;
+    - the hybrid's ECOD sees held-out features (transductive).
+- Deliverables:
+  - [x] holdout membership, split, sealed metrics in all trainers and the prioritizer — done
+  - [x] Platt calibration (run + earlier), format-2 persistence, evidence — done
+  - [x] metric helpers moved and shared — done
+  - [x] Tests: `tests/test_ml_holdout_calibration.py` (42) — done. It covers:
+    - Platt recovery, monotonicity, degenerate refusal, and cross-fit fold isolation;
+    - the metric helpers on hand examples, and the ML tab using the shared ECE;
+    - format 1 unchanged, a format-2 round trip, and 14 malformed envelopes (NaN,
+      a ≤ 0, missing or extra keys, unknown kind, wrong type, a calibrator on a
+      prevalence or constant model, format mismatches, a bool format);
+    - stored cross-fitted `score_oof` recomputed independently, the gate on stored
+      values, the evidence keys, the loaded model reproducing the calibrated score, and
+      the per-side ≤ α invariant;
+    - an engineered degenerate fold giving an identical uncalibrated model;
+    - earlier-mode calibration, and validation;
+    - membership: deterministic, about 20%, keyed by target, canonical origins, no
+      target means never held;
+    - identity (held-out flips change nothing; a training flip changes the model) for
+      run mode, the ranker and the prioritizer, with every flip asserted to change a
+      label;
+    - held rows: no `score_oof`, gated on `score`, excluded from metrics;
+    - sealed metrics equal a recomputation, are never in `run_metrics`, and the record
+      carries no label counts;
+    - gating: budget-skipped, fallback, and store-wide refusal;
+    - a version bump leaves decisions unchanged;
+    - earlier mode and the prioritizer drop held endpoints;
+    - saved mode reports only for the current membership;
+    - the sealed surfaces (report JSON and text, `/api/runs/{id}`, diagnostics metrics
+      and models, store tables, the ML data API and the run page);
+    - the reveal counter, and nothing recorded when there is nothing to reveal;
+    - the reveal CLI;
+    - the auto CLI validation and its label-free summary lines;
+    - default configs unchanged;
+    - a real-browser calibration note.
+  - [x] Requirements: FR-ML-7 (partial), FR-ML-1 note, FR-ML-13 (format 2), FR-ML-19,
+    FR-ML-20; ARCHITECTURE; CHANGELOG — done
+- Implementation divergence (from the agreed draft v3, written back here):
+  - **The reveal is its own command.** It is `fuzzlab reveal-holdout --store S --run N`,
+    not `fuzzlab auto --reveal-holdout`. `auto` requires `--base-url` and `--authorized`
+    for a pass that sends traffic, and a reveal sends none. It is also kept out of the
+    web launcher, so every reveal is a deliberate command. `reveal()` returns a dict
+    `{metrics, reveals, version}`, not a tuple.
+  - **Positives are sealed too.** The model's `holdout` record holds `{version,
+    fraction, rows}`, without `positives`. The held-out positive count is label
+    information, so it is sealed (`holdout_positives` in `holdout_metric`). The sealed
+    set also gains `ml_brier_holdout`, `ml_ece_holdout` (the measured calibration) and
+    `holdout_rows`.
+  - **The endpoint count prints on every `--holdout` run,** not only the first per
+    target. It is label-free.
+  - **The ranker's vocabulary is fitted on the kept rows only,** which is stricter than
+    the draft's transductive allowance. The hybrid ECOD remains transductive.
+  - **No `holdout: null` key.** A model trained without the holdout records no
+    `holdout` key, rather than `holdout: null`, to keep the default path bit-identical
+    (the draft's own "without `--holdout`, bit-identical" requirement wins).
+  - **Calibration evidence location.** It lives in the model's calibration and the
+    stage result, not `run_metrics`, as v2 settled.
+- Review: the pre-change review gate cleared 3/3 over drafts v1 to v3 (the proposing
+  agent plus 2 independent reviewer agents; every raised issue adopted). It was
+  renumbered from CC-ML-0019 after BUG-0070 took that number (PA-0031). The BUG-0070
+  review's A5 added the rounding rule: cross-fitted `score_oof` is rounded before the
+  gate is calibrated on it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (58 files: ML, auto, web incl. real-browser, plugins, report, no-ML, harness, multitarget, pipeline, diagnostics, core, CLI, store, migrations; `FUZZLAB_REQUIRE_BROWSER=1`): 901 passed. `tests/test_ml_holdout_calibration.py`: 42 passed. Mutation-checked on a copy with bytecode caches cleared: all 27 mutants are killed, with no survivors on the first pass. Killed: split no-op, fraction ignored, no-origin held, gate held→none, metric includes held, oof not cross-fitted, gate on raw, deploy uncalibrated, loader skips the calibrator, no slope check, calibrator on any kind, holdout ungated, no seal, prioritizer ignores, earlier trains held, saved any membership, tables listed, tables browsable, empty reveal counted, CLI unvalidated, config always holdout, ranker trains held, ranker panel includes held, cross-fit leaks, JS note missing, all-or-nothing off, held oof written.
+
 ### CC-ML-0019 — The conformal gate keeps its α bound (BUG-0070); anomaly flags never exceed their fraction (2026-10-13)
 - **Context:** found while building batch 3 (calibration). Its agreed invariant test
   (each side's error ≤ α on the calibration set, ties included) failed on today's gate

@@ -9,6 +9,12 @@ Envelope (format 1)::
     {"format": 1, "kind": <logistic|gbt|prevalence|ranker|constant>,
      "feature_names": [...], "feature_version": <int>, "params": {...}, "ecod": {...}|null}
 
+Format 2 (CC-ML-0020, FR-ML-20) is format 1 plus ``"calibrator": {"kind": "platt", "a",
+"b"}`` — written **only** when a classifier carries a probability calibrator, so a model
+without one keeps its format-1 text and sha byte-identical. Each format has its own
+exact key set; a calibrator is allowed only on the ``logistic`` / ``gbt`` kinds and must
+be a strictly increasing Platt map (finite ``a > 0``, finite ``b``).
+
 * Canonical text — ``sort_keys``, compact separators, ``allow_nan=False`` — so the same
   model always yields the same sha, and finite floats round-trip exactly.
 * The loader **fails closed** with `ModelParamsError` on anything it cannot prove well
@@ -30,7 +36,10 @@ import math
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-FORMAT = 1
+FORMAT = 1                       # the envelope written when there is no calibrator
+FORMAT_CALIBRATED = 2            # format 1 + a "calibrator" key (CC-ML-0020)
+_ENVELOPE_KEYS = {"format", "kind", "feature_names", "feature_version", "params", "ecod"}
+CALIBRATED_KINDS = ("logistic", "gbt")
 CLASSIFIER_KINDS = ("logistic", "gbt", "prevalence")
 RANKER_KINDS = ("ranker", "constant")
 KINDS = CLASSIFIER_KINDS + RANKER_KINDS
@@ -154,14 +163,32 @@ def _check_ecod(e, d: int) -> None:
     _nums(e["skew"], "ecod.skew", d)
 
 
+def _check_calibrator(c) -> None:
+    _keys(c, {"kind", "a", "b"}, "calibrator")
+    if c["kind"] != "platt":
+        _fail(f"unknown calibrator kind {c['kind']!r}")
+    if not (_is_num(c["a"]) and _is_num(c["b"]) and c["a"] > 0):
+        _fail("calibrator: expected finite a > 0 and finite b")
+
+
 def _validate(env) -> None:
-    _keys(env, {"format", "kind", "feature_names", "feature_version", "params", "ecod"},
-          "envelope")
-    if env["format"] != FORMAT:
-        _fail(f"unknown params format {env['format']!r}")
+    if not isinstance(env, dict):
+        _fail(f"envelope: expected an object, got {type(env).__name__}")
+    fmt = env.get("format")
+    if fmt == FORMAT and not isinstance(fmt, bool):
+        _keys(env, _ENVELOPE_KEYS, "envelope")
+    elif fmt == FORMAT_CALIBRATED and not isinstance(fmt, bool):
+        _keys(env, _ENVELOPE_KEYS | {"calibrator"}, "envelope (format 2)")
+    else:
+        _fail(f"unknown params format {fmt!r}")
     kind = env["kind"]
     if kind not in KINDS:
         _fail(f"unknown model kind {kind!r}")
+    if fmt == FORMAT_CALIBRATED:
+        if kind not in CALIBRATED_KINDS:
+            _fail(f"a calibrator is allowed only on {', '.join(CALIBRATED_KINDS)}, "
+                  f"not {kind!r}")
+        _check_calibrator(env["calibrator"])
     names = env["feature_names"]
     if not (isinstance(names, list) and all(isinstance(n, str) for n in names)):
         _fail("feature_names: expected a list of strings")
@@ -203,14 +230,18 @@ def _validate(env) -> None:
 # --- dump / load ------------------------------------------------------------------
 
 def dumps_model(kind: str, model, *, feature_names: Sequence[str], feature_version: int,
-                ecod=None) -> tuple[str, str]:
+                ecod=None, calibrator=None) -> tuple[str, str]:
     """Serialise a fitted model to canonical JSON; return ``(text, sha256)``.
 
-    ``kind="constant"`` takes the constant score itself as ``model``."""
+    ``kind="constant"`` takes the constant score itself as ``model``. With a
+    ``calibrator`` (a `calibration.PlattScaler`) the envelope is format 2; without one
+    it is exactly the format-1 text it always was."""
     params = {"value": model} if kind == "constant" else model.to_params()
     env = {"format": FORMAT, "kind": kind, "feature_names": list(feature_names),
            "feature_version": feature_version, "params": params,
            "ecod": ecod.to_params() if ecod is not None else None}
+    if calibrator is not None:
+        env.update(format=FORMAT_CALIBRATED, calibrator=calibrator.to_params())
     text = _canonical(env)
     _validate(json.loads(text))                      # never store what we couldn't load
     return text, _sha(text)
@@ -249,8 +280,13 @@ def _build(env: dict, sha256: str) -> "LoadedModel":
                   "prevalence": PrevalenceBaseline, "ranker": Ranker}[kind].from_params(p) \
         if kind != "constant" else p["value"]
     ecod = ECOD.from_params(env["ecod"]) if env["ecod"] is not None else None
+    calibrator = None
+    if env.get("calibrator") is not None:
+        from fuzzlab.ml.calibration import PlattScaler
+        calibrator = PlattScaler.from_params(env["calibrator"])
     return LoadedModel(kind=kind, model=model, feature_names=list(env["feature_names"]),
-                       feature_version=env["feature_version"], ecod=ecod, sha256=sha256)
+                       feature_version=env["feature_version"], ecod=ecod, sha256=sha256,
+                       calibrator=calibrator)
 
 
 @dataclass
@@ -262,6 +298,7 @@ class LoadedModel:
     feature_version: int
     ecod: Any = None
     sha256: str | None = None
+    calibrator: Any = None              # a `calibration.PlattScaler` (format 2), or None
 
     def _structural_width(self) -> int:
         if self.kind == "ranker":
@@ -294,15 +331,17 @@ class LoadedModel:
                     f"feature row has {len(row)} values, the model expects {width}")
 
     def predict_proba(self, X: Sequence[Sequence[float]]) -> list[float]:
-        """Classifier kinds: probabilities for plain `dataset` feature rows (the stored
-        ECOD augment, if any, is applied here)."""
+        """Classifier kinds: probabilities for plain `dataset` feature rows — the stored
+        ECOD augment (if any), then the model, then the stored calibrator (if any), so a
+        reloaded model reproduces the scores it wrote."""
         if self.kind not in CLASSIFIER_KINDS:
             raise TypeError(f"{self.kind!r} is not a classifier")
         self._check_rows(X)
         if self.ecod is not None:
             from fuzzlab.ml.anomaly import augment
             X = augment(X, self.ecod)
-        return self.model.predict_proba(X)
+        probs = self.model.predict_proba(X)
+        return self.calibrator.transform(probs) if self.calibrator is not None else probs
 
     def score(self, X: Sequence[Sequence[float]], texts: Sequence[str]) -> list[float]:
         """Ranker kinds: rank scores for feature rows + candidate texts."""

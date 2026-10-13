@@ -81,6 +81,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "apply (default: the newest qualifying one)")
     p.add_argument("--ranker-model-id", type=int, default=None, metavar="ID",
                    help="With --rank --train-on saved: the saved ranker model row to apply")
+    p.add_argument("--calibrate", choices=["none", "platt"], default="none",
+                   help="With --score (not --train-on saved): Platt-scale the classifier's "
+                        "probabilities on cross-fitted out-of-fold scores; the evidence "
+                        "(Brier / ECE before and after) is recorded (default none)")
+    p.add_argument("--holdout", action="store_true",
+                   help="With --score/--rank/--confirm-budget: keep the fixed blind holdout "
+                        "(20%% of each target's endpoints) out of training, and seal its "
+                        "metrics — read them with `fuzzlab reveal-holdout`")
     p.add_argument("--hybrid", action="store_true",
                    help="With --score: add the ECOD anomaly score as a classifier feature "
                         "(XGBOD-style; label-free)")
@@ -133,6 +141,13 @@ def main(argv: list[str]) -> int:
         p.error("--train-on needs --score and/or --rank")
     if args.hybrid and not args.score:
         p.error("--hybrid needs --score")
+    if args.calibrate != "none" and not args.score:
+        p.error("--calibrate needs --score")
+    if args.calibrate != "none" and args.train_on == "saved":
+        p.error("--calibrate does not apply to --train-on saved (a saved model keeps its "
+                "own calibrator)")
+    if args.holdout and not (args.score or args.rank or args.confirm_budget is not None):
+        p.error("--holdout needs --score, --rank or --confirm-budget")
     if args.hybrid and args.train_on == "saved":
         p.error("--hybrid does not apply to --train-on saved (a saved model keeps its own)")
     if args.model_id is not None and not (args.score and args.train_on == "saved"):
@@ -199,6 +214,7 @@ def main(argv: list[str]) -> int:
             scheduler.flush_metrics()            # commit any buffered per-pull metrics
             scheduler.save(store)                # persist what this run learned
         # the ML stages ran inside `run_auto` as `after_run` plugins (CC-FUZZ-0050)
+        args.run_id = run_id
         return _print_summary(args, counts, result, plugins)
 
 
@@ -222,7 +238,8 @@ def _build_plugins(p, args):
                 hybrid=args.hybrid, model_id=args.model_id,
                 ranker_model_id=args.ranker_model_id,
                 confirm_budget=args.confirm_budget, budget_method=args.budget_method,
-                budget_seed=args.budget_seed)
+                budget_seed=args.budget_seed, calibrate=args.calibrate,
+                holdout=args.holdout)
     args.stage_names = {st.flag: st.name for st in stages}
     if not stages and not args.plugins:
         if args.confirm_budget is not None:
@@ -271,6 +288,30 @@ def _print_budget(m: dict) -> None:
           f"skipped ({how})")
     if m.get("scored") and m.get("oracle_skipped"):
         print("    skipped candidates count as misses in the score")
+
+
+def _print_ml_extras(r: dict, run_id) -> None:
+    """Calibration and holdout lines under a classifier / ranker line (CC-FUZZ-0053).
+    The holdout line prints only label-free facts — how many endpoints are held out and
+    whether sealed metrics were written — never a holdout number."""
+    cal = r.get("calibration")
+    if cal and cal.get("calibrator") == "platt":
+        print(f"    calibration: platt — out-of-fold ECE {round(cal['ece_oof_raw'], 4)} raw "
+              f"→ {round(cal['ece_oof_calibrated'], 4)} cross-fitted; Brier "
+              f"{round(cal['brier_oof_raw'], 4)} → {round(cal['brier_oof_calibrated'], 4)}")
+    elif cal:
+        print(f"    calibration: {cal.get('calibrator')} — scores left uncalibrated")
+    h = r.get("holdout")
+    if h is not None:
+        held = h.get("endpoints")
+        where = f"{held} endpoint(s) of this run held out" if held is not None else \
+            "holdout"
+        if h.get("sealed"):
+            print(f"    holdout: {where}; metrics sealed — read with `fuzzlab "
+                  f"reveal-holdout --run {run_id if run_id is not None else 'N'}` "
+                  f"(each read is counted)")
+        else:
+            print(f"    holdout: {where}; no sealed metrics ({h.get('skipped_reason')})")
 
 
 def _print_earlier(label: str, verb: str, r: dict, metric: str, key: str,
@@ -360,6 +401,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
             line += (f"; PR-AUC={ml.get('pr_auc')} vs prevalence "
                      f"{ml.get('baseline_prevalence')} / sigma {ml.get('baseline_sigma')}")
         print(line + "  (advisory — never labels)")
+    if ml is not None:
+        _print_ml_extras(ml, getattr(args, "run_id", None))
     if rank is not None and rank.get("train_on") in ("earlier", "saved"):
         _print_earlier("ranker", "ranked", rank, f"NDCG@{rank.get('at_k')}", "ndcg",
                        "random", "baseline_ndcg_forward")
@@ -371,6 +414,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
                      f"P@{rank.get('at_k')}={rank.get('precision')} "
                      f"(random {rank.get('baseline_precision')})")
         print(line + "  (advisory — never labels)")
+    if rank is not None:
+        _print_ml_extras(rank, getattr(args, "run_id", None))
     if anomaly is not None:
         print(f"  anomaly: flagged {anomaly.get('flagged', 0)} of {anomaly.get('rows', 0)} "
               f"candidate(s)  (advisory — unusual is not vulnerable)")

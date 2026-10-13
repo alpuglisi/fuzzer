@@ -134,7 +134,8 @@ class Prioritized:
 
 def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str = "score",
                n_members: int = 5, seed: int = 0, min_rows: int = 20,
-               min_positives: int = 5, min_groups: int = 2) -> Prioritized | None:
+               min_positives: int = 5, min_groups: int = 2,
+               holdout: bool = False) -> Prioritized | None:
     """Order ``candidate_ids`` (this run's confirmable candidates) for a confirmation budget.
 
     The model learns only from **earlier runs against the same target** (the pipeline's
@@ -154,6 +155,9 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     Limitation: candidate text includes the URL path, so a model trained on earlier runs
     of the same app partly remembers which endpoints were vulnerable — useful for
     re-testing, but a "beats random" claim must be measured on held-out endpoints.
+
+    ``holdout=True`` (CC-ML-0020, FR-ML-19) leaves the blind holdout's endpoints out of
+    the earlier-run training, so a held-out endpoint never teaches the order.
     """
     if method not in BUDGET_METHODS:
         raise ValueError(f"unknown budget method: {method!r} (choose from {BUDGET_METHODS})")
@@ -167,6 +171,9 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     if target is None:
         return None
     prior = build_dataset(store, before_run_id=run_id, target=target)
+    if holdout:
+        from fuzzlab.ml.holdout import split
+        prior = split(store, prior)[0]
     n, pos = len(prior), prior.positives
     if (n < min_rows or pos < min_positives or (n - pos) < 1
             or len(set(prior.groups)) < max(2, min_groups)):

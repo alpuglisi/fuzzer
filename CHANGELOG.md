@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML: sealed blind holdout and Platt calibration — CC-ML-0020)
+- **Blind holdout (opt-in).** `fuzzlab auto --holdout` keeps a fixed, versioned 20% of
+  each target's endpoints out of every model's training, model selection and
+  calibration, then measures the model on them. The holdout's numbers are sealed: no
+  report, page or chart shows them. `fuzzlab reveal-holdout` reads them and counts each
+  read, because tuning on the holdout uses it up. This partially implements FR-ML-7: the
+  lab's cell/transform split and external validation are still to come.
+- **Probability calibration (opt-in).** `--calibrate platt` calibrates the classifier's
+  probabilities. It reports its own before/after evidence (out-of-fold ECE and Brier,
+  cross-fitted), so the on-host runs can decide whether it should become the default.
+- Records: CC-ML-0020, CC-CORE-0030 (migration 17), CC-FUZZ-0053, CC-UI-0045,
+  CC-PLUG-0007.
+
 ## 2026-10-13 (ML: conformal gate keeps its α bound; anomaly flags keep their fraction — BUG-0070)
 - **Conformal gate fixed.** The gate's thresholds now use the finite-sample
   split-conformal rule, so on its calibration set it flags at most α of the negatives

@@ -3,6 +3,26 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0007 — The advisory write allowlist gains INSERT on `holdout_metric` (2026-10-13)
+- Change: `plugins/guard.ADVISORY_WRITES["insert"]` gains `holdout_metric`. The ML
+  stages write the sealed holdout metrics under the `after_run` guard (CC-ML-0020).
+  `holdout_reveal` is not allowed: only the `reveal-holdout` command writes it, outside
+  any hook.
+- Impact: an `after_run` plugin may INSERT `holdout_metric` rows. UPDATE and DELETE of
+  it stay denied, as for every output table. No other guard behaviour changes.
+- Risk: low. Insert-only into an advisory table, with the same scope caveat as
+  PLUG §8: the guard prevents accidents; it is not a trust boundary.
+- Deliverables:
+  - [x] allowlist entry — done
+  - [x] `test_plugins_post_run.py::test_advisory_writes_are_one_declared_set` updated —
+    done
+  - [x] the `fuzzlab auto --holdout` run writes sealed metrics through the guarded hook
+    (`test_cli_holdout_and_calibrate_print_only_label_free_facts`) — done
+  - [x] FR-PLUG note — done
+- Review: covered by CC-ML-0020's 3/3 pre-change review (A1). Pre-assigned number
+  (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (58 files: ML, auto, web incl. real-browser, plugins, report, no-ML, harness, multitarget, pipeline, diagnostics, core, CLI, store, migrations; `FUZZLAB_REQUIRE_BROWSER=1`): 901 passed. `tests/test_ml_holdout_calibration.py`: 42 passed. Its mutants are among CC-ML-0020's 27, all killed.
+
 ### CC-PLUG-0006 — The advisory write allowlist gains the out-of-fold columns (2026-10-13)
 - Change: `guard.ADVISORY_WRITES["update_candidate"]` gains `score_oof` and
   `rank_score_oof` (migration 16). Run-mode stages write them, and every other scoring

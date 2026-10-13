@@ -20,7 +20,8 @@ the oracle owns truth (the oracle/advisory split).
 - **FR-ML-1 (classifier, A.1)** Gradient-boosted trees over `attempt.features_json`
   with probability calibration and a conformal flag/abstain/drop decision; writes
   scores + uncertainty, never labels. *(Note CC-ML-0019, BUG-0070: the conformal
-  decision keeps its stated per-side bound — see FR-ML-18.)*
+  decision keeps its stated per-side bound — see FR-ML-18.)* *(Note CC-ML-0020:
+  probability calibration is Platt scaling, opt-in — FR-ML-20.)*
 - **FR-ML-2 (ranker, A.2)** Learning-to-rank over parameters/forms from candidate
   features; writes `candidate.score`; costs **zero** requests.
 - **FR-ML-3 (anomaly, A.5)** ECOD / Isolation Forest tripwire over flows, later an
@@ -49,6 +50,11 @@ the oracle owns truth (the oracle/advisory split).
     `[tool.setuptools.packages.find] exclude = ["fuzzlab.ml*"]`.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
+  *(Partially implemented, CC-ML-0020 — FR-ML-19:)* a deterministic, versioned,
+  endpoint-keyed blind holdout, opt-in (`--holdout`), with sealed metrics. **Not built:**
+  the lab's cell/transform split (the endpoint key is an interim choice behind
+  `HOLDOUT_VERSION`) and external validation (WAVSEP / Juice Shop need those apps on
+  the host).
 - **FR-ML-9** *(added CC-ML-0010, lane U4)* Model internals already written to the
   store are surfaced **read-only** by the web control panel's ML tab (`GET /ml`,
   `GET /api/ml/data`; see `12-diagnostics-and-ui/requirements.md` FR-UI-11): classifier
@@ -145,6 +151,11 @@ the oracle owns truth (the oracle/advisory split).
     predict, and `params_sha256` holds the sha256 of exactly that text.
   - **Kinds:** `logistic`, `gbt`, `prevalence`, `ranker` (with its vectorizer and nested
     logistic model) and `constant`. A hybrid classifier also stores its fitted ECOD.
+  - *(CC-ML-0020)* **Format 2** = format 1 plus `"calibrator": {"kind": "platt", "a",
+    "b"}`, written only when a `logistic` / `gbt` classifier is calibrated (finite `a > 0`
+    and `b`; refused on any other kind). Without a calibrator the text — and so the sha
+    — is exactly format 1. `LoadedModel.predict_proba` applies ECOD, the model, then the
+    calibrator, so a reloaded model reproduces its stored scores.
   - **Loading:** `loads_model` rebuilds the model with exactly equal predictions, and
     fails closed with `ModelParamsError` on anything malformed (sha mismatch, non-JSON
     or pickle input, NaN/Infinity, runaway nesting, unknown format or kind, bad types or
@@ -255,6 +266,58 @@ the oracle owns truth (the oracle/advisory split).
     could exceed α by about 1/n). It is applied as recorded and labelled
     "pre-BUG-0070" on the run page and in the ML tab, including the pooled view when
     any pooled gate lacks it.
+
+- **FR-ML-19 (blind holdout, CC-ML-0020; FR-ML-7 partial)**
+  - **Membership.** `ml/holdout.in_holdout(origin, endpoint)` — `sha256(salt | canonical
+    origin | endpoint) / 2^256 < 0.2` (`HOLDOUT_VERSION = 1`, `HOLDOUT_FRACTION = 0.2`,
+    `HOLDOUT_SALT`). The endpoint is `dataset.endpoint_key` (the group-k-fold group), so
+    folds and the holdout never split an endpoint; a run with no target row is never
+    held out.
+  - **Guarantee (per model).** With `holdout=True` the classifier, ranker (run, earlier,
+    saved modes) and budget prioritizer never train on, select with or calibrate on a
+    held-out endpoint — including earlier runs' held-out endpoints. Label-free
+    components (the hybrid's ECOD) may see their features (transductive). A store-wide
+    train with `holdout=True` raises `ValueError`.
+  - **Stored facts.** Held-out labelled rows keep `score_oof` NULL; the model's
+    calibration records `holdout: {version, fraction, rows}` (no label counts). A labelled
+    row of such a model with no `score_oof` is held out, so `gate_input` judges it on
+    `score` and `train.metric_input` leaves it out of every shown out-of-fold metric —
+    decided from stored facts, so a version bump never re-classifies an old model's rows.
+  - **Sealed metrics.** On the run's held-out labelled rows, from the deploy model's
+    stored scores: classifier `ml_pr_auc_holdout`, `ml_pr_auc_prevalence_holdout`,
+    `ml_mcc_holdout` (at the conformal flag threshold), `ml_precision_at_recall90_holdout`,
+    `ml_brier_holdout`, `ml_ece_holdout` (the *measured* calibration); ranker
+    `rank_ndcg_holdout`, `rank_precision_holdout` and their random controls; plus
+    `holdout_rows` / `holdout_positives`. Written to `holdout_metric` (FR-CORE-19), never
+    `run_metrics`, only when the held-out labels are two-class and nothing in the run was
+    budget-skipped; otherwise (and for a fallback model) the reason is recorded. A saved
+    model reports them only when its holdout record matches today's version and fraction.
+  - **Staying blind.** The only reader is `fuzzlab reveal-holdout` (FR-FUZZ-36), which
+    counts each reveal per version. Tuning on the holdout uses it up; bumping
+    `HOLDOUT_VERSION` (new salt) refreshes it. Sealed against the toolkit's summary
+    surfaces, not against inspection: the run page still lists stored scores and the
+    SQLite file can be opened directly.
+  - Opt-in; making it the default waits on the on-host T5.5 / T7.4 runs (thin data).
+- **FR-ML-20 (probability calibration, CC-ML-0020; FR-ML-1)**
+  - `train_and_score(calibrate="platt")` (run and earlier modes; `ValueError` with
+    `saved`): `p = sigmoid(a·logit(s) + b)`, Newton-fitted with Platt's smoothed targets,
+    `a > 0` (strictly monotone, never reorders or ties). Isotonic is not offered (ties
+    break the gate's per-side bound and change PR-AUC; it overfits at lab sizes).
+  - **Where each map goes.** `score_oof` holds **cross-fitted** calibrated out-of-fold
+    scores (each fold through a Platt fitted on the other folds); the gate is calibrated
+    on those (rounded as stored, PA-0069(3)). The Platt fitted on all out-of-fold scores
+    is applied to the deploy `score` and saved (format 2). The gate therefore sees a
+    mixture of nearly equal monotone maps; the per-side ≤ α invariant on the stored
+    values is the check.
+  - **Evidence.** The calibration records `calibrator`, `platt_a` / `platt_b`,
+    `oof_pr_auc` (of the stored cross-fitted scores) and `oof_pr_auc_raw`, and
+    `brier_oof_raw` / `brier_oof_calibrated`, `ece_oof_raw` / `ece_oof_calibrated`
+    (`metrics.brier` / `metrics.ece`, the ML tab's binning). The deploy `score`'s
+    calibration on new data is *expected*, not measured; the measured one is the sealed
+    `ml_ece_holdout` / `ml_brier_holdout`.
+  - **All-or-nothing.** A degenerate full or fold fit (one class, no convergence, `a ≤
+    1e-9`) calibrates nothing: `calibrator: "none (degenerate fit)"`, format-1 model.
+  - Opt-in (`--calibrate`, default `none`); the thin-data fallback is never calibrated.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

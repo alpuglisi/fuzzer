@@ -222,45 +222,48 @@ def _pr_curve(labels: Sequence[int], scores: Sequence[float], max_points: int = 
 
 
 def _reliability(labels: Sequence[int], scores: Sequence[float], bins: int = 10) -> dict:
-    """Binned reliability diagram (mean predicted vs observed frequency) + ECE."""
-    buckets: list[list[tuple[float, int]]] = [[] for _ in range(bins)]
-    for s, y in zip(scores, labels):
-        idx = min(bins - 1, max(0, int(s * bins)))
-        buckets[idx].append((s, y))
-    n = len(scores)
-    out_bins = []
-    ece = 0.0
-    for i, b in enumerate(buckets):
-        if not b:
-            out_bins.append({"bin": i, "mean_pred": None, "observed": None, "count": 0})
-            continue
-        mean_pred = sum(x[0] for x in b) / len(b)
-        observed = sum(x[1] for x in b) / len(b)
-        count = len(b)
-        ece += (count / n) * abs(mean_pred - observed)
-        out_bins.append({"bin": i, "mean_pred": round(mean_pred, 4),
-                         "observed": round(observed, 4), "count": count})
-    return {"bins": out_bins, "ece": round(ece, 4)}
+    """Binned reliability diagram (mean predicted vs observed frequency) + ECE — the
+    binning is `metrics.reliability`'s (one definition, CC-ML-0020)."""
+    raw, total = _ml().metrics.reliability(labels, scores, bins)
+    out_bins = [b if b["count"] == 0 else
+                {**b, "mean_pred": round(b["mean_pred"], 4), "observed": round(b["observed"], 4)}
+                for b in raw]
+    return {"bins": out_bins, "ece": round(total, 4)}
 
 
 def _scored_pairs(store, ds, run_id: int | None, column: str = "score",
-                  oof_column: str = "score_oof") -> tuple[list[float], list[int]]:
-    """Join the dataset's labels back onto the stored scores: a labelled row's
-    out-of-fold score where the trainer stored one (CC-ML-0018), else its deploy score —
-    so a run-mode model's recomputed metrics are honest out-of-fold numbers."""
+                  oof_column: str = "score_oof",
+                  reader=None) -> tuple[list[float], list[int], list]:
+    """Join the dataset's labels back onto the stored scores, per `train.metric_input`
+    with each row's own run's scoring model (``reader``): a labelled row's out-of-fold
+    score where the trainer stored one (CC-ML-0018), else its deploy score — except a
+    sealed **held-out** row of a run-mode model, which is left out (CC-ML-0020): the
+    holdout's numbers are never pooled into the shown metrics. Returns ``(scores,
+    labels, groups)``."""
+    reader = reader or _clf_calibration
     where = "WHERE run_id=?" if run_id is not None else ""
     args: tuple = (run_id,) if run_id is not None else ()
     rows = store.conn.execute(
-        f"SELECT id, {column} AS s, {oof_column} AS o FROM candidate {where}",
-        args).fetchall()
-    scored = {r["id"]: (r["o"] if r["o"] is not None else r["s"]) for r in rows
-              if r["s"] is not None}
-    scores, labels = [], []
-    for cid, y in zip(ds.ids, ds.y):
+        f"SELECT id, run_id, oracle_status, {column} AS s, {oof_column} AS o "
+        f"FROM candidate {where}", args).fetchall()
+    calib: dict = {}
+    scored = {}
+    for r in rows:
+        if r["s"] is None:
+            continue
+        if r["run_id"] not in calib:
+            calib[r["run_id"]] = reader(store, r["run_id"])
+        value = _ml().train.metric_input(calib[r["run_id"]], r["oracle_status"], r["s"],
+                                         r["o"])
+        if value is not None:
+            scored[r["id"]] = value
+    scores, labels, groups = [], [], []
+    for cid, y, g in zip(ds.ids, ds.y, ds.groups):
         if cid in scored:
             scores.append(scored[cid])
             labels.append(y)
-    return scores, labels
+            groups.append(g)
+    return scores, labels, groups
 
 
 @_ml_panel
@@ -269,7 +272,7 @@ def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
     ds = _ml().dataset.build_dataset(store, run_id)
     if not len(ds):
         return {"available": False, "reason": "no candidates in the store yet", "n": 0}
-    scores, labels = _scored_pairs(store, ds, run_id)
+    scores, labels, _ = _scored_pairs(store, ds, run_id)
     if not scores:
         return {"available": False, "reason": "no classifier scores yet (run training)",
                 "n": len(ds)}
@@ -283,7 +286,26 @@ def classifier_panel(store, run_id: int | None = None) -> dict[str, Any]:
         "pr_auc": _ml().metrics.pr_auc(labels, scores),
         "pr_curve": _pr_curve(labels, scores),
         "reliability": _reliability(labels, scores),
+        "calibration": _calibration_evidence(store, run_id),
     }
+
+
+def _calibration_evidence(store, run_id: int | None) -> dict | None:
+    """The scoring classifier's probability-calibration record (CC-UI-0045, FR-ML-20):
+    the calibrator and its out-of-fold ECE / Brier raw vs cross-fitted calibrated —
+    for the selected run's model (per run) or a store-wide train (all runs); ``None``
+    when that model was not asked to calibrate."""
+    clf = _ml().train.latest_classifier(store, run_id)
+    if clf is None or "calibrator" not in clf.calibration \
+            or not _oof_source(clf.calibration, run_id):
+        return None
+    c = clf.calibration
+    out = {"calibrator": c["calibrator"]}
+    for key in ("ece_oof_raw", "ece_oof_calibrated", "brier_oof_raw",
+                "brier_oof_calibrated"):
+        if key in c:
+            out[key] = round(c[key], 4)
+    return out
 
 
 @_ml_panel
@@ -296,12 +318,21 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
     where = "WHERE run_id=?" if run_id is not None else ""
     args: tuple = (run_id,) if run_id is not None else ()
     rows = store.conn.execute(
-        f"SELECT id, rank_score, rank_uncertainty, rank_score_oof FROM candidate {where}",
-        args).fetchall()
-    # metrics judge a labelled row's out-of-fold rank score where stored (CC-ML-0018)
-    rank_map = {r["id"]: (r["rank_score_oof"] if r["rank_score_oof"] is not None
-                          else r["rank_score"], r["rank_uncertainty"])
-               for r in rows if r["rank_score"] is not None}
+        f"SELECT id, run_id, oracle_status, rank_score, rank_uncertainty, rank_score_oof "
+        f"FROM candidate {where}", args).fetchall()
+    # metrics judge a labelled row's out-of-fold rank score where stored (CC-ML-0018),
+    # and leave a sealed held-out row out (CC-ML-0020) — `train.metric_input`
+    calib: dict = {}
+    rank_map = {}
+    for r in rows:
+        if r["rank_score"] is None:
+            continue
+        if r["run_id"] not in calib:
+            calib[r["run_id"]] = _rank_calibration(store, r["run_id"])
+        value = _ml().train.metric_input(calib[r["run_id"]], r["oracle_status"],
+                                         r["rank_score"], r["rank_score_oof"])
+        if value is not None:
+            rank_map[r["id"]] = (value, r["rank_uncertainty"])
     scores, uncertainties, labels, groups = [], [], [], []
     for cid, y, g in zip(ds.ids, ds.y, ds.groups):
         if cid in rank_map:

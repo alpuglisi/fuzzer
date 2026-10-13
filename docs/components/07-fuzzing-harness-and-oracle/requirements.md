@@ -1027,6 +1027,21 @@ rewards) derives from it.
   - **`--hybrid`** adds the ECOD anomaly feature to the classifier. It needs `--score`
     and is a usage error with `--train-on saved`.
   - **Summary.** It names the saved model and its training runs, or the refusal reason.
+- **FR-FUZZ-36** *(holdout, calibration, reveal; `CC-FUZZ-0053`, 2026-10-13).*
+  - **`--holdout`** passes `holdout=True` to the classifier, ranker and budget stages
+    (FR-ML-19); it needs `--score`, `--rank` or `--confirm-budget`. The summary prints
+    only label-free facts: how many of the run's endpoints are held out, and whether
+    sealed metrics were written (or why not) — never a holdout number.
+  - **`--calibrate {none,platt}`** (default `none`) Platt-calibrates the classifier
+    (FR-ML-20); it needs `--score` and is a usage error with `--train-on saved`. The
+    summary prints the out-of-fold ECE / Brier raw → cross-fitted, or why nothing was
+    calibrated.
+  - Each appears in a stage's recorded config only when set, so a run without them
+    records exactly the config it always did.
+  - **`fuzzlab reveal-holdout --store S --run N`** prints a run's sealed holdout
+    metrics and the store-wide reveal count for that membership version (core only, no
+    traffic, no ML package needed); "nothing to reveal" records no reveal. Not in the
+    web launcher, so a reveal is always a deliberate command.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

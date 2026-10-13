@@ -54,7 +54,9 @@ bugs — the research-platform diagnostics of decision D2.
   Table names are always re-validated against `sqlite_master` before use
   (never interpolated from the request unchecked), and every cell renders
   client-side via `textContent` only — see `fuzzlab/web/diagnostics.py` and
-  `js/datatable.js`.)*
+  `js/datatable.js`.)* *(CC-UI-0045:)* the sealed holdout tables
+  (`core.sealed.SEALED_TABLES`) are neither listed nor browsable — they read as "no
+  such table" (FR-ML-19).
 - **FR-UI-3** A `run_metrics` table populated per run (requests, findings,
   precision, budget used, timing).
 - **FR-UI-4** Structured audit and debug logs carrying `run_id`, `tool`,
@@ -232,6 +234,10 @@ bugs — the research-platform diagnostics of decision D2.
     drops" threshold as "never" (never `1.0` or `-0.0`) with `train.gate_notes`, and the
     pre-BUG-0070 note when any pooled gate lacks `gate_rule`. The anomaly panel shows
     "at most k" (`anomaly.flag_budget`) and the tie reason.
+  - *(Note CC-UI-0045.)* Recomputed out-of-fold metrics leave out a run-mode model's
+    sealed held-out rows (`train.metric_input`, per row with its own run's model). The
+    reliability panel shows a calibrated classifier's out-of-fold ECE raw → cross-fitted
+    (FR-ML-20), or "calibration: none (degenerate fit)".
 - **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
   layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
   (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +

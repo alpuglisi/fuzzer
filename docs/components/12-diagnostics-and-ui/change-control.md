@@ -3,6 +3,45 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0045 — ML tab: held-out rows left out of out-of-fold metrics; calibration evidence; sealed tables hidden (2026-10-13)
+- Change:
+  - **`mlview._scored_pairs`** joins each row with its own run's scoring model and
+    keeps a row only per `train.metric_input`: out-of-fold where stored, never a sealed
+    held-out row. It returns `(scores, labels, groups)`.
+  - **`ranker_panel`** does the same for `rank_score_oof`, with `_rank_calibration`.
+  - **`mlview._reliability`** delegates to `metrics.reliability`; its output is
+    unchanged.
+  - **`classifier_panel` gains `calibration`** (`_calibration_evidence`): the
+    calibrator and its out-of-fold ECE / Brier, raw against cross-fitted, rounded to
+    4 dp. It is shown for a per-run model, or a store-wide train in the all-runs view.
+  - **`ml.js` `calibrationNote`** adds "Platt-calibrated: out-of-fold ECE a raw → b
+    cross-fitted", or "calibration: none (degenerate fit)". It is text only.
+  - **`diagnostics.list_tables` / `_resolve_table`** exclude
+    `core.sealed.SEALED_TABLES`: they are not listed, and browsing one answers like a
+    missing table.
+- Impact:
+  - The ML tab's out-of-fold numbers for a holdout-trained run exclude its held-out rows,
+    which is correct and intended. Every other run's numbers are unchanged.
+  - The store browser lists two fewer tables once migration 17 is applied.
+  - No route changes.
+- Risk: low.
+- Deliverables:
+  - [x] metric exclusion (classifier and ranker) — done
+  - [x] calibration evidence and note — done
+  - [x] sealed tables hidden — done
+  - [x] FR-UI-2 and FR-UI-11 notes — done
+  - [x] tests:
+    - the classifier panel `n` excludes held rows;
+    - the shared ECE;
+    - the sealed surfaces, with every route returning 200 and the sealed tables
+      answering 404 like a missing table;
+    - a real-browser calibration note (`FUZZLAB_REQUIRE_BROWSER=1`).
+
+    — done
+- Review: covered by CC-ML-0020's 3/3 pre-change review (A2/B3v2-2, B3-12).
+  Renumbered from CC-UI-0044 after BUG-0070 took that number (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (58 files: ML, auto, web incl. real-browser, plugins, report, no-ML, harness, multitarget, pipeline, diagnostics, core, CLI, store, migrations; `FUZZLAB_REQUIRE_BROWSER=1`): 901 passed. `tests/test_ml_holdout_calibration.py`: 42 passed. Its mutants are among CC-ML-0020's 27, all killed.
+
 ### CC-UI-0044 — Gate and anomaly-flag notes on the run page and ML tab; "never" thresholds (BUG-0070) (2026-10-13)
 - Change (readers of CC-ML-0019's corrected gate and tripwire):
   - **Run page** (`results.py`, `templates/run.html`):

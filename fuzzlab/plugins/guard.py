@@ -29,7 +29,8 @@ from contextlib import contextmanager
 #: The only writes an `after_run` plugin may make (one declaration, PA-0003). The
 #: built-in ML stages' measured footprint is exactly this (CC-ML-0017).
 ADVISORY_WRITES: dict[str, frozenset] = {
-    "insert": frozenset({"model", "run_metrics", "metric_series"}),
+    "insert": frozenset({"model", "run_metrics", "metric_series",
+                         "holdout_metric"}),                     # CC-PLUG-0007
     "update_candidate": frozenset({"score", "rank_score", "rank_uncertainty",
                                    "anomaly_score", "anomaly_flag",
                                    "score_oof", "rank_score_oof"}),     # CC-PLUG-0006
