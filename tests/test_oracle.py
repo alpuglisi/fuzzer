@@ -7,7 +7,7 @@ from pathlib import Path
 from fuzzlab.core.store import Store
 from fuzzlab.oracle import Candidate, Oracle
 from fuzzlab.oracle.baseline import build_baseline, median_abs_deviation
-from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
+from fuzzlab.oracle.context import element_injected, type_reflection
 from fuzzlab.oracle.probe import Probe
 from fuzzlab.oracle.strategies import (
     ReflectedXssStrategy, SqliBooleanStrategy, SqliErrorStrategy, SqliTimingStrategy,
@@ -76,11 +76,12 @@ def test_type_reflection_contexts():
     assert type_reflection("<p>nothing</p>", "MARK") == "none"
 
 
-def test_is_unescaped_and_breakout():
-    frag, sig = breakout_for("html", "TOK")
-    assert frag == "<TOK>" and sig == "<TOK>"
-    assert is_unescaped("<html><TOK></html>", "<TOK>")
-    assert not is_unescaped("<html>&lt;TOK&gt;</html>", "<TOK>")
+def test_an_injected_element_is_judged_structurally():
+    # BUG-0083: the substring helpers (`is_unescaped`, `breakout_for`) are gone; the
+    # oracle asks whether an element exists outside any inert element
+    assert element_injected("<html><TOK></html>", "TOK")
+    assert not element_injected("<html>&lt;TOK&gt;</html>", "TOK")
+    assert not element_injected("<textarea><TOK></textarea>", "TOK")
 
 
 # --- SQLi mechanisms (M1/M2/M3) ---------------------------------------------

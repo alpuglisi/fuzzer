@@ -12,7 +12,13 @@ from __future__ import annotations
 
 import re
 
+from fuzzlab.mutation.catalog import refuse_destructive
 from fuzzlab.mutation.filtermodel import FilterResult
+
+
+class DestructiveRefused(Exception):
+    """A destructive payload reached the live filter with ``allow_destructive`` off; it
+    was not sent (BUG-0082). Distinct from a WAF block: never counted as one."""
 
 # Lab WAF rule ids look like "sqli-union-select", "xss-script-tag", "path-traversal".
 _RULE_ID = re.compile(r"\b[a-z][a-z0-9]*(?:-[a-z0-9]+)+\b")
@@ -34,15 +40,23 @@ class HttpFilter:
     """A `Filter` backed by live HTTP: block status -> caught (the live WAF)."""
 
     def __init__(self, sender, url: str, param: str, *, method: str = "GET",
-                 location: str = "query", block_status: int = 403):
+                 location: str = "query", block_status: int = 403,
+                 allow_destructive: bool = False):
         self._sender = sender
+        self._allow_destructive = allow_destructive
         self._url = url
         self._param = param
         self._method = method
         self._location = location
         self._block = block_status
 
+    def refuses(self, payload: str) -> bool:
+        """True when the send-time destructive gate would refuse ``payload``."""
+        return refuse_destructive(payload, self._allow_destructive)
+
     def _probe(self, payload: str):
+        if self.refuses(payload):                    # the gate sits at the send itself
+            raise DestructiveRefused(payload)
         return self._sender.send(self._url, self._param, payload,
                                  method=self._method, location=self._location)
 

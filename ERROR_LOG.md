@@ -18,6 +18,72 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Oracle: in-band SSRF/XXE confirmed on a reflection of the callback URL (fixed, BUG-0089/PA-0090)
+- **Symptom:** a page that only echoed the submitted callback URL confirmed SSRF / XXE in-band.
+- **Root cause:** the listener served the token as its body, and the token is in the URL.
+- **Remediation:** the listener serves an HMAC proof of the token, and the strategies require it. CC-FUZZ-0057. `docs/bugs/BUG-0089-oob-in-band-confirms-url-reflection.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Scheduler: bandit backoff never took effect (fixed, BUG-0088/PA-0089)
+- **Symptom:** with backoff on, a cold sibling context still started at the flat prior.
+- **Root cause:** `_seed` reads parent posteriors, but `update` never wrote them.
+- **Remediation:** parent contexts pool their leaves' pulls; the panels label them "(pooled)". CC-SCHED-0006, CC-UI-0049. `docs/bugs/BUG-0088-bandit-backoff-never-takes-effect.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Store: migrations not atomic; concurrent first opens failed 13 of 20 (fixed, BUG-0087/PA-0088)
+- **Symptom:** duplicate-column / table-exists / locked errors on concurrent first opens; a failed migration left partial state.
+- **Root cause:** `executescript` commits and runs in autocommit, and the version was not re-read under a lock; the WAL switch bypasses the busy handler.
+- **Remediation:** `BEGIN IMMEDIATE` per migration with an in-lock re-check, statement-by-statement execution, ROLLBACK on error, and a WAL-switch retry. CC-CORE-0034. `docs/bugs/BUG-0087-migrations-not-atomic-first-open-race.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: a port-specific scope exclude was bypassed; IPv6 authorities were misparsed (fixed, BUG-0086/PA-0087)
+- **Symptom:** flows of an excluded `host:port` were recorded; `CONNECT [::1]:8443` parsed as host `[`.
+- **Root cause:** a second, host-only scope check; `partition(":")` in five places.
+- **Remediation:** one scope decision on the authority; one IPv6-aware `proxy.authority` parser. CC-PROXY-0019. `docs/bugs/BUG-0086-scope-exclude-bypass-and-ipv6-authority.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: one bad match/replace or scope rule broke every connection (fixed, BUG-0085/PA-0086)
+- **Symptom:** after adding a non-latin-1 or bad-regex rule, every request got an empty reply.
+- **Root cause:** rules were not validated at creation, and `_on_client` contained only `CancelledError`.
+- **Remediation:** validation at creation (API 400); per-connection containment (502 if nothing was written yet). CC-PROXY-0019, CC-UI-0049. `docs/bugs/BUG-0085-proxy-rule-errors-crash-connections.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: history persisted URL tokens, body passwords and redirect tokens (fixed, BUG-0084/PA-0085)
+- **Symptom:** `flow.url`, stored raw messages and FTS contained `access_token`, `password` and `session` values.
+- **Root cause:** only headers were redacted, despite the docstring.
+- **Remediation:** name-token redaction of query parameters, URL headers and form / JSON / multipart bodies in every persisted copy; one shared predicate with obs. CC-PROXY-0019, CC-CORE-0034. `docs/bugs/BUG-0084-proxy-history-persists-secrets.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Oracle: reflected-XSS confirmed non-exploitable reflections (fixed, BUG-0083/PA-0084)
+- **Symptom:** an escaped value mid-URL and a json_encode'd JS string were confirmed as XSS.
+- **Root cause:** confirmation by substring presence, with a fixed break-out per context.
+- **Remediation:** structural confirmation (element, injected attribute, JS code state, scheme position) with a fail-closed JS lexer; tests derived from the 4 lab sink templates. CC-FUZZ-0057. `docs/bugs/BUG-0083-reflected-xss-oracle-false-positives.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Mutation/greybox: destructive payloads were sent without `--allow-destructive` (fixed, BUG-0082/PA-0083)
+- **Symptom:** `mutate-run` sent 10 of 10 `DROP TABLE` variants with the flag off.
+- **Root cause:** the gate existed only at record time, on raw strings.
+- **Remediation:** a send-time gate on raw and normalised payloads; a destructive base is skipped entirely; greybox is gated too. CC-MUT-0012, CC-FUZZ-0057. `docs/bugs/BUG-0082-destructive-payloads-sent-without-flag.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Session: credentials POSTed to any form action and re-sent on redirects (fixed, BUG-0081/PA-0082)
+- **Symptom:** a form `action` on another host received the stored username and password; a 307 re-sent them; Basic logins never worked.
+- **Root cause:** the action URL from the page was trusted, and the client followed redirects.
+- **Remediation:** an origin rule (login origin / https upgrade / in scope / `auth_origins`), redirects followed by hand (307/308 never), Basic at discovery. CC-SESS-0011. `docs/bugs/BUG-0081-session-credentials-to-any-form-action.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: `fuzzlab proxy --host 0.0.0.0` bound every interface (fixed, BUG-0080/PA-0081)
+- **Symptom:** the CLI bound a non-loopback host.
+- **Root cause:** three copies of the loopback check, none in the proxy CLI or server.
+- **Remediation:** one `core.net` gate at every listener, with an AST guard finding listeners by call shape. CC-PROXY-0019, CC-CORE-0034, CC-UI-0049. `docs/bugs/BUG-0080-proxy-cli-binds-non-loopback.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy CA: CONNECT host path traversal; keys briefly world-readable (fixed, BUG-0079/PA-0080)
+- **Symptom:** `CONNECT ../../outside/evil:443` wrote a cert and key outside the CA directory.
+- **Root cause:** the raw CONNECT host was used as a filename; keys were written, then chmodded (the keyring file too).
+- **Remediation:** host grammar validation, a path backstop, and 0600-from-creation `write_secret` with `O_NOFOLLOW` (CA and keyring). CC-PROXY-0019, CC-CORE-0034. `docs/bugs/BUG-0079-proxy-ca-leaf-path-traversal.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — `fuzzlab auto`: the D15 fail-safe exit left an orphan run row (fixed, BUG-0078/PA-0079)
 - **Symptom:** a usage error (no categories, `--points ground-truth` without a contract)
   exited 2 but left an empty run behind, which `fuzzlab report` then defaulted to.

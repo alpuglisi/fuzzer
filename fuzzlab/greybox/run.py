@@ -35,7 +35,7 @@ from fuzzlab.greybox.confirm import greybox_confirms
 from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
 from fuzzlab.greybox.recorder import record_attempt_signals
 from fuzzlab.greybox.reward import GreyboxSignal, shaped_reward
-from fuzzlab.mutation.catalog import record_variant
+from fuzzlab.mutation.catalog import record_variant, refuse_destructive
 from fuzzlab.mutation.operators import default_operators
 from fuzzlab.mutation.semantics import SemanticsValidator
 from fuzzlab.oracle.probe import Probe
@@ -289,7 +289,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
     summary = {"points": len(points), "attempts": 0, "db_faults": 0,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
                "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0,
-               "mutation_variants_probed": 0, "mutation_variants_recorded": 0}
+               "mutation_variants_probed": 0, "mutation_variants_recorded": 0,
+               "destructive_refused": 0}
 
     if lab_control is not None:
         lab_control.snapshot("baseline")
@@ -310,6 +311,10 @@ def run_greybox(*, base_url: str, store, run_id: int,
         baseline_probe: Probe | None = None
         baseline_cov: set[tuple[str, int]] = set()
         for spec in ordered:
+            if refuse_destructive(spec.value, allow_destructive):
+                # the send-time gate (BUG-0082): it used to apply only when recording
+                summary["destructive_refused"] += 1
+                continue
             probe, cid = sender.send_correlated(
                 pt.url, pt.param, spec.value, method=pt.method, location=pt.location)
             if settle:

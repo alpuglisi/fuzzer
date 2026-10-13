@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlparse
 
+from fuzzlab.core.urls import canonical_origin
 from fuzzlab.session import detect
 from fuzzlab.session.state import SessionState
 
@@ -41,7 +42,8 @@ class Fetcher:
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> FetchResponse: ...
     def post(self, url: str, data: dict[str, str] | None = None,
-             headers: dict[str, str] | None = None) -> FetchResponse: ...
+             headers: dict[str, str] | None = None,
+             allow_redirects: bool = True) -> FetchResponse: ...
     def cookies(self) -> dict[str, str]: ...
 
 
@@ -58,9 +60,9 @@ def _requests_fetch_factory() -> Callable[[], Fetcher]:
                 r = sess.get(url, headers=headers, timeout=15, allow_redirects=True)
                 return FetchResponse(r.status_code, dict(r.headers), r.text)
 
-            def post(self, url, data=None, headers=None):
+            def post(self, url, data=None, headers=None, allow_redirects=True):
                 r = sess.post(url, data=data, headers=headers, timeout=15,
-                              allow_redirects=True)
+                              allow_redirects=allow_redirects)
                 return FetchResponse(r.status_code, dict(r.headers), r.text)
 
             def cookies(self):
@@ -75,9 +77,13 @@ class SessionManager:
     def __init__(self, credentials, scope_hosts: list[str] | None = None,
                  fetch_factory: Callable[[], Fetcher] | None = None,
                  identities: list[str] | None = None, max_reauth: int = 3,
-                 logger=None, store=None):
+                 logger=None, store=None, auth_origins: list[str] | None = None):
         self._creds = credentials
         self._scope = set(scope_hosts or [])
+        # extra origins credentials may be sent to (an auth service elsewhere), beyond
+        # the login page's own origin and in-scope hosts (BUG-0081)
+        self._auth_origins = {o for o in (canonical_origin(u) for u in auth_origins or [])
+                              if o is not None}
         self._fetch_factory = fetch_factory or _requests_fetch_factory()
         self._identities = identities or [ANONYMOUS, "user", "admin"]
         self._max_reauth = max_reauth
@@ -211,14 +217,29 @@ class SessionManager:
         cred = self._creds.require(host, identity)   # CredentialError if missing
         fetcher = self._fetch_factory()
 
-        form, login_page_url = self._discover_login_form(fetcher, base_url)
+        form, login_page_url, challenge = self._discover_login_form(fetcher, base_url)
+        if form is None and challenge == "basic":
+            # HTTP Basic has no form: the base URL itself challenges (BUG-0081). The
+            # header goes only to that same in-scope origin.
+            return self._basic_login(fetcher, host, identity, base_url, cred)
         if form is None:
             raise SessionAuthError(
                 f"could not detect a login for {identity}@{host}: no login form found "
                 f"from {base_url} (multi-step/CAPTCHA/SPA logins are not auto-detected; "
                 f"capture via the proxy post-Phase 6)"
             )
-        resp = fetcher.post(form.action_url, data=form.fill(cred.username, cred.password))
+        if not self._credential_destination_ok(form.action_url, login_page_url):
+            raise SessionAuthError(
+                f"refusing to send {identity}@{host} credentials to "
+                f"{canonical_origin(form.action_url)}: not the login page's origin, an "
+                f"in-scope host, or an authorised auth origin (pass auth_origins=[...] "
+                f"to allow it)")
+        resp = self._post_credentials(fetcher, form.action_url,
+                                      form.fill(cred.username, cred.password), login_page_url)
+        if resp.status == 401 and "basic" in {k.lower(): v for k, v in
+                                              resp.headers.items()}.get(
+                                                  "www-authenticate", "").lower():
+            return self._basic_login(fetcher, host, identity, base_url, cred)
         # A rejected login re-renders the login form (or answers 401/403). The mere
         # presence of a session cookie is NOT proof of authentication: servers hand an
         # anonymous session cookie to everyone (e.g. PHP's session_start() runs on every
@@ -261,18 +282,73 @@ class SessionManager:
         return state
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str):
-        """Look for a login form from the base URL and a few common login paths."""
+        """Look for a login form from the base URL and a few common login paths.
+        Returns ``(form, login_page_url, challenge)``; ``challenge`` is ``"basic"`` when
+        the base URL answered 401 with a Basic ``WWW-Authenticate`` (no form needed)."""
         candidates = [base_url] + [urljoin(base_url, p) for p in
                                    ("login", "login.php", "signin", "users/login")]
+        challenge = None
         for url in candidates:
             try:
                 resp = fetcher.get(url)
             except Exception:  # noqa: BLE001 - a bad candidate URL is not fatal
                 continue
+            if url == base_url and resp.status == 401:
+                www = {k.lower(): v for k, v in resp.headers.items()}.get(
+                    "www-authenticate", "")
+                if www.lower().startswith("basic"):
+                    challenge = "basic"
             form = detect.find_login_form(resp.text, url)
             if form is not None:
-                return form, url
-        return None, base_url
+                return form, url, challenge
+        return None, base_url, challenge
+
+    # -- credential destinations (BUG-0081) --------------------------------
+    def _credential_destination_ok(self, target: str, login_page_url: str) -> bool:
+        """May credentials be sent to ``target``? Its origin must be the login page's
+        own, that host upgraded http→https (never downgraded), an in-scope host, or
+        an authorised ``auth_origins`` entry. A URL taken from response content (a form
+        action, a redirect) is never trusted otherwise."""
+        origin, page = canonical_origin(target), canonical_origin(login_page_url)
+        if origin is None:
+            return False
+        if origin == page or origin in self._auth_origins:
+            return True
+        t, p = urlparse(target), urlparse(login_page_url)
+        if t.scheme == "https" and p.scheme == "http" and \
+                (t.hostname or "").lower() == (p.hostname or "").lower():
+            return True
+        host = (t.hostname or "").lower()
+        return host in self._scope or f"{host}:{t.port}" in self._scope
+
+    def _post_credentials(self, fetcher: Fetcher, url: str, data: dict,
+                          login_page_url: str) -> FetchResponse:
+        """POST the credentials without letting the HTTP client follow redirects: a 307 /
+        308 re-sends the body (the credentials) to wherever ``Location`` says. A 301 /
+        302 / 303 becomes a body-less GET, followed only to an allowed origin."""
+        resp = _post_no_redirects(fetcher, url, data)
+        location = {k.lower(): v for k, v in resp.headers.items()}.get("location")
+        if resp.status in (301, 302, 303) and location:
+            nxt = urljoin(url, location)
+            if self._credential_destination_ok(nxt, login_page_url):
+                return fetcher.get(nxt)
+        return resp                          # 307/308 never followed: judged as is
+
+    def _basic_login(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
+                     cred) -> SessionState:
+        token = base64.b64encode(f"{cred.username}:{cred.password}".encode()).decode()
+        state = SessionState(host=host, identity=identity, kind="basic", cookies={},
+                             headers={"Authorization": f"Basic {token}"}, token_exp=None,
+                             login_url=base_url, logout_url=urljoin(base_url, "logout"))
+        if not self._verify_authenticated(fetcher, base_url, state):
+            raise SessionAuthError(
+                f"HTTP Basic login for {identity}@{host} was rejected (credentials "
+                f"wrong: the base URL still challenges)")
+        state.valid = True
+        self._persist(state)
+        if self._log:
+            self._log.info("authenticated", extra=state.redacted())
+        return state
 
     def _verify_authenticated(self, fetcher: Fetcher, base_url: str,
                               state: SessionState) -> bool:
@@ -290,6 +366,20 @@ class SessionManager:
         if probe.status in (401, 403):
             return False
         return not detect.is_login_page(probe.text)
+
+
+def _post_no_redirects(fetcher, url: str, data: dict) -> FetchResponse:
+    """``fetcher.post`` with redirects off. A fetcher without the keyword (an old test
+    double, which never follows redirects anyway) is called without it."""
+    import inspect
+    try:
+        params = inspect.signature(fetcher.post).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "allow_redirects" in params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return fetcher.post(url, data=data, allow_redirects=False)
+    return fetcher.post(url, data=data)
 
 
 def _base_url(url: str) -> str:

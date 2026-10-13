@@ -137,3 +137,20 @@ def test_encrypted_file_backend_requires_passphrase(tmp_path):
     from fuzzlab.core.credentials import _encrypted_file_backend
     with pytest.raises(CredentialError):
         _encrypted_file_backend(str(tmp_path / "k.cfg"), {})
+
+
+def test_the_encrypted_keyring_file_is_private_from_creation(tmp_path, monkeypatch):
+    """PA-0080 sweep (BUG-0079): written 0600 from the first byte, never chmodded after
+    (os.chmod is disabled here; umask 0 would otherwise leave it world-readable)."""
+    import os
+    import stat
+    _crypto_or_skip()
+    monkeypatch.setattr(os, "chmod", lambda *a, **k: None)
+    old = os.umask(0)
+    try:
+        path = tmp_path / "keys" / "keyring.cfg"
+        CredentialStore(backend=_enc_backend(path)).set("h", "user", "u", "pw")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700

@@ -938,7 +938,11 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         b = await request.json()
         if not b.get("host"):
             return JSONResponse({"error": "host required"}, status_code=400)
-        proxy.scope_add(b["host"], b.get("path_regex") or None, bool(b.get("exclude")))
+        try:                                   # a bad rule is a 400 (BUG-0085)
+            proxy.scope_add(b["host"], b.get("path_regex") or None,
+                            bool(b.get("exclude")))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         return {"scope": proxy.scope_view()}
 
     @app.delete("/api/proxy/scope/{index}")
@@ -1053,17 +1057,15 @@ def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
     When ``proxy`` is given it runs in this same uvicorn event loop (so live
     interception's futures work); its own loopback listener is separate from the panel's.
     """
-    import ipaddress
-
     import uvicorn
+
+    from fuzzlab.core.net import require_loopback
 
     cfg = cfg or load_config()
     host = cfg.get("web_host", "127.0.0.1")
-    if not ipaddress.ip_address(host).is_loopback:
-        raise ValueError(f"refusing to bind web panel to non-loopback host {host!r}")
-    if proxy is not None and not ipaddress.ip_address(proxy.config.host).is_loopback:
-        raise ValueError(
-            f"refusing to bind proxy to non-loopback host {proxy.config.host!r}")
+    require_loopback(host, "web panel")                    # the one gate (BUG-0080)
+    if proxy is not None:
+        require_loopback(proxy.config.host, "proxy")
     uvicorn.run(create_app(cfg, pipeline, proxy), host=host,
                 port=int(cfg.get("web_port", 8787)))
 

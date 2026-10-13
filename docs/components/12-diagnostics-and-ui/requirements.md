@@ -199,7 +199,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   split + nonconformity histogram, the ECOD anomaly histogram, committee-disagreement
   histogram + a top-N query queue, bandit Beta posteriors (overlaid density + a
   forest/interval table; *CC-UI-0048:* pulls are the scheduler's recorded `cost_n`,
-  never `α + β − 2`), and a mutation killed/survived table. `GET /api/ml/data`
+  never `α + β − 2`; *CC-UI-0049:* backoff parent contexts are labelled "(pooled)",
+  with mean cost "n/a (pooled)"), and a mutation killed/survived table. `GET /api/ml/data`
   (`fuzzlab/web/mlview.py`) is the sole data source — read-only over the store,
   optionally filtered by `run_id`; degrades to a documented "not available" reason per
   panel (never an error) on an empty or partially-populated store.

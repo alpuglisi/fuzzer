@@ -22,6 +22,63 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0057 — Structural reflected-XSS confirmation (BUG-0083); in-band OOB proof (BUG-0089); greybox destructive send gate (BUG-0082) (2026-10-13)
+- Change:
+  - **XSS (BUG-0083), in `oracle/context.py`.**
+    - `locate_reflection` types where a marker lands (script, attribute or text), and
+      `xss_breakouts` offers at most 3 structural tries:
+      - script: a JS breakout closing the lexer state;
+      - attribute: js-url, scheme position, then attribute injection with the raw-text
+        quote;
+      - text: an element, or `</inert>` plus an element.
+    - Each try is judged by `js_executes`, `attribute_injected` or `element_injected`.
+    - The JS lexer fails closed (`UNSURE`).
+    - `ReflectedXssStrategy` uses these and never reads `candidate.sink_context` (an
+      AST guard).
+    - `pipeline._candidate_of` documents the deliberate omission (item 11).
+    - The substring helpers `is_unescaped` / `breakout_for` are removed.
+  - **OOB proof (BUG-0089, found by the PA-0084 sweep).** `OobListener.proof(token)` is
+    an HMAC under a per-listener secret; the callback serves it, and the in-band
+    SSRF / XXE strategies require it.
+  - **Greybox (BUG-0082).** `run_greybox` refuses destructive probes (base and
+    mutation variants) before sending, counts `destructive_refused`, and the CLI prints
+    it.
+- Impact (other components / project):
+  - XSS confirmation may take up to 4 requests per candidate (it was 2). The auto
+    goldens are unchanged, because the lab's reflected-XSS cases are html-body shapes.
+  - Labs that echo the fetched body still confirm SSRF / XXE in-band (the live
+    category-3 / category-4 multitarget runs pass).
+- Risk: medium. These are oracle verdicts. The four lab sink templates are tested
+  vulnerable and secure, and the existing oracle, greybox and pipeline suites pass
+  (351).
+- Deliverables:
+  - [x] structural XSS; the item-11 guard — done
+  - [x] OOB HMAC proof — done
+  - [x] greybox send gate — done
+  - [x] tests: `test_oracle_xss_structural`, `test_oracle_oob` additions,
+        `test_destructive_send_gate` — done
+  - [x] FR-FUZZ-39 added; FR-FUZZ-8 / FR-FUZZ-10 amended — done
+- Implementation divergence:
+  - The draft named "FR-FUZZ-15 amended", but FR-FUZZ-15 is SpEL. The XSS rule is a new
+    **FR-FUZZ-39**.
+  - BUG-0089 was not in the draft: it was found by this batch's PA-0084 sweep and
+    fixed here, being the same root-cause class.
+  - Its review is this entry's mutation proof plus the agreed PA-0084.
+- **Effectiveness addendum for CC-FUZZ-0056 / CC-ML-0023 / CC-UI-0048 / CC-PLUG-0008 /
+  CC-CORE-0033 (review 6, committed 93270ae):**
+  - **Non-labgen suite** (134 files, real browser and lint required): **1547 passed, 13
+    skipped, 2 xfailed, 1 failed**. The failure was `test_multitarget_category4`'s live
+    boot, a connection reset under concurrent CPU load; it passes alone (2 passed).
+  - **Full suite** (all 289 files, labgen included, real browser and lint required):
+    **3365 passed, 66 skipped, 9 xfailed, 33 failed**. All 33 failures are the known
+    environmental labgen tests (`test_labgen_cli`, `test_labgen_fingerprint_gate`, the
+    `*_cli_check_passes_end_to_end` family): scipy, scikit-learn and gitleaks are absent
+    here. None involves a file this batch touched.
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-FUZZ-0056 — Bandit cost wrapper takes `content_type` (BUG-0071); crash-safe oracle statuses; one confirmation per key (BUG-0072); usage checks before any run row (BUG-0078) (2026-10-13)
 - Change:
   - **BUG-0071.**

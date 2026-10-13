@@ -56,6 +56,13 @@ def context_parents(context: str) -> list[str]:
     return [c for c in dict.fromkeys(out) if c != context]
 
 
+def is_pooled_context(context: str) -> bool:
+    """True for a backoff parent (a category, or the root ``""``): it pools the pulls of
+    its leaf contexts (``category:facet``, from `context_for`) and is never itself the
+    context a pull is made in (CC-SCHED-0006, BUG-0088)."""
+    return ":" not in context
+
+
 def arm_priors(strategies: Iterable) -> dict[str, tuple[float, float]]:
     """Per-arm priors for the oracle-mechanism bandit, from the mechanism cost model.
 

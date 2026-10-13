@@ -228,10 +228,15 @@ function renderBandit(d) {
     tbody.replaceChildren();
     for (const arm of d.arms) {
       const tr = document.createElement("tr");
-      for (const v of [arm.context, arm.arm, arm.mean.toFixed(3),
+      // backoff parents pool their leaves' pulls (BUG-0088)
+      const ctx = arm.pooled
+        ? (arm.context === "" ? "(all contexts, pooled)" : `${arm.context} (pooled)`)
+        : arm.context;
+      for (const v of [ctx, arm.arm, arm.mean.toFixed(3),
                        `${arm.ci_low.toFixed(3)}–${arm.ci_high.toFixed(3)}`,
                        arm.pulls == null ? "n/a (legacy)" : arm.pulls,
-                       arm.mean_cost == null ? "—" : arm.mean_cost.toFixed(3)]) {
+                       arm.pooled ? "n/a (pooled)"
+                         : arm.mean_cost == null ? "—" : arm.mean_cost.toFixed(3)]) {
         const td = document.createElement("td");
         td.textContent = String(v);
         tr.appendChild(td);

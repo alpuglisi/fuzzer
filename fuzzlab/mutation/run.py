@@ -57,13 +57,23 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
                  seed: int = 0, budget: int = 40,
                  allow_destructive: bool = False) -> dict:
     """Search for a bypass per base; record the preserving evaders. Returns a summary."""
-    flt = HttpFilter(sender, url, param, method=method, location=location)
-    summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "results": []}
+    flt = HttpFilter(sender, url, param, method=method, location=location,
+                     allow_destructive=allow_destructive)
+    summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "refused": 0,
+               "results": []}
     # B0 emitter (CC-MUT-0011, R-05): one buffered `metric_series` writer for the whole
     # run, shared across each base's MutationSearch so reward/novelty land under a single
     # source="mutation" series per run_id. Purely observational; flushed on exit.
     with MetricLogger(store, run_id, source="mutation") as metric_logger:
         for base in bases:
+            if flt.refuses(base):
+                # a destructive base is never sent, nor any variant of it: an encoded
+                # variant can slip past the signature, so the base decides (BUG-0082)
+                summary["bases"] += 1
+                summary["refused"] += 1
+                summary["results"].append({"base": base, "refused": "destructive "
+                                           "payload; pass --allow-destructive (lab-only)"})
+                continue
             base_blocked = flt.caught(base)
             search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget,
                                     metric_logger=metric_logger)
@@ -80,6 +90,7 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
             summary["blocked"] += 1 if base_blocked else 0
             summary["bypasses"] += 1 if bypass else 0
             summary["recorded"] += 1 if recorded is not None else 0
+            summary["refused"] += res.refused
             summary["results"].append({
                 "base": base,
                 "base_blocked": base_blocked,
@@ -89,5 +100,6 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
                 "semantics_ok": res.semantics_ok,
                 "novel_lines": res.novel_lines,
                 "recorded_id": recorded,
+                "refused_variants": res.refused,
             })
     return summary

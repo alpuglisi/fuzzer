@@ -3,6 +3,31 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0049 — Proxy API rule validation; one loopback gate; IPv6 repeater seeding; pooled bandit rows (BUG-0080, BUG-0085, BUG-0086, BUG-0088) (2026-10-13)
+- Change:
+  - **Rule validation (BUG-0085).** `POST /api/proxy/scope` answers **400** on an
+    invalid rule, as match/replace already did.
+  - **Loopback (BUG-0080).** `app.serve` and `ProxyController.build` use
+    `core.net.require_loopback`.
+  - **IPv6 seeding (BUG-0086).** `proxycontrol.create_from_flow` splits the flow's
+    host with `split_authority`.
+  - **Pooled bandit rows (BUG-0088).** `mlview.bandit_panel` and
+    `diagnostics.bandit_arms` flag `pooled` contexts. `ml.js` and `diagnostics.js`
+    label them "(pooled)" / "(all contexts, pooled)", and a pooled mean cost shows
+    "n/a (pooled)".
+- Impact (other components / project): reads CORE, PROXY and SCHED changes. JSON fields
+  are added (`pooled`); none are removed.
+- Risk: low.
+- Deliverables:
+  - [x] API 400s; gate; IPv6 seeding; pooled labels — done
+  - [x] tests in `test_proxy_rules_and_scope`, `test_loopback_listeners` and
+        `test_scheduler_backoff`; the web suites with the real browser required — done
+  - [x] FR-UI-11 amended — done
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-UI-0048 — Ranker panel baseline from the trainer's function (BUG-0073); bandit pulls from `cost_n` (BUG-0077); pending oracle status on the run page (BUG-0071) (2026-10-13)
 - Change:
   - **Ranker panel (BUG-0073).** `mlview.ranker_panel` computes nDCG@k / precision@k and

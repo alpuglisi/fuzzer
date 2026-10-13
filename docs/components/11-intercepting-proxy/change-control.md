@@ -3,6 +3,64 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0019 — CA leaf hardening (BUG-0079); loopback-only bind (BUG-0080); persisted-copy redaction (BUG-0084); rule validation and per-connection containment (BUG-0085); one scope decision and IPv6 authorities (BUG-0086) (2026-10-13)
+- Change:
+  - **CA (BUG-0079).**
+    - `ca.leaf_host` validates a CONNECT host: an IP literal, or an IDNA, lower-cased
+      hostname of `[a-z0-9_-]` labels, at most 253 characters.
+    - IPv6 leaf files are named `ip6-<hex>`.
+    - A path backstop keeps every leaf directly in `leaves/`.
+    - Keys go through `core.secretfile.write_secret` (0600 from creation,
+      `O_NOFOLLOW`), and the directories are `0700`.
+  - **Loopback (BUG-0080).** The proxy CLI exits 2 on a non-loopback `--host`, and
+    `AsyncProxyServer.start` refuses one too (`core.net.require_loopback`).
+  - **Redaction (BUG-0084).**
+    - `proxy.redact` covers sensitively named headers; query parameters of the request
+      target and of `Location` / `Content-Location` / `Refresh`; and form / JSON / multipart
+      request **and** response bodies.
+    - Matching is by name token (`core.redaction`).
+    - JSON is re-serialised only on a hit, and Content-Length is recomputed when it was
+      consistent.
+    - Chunked or compressed bodies are stored as received (a stated residual).
+    - `HistoryWriter` also redacts `flow.url` and the separately stored bodies.
+  - **Rules and containment (BUG-0085).** `MatchReplaceRule` and `ScopeRule` validate
+    at creation (latin-1 encodability, regex compilation). `_on_client` contains any
+    exception: `502` if nothing was written yet, else close; the CONNECT path never
+    writes a 502 into the tunnel. Errors are kept on `AsyncProxyServer.errors`.
+  - **Scope and IPv6 (BUG-0086).**
+    - New `proxy/authority.py`: `split_authority` / `join_authority`.
+    - The engine decides scope once, on the authority.
+    - `_host_matches` parses both the pattern and the host.
+    - Used by `parse_connect`, `target_from_request`, `_authority` and the CA.
+- Impact (other components / project):
+  - **CORE** (CC-CORE-0034): `core.net`, `core.redaction`, `core.secretfile`.
+  - **UI** (CC-UI-0049): API 400s, the in-process proxy gate, `create_from_flow`
+    IPv6.
+  - **Trade-off, stated:** Repeater tabs seeded from history carry placeholders.
+    Replaying JWT / session / CSRF flows needs a fresh capture or
+    `redact_secrets=False`.
+  - Underscore hostnames are allowed; anything outside the grammar is refused.
+- Risk: medium. These are safety controls. Each one is tested against hostile input,
+  and the benign paths (byte-identical messages, valid hosts, valid rules) are tested
+  too.
+- Deliverables:
+  - [x] CA hardening — done
+  - [x] loopback gate — done
+  - [x] redaction — done
+  - [x] rule validation and containment — done
+  - [x] authority parser and single scope decision — done
+  - [x] tests: `test_proxy_ca_hardening`, `test_loopback_listeners`,
+        `test_proxy_redaction`, `test_proxy_rules_and_scope` — done
+  - [x] FR-PROXY-10 / FR-PROXY-11 added; FR-PROXY-5 amended — done
+- Implementation divergence:
+  - The draft's "refuse underscore" is superseded by A's nit: `_` is allowed.
+  - WebSocket and h2 are not in the server's connection loop, so their containment is
+    noted in BUG-0085's sweep rather than coded.
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-PROXY-0018 — Incidental: Proxy workbench UI rebuild on a shared message editor (lane U3) (2026-09-22)
 - Change: lane U3 rebuilt the web control panel's Proxy section UI on a shared
   `<message-editor>` component and resizable panes (see `CC-UI-0030` for the

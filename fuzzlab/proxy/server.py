@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from fuzzlab.proxy.authority import join_authority, split_authority
 from fuzzlab.proxy.history import FlowRecord, HistoryWriter
 from fuzzlab.proxy.intercept import Interceptor
 from fuzzlab.proxy.matchreplace import MatchReplaceEngine
@@ -47,9 +48,8 @@ def parse_connect(raw: bytes) -> tuple[str, int] | None:
     line = RawMessage.from_bytes(raw).start_line.split(b" ")
     if len(line) < 2 or line[0].upper() != b"CONNECT":
         return None
-    authority = line[1].decode("latin-1", "replace")
-    host, _, port = authority.partition(":")
-    return host, int(port) if port.isdigit() else 443
+    host, port = split_authority(line[1].decode("latin-1", "replace"), 443)
+    return host, port
 
 
 def target_from_request(raw: bytes, use_tls: bool = False,
@@ -75,8 +75,7 @@ def target_from_request(raw: bytes, use_tls: bool = False,
         return Target(host, port, use_tls, msg.with_request_line(line).raw)
     # origin-form: host from the Host header
     host_hdr = (msg.get("Host") or b"").decode("latin-1", "replace")
-    host, _, port = host_hdr.partition(":")
-    port_n = int(port) if port.isdigit() else (default_port or (443 if use_tls else 80))
+    host, port_n = split_authority(host_hdr, default_port or (443 if use_tls else 80))
     return Target(host, port_n, use_tls, raw)
 
 
@@ -100,8 +99,10 @@ class ProxyEngine:
         """
         msg = RawMessage.from_bytes(raw)
         path = msg.target.decode("latin-1", "replace")
-        if not self.scope.in_scope(_authority(host, port), path) \
-                and not self.scope.in_scope(host, path):
+        # one decision, on the most specific key (BUG-0086): a port-less rule already
+        # matches any port, and a second, bare-host check let a port-specific exclude
+        # be overridden by a host-wide include
+        if not self.scope.in_scope(_authority(host, port), path):
             return self.sender(host, port, use_tls, raw)     # transparent bypass
 
         if self.matchreplace is not None:
@@ -163,8 +164,11 @@ class AsyncProxyServer:
         self.ca = ca
         self._server: asyncio.AbstractServer | None = None
         self._conns: set[asyncio.Task] = set()
+        self.errors: list[str] = []               # contained per-connection failures
 
     async def start(self) -> "AsyncProxyServer":
+        from fuzzlab.core.net import require_loopback
+        require_loopback(self.host, "the proxy")      # defence in depth (BUG-0080)
         self._server = await asyncio.start_server(self._on_client, self.host, self.port)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
@@ -188,6 +192,7 @@ class AsyncProxyServer:
         task = asyncio.current_task()
         if task is not None:
             self._conns.add(task)
+        written = False
         try:
             raw = await _read_http_message(reader)
             if not raw:
@@ -200,16 +205,29 @@ class AsyncProxyServer:
                                  b"Content-Length: 0\r\n\r\n")
                     await writer.drain()
                     return
+                written = True        # it answers 200 first: never a 502 into the tunnel
                 await self._handle_connect(reader, writer, connect)
                 return
             tgt = target_from_request(raw)
             resp = await self.engine.handle_request(tgt.request, tgt.host, tgt.port,
                                                     tgt.use_tls)
             if resp is not None:
+                written = True
                 writer.write(resp)
                 await writer.drain()
         except asyncio.CancelledError:
             pass                                     # shutting down; drop this connection
+        except Exception as exc:                     # noqa: BLE001 - per connection
+            # one connection's failure never takes the proxy down (BUG-0085): 502 when
+            # nothing was sent yet, otherwise just close
+            self.errors.append(repr(exc))
+            if not written:
+                try:
+                    writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                                 b"Connection: close\r\n\r\n")
+                    await writer.drain()
+                except (OSError, RuntimeError):
+                    pass
         finally:
             try:
                 writer.close()
@@ -282,4 +300,4 @@ async def _read_http_message(reader: asyncio.StreamReader) -> bytes:
 
 
 def _authority(host: str, port: int) -> str:
-    return f"{host}:{port}"
+    return join_authority(host, port)

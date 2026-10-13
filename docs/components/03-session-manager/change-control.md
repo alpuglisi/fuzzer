@@ -3,6 +3,37 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0011 — Credentials only to authorised origins, never on redirects; HTTP Basic at discovery (BUG-0081) (2026-10-13)
+- Change:
+  - **`_credential_destination_ok`.** Allowed destinations are the login page's
+    canonical origin, that host upgraded to https, an in-scope host (by host or
+    `host:port`), or an origin in the new `SessionManager(auth_origins=[...])`.
+    Otherwise `SessionAuthError` names the option, and no POST is made.
+  - **No redirect following on the credential POST.** `Fetcher.post(...,
+    allow_redirects=False)` is a new keyword, which old doubles without it are called
+    without. 301/302/303 are followed by hand as a GET, only to an allowed origin.
+    307/308 are never followed.
+  - **HTTP Basic.** `_discover_login_form` reports a `401 + WWW-Authenticate: Basic`
+    on the base URL, and `_basic_login` verifies the `Authorization` header against
+    that base URL only. A POST answering 401 Basic switches to it too.
+- Impact (other components / project): CLI callers (`auto`, `greybox`) pass no
+  `auth_origins`. In-scope hosts already cover the lab's own services, and a CLI flag is
+  a stated follow-up.
+- Risk: low-medium. Legitimate same-origin, relative, https-upgrade and in-scope
+  cross-port logins are all tested as allowed.
+- Deliverables:
+  - [x] origin rule; manual redirects; Basic at discovery — done
+  - [x] `tests/test_session_credential_destination.py` — done
+  - [x] FR-SESS-12 added — done
+- Implementation divergence: the draft's "never a downgrade" is moot. The authenticated
+  host is always in scope (`ensure` requires it), so a same-host http action is allowed
+  by the in-scope rule. The vacuous downgrade test was replaced by an
+  out-of-scope-host test, and this is stated in BUG-0081.
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-SESS-0010 — Lint: unused `dataclasses.field` import in `session/manager.py` (2026-10-13)
 - Change: removed the unused import (pyflakes). No behaviour change.
 - Impact: none.

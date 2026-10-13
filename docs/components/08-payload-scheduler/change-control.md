@@ -3,6 +3,29 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0006 — Hierarchical backoff pools pulls into parent contexts (BUG-0088) (2026-10-13)
+- Change:
+  - **Pooling.** With `backoff`, `ThompsonBandit.update` also updates each parent
+    context's posterior (`context_parents`: the category, then the root `""`), and
+    counts the pull in the parent's `cost_n` with no cost.
+  - **`context.is_pooled_context`** marks parents.
+  - **Unchanged:** cost ordering and the regret metric read leaves only, and backoff
+    off creates no parents.
+- Impact (other components / project):
+  - The ML tab and diagnostics label pooled rows (CC-UI-0049).
+  - **Existing stores:** parents start empty and accumulate from new pulls; they are
+    not rebuilt from leaves (stated).
+- Risk: low. A cold context's seeded prior stays bounded by `backoff_strength`
+  (tested).
+- Deliverables:
+  - [x] pooling; `is_pooled_context` — done
+  - [x] `tests/test_scheduler_backoff.py` — done
+  - [x] FR-SCHED-10 added — done
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-SCHED-0005 — Per-pull metric emission: regret/cumulative + posterior/arm_<N>/mean (R-05) (2026-09-22)
 - Change: `ThompsonBandit` (`fuzzlab/scheduler/bandit.py`) gained optional per-pull
   metric emission into the shared `metric_series` sink added by B0/CC-CORE-0018.

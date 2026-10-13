@@ -242,7 +242,10 @@ async function loadSnapshotPanels() {
     createDataTable(banditEl, {
       caption: "Bandit arm posteriors",
       columns: [
-        { key: "context", label: "context" },
+        // backoff parents pool their leaves' pulls (BUG-0088)
+        { key: "context", label: "context",
+          render: (row) => (!row.pooled ? row.context
+            : row.context === "" ? "(all contexts, pooled)" : `${row.context} (pooled)`) },
         { key: "arm", label: "arm" },
         { key: "alpha", label: "α" },
         { key: "beta", label: "β" },

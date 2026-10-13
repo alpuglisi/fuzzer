@@ -61,6 +61,15 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   per-host config. On expiry of an interactive login, prompt for re-capture rather
   than attempting an automated re-login. Depends on the proxy (component #11).
 
+- **FR-SESS-12 (credential destinations, CC-SESS-0011, BUG-0081)**
+  - **Where credentials may go.** They are POSTed only to the login page's own
+    canonical origin, that host upgraded to https, an in-scope host, or an origin in
+    `SessionManager(auth_origins=[...])`. Anything else fails loudly, naming the
+    option.
+  - **No automatic redirects.** The credential POST never follows them. 301/302/303
+    are followed by hand as a GET, only to an allowed origin; 307/308 never.
+  - **HTTP Basic.** A base URL answering `401` + `WWW-Authenticate: Basic` (no form)
+    authenticates with the Basic header, sent only to that in-scope base URL.
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth.
 - **NFR-SESS-zero-request** Prefer validity signals that cost no request (e.g.

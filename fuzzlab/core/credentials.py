@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from fuzzlab.core.secretfile import write_secret
+
 SERVICE = "fuzzlab"
 
 
@@ -214,10 +216,10 @@ class _CryptographyFileBackend:
         if salt is None:
             salt = os.urandom(16)
         token = self._fernet(salt).encrypt(json.dumps(data).encode("utf-8"))
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         tmp = self._path.with_name(self._path.name + ".tmp")
-        tmp.write_bytes(self._MAGIC + salt + token)
-        os.chmod(tmp, 0o600)               # secrets: owner-only
+        # owner-only from creation, never chmodded after the write (PA-0080 sweep)
+        write_secret(tmp, self._MAGIC + salt + token)
         os.replace(tmp, self._path)
 
     def get_password(self, service: str, account: str) -> str | None:

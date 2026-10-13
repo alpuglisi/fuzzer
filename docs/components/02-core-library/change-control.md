@@ -3,6 +3,47 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0034 — Shared safety helpers (`core.net`, `core.redaction`, `core.secretfile`); atomic, race-safe migrations (BUG-0080, BUG-0084, BUG-0079 sweep, BUG-0087) (2026-10-13)
+- Change:
+  - **`core/net.py` (BUG-0080):** `is_loopback_host` (`localhost`, 127/8, `::1`,
+    IPv4-mapped) and `require_loopback`. This is the one listener gate (FR-CORE-25).
+  - **`core/redaction.py` (BUG-0084):** `is_sensitive_name` by name token.
+    `core.obs` uses it. **Behaviour change:** log extras `author` and `tokenizer` are
+    no longer redacted; `key`, `api_key` and `session_id` now are.
+  - **`core/secretfile.py` (BUG-0079):** `write_secret`, which creates the file 0600
+    with `O_NOFOLLOW` and `fchmod`s it before writing. The encrypted keyring backend
+    (`core/credentials.py`) uses it, a sweep fix (it used to write, then chmod), and
+    creates its directory `0700`.
+  - **Migrations (BUG-0087).** `migrate` applies each migration in an explicit
+    `BEGIN IMMEDIATE` transaction:
+    - the version is re-read inside the lock;
+    - statements run one by one (`split_statements`, via SQLite's
+      `complete_statement`);
+    - `COMMIT`, or `ROLLBACK` and re-raise;
+    - `isolation_level` is restored in a `finally`.
+
+    `open_store` sets `busy_timeout` first and retries the WAL switch (`_set_wal`,
+    10 s), which bypasses the busy handler (FR-CORE-24).
+- Impact (other components / project):
+  - PROXY, SESS, the web app and the oracle's OOB listener use the helpers.
+  - No schema change: the migrations build the identical schema, as a test asserts.
+- Risk: low-medium. The migration runner is on every store open. A
+  schema-equals-reference test, a failure-injection test, and a 4-process race test
+  cover it.
+- Deliverables:
+  - [x] `core.net`, `core.redaction`, `core.secretfile` — done
+  - [x] atomic migrations and the WAL retry — done
+  - [x] tests: `test_migrations_atomic`, `test_loopback_listeners`, the keyring mode in
+        `test_credentials`, obs in `test_proxy_redaction` — done
+  - [x] FR-CORE-24 / FR-CORE-25 added — done
+- Implementation divergence: the WAL-switch retry was added after the race test still
+  failed on "database is locked" (reviewer B had predicted it), and `core.secretfile`
+  was split out when the sweep found the keyring backend.
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-CORE-0033 — `pending` oracle status (BUG-0071); `Store.mark_aborted` (BUG-0078) (2026-10-13)
 - Change:
   - `core.oracle_status.PENDING = "pending"`, and `UNLABELLED` now includes it. The

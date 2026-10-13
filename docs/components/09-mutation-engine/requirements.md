@@ -49,7 +49,8 @@ feedback and the scheduler.
   rejects transformations that change meaning. This includes fail-closed handling
   of transforms unprovable from the compared fragment alone (see FR-MUT-7).
 - **NFR-MUT-safe** Never emit destructive payloads through the default-on path;
-  the destructive gate still applies to generated payloads.
+  the destructive gate still applies to generated payloads. *(CC-MUT-0012, BUG-0082:)*
+  the gate sits at the **send** (FR-MUT-9), not only at the record.
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
 - **NFR-MUT-offline** The LLM expansion path is offline and gated; nothing is sent
   to an external service without explicit opt-in.
@@ -67,6 +68,15 @@ feedback and the scheduler.
   every base payload's search under the run's `run_id`. Purely observational —
   never read back by the search/selection logic itself (CC-MUT-0011).
 
+- **FR-MUT-9 (send-time destructive gate, CC-MUT-0012, BUG-0082)** With
+  `allow_destructive` off, no destructive payload leaves the process.
+  - **The check.** `catalog.refuse_destructive` refuses a payload whose raw text or
+    either normalised form (URL / entity decoding, comments, `+`, NUL, whitespace,
+    case) matches the signature.
+  - **The live filter** (`HttpFilter`) raises `DestructiveRefused` at its send, and the
+    search skips refused variants (counted as `refused`, never as a WAF block).
+  - **`run_mutation`** skips a destructive base entirely, and `run_greybox` checks
+    every probe (FR-FUZZ-8). The CLIs print the refused counts.
 ## 5. Interfaces and data contracts
 Reads catalog payloads and canary/filter observations; reads coverage signals and
 scheduler operator choices; writes new payload candidates back to the

@@ -589,6 +589,7 @@ def _beta_ci(xs: list[float], dens: list[float], lo_q: float = 0.05,
 
 def bandit_panel(store) -> dict[str, Any]:
     """Overlaid Beta posterior density per arm + a mean/CI/pulls/cost forest table."""
+    from fuzzlab.scheduler.context import is_pooled_context
     rows = store.conn.execute(
         "SELECT context, arm, alpha, beta, cost_sum, cost_n FROM bandit_posteriors "
         "ORDER BY context, arm").fetchall()
@@ -605,9 +606,11 @@ def bandit_panel(store) -> dict[str, Any]:
         # DEFAULT 0; a NULL could only be a hand-made row: shown "n/a", never 0.
         pulls = None if r["cost_n"] is None else int(r["cost_n"])
         cost_n = r["cost_n"] or 0
-        mean_cost = (r["cost_sum"] / cost_n) if cost_n else None
+        # a pooled (backoff parent) row counts its leaves' pulls but no cost (BUG-0088)
+        pooled = is_pooled_context(r["context"])
+        mean_cost = None if pooled or not cost_n else r["cost_sum"] / cost_n
         arms.append({
-            "context": r["context"], "arm": r["arm"],
+            "context": r["context"], "arm": r["arm"], "pooled": pooled,
             "alpha": round(a, 4), "beta": round(b, 4),
             "mean": round(a / (a + b), 4) if (a + b) else 0.0,
             "ci_low": round(lo, 4), "ci_high": round(hi, 4),

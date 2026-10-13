@@ -199,7 +199,8 @@ def candidate_score_histogram(store, run_id: int, bins: int = 20) -> dict[str, A
 
 def bandit_arms(store) -> list[dict[str, Any]]:
     """Current Beta posteriors per (context, arm), plus the posterior mean, for
-    the "bandit arm state" snapshot panel."""
+    the "bandit arm state" snapshot panel. Backoff parents are flagged ``pooled``."""
+    from fuzzlab.scheduler.context import is_pooled_context
     rows = store.conn.execute(
         "SELECT context, arm, alpha, beta, updated_at FROM bandit_posteriors "
         "ORDER BY context, arm"
@@ -209,7 +210,9 @@ def bandit_arms(store) -> list[dict[str, Any]]:
         a, b = r["alpha"], r["beta"]
         mean = a / (a + b) if (a + b) else None
         out.append({"context": r["context"], "arm": r["arm"], "alpha": a, "beta": b,
-                    "mean": mean, "updated_at": r["updated_at"]})
+                    "mean": mean, "updated_at": r["updated_at"],
+                    # a backoff parent pooling its leaves' pulls (BUG-0088)
+                    "pooled": is_pooled_context(r["context"])})
     return out
 
 

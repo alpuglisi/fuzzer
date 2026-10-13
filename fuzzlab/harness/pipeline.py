@@ -61,6 +61,10 @@ def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[Inj
 
 
 def _candidate_of(ev: dict) -> Candidate:
+    # `sink_context` is omitted deliberately (BUG-0083, item 11): the auditor's value is a
+    # coarse ground-truth label (`html`, `sql`, …), no confirmation strategy reads it
+    # (an AST guard enforces that), and leaving it out keeps one confirmation per
+    # `_confirmation_key` sound (BUG-0072). The bandit context facet is the location.
     return Candidate(url=ev["url"], param=ev["param"], method=ev.get("method", "GET"),
                      location=ev.get("location", "query"), category=ev.get("category", ""),
                      store_url=ev.get("store_url"), store_param=ev.get("store_param"),

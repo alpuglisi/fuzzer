@@ -27,7 +27,15 @@ that shares the store, never a mandatory pipeline (D5).
 - **FR-PROXY-4** Repeater with DB-persisted tabs; edit and replay, including via
   the raw path.
 - **FR-PROXY-5** Match-and-replace rules and a scope engine (only in-scope hosts
-  are intercepted/recorded).
+  are intercepted/recorded). *(Amended CC-PROXY-0019, BUG-0085 / BUG-0086:)*
+  - **Rules are validated when created.** A match / replace that is not latin-1, or a
+    regex or scope path regex that doesn't compile, raises `ValueError` (the API
+    answers 400).
+  - **One connection's failure is contained:** `502` when nothing was written yet,
+    otherwise close; the server keeps serving.
+  - **Scope is decided once, on the authority.** A port-less rule matches any port,
+    and a port-specific exclude always wins.
+  - **Authorities are parsed by `proxy.authority`** (IPv6 `[v6]:port` included).
 - **FR-PROXY-6** Interactive interception modeled as an awaited future (hold,
   edit, release).
 - **FR-PROXY-7** Attach the session manager as an addon so hand-driven browser
@@ -42,6 +50,26 @@ that shares the store, never a mandatory pipeline (D5).
   a per-host config file. Captured secrets are redacted on write and never
   persisted in cleartext.
 
+- **FR-PROXY-10 (CA leaf hygiene, CC-PROXY-0019, BUG-0079)** A leaf is minted only
+  for a valid host: an IP literal, or an IDNA, lower-cased `[a-z0-9_-]` label
+  hostname, at most 253 characters. The leaf file lives directly in `<ca_dir>/leaves/`
+  (IPv6 as `ip6-<hex>`, with a resolved-path backstop). Every key (leaf and CA) is
+  created 0600 with `O_NOFOLLOW` (`core.secretfile.write_secret`), and the CA
+  directories are 0700. `fuzzlab proxy` and `AsyncProxyServer` bind loopback only
+  (`core.net.require_loopback`, BUG-0080).
+- **FR-PROXY-11 (persisted-copy redaction, CC-PROXY-0019, BUG-0084)** Before history is
+  written, these are redacted:
+  - sensitively named headers;
+  - query parameters of the request target and of `Location` / `Content-Location` /
+    `Refresh`;
+  - form, JSON (any depth) and multipart (non-file) request and response bodies;
+  - `flow.url` and the separately stored bodies.
+
+  Sensitivity is by name token (`core.redaction.is_sensitive_name`). Benign messages
+  stay byte-identical, and Content-Length follows a changed body. Chunked or compressed
+  bodies are stored as received (a residual). Trade-off: a Repeater tab seeded from
+  history carries placeholders, and `HistoryWriter(redact_secrets=False)` is the
+  lab-local opt-out.
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
 - **NFR-PROXY-safe** Scope-enforced and lab-only; the local CA never leaves the

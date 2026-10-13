@@ -81,7 +81,13 @@ def _print_summary(args, summary, run_id) -> None:
     print(f"\nmutate-run ({args.vuln_class}; {args.url} [{args.param}]; run_id={run_id})")
     print(f"  bases: {summary['bases']}   blocked by WAF: {summary['blocked']}   "
           f"bypasses found: {summary['bypasses']}   recorded: {summary['recorded']}")
+    if summary.get("refused"):
+        print(f"  destructive payloads refused (never sent): {summary['refused']}"
+              f"  — pass --allow-destructive to send them (lab-only)")
     for r in summary["results"]:
+        if r.get("refused"):
+            print(f"    [REFUSED] base={r['base']!r}: {r['refused']}")
+            continue
         tag = "BYPASS" if (r["evaded"] and r["semantics_ok"] and r["base_blocked"]) else "-"
         cov = f"  +{r['novel_lines']} new line(s)" if r["novel_lines"] else ""
         print(f"    [{tag}] base={r['base']!r}")

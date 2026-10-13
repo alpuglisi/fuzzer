@@ -41,6 +41,14 @@ from oracle and grey-box reward.
   observational-only. `fuzzlab auto --bandit` attaches a logger and flushes it
   around the run (`auto_cli.py`).
 
+- **FR-SCHED-10 (backoff pooling, CC-SCHED-0006, BUG-0088)** With `backoff`, every
+  pull also updates the arm's posterior in each parent context (the category, then the
+  root `""`), so a cold sibling context is seeded from the pooled parent, capped by
+  `backoff_strength`.
+  - Parents count pulls (`cost_n`) but no cost; cost ordering and regret read leaves
+    only.
+  - The UI labels parents "(pooled)".
+  - Stores written before this change gain parents only from new pulls.
 ## 4. Non-functional requirements
 - **NFR-SCHED-reproducible** Given a fixed seed and posteriors, selection is
   reproducible.

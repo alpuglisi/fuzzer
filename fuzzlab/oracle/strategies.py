@@ -23,7 +23,7 @@ from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
 from fuzzlab.greybox.coverage import CoverageSource, app_lines
 from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
-from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
+from fuzzlab.oracle.context import locate_reflection, xss_breakouts
 from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import Candidate, Probe, Sender, Verdict
 
@@ -239,20 +239,26 @@ class ReflectedXssStrategy(ConfirmationStrategy):
     category = "xss"
 
     def confirm(self, candidate, sender):
+        """Type where a marker reflects, then try the break-outs that context allows
+        (at most 3) and confirm only on their **structural** effect in the parsed
+        response: an element outside any inert element, an injected attribute, or the
+        token in JavaScript code state (BUG-0083, FR-FUZZ-15). The context is always
+        observed: no strategy reads the auditor's coarse ``sink_context`` (``html``,
+        ``sql``, …), which keeps one confirmation per key sound (BUG-0072; guarded by
+        ``tests/test_oracle_xss_structural.py``)."""
         token = _token()
         marker = f"zqxm{token}"
         first = self._send(sender, candidate, marker)
-        context = candidate.sink_context or type_reflection(first.text, marker)
-        if context == "none":
+        ref = locate_reflection(first.text, marker)
+        if ref is None:
             return None
-        breakout = breakout_for(context, f"zqxb{token}")
-        if breakout is None:
-            return None
-        fragment, signature = breakout
-        second = self._send(sender, candidate, fragment)
-        if is_unescaped(second.text, signature):
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"context": context, "signature": signature})
+        probe_token = f"zqxb{token}"
+        for kind, fragment, check in xss_breakouts(ref, probe_token):
+            second = self._send(sender, candidate, fragment)
+            if check(second.text):
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"context": ref.context, "breakout": kind,
+                                "signature": fragment})
         return None
 
 
@@ -837,7 +843,9 @@ class SsrfInBandMarkerStrategy(ConfirmationStrategy):
         token = self._listener.register()
         canary = self._listener.callback_url(token)
         probe = self._send(sender, candidate, canary)
-        if token in (probe.text or ""):
+        # the fetched body's proof, never the token (which the URL itself carries, so a
+        # page reflecting the URL would confirm; BUG-0089)
+        if self._listener.proof(token) in (probe.text or ""):
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"canary": canary, "marker": token})
         return None
@@ -1074,7 +1082,7 @@ class XxeInBandMarkerStrategy(ConfirmationStrategy):
                                 _xxe_payload(canary, wrapper),
                                 method=candidate.method, location=candidate.location,
                                 content_type="application/xml")
-            if token in (probe.text or ""):
+            if self._listener.proof(token) in (probe.text or ""):     # BUG-0089
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"canary": canary, "marker": token, "wrapper": wrapper})
         return None

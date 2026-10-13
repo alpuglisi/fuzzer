@@ -290,3 +290,45 @@ def test_ssrf_strategies_registered_in_default_strategies_cheapest_first():
     assert SsrfInBandMarkerStrategy in kinds and SsrfOobStrategy in kinds
     # Cheapest-first, matching every other category's own stacking order.
     assert kinds.index(SsrfInBandMarkerStrategy) < kinds.index(SsrfOobStrategy)
+
+
+# --- BUG-0089: in-band confirmation needs the fetched proof, not the token --------
+
+class _UrlReflectingSender:
+    """Never fetches anything; echoes the submitted value in an error page — the token is
+    inside the callback URL, so the old in-band check confirmed this."""
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None):
+        return Probe(200, f"<p>could not fetch {value}</p>")
+
+
+def test_a_page_reflecting_the_callback_url_is_not_an_ssrf():
+    from fuzzlab.oracle.strategies import SsrfInBandMarkerStrategy, XxeInBandMarkerStrategy
+    listener = OobListener()
+    listener.start()
+    try:
+        assert SsrfInBandMarkerStrategy(listener).confirm(
+            _ssrf_cand(), _UrlReflectingSender()) is None
+        xxe = Candidate(url="http://h/import", param="body", method="POST",
+                        location="body", vuln_class="xxe", category="xxe")
+        assert XxeInBandMarkerStrategy(listener).confirm(xxe, _UrlReflectingSender()) is None
+        # a real fetch still confirms
+        assert SsrfInBandMarkerStrategy(listener).confirm(
+            _ssrf_cand(), _SsrfEchoingSender()) is not None
+    finally:
+        listener.stop()
+
+
+def test_the_callback_serves_a_proof_absent_from_its_url():
+    listener = OobListener()
+    listener.start()
+    try:
+        token = listener.register()
+        url = listener.callback_url(token)
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            body = resp.read().decode("ascii")
+        assert body == listener.proof(token) and body not in url and token not in body
+        assert OobListener().proof(token) != body             # keyed per listener
+    finally:
+        listener.stop()

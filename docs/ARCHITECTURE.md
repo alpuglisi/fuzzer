@@ -1146,6 +1146,15 @@ tracked in the requirements files, not here.
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
   normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
+- **Shared safety helpers** `[built]` (CC-CORE-0034, FR-CORE-25):
+  - `core/net.py`: the one loopback listener gate, enforced at every listener by an
+    AST guard test;
+  - `core/redaction.py`: the one secret-name predicate, by name token, for logs and
+    proxy history;
+  - `core/secretfile.py`: secret files are 0600 from creation.
+- **Migrations are atomic and race-safe** (CC-CORE-0034, FR-CORE-24): one
+  `BEGIN IMMEDIATE` per migration, the version re-checked under the lock,
+  statement-by-statement, with rollback on error.
 - **Credential store** `[built]`: keyring-abstracted, with an encrypted-file
   headless/CI fallback on `cryptography` Fernet (PBKDF2, 0600, atomic write; D12);
   secrets by reference only, never in the project store (`core/credentials.py`).
@@ -1251,6 +1260,8 @@ tracked in the requirements files, not here.
   (`scheduler/context.py`); hierarchical backoff and cost-normalized selection
   (reward per second, migration 5's `cost_sum`/`cost_n`); persisted posteriors
   (load/save); and a `UniformScheduler` control condition (`scheduler/uniform.py`).
+  With backoff on, pulls pool into parent contexts, so a cold sibling backs off to
+  them (CC-SCHED-0006, FR-SCHED-10).
   Ordered the oracle's applicable mechanisms in the confirm loop; wired as
   `fuzzlab auto --bandit`.
 - **Depends on (components):** `core/`, auditor (candidates), fuzzing harness and
@@ -1436,6 +1447,14 @@ tracked in the requirements files, not here.
   are the rest of Phase 9 (on-host).
 - **Scope + match-and-replace** `[built]`: a default-deny scope engine (`scope.py`,
   host + optional path regex) and ordered byte-level rewrites (`matchreplace.py`).
+  *(CC-PROXY-0019:)*
+  - scope is decided once, on the authority, parsed by `authority.py` (IPv6-safe);
+  - rules are validated when created;
+  - every connection contains its own failures (502);
+  - the proxy binds loopback only (`core.net`);
+  - CA leaves are minted only for a valid host, inside `leaves/`, with 0600 keys;
+  - history redacts URL query parameters and form / JSON / multipart bodies by name
+    token (FR-PROXY-10/11).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
   (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
   redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay

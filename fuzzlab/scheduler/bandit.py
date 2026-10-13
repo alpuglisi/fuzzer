@@ -133,6 +133,15 @@ class ThompsonBandit:
         c = self._cost.setdefault((context, arm), [0.0, 0.0])
         c[0] += max(0.0, float(cost))
         c[1] += 1.0
+        if self._backoff:
+            # Hierarchical pooling (T4.5, BUG-0088): each parent context learns from its
+            # leaves' pulls, so a cold sibling context has a parent posterior to back off
+            # to. Without this, `_seed` looked for parents nothing ever wrote. A parent
+            # counts the pull (`cost_n`, for the panel) but no cost: cost ordering reads
+            # leaves only.
+            for parent in context_parents(context):
+                self._posterior(parent, arm).update(reward)
+                self._cost.setdefault((parent, arm), [0.0, 0.0])[1] += 1.0
 
         if self._metrics is not None:
             self._metric_step += 1

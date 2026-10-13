@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import datetime
 import ipaddress
+import re
 from pathlib import Path
+
+from fuzzlab.core.secretfile import write_secret
 from typing import Callable
 
 
@@ -26,6 +29,42 @@ def _utcnow() -> datetime.datetime:
 
 # minter: host -> (cert_pem, key_pem)
 Minter = Callable[[str], "tuple[bytes, bytes]"]
+
+_LABEL = re.compile(r"^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$")
+
+
+def leaf_host(host: str) -> str:
+    """The validated, canonical host a leaf is minted for (BUG-0079, FR-PROXY-10).
+
+    ``host`` arrives from the network (a CONNECT authority), so it is a whitelist
+    grammar, never a filename fragment: an IP literal (IPv6 with or without brackets,
+    port stripped by `split_authority`), or a hostname of ``[a-z0-9_-]`` labels (``_``
+    allowed: Docker service names) separated by single dots, IDNA-encoded and
+    lower-cased, at most 253 characters. Anything else raises ``ValueError``."""
+    from fuzzlab.proxy.authority import split_authority
+    name, _port = split_authority(host or "")
+    try:
+        return str(ipaddress.ip_address(name))
+    except ValueError:
+        pass
+    try:
+        name = name.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError(f"not a valid leaf hostname: {host!r}") from exc
+    name = name.rstrip(".")
+    if not name or len(name) > 253 or not all(_LABEL.match(lb) for lb in name.split(".")):
+        raise ValueError(f"not a valid leaf hostname: {host!r}")
+    return name
+
+
+def _leaf_filename(host: str) -> str:
+    """A filename for a validated host: IPv6 as ``ip6-<hex>`` (no ':' in a filename,
+    and no collision with a hostname)."""
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    return f"ip6-{ip.packed.hex()}" if ip.version == 6 else host
 
 
 class LocalCA:
@@ -55,7 +94,7 @@ class LocalCA:
     # --- leaf cache (pure; testable offline) --------------------------------
     def leaf_cert(self, host: str) -> tuple[bytes, bytes]:
         """Return ``(cert_pem, key_pem)`` for ``host``, minting+caching on first use."""
-        host = host.split(":", 1)[0].lower()          # cache per hostname, not port
+        host = leaf_host(host)                         # cache per hostname, not port
         cached = self._leaf_cache.get(host)
         if cached is not None:
             return cached
@@ -70,14 +109,17 @@ class LocalCA:
         written under ``<ca_dir>/leaves/`` (the key 0600). On-host (needs a real leaf).
         """
         cert_pem, key_pem = self.leaf_cert(host)
-        safe = host.split(":", 1)[0].lower()
+        safe = _leaf_filename(leaf_host(host))
         d = self._dir / "leaves"
-        d.mkdir(parents=True, exist_ok=True)
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
         cert_path = d / f"{safe}.crt"
         key_path = d / f"{safe}.key"
+        root = d.resolve()
+        for p in (cert_path, key_path):               # backstop: never outside leaves/
+            if p.resolve().parent != root:
+                raise ValueError(f"leaf path escapes {root}: {p}")
         cert_path.write_bytes(cert_pem)
-        key_path.write_bytes(key_pem)
-        key_path.chmod(0o600)
+        write_secret(key_path, key_pem)
         return cert_path, key_path
 
     def cached_hosts(self) -> list[str]:
@@ -96,9 +138,8 @@ class LocalCA:
             self._ca_key_pem = self.ca_key_path.read_bytes()
             return self._ca_cert_pem, self._ca_key_pem
         cert_pem, key_pem = self._mint_ca()
-        self._dir.mkdir(parents=True, exist_ok=True)
-        self.ca_key_path.write_bytes(key_pem)
-        self.ca_key_path.chmod(0o600)
+        self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_secret(self.ca_key_path, key_pem)      # 0600 from creation (BUG-0079)
         self.ca_cert_path.write_bytes(cert_pem)
         self.ca_cert_path.chmod(0o644)
         self._ca_cert_pem, self._ca_key_pem = cert_pem, key_pem

@@ -15,12 +15,22 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from fuzzlab.proxy.authority import split_authority
+
 
 @dataclass(frozen=True)
 class ScopeRule:
     host: str = "*"
     path_regex: str | None = None
     exclude: bool = False
+
+    def __post_init__(self):
+        # validated when created (BUG-0085): a bad regex used to raise per request
+        if self.path_regex is not None:
+            try:
+                re.compile(self.path_regex)
+            except re.error as exc:
+                raise ValueError(f"invalid scope path regex: {exc}") from exc
 
     def matches(self, host: str, path: str = "/") -> bool:
         if not _host_matches(self.host, host):
@@ -65,16 +75,17 @@ def _normalize_host(host: str) -> str:
 
 
 def _host_matches(pattern: str, host: str) -> bool:
+    """Both sides are parsed as authorities (`split_authority`, IPv6-safe, BUG-0086): the
+    hosts must match, and a pattern's port, when it has one, must equal the host's. A
+    port-less pattern matches any port."""
     pattern = _normalize_host(pattern)
     if pattern in ("", "*"):
         return True
+    p_host, p_port = split_authority(pattern)
+    h_host, h_port = split_authority(host)
+    if p_port is not None and p_port != h_port:
+        return False
     # A leading dot means "this domain or any subdomain of it".
-    if pattern.startswith("."):
-        bare = pattern[1:]
-        hostname = host.split(":", 1)[0]
-        return hostname == bare or hostname.endswith(pattern)
-    if host == pattern:                       # exact host[:port] match
-        return True
-    if ":" not in pattern:                    # a port-less pattern matches any port
-        return host.split(":", 1)[0] == pattern
-    return False
+    if p_host.startswith("."):
+        return h_host == p_host[1:] or h_host.endswith(p_host)
+    return h_host == p_host

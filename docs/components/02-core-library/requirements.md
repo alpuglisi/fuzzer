@@ -135,6 +135,21 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
   is defined once in `core/oracle_status.py`.
+- **FR-CORE-24** *(atomic migrations; `CC-CORE-0034`, 2026-10-13, BUG-0087).*
+  - **Each migration is atomic.** It runs in one `BEGIN IMMEDIATE` transaction,
+    statement by statement (`split_statements`), with its version row: `COMMIT`, or
+    `ROLLBACK` on any error. A failed migration leaves nothing behind.
+  - **The version is re-read inside the write lock,** so concurrent first opens never
+    double-apply.
+  - **`open_store`** sets `busy_timeout` before the WAL switch and retries the switch
+    for up to 10 s.
+- **FR-CORE-25** *(shared safety helpers; `CC-CORE-0034`, 2026-10-13, BUG-0079/0080/0084).*
+  - `core.net.is_loopback_host` / `require_loopback`: the one listener gate (D11),
+    accepting `localhost`, 127/8, `::1` and IPv4-mapped loopback;
+  - `core.redaction.is_sensitive_name`: the one secret-name predicate (by name token),
+    used by obs and proxy redaction;
+  - `core.secretfile.write_secret`: secret files are created 0600 with `O_NOFOLLOW`
+    (CA keys, the encrypted keyring).
 - **FR-CORE-23** *(aborted runs; `CC-CORE-0033`, 2026-10-13, BUG-0078).*
   `Store.mark_aborted(run_id, exc)` records on a run that failed after it started
   `run.notes = "aborted: <Type>: <message>"`, or `"aborted: exit N"` for `SystemExit`,

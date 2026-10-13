@@ -56,7 +56,9 @@ rewards) derives from it.
   semantics-preserving variants (component #9, MUT), through the same
   attempt/reward/coverage path as the built-in probes; a variant that hits or
   reaches new code is written back to `payload_variant` via MUT's existing
-  destructive-gated `catalog.record_variant` — the harness's own consumer of
+  destructive-gated `catalog.record_variant` (*CC-FUZZ-0057, BUG-0082:* and every
+  probe, base or variant, is checked by `refuse_destructive` **before it is sent**;
+  refusals are counted as `destructive_refused`) — the harness's own consumer of
   Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
   Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
 - **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
@@ -73,8 +75,11 @@ rewards) derives from it.
 - **FR-FUZZ-10** The oracle supports **M8 out-of-band (OOB) callback** confirmation
   for blind injection classes with no observable direct-response difference. Scope
   and contract:
-  - `fuzzlab.oracle.oob.OobListener` is a loopback-only (`127.0.0.1`/`localhost`
-    only; any other host raises) local HTTP callback tracker. It binds no socket
+  - `fuzzlab.oracle.oob.OobListener` is a loopback-only (`core.net.is_loopback_host`,
+    CC-CORE-0034; any other host raises) local HTTP callback tracker. *(CC-FUZZ-0057,
+    BUG-0089:)* its callback serves `proof(token)`, an HMAC under a per-listener
+    secret that appears nowhere in the URL. In-band SSRF / XXE confirmation requires
+    the proof, never the token, so a page merely reflecting the URL does not confirm. It binds no socket
     until `start()` is called (default-off — never binds implicitly), mints
     unguessable per-probe tokens (`register()`), gives the URL to embed in a payload
     (`callback_url(token)`), and reports whether that exact token was later
@@ -1242,3 +1247,20 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   shape).
 - Timing-threshold calibration per target/network profile.
 - Reward shaping when grey-box signals are unavailable (black-box fallback).
+- **FR-FUZZ-39** *(structural reflected-XSS confirmation; `CC-FUZZ-0057`, 2026-10-13,
+  BUG-0083).* `ReflectedXssStrategy` types where a marker lands, from the observed
+  response (never `candidate.sink_context`, which no strategy reads, guarded by an AST
+  test). It sends at most 3 break-outs, and confirms only on their structural effect in
+  the parsed response:
+  - **script:** the token in JavaScript **code** state. The fail-closed lexer handles
+    strings, comments and regex literals.
+  - **attribute:** in order:
+    - a `javascript:` URL in an executing attribute, lexed after percent-decoding;
+    - `javascript:` at the scheme position;
+    - an **injected attribute**, with the quote read from the raw text.
+  - **text:** an injected **element** with no inert ancestor (`textarea`, `title`,
+    `script`, `style`, `xmp`, `noscript`, `iframe`, `noembed`, `noframes`,
+    `plaintext`, `template`). RCDATA is broken out of by its closing tag.
+
+  Verified against the four lab XSS sink templates, each vulnerable and as its secure
+  twin.

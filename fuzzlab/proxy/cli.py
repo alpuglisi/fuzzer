@@ -73,6 +73,11 @@ def main(argv: list[str]) -> int:
 
     if not args.authorized:
         p.error("refusing to run the proxy without --authorized (lab-only)")
+    from fuzzlab.core.net import require_loopback
+    try:
+        require_loopback(args.host, "the proxy")      # D11 (BUG-0080)
+    except ValueError as exc:
+        p.error(str(exc))
 
     sender = SocketSender(verify_tls=not args.no_verify_tls)
     scope = _build_scope(args.scope)

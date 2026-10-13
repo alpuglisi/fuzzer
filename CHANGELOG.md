@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Error review 7: eleven safety and correctness defects fixed — BUG-0079..0089)
+- **Proxy hardened.**
+  - **CA leaves (BUG-0079):** minted only for a valid host, inside the CA directory, so a
+    CONNECT host can no longer write files elsewhere. Keys are private from creation;
+    the keyring file too.
+  - **Loopback only (BUG-0080):** `fuzzlab proxy` binds loopback only. One gate covers
+    every listener, and a guard test finds new ones.
+  - **History redaction (BUG-0084):** URL tokens, body passwords and redirect tokens
+    are redacted, by name token, so `author` stays readable.
+  - **Bad rules (BUG-0085):** refused when added, instead of breaking every connection.
+  - **Scope and IPv6 (BUG-0086):** a port-specific exclude is honoured, and IPv6 hosts
+    parse.
+- **Credentials only to authorised origins (BUG-0081).** A login form or a redirect can
+  no longer send stored credentials off the lab. HTTP Basic logins work.
+- **Destructive payloads are refused before sending (BUG-0082).** This covers obfuscated
+  ones, in `mutate-run` and greybox, unless `--allow-destructive` is set.
+- **The oracle no longer confirms non-exploitable XSS (BUG-0083)** or a mere echo of
+  an SSRF/XXE callback URL (BUG-0089). XSS confirmation is structural, verified against
+  the lab's own sink templates.
+- **Store opens are atomic and safe to race (BUG-0087).**
+- **Bandit backoff now works (BUG-0088).**
+- Bookkeeping: CC-PROXY-0019, CC-CORE-0034, CC-SESS-0011, CC-MUT-0012, CC-FUZZ-0057,
+  CC-SCHED-0006, CC-UI-0049; PA-0080..PA-0090.
+
 ## 2026-10-13 (Error review: eight defects fixed — BUG-0071..0078)
 - **`--bandit` no longer crashes on JSON-body / upload / XXE probes (BUG-0071).** The
   bandit's cost wrapper lacked `content_type`. A crash mid-oracle also no longer leaves

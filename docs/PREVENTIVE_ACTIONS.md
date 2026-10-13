@@ -1155,3 +1155,100 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      "aborted: …"`). It is never left looking like a finished empty run.
   3. **Tested per path:** each known usage-error path asserts that no run row (no store)
      is left behind. A sweep covers every `start_run` caller. (from BUG-0078)
+
+- **PA-0080** — Untrusted input never becomes a filesystem path, and secrets are private
+  from creation, after BUG-0079: a CONNECT host became a leaf-certificate filename (path
+  traversal), and keys were written, then chmodded.
+  1. **A value from the network that becomes part of a path is validated against a
+     whitelist grammar**, and the resolved path is asserted inside its root.
+  2. **Secret files are created 0600 with `O_NOFOLLOW`** (`core.secretfile.write_secret`,
+     the one helper), never chmodded after the write. The PA-0002 sweep for this class
+     covers every write-then-chmod. (from BUG-0079)
+
+- **PA-0081** — Strengthens `PA-0003` for safety gates, after BUG-0080: the loopback
+  check existed in three copies and the proxy CLI had none.
+  1. **Every listener goes through `core.net.require_loopback`.**
+  2. **Enforced by a guard test that finds listeners by call shape**
+     (`tests/test_loopback_listeners.py`), proven on a synthetic offender. A new safety
+     gate shared by several call sites gets the same treatment. (from BUG-0080)
+
+- **PA-0082** — Strengthens `PA-0046` (no automatic redirects in senders) from the oracle
+  seam to every client that sends credentials, after BUG-0081: the session manager
+  POSTed credentials to any form action and let a 307 re-send them.
+  1. **A credential is sent only to an origin the operator authorised:** the login
+     page's own origin, an in-scope host, or an explicit allow-list. A URL derived from
+     response content (a form action, a redirect, a link) is never trusted as a
+     credential destination.
+  2. **Every client that sends credentials disables automatic redirects** and follows
+     them by hand under the same origin rule. A 307/308 is never followed with a body.
+     (from BUG-0081)
+
+- **PA-0083** — Safety claims are backed at the action, after BUG-0082 ("never … sent",
+  but gated only at record time) and BUG-0084 ("redacts token query parameters",
+  never implemented).
+  1. **A safety gate sits at the action it guards** (sending, writing, binding), not at
+     a later bookkeeping step.
+  2. **Every "never / always" safety claim in a docstring is backed by a test that fails
+     when the claim is broken**; for a send gate, the test counts sends. The PA-0002
+     sweep for this class greps docstrings for such claims.
+  3. **A gate on an obfuscatable signature matches the normalised form as well as the
+     raw one** (normalising only adds refusals). (from BUG-0082, BUG-0084)
+
+- **PA-0084** — An oracle confirms by structural effect, after BUG-0083: reflected-XSS
+  confirmed whenever a break-out substring appeared anywhere.
+  1. **Confirmation is by the structural effect a break-out would have:** an element
+     outside inert content, an injected attribute, a token in JS code state, or a scheme
+     in scheme position. Never a substring appearing somewhere. A lexer or parser that
+     cannot be sure gives no verdict (PA-0025).
+  2. **Each strategy has a true-positive and an escaped-reflection false-positive
+     fixture per context**, derived from the lab's own sink templates where they exist.
+     (from BUG-0083)
+
+- **PA-0085** — Redaction rules, after BUG-0084: proxy history kept URL tokens and body
+  passwords.
+  1. **Sensitivity is decided by one name-token predicate** (`core.redaction.
+     is_sensitive_name`), never a local substring list, which over-redacts benign
+     fields such as `author`.
+  2. **A redaction test plants each promised class of secret and searches every
+     persisted copy** (rows, body table, FTS, separately stored bodies), with a benign
+     list asserting nothing over-redacts. (from BUG-0084)
+
+- **PA-0086** — Generalises `PA-0077` (plugin containment) to every per-unit boundary,
+  after BUG-0085: one bad proxy rule broke every connection.
+  1. **User-supplied rules are validated when created** (regexes, encodings, scope
+     patterns), never first evaluated on live traffic.
+  2. **Every per-unit handler contains its own failures and reports them** (per
+     connection, per plugin, per run). (from BUG-0085)
+
+- **PA-0087** — One policy decision, one parser, after BUG-0086: a port-specific exclude
+  was overridden by a second, host-only check, and every authority split broke on
+  IPv6.
+  1. **A policy decision is evaluated in exactly one place, on the most specific key.** A
+     fallback on a less specific key must never be able to turn a deny into an allow.
+  2. **Authorities are parsed by one IPv6-aware helper** (`proxy.authority`), never by
+     `partition(":")`. (from BUG-0086)
+
+- **PA-0088** — Atomic transitions and locked check-then-act on shared storage, after
+  BUG-0087: migrations were not atomic and two first opens raced. `open_store`'s own
+  docstring rule was not followed.
+  1. **An all-or-nothing transition is tested by injecting a mid-way failure.**
+  2. **A check-then-act on shared storage holds the write lock across the check**
+     (`BEGIN IMMEDIATE`, then re-check inside). `executescript` is never used where
+     atomicity matters.
+  3. **A rule stated in the store contract's docstring is backed by a concurrency
+     test.** (from BUG-0087)
+
+- **PA-0089** — Strengthens `PA-0071` from columns to any state, after BUG-0088: bandit
+  backoff read parent posteriors that only a test created.
+  1. **A feature switch is tested by its observable effect through the production
+     path.** A flag whose on and off runs are indistinguishable in a test is a defect.
+  2. **A test never creates state its producer does not**, in memory as well as in
+     columns, unless it also tests the producer. (from BUG-0088)
+
+- **PA-0090** — Extends `PA-0084`, after BUG-0089: in-band SSRF/XXE confirmed on a mere
+  reflection of the callback URL, whose token was also the "proof".
+  1. **A confirmation's proof must not be derivable from the probe that elicits it.** An
+     OOB / in-band marker is a keyed function of the token (here an HMAC), never the
+     token the request carries.
+  2. **Each such strategy has a "reflects the request but does nothing"
+     false-positive fixture.** (from BUG-0089)

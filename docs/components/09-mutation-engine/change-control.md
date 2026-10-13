@@ -3,6 +3,31 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0012 — Send-time destructive gate with normalisation (BUG-0082) (2026-10-13)
+- Change:
+  - **`catalog.refuse_destructive(payload, allow_destructive)`** refuses on the raw
+    payload or either normalised form (`normalize_for_gate`: up to 3 URL-decoding
+    rounds, entities, NUL, `+`, `/*…*/`, line comments stripped or kept, whitespace,
+    case).
+  - **`HttpFilter(allow_destructive=)`.** Its `refuses()` predicate, and the send itself
+    raises `DestructiveRefused`.
+  - **`MutationSearch`** skips refused variants and counts `SearchResult.refused`; a
+    refusal is never a WAF block.
+  - **`run_mutation`** skips a destructive base entirely and counts `refused`; the CLI
+    prints it.
+  - The catalog docstring now states the gate truthfully.
+- Impact (other components / project): FUZZ's greybox loop uses the same gate
+  (CC-FUZZ-0057). WAF statistics no longer include fake blocks.
+- Risk: low. Ordinary payloads (SQLi, XSS, SSTI, traversal) are tested as not refused.
+- Deliverables:
+  - [x] the gate, filter, search and run — done
+  - [x] `tests/test_destructive_send_gate.py` — done
+  - [x] FR-MUT-9 added; NFR-MUT-safe noted — done
+- Review: the review-7 draft v1 got AGREE-with-changes from both reviewers (A: 2 must-fix, 7 should-fix, 3 nits; B: 6 should-fix, 4 nits), all adopted; v2 was agreed 3/3, with the final nits adopted.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Mutation check** (a copy of the worktree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **40 of 40** review-7 mutants killed. Six first survivors were killed after adding tests for: the leaf cache refusing directly; 0600 with `chmod` disabled; the path backstop alone; a same-origin 307; a line-comment-split `INSERT … INTO`; a JS string open at a newline.
+  - **Suites:** **non-labgen suite** (143 files, real browser and lint required; ): **1730 passed, 13 skipped, 2 xfailed, 0 failed**. The live multitarget category-3 / category-4 runs pass with no concurrent load. Packaging / no-ML / contract writers / lint: 22 passed, 1 skipped (the wheel, the known Debian setuptools issue). The labgen suites are untouched by this batch; the last full run (review 6) failed only the 33 known environmental tests (no scipy, scikit-learn or gitleaks).
+
 ### CC-MUT-0011 — `MutationSearch` reward/novelty emitted into `metric_series` (B0 emitter sub-lane) (2026-09-22)
 - Change: `fuzzlab/mutation/search.py::MutationSearch` gained an optional
   `metric_logger: MetricLogger | None = None` constructor parameter (B0's

@@ -170,6 +170,9 @@ def _print_summary(args, source, counts, points, skipped, summary, run_id) -> No
     if args.mutation_variants:
         print(f"  mutation variants probed: {summary.get('mutation_variants_probed', 0)}   "
               f"recorded (accepted): {summary.get('mutation_variants_recorded', 0)}")
+    if summary.get("destructive_refused"):
+        print(f"  destructive payloads refused (never sent): "
+              f"{summary['destructive_refused']} — pass --allow-destructive (lab-only)")
     if summary.get("coverage_lines_seen", 0) == 0:
         print("  NOTE: no application coverage was captured — is the cov.php shim "
               "installed and is --cov-dir the bind-mounted side channel?")

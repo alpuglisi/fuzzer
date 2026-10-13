@@ -16,7 +16,7 @@ import hashlib
 from dataclasses import dataclass, field
 
 from fuzzlab.core.store import Store
-from fuzzlab.proxy.redact import redact
+from fuzzlab.proxy.redact import redact, redact_body_for, redact_url
 
 
 @dataclass
@@ -72,15 +72,20 @@ class HistoryWriter:
         for rec in self._buf:
             req_raw = self._prep(rec.raw_request)
             resp_raw = self._prep(rec.raw_response)
+            req_body, resp_body, url = rec.req_body or b"", rec.resp_body or b"", rec.url
+            if self.redact_secrets:          # every persisted copy (BUG-0084)
+                req_body = redact_body_for(rec.raw_request, req_body)
+                resp_body = redact_body_for(rec.raw_response, resp_body)
+                url = redact_url(url)
             req_raw_sha = self._put_body(req_raw)
             resp_raw_sha = self._put_body(resp_raw)
-            req_body_sha = self._put_body(rec.req_body or b"")
-            resp_body_sha = self._put_body(rec.resp_body or b"")
+            req_body_sha = self._put_body(req_body)
+            resp_body_sha = self._put_body(resp_body)
             cur = conn.execute(
                 "INSERT INTO flow (run_id, identity, method, url, host, status, "
                 "elapsed_ms, in_scope, req_body_sha, resp_body_sha, req_raw_sha, "
                 "resp_raw_sha, protocol) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (self.run_id, rec.identity, rec.method, rec.url, rec.host, rec.status,
+                (self.run_id, rec.identity, rec.method, url, rec.host, rec.status,
                  rec.elapsed_ms, int(bool(rec.in_scope)), req_body_sha, resp_body_sha,
                  req_raw_sha, resp_raw_sha, rec.protocol),
             )
@@ -88,7 +93,7 @@ class HistoryWriter:
             conn.execute(
                 "INSERT INTO flow_fts (url, method, host, req_head, resp_head, flow_id) "
                 "VALUES (?,?,?,?,?,?)",
-                (rec.url, rec.method, rec.host, _head_text(req_raw),
+                (url, rec.method, rec.host, _head_text(req_raw),
                  _head_text(resp_raw), flow_id),
             )
             written += 1

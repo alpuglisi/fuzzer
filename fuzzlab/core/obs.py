@@ -12,7 +12,8 @@ import logging
 import sys
 from typing import Any
 
-_REDACT = ("password", "secret", "token", "cookie", "authorization", "credential")
+from fuzzlab.core.redaction import is_sensitive_name
+
 
 
 class _JsonFormatter(logging.Formatter):
@@ -35,7 +36,8 @@ class _JsonFormatter(logging.Formatter):
 def _redact(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            k: ("***" if any(t in k.lower() for t in _REDACT) else _redact(v))
+            # one predicate with the proxy, by name token (BUG-0084)
+            k: ("***" if is_sensitive_name(str(k)) else _redact(v))
             for k, v in value.items()
         }
     if isinstance(value, list):

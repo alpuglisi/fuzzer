@@ -47,12 +47,14 @@ class ProxyController:
 
     def build(self) -> "ProxyController":
         """Construct the engine + server (no sockets bound yet). Imports are lazy."""
+        from fuzzlab.core.net import require_loopback
         from fuzzlab.proxy.intercept import Interceptor
         from fuzzlab.proxy.matchreplace import MatchReplaceEngine
         from fuzzlab.proxy.scope import Scope
         from fuzzlab.proxy.server import AsyncProxyServer, ProxyEngine
         from fuzzlab.proxy.socketsender import SocketSender
 
+        require_loopback(self.config.host, "the in-process proxy")   # (BUG-0080)
         scope = Scope()
         for host in self.config.scope_hosts:
             scope.include(host)
@@ -334,9 +336,10 @@ class RepeaterController:
         finally:
             if own is not thread_store:
                 own.close()
-        host, _, port_s = (row["host"] or "").partition(":")
+        from fuzzlab.proxy.authority import split_authority
         use_tls = str(row["url"] or "").startswith("https")
-        port = int(port_s) if port_s.isdigit() else (443 if use_tls else 80)
+        # IPv6-safe (BUG-0086 sweep): `[::1]:8443` used to yield host "["
+        host, port = split_authority(row["host"] or "", 443 if use_tls else 80)
         name = f"flow #{flow_id}"
         return self.create_tab(name, host or "127.0.0.1", port,
                                raw.decode("latin-1", "replace"), use_tls=use_tls)

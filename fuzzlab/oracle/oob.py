@@ -22,6 +22,8 @@ process, and no relaying of received data anywhere.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 import secrets
 import threading
@@ -29,7 +31,6 @@ import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _TOKEN_RE = re.compile(r"/cb/([0-9a-f]+)")
 
 
@@ -52,7 +53,8 @@ class OobListener:
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
-        if host not in _LOOPBACK_HOSTS:
+        from fuzzlab.core.net import is_loopback_host
+        if not is_loopback_host(host):                 # the one gate (BUG-0080)
             raise ValueError(
                 f"OobListener is loopback-only (lab-only); refusing host={host!r}")
         self._host = host
@@ -61,6 +63,7 @@ class OobListener:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._hits: dict[str, list[OobHit]] = {}
+        self._secret = secrets.token_bytes(16)       # per-listener proof key (BUG-0089)
 
     @property
     def running(self) -> bool:
@@ -99,6 +102,15 @@ class OobListener:
         with self._lock:
             self._hits[token] = []
         return token
+
+    def proof(self, token: str) -> str:
+        """What the callback serves for ``token``: an HMAC of it under this listener's
+        secret. It appears **nowhere in the callback URL**, so a response can only
+        contain it if the target really fetched the URL. A page that merely reflects
+        the URL (e.g. "could not fetch …/cb/<token>") used to confirm SSRF/XXE in-band,
+        because the body was the token itself (BUG-0089)."""
+        mac = hmac.new(self._secret, token.encode("ascii"), hashlib.sha256)
+        return "fzlproof" + mac.hexdigest()[:24]
 
     def callback_url(self, token: str, scheme: str = "http") -> str:
         if not self.running:
@@ -142,7 +154,7 @@ def _make_handler(listener: OobListener):
                 # confirms. Purely additive: `wait_for`/`hits()` never read
                 # this body, so this changes nothing for an existing
                 # OOB-only caller (e.g. `CommandInjectionOobStrategy`).
-                body = token.encode("ascii")
+                body = listener.proof(token).encode("ascii")
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

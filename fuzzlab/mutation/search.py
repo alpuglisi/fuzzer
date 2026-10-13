@@ -41,6 +41,7 @@ class SearchResult:
     semantics_ok: bool = True
     novel_lines: int = 0
     steps: int = 0
+    refused: int = 0          # variants the destructive gate kept from being sent
 
     def _key(self) -> tuple:
         # better = evading-and-preserving first, then more novelty, then shorter chain
@@ -89,6 +90,7 @@ class MutationSearch:
         best = SearchResult(base, [], not self.filter.caught(base), True,
                             self._novelty(base), 0)
         current, chain = base, []
+        refused = 0
         for step in range(1, self.budget + 1):
             arm = self.scheduler.select(ctx, arms)
             op = op_by_id[arm]
@@ -100,6 +102,10 @@ class MutationSearch:
             step_novel = 0
             accepted = None
             for v in variants:
+                refuses = getattr(self.filter, "refuses", None)
+                if refuses is not None and refuses(v):
+                    refused += 1          # never sent, never a WAF block (BUG-0082)
+                    continue
                 evaded = not self.filter.caught(v)
                 preserving = self.validator.preserves(base, v, vuln_class,
                                                       trusted=not op.surface)
@@ -121,6 +127,7 @@ class MutationSearch:
             if self.coverage_fn is None and best.evaded and best.semantics_ok:
                 best.steps = step
                 break
+        best.refused = refused
         return best
 
     def search_pool(self, pool, vuln_class: str = "sql-injection",

@@ -43,11 +43,28 @@ def open_store(path: str | Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
+    _set_wal(conn)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _set_wal(conn: sqlite3.Connection, deadline_s: float = 10.0) -> None:
+    """Switch to WAL, retrying while another connection holds the lock. SQLite answers a
+    contested journal-mode change with an immediate SQLITE_BUSY that bypasses the busy
+    handler, so two processes opening a fresh store at once used to fail (BUG-0087)."""
+    end = time.monotonic() + deadline_s
+    delay = 0.01
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or time.monotonic() >= end:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.25)
 
 
 def connect(path: str | Path) -> sqlite3.Connection:

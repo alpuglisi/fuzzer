@@ -497,16 +497,55 @@ def current_version(conn: sqlite3.Connection) -> int:
     return int(value) if value is not None else 0
 
 
+def split_statements(script: str) -> list[str]:
+    """Split ``script`` at each ``;`` that completes a statement, judged by SQLite's own
+    `complete_statement` (so trigger bodies, string literals and comments are safe)."""
+    out, start = [], 0
+    for i, ch in enumerate(script):
+        if ch == ";" and sqlite3.complete_statement(script[start:i + 1]):
+            stmt = script[start:i + 1].strip()
+            if stmt.strip(";").strip():
+                out.append(stmt)
+            start = i + 1
+    rest = script[start:].strip()
+    if rest and any(not line.strip().startswith("--")
+                    for line in rest.splitlines() if line.strip()):
+        out.append(rest)                       # a final statement without ';'
+    return out
+
+
 def migrate(conn: sqlite3.Connection) -> int:
-    """Apply all pending migrations in order. Idempotent. Returns new version."""
-    _ensure_version_table(conn)
-    have = current_version(conn)
-    for version, sql in sorted(MIGRATIONS):
-        if version <= have:
-            continue
-        with conn:  # transaction: all-or-nothing per migration
-            conn.executescript(sql)
-            conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)", (version,)
-            )
+    """Apply all pending migrations in order. Idempotent and safe under concurrency.
+    Returns the new version.
+
+    Each migration runs in one explicit ``BEGIN IMMEDIATE`` transaction, statement by
+    statement, with its version row. The version is re-read **inside** the write lock,
+    so a process that waited while another applied it skips it. A failure rolls the
+    whole migration back (BUG-0087, PA-0088). ``executescript`` is not used: it commits
+    first and runs in autocommit, so a failing script used to leave its earlier
+    statements applied with no version row, and two first opens raced.
+    """
+    _ensure_version_table(conn)               # CREATE ... IF NOT EXISTS: race-safe
+    conn.commit()
+    saved = conn.isolation_level
+    conn.isolation_level = None               # explicit transactions below
+    try:
+        for version, sql in sorted(MIGRATIONS):
+            if version <= current_version(conn):
+                continue
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if version <= current_version(conn):   # applied while we waited
+                    conn.execute("COMMIT")
+                    continue
+                for stmt in split_statements(sql):
+                    conn.execute(stmt)
+                conn.execute("INSERT INTO schema_version (version) VALUES (?)",
+                             (version,))
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+    finally:
+        conn.isolation_level = saved
     return current_version(conn)

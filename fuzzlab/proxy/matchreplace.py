@@ -34,6 +34,18 @@ class MatchReplaceRule:
             raise ValueError(f"unknown match-replace target: {self.target}")
         if self.target == "header" and not self.header_name:
             raise ValueError("header target requires header_name")
+        # validated when created, never first on live traffic (BUG-0085): a rule the
+        # proxy cannot encode or compile used to raise on every request
+        try:
+            match, _ = _as_bytes(self.match), _as_bytes(self.replace)
+        except UnicodeEncodeError as exc:
+            raise ValueError("match/replace must be latin-1 text or bytes (the proxy "
+                             f"edits raw bytes): {exc}") from exc
+        if self.is_regex:
+            try:
+                re.compile(match)
+            except re.error as exc:
+                raise ValueError(f"invalid match regex: {exc}") from exc
 
     def _sub(self, data: bytes) -> bytes:
         rep = _as_bytes(self.replace)
