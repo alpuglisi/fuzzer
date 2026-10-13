@@ -3,6 +3,28 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0006 — The advisory write allowlist gains the out-of-fold columns (2026-10-13)
+- Change: `guard.ADVISORY_WRITES["update_candidate"]` gains `score_oof` and
+  `rank_score_oof` (migration 16). Run-mode stages write them, and every other scoring
+  pass clears them, under the `after_run` guard.
+- Impact: FR-PLUG-6 text updated. Nothing else changes in the guard.
+- Risk: low.
+- Deliverables:
+  - [x] Allowlist — done
+  - [x] Test: the declared set is updated; every built-in stage still runs under the
+    guard (`test_ml_plugins.py`) — done
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v4 (the proposing agent plus 2 independent reviewer agents; every raised issue adopted).
+  - **Process note:** `core/oracle_status.py`, `core/urls.canonical_origin`, the dataset changes and `--hybrid` were drafted in the working tree **before** agreement. They were kept uncommitted and reconciled with the agreed v4.
+  - **Reverted:** my early in-column version of D-c was reverted; reviewer B's separate-column design replaced it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (ML, auto, web incl. browser smoke, plugins, report, no-ML, harness, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 705 passed, including `test_ml_saved_and_decisions.py` 39 and `test_auto_train_on.py` 13. Mutation-checked on a copy with bytecode caches cleared: all 20 mutants are killed. The first run left two survivors, and each got a new test (noisy data where in-sample and out-of-fold PR-AUC differ; an earlier-trained saved source). Killed:
+  - **gates:** the legacy gate on in-sample scores, `score_oof` ignored, the run page or conformal panel judging `score`;
+  - **out-of-fold columns:** not written, not cleared by earlier mode, ranker out-of-fold dropped;
+  - **saved selector:** any scope run, a bool scope, copies chosen, the wrong `train_run_ids`;
+  - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
+  - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
+  - **CLI:** `--hybrid` allowed with saved.
+  Full-suite result: recorded in a follow-up commit.
+
 ### CC-PLUG-0005 — Post-run and budget-order hooks; advisory write guard; the run record (2026-10-13)
 - Change:
   - **Two new hooks** (`plugins/hooks.py`):

@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — ML/UI: conformal thresholds were applied to in-sample deploy scores (fixed, BUG-0067/PA-0068, recurrence of the BUG-0062/PA-0064 class)
+
+- **Symptom:** the run page's "Model scores (advisory)" decisions and the ML tab's
+  flag / abstain / drop split judged every labelled candidate on its deploy-fit score.
+  That score is in-sample, but the thresholds are out-of-fold quantiles.
+- **Root cause:** calibrated artefacts were not bound to the score distribution they are
+  applied to. `candidate.score` held several distributions and named none.
+  PA-0064(2) covered displayed numbers, not decisions.
+- **Remediation:**
+  - Migration 16 adds `score_oof` / `rank_score_oof` (written in run mode, cleared by
+    every other scoring pass). Model rows record `score_source`.
+  - One rule (`train.gate_input`) picks the score a gate may judge; a legacy in-sample
+    row shows "n/a (in-sample score)".
+  - The run page shows the decision score; the conformal panel gates each run with its
+    own model.
+  - CC-ML-0018 / CC-CORE-0029 / CC-UI-0042.
+- **Status:** Fixed (offline; mutation-checked).
+
+---
 ## 2026-10-13 — REPORT: `fuzzlab report` for a run pinned the store's newest models, not the run's own (fixed, BUG-0066/PA-0067, recurrence of BUG-0061/PA-0063)
 
 - **Symptom:** with two runs that each trained a classifier and a ranker, run 1's report

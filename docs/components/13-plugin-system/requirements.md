@@ -34,7 +34,8 @@ sources — without changing core code, via a registry of hooks on `core/`.
   - **Prioritizer:** read-only.
   - **`after_run`:** plus exactly `ADVISORY_WRITES`: INSERT into `model`,
     `run_metrics` and `metric_series`, and UPDATE of `candidate.score`, `rank_score`,
-    `rank_uncertainty`, `anomaly_score` and `anomaly_flag`.
+    `rank_uncertainty`, `anomaly_score` and `anomaly_flag` — plus, *(CC-PLUG-0006)*,
+    `score_oof` and `rank_score_oof`.
   - **Denied:** every other write (`finding`; label-defining `candidate` state;
     UPDATE/DELETE of the output tables), all DDL including `IF NOT EXISTS`,
     ATTACH/DETACH, and PRAGMA assignment.

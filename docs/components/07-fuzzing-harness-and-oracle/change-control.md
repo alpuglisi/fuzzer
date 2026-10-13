@@ -22,6 +22,43 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0051 — `--train-on saved`, `--model-id`, `--ranker-model-id`, `--hybrid` (2026-10-13)
+- Change:
+  - **`auto_cli`:**
+    - `--train-on` gains `saved`.
+    - New `--model-id ID` (needs `--score` and `--train-on saved`), `--ranker-model-id ID`
+      (needs `--rank` and `--train-on saved`), and `--hybrid` (needs `--score`; a usage
+      error with `--train-on saved`).
+    - **Summary:** "ml (logistic): scored N candidate(s); with saved model #ID (trained
+      on runs …), not trained on this run; X% … seen in training; forward …". A refusal
+      reads "ml: NOT scored — <reason> …".
+  - **`harness/pipeline.py`** imports the status vocabulary from `core.oracle_status`.
+- Impact:
+  - CLI only. FR-FUZZ-35 is added.
+  - **Tests updated deliberately:**
+    - `test_auto_train_on.py`: the launcher choices gain `saved`;
+    - `test_auto_plugins.py`, `test_ml_plugins.py`, `test_no_ml.py`: config strings gain
+      `hybrid`.
+- Risk: low.
+- Deliverables:
+  - [x] Flags, validation, summary — done
+  - [x] `tests/test_auto_train_on.py` (+8) — done:
+    - saved end to end, with the source id and the summary wording;
+    - the saved refusal;
+    - five validation errors;
+    - `--hybrid` reaches the classifier and is recorded.
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v4 (the proposing agent plus 2 independent reviewer agents; every raised issue adopted).
+  - **Process note:** `core/oracle_status.py`, `core/urls.canonical_origin`, the dataset changes and `--hybrid` were drafted in the working tree **before** agreement. They were kept uncommitted and reconciled with the agreed v4.
+  - **Reverted:** my early in-column version of D-c was reverted; reviewer B's separate-column design replaced it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (ML, auto, web incl. browser smoke, plugins, report, no-ML, harness, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 705 passed, including `test_ml_saved_and_decisions.py` 39 and `test_auto_train_on.py` 13. Mutation-checked on a copy with bytecode caches cleared: all 20 mutants are killed. The first run left two survivors, and each got a new test (noisy data where in-sample and out-of-fold PR-AUC differ; an earlier-trained saved source). Killed:
+  - **gates:** the legacy gate on in-sample scores, `score_oof` ignored, the run page or conformal panel judging `score`;
+  - **out-of-fold columns:** not written, not cleared by earlier mode, ranker out-of-fold dropped;
+  - **saved selector:** any scope run, a bool scope, copies chosen, the wrong `train_run_ids`;
+  - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
+  - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
+  - **CLI:** `--hybrid` allowed with saved.
+  Full-suite result: recorded in a follow-up commit.
+
 ### CC-FUZZ-0050 — `fuzzlab auto` attaches ML through plugins; `run_auto` dispatches the post-run hooks (2026-10-13)
 - Change:
   - **`run_auto`**:

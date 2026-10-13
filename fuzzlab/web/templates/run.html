@@ -54,13 +54,18 @@
   {% if scored %}
   <p class="muted">Model: <code>{{ name }}</code>. Scores rank candidates and the
     conformal gate triages them (flag / abstain / drop); they never confirm &mdash;
-    the oracle owns findings.</p>
+    the oracle owns findings. The gate judges the <em>decision score</em>: a labelled
+    row's out-of-fold score, or a score the model never trained on &mdash; never an
+    in-sample score.</p>
   <table>
-    <thead><tr><th>url</th><th>param</th><th>category</th><th>score</th><th>decision</th></tr></thead>
+    <thead><tr><th>url</th><th>param</th><th>category</th><th>score</th>
+      <th>decision score</th><th>decision</th></tr></thead>
     <tbody>
       {% for s in scored %}
       <tr><td><code>{{ s.url or '' }}</code></td><td>{{ s.param or '' }}</td>
-        <td>{{ s.category or '' }}</td><td>{{ s.score }}</td><td>{{ s.decision }}</td></tr>
+        <td>{{ s.category or '' }}</td><td>{{ s.score }}</td>
+        <td>{{ s.decision_score if s.decision_score is not none else '—' }}</td>
+        <td>{{ s.decision }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

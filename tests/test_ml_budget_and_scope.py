@@ -9,7 +9,8 @@ from fuzzlab.core import migrations
 from fuzzlab.core.store import Store
 from fuzzlab.ml.active import BUDGET_METHODS, prioritize, propose_queries
 from fuzzlab.ml.anomaly import detect_anomalies
-from fuzzlab.ml.dataset import SKIPPED_BUDGET, build_dataset
+from fuzzlab.core.oracle_status import SKIPPED_BUDGET
+from fuzzlab.ml.dataset import build_dataset
 from fuzzlab.ml.rank_train import train_and_rank
 from fuzzlab.ml.train import train_and_score
 from fuzzlab.web import mlview

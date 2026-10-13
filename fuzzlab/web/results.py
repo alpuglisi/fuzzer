@@ -47,7 +47,13 @@ def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None
     The model is read through the shared run-scoped reader, never as "the newest
     `model` row": the ranker writes that table too, and other runs train their own
     classifiers (BUG-0061). Without the ML package (FR-ML-6) the stored scores are
-    still listed — with no model and decision "n/a" — never hidden as "unscored"."""
+    still listed — with no model and decision "n/a" — never hidden as "unscored".
+
+    The conformal decision judges only the score its gate was calibrated for
+    (`train.gate_input`, BUG-0067): a labelled run-mode row's out-of-fold score, or a
+    score the model never trained on — never an in-sample deploy score, which reads
+    "n/a (in-sample score)". The list is ordered by the deploy ``score``; each row also
+    shows the ``decision_score`` the decision used."""
     from fuzzlab.plugins.optional import import_ml
     train = import_ml("fuzzlab.ml.train")
     clf = train.latest_classifier(store, run_id) if train is not None else None
@@ -57,15 +63,23 @@ def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None
         gate = clf.gate
     scored = []
     for c in store.conn.execute(
-        "SELECT evidence, score FROM candidate WHERE run_id=? AND score IS NOT NULL "
-        "ORDER BY score DESC LIMIT ?", (run_id, limit)).fetchall():
+        "SELECT evidence, score, score_oof, oracle_status FROM candidate "
+        "WHERE run_id=? AND score IS NOT NULL ORDER BY score DESC LIMIT ?",
+        (run_id, limit)).fetchall():
         try:
             ev = json.loads(c["evidence"] or "{}")
         except (ValueError, TypeError):
             ev = {}
+        judged = None
+        if gate is not None:
+            judged = train.gate_input(clf.calibration, c["oracle_status"], c["score"],
+                                      c["score_oof"])
+        decision = ("n/a" if gate is None else
+                    "n/a (in-sample score)" if judged is None else gate.decide(judged))
         scored.append({"url": to_path(ev.get("url", "")), "param": ev.get("param", ""),
                        "category": ev.get("category", ""), "score": round(c["score"], 4),
-                       "decision": gate.decide(c["score"]) if gate else "n/a"})
+                       "decision_score": None if judged is None else round(judged, 4),
+                       "decision": decision})
     return model, scored
 
 

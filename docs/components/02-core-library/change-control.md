@@ -3,6 +3,47 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0029 — `oracle_status` vocabulary in one place; canonical target origin; migration 16 (2026-10-13)
+- Change:
+  - **New `fuzzlab/core/oracle_status.py`** holds `CHECKED`, `SKIPPED_BUDGET`,
+    `NO_CONFIRMER` and `UNLABELLED = {SKIPPED_BUDGET, NO_CONFIRMER}`. `harness/pipeline.py`,
+    `ml/dataset.py` and `ml/train.forward_skip_reason` import them, replacing duplicate
+    literals (PA-0003).
+  - **`core/urls.canonical_origin(url) -> str | None`.**
+    - It lower-cases scheme and host, strips a trailing dot, and normalises the host
+      through `ipaddress` (compressed form; IPv4-mapped IPv6 → IPv4).
+    - `localhost` and `::1`, in any spelling, become `127.0.0.1`. Other 127/8 hosts
+      stay distinct.
+    - The default port is made explicit; userinfo, path, query and fragment are
+      dropped. A URL without a scheme reads as `http`.
+    - It returns `None` (never matches) for an empty or missing host, or for a
+      non-numeric or out-of-range port.
+  - **Migration 16** adds `candidate.score_oof REAL` and `candidate.rank_score_oof REAL`.
+    Head 15 → 16 (BUG-0067).
+- Impact:
+  - **Behaviour:** pipeline runs are unchanged. Target matching for earlier-run training
+    and budget ordering now joins loopback aliases (CC-ML-0018).
+  - **PA-0063 reader audit:** the new columns are read only per row, by the run page and
+    the ML tab (per run), through `train.gate_input`.
+  - **IDs:** FR-CORE-17 (oracle_status vocabulary) and FR-CORE-18 (canonical origin and
+    migration 16).
+- Risk: low. Additive.
+- Deliverables:
+  - [x] `oracle_status`, `canonical_origin`, migration 16 — done
+  - [x] Tests — done: 20 `canonical_origin` cases, including every alias and edge case
+    from review; target-run matching; the migration head derived from `MIGRATIONS`.
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v4 (the proposing agent plus 2 independent reviewer agents; every raised issue adopted).
+  - **Process note:** `core/oracle_status.py`, `core/urls.canonical_origin`, the dataset changes and `--hybrid` were drafted in the working tree **before** agreement. They were kept uncommitted and reconciled with the agreed v4.
+  - **Reverted:** my early in-column version of D-c was reverted; reviewer B's separate-column design replaced it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (ML, auto, web incl. browser smoke, plugins, report, no-ML, harness, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 705 passed, including `test_ml_saved_and_decisions.py` 39 and `test_auto_train_on.py` 13. Mutation-checked on a copy with bytecode caches cleared: all 20 mutants are killed. The first run left two survivors, and each got a new test (noisy data where in-sample and out-of-fold PR-AUC differ; an earlier-trained saved source). Killed:
+  - **gates:** the legacy gate on in-sample scores, `score_oof` ignored, the run page or conformal panel judging `score`;
+  - **out-of-fold columns:** not written, not cleared by earlier mode, ranker out-of-fold dropped;
+  - **saved selector:** any scope run, a bool scope, copies chosen, the wrong `train_run_ids`;
+  - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
+  - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
+  - **CLI:** `--hybrid` allowed with saved.
+  Full-suite result: recorded in a follow-up commit.
+
 ### CC-CORE-0028 — Migration 15: `run_plugin.config` / `status` / `error` (2026-10-13)
 - Change: `ALTER TABLE run_plugin ADD COLUMN config TEXT`, `status TEXT` and
   `error TEXT`. They are nullable; legacy rows are NULL. Head 14 → 15.

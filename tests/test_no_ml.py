@@ -91,7 +91,7 @@ def test_the_report_marks_models_unavailable_and_keeps_the_plugin_record(child):
     assert f"models: unavailable ({UNAVAILABLE})" in rep["text"]
     by = {p["name"]: p for p in rep["plugins"]}
     assert set(by) == {"ml-classifier", "ml-ranker", "ml-anomaly"}
-    assert by["ml-classifier"]["config"] == '{"model_kind":"auto","train_on":"run"}'
+    assert by["ml-classifier"]["config"] == '{"hybrid":false,"model_kind":"auto","train_on":"run"}'
     assert {p["status"] for p in rep["plugins"]} == {"ok"}
 
 

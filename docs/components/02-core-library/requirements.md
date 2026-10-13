@@ -129,6 +129,14 @@ plugin registry. It is the layer that makes the store the integration bus.
   `params` (canonical JSON of the trained model) and `params_sha256` (sha256 of that
   exact text). Only the ML trainers write them, through `fuzzlab.ml.persist`; rows
   from before migration 14 read NULL and are not reloadable.
+- **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
+  vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
+  is defined once in `core/oracle_status.py`.
+- **FR-CORE-18** *(migration 16; `CC-CORE-0029`, 2026-10-13).*
+  - **Canonical origin.** `core/urls.canonical_origin(url)` is the canonical
+    `scheme://host:port` used to compare targets (loopback aliases → `127.0.0.1`;
+    explicit default port). It is `None` (never matches) for no usable host or port.
+  - **Migration 16** adds `candidate.score_oof` / `rank_score_oof` (FR-ML-16).
 - **FR-CORE-16** *(migration 15; `CC-CORE-0028`, 2026-10-13).* `run_plugin` carries
   `config` (canonical JSON of the plugin's options), `status` (`attached`, then `ok` /
   `failed`) and `error`. They are written by `PluginManager.record` / `finalize`

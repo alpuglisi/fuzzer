@@ -111,8 +111,26 @@ def test_conformal_panel_splits_flag_abstain_drop(tmp_path):
     with Store(path) as store:
         panel = mlview.conformal_panel(store)
     assert panel["available"] is True
-    assert panel["counts"]["flag"] + panel["counts"]["abstain"] + panel["counts"]["drop"] == panel["n"]
     assert panel["t_lo"] == 0.3 and panel["t_hi"] == 0.7
+    # BUG-0067: the seeded model is a legacy run-mode row (no `score_source`): its stored
+    # scores are in-sample deploy scores, so the out-of-fold gate decides none of them
+    assert panel["counts"] == {"flag": 0, "abstain": 0, "drop": 0, "n/a": panel["n"]}
+    assert panel["judged"] == 0
+
+
+def test_conformal_panel_gates_the_out_of_fold_scores(tmp_path):
+    """A run-mode model (CC-ML-0018): each labelled row is decided on its stored
+    out-of-fold score, not its deploy score."""
+    path = tmp_path / "ml.db"
+    _seed(path)
+    with Store(path) as store:
+        store.conn.execute("UPDATE model SET calibration=?", (json.dumps(
+            {"alpha": 0.1, "t_lo": 0.3, "t_hi": 0.7, "score_source": "oof-labelled"}),))
+        # deploy score says flag (0.9) for every row; the out-of-fold score says drop
+        store.conn.execute("UPDATE candidate SET score=0.9, score_oof=0.1")
+        store.conn.commit()
+        panel = mlview.conformal_panel(store)
+    assert panel["counts"] == {"flag": 0, "abstain": 0, "drop": panel["n"], "n/a": 0}
 
 
 def test_anomaly_panel_is_read_only(tmp_path):

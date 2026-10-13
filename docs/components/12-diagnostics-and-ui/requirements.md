@@ -201,12 +201,16 @@ bugs — the research-platform diagnostics of decision D2.
   *(Amended CC-UI-0034/CC-UI-0035, BUG-0061/BUG-0062.)*
   - The conformal split is gated by the classifier that scored the run, read through
     `fuzzlab.ml.train.latest_classifier(store, run_id)` (FR-ML-10). It is never "the
-    newest `model` row", which may be the ranker's or another run's. **Known
-    limitation:** the all-runs view (`run_id` omitted) applies the newest classifier's
-    one set of thresholds to every run's scores; per-run views are exact.
-  - PR-AUC/ECE and nDCG@k/precision@k recomputed from stored scores are **in-sample**
-    (the deploy fit scored its own training rows). Each panel carries
-    `evaluation: "in-sample (deploy fit)"`, which `ml.js` shows. Beside it is an `oof`
+    newest `model` row", which may be the ranker's or another run's. *(Amended
+    CC-UI-0042, BUG-0067.)* Every row is gated by **its own run's** classifier, and
+    judges only the score that gate was calibrated for (`train.gate_input`, FR-ML-16).
+    Rows with no such score are counted `n/a`; the run page shows each row's decision
+    score.
+  - **Recomputed metrics.** PR-AUC/ECE and nDCG@k/precision@k are recomputed from
+    stored scores: the out-of-fold `score_oof` / `rank_score_oof` where a run-mode
+    model stored them (`evaluation: "out-of-fold (labelled rows)"`), else the deploy
+    score. For legacy rows that is **in-sample**, labelled `"in-sample (deploy
+    fit)"`. `ml.js` shows the label. Beside it is an `oof`
     object: the out-of-fold numbers of the model that wrote those scores, from its
     `model` row (ranker's at that model's own training `at_k`). `oof` is `null` when no
     such model exists, for a fallback or legacy row, or in the all-runs view unless the
@@ -360,6 +364,9 @@ bugs — the research-platform diagnostics of decision D2.
   [...]}` for a model trained on earlier runs (FR-ML-14), and `{"trained_on": "run",
   "train_run_ids": null}` for a `run`-mode or legacy row. The text report marks an
   earlier-trained model "(trained on earlier runs …)".
+  *(Extended CC-UI-0042.)* A saved-model row reports `{"trained_on": "saved",
+  "train_run_ids", "source_model_id"}`, and the text report marks it "(saved model #ID,
+  trained on runs …)".
   *(Extended CC-UI-0041.)* `plugins` items carry `config`, `status` and `error`.
   `reproducibility` gains `plugin_config` and `plugin_status`. A failed plugin is
   marked `(FAILED)` in the text report.

@@ -1331,6 +1331,14 @@ tracked in the requirements files, not here.
     and never unpickles. A compatibility check guards the feature layout.
   - The ML tab shows the saved logistic coefficients. `fuzzlab report` pins each run's
     own models and their shas (BUG-0066 fixed).
+- **Saved models, score sources, decisions** `[built]` (CC-ML-0018, BUG-0067):
+  - **Saved models.** `--train-on saved` applies a saved earlier model without
+    retraining; the selector never picks a model that could have read this run's labels.
+  - **Stored scores.** Run-mode trains store each labelled row's out-of-fold score beside
+    the deploy score, and every conformal gate judges only the score it was calibrated
+    for (`train.gate_input`).
+  - **Training set.** `no_confirmer` rows are unlabelled.
+  - **Targets** match as canonical origins (`core.urls`).
 - **Train on earlier runs** `[built; on-host exits pending]` (CC-ML-0016, CC-FUZZ-0049,
   CC-UI-0040, FR-ML-14):
   - `fuzzlab auto --score/--rank --train-on earlier` trains the classifier / ranker
@@ -1603,7 +1611,7 @@ detail):
 | `run`, `schema_version` | core | everything |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
-| `candidate` (rule evidence, features, score, rank, `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `skipped_budget` rows are scored, never trained on), UI |
+| `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `skipped_budget` rows are scored, never trained on), UI |
 | `flow` (+ raw bytes) | proxy, http client | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |

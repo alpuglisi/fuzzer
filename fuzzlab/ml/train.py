@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from fuzzlab.core.oracle_status import SKIPPED_BUDGET, UNLABELLED
 from fuzzlab.core.store import MetricLogger
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
@@ -34,6 +35,50 @@ PREVALENCE_FALLBACK_NAME = "prevalence-fallback"
 #: Every `model.name` the detection classifier writes — derived from `_MODELS` so a new
 #: classifier kind is picked up by readers automatically (PA-0001/PA-0027).
 CLASSIFIER_MODEL_NAMES = tuple(_MODELS) + (PREVALENCE_FALLBACK_NAME,)
+
+#: Where a model row's stored scores came from (`calibration["score_source"]`,
+#: CC-ML-0018). Absent on rows written before it: in-sample deploy-fit scores.
+SCORE_OOF_LABELLED = "oof-labelled"    # `score` deploy fit; labelled rows also `score_oof`
+SCORE_DEPLOY = "deploy"                # thin-data fallback: `score` only, no gate
+SCORE_EARLIER = "earlier"              # model trained on earlier runs: `score` only
+SCORE_SAVED = "saved-model"            # a saved earlier model applied: `score` only
+
+
+def gate_input(calibration: dict, oracle_status, score, score_oof):
+    """The score a model's conformal gate may judge for one candidate, or ``None`` when
+    no stored score matches the distribution the gate was calibrated on (BUG-0067,
+    PA-0068): the gate thresholds are out-of-fold quantiles, so they are applied to an
+    out-of-fold score, or to a score the model never trained on — never to an in-sample
+    deploy-fit score.
+
+    - Earlier / saved models never read this run's labels: ``score``.
+    - Run-mode models (``score_source`` = oof-labelled): a labelled row's ``score_oof``;
+      a row nobody checked (`UNLABELLED`) was never trained on: ``score``.
+    - Legacy run-mode rows (no ``score_source``): they trained on every row except a
+      budget-skipped one (the only unlabelled status then), so only that gets ``score``.
+    """
+    if calibration.get("trained_on") in ("earlier", "saved"):
+        return score
+    source = calibration.get("score_source")
+    if source is None:
+        return score if oracle_status == SKIPPED_BUDGET else None
+    if source == SCORE_OOF_LABELLED:
+        if score_oof is not None:
+            return score_oof
+        return score if oracle_status in UNLABELLED else None
+    return score
+
+
+def _write_scores(store, ids, scores, oof_by_id=None) -> None:
+    """Write ``candidate.score`` and — always, in the same pass — ``score_oof`` (the
+    labelled rows' out-of-fold score, else NULL), so a re-scored run never keeps another
+    model's out-of-fold scores (PA-0068 rule 3)."""
+    oof_by_id = oof_by_id or {}
+    for cid, s in zip(ids, scores):
+        oof = oof_by_id.get(cid)
+        store.conn.execute("UPDATE candidate SET score=?, score_oof=? WHERE id=?",
+                           (round(s, 6), None if oof is None else round(oof, 6), cid))
+
 
 # Per-model ``metric_series`` source name (B0's GBT/logistic emitter,
 # CC-ML-0009): mirrors the existing subsystem-prefix convention (R-05).
@@ -82,8 +127,9 @@ def _thin(n: int, pos: int, groups: int, min_rows: int, min_positives: int,
 def _select_and_evaluate(ds, model_kind: str, k: int, alpha: float):
     """Out-of-fold model selection + evaluation + conformal calibration on ``ds``.
 
-    Returns ``(name, pr_auc, prevalence, sigma, gate, selection)``; ``selection`` is the
-    per-model OOF PR-AUC for ``auto``, else None."""
+    Returns ``(name, pr_auc, prevalence, sigma, gate, selection, oof)``; ``selection`` is
+    the per-model OOF PR-AUC for ``auto``, else None; ``oof`` is the selected model's
+    out-of-fold score per row of ``ds``."""
     selection = None
     if model_kind == "auto":
         oof_by = {k2: _oof_scores(ds, f, k) for k2, f in _MODELS.items()}
@@ -98,7 +144,7 @@ def _select_and_evaluate(ds, model_kind: str, k: int, alpha: float):
     prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
     sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
     gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
-    return name, prauc, prevalence, sigma, gate, selection
+    return name, prauc, prevalence, sigma, gate, selection, oof
 
 
 def _metric(store, run_id: int, key: str, value: float) -> None:
@@ -112,8 +158,8 @@ def forward_skip_reason(store, run_id: int, labels) -> str | None:
     With a confirmation budget the labels are the ones the prioritizer chose (grading the
     model on rows it picked itself); one-class labels make PR-AUC / NDCG meaningless."""
     skipped = store.conn.execute(
-        "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND oracle_status='skipped_budget'",
-        (run_id,)).fetchone()["c"]
+        "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND oracle_status=?",
+        (run_id, SKIPPED_BUDGET)).fetchone()["c"]
     if skipped:
         return "budget-selected labels"
     if not labels or sum(labels) == 0 or sum(labels) == len(labels):
@@ -124,7 +170,8 @@ def forward_skip_reason(store, run_id: int, labels) -> str | None:
 def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logistic",
                     min_rows: int = 20, min_positives: int = 5, k: int = 5,
                     alpha: float = 0.1, hybrid: bool = False,
-                    min_groups: int = 2, train_on: str = "run") -> dict:
+                    min_groups: int = 2, train_on: str = "run",
+                    model_id: int | None = None) -> dict:
     """Train and write advisory scores. ``model_kind``: ``logistic``, ``gbt``, or
     ``auto`` (out-of-fold-select the better of the two). ``hybrid=True`` appends the
     unsupervised ECOD anomaly score as an extra feature (XGBOD-style; label-free, so no
@@ -133,13 +180,24 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     exists and any "OOF" metric would be in-sample (BUG-0062).
 
     ``train_on="earlier"`` (CC-ML-0016) instead trains on earlier runs against the same
-    target and scores this run without reading its labels — see `_score_from_earlier`."""
+    target and scores this run without reading its labels — see `_score_from_earlier`;
+    ``train_on="saved"`` (CC-ML-0018) scores it with a saved earlier model, no training
+    (``model_id`` pins one) — see `_score_from_saved`.
+
+    In run mode a labelled row's out-of-fold score is also stored (``score_oof``), the
+    score its conformal gate is calibrated for (BUG-0067)."""
+    if train_on == "saved":
+        if hybrid:
+            raise ValueError("hybrid does not apply to a saved model (it keeps its own)")
+        return _score_from_saved(store, run_id, model_id=model_id)
+    if model_id is not None:
+        raise ValueError("model_id needs train_on='saved'")
     if train_on == "earlier":
         return _score_from_earlier(store, run_id, model_kind=model_kind, min_rows=min_rows,
                                    min_positives=min_positives, k=k, alpha=alpha,
                                    hybrid=hybrid, min_groups=min_groups)
     if train_on != "run":
-        raise ValueError(f"train_on must be 'run' or 'earlier', got {train_on!r}")
+        raise ValueError(f"train_on must be 'run', 'earlier' or 'saved', got {train_on!r}")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
     ecod = None                                  # the hybrid's fitted detector, if any
@@ -162,9 +220,15 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         scores = model.predict_proba(every.X)
         gate, name, kind = None, PREVALENCE_FALLBACK_NAME, "prevalence"
         result.update(model=name, fallback=True)
+        oof_by_id = {}
+        calibration["score_source"] = SCORE_DEPLOY
     else:
-        name, prauc, prevalence, sigma, gate, selection = _select_and_evaluate(
+        name, prauc, prevalence, sigma, gate, selection, oof = _select_and_evaluate(
             ds, model_kind, k, alpha)
+        # each labelled row's out-of-fold score, stored beside the deploy score: the
+        # distribution the conformal gate is calibrated on (BUG-0067, CC-ML-0018)
+        oof_by_id = dict(zip(ds.ids, oof))
+        calibration["score_source"] = SCORE_OOF_LABELLED
         if selection is not None:
             result["model_selection"] = selection
         model, kind = _MODELS[name](), name
@@ -185,8 +249,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
                     (run_id, key, float(val)))
 
     # Advisory scores onto the candidate rows (never labels).
-    for cid, s in zip(every.ids, scores):
-        store.conn.execute("UPDATE candidate SET score=? WHERE id=?", (round(s, 6), cid))
+    _write_scores(store, every.ids, scores, oof_by_id)
 
     if gate is not None:
         calibration.update(t_lo=gate.t_lo, t_hi=gate.t_hi)
@@ -241,12 +304,11 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
         every.X = augment(every.X, ecod) if len(every) else every.X
         prior.feature_names = list(prior.feature_names) + ["anomaly_ecod"]
 
-    name, prauc, prevalence, sigma, gate, selection = _select_and_evaluate(
+    name, prauc, prevalence, sigma, gate, selection, _ = _select_and_evaluate(
         prior, model_kind, k, alpha)
     model = _MODELS[name]().fit(prior.X, prior.y)      # deploy: all earlier labels
     scores = model.predict_proba(every.X)              # this run: never its labels
-    for cid, s in zip(every.ids, scores):
-        store.conn.execute("UPDATE candidate SET score=? WHERE id=?", (round(s, 6), cid))
+    _write_scores(store, every.ids, scores)            # and clears score_oof
 
     seen = seen_fraction(store, train_ids, every.ids)
     train_runs = run_ids_of(store, train_ids)
@@ -261,33 +323,19 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
                      ("ml_pr_auc_sigma_earlier", sigma), ("ml_seen_fraction", seen)):
         _metric(store, run_id, key, val)
 
-    # Forward evaluation: this run's scores against this run's OWN oracle labels, after
-    # the fact (never fed back). Only when those labels weren't budget-selected.
-    now = build_dataset(store, run_id)                 # labelled rows of this run
-    by_id = dict(zip(every.ids, scores))
-    reason = forward_skip_reason(store, run_id, now.y)
-    if reason is None:
-        fwd = pr_auc(now.y, [by_id[c] for c in now.ids])
-        fwd_prev = pr_auc(now.y, [now.positives / len(now)] * len(now))
-        result.update(pr_auc_forward=fwd, baseline_prevalence_forward=fwd_prev)
-        _metric(store, run_id, "ml_pr_auc_forward", fwd)
-        _metric(store, run_id, "ml_pr_auc_prevalence_forward", fwd_prev)
-    else:
-        result["forward_skipped_reason"] = reason
+    fwd_result, fwd_calibration = _forward_evaluation(store, run_id, every.ids, scores)
+    result.update(fwd_result)
 
     calibration = {"alpha": alpha, "feature_version": prior.feature_version,
                    "run_id": run_id, "trained_on": "earlier", "train_run_ids": train_runs,
                    "train_rows": n, "train_positives": pos, "seen_fraction": seen,
                    "seed": 0, "k": k, "min_rows": min_rows, "min_positives": min_positives,
                    "min_groups": min_groups, "model_kind": model_kind,
-                   "oof_scope": "earlier runs", "oof_pr_auc": prauc,
+                   "oof_scope": "earlier runs", "score_source": SCORE_EARLIER,
+                   "oof_pr_auc": prauc,
                    "oof_pr_auc_prevalence": prevalence, "oof_pr_auc_sigma": sigma,
                    "t_lo": gate.t_lo, "t_hi": gate.t_hi}
-    if reason is not None:
-        calibration["forward_skipped_reason"] = reason
-    else:
-        calibration.update(forward_pr_auc=result["pr_auc_forward"],
-                           forward_pr_auc_prevalence=result["baseline_prevalence_forward"])
+    calibration.update(fwd_calibration)
     params, params_sha = dumps_model(name, model, feature_names=prior.feature_names,
                                      feature_version=prior.feature_version, ecod=ecod)
     version = _next_version(store, name)
@@ -297,6 +345,106 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
         (name, version, prior.feature_version, json.dumps(calibration), params, params_sha))
     store.conn.commit()
     result.update(version=version, scored=len(scores), params_sha256=params_sha)
+    return result
+
+
+def _forward_evaluation(store, run_id: int, ids, scores) -> tuple[dict, dict]:
+    """This run's stored scores against this run's OWN oracle labels, after the fact
+    (never fed back) — for a model that never read them (earlier / saved). Written only
+    when those labels were not budget-selected and have both classes; otherwise the
+    reason. Returns the result-dict and calibration updates."""
+    now = build_dataset(store, run_id)                 # labelled rows of this run
+    by_id = dict(zip(ids, scores))
+    reason = forward_skip_reason(store, run_id, now.y)
+    if reason is not None:
+        return {"forward_skipped_reason": reason}, {"forward_skipped_reason": reason}
+    fwd = pr_auc(now.y, [by_id[c] for c in now.ids])
+    fwd_prev = pr_auc(now.y, [now.positives / len(now)] * len(now))
+    _metric(store, run_id, "ml_pr_auc_forward", fwd)
+    _metric(store, run_id, "ml_pr_auc_prevalence_forward", fwd_prev)
+    return ({"pr_auc_forward": fwd, "baseline_prevalence_forward": fwd_prev},
+            {"forward_pr_auc": fwd, "forward_pr_auc_prevalence": fwd_prev})
+
+
+#: The classifier kinds a saved model may be reused from (never a fallback).
+SAVED_CLASSIFIER_NAMES = tuple(_MODELS)
+#: Calibration keys a saved-mode copy carries over from its original (the original's
+#: own out-of-fold evaluation and gate; not re-derived from this run).
+_SAVED_CARRY = ("alpha", "feature_version", "model_kind", "t_lo", "t_hi", "oof_pr_auc",
+                "oof_pr_auc_prevalence", "oof_pr_auc_sigma")
+
+
+def saved_training_rows(store, calibration: dict) -> list[int]:
+    """Candidate ids an original model was trained on, rebuilt with today's dataset
+    rules (for `seen_fraction`; recomputed, so marked as such)."""
+    runs = calibration.get("train_run_ids") or [calibration.get("run_id")]
+    ids: list[int] = []
+    for r in runs:
+        if isinstance(r, int) and not isinstance(r, bool):
+            ids += build_dataset(store, r).ids
+    return ids
+
+
+def _saved_oof_scope(calibration: dict, model_id: int) -> str:
+    scope = calibration.get("oof_scope")
+    if not scope or scope == "this run":
+        scope = f"run #{calibration.get('run_id')}"
+    return f"{scope} (saved model #{model_id})"
+
+
+def _score_from_saved(store, run_id, *, model_id=None) -> dict:
+    """Score EVERY candidate of this run with a saved earlier model — no retraining
+    (CC-ML-0018, FR-ML-15). The model is the original trained row chosen by
+    `model_registry.saved_source` (never one that read this run's labels); a copy row
+    scoped to this run is written so the run-scoped readers find it. Refuses — writes
+    nothing — when there is no qualifying model or it cannot be applied."""
+    from fuzzlab.ml.dataset import target_runs
+    from fuzzlab.ml.model_registry import saved_source
+    from fuzzlab.ml.persist import ModelIncompatibleError, ModelParamsError
+    if run_id is None:
+        raise ValueError("train_on='saved' needs the run to score")
+    base: dict = {"train_on": "saved"}
+    target = target_of(store, run_id)
+    if target is None:
+        return {**base, "refused": True, "reason": "no target recorded for this run"}
+    earlier = [r for r in target_runs(store, target) if r < run_id]
+    row, source, reason = saved_source(store, SAVED_CLASSIFIER_NAMES, run_id, earlier,
+                                       model_id=model_id)
+    if row is None:
+        return {**base, "refused": True, "reason": reason}
+    try:
+        loaded = loads_model(*params_for(store, row["id"]))
+        loaded.check_compatible()
+    except (ModelParamsError, ModelIncompatibleError) as exc:
+        return {**base, "refused": True,
+                "reason": f"saved model #{row['id']} cannot be applied: {exc}"}
+    every = build_dataset(store, run_id, include_unlabelled=True)
+    scores = loaded.predict_proba(every.X) if len(every) else []
+    _write_scores(store, every.ids, scores)            # and clears score_oof
+    train_runs = source.get("train_run_ids") or [source["run_id"]]
+    seen = seen_fraction(store, saved_training_rows(store, source), every.ids)
+    result = {**base, "refused": False, "model": row["name"], "fallback": False,
+              "rows": len(every), "source_model_id": row["id"],
+              "source_run_id": source["run_id"], "train_run_ids": train_runs,
+              "seen_fraction": seen, "params_sha256": loaded.sha256}
+    _metric(store, run_id, "ml_seen_fraction", seen)
+    fwd_result, fwd_calibration = _forward_evaluation(store, run_id, every.ids, scores)
+    result.update(fwd_result)
+    calibration = {k: source[k] for k in _SAVED_CARRY if k in source}
+    calibration.update(run_id=run_id, trained_on="saved", source_model_id=row["id"],
+                       source_run_id=source["run_id"], train_run_ids=train_runs,
+                       seen_fraction=seen, seen_fraction_recomputed=True,
+                       score_source=SCORE_SAVED,
+                       oof_scope=_saved_oof_scope(source, row["id"]), **fwd_calibration)
+    params, params_sha = params_for(store, row["id"])
+    version = _next_version(store, row["name"])
+    store.conn.execute(
+        "INSERT INTO model (name, version, feature_version, calibration, params, "
+        "params_sha256) VALUES (?,?,?,?,?,?)",
+        (row["name"], version, row["feature_version"], json.dumps(calibration), params,
+         params_sha))
+    store.conn.commit()
+    result.update(version=version, scored=len(scores))
     return result
 
 

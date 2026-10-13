@@ -399,7 +399,7 @@ def test_all_runs_view_is_mixed_unless_every_pooled_run_was_earlier_trained(tmp_
         # run 2 has no scores: not pooled; runs 1 (in-sample) and 3 (earlier) are
         assert mlview.classifier_panel(store)["evaluation"] == mlview.MIXED
         assert mlview.ranker_panel(store)["evaluation"] == mlview.MIXED
-        assert mlview.classifier_panel(store, first)["evaluation"] == mlview.IN_SAMPLE
+        assert mlview.classifier_panel(store, first)["evaluation"] == mlview.OUT_OF_FOLD
         store.conn.execute("UPDATE candidate SET score=NULL, rank_score=NULL "
                            "WHERE run_id=?", (first,))
         store.conn.commit()

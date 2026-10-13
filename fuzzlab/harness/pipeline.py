@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core.dedup import TemplateClusterer
 from fuzzlab.core.fingerprint import fingerprint
+from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET  # migration 13
 from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
@@ -56,10 +57,6 @@ def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[Inj
             seen_clusters.add(cid)
             keep.add(url)
     return [p for p in points if p.url in keep]
-
-
-# `candidate.oracle_status` values (migration 13).
-CHECKED, SKIPPED_BUDGET, NO_CONFIRMER = "checked", "skipped_budget", "no_confirmer"
 
 
 def _candidate_of(ev: dict) -> Candidate:

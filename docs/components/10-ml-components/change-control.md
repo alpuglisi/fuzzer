@@ -3,6 +3,117 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0018 — no_confirmer unlabelled; canonical target matching; out-of-fold columns (BUG-0067); saved-model scoring; `--hybrid` (2026-10-13)
+- **Context:** the user asked me to build the remaining ML work while away, taking my
+  own recommendation at each decision point. This settles the three decisions flagged
+  earlier (D-a, D-b, D-c) and adds two small features (F-1, F-2).
+- Change:
+  - **D-a: `no_confirmer` rows are unlabelled.** `build_dataset` treats `oracle_status`
+    in `UNLABELLED` (budget-skipped **or** no confirmer) as unlabelled: never trained or
+    evaluated on, still scored, ranked and anomaly-scored. "No finding" there means
+    nobody could check. NULL (legacy) keeps its old meaning.
+    `forward_skip_reason` stays budget-only.
+  - **D-b: loopback aliases are one target.** `dataset.target_runs(store, target)`
+    matches runs by `canonical_origin` (CC-CORE-0029), and the `target=` filter uses it.
+    So `localhost:8080`, `127.0.0.1:8080` and `[::1]:8080` are one target for
+    earlier-run training and budget ordering. An unusable origin matches nothing.
+  - **D-c: out-of-fold columns** (BUG-0067).
+    - **Classifier.** In run mode, `train_and_score` keeps `score` as the deploy model's
+      score for every row and writes each labelled row's **out-of-fold** score to
+      `score_oof`. Unlabelled rows, the thin fallback, and earlier/saved modes write
+      NULL, so every scoring pass writes or clears the column (`_write_scores`,
+      PA-0068(3)). Model calibration records `score_source`: `oof-labelled`, `deploy`,
+      `earlier` or `saved-model`.
+    - **Ranker.** `train_and_rank` does the same with `rank_score_oof`.
+    - **`train.gate_input(calibration, oracle_status, score, score_oof)`** is the one
+      rule for which stored score a conformal gate may judge (PA-0068(2)).
+    - **Reproducibility.** The saved model still reproduces every stored `score`
+      (CC-ML-0015 holds). The out-of-fold columns are reproducible by deterministic
+      re-training (seeded `oof_folds`).
+  - **F-1: `train_on="saved"`.** `_score_from_saved` / `_rank_from_saved` score or rank
+    every candidate of the run with a saved earlier model, without training.
+    - **Selection.** `model_registry.saved_source` (FR-ML-15) picks the **original**
+      trained row:
+      - the scope must be an `int` (not a bool) for an earlier run against this target;
+        store-wide, legacy, non-int, fallback and no-params rows never qualify;
+      - saved-mode copies are never chosen, and a pinned copy resolves to its original;
+      - newest means highest scope run, then highest id;
+      - `model_id` pins a row of the right family only.
+    - **Refusal, writing nothing:** no target, no qualifying model, or a model that
+      cannot be applied (`ModelParamsError` / `ModelIncompatibleError`).
+    - **Copy row.** A copy row scoped to this run is written with the same params and
+      sha. Its calibration records `trained_on: "saved"`, `source_model_id`,
+      `source_run_id`, `train_run_ids` (from the original when present), a recomputed
+      `seen_fraction` (`seen_fraction_recomputed: true`) and `score_source:
+      "saved-model"`. It carries the original's gate and `oof_*`, with an explicit
+      `oof_scope` "run #R (saved model #ID)".
+    - **Forward metrics and `*_seen_fraction`** are recorded as in earlier mode, through
+      the now-shared `_forward_evaluation` / `_forward_ranking` helpers.
+  - **F-2: `hybrid`** reaches the classifier through `ClassifierPlugin(hybrid=)`.
+    `hybrid` together with `saved` raises `ValueError`, since a saved model applies its
+    own ECOD.
+  - **`ml/plugins.py`:**
+    - `ClassifierPlugin(train_on, model_kind, hybrid, model_id)` and
+      `RankerPlugin(train_on, model_id)`;
+    - `model_id` appears in the config only when set;
+    - `stage_plugins(hybrid, model_id, ranker_model_id)`;
+    - `ML_PLUGIN_VERSION` "1" → "2" (run-mode output and the training set change
+      meaning).
+- Impact:
+  - **D-a is a behaviour change for existing stores.** Old runs that recorded
+    `no_confirmer` rows lose those negatives retroactively, so training sizes can
+    shrink, possibly into the thin fallback, and old ML-tab numbers may differ from
+    their stored `oof_*`. NULL-status legacy rows in no-confirmer categories stay
+    negatives, so a store mixes both semantics (FR-ML-17 says so).
+  - **Golden summaries stay byte-identical:** every run-mode stage in them is a
+    prevalence fallback, and the earlier-run seeds have NULL status.
+  - **IDs:** FR-ML-15 (saved), FR-ML-16 (stored-score sources), FR-ML-17 (unlabelled
+    statuses). The FR-ML-11 limitations (aliases, no_confirmer) are resolved.
+- Risk: medium-low.
+  - The run-mode `score` is unchanged.
+  - The new columns are additive.
+  - The saved selector is strict and tested against every leak path from review.
+- Deliverables:
+  - [x] Code — done
+  - [x] `tests/test_ml_saved_and_decisions.py` (39) — done:
+    - **D-a:** excluded from training but scored; no forward skip; earlier mode excludes
+      earlier no_confirmer rows.
+    - **D-b:** canonical cases; aliases (localhost, `[::1]`) train together, while a
+      different port and an empty origin do not.
+    - **D-c:**
+      - run mode stores both columns, with a precondition that they differ;
+      - the tab's PR-AUC equals `oof_pr_auc`, including on noisy data where in-sample
+        differs;
+      - the saved model reproduces every `score`;
+      - unlabelled rows get NULL;
+      - re-scoring clears the out-of-fold columns;
+      - the run page decides on the out-of-fold score and shows it;
+      - the `gate_input` truth table, and the legacy "n/a (in-sample score)" rule.
+    - **F-1:**
+      - saved scoring and ranking reproduce the loaded models exactly, with the same sha;
+      - each never-qualifying row is refused when pinned and never auto-picked
+        (store-wide, legacy, non-int, bool, no params, this run, a later run);
+      - a copy resolves to its original; a wrong-family pin is refused;
+      - refusal writes nothing; a corrupted model is refused;
+      - an earlier-trained source passes its `train_run_ids` on;
+      - the UI and report labels.
+- Implementation divergence:
+  1. `conformal_panel` now gates each row with **its own run's** classifier, which also
+     closes the documented all-runs limitation (BUG-0067's sweep).
+  2. The shared forward helpers are extracted (`_forward_evaluation`,
+     `_forward_ranking`).
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v4 (the proposing agent plus 2 independent reviewer agents; every raised issue adopted).
+  - **Process note:** `core/oracle_status.py`, `core/urls.canonical_origin`, the dataset changes and `--hybrid` were drafted in the working tree **before** agreement. They were kept uncommitted and reconciled with the agreed v4.
+  - **Reverted:** my early in-column version of D-c was reverted; reviewer B's separate-column design replaced it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (ML, auto, web incl. browser smoke, plugins, report, no-ML, harness, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 705 passed, including `test_ml_saved_and_decisions.py` 39 and `test_auto_train_on.py` 13. Mutation-checked on a copy with bytecode caches cleared: all 20 mutants are killed. The first run left two survivors, and each got a new test (noisy data where in-sample and out-of-fold PR-AUC differ; an earlier-trained saved source). Killed:
+  - **gates:** the legacy gate on in-sample scores, `score_oof` ignored, the run page or conformal panel judging `score`;
+  - **out-of-fold columns:** not written, not cleared by earlier mode, ranker out-of-fold dropped;
+  - **saved selector:** any scope run, a bool scope, copies chosen, the wrong `train_run_ids`;
+  - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
+  - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
+  - **CLI:** `--hybrid` allowed with saved.
+  Full-suite result: recorded in a follow-up commit.
+
 ### CC-ML-0017 — The ML stages as built-in plugins (2026-10-13)
 - Change: new `fuzzlab/ml/plugins.py`.
   - **The stages:**

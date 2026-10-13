@@ -1018,6 +1018,13 @@ rewards) derives from it.
   - **Exit 1** when a post-run plugin or the prioritizer failed, or a requested stage
     did not run.
   - With no ML flags and no `--plugins`, no plugin manager is created.
+- **FR-FUZZ-35** *(saved models, hybrid; `CC-FUZZ-0051`, 2026-10-13).*
+  - **`--train-on saved`** scores and ranks with saved earlier models, without training
+    (FR-ML-15). `--model-id` / `--ranker-model-id` pin one: they need `--score` /
+    `--rank` and `--train-on saved`.
+  - **`--hybrid`** adds the ECOD anomaly feature to the classifier. It needs `--score`
+    and is a usage error with `--train-on saved`.
+  - **Summary.** It names the saved model and its training runs, or the refusal reason.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

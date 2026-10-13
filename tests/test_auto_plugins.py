@@ -77,7 +77,7 @@ def test_ml_flags_record_their_stages_on_the_run(tmp_path, monkeypatch, capsys):
         rows = _rows(store, run_id)
     assert set(rows) == {"ml-budget", "ml-classifier", "ml-ranker", "ml-anomaly"}
     assert {r["status"] for r in rows.values()} == {"ok"}
-    assert rows["ml-classifier"]["config"] == '{"model_kind":"auto","train_on":"earlier"}'
+    assert rows["ml-classifier"]["config"] == '{"hybrid":false,"model_kind":"auto","train_on":"earlier"}'
     assert rows["ml-budget"]["config"] == '{"method":"score","seed":0}'
 
 

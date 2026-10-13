@@ -4,6 +4,25 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/CORE/PLUG/FUZZ/UI: saved-model scoring, three ML decisions, BUG-0067 — CC-ML-0018, CC-CORE-0029, CC-PLUG-0006, CC-FUZZ-0051, CC-UI-0042)
+- **Batch 1 of the remaining ML work**, built while the user was away, taking my own
+  recommendation at each decision point.
+- **New features:**
+  - **`--train-on saved`** applies a saved earlier model without retraining. It never
+    picks a model that could have read this run's labels.
+  - **`--hybrid`** adds the anomaly score as a classifier feature.
+- **Decisions:**
+  - **No-confirmer rows** are no longer counted as "not vulnerable" when training,
+    because nobody could check them.
+  - **`localhost:8080` and `127.0.0.1:8080` are one target.**
+  - **Out-of-fold scores.** Run-mode trains now store each labelled candidate's
+    out-of-fold score next to its deploy score.
+- **BUG-0067 fixed** (PA-0068). The run page and ML tab were judging in-sample scores
+  with out-of-fold triage thresholds, so their flag/abstain/drop decisions were not the
+  ones the gate promises. Gates now judge the score they were calibrated for, legacy
+  in-sample rows read "n/a", and the ML tab's numbers are honest out-of-fold ones.
+- **Tests:** related suites 705 passed (real browser required). 20 of 20 mutants killed. Full suite recorded in a follow-up commit.
+
 ## 2026-10-13 (ML/PLUG/FUZZ/CORE/UI: ML attaches as plugins; the toolkit runs without it — CC-ML-0017, CC-PLUG-0005, CC-FUZZ-0050, CC-CORE-0028, CC-UI-0041)
 - **ML now attaches through the plugin system** (step 3 of the user's order; FR-ML-6).
   - **What changed:** the classifier, ranker, anomaly tripwire and budget order are

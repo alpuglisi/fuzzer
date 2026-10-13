@@ -152,10 +152,13 @@ function renderConformal(d) {
   if (meta) {
     meta.replaceChildren(
       document.createTextNode(`${d.model.name} v${d.model.version} · N=${d.n} · `
-        + `t_lo=${d.t_lo} t_hi=${d.t_hi} · `),
+        + `t_lo=${d.t_lo} t_hi=${d.t_hi}`
+        + (d.per_run_gates ? " (each run gated by its own model)" : "") + " · "),
       band("flag", `flag ${d.counts.flag}`), document.createTextNode(" "),
       band("abstain", `abstain ${d.counts.abstain}`), document.createTextNode(" "),
       band("drop", `drop ${d.counts.drop}`),
+      // BUG-0067: rows with no score the gate was calibrated for are not decided
+      document.createTextNode(d.counts["n/a"] ? ` · n/a ${d.counts["n/a"]} (in-sample score)` : ""),
     );
   }
   bars("chart-conformal-split", ["flag", "abstain", "drop"], [

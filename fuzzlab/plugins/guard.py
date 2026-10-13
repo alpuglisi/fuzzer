@@ -31,7 +31,8 @@ from contextlib import contextmanager
 ADVISORY_WRITES: dict[str, frozenset] = {
     "insert": frozenset({"model", "run_metrics", "metric_series"}),
     "update_candidate": frozenset({"score", "rank_score", "rank_uncertainty",
-                                   "anomaly_score", "anomaly_flag"}),
+                                   "anomaly_score", "anomaly_flag",
+                                   "score_oof", "rank_score_oof"}),     # CC-PLUG-0006
 }
 
 READ_ONLY = "read-only"

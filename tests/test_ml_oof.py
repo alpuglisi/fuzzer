@@ -144,7 +144,10 @@ def test_ml_tab_labels_in_sample_and_shows_the_scoring_models_oof(tmp_path):
         rank = train_and_rank(store, run_id)
         cp = mlview.classifier_panel(store, run_id)
         rp = mlview.ranker_panel(store, run_id)
-        assert cp["evaluation"] == rp["evaluation"] == mlview.IN_SAMPLE
+        # CC-ML-0018: a run-mode model stores each labelled row's out-of-fold score,
+        # and the tab recomputes its metrics from those
+        assert cp["evaluation"] == rp["evaluation"] == mlview.OUT_OF_FOLD
+        assert cp["pr_auc"] == pytest.approx(clf["pr_auc"], abs=1e-4)
         assert cp["oof"] == {"pr_auc": clf["pr_auc"],
                              "pr_auc_prevalence": clf["baseline_prevalence"],
                              "pr_auc_sigma": clf["baseline_sigma"],

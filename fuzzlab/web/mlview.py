@@ -54,24 +54,40 @@ def _ml_panel(fn):
         return fn(*args, **kwargs)
     return panel
 
-#: Stored `candidate.score` / `rank_score` are the deploy fit's scores on its own training
-#: rows, so metrics recomputed from them here are in-sample — labelled as such, beside the
-#: scoring model's own out-of-fold numbers (BUG-0062, CC-UI-0035).
+#: LEGACY rows (no `score_source`): stored `candidate.score` / `rank_score` are the deploy
+#: fit's scores on its own training rows, so metrics recomputed from them are in-sample —
+#: labelled as such, beside the scoring model's own out-of-fold numbers (BUG-0062,
+#: CC-UI-0035). Run-mode rows since CC-ML-0018 are recomputed from `score_oof` instead.
 IN_SAMPLE = "in-sample (deploy fit)"
 #: Scores written by a model trained on earlier runs (`train_on="earlier"`, CC-ML-0016):
 #: this run's labels were never read — but its endpoints may recur (see `seen_fraction`),
 #: so this is deliberately not called "out-of-sample" (CC-UI-0040).
 NOT_TRAINED_ON_RUN = "not trained on this run's labels (trained on earlier runs)"
+#: Scores from a saved earlier model applied without training (CC-ML-0018).
+NOT_TRAINED_SAVED = "not trained on this run's labels (saved model {id})"
+#: Run-mode models since CC-ML-0018: the metrics are recomputed from each labelled row's
+#: stored out-of-fold score (`score_oof` / `rank_score_oof`), not the deploy score.
+OUT_OF_FOLD = "out-of-fold (labelled rows)"
 #: All-runs view pooling runs scored both ways (PA-0064(2)): no single label is true.
 MIXED = "mixed"
 
 
 def _earlier_trained(calibration: dict | None) -> bool:
-    return bool(calibration) and calibration.get("trained_on") == "earlier"
+    """A model that never read this run's labels: trained on earlier runs, or a saved
+    earlier model applied as is."""
+    return bool(calibration) and calibration.get("trained_on") in ("earlier", "saved")
+
+
+def _evaluation_kind(calibration: dict | None) -> str:
+    if _earlier_trained(calibration):
+        return "not-trained"
+    if calibration and calibration.get("score_source") == "oof-labelled":
+        return "oof"
+    return "in-sample"
 
 
 def _evaluation(store, run_id: int | None, column: str, reader) -> str:
-    """How the stored scores shown for ``run_id`` relate to their model's training data.
+    """How the numbers recomputed for ``run_id`` relate to their model's training data.
 
     Per run: from that run's scoring model. All runs: from every pooled run's scoring
     model — one label only when they all agree, else `MIXED`."""
@@ -80,10 +96,21 @@ def _evaluation(store, run_id: int | None, column: str, reader) -> str:
     else:
         runs = [int(r["run_id"]) for r in store.conn.execute(
             f"SELECT DISTINCT run_id FROM candidate WHERE {column} IS NOT NULL")]
-    kinds = {_earlier_trained(reader(store, r)) for r in runs}
-    if kinds == {True}:
-        return NOT_TRAINED_ON_RUN
-    return MIXED if len(kinds) > 1 else IN_SAMPLE
+    calibrations = [reader(store, r) for r in runs]
+    kinds = {_evaluation_kind(c) for c in calibrations}
+    if len(kinds) > 1:
+        return MIXED
+    kind = kinds.pop() if kinds else "in-sample"
+    if kind == "oof":
+        return OUT_OF_FOLD
+    if kind == "not-trained":
+        saved = {c.get("source_model_id") for c in calibrations
+                 if c and c.get("trained_on") == "saved"}
+        if saved and len(calibrations) == len(saved) == 1:
+            return NOT_TRAINED_SAVED.format(id=f"#{saved.pop()}")
+        return NOT_TRAINED_ON_RUN if not saved else \
+            "not trained on this run's labels (earlier runs / saved models)"
+    return IN_SAMPLE
 
 
 def _clf_calibration(store, run_id):
@@ -216,13 +243,18 @@ def _reliability(labels: Sequence[int], scores: Sequence[float], bins: int = 10)
     return {"bins": out_bins, "ece": round(ece, 4)}
 
 
-def _scored_pairs(store, ds, run_id: int | None) -> tuple[list[float], list[int]]:
-    """Join the dataset's labels back onto the stored (already-written) `candidate.score`."""
+def _scored_pairs(store, ds, run_id: int | None, column: str = "score",
+                  oof_column: str = "score_oof") -> tuple[list[float], list[int]]:
+    """Join the dataset's labels back onto the stored scores: a labelled row's
+    out-of-fold score where the trainer stored one (CC-ML-0018), else its deploy score —
+    so a run-mode model's recomputed metrics are honest out-of-fold numbers."""
     where = "WHERE run_id=?" if run_id is not None else ""
     args: tuple = (run_id,) if run_id is not None else ()
     rows = store.conn.execute(
-        f"SELECT id, score FROM candidate {where}", args).fetchall()
-    scored = {r["id"]: r["score"] for r in rows if r["score"] is not None}
+        f"SELECT id, {column} AS s, {oof_column} AS o FROM candidate {where}",
+        args).fetchall()
+    scored = {r["id"]: (r["o"] if r["o"] is not None else r["s"]) for r in rows
+              if r["s"] is not None}
     scores, labels = [], []
     for cid, y in zip(ds.ids, ds.y):
         if cid in scored:
@@ -264,8 +296,11 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
     where = "WHERE run_id=?" if run_id is not None else ""
     args: tuple = (run_id,) if run_id is not None else ()
     rows = store.conn.execute(
-        f"SELECT id, rank_score, rank_uncertainty FROM candidate {where}", args).fetchall()
-    rank_map = {r["id"]: (r["rank_score"], r["rank_uncertainty"])
+        f"SELECT id, rank_score, rank_uncertainty, rank_score_oof FROM candidate {where}",
+        args).fetchall()
+    # metrics judge a labelled row's out-of-fold rank score where stored (CC-ML-0018)
+    rank_map = {r["id"]: (r["rank_score_oof"] if r["rank_score_oof"] is not None
+                          else r["rank_score"], r["rank_uncertainty"])
                for r in rows if r["rank_score"] is not None}
     scores, uncertainties, labels, groups = [], [], [], []
     for cid, y, g in zip(ds.ids, ds.y, ds.groups):
@@ -297,32 +332,52 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
 def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
     """Flag/abstain/drop split (tab summary) + the nonconformity histogram + thresholds.
 
-    Gated by the classifier that scored the run (`latest_classifier`, BUG-0061). Known
-    limitation: the all-runs view (``run_id=None``) applies the newest classifier's one
-    set of thresholds to every run's scores; per-run views are exact."""
-    clf = _ml().train.latest_classifier(store, run_id)
+    Each candidate is gated by **its own run's** classifier (`latest_classifier`,
+    BUG-0061) and judges only the score that gate was calibrated for
+    (`train.gate_input`, BUG-0067): a labelled run-mode row's out-of-fold score, or a
+    score the model never trained on. A row with no such score (an in-sample legacy
+    score, or a run whose classifier has no gate) is counted as ``n/a``, never decided.
+    The thresholds shown are the selected model's; the all-runs view says when runs'
+    gates differ (``per_run_gates``)."""
+    train = _ml().train
+    clf = train.latest_classifier(store, run_id)
     if clf is None:
         return {"available": False, "reason": "no trained classifier yet"}
     if clf.gate is None:
         return {"available": False, "reason": "latest classifier has no conformal calibration"}
-    calib, gate = clf.calibration, clf.gate
+    calib = clf.calibration
     row = {"name": clf.name, "version": clf.version}
     where = "WHERE score IS NOT NULL" + (" AND run_id=?" if run_id is not None else "")
     args: tuple = (run_id,) if run_id is not None else ()
-    scores = [r["score"] for r in
-              store.conn.execute(f"SELECT score FROM candidate {where}", args).fetchall()]
-    if not scores:
+    rows = store.conn.execute(
+        f"SELECT run_id, score, score_oof, oracle_status FROM candidate {where}",
+        args).fetchall()
+    if not rows:
         return {"available": False, "reason": "no scored candidates yet",
                 "model": {"name": row["name"], "version": row["version"]}}
-    counts = {"flag": 0, "abstain": 0, "drop": 0}
-    for s in scores:
-        counts[gate.decide(s)] += 1
+    gates: dict = {}
+    counts = {"flag": 0, "abstain": 0, "drop": 0, "n/a": 0}
+    judged_scores = []
+    for r in rows:
+        if r["run_id"] not in gates:
+            gates[r["run_id"]] = train.latest_classifier(store, r["run_id"])
+        owner = gates[r["run_id"]]
+        judged = (None if owner is None or owner.gate is None else
+                  train.gate_input(owner.calibration, r["oracle_status"], r["score"],
+                                   r["score_oof"]))
+        if judged is None:
+            counts["n/a"] += 1
+            continue
+        counts[owner.gate.decide(judged)] += 1
+        judged_scores.append(judged)
+    distinct = {(g.name, g.version) for g in gates.values() if g is not None}
     return {
-        "available": True, "n": len(scores),
+        "available": True, "n": len(rows), "judged": len(judged_scores),
         "model": {"name": row["name"], "version": row["version"]},
         "t_lo": round(calib["t_lo"], 4), "t_hi": round(calib["t_hi"], 4),
+        "per_run_gates": len(distinct) > 1,
         "counts": counts,
-        "nonconformity_hist": _histogram(scores, bins=20, lo=0.0, hi=1.0),
+        "nonconformity_hist": _histogram(judged_scores, bins=20, lo=0.0, hi=1.0),
     }
 
 

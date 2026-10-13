@@ -9,7 +9,7 @@ loads each HTML page in real Chromium against a seeded store and asserts:
 (a) every HTML GET route of the app (walked from `app.routes`, not a hand-kept list) plus
     the not-found page: zero page errors, zero console errors, zero CSP violations;
 (b) /ml: in every panel the payload marks available, every chart mount holds a rendered
-    uPlot chart carrying its `fl-chart--<type>` class; the in-sample labels show;
+    uPlot chart carrying its `fl-chart--<type>` class; the evaluation labels show;
 (c) /diagnostics: picking a run and a metric draws both charts, labelled, and a second
     metric updates the chart's accessible name;
 (d) /ml: one panel that throws no longer blanks the panels after it;
@@ -213,8 +213,10 @@ def test_ml_tab_renders_every_available_chart(site, tab):
                                               "fl-chart--scatter")), classes
             assert mount.get_attribute("role") == "figure"
     assert expected >= 8, "seeded store should make the main ML panels available"
+    # CC-UI-0042: a run-mode model's numbers are recomputed from its stored
+    # out-of-fold scores, and say so
     meta = page.inner_text("#panel-ranker")
-    assert "in-sample (deploy fit)" in meta and "in-sample (deploy fit)" in \
+    assert "out-of-fold (labelled rows)" in meta and "out-of-fold (labelled rows)" in \
         page.inner_text("#panel-calibration")
     assert tab.problems() == []
 

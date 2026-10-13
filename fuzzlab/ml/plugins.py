@@ -21,7 +21,7 @@ import json
 from functools import partial
 
 #: Bumped when a stage's options change meaning (not when a model retrains).
-ML_PLUGIN_VERSION = "1"
+ML_PLUGIN_VERSION = "2"     # 2: run-mode out-of-fold columns; no_confirmer unlabelled
 
 
 class _Stage:
@@ -38,13 +38,18 @@ class ClassifierPlugin(_Stage):
     flag = "score"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-classifier", 10
 
-    def __init__(self, train_on: str = "run", model_kind: str = "auto"):
-        super().__init__(train_on=train_on, model_kind=model_kind)
+    def __init__(self, train_on: str = "run", model_kind: str = "auto", hybrid: bool = False,
+                 model_id: int | None = None):
+        super().__init__(train_on=train_on, model_kind=model_kind, hybrid=hybrid)
+        if model_id is not None:                  # only when pinned (keeps old configs)
+            self.config["model_id"] = model_id
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.train import train_and_score
         return train_and_score(store, run_id, model_kind=self.config["model_kind"],
-                               train_on=self.config["train_on"])
+                               train_on=self.config["train_on"],
+                               hybrid=self.config["hybrid"],
+                               model_id=self.config.get("model_id"))
 
 
 class RankerPlugin(_Stage):
@@ -52,12 +57,15 @@ class RankerPlugin(_Stage):
     flag = "rank"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-ranker", 20
 
-    def __init__(self, train_on: str = "run"):
+    def __init__(self, train_on: str = "run", model_id: int | None = None):
         super().__init__(train_on=train_on)
+        if model_id is not None:
+            self.config["model_id"] = model_id
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.rank_train import train_and_rank
-        return train_and_rank(store, run_id, train_on=self.config["train_on"])
+        return train_and_rank(store, run_id, train_on=self.config["train_on"],
+                              model_id=self.config.get("model_id"))
 
 
 class AnomalyPlugin(_Stage):
@@ -94,7 +102,8 @@ STAGE_NAMES = {cls.flag: cls.name for cls in (ClassifierPlugin, RankerPlugin,
 
 
 def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = False,
-                  contamination: float = 0.1, train_on: str = "run",
+                  contamination: float = 0.1, train_on: str = "run", hybrid: bool = False,
+                  model_id: int | None = None, ranker_model_id: int | None = None,
                   confirm_budget: int | None = None, budget_method: str = "score",
                   budget_seed: int = 0) -> list:
     """The plugins a set of `fuzzlab auto` options asks for — the one options→plugins
@@ -103,9 +112,9 @@ def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = Fa
     if confirm_budget is not None:
         out.append(BudgetPlugin(method=budget_method, seed=budget_seed))
     if score:
-        out.append(ClassifierPlugin(train_on=train_on))
+        out.append(ClassifierPlugin(train_on=train_on, hybrid=hybrid, model_id=model_id))
     if rank:
-        out.append(RankerPlugin(train_on=train_on))
+        out.append(RankerPlugin(train_on=train_on, model_id=ranker_model_id))
     if anomaly:
         out.append(AnomalyPlugin(contamination=contamination))
     return out

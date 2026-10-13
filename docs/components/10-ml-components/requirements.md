@@ -116,10 +116,10 @@ the oracle owns truth (the oracle/advisory split).
     - Candidate text includes the URL path, so a model trained on earlier runs of the
       same app partly memorises vulnerable endpoints. A T7.4 "beats random" claim must
       be measured on held-out endpoints.
-    - `localhost:8080` and `127.0.0.1:8080` count as different targets.
-    - `no_confirmer` rows still train as negatives, although
-      `pipeline_oracle_rejected` excludes them. That divergence is flagged for a
-      decision.
+    - ~~`localhost:8080` and `127.0.0.1:8080` count as different targets.~~
+      *Resolved CC-ML-0018:* targets match as canonical origins (FR-ML-17).
+    - ~~`no_confirmer` rows still train as negatives.~~ *Resolved CC-ML-0018:* they
+      are unlabelled (FR-ML-17).
 - **FR-ML-12 (anomaly persistence, CC-ML-0013)** `detect_anomalies(store, run_id,
   contamination)` scores **every** candidate of the run with ECOD (label-free, so
   budget-skipped ones included).
@@ -185,11 +185,54 @@ the oracle owns truth (the oracle/advisory split).
   - Wired as `fuzzlab auto --train-on earlier` (FR-FUZZ-33). Making it the default
     waits on the on-host T5.5 / T7.4 runs.
 
+- **FR-ML-15 (saved-model scoring, CC-ML-0018)** `train_and_score` /
+  `train_and_rank(train_on="saved", model_id=None)` score or rank every candidate of a
+  run with a saved earlier model, **without training**.
+  - **Selection** (`model_registry.saved_source`): the original trained row, newest by
+    scope run then id. Its scope must be an `int` (not a bool) naming an earlier run
+    against this run's target (canonical, FR-ML-17). Its row must have params.
+    - **Never selected:** store-wide, legacy, non-int and fallback rows. Copies written
+      by saved mode itself are never chosen; a pinned copy resolves to its original. A
+      pin must be of the right family.
+  - **Refusal:** no target, no qualifying model, or a model that cannot be applied
+    (corrupt params, or feature-layout drift via `check_compatible`). It writes nothing.
+  - **Copy row.** A copy row scoped to the run (same params and sha) lets the run-scoped
+    readers find it. It records `trained_on: "saved"`, `source_model_id`,
+    `source_run_id`, `train_run_ids` (the original's when known), a recomputed
+    `seen_fraction`, and the original's gate and OOF numbers under an explicit
+    `oof_scope`.
+  - **Metrics.** Forward metrics and `*_seen_fraction` are recorded as for `earlier`.
+  - **Invariant (every model-writing mode):** the runs a model trained on are at or
+    below its scope (`calibration.run_id`). This is what makes "scope is an earlier
+    run" imply "never read this run's labels". Later work (holdout, calibration) must
+    keep it.
+- **FR-ML-16 (stored-score sources, CC-ML-0018, BUG-0067)**
+  - **Columns.** `candidate.score` / `rank_score` are always the deployed model's scores
+    (the saved model reproduces them, FR-ML-13). In run mode each labelled row also
+    stores its **out-of-fold** score in `score_oof` / `rank_score_oof`. Every scoring
+    pass writes or clears both columns for the rows it scores.
+  - **`score_source`.** A model row records it: `oof-labelled`, `deploy`, `earlier` or
+    `saved-model`; it is absent on legacy rows.
+  - **Gate input.** A conformal gate judges only the score `train.gate_input` returns:
+    a labelled run-mode row's `score_oof`; a row nobody checked, or an earlier- or
+    saved-model score, as `score`; nothing for a legacy run-mode row except a
+    budget-skipped one ("n/a (in-sample score)").
+- **FR-ML-17 (unlabelled statuses; canonical targets, CC-ML-0018)**
+  - **Unlabelled.** `oracle_status` in `core.oracle_status.UNLABELLED` (`skipped_budget`,
+    `no_confirmer`) is unlabelled: never trained or evaluated on, still scored. NULL
+    (legacy) rows keep the old meaning, so a store written before this change mixes
+    both semantics for no-confirmer categories.
+  - **Canonical targets.** Target matching for cross-run training and budget ordering
+    compares `core.urls.canonical_origin`, so loopback aliases are one target and an
+    unusable origin matches nothing.
+
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
   the oracle's verdict is final and independent.
 - **NFR-ML-reproducible** *(Amended CC-ML-0015: models are now versioned **and
-  stored**, so a model reproduces from its row, sha-pinned.)* Deterministic pipeline: fixed seeds, versioned features,
+  stored**, so a model reproduces from its row, sha-pinned. Note CC-ML-0018: the
+  run-mode out-of-fold columns reproduce by deterministic, seeded re-training, not by
+  loading the model.)* Deterministic pipeline: fixed seeds, versioned features,
   versioned models, recorded metrics.
 - **NFR-ML-no-leak** Train/test split prevents leakage across cells/transforms; the
   blind holdout is never trained on. *(Amended CC-ML-0014, BUG-0065:)* a candidate's

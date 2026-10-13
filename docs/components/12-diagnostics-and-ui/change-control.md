@@ -3,6 +3,63 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0042 — Gates judge the score they were calibrated for (BUG-0067 fix site); evaluation labels; saved models in the report (2026-10-13)
+- Change:
+  - **Run page** (`results._scored_candidates` + `run.html`):
+    - Each decision uses `train.gate_input`.
+    - A new **decision score** column shows the score the decision judged: the
+      out-of-fold score for a labelled run-mode row, else the deploy score.
+    - A legacy in-sample row reads "n/a (in-sample score)".
+    - The list stays ordered by the deploy `score`. A note explains the decision score.
+  - **ML tab (`mlview`):**
+    - `conformal_panel` gates every row with its own run's classifier and
+      `gate_input`, counts `n/a` rows separately, and reports `judged` and
+      `per_run_gates`.
+    - The classifier and ranker metrics are recomputed from `score_oof` /
+      `rank_score_oof` when stored.
+    - **Evaluation labels:**
+      - `out-of-fold (labelled rows)` for `score_source == "oof-labelled"`;
+      - `not trained on this run's labels (saved model #ID)` for saved;
+      - earlier as before; legacy `in-sample (deploy fit)`;
+      - `mixed` across disagreeing pools.
+    - `_earlier_trained` accepts `saved`, so forward metrics and `seen_fraction` show.
+  - **`ml.js`:** the conformal line shows "(each run gated by its own model)" and
+    "n/a K (in-sample score)".
+  - **Report:**
+    - `_training` gives `{trained_on: "saved", train_run_ids, source_model_id}`;
+    - the text note reads "(saved model #ID, trained on runs …)".
+- Impact:
+  - Read-only. FR-UI-11's evaluation text is updated in place, and FR-UI-17 gets a
+    note.
+  - **Tests updated deliberately:**
+    - `test_ml_oof.py` and `test_ml_train_on_earlier.py`: new run-mode models read
+      "out-of-fold";
+    - `test_web_ml.py`: a legacy seeded model is now all `n/a`, and a new test gates
+      out-of-fold scores;
+    - `test_web_pages_browser.py`: the label.
+- Risk: low.
+- Deliverables:
+  - [x] Run page, `mlview`, `ml.js`, report — done
+  - [x] Tests — done:
+    - the out-of-fold decision and decision score on the run page;
+    - the legacy n/a case;
+    - re-scored runs gated on `score`;
+    - the conformal panel's out-of-fold gating against contradicting deploy scores;
+    - the labels;
+    - the saved report block and text;
+    - the browser smoke (8 passed under `FUZZLAB_REQUIRE_BROWSER=1`).
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v4 (the proposing agent plus 2 independent reviewer agents; every raised issue adopted).
+  - **Process note:** `core/oracle_status.py`, `core/urls.canonical_origin`, the dataset changes and `--hybrid` were drafted in the working tree **before** agreement. They were kept uncommitted and reconciled with the agreed v4.
+  - **Reverted:** my early in-column version of D-c was reverted; reviewer B's separate-column design replaced it.
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (ML, auto, web incl. browser smoke, plugins, report, no-ML, harness, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 705 passed, including `test_ml_saved_and_decisions.py` 39 and `test_auto_train_on.py` 13. Mutation-checked on a copy with bytecode caches cleared: all 20 mutants are killed. The first run left two survivors, and each got a new test (noisy data where in-sample and out-of-fold PR-AUC differ; an earlier-trained saved source). Killed:
+  - **gates:** the legacy gate on in-sample scores, `score_oof` ignored, the run page or conformal panel judging `score`;
+  - **out-of-fold columns:** not written, not cleared by earlier mode, ranker out-of-fold dropped;
+  - **saved selector:** any scope run, a bool scope, copies chosen, the wrong `train_run_ids`;
+  - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
+  - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
+  - **CLI:** `--hybrid` allowed with saved.
+  Full-suite result: recorded in a follow-up commit.
+
 ### CC-UI-0041 — Web app and report work without `fuzzlab.ml`; report shows plugin config and status (2026-10-13)
 - Change:
   - **`mlview`:**

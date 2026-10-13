@@ -76,5 +76,68 @@ def test_cli_train_on_needs_score_or_rank(tmp_path, monkeypatch, capsys):
 def test_launcher_renders_train_on_as_a_choice():
     from fuzzlab.web.commandspec import spec
     field = {o.dest: o for o in spec("auto").options}["train_on"]
-    assert field.type == "choice" and set(field.choices) == {"run", "earlier"}
+    assert field.type == "choice" and set(field.choices) == {"run", "earlier", "saved"}
     assert field.default == "run"
+
+
+# --- `--train-on saved`, `--model-id`, `--hybrid` (CC-FUZZ-0051) ---------------------
+
+def test_cli_scores_and_ranks_with_saved_models(tmp_path, monkeypatch, capsys):
+    from fuzzlab.ml.rank_train import train_and_rank
+    from fuzzlab.ml.train import train_and_score
+    with Store(tmp_path / "s.db") as store:
+        _earlier_runs(store)
+        for r in (1, 2):
+            train_and_score(store, r)
+            train_and_rank(store, r)
+        source = latest_classifier(store, 2).id
+    assert _main(tmp_path, monkeypatch, "--score", "--rank", "--train-on", "saved") == 0
+    out = capsys.readouterr().out
+    store, run_id = _last_run(tmp_path)
+    with store:
+        clf = latest_classifier(store, run_id)
+        assert clf.calibration["trained_on"] == "saved"
+        assert clf.calibration["source_model_id"] == source
+        assert latest_ranker(store, run_id)[1]["trained_on"] == "saved"
+    assert f"with saved model #{source} (trained on runs 2), not trained on this run" in out
+
+
+def test_cli_saved_refuses_without_a_saved_model(tmp_path, monkeypatch, capsys):
+    assert _main(tmp_path, monkeypatch, "--score", "--train-on", "saved") == 0
+    assert ("  ml: NOT scored — no saved model from an earlier run against this target"
+            in capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("args, msg", [
+    (["--hybrid"], "--hybrid needs --score"),
+    (["--score", "--hybrid", "--train-on", "saved"],
+     "--hybrid does not apply to --train-on saved"),
+    (["--score", "--model-id", "3"], "--model-id needs --score and --train-on saved"),
+    (["--rank", "--train-on", "saved", "--model-id", "3"],
+     "--model-id needs --score and --train-on saved"),
+    (["--score", "--train-on", "saved", "--ranker-model-id", "3"],
+     "--ranker-model-id needs --rank and --train-on saved"),
+])
+def test_cli_validates_the_new_flags(tmp_path, monkeypatch, capsys, args, msg):
+    with pytest.raises(SystemExit):
+        _main(tmp_path, monkeypatch, *args)
+    assert msg in capsys.readouterr().err
+
+
+def test_cli_hybrid_reaches_the_classifier(tmp_path, monkeypatch, capsys):
+    import fuzzlab.ml.train as ml_train
+    seen = {}
+    real = ml_train.train_and_score
+
+    def spy(*a, **k):
+        seen.update(k)
+        return real(*a, **k)
+
+    monkeypatch.setattr(ml_train, "train_and_score", spy)
+    assert _main(tmp_path, monkeypatch, "--score", "--hybrid") == 0
+    assert seen["hybrid"] is True
+    store, run_id = _last_run(tmp_path)
+    with store:
+        config = store.conn.execute("SELECT config FROM run_plugin WHERE run_id=? AND "
+                                    "name='ml-classifier'", (run_id,)).fetchone()[0]
+    assert '"hybrid":true' in config

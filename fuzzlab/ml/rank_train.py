@@ -23,7 +23,9 @@ from fuzzlab.ml.model_registry import params_for, select_latest
 from fuzzlab.ml.persist import LoadedModel, dumps_model, loads_model
 from fuzzlab.ml.ranker import Ranker
 from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k
-from fuzzlab.ml.train import _metric, _thin, forward_skip_reason
+from fuzzlab.ml.train import (SCORE_DEPLOY, SCORE_EARLIER, SCORE_OOF_LABELLED, SCORE_SAVED,
+                              _metric, _saved_oof_scope, _thin, forward_skip_reason,
+                              saved_training_rows)
 from fuzzlab.ml.text_features import candidate_text
 
 #: `model.name`s the ranker writes (disjoint from `train.CLASSIFIER_MODEL_NAMES`).
@@ -76,20 +78,28 @@ def _next_version(store, name: str) -> int:
 
 def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
                    min_positives: int = 5, k: int = 5, at_k: int = 10,
-                   seed: int = 0, min_groups: int = 2, train_on: str = "run") -> dict:
+                   seed: int = 0, min_groups: int = 2, train_on: str = "run",
+                   model_id: int | None = None) -> dict:
     """Train the ranker, write advisory rank scores, and report NDCG@k/Precision@k vs a
     random-order baseline. Falls back to a constant order on thin data — including fewer
     than ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
     exists and any "OOF" metric would be in-sample (BUG-0062).
 
     ``train_on="earlier"`` (CC-ML-0016) instead trains on earlier runs against the same
-    target and ranks this run without reading its labels — see `_rank_from_earlier`."""
+    target and ranks this run without reading its labels — see `_rank_from_earlier`;
+    ``train_on="saved"`` (CC-ML-0018) ranks it with a saved earlier ranker, no training
+    — see `_rank_from_saved`. In run mode a labelled row's out-of-fold rank score is
+    also stored (``rank_score_oof``)."""
+    if train_on == "saved":
+        return _rank_from_saved(store, run_id, model_id=model_id, at_k=at_k, seed=seed)
+    if model_id is not None:
+        raise ValueError("model_id needs train_on='saved'")
     if train_on == "earlier":
         return _rank_from_earlier(store, run_id, min_rows=min_rows,
                                   min_positives=min_positives, k=k, at_k=at_k, seed=seed,
                                   min_groups=min_groups)
     if train_on != "run":
-        raise ValueError(f"train_on must be 'run' or 'earlier', got {train_on!r}")
+        raise ValueError(f"train_on must be 'run', 'earlier' or 'saved', got {train_on!r}")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     texts = _candidate_texts(store, run_id, ds.ids)
     every = build_dataset(store, run_id, include_unlabelled=True)   # rank: every row
@@ -99,15 +109,20 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     result: dict = {"rows": n, "positives": pos, "groups": groups, "at_k": at_k}
     calibration: dict = {"at_k": at_k, "run_id": run_id}
 
+    oof_by_id: dict = {}
     if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
         scores = [0.0] * len(every)              # constant order (no signal)
+        calibration["score_source"] = SCORE_DEPLOY
         params, params_sha = dumps_model("constant", 0.0, feature_names=FEATURE_NAMES,
                                          feature_version=FEATURE_VERSION)
         name = RANK_FALLBACK_NAME
         result.update(model=name, fallback=True)
     else:
-        ndcg, prec, ndcg_rand, prec_rand = _evaluate(
-            ds.y, _oof_scores(ds, texts, k, seed), ds.groups, at_k, seed)
+        oof = _oof_scores(ds, texts, k, seed)
+        ndcg, prec, ndcg_rand, prec_rand = _evaluate(ds.y, oof, ds.groups, at_k, seed)
+        # each labelled row's out-of-fold rank score, stored beside the deploy one
+        oof_by_id = dict(zip(ds.ids, oof))
+        calibration["score_source"] = SCORE_OOF_LABELLED
         ranker = Ranker(seed=seed).fit(ds.X, texts, ds.y)   # deploy: fit on all data
         # advisory rank for EVERY row, including budget-skipped candidates
         scores = ranker.score(every.X, every_texts)
@@ -128,7 +143,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
                     "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
                     (run_id, key, float(val)))
 
-    _write_ranks(store, every.ids, scores)
+    _write_ranks(store, every.ids, scores, oof_by_id)
 
     version = _next_version(store, name)
     store.conn.execute(
@@ -140,14 +155,101 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     return result
 
 
-def _write_ranks(store, ids, scores) -> None:
+def _write_ranks(store, ids, scores, oof_by_id=None) -> None:
     # Advisory rank score + uncertainty (max at the 0.5 boundary). Never labels.
     # Derive uncertainty from the rounded score so the two stored values are consistent.
+    # `rank_score_oof` is written (or cleared) in the same pass (PA-0068 rule 3).
+    oof_by_id = oof_by_id or {}
     for cid, s in zip(ids, scores):
         sr = round(s, 6)
+        oof = oof_by_id.get(cid)
         store.conn.execute(
-            "UPDATE candidate SET rank_score=?, rank_uncertainty=? WHERE id=?",
-            (sr, round(1.0 - abs(2.0 * sr - 1.0), 6), cid))
+            "UPDATE candidate SET rank_score=?, rank_uncertainty=?, rank_score_oof=? "
+            "WHERE id=?",
+            (sr, round(1.0 - abs(2.0 * sr - 1.0), 6),
+             None if oof is None else round(oof, 6), cid))
+
+
+def _forward_ranking(store, run_id: int, ids, scores, at_k: int, seed: int):
+    """This run's stored rank scores against its OWN oracle labels, after the fact,
+    for a ranker that never read them (earlier / saved): result and calibration
+    updates, or the skip reason (budget-selected or one-class labels)."""
+    now = build_dataset(store, run_id)
+    by_id = dict(zip(ids, scores))
+    reason = forward_skip_reason(store, run_id, now.y)
+    if reason is not None:
+        return {"forward_skipped_reason": reason}, {"forward_skipped_reason": reason}
+    f_ndcg, f_prec, f_ndcg_rand, f_prec_rand = _evaluate(
+        now.y, [by_id[c] for c in now.ids], now.groups, at_k, seed)
+    fwd = {"ndcg": f_ndcg, "precision": f_prec, "ndcg_random": f_ndcg_rand,
+           "precision_random": f_prec_rand}
+    for key, val in fwd.items():
+        _metric(store, run_id, f"rank_{key}_forward", val)
+    return ({"ndcg_forward": f_ndcg, "precision_forward": f_prec,
+             "baseline_ndcg_forward": f_ndcg_rand, "baseline_precision_forward": f_prec_rand},
+            {f"forward_{k}": v for k, v in fwd.items()})
+
+
+#: Calibration keys a saved-mode ranker copy carries over from its original.
+_SAVED_CARRY = ("at_k", "seed", "feature_version", "oof_ndcg", "oof_precision",
+                "oof_ndcg_random", "oof_precision_random")
+
+
+def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
+                     seed: int = 0) -> dict:
+    """Rank EVERY candidate of this run with a saved earlier ranker — no retraining
+    (CC-ML-0018, FR-ML-15). The ranker counterpart of `train._score_from_saved`."""
+    from fuzzlab.ml.dataset import target_runs
+    from fuzzlab.ml.model_registry import saved_source
+    from fuzzlab.ml.persist import ModelIncompatibleError, ModelParamsError
+    if run_id is None:
+        raise ValueError("train_on='saved' needs the run to rank")
+    base: dict = {"train_on": "saved", "at_k": at_k}
+    target = target_of(store, run_id)
+    if target is None:
+        return {**base, "refused": True, "reason": "no target recorded for this run"}
+    earlier = [r for r in target_runs(store, target) if r < run_id]
+    row, source, reason = saved_source(store, (RANKER_NAME,), run_id, earlier,
+                                       model_id=model_id)
+    if row is None:
+        return {**base, "refused": True, "reason": reason}
+    try:
+        loaded = loads_model(*params_for(store, row["id"]))
+        loaded.check_compatible()
+    except (ModelParamsError, ModelIncompatibleError) as exc:
+        return {**base, "refused": True,
+                "reason": f"saved model #{row['id']} cannot be applied: {exc}"}
+    at_k = source.get("at_k", at_k)
+    every = build_dataset(store, run_id, include_unlabelled=True)
+    texts = _candidate_texts(store, run_id, every.ids)
+    scores = loaded.score(every.X, texts) if len(every) else []
+    _write_ranks(store, every.ids, scores)           # and clears rank_score_oof
+    train_runs = source.get("train_run_ids") or [source["run_id"]]
+    seen = seen_fraction(store, saved_training_rows(store, source), every.ids)
+    result = {**base, "at_k": at_k, "refused": False, "model": RANKER_NAME,
+              "fallback": False, "rows": len(every), "source_model_id": row["id"],
+              "source_run_id": source["run_id"], "train_run_ids": train_runs,
+              "seen_fraction": seen, "params_sha256": loaded.sha256}
+    _metric(store, run_id, "rank_seen_fraction", seen)
+    fwd_result, fwd_calibration = _forward_ranking(store, run_id, every.ids, scores,
+                                                   at_k, seed)
+    result.update(fwd_result)
+    calibration = {k: source[k] for k in _SAVED_CARRY if k in source}
+    calibration.update(run_id=run_id, trained_on="saved", source_model_id=row["id"],
+                       source_run_id=source["run_id"], train_run_ids=train_runs,
+                       seen_fraction=seen, seen_fraction_recomputed=True,
+                       score_source=SCORE_SAVED,
+                       oof_scope=_saved_oof_scope(source, row["id"]), **fwd_calibration)
+    params, params_sha = params_for(store, row["id"])
+    version = _next_version(store, RANKER_NAME)
+    store.conn.execute(
+        "INSERT INTO model (name, version, feature_version, calibration, params, "
+        "params_sha256) VALUES (?,?,?,?,?,?)",
+        (RANKER_NAME, version, row["feature_version"], json.dumps(calibration), params,
+         params_sha))
+    store.conn.commit()
+    result.update(version=version, ranked=len(scores))
+    return result
 
 
 def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
@@ -191,30 +293,18 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
                      ("rank_seen_fraction", seen)):
         _metric(store, run_id, key, val)
 
-    # Forward evaluation against this run's own oracle labels (never fed back).
-    now = build_dataset(store, run_id)
-    by_id = dict(zip(every.ids, scores))
-    reason = forward_skip_reason(store, run_id, now.y)
     calibration = {"at_k": at_k, "run_id": run_id, "trained_on": "earlier",
                    "train_run_ids": train_runs, "train_rows": n, "train_positives": pos,
                    "seen_fraction": seen, "seed": seed, "k": k, "min_rows": min_rows,
                    "min_positives": min_positives, "min_groups": min_groups,
                    "feature_version": prior.feature_version, "oof_scope": "earlier runs",
+                   "score_source": SCORE_EARLIER,
                    "oof_ndcg": ndcg, "oof_precision": prec, "oof_ndcg_random": ndcg_rand,
                    "oof_precision_random": prec_rand}
-    if reason is None:
-        f_ndcg, f_prec, f_ndcg_rand, f_prec_rand = _evaluate(
-            now.y, [by_id[c] for c in now.ids], now.groups, at_k, seed)
-        fwd = {"ndcg": f_ndcg, "precision": f_prec, "ndcg_random": f_ndcg_rand,
-               "precision_random": f_prec_rand}
-        for key, val in fwd.items():
-            _metric(store, run_id, f"rank_{key}_forward", val)
-            calibration[f"forward_{key}"] = val
-        result.update(ndcg_forward=f_ndcg, precision_forward=f_prec,
-                      baseline_ndcg_forward=f_ndcg_rand,
-                      baseline_precision_forward=f_prec_rand)
-    else:
-        result["forward_skipped_reason"] = calibration["forward_skipped_reason"] = reason
+    fwd_result, fwd_calibration = _forward_ranking(store, run_id, every.ids, scores,
+                                                   at_k, seed)
+    result.update(fwd_result)
+    calibration.update(fwd_calibration)
 
     params, params_sha = dumps_model("ranker", ranker, feature_names=ranker.feature_names,
                                      feature_version=prior.feature_version)

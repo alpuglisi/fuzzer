@@ -109,12 +109,13 @@ def test_stage_options_reach_the_plugins_and_the_run_record(tmp_path):
                             budget_seed=7)
     by = {p.name: p.config for p in plugins}
     assert by == {"ml-budget": {"method": "committee", "seed": 7},
-                  "ml-classifier": {"train_on": "earlier", "model_kind": "auto"},
+                  "ml-classifier": {"train_on": "earlier", "model_kind": "auto",
+                                    "hybrid": False},
                   "ml-ranker": {"train_on": "earlier"},
                   "ml-anomaly": {"contamination": 0.25}}
     with Store(tmp_path / "a.db") as store:
         run_id = store.start_run("auto", "h")
         PluginManager(plugins=plugins).record(store, run_id)
         rows = dict(store.conn.execute("SELECT name, config FROM run_plugin").fetchall())
-        assert rows["ml-classifier"] == '{"model_kind":"auto","train_on":"earlier"}'
+        assert rows["ml-classifier"] == '{"hybrid":false,"model_kind":"auto","train_on":"earlier"}'
         assert rows["ml-anomaly"] == '{"contamination":0.25}'

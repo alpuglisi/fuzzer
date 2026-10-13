@@ -414,6 +414,18 @@ ALTER TABLE run_plugin ADD COLUMN status TEXT;
 ALTER TABLE run_plugin ADD COLUMN error TEXT;
 """
 
+# --- migration 16: out-of-fold scores beside the deploy scores (CC-CORE-0029) -----
+# `candidate.score` / `rank_score` stay the deployed model's score for every row (the
+# saved model reproduces them exactly, FR-ML-13). In run mode the trainers also store
+# each labelled row's OUT-OF-FOLD score here — the distribution the conformal gate was
+# calibrated on — so a gate is applied to the scores it was calibrated for (BUG-0067).
+# A scoring pass writes or clears both columns for every row it scores (PA-0068 rule 3).
+# Additive; existing rows read NULL.
+_M0016 = """
+ALTER TABLE candidate ADD COLUMN score_oof REAL;
+ALTER TABLE candidate ADD COLUMN rank_score_oof REAL;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -431,6 +443,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (13, _M0013),
     (14, _M0014),
     (15, _M0015),
+    (16, _M0016),
 ]
 
 

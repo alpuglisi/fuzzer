@@ -15,8 +15,9 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from fuzzlab.core.oracle_status import UNLABELLED
 from fuzzlab.core.runmode import to_category
-from fuzzlab.core.urls import to_path
+from fuzzlab.core.urls import canonical_origin, to_path
 
 FEATURE_NAMES = [
     "loc_body", "method_post", "has_sink", "cat_sqli", "cat_xss",
@@ -72,12 +73,18 @@ def _features(ev: dict, sink_context, rules_fired: int) -> list[float]:
     ]
 
 
-#: `candidate.oracle_status` of a row the oracle never looked at because the
-#: confirmation budget ran out (migration 13). "No finding" is not a negative there.
-SKIPPED_BUDGET = "skipped_budget"
+def target_runs(store, target: str) -> list[int]:
+    """Runs whose recorded target is ``target``, compared as canonical origins — so
+    ``localhost:8080`` and ``127.0.0.1:8080`` are one target (CC-ML-0018, D-b)."""
+    want = canonical_origin(target)
+    if want is None:                     # no usable host: matches nothing
+        return []
+    return sorted({int(r["run_id"]) for r in store.conn.execute(
+        "SELECT run_id, base_url FROM target WHERE run_id IS NOT NULL").fetchall()
+        if canonical_origin(r["base_url"]) == want})
 
 
-def _run_filter(run_id, before_run_id, target) -> tuple[str, tuple]:
+def _run_filter(store, run_id, before_run_id, target) -> tuple[str, tuple]:
     """SQL condition on a table's `run_id` column for the requested scope."""
     conds, args = [], []
     if run_id is not None:
@@ -88,8 +95,9 @@ def _run_filter(run_id, before_run_id, target) -> tuple[str, tuple]:
         args.append(before_run_id)
     if target is not None:
         # only pipeline runs record a target row; a run without one never matches
-        conds.append("run_id IN (SELECT run_id FROM target WHERE base_url=?)")
-        args.append(target)
+        runs = target_runs(store, target)
+        conds.append(f"run_id IN ({','.join('?' * len(runs))})" if runs else "0")
+        args.extend(runs)
     return (" AND ".join(conds) or "1=1"), tuple(args)
 
 
@@ -104,11 +112,13 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
     (BUG-0065: the store-wide view used to pool them, leaking labels across runs and
     targets and inflating counts).
 
-    Candidates the oracle skipped for budget (``oracle_status='skipped_budget'``) have
-    no label, so they are left out unless ``include_unlabelled`` (label-free uses:
-    scoring every row, anomaly detection); they are then marked ``labelled=False``.
+    Candidates nobody checked (``oracle_status`` in `UNLABELLED`: skipped for budget,
+    or in a category with no oracle confirmer — CC-ML-0018) have no label, so they are
+    left out unless ``include_unlabelled`` (label-free uses: scoring every row, anomaly
+    detection); they are then marked ``labelled=False``. ``target`` is compared as a
+    canonical origin (`target_runs`).
     """
-    where, args = _run_filter(run_id, before_run_id, target)
+    where, args = _run_filter(store, run_id, before_run_id, target)
 
     positives: set[tuple[int, str, str, str]] = set()
     for f in store.conn.execute(
@@ -128,7 +138,7 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
     for c in store.conn.execute(
             f"SELECT id, run_id, evidence, sink_context, oracle_status FROM candidate "
             f"WHERE {where} ORDER BY id", args).fetchall():
-        unlabelled = c["oracle_status"] == SKIPPED_BUDGET
+        unlabelled = c["oracle_status"] in UNLABELLED
         if unlabelled and not include_unlabelled:
             continue
         try:

@@ -224,7 +224,8 @@ def test_guard_allows_exactly_the_advisory_writes_and_is_removed_afterwards(tmp_
 def test_advisory_writes_are_one_declared_set():
     assert ADVISORY_WRITES["insert"] == {"model", "run_metrics", "metric_series"}
     assert ADVISORY_WRITES["update_candidate"] == {
-        "score", "rank_score", "rank_uncertainty", "anomaly_score", "anomaly_flag"}
+        "score", "rank_score", "rank_uncertainty", "anomaly_score", "anomaly_flag",
+        "score_oof", "rank_score_oof"}                  # CC-PLUG-0006
 
 
 @pytest.mark.parametrize("mode", [ADVISORY, READ_ONLY])

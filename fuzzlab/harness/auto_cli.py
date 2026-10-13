@@ -70,10 +70,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rank", action="store_true",
                    help="After the run, train the candidate ranker and write advisory "
                         "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
-    p.add_argument("--train-on", choices=["run", "earlier"], default="run",
+    p.add_argument("--train-on", choices=["run", "earlier", "saved"], default="run",
                    help="What --score/--rank train on: run = this run's own labels "
-                        "(in-sample deploy fit); earlier = earlier runs against the same "
-                        "target, never this run's labels (refuses when there are none)")
+                        "(labelled rows also get out-of-fold scores); earlier = earlier "
+                        "runs against the same target, never this run's labels; saved = "
+                        "no training, apply the newest saved model from an earlier run "
+                        "(refuses when there is none)")
+    p.add_argument("--model-id", type=int, default=None, metavar="ID",
+                   help="With --score --train-on saved: the saved classifier model row to "
+                        "apply (default: the newest qualifying one)")
+    p.add_argument("--ranker-model-id", type=int, default=None, metavar="ID",
+                   help="With --rank --train-on saved: the saved ranker model row to apply")
+    p.add_argument("--hybrid", action="store_true",
+                   help="With --score: add the ECOD anomaly score as a classifier feature "
+                        "(XGBOD-style; label-free)")
     p.add_argument("--confirm-budget", type=int, default=None, metavar="N",
                    help="Send at most N distinct candidates to the oracle, chosen by a "
                         "model trained on EARLIER runs against the same target (active "
@@ -120,6 +130,14 @@ def main(argv: list[str]) -> int:
         p.error("--anomaly-contamination must be in (0, 0.5]")
     if args.train_on != "run" and not (args.score or args.rank):
         p.error("--train-on needs --score and/or --rank")
+    if args.hybrid and not args.score:
+        p.error("--hybrid needs --score")
+    if args.hybrid and args.train_on == "saved":
+        p.error("--hybrid does not apply to --train-on saved (a saved model keeps its own)")
+    if args.model_id is not None and not (args.score and args.train_on == "saved"):
+        p.error("--model-id needs --score and --train-on saved")
+    if args.ranker_model_id is not None and not (args.rank and args.train_on == "saved"):
+        p.error("--ranker-model-id needs --rank and --train-on saved")
 
     # Plugins (the ML stages included, FR-ML-6) are settled before the store is opened,
     # so a missing ML package or a prioritizer conflict leaves no run row behind.
@@ -200,6 +218,8 @@ def _build_plugins(p, args):
             stages = ml_plugins.stage_plugins(
                 score=args.score, rank=args.rank, anomaly=args.anomaly,
                 contamination=args.anomaly_contamination, train_on=args.train_on,
+                hybrid=args.hybrid, model_id=args.model_id,
+                ranker_model_id=args.ranker_model_id,
                 confirm_budget=args.confirm_budget, budget_method=args.budget_method,
                 budget_seed=args.budget_seed)
     args.stage_names = {st.flag: st.name for st in stages}
@@ -261,9 +281,13 @@ def _print_earlier(label: str, verb: str, r: dict, metric: str, key: str,
               f"on this run's labels)")
         return
     runs = ", ".join(str(x) for x in r.get("train_run_ids") or [])
-    line = (f"  {label} ({r['model']}): {verb} {r.get(verb, 0)} candidate(s); trained on "
-            f"{r.get('train_rows', 0)} earlier labelled candidate(s) from this target "
-            f"(runs {runs}), not on this run's labels; "
+    if r.get("train_on") == "saved":            # CC-FUZZ-0051: applied, not trained
+        how = (f"with saved model #{r.get('source_model_id')} (trained on runs {runs}), "
+               f"not trained on this run")
+    else:
+        how = (f"trained on {r.get('train_rows', 0)} earlier labelled candidate(s) from "
+               f"this target (runs {runs}), not on this run's labels")
+    line = (f"  {label} ({r['model']}): {verb} {r.get(verb, 0)} candidate(s); {how}; "
             f"{round(100 * (r.get('seen_fraction') or 0.0))}% of this run's candidates "
             f"were seen in training; ")
     if f"{key}_forward" in r:
@@ -326,7 +350,7 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     ml = stage("score") if args.score else None
     rank = stage("rank") if args.rank else None
     anomaly = stage("anomaly") if args.anomaly else None
-    if ml is not None and ml.get("train_on") == "earlier":
+    if ml is not None and ml.get("train_on") in ("earlier", "saved"):
         _print_earlier("ml", "scored", ml, "PR-AUC", "pr_auc", "prevalence",
                        "baseline_prevalence_forward")
     elif ml is not None:
@@ -335,7 +359,7 @@ def _print_summary(args, counts, result, plugins=None) -> int:
             line += (f"; PR-AUC={ml.get('pr_auc')} vs prevalence "
                      f"{ml.get('baseline_prevalence')} / sigma {ml.get('baseline_sigma')}")
         print(line + "  (advisory — never labels)")
-    if rank is not None and rank.get("train_on") == "earlier":
+    if rank is not None and rank.get("train_on") in ("earlier", "saved"):
         _print_earlier("ranker", "ranked", rank, f"NDCG@{rank.get('at_k')}", "ndcg",
                        "random", "baseline_ndcg_forward")
     elif rank is not None:

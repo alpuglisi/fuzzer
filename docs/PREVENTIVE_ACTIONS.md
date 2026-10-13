@@ -999,3 +999,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A recurrence in a site a prior sweep cleared triggers a re-sweep** of every site
      that sweep cleared, judged by rule 1. The re-sweep is recorded in the new bug
      report. (from BUG-0066)
+
+- **PA-0068** — Strengthens `PA-0064` (held-out numbers; in-sample labelled) from *numbers*
+  to *every calibrated artefact*, after BUG-0067: out-of-fold conformal thresholds were
+  applied to in-sample deploy scores, and PA-0064's sweep never looked at decisions.
+  1. **An artefact judges only its own distribution.** A threshold, calibration map or
+     held-out metric is applied only to scores from the distribution it was calibrated
+     or computed on. With no such score the consumer says so ("n/a (…)"); it never
+     substitutes another score.
+  2. **Stored scores name their source.** A model row records `score_source`. A score
+     distribution that must be kept gets its own column, never a mix in one column. One
+     function decides which stored score a gate may judge (`fuzzlab.ml.train.gate_input`).
+  3. **A writer owns its paired columns.** The writer of a score column writes or clears
+     its paired columns (`score` / `score_oof`, `rank_score` / `rank_score_oof`) in the
+     same pass, so a re-scored run never keeps another model's values.
+  4. **Sweep by consumer.** The PA-0002 sweep for this class covers every consumer of a
+     calibrated artefact (each `gate.decide`, each threshold comparison, each
+     calibration applied), not only the producers. (from BUG-0067)
