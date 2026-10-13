@@ -18,6 +18,92 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — `fuzzlab auto`: the D15 fail-safe exit left an orphan run row (fixed, BUG-0078/PA-0079)
+- **Symptom:** a usage error (no categories, `--points ground-truth` without a contract)
+  exited 2 but left an empty run behind, which `fuzzlab report` then defaulted to.
+  `greybox-run` (no crawl points) and `run_targets` (a bad spec after earlier targets
+  had started) did the same.
+- **Root cause:** usage validation ran after `start_run`. An earlier fix of the same
+  symptom (plugins, CC-FUZZ-0050) left no rule and no sweep.
+- **Remediation:**
+  - a shared pure `plan_run`, run before the store;
+  - environment prechecks (`--browser`, greybox paths);
+  - `Store.mark_aborted` marks a run that fails after it starts.
+
+  CC-FUZZ-0056, CC-CORE-0033; `docs/bugs/BUG-0078-d15-exit-leaves-orphan-run.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML tab: bandit pull counts counted prior mass (fixed, BUG-0077/PA-0078)
+- **Symptom:** after one pull, the panel showed 3 and 1 pulls on two arms.
+- **Root cause:** pulls were shown as `α + β − 2`, which assumes a Beta(1,1) prior;
+  arms carry informed priors.
+- **Remediation:** pulls read the stored `cost_n` counter. CC-UI-0048;
+  `docs/bugs/BUG-0077-bandit-panel-pull-counts.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Plugins: one malformed plugin crashed every plugin's registration (fixed, BUG-0076/PA-0077)
+- **Symptom:** an entry point with `priority = "high"` made
+  `PluginManager.from_entry_points` raise, losing every plugin, the ML stages included.
+- **Root cause:** metadata reading in `register()`, and hook lookup, were outside the
+  containment boundary.
+- **Remediation:** every exception from `plugin_info` rejects only that plugin, with
+  its reason; a bool priority is rejected; hook lookup is contained. CC-PLUG-0008;
+  `docs/bugs/BUG-0076-plugin-registration-not-contained.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML dataset: labels ignored the HTTP method (fixed, latent, BUG-0075/PA-0076)
+- **Symptom:** a finding confirmed only on POST labelled the GET candidate at the same
+  path and param positive.
+- **Root cause:** the label and seen-key joins omitted the method, which both tables
+  record.
+- **Remediation:** a shared `dataset.method_key` on both sides; a method-less finding
+  still matches any method. CC-ML-0023;
+  `docs/bugs/BUG-0075-dataset-labels-ignore-http-method.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Report/run page: a store-wide model cited for runs it never scored (fixed, BUG-0074/PA-0075)
+- **Symptom:** after a store-wide train, a later unscored run reported that model.
+- **Root cause:** a NULL model scope was read as "covers every run".
+- **Remediation:** store-wide trains record `scored_run_ids`; legacy rows cover only
+  runs holding that family's stored score (`select_latest(score_column=…)`). CC-ML-0023;
+  `docs/bugs/BUG-0074-store-wide-model-cited-for-unscored-runs.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML tab: ranker baseline not comparable; ties broken by input order (fixed, BUG-0073/PA-0074)
+- **Symptom:** a no-signal ranker showed precision@k 0.5 against a "random baseline" of
+  0.1. A constant ranker scored nDCG 1.0 when the input listed positives first.
+- **Root cause:** the panel's baseline was a global prevalence, not the trainer's
+  same-rows random control. The ranking metrics' tie-break was input order.
+- **Remediation:** one `evaluate_vs_random` for metric and baseline; tie-averaged
+  nDCG / precision@k; NaN refused; trainer metrics on stored 6-dp values. CC-ML-0023,
+  CC-UI-0048; `docs/bugs/BUG-0073-ranker-panel-baseline-not-comparable.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Pipeline: duplicate findings for one confirmation key (fixed, BUG-0072/PA-0073)
+- **Symptom:** two ground-truth points differing only in `sink_context` produced two
+  identical findings in unbudgeted runs.
+- **Root cause:** the unbudgeted loop confirmed every row, not every key; PA-0048 had
+  judged duplicates safe by one consumer.
+- **Remediation:** one confirmation per key in row order, with an invariant test in
+  every mode. The summary goldens changed deliberately (findings 4 → 3). CC-FUZZ-0056;
+  `docs/bugs/BUG-0072-unbudgeted-pipeline-duplicate-findings.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — `fuzzlab auto --bandit` crashed on content-typed probes, leaving NULL statuses (fixed, BUG-0071/PA-0072)
+- **Symptom:** `TypeError: _CostCounter.send() got an unexpected keyword argument
+  'content_type'` on JSON / upload / XXE points. The aborted run's candidates kept NULL
+  `oracle_status`, which reads as labelled.
+- **Root cause:** a protocol wrapper drifted from `Sender`; the oracle loop wrote
+  statuses only after the loop.
+- **Remediation:**
+  - the wrapper forwards `content_type`;
+  - a pre-loop `pending` status (unlabelled), and a `finally` flush;
+  - a sender conformance test found by AST.
+
+  CC-FUZZ-0056, CC-CORE-0033, CC-UI-0048;
+  `docs/bugs/BUG-0071-bandit-cost-wrapper-drops-content-type.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Packaging: the built package shipped 87 of 485 data files (fixed, BUG-0068/PA-0070)
 - **Symptom:** a setuptools build of the tracked tree omitted every web tab template,
   all JS/CSS/vendor assets, and the lab generator's nested templates and skeletons. An

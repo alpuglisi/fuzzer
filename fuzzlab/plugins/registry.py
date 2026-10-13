@@ -40,12 +40,26 @@ def plugin_config(plugin) -> str:
 
 
 def plugin_info(plugin) -> PluginInfo:
+    """A plugin's metadata. Raises on malformed metadata (e.g. ``priority="high"``, or a
+    bool priority, which ``int()`` would silently read as 0/1); `HookRegistry.register`
+    contains that as a rejection (BUG-0076)."""
+    priority = getattr(plugin, "priority", 100)
+    if isinstance(priority, bool):
+        raise ValueError(f"priority must be an integer, got {priority!r}")
     return PluginInfo(
         name=str(getattr(plugin, "name", type(plugin).__name__)),
         version=str(getattr(plugin, "version", "0")),
-        priority=int(getattr(plugin, "priority", 100)),
+        priority=int(priority),
         config=plugin_config(plugin),
     )
+
+
+def _fallback_name(plugin) -> str:
+    """A name to report a plugin by when its own metadata cannot be read."""
+    try:
+        return str(getattr(plugin, "name", type(plugin).__name__))
+    except Exception:                               # noqa: BLE001 - name itself broken
+        return type(plugin).__name__
 
 
 class HookRegistry:
@@ -54,17 +68,29 @@ class HookRegistry:
         self._disabled: set[str] = set()
         self._errors: dict[str, str] = {}
         self._rejected: list[PluginInfo] = []
+        self._rejected_why: list[str] = []            # parallel to `_rejected`
         self._log = logger
 
+    def _reject(self, info: PluginInfo, why: str) -> None:
+        self._rejected.append(info)
+        self._rejected_why.append(why)
+        if self._log:
+            self._log.warning(f"plugin refused: {why}", extra={"plugin": info.name})
+
     def register(self, plugin) -> PluginInfo | None:
-        """Register ``plugin``; refuse (log, return None) a name already registered —
-        two plugins sharing a name would otherwise share one disabled flag."""
-        info = plugin_info(plugin)
+        """Register ``plugin``; refuse (log, return None) a plugin whose metadata cannot
+        be read — every exception, contained like any other per-plugin failure so one bad
+        plugin never takes the others down (BUG-0076, FR-PLUG-3) — or a name already
+        registered (two plugins sharing a name would otherwise share one disabled
+        flag)."""
+        try:
+            info = plugin_info(plugin)
+        except Exception as exc:                     # noqa: BLE001 - containment boundary
+            self._reject(PluginInfo(name=_fallback_name(plugin)),
+                         f"invalid metadata: {type(exc).__name__}: {exc}")
+            return None
         if any(i.name == info.name for i, _ in self._plugins):
-            self._rejected.append(info)
-            if self._log:
-                self._log.warning("plugin refused: duplicate name",
-                                  extra={"plugin": info.name})
+            self._reject(info, "duplicate name")
             return None
         self._plugins.append((info, plugin))
         self._plugins.sort(key=lambda t: (t[0].priority, t[0].name))  # deterministic
@@ -77,7 +103,11 @@ class HookRegistry:
         for info, plugin in self._plugins:
             if info.name in self._disabled:
                 continue
-            fn = getattr(plugin, hook, None)
+            try:
+                fn = getattr(plugin, hook, None)       # a raising attribute is contained
+            except Exception as exc:                   # noqa: BLE001 - (BUG-0076 sweep)
+                self.fail(info, repr(exc))
+                continue
             if callable(fn):
                 yield info, fn
 
@@ -148,3 +178,7 @@ class HookRegistry:
 
     def rejected(self) -> list[PluginInfo]:
         return list(self._rejected)
+
+    def rejections(self) -> list[tuple[PluginInfo, str]]:
+        """Each refused plugin with why it was refused."""
+        return list(zip(self._rejected, self._rejected_why))

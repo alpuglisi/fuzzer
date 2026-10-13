@@ -8,9 +8,12 @@ it lives here, in exactly one function (PA-0003/PA-0021) — never as an inline
 "newest row" query at a read site.
 
 Scope: a trainer records the `run_id` it trained on in the row's `calibration` JSON
-(null for a store-wide train, which re-scores every run's candidates). A row covers a run
-when its `run_id` equals it, is null, or is absent (a legacy row written before the key
-existed — its scope is unknowable, so the old "newest row" behavior is kept).
+(null for a store-wide train, which re-scores every run's candidates present at the
+time). A row covers a run when its `run_id` equals it; a store-wide row (null) covers the
+runs it recorded in `scored_run_ids` — never a later run it never scored (BUG-0074,
+PA-0075). A store-wide row without that list, or a legacy row with no `run_id` key (its
+scope is unknowable), covers a run only when that run holds a stored score in the
+family's column — a provenance claim backed by a recorded fact about the run.
 """
 
 from __future__ import annotations
@@ -21,11 +24,29 @@ from typing import Sequence
 _ABSENT = object()
 
 
-def _covers(calibration: dict, run_id: int | None) -> bool:
+#: The candidate column each family writes its advisory score to (`select_latest`'s
+#: ``score_column``): a legacy store-wide row covers only runs with a value there.
+SCORE_COLUMNS = ("score", "rank_score")
+
+
+def _has_scores(store, run_id: int, score_column: str) -> bool:
+    if score_column not in SCORE_COLUMNS:
+        raise ValueError(f"score_column must be one of {SCORE_COLUMNS}, got {score_column!r}")
+    return store.conn.execute(
+        f"SELECT 1 FROM candidate WHERE run_id=? AND {score_column} IS NOT NULL LIMIT 1",
+        (run_id,)).fetchone() is not None
+
+
+def _covers(store, calibration: dict, run_id: int | None, score_column: str) -> bool:
     if run_id is None:
         return True
     scope = calibration.get("run_id", _ABSENT)
-    return scope is _ABSENT or scope is None or scope == run_id
+    if scope is not _ABSENT and scope is not None:
+        return scope == run_id
+    scored = calibration.get("scored_run_ids")
+    if isinstance(scored, list):
+        return run_id in scored
+    return _has_scores(store, run_id, score_column)       # legacy: back it with a fact
 
 
 def params_for(store, model_id: int) -> tuple[str, str] | None:
@@ -45,13 +66,18 @@ def params_sha256_for(store, model_id: int) -> str | None:
     return row["params_sha256"] if row else None
 
 
-def select_latest(store, names: Sequence[str], run_id: int | None = None):
+def select_latest(store, names: Sequence[str], run_id: int | None = None, *,
+                  score_column: str):
     """The newest `model` row named in ``names`` whose scope covers ``run_id``.
+    ``score_column`` is the family's candidate score column (`SCORE_COLUMNS`), required
+    so no caller can omit the fact a legacy store-wide row's coverage rests on.
 
     Returns ``(row, calibration)`` — the row (`id, name, version, feature_version,
     calibration`) and its parsed calibration (``{}`` when absent or malformed) — or
     ``None`` when no row of the family covers the run.
     """
+    if score_column not in SCORE_COLUMNS:
+        raise ValueError(f"score_column must be one of {SCORE_COLUMNS}, got {score_column!r}")
     names = list(names)
     if not names:
         return None
@@ -66,7 +92,7 @@ def select_latest(store, names: Sequence[str], run_id: int | None = None):
             calibration = {}
         if not isinstance(calibration, dict):
             calibration = {}
-        if _covers(calibration, run_id):
+        if _covers(store, calibration, run_id, score_column):
             return row, calibration
     return None
 

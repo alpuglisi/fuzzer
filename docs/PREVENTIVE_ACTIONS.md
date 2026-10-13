@@ -1065,3 +1065,93 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      synthetic writer-less column, and a stale allowlist entry fails too.
   3. **The PA-0002 sweep for this class covers every writer-less column** (the
      allowlist records each one's reason). (from BUG-0069)
+
+- **PA-0072** — Strengthens `PA-0041` (one seam's implementations stay in step) from
+  *transport settings on senders* to the seam's **signature and every wrapper**, after
+  BUG-0071: `_CostCounter` (the bandit's cost wrapper) lacked `content_type`, so
+  `--bandit` crashed on every content-typed probe.
+  1. **Every implementation or wrapper of a project protocol accepts the protocol's full
+     signature and forwards every argument it accepts.**
+  2. **Enforced by discovery, not by a list.** `tests/test_sender_conformance.py` finds
+     `Sender` implementations by shape (AST), checks each signature against the
+     protocol, and calls each wrapper against a recording inner sender. It is proven on
+     synthetic wrappers that lack or drop an argument. Add a sibling guard when another
+     protocol gets wrappers.
+  3. **A loop that writes per-row state first writes a non-label "pending" state and
+     flushes what it has in a `finally`.** A crash must never leave a value a consumer
+     reads as a label (here NULL `oracle_status` reads as "oracle-labelled"). (from
+     BUG-0071)
+
+- **PA-0073** — Strengthens `PA-0048` ("duplicate points are safe to emit") after
+  BUG-0072: the duplicates were safe for scoring, but the unbudgeted oracle loop
+  confirmed each one and wrote duplicate findings.
+  1. **When a producer may emit duplicates "safely", name every consumer of the
+     duplicated unit and check each one.** "Safe" is a claim about all of them.
+  2. **Enforce the invariant in every mode.** Here, `oracle.confirm` calls == distinct
+     confirmation keys and findings ≤ distinct keys, in unbudgeted, budgeted and fallback
+     modes (`tests/test_pipeline_invariants.py`).
+  3. **A golden that pins a count is re-derived, never regenerated blindly.** A golden
+     change is listed with before/after and its cause. (from BUG-0072)
+
+- **PA-0074** — Strengthens `PA-0069(2)/(4)` (tie handling of order-statistic
+  thresholds) and `PA-0003`, after BUG-0073: the ML tab compared a per-page ranker metric
+  with a global prevalence "baseline". The ranking metrics broke ties by input order, so a
+  constant ranker could beat the random expectation.
+  1. **A metric and its baseline are computed by the same function over the same rows**
+     (here `rank_train.evaluate_vs_random`). A displayed baseline derived any other way
+     is a defect.
+  2. **Every score-ordered computation states its tie handling**: a threshold, a top-k
+     metric, or a selection cut. Input order is never the tie-break for a metric or a
+     guarantee. A constant scorer is tested to equal the random expectation.
+  3. **The PA-0002 sweep for this class covers every score-ordered computation**, not
+     only thresholds. (from BUG-0073)
+
+- **PA-0075** — Strengthens `PA-0063(1)` and `PA-0067` (model-row scope, judged on the
+  reader side) after BUG-0074: a store-wide model (scope NULL = "all runs") was cited for
+  later runs it never scored.
+  1. **A provenance claim about a run** ("this model scored / produced X for this run")
+     **is backed by a recorded fact about that run.** It is never inferred from an
+     open-ended scope (NULL = all, "newest", a maximum).
+  2. **A writer whose scope is open-ended records the closed set it acted on** (here,
+     `calibration.scored_run_ids`).
+  3. **A reader of a legacy open-ended row falls back to a fact in the run's own data**
+     (a stored score in the family's column, passed as `select_latest`'s required
+     `score_column`), never to "covers everything". (from BUG-0074)
+
+- **PA-0076** — Strengthens `PA-0066(1)` (cross-table lookups keyed by run + content)
+  after BUG-0075: the label join keyed on `(run, path, param, category)` and ignored the
+  HTTP method both tables record, so a POST-only finding labelled the GET candidate
+  positive.
+  1. **A join between two tables keys on every identity field both sides record.** A
+     field is omitted only with a stated reason (e.g. "an endpoint is a path").
+  2. **Both sides normalise through one helper** (PA-0003; here `dataset.method_key`).
+  3. **When a new value of an identity field becomes possible** (a new method, location
+     or content type), **sweep the joins keyed without it.** (from BUG-0075)
+
+- **PA-0077** — Plugin containment covers every per-plugin step, after BUG-0076: one
+  entry point with `priority = "high"` raised inside `register()` and took every plugin
+  down, the ML stages included.
+  1. **Every per-plugin step is inside the containment boundary:** load, metadata,
+     registration, hook lookup, hook call, and recording. The containment property is
+     tested at each step, not only at hook invocation.
+  2. **A contained failure is visible:** a rejection or disable carries its reason to the
+     run record or CLI. (from BUG-0076)
+
+- **PA-0078** — A displayed count reads the recorded counter, after BUG-0077: the bandit
+  panel showed `α + β − 2` as pulls, which counted informed-prior mass as pulls.
+  1. **Never reconstruct a count from parameters that also encode something else** (a
+     prior, a smoothing term, a default).
+  2. **A display test asserts the value a production writer records**, not a formula
+     applied to a hand-seeded row (cf. PA-0071). (from BUG-0077)
+
+- **PA-0079** — Usage-level validation precedes every side effect, after BUG-0078: the
+  D15 fail-safe exited 2 only after writing a run row (and importing the crawl). The same
+  symptom had been fixed for plugin errors alone (CC-FUZZ-0050), with no rule and no
+  sweep.
+  1. **Every usage-level validation runs before any side effect** (store open, run row,
+     import, network). The pure part of a resolution is one function that both the CLI
+     and the library call (here `harness.auto.plan_run`).
+  2. **A failure only the run can hit marks the run** (`Store.mark_aborted`: `notes =
+     "aborted: …"`). It is never left looking like a finished empty run.
+  3. **Tested per path:** each known usage-error path asserts that no run row (no store)
+     is left behind. A sweep covers every `start_run` caller. (from BUG-0078)

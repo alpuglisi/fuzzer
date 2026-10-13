@@ -137,8 +137,9 @@ function renderRanker(d) {
       + earlierNote(d.oof, (f) => `nDCG@${d.oof.at_k} ${(f.ndcg ?? 0).toFixed(3)}`
         + (f.ndcg_random != null ? ` (random ${f.ndcg_random.toFixed(3)})` : ""))
     : "";
-  setMeta("ranker", `${d.evaluation} nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} · precision@${d.k} `
-    + `${d.precision_at_k.toFixed(3)} (random baseline ${d.random_baseline_precision_at_k.toFixed(3)})`
+  setMeta("ranker", `${d.evaluation} nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} `
+    + `(random ${d.random_baseline_ndcg_at_k.toFixed(3)}) · precision@${d.k} `
+    + `${d.precision_at_k.toFixed(3)} (random ${d.random_baseline_precision_at_k.toFixed(3)})`
     + `${oof} · N=${d.n}`
     // CC-UI-0046: pairwise learning-to-rank — scores are no probabilities and fold
     // models' scales differ, so run-wide metrics are the trainer's per-fold average
@@ -147,7 +148,8 @@ function renderRanker(d) {
     + (d.uncertainty_available ? "" : " · uncertainty n/a (pairwise)"));
   bars("chart-rank-bars", ["nDCG@k", "precision@k"], [
     { label: "ranker", data: [d.ndcg_at_k, d.precision_at_k] },
-    { label: "random baseline", data: [0, d.random_baseline_precision_at_k] },
+    { label: "random baseline",
+      data: [d.random_baseline_ndcg_at_k, d.random_baseline_precision_at_k] },
   ], { caption: "nDCG@k / precision@k vs random" });
   histChart("chart-rank-score-hist", d.score_hist, "rank score");
   if (d.uncertainty_hist) histChart("chart-rank-unc-hist", d.uncertainty_hist, "rank uncertainty");
@@ -227,7 +229,8 @@ function renderBandit(d) {
     for (const arm of d.arms) {
       const tr = document.createElement("tr");
       for (const v of [arm.context, arm.arm, arm.mean.toFixed(3),
-                       `${arm.ci_low.toFixed(3)}–${arm.ci_high.toFixed(3)}`, arm.pulls,
+                       `${arm.ci_low.toFixed(3)}–${arm.ci_high.toFixed(3)}`,
+                       arm.pulls == null ? "n/a (legacy)" : arm.pulls,
                        arm.mean_cost == null ? "—" : arm.mean_cost.toFixed(3)]) {
         const td = document.createElement("td");
         td.textContent = String(v);

@@ -82,7 +82,7 @@ def test_run_detail_carries_the_runs_ml_context(tmp_path):
     with Store(tmp_path / "s.db") as store:
         d = run_detail(store, seeded["trained"])
     assert d["oracle_status"] == {"checked": 12, "skipped_budget": 5, "no_confirmer": 3,
-                                  "unrecorded": 1}
+                                  "unrecorded": 1, "pending": 0}
     assert d["anomaly"]["flagged"] == 5.0
     assert d["anomaly"]["top"][0]["param"] == HOSTILE        # highest stored score first
     assert len(d["anomaly"]["top"]) <= 10

@@ -3,9 +3,9 @@ rc=0
 auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-truth)
   points from: ground-truth
   points audited: 23   candidates: 46   negatives: 41
-  findings (oracle-confirmed): 4
+  findings (oracle-confirmed): 3
   score vs ground truth: tp=3 fp=0 fn=5 tn=8
-  requests: 322   requests/finding: 80.5
+  requests: 306   requests/finding: 102.0
   not audited (3 enumerated point(s) — scoped as future capability; they score as false negatives):
     - GET /reviews.php [author]: client-only/DOM (needs browser execution, M6)
     - GET /feedback.php [ref]: client-only/DOM (needs browser execution, M6)

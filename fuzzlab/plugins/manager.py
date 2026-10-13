@@ -247,6 +247,9 @@ class PluginManager:
     def rejected(self) -> list[PluginInfo]:
         return self.registry.rejected()
 
+    def rejections(self) -> list[tuple[PluginInfo, str]]:
+        return self.registry.rejections()
+
     def record(self, store, run_id: int) -> int:
         """Start the run's plugin scope and write every registered plugin onto it
         (migrations 10 + 15). From the second run on, containment from the previous run

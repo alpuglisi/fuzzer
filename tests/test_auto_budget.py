@@ -269,8 +269,10 @@ def test_launcher_renders_the_new_flags_as_typed_inputs():
 
 
 def test_unbudgeted_run_confirms_rows_in_their_original_order(tmp_path, confirm_calls):
-    """Order matters to a bandit scheduler, so the no-budget path must not regroup
-    duplicate rows by key: interleaved duplicates are confirmed in row order."""
+    """Order matters to a bandit scheduler, so the no-budget path must not regroup rows
+    by key: keys are confirmed in the order of their first row. A duplicate row of a
+    key sends the identical Candidate, so it is checked without a second probe
+    (BUG-0072, FR-FUZZ-32 amended: it used to re-confirm and duplicate the finding)."""
     with Store(tmp_path / "a.db") as store:
         run_id = store.start_run("auto", "127.0.0.1:8080")
         ev = ('{"url": "%s/%s", "param": "%s", "category": "sql-injection", '
@@ -281,4 +283,5 @@ def test_unbudgeted_run_confirms_rows_in_their_original_order(tmp_path, confirm_
                                (run_id, "R", ev % (BASE, page, param)))
         store.conn.commit()
         run_pipeline([], store, run_id, AutoSender(), _PLAN)
-        assert [(c[0].rsplit("/", 1)[1], c[1]) for c in confirm_calls] == rows
+        assert [(c[0].rsplit("/", 1)[1], c[1]) for c in confirm_calls] == rows[:2]
+        assert _statuses(store, run_id) == {"checked": 3}       # the duplicate too

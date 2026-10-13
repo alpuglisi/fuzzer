@@ -22,6 +22,64 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0056 — Bandit cost wrapper takes `content_type` (BUG-0071); crash-safe oracle statuses; one confirmation per key (BUG-0072); usage checks before any run row (BUG-0078) (2026-10-13)
+- Change:
+  - **BUG-0071.**
+    - `oracle._CostCounter.send` accepts and forwards `content_type`, in the same shape
+      as `_CountingSender`.
+    - `run_pipeline` writes one committed pre-loop status for every candidate:
+      `no_confirmer` (final) or `pending` (unlabelled, CC-CORE-0033). The oracle loop
+      runs in `try/finally`, and the `finally` writes the statuses gathered so far
+      before the error re-raises. A crash never leaves a NULL, which the ML dataset
+      reads as labelled.
+  - **BUG-0072.** The unbudgeted loop confirms **each key once, on its first row in row
+    order, whatever the verdict**. Later rows of a key are marked `checked` with no
+    probe. Row order (the bandit's) is kept. There is no writer-level dedupe (`finding`
+    has no `location`). **FR-FUZZ-32 is amended in place.**
+  - **BUG-0078.**
+    - New pure `harness.auto.plan_run(mode, ground_truth, selected_categories,
+      points_source)` → `(source, plan)`. `run_auto` calls it, and so does `fuzzlab auto`
+      **before opening the store**.
+    - `_precheck_environment`, also before the store: `--browser` needs Playwright
+      importable, and greybox side-channel paths must exist.
+    - Everything after `start_run` is guarded: `Store.mark_aborted` (CC-CORE-0033)
+      records `notes = "aborted: …"`, then the error re-raises.
+    - Sweep fixes:
+      - `greybox-run`: ground-truth "no points" is checked before the store, and the
+        crawl path is guarded;
+      - `run_targets`: every spec's plan is resolved before the first run, and each run
+        is guarded.
+- Impact (other components / project):
+  - **CORE** (CC-CORE-0033): `PENDING`, `Store.mark_aborted`.
+  - **UI** (CC-UI-0048): the run page counts pending rows.
+  - **CLI output, a deliberate change.** Summary goldens `score_only.txt` and
+    `budget_fallback_nolabels.txt` show `findings 4 → 3` and `requests 322 → 306`
+    (`requests/finding 80.5 → 102.0`): the duplicate `/search.php q` confirmation is
+    gone. `run.txt` and `earlier.txt` are unchanged.
+  - `test_unbudgeted_run_confirms_rows_in_their_original_order` now expects one confirm
+    per key.
+  - The CLI prints `plugin refused (<reason>): <name>` (CC-PLUG-0008).
+- Risk: low-medium. The confirmation change alters run numbers on labs with
+  duplicate-key points. That is the intended correction; it is listed above with
+  before/after. Pending rows appear only after a crash.
+- Deliverables:
+  - [x] `_CostCounter` signature and forwarding — done
+  - [x] pending pre-write and `finally` flush — done
+  - [x] one confirmation per key; FR-FUZZ-32 amended — done
+  - [x] `plan_run`, environment prechecks, abort marking; greybox / multitarget sweep — done
+  - [x] tests: `test_sender_conformance.py`, `test_pipeline_invariants.py`,
+        `test_auto_cli_side_effects.py` — done
+- Implementation divergence:
+  - The draft's "no writer-level dedupe" holds.
+  - **Sweep additions:** the BUG-0078 sweep found two more instances (`greybox-run`,
+    `run_targets`). They were fixed in this entry rather than deferred, being the same
+    root cause with the same mechanism.
+  - The abort marker lives in `Store.mark_aborted`, not in the CLI, so all three guarded
+    paths share it (PA-0003).
+- Review: the review-phase draft v2, plus final amendments, agreed 3/3 (reviewers A and
+  B). The BUG-0073 tie divergence was re-reviewed and agreed.
+- Effectiveness (assessed 2026-10-13): effective offline. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **26 of 26** review-batch mutants killed (one survivor, the ranker reader passing the classifier's score column, was killed after adding `test_each_family_reader_backs_a_legacy_row_with_its_own_score_column`). Every new regression test fails on the pre-fix code. Suite results: see the related suites (83 files: auto, pipeline, plugins, ML, web incl. real-browser, report, oracle, scheduler, CLI, contract writers, lint, no-ML, packaging, harness, store, migrations, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1054 passed, 1 skipped, before the last three tests were added, which pass with their files; greybox / multitarget / auto / store / CLI: 143 passed. The non-labgen and full-suite runs were still in progress at commit time and are recorded in a follow-up entry.
+
 ### CC-FUZZ-0055 — On-host run through the CLI; budget feature version; attempt feature schemas; FR-FUZZ-31 backfill; oracle lint (2026-10-13)
 - Change:
   - **`scripts/on_host_full_run.sh`.** No ML step calls `fuzzlab.ml` any more:

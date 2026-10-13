@@ -14,7 +14,8 @@ path form via `core.urls.to_path`).
 from __future__ import annotations
 
 from fuzzlab.audit import InjectionPoint, known_categories
-from fuzzlab.core.runmode import RunModeError, categories_from_vuln_classes, resolve_run
+from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
+                                   resolve_run)
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 
 
@@ -176,6 +177,27 @@ class _CountingSender:
         return self.count
 
 
+def plan_run(*, mode: str, ground_truth, selected_categories,
+             points_source: str = "auto") -> tuple[str, RunPlan]:
+    """``(points source, run plan)`` for a run — pure, no store, no traffic. The one
+    usage-level resolution (PA-0003): `run_auto` calls it, and `fuzzlab auto` calls it
+    **before opening the store**, so a D15 fail-safe or a ground-truth source without a
+    contract exits with no run row behind (BUG-0078, PA-0079). Raises `RunModeError`."""
+    source = points_source
+    if source == "auto":
+        source = "ground-truth" if ground_truth is not None else "crawl"
+    if source == "ground-truth" and ground_truth is None:
+        raise RunModeError("points_source='ground-truth' requires a ground-truth contract")
+    gt_categories = None
+    if ground_truth is not None:
+        gt_categories = categories_from_vuln_classes(
+            c.vuln_class for c in ground_truth.positives())
+    plan = resolve_run(mode, ground_truth_categories=gt_categories,
+                       selected_categories=selected_categories,
+                       all_categories=known_categories())
+    return source, plan
+
+
 def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
              ground_truth=None, selected_categories=None, points_source: str = "auto",
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
@@ -199,27 +221,16 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     `DbFaultSource`) enable M10 grey-box confirmation of sql-injection/xss; both
     default to ``None`` (no-op) same as ``browser``/``oob``.
     """
-    source = points_source
-    if source == "auto":
-        source = "ground-truth" if ground_truth is not None else "crawl"
+    source, plan = plan_run(mode=mode, ground_truth=ground_truth,
+                            selected_categories=selected_categories,
+                            points_source=points_source)
 
     skipped: list[tuple[str, str, str, str]] = []
     if source == "ground-truth":
-        if ground_truth is None:
-            raise RunModeError("points_source='ground-truth' requires a ground-truth contract")
         points, skipped = points_from_ground_truth(
             ground_truth, base_url, browser_available=browser is not None)
     else:
         points = injection_points_from_store(store, run_id, base_url)
-
-    gt_categories = None
-    if ground_truth is not None:
-        gt_categories = categories_from_vuln_classes(
-            c.vuln_class for c in ground_truth.positives())
-
-    plan = resolve_run(mode, ground_truth_categories=gt_categories,
-                       selected_categories=selected_categories,
-                       all_categories=known_categories())
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set

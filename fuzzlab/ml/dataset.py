@@ -50,6 +50,13 @@ class Dataset:
         return sum(y for y, lab in zip(self.y, self.labelled) if lab)
 
 
+def method_key(method) -> str:
+    """The HTTP method as every label / seen-key join compares it: upper-case, and
+    ``GET`` when missing (the evidence default). The one definition (PA-0003) for both
+    sides of a join (BUG-0075, PA-0076)."""
+    return method.upper() if isinstance(method, str) and method else "GET"
+
+
 def endpoint_key(ev: dict) -> str:
     """The endpoint a candidate belongs to — its URL path. The one definition for the
     group-k-fold groups and for blind-holdout membership (PA-0003, CC-ML-0020): folds
@@ -104,11 +111,20 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
     """
     where, args = _run_filter(store, run_id, before_run_id, target)
 
-    positives: set[tuple[int, str, str, str]] = set()
+    # Keyed on every identity field both tables record, the method included (BUG-0075:
+    # a finding confirmed only on POST used to label the GET candidate positive). A
+    # finding with no recorded method (legacy / hand-written) matches any method, as
+    # before — such rows never flip.
+    positives: set[tuple[int, str, str, str, str]] = set()
+    any_method: set[tuple[int, str, str, str]] = set()
     for f in store.conn.execute(
-            f"SELECT run_id, url, param, vuln_class FROM finding WHERE {where}",
+            f"SELECT run_id, url, param, vuln_class, method FROM finding WHERE {where}",
             args).fetchall():
-        positives.add((int(f["run_id"]), f["url"], f["param"], to_category(f["vuln_class"])))
+        key = (int(f["run_id"]), f["url"], f["param"], to_category(f["vuln_class"]))
+        if f["method"] is None:
+            any_method.add(key)
+        else:
+            positives.add((*key, method_key(f["method"])))
 
     fired: dict[tuple[int, str, str], int] = {}
     for e in store.conn.execute(
@@ -133,7 +149,9 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
         path = endpoint_key(ev)
         param = ev.get("param", "")
         cat = ev.get("category", "")
-        label = 1 if (rid, path, param, cat) in positives else 0
+        key = (rid, path, param, cat)
+        label = 1 if ((*key, method_key(ev.get("method"))) in positives
+                      or key in any_method) else 0
         ds.X.append(_features(ev, c["sink_context"], fired.get((rid, path, param), 0)))
         ds.y.append(0 if unlabelled else label)
         ds.groups.append(path)
@@ -151,9 +169,10 @@ def target_of(store, run_id: int) -> str | None:
     return row["base_url"] if row else None
 
 
-def candidate_keys(store, ids) -> list[tuple[str, str, str]]:
-    """`(path, param, category)` of each candidate id, in order — the key a repeated
-    endpoint shares across runs (used for `seen_fraction`)."""
+def candidate_keys(store, ids) -> list[tuple[str, str, str, str]]:
+    """`(path, param, category, method)` of each candidate id, in order — the key a
+    repeated injection point shares across runs (used for `seen_fraction`; the method
+    joined it with BUG-0075)."""
     out = []
     for cid in ids:
         row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
@@ -161,22 +180,29 @@ def candidate_keys(store, ids) -> list[tuple[str, str, str]]:
             ev = json.loads(row["evidence"] or "{}") if row else {}
         except (ValueError, TypeError):
             ev = {}
-        out.append((to_path(ev.get("url", "")), ev.get("param", ""), ev.get("category", "")))
+        out.append((to_path(ev.get("url", "")), ev.get("param", ""), ev.get("category", ""),
+                    method_key(ev.get("method"))))
     return out
 
 
 def run_ids_of(store, ids) -> list[int]:
-    """The distinct runs the given candidate ids belong to, sorted."""
+    """The distinct runs the given candidate ids belong to, sorted (chunked under
+    SQLite's bound-parameter limit — a store-wide train passes every candidate)."""
+    ids = list(ids)
     runs = set()
-    for cid in ids:
-        row = store.conn.execute("SELECT run_id FROM candidate WHERE id=?", (cid,)).fetchone()
-        if row is not None:
-            runs.add(int(row["run_id"]))
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for row in store.conn.execute(
+                f"SELECT DISTINCT run_id FROM candidate WHERE id IN "
+                f"({','.join('?' * len(chunk))})", chunk).fetchall():
+            if row["run_id"] is not None:
+                runs.add(int(row["run_id"]))
     return sorted(runs)
 
 
 def seen_fraction(store, train_ids, now_ids) -> float:
-    """Share of ``now_ids`` whose (path, param, category) key occurs among ``train_ids``:
+    """Share of ``now_ids`` whose (path, param, category, method) key occurs among
+    ``train_ids``:
     how much of this run a model trained on earlier runs has effectively seen."""
     if not now_ids:
         return 0.0

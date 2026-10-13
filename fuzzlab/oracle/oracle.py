@@ -25,10 +25,17 @@ class _CostCounter:
         self.count = 0
 
     def send(self, url, param, value, timing: bool = False,
-             method: str = "GET", location: str = "query"):
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None):
+        # the full `Sender` signature, forwarded exactly like `harness.auto`'s
+        # `_CountingSender` (BUG-0071: a JSON-body / upload / XXE probe crashed `--bandit`)
         self.count += 1
         if method == "GET" and location == "query":
             return self._inner.send(url, param, value, timing=timing)
+        if content_type:
+            return self._inner.send(url, param, value, timing=timing,
+                                    method=method, location=location,
+                                    content_type=content_type)
         return self._inner.send(url, param, value, timing=timing,
                                 method=method, location=location)
 

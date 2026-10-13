@@ -74,6 +74,20 @@ class Store:
         self.conn.commit()
         return int(cur.lastrowid)
 
+    def mark_aborted(self, run_id: int, exc: BaseException) -> None:
+        """Record on the run row that it stopped on ``exc`` (`notes = "aborted: …"`), so a
+        run that failed after it started never reads as an empty finished run
+        (BUG-0078, PA-0079). Best effort: never masks the error being handled."""
+        why = (f"exit {exc.code}" if isinstance(exc, SystemExit)
+               else f"{type(exc).__name__}: {exc}")[:500]
+        try:
+            self.conn.rollback()                 # drop a half-written statement
+            self.conn.execute("UPDATE run SET notes=? WHERE id=?",
+                              (f"aborted: {why}", run_id))
+            self.conn.commit()
+        except Exception:                        # noqa: BLE001 - never mask the cause
+            pass
+
     # -- content-addressed bodies ----------------------------------------
     def put_body(self, data: bytes) -> str:
         """Store a response/request body once, keyed by sha256. Returns the hash."""

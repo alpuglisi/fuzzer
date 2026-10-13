@@ -360,8 +360,10 @@ def test_report_pins_the_runs_own_models_not_the_newest(tmp_path):
 def test_report_sha_is_null_for_a_legacy_model(tmp_path):
     with Store(tmp_path / "a.db") as store:
         run_id = store.start_run("auto", "h")
+        # no saved params (pre-migration 14); scoped to its run, as trainers write it — a
+        # scope-less row now covers only a run holding stored scores (BUG-0074)
         store.conn.execute("INSERT INTO model (name, version, feature_version, calibration) "
-                           "VALUES ('logistic', 1, 1, '{}')")
+                           "VALUES ('logistic', 1, 1, ?)", (json.dumps({"run_id": run_id}),))
         store.conn.commit()
         rep = build_report(store, run_id)
         assert rep["reproducibility"]["model_params_sha256"] == {"logistic": None}
@@ -398,7 +400,7 @@ def test_weights_panel_explains_when_there_are_no_coefficients(tmp_path, setup, 
             train_and_score(store, run_id, min_rows=10**6)
         elif setup == "legacy":
             store.conn.execute("INSERT INTO model (name, version, calibration) VALUES "
-                               "('logistic', 1, '{}')")
+                               "('logistic', 1, ?)", (json.dumps({"run_id": run_id}),))
             store.conn.commit()
         panel = mlview.weights_panel(store, run_id)
         assert panel["available"] is False and reason in panel["reason"]

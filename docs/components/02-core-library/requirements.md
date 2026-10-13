@@ -118,6 +118,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     - `skipped_budget`: not sent to the oracle because `fuzzlab auto --confirm-budget`
       ran out. This is **not** a negative label;
     - `no_confirmer`: its category has no oracle confirmer;
+    - `pending` *(CC-CORE-0033, BUG-0071)*: written before the oracle loop and
+      overwritten as the oracle reaches the row. It survives only when a run crashed
+      mid-loop, and is unlabelled (in `UNLABELLED`);
     - NULL: written before migration 13 or by a writer outside the pipeline, with the
       old meaning (treated as oracle-labelled).
   - `anomaly_score` / `anomaly_flag`: the ECOD tripwire's advisory output.
@@ -132,6 +135,13 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
   is defined once in `core/oracle_status.py`.
+- **FR-CORE-23** *(aborted runs; `CC-CORE-0033`, 2026-10-13, BUG-0078).*
+  `Store.mark_aborted(run_id, exc)` records on a run that failed after it started
+  `run.notes = "aborted: <Type>: <message>"`, or `"aborted: exit N"` for `SystemExit`,
+  truncated to 500 characters, after rolling back any half-written statement. It is best
+  effort and never masks the error being handled. The run-starting entry points
+  (`fuzzlab auto`, `greybox-run`, `run_targets`) call it from a `BaseException` guard,
+  so no failed run reads as an empty finished one.
 - **FR-CORE-22** *(packaging; `CC-CORE-0032`, 2026-10-13, BUG-0068).* Every tracked
   non-Python file under `fuzzlab/` ships in the built package (wheel, sdist,
   `build_py`), except the declared exclusions (`exclude-package-data "*"`: caches,

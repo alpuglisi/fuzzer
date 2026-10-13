@@ -111,35 +111,45 @@ def main(argv: list[str]) -> int:
         except SessionAuthError as exc:
             p.error(f"authentication failed for {args.identity}@{host}: {exc}")
 
-    with Store(args.store) as store:
-        run_id = store.start_run("greybox", host)
-        counts = {}
-        if source == "ground-truth":
-            points, skipped = gbrun.points_with_classes(ground_truth, args.base_url)
-        else:
-            if os.path.exists(args.spider_db):
-                counts = import_spider(args.spider_db, store, run_id)
-            points = gbrun.points_from_store(store, run_id, args.base_url)
-            skipped = []
-
+    # ground-truth points are pure: an empty set is a usage error before any side effect
+    # (BUG-0078 sweep, PA-0079); crawl points need the store, so a run that then fails is
+    # marked aborted rather than left looking like an empty finished run
+    if source == "ground-truth":
+        points, skipped = gbrun.points_with_classes(ground_truth, args.base_url)
         if not points:
             p.error("no injection points to probe (crawl first, or pass --ground-truth)")
 
-        sender = gbrun.RequestsCorrelatingSender(cookie=cookie)
-        coverage_source = FileCoverageSource(args.cov_dir)
-        dbfault_source = FileDbFaultSource(args.cov_dir)
-        lab_control = ScriptLabControl(args.labctl) if args.labctl else None
+    with Store(args.store) as store:
+        run_id = store.start_run("greybox", host)
+        try:
+            counts = {}
+            if source != "ground-truth":
+                if os.path.exists(args.spider_db):
+                    counts = import_spider(args.spider_db, store, run_id)
+                points = gbrun.points_from_store(store, run_id, args.base_url)
+                skipped = []
 
-        summary = gbrun.run_greybox(
-            base_url=args.base_url, store=store, run_id=run_id, points=points,
-            sender=sender, coverage_source=coverage_source,
-            dbfault_source=dbfault_source, lab_control=lab_control,
-            reset_between=args.reset, app_root=args.app_root, settle=args.settle,
-            mutation_variants=args.mutation_variants,
-            max_mutation_variants=args.max_mutation_variants,
-            allow_destructive=args.allow_destructive)
+            if not points:
+                p.error("no injection points to probe (crawl first, or pass --ground-truth)")
 
-        _print_summary(args, source, counts, points, skipped, summary, run_id)
+            sender = gbrun.RequestsCorrelatingSender(cookie=cookie)
+            coverage_source = FileCoverageSource(args.cov_dir)
+            dbfault_source = FileDbFaultSource(args.cov_dir)
+            lab_control = ScriptLabControl(args.labctl) if args.labctl else None
+
+            summary = gbrun.run_greybox(
+                base_url=args.base_url, store=store, run_id=run_id, points=points,
+                sender=sender, coverage_source=coverage_source,
+                dbfault_source=dbfault_source, lab_control=lab_control,
+                reset_between=args.reset, app_root=args.app_root, settle=args.settle,
+                mutation_variants=args.mutation_variants,
+                max_mutation_variants=args.max_mutation_variants,
+                allow_destructive=args.allow_destructive)
+
+            _print_summary(args, source, counts, points, skipped, summary, run_id)
+        except BaseException as exc:
+            store.mark_aborted(run_id, exc)
+            raise
     return 0
 
 

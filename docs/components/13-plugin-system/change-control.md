@@ -3,6 +3,32 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0008 — Plugin metadata and hook lookup are contained (BUG-0076) (2026-10-13)
+- Change:
+  - **Metadata is contained.** `HookRegistry.register` catches **every** exception from
+    `plugin_info`. It rejects only that plugin, with `invalid metadata: <Type>: <msg>`,
+    under its name, or its class name when the name itself raises.
+  - **Bad priorities are refused.** `plugin_info` raises for a bool `priority`, which
+    `int()` would silently read as 0 / 1.
+  - **Rejections carry reasons.** `rejections()` on the registry and the manager return
+    `(info, reason)` for both rejection kinds (metadata, duplicate name). `rejected()`
+    is unchanged.
+  - **Hook lookup is contained.** `handlers()` wraps the attribute lookup, so a raising
+    hook attribute disables only that plugin and records its error.
+- Impact (other components / project): FUZZ's CLI prints `plugin refused (<reason>):
+  <name>` (CC-FUZZ-0056). FR-PLUG-3 / NFR-PLUG-safe now hold at registration and lookup.
+- Risk: low.
+- Deliverables:
+  - [x] contained registration; bool priority refused; reasons; contained lookup — done
+  - [x] tests in `tests/test_plugins.py`:
+    - string priority, bool priority, a raising `name`;
+    - a duplicate keeps its reason;
+    - a raising hook property — done
+  - [x] FR-PLUG-3 updated in place — done
+- Review: the review-phase draft agreed 3/3. The hook-lookup containment is a PA-0077
+  sweep addition, recorded here.
+- Effectiveness (assessed 2026-10-13): effective offline. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **26 of 26** review-batch mutants killed (one survivor, the ranker reader passing the classifier's score column, was killed after adding `test_each_family_reader_backs_a_legacy_row_with_its_own_score_column`). Every new regression test fails on the pre-fix code. Suite results: see the related suites (83 files: auto, pipeline, plugins, ML, web incl. real-browser, report, oracle, scheduler, CLI, contract writers, lint, no-ML, packaging, harness, store, migrations, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1054 passed, 1 skipped, before the last three tests were added, which pass with their files; greybox / multitarget / auto / store / CLI: 143 passed. The non-labgen and full-suite runs were still in progress at commit time and are recorded in a follow-up entry.
+
 ### CC-PLUG-0007 — The advisory write allowlist gains INSERT on `holdout_metric` (2026-10-13)
 - Change: `plugins/guard.ADVISORY_WRITES["insert"]` gains `holdout_metric`. The ML
   stages write the sealed holdout metrics under the `after_run` guard (CC-ML-0020).

@@ -998,12 +998,29 @@ rewards) derives from it.
     confirmed keys). The pipeline also records `pipeline_oracle_checked`, `_skipped`,
     `_no_confirmer`, `_checked_keys`, `pipeline_confirmable_keys` and
     `pipeline_confirm_budget`.
-  - **Without a budget**, every row is confirmed exactly as before.
+  - **Without a budget** *(amended CC-FUZZ-0056, BUG-0072)*, each confirmation key is
+    confirmed **once, on its first row in row order, whatever the verdict**. Later rows
+    of the key send the identical `Candidate`, so they are marked `checked` with no
+    probe. Row order (the bandit's) is kept. Findings ≤ distinct confirmed keys, and
+    confirmations == distinct keys, in every mode. (It used to confirm every row,
+    writing duplicate findings.)
+  - **Crash safety** *(CC-FUZZ-0056, BUG-0071)*: before the oracle loop, every candidate
+    gets a status that is never read as a label: `no_confirmer` (final) or `pending`.
+    The statuses gathered so far are flushed in a `finally`, so a crash leaves unreached
+    rows `pending` (unlabelled), never NULL.
   - **`--anomaly [--anomaly-contamination F]`** runs the persisted ECOD tripwire after
     the run (FR-ML-12) and prints the top flagged candidates. *(CC-FUZZ-0052:)* `F` is
     an upper bound — at most that fraction, whole tie groups only — and the summary
     prints `note: <reason>` when ties left fewer flagged.
   - All flags appear in the launcher form, as number inputs, via `commandspec`.
+- **FR-FUZZ-32a** *(usage checks before side effects; `CC-FUZZ-0056`, BUG-0078).*
+  `fuzzlab auto` resolves its run plan with `harness.auto.plan_run`, the function
+  `run_auto` uses: the D15 fail-safe, and `--points ground-truth` without a contract.
+  It also checks the environment (`--browser` needs Playwright; greybox side-channel
+  paths must exist), **before opening the store**. A usage error leaves no run row.
+  A failure after the run starts (an OOB bind, a crash) records `run.notes = "aborted:
+  …"` via `Store.mark_aborted`, then re-raises. `greybox-run` and `run_targets` follow
+  the same rule.
 - **FR-FUZZ-33** *(`--train-on`; `CC-FUZZ-0049`, 2026-10-13).* `fuzzlab auto --train-on
   {run,earlier}` (default `run`) chooses what `--score` / `--rank` train on.
   - It needs `--score` and/or `--rank`, otherwise it is a usage error.

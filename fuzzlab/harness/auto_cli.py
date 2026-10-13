@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from fuzzlab.core.runmode import RunModeError
 from fuzzlab.core.store import Store
-from fuzzlab.harness.auto import run_auto
+from fuzzlab.harness.auto import plan_run, run_auto
 from fuzzlab.labels import contract
 from fuzzlab.tools.probesender import make_probe_sender
 from fuzzlab.tools.store_adapter import import_spider
@@ -180,57 +180,89 @@ def main(argv: list[str]) -> int:
     except contract.ContractError as exc:
         p.error(str(exc))            # clean message, non-zero exit (no traceback)
     host = urlparse(args.base_url).netloc or args.base_url
+    # Every usage-level check runs before any side effect (BUG-0078, PA-0079): the run
+    # plan by the same function `run_auto` uses (D15 fail-safe, a ground-truth source
+    # without a contract), then the environment the flags need.
+    try:
+        plan_run(mode=args.mode, ground_truth=ground_truth, selected_categories=selected,
+                 points_source=args.points)
+    except RunModeError as exc:
+        p.error(str(exc))
+    _precheck_environment(p, args)
 
     with Store(args.store) as store:
         run_id = store.start_run("auto", host)
-        counts = import_spider(args.spider_db, store, run_id) if \
-            os.path.exists(args.spider_db) else {}
-        sender = make_probe_sender(args.base_url, args.identity)
-        browser = None
-        if args.browser:
-            from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-            browser = PlaywrightBrowserExecutor()
-        oob = None
-        if args.oob:
-            from fuzzlab.oracle.oob import OobListener
-            oob = OobListener()          # loopback-only; refuses any other host
-            oob.start()
-        coverage = None
-        if args.greybox_coverage_file:
-            from fuzzlab.greybox.coverage import FileCoverageSource
-            coverage = FileCoverageSource(args.greybox_coverage_file)
-        dbfault = None
-        if args.greybox_dbfault_file:
-            from fuzzlab.greybox.dbfault import FileDbFaultSource
-            dbfault = FileDbFaultSource(args.greybox_dbfault_file)
-        scheduler = None
-        if args.bandit:
-            from fuzzlab.oracle.strategies import default_strategies
-            from fuzzlab.scheduler import ThompsonBandit, arm_priors
-            scheduler = ThompsonBandit(priors=arm_priors(default_strategies()),
-                                       cost_normalized=True, backoff=True)
-            scheduler.load(store)                # resume posteriors + costs from prior runs
-            from fuzzlab.core.store import MetricLogger
-            scheduler.attach_metrics(MetricLogger(store, run_id, source="bandit"))
         try:
-            result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
-                              sender=sender, mode=args.mode, ground_truth=ground_truth,
-                              selected_categories=selected, points_source=args.points,
-                              browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
-                              scheduler=scheduler, plugins=plugins,
-                              confirm_budget=args.confirm_budget)
-        except RunModeError as exc:
-            p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
-        finally:
-            if oob is not None:
-                oob.stop()                # tear down the loopback listener every run
+            return _run(p, args, store, run_id, plugins, selected, ground_truth)
+        except BaseException as exc:
+            # a failure only the run itself can hit (an OOB bind, a crash): the run row
+            # says so instead of reading as an empty finished run; then re-raise, so a
+            # usage error still exits 2 and a real bug keeps its traceback
+            store.mark_aborted(run_id, exc)
+            raise
 
-        if scheduler is not None:
-            scheduler.flush_metrics()            # commit any buffered per-pull metrics
-            scheduler.save(store)                # persist what this run learned
-        # the ML stages ran inside `run_auto` as `after_run` plugins (CC-FUZZ-0050)
-        args.run_id = run_id
-        return _print_summary(args, counts, result, plugins)
+
+def _precheck_environment(p, args) -> None:
+    """Refuse, before the store is opened, a flag whose environment is missing."""
+    import importlib.util
+    if args.browser and importlib.util.find_spec("playwright") is None:
+        p.error("--browser needs Playwright (pip install playwright; "
+                "playwright install chromium)")
+    for flag, path in (("--greybox-coverage-file", args.greybox_coverage_file),
+                       ("--greybox-dbfault-file", args.greybox_dbfault_file)):
+        if path and not os.path.exists(path):
+            p.error(f"{flag}: {path} does not exist (is the lab's side channel mounted?)")
+
+
+def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
+    counts = import_spider(args.spider_db, store, run_id) if \
+        os.path.exists(args.spider_db) else {}
+    sender = make_probe_sender(args.base_url, args.identity)
+    browser = None
+    if args.browser:
+        from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+        browser = PlaywrightBrowserExecutor()
+    oob = None
+    if args.oob:
+        from fuzzlab.oracle.oob import OobListener
+        oob = OobListener()          # loopback-only; refuses any other host
+        oob.start()
+    coverage = None
+    if args.greybox_coverage_file:
+        from fuzzlab.greybox.coverage import FileCoverageSource
+        coverage = FileCoverageSource(args.greybox_coverage_file)
+    dbfault = None
+    if args.greybox_dbfault_file:
+        from fuzzlab.greybox.dbfault import FileDbFaultSource
+        dbfault = FileDbFaultSource(args.greybox_dbfault_file)
+    scheduler = None
+    if args.bandit:
+        from fuzzlab.oracle.strategies import default_strategies
+        from fuzzlab.scheduler import ThompsonBandit, arm_priors
+        scheduler = ThompsonBandit(priors=arm_priors(default_strategies()),
+                                   cost_normalized=True, backoff=True)
+        scheduler.load(store)                # resume posteriors + costs from prior runs
+        from fuzzlab.core.store import MetricLogger
+        scheduler.attach_metrics(MetricLogger(store, run_id, source="bandit"))
+    try:
+        result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
+                          sender=sender, mode=args.mode, ground_truth=ground_truth,
+                          selected_categories=selected, points_source=args.points,
+                          browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
+                          scheduler=scheduler, plugins=plugins,
+                          confirm_budget=args.confirm_budget)
+    except RunModeError as exc:
+        p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
+    finally:
+        if oob is not None:
+            oob.stop()                # tear down the loopback listener every run
+
+    if scheduler is not None:
+        scheduler.flush_metrics()            # commit any buffered per-pull metrics
+        scheduler.save(store)                # persist what this run learned
+    # the ML stages ran inside `run_auto` as `after_run` plugins (CC-FUZZ-0050)
+    args.run_id = run_id
+    return _print_summary(args, counts, result, plugins)
 
 
 def _build_plugins(p, args):
@@ -467,6 +499,6 @@ def _print_summary(args, counts, result, plugins=None) -> int:
             print("  plugins disabled after an error:")
             for name in others:
                 print(f"    - {name}: {errors.get(name)}")
-        for info in plugins.rejected():
-            print(f"  plugin refused (duplicate name): {info.name}")
+        for info, why in plugins.rejections():
+            print(f"  plugin refused ({why}): {info.name}")
     return 1 if failed else 0

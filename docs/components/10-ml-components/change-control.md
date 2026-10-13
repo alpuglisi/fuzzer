@@ -3,6 +3,67 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0023 — Tie-averaged ranking metrics and one metric/baseline function (BUG-0073); store-wide models cover only the runs they scored (BUG-0074); method-aware labels (BUG-0075) (2026-10-13)
+- Change:
+  - **BUG-0073:**
+    - `rank_train._evaluate` becomes the public `evaluate_vs_random`, the one function
+      for a ranker metric and its seeded random control. It is used by the trainer and
+      the ML tab (CC-UI-0048).
+    - It rounds scores to the stored 6 dp first (PA-0069(3)), so ties match the panel's
+      stored values.
+    - `ranking.ndcg_at_k` / `precision_at_k` **average over ties**: each slot of a tied
+      group holds the group's mean relevance, the exact expectation over all orders of
+      the tie. They refuse non-finite scores.
+  - **BUG-0074:**
+    - Store-wide classifier and ranker trains record `calibration.scored_run_ids`.
+    - `model_registry._covers`: an int scope covers that run; a NULL scope covers
+      `scored_run_ids` when recorded; otherwise a NULL scope, or a legacy row with no
+      scope key, covers a run only if it holds a non-NULL score in the family's column.
+    - `select_latest(..., *, score_column)` is a **required**, validated keyword:
+      `latest_classifier` passes `score`, `latest_ranker` `rank_score`.
+    - `dataset.run_ids_of` is one chunked query.
+  - **BUG-0075:**
+    - `dataset.method_key` (upper-case; missing or NULL → `GET`) is used on both sides.
+    - Positives are keyed `(run, path, param, category, method)`. A method-less
+      finding matches any method.
+    - `candidate_keys` / `seen_fraction` include the method.
+    - `rules_fired` is **unchanged**; a versioned follow-up is noted on FR-ML-5.
+- Impact (other components / project):
+  - **UI** (CC-UI-0048) reads `evaluate_vs_random`.
+  - **The report's `models` / `model_training`** no longer cite a store-wide model for
+    runs it never scored.
+  - **Metric semantics, a named change:** newly recorded `rank_ndcg` / `rank_precision`,
+    the forward and holdout numbers, and pairwise `auto` selection differ from old
+    values **only where scores tie**. Old `model.calibration` `oof_*` values keep the
+    old rule. For a tied (e.g. fallback) model trained before this change, the panel's
+    recomputed metric can differ from the stored `oof_ndcg`.
+  - Labels can change only where a GET and a POST point share a path and param with
+    different outcomes. No current contract has such a pair.
+  - `FEATURE_VERSION` is unchanged.
+- Risk: low. All 338 existing ML tests pass unchanged, apart from the deliberate
+  updates listed in the deliverables.
+- Deliverables:
+  - [x] `evaluate_vs_random` shared; tie averaging; NaN refusal; 6-dp ranking — done
+  - [x] `scored_run_ids`, coverage rule, required `score_column` — done
+  - [x] `method_key`; method-aware labels and seen keys — done
+  - [x] deliberate test updates:
+    - `test_ties_break_to_original_order` → tie-independence and permutation tests;
+    - `test_select_latest_scope_rules`'s store-wide pin;
+    - the legacy-row tests;
+    - the report / persist fixtures scoped to their run (PA-0071) — done
+  - [x] new tests: `test_ml_dataset_keys.py`; store-wide coverage and family-column
+        tests; the ranking rounding / NaN / permutation tests — done
+  - [x] FR-ML-2, FR-ML-5, FR-ML-10, FR-ML-17 updated in place — done
+- Implementation divergence:
+  - **Tie averaging (not in the agreed draft).** The agreed test "a constant ranker's
+    panel metric ≈ its baseline" exposed input-order tie-breaking in `ranking.py`. The
+    fix (tie averaging), the rounding (reviewer A's note) and the NaN refusal (reviewer
+    B's nit) were reviewed as a divergence: both reviewers AGREE, no must-fix.
+  - Reviewer B's should-fix is adopted. BUG-0073 is analysed as a recurrence of
+    BUG-0070 / PA-0069(2)/(4), and PA-0074 strengthens those rules.
+- Review: the review-phase draft agreed 3/3; the tie divergence agreed 3/3.
+- Effectiveness (assessed 2026-10-13): effective offline. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **26 of 26** review-batch mutants killed (one survivor, the ranker reader passing the classifier's score column, was killed after adding `test_each_family_reader_backs_a_legacy_row_with_its_own_score_column`). Every new regression test fails on the pre-fix code. Suite results: see the related suites (83 files: auto, pipeline, plugins, ML, web incl. real-browser, report, oracle, scheduler, CLI, contract writers, lint, no-ML, packaging, harness, store, migrations, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1054 passed, 1 skipped, before the last three tests were added, which pass with their files; greybox / multitarget / auto / store / CLI: 143 passed. The non-labgen and full-suite runs were still in progress at commit time and are recorded in a follow-up entry.
+
 ### CC-ML-0022 — A real no-ML build passes the no-ML checks; feature-reading stages record their feature version (BUG-0069) (2026-10-13)
 - Change:
   - **Real no-ML build.** `tests/test_no_ml.py::test_a_real_no_ml_build_passes_the_same_checks`

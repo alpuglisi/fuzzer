@@ -1389,6 +1389,12 @@ tracked in the requirements files, not here.
   - Every reader goes through `ml/model_registry.py::select_latest`, wrapped by
     `train.latest_classifier` / `rank_train.latest_ranker`. A guard test forbids
     inline "newest row" reads.
+  - A row covers a run only on a recorded fact (CC-ML-0023, BUG-0074): its int scope,
+    or a store-wide row's `scored_run_ids`. A legacy open-ended row covers a run only
+    when that run holds the family's stored score (`select_latest`'s required
+    `score_column`).
+  - Ranker metrics and their random control come from one function
+    (`rank_train.evaluate_vs_random`), over tie-averaged NDCG / precision@k.
   - Out-of-fold scoring goes only through `metrics.oof_folds`, which fails closed unless
     each row is held out exactly once. One-endpoint data or `k < 2` takes the thin-data
     fallback.
@@ -1650,16 +1656,16 @@ detail):
 
 | Table | Written by | Read by |
 | --- | --- | --- |
-| `run`, `schema_version` | core | everything |
+| `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, CC-CORE-0033), `schema_version` | core | everything |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
-| `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `skipped_budget` rows are scored, never trained on), UI |
+| `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
 | `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |
 | `holdout_metric`, `holdout_reveal` (sealed blind-holdout metrics and the reveal count; migration 17) | ML trainers via `core.sealed.write_metrics`; `fuzzlab reveal-holdout` (reveal rows) | only `core.sealed.reveal` (`fuzzlab reveal-holdout`); hidden from the store browser (`SEALED_TABLES`) |
-| `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
+| `model` (versions, calibration incl. `run_id` scope — a store-wide row also records `scored_run_ids` (CC-ML-0023) — + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
 | `request_budget` | all tools | budget manager, UI |
 | `run_plugin` (attached plugins: name, version, priority; `config`, `status`, `error` — migration 15) | `PluginManager.record` / `finalize` | `fuzzlab report` (per run) |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |

@@ -23,7 +23,14 @@ sources — without changing core code, via a registry of hooks on `core/`.
   confirmation-budget order, FR-PLUG-8) and `after_run(store, run_id)` (post-run
   stages, FR-PLUG-7), where the ML stages attach (FR-ML-6).
 - **FR-PLUG-3** Isolate plugins so one plugin's failure does not crash a run
-  (errors are contained and logged).
+  (errors are contained and logged). *(CC-PLUG-0008, BUG-0076:)* containment covers
+  every per-plugin step:
+  - load;
+  - **metadata / registration**: any exception from `plugin_info` (e.g. `priority =
+    "high"`), and a bool priority, rejects only that plugin, with its reason in
+    `rejections()`;
+  - **hook lookup**: a raising attribute disables only that plugin;
+  - hook calls, prioritizer collection and `after_run`.
 - **FR-PLUG-4** Support deterministic ordering via per-plugin priority.
 - **FR-PLUG-5** Enforce that plugins honor the oracle/advisory split: a plugin may
   `register_oracle` but ML-style plugins write scores/uncertainty, not `finding`

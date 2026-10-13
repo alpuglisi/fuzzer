@@ -3,6 +3,31 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0033 — `pending` oracle status (BUG-0071); `Store.mark_aborted` (BUG-0078) (2026-10-13)
+- Change:
+  - `core.oracle_status.PENDING = "pending"`, and `UNLABELLED` now includes it. The
+    pipeline writes it for every confirmable row before the oracle loop. A row a crash
+    never reached is therefore unlabelled (never training data), but still scored,
+    ranked and anomaly-scored.
+  - `Store.mark_aborted(run_id, exc)` records `notes = "aborted: <Type>: <msg>"` (or
+    `"aborted: exit N"` for `SystemExit`, truncated to 500 characters) after a rollback
+    of any half-written statement. It is best effort and never masks the error being
+    handled. It is used by `fuzzlab auto`, `greybox-run` and `run_targets`.
+- Impact (other components / project):
+  - **The status vocabulary gains one value** (no migration: `oracle_status` is free
+    text). Every reader goes through `UNLABELLED` (`ml/dataset.py`, `ml/train.py`,
+    `web/mlview.py`, `web/results.py`, swept).
+  - The `run.notes` column, already shown in the runs list and the report, now carries
+    abort reasons.
+- Risk: low.
+- Deliverables:
+  - [x] `PENDING` — done
+  - [x] `Store.mark_aborted` and its test — done
+  - [x] FR-CORE-14 note — done
+- Review: the review-phase draft agreed 3/3. `mark_aborted` moved into core from the
+  CLI during implementation, so the three guarded paths share it (PA-0003).
+- Effectiveness (assessed 2026-10-13): effective offline. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **26 of 26** review-batch mutants killed (one survivor, the ranker reader passing the classifier's score column, was killed after adding `test_each_family_reader_backs_a_legacy_row_with_its_own_score_column`). Every new regression test fails on the pre-fix code. Suite results: see the related suites (83 files: auto, pipeline, plugins, ML, web incl. real-browser, report, oracle, scheduler, CLI, contract writers, lint, no-ML, packaging, harness, store, migrations, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1054 passed, 1 skipped, before the last three tests were added, which pass with their files; greybox / multitarget / auto / store / CLI: 143 passed. The non-labgen and full-suite runs were still in progress at commit time and are recorded in a follow-up entry.
+
 ### CC-CORE-0032 — Packaging ships every tracked data file (BUG-0068); FR-CORE-22 (2026-10-13)
 - Change:
   - **Package data.** `pyproject.toml` `[tool.setuptools.package-data]` drops the

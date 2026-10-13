@@ -4,6 +4,28 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Error review: eight defects fixed — BUG-0071..0078)
+- **`--bandit` no longer crashes on JSON-body / upload / XXE probes (BUG-0071).** The
+  bandit's cost wrapper lacked `content_type`. A crash mid-oracle also no longer leaves
+  candidates looking labelled: rows the oracle never reached stay `pending`
+  (unlabelled). A conformance test now finds every sender implementation and wrapper.
+- **One confirmation per key in every pipeline mode (BUG-0072).** Duplicate
+  ground-truth points no longer produce duplicate findings. The summary goldens change
+  deliberately: findings 4 → 3, requests 322 → 306.
+- **The ML tab's ranker baseline is comparable (BUG-0073).** The metric and its
+  baseline come from one function, and ranking metrics now average over tied scores,
+  so a ranker with no signal never beats random by input order.
+- **A store-wide model is no longer cited for runs it never scored (BUG-0074).**
+  Training records the runs it scored.
+- **Training labels respect the HTTP method (BUG-0075).**
+- **One malformed plugin no longer takes every plugin down (BUG-0076).**
+- **The bandit panel shows real pull counts (BUG-0077).**
+- **Usage errors leave no orphan run row; failed runs are marked `aborted` (BUG-0078).**
+  This covers `fuzzlab auto`, and `greybox-run` and multi-target runs found by the
+  sweep.
+- Bookkeeping: CC-FUZZ-0056, CC-ML-0023, CC-UI-0048, CC-PLUG-0008, CC-CORE-0033;
+  PA-0072..PA-0079.
+
 ## 2026-10-13 (Packaging fixed; report feature versions fixed; on-host run via the CLI — BUG-0068, BUG-0069)
 - **Installed builds now work (BUG-0068).** A built package shipped only 87 of its 485
   data files, so an installed `fuzzlab web` had no tab templates or assets and the lab

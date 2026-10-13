@@ -116,9 +116,14 @@ def _objective_record(calibration: dict, result: dict, info: dict, ranker) -> No
                   precision_global=info["rank_precision_global"])
 
 
-def _evaluate(y, scores, groups, at_k: int, seed: int):
+def evaluate_vs_random(y, scores, groups, at_k: int, seed: int):
     """``(ndcg, precision, ndcg_random, precision_random)`` of ``scores`` at ``at_k``,
-    against a seeded random order over the same rows (the ranker's control)."""
+    against a seeded random order over the same rows (the ranker's control). The one
+    definition of a ranker metric and its baseline: the trainer and the ML tab both call
+    it, so the two numbers are always computed over the same rows and groups (BUG-0073,
+    PA-0074). Scores are rounded to the 6 dp `_write_ranks` stores, so ties — averaged
+    by the metrics — are the ones the panel sees on the stored values (PA-0069(3))."""
+    scores = [round(s, 6) for s in scores]
     rng = random.Random(seed)
     rand = [rng.random() for _ in range(len(y))]
     return (mean_ndcg_at_k(y, scores, groups, at_k),
@@ -137,7 +142,7 @@ def _holdout_ranking(store, run_id: int, held, scores_by_id: dict, at_k: int,
     reason = forward_skip_reason(store, run_id, held.y)
     if reason is not None:
         return None, reason
-    ndcg, prec, ndcg_rand, prec_rand = _evaluate(
+    ndcg, prec, ndcg_rand, prec_rand = evaluate_vs_random(
         held.y, [round(scores_by_id[c], 6) for c in held.ids], held.groups, at_k, seed)
     return {"rank_ndcg_holdout": ndcg, "rank_precision_holdout": prec,
             "rank_ndcg_random_holdout": ndcg_rand,
@@ -225,7 +230,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
         result.update(model=name, fallback=True)
     else:
         chosen, oof, obj_info = _choose_objective(ds, texts, k, seed, at_k, objective)
-        ndcg, prec, ndcg_rand, prec_rand = _evaluate(ds.y, oof, ds.groups, at_k, seed)
+        ndcg, prec, ndcg_rand, prec_rand = evaluate_vs_random(ds.y, oof, ds.groups, at_k, seed)
         # each labelled row's out-of-fold rank score, stored beside the deploy one
         oof_by_id = dict(zip(ds.ids, oof))
         calibration["score_source"] = SCORE_OOF_LABELLED
@@ -259,6 +264,9 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     _write_ranks(store, every.ids, scores, oof_by_id,
                  probabilistic=not pairwise)
+    if run_id is None:
+        # a store-wide row covers exactly the runs it ranked (BUG-0074)
+        calibration["scored_run_ids"] = run_ids_of(store, every.ids)
     if held is not None:
         _holdout_record(calibration, result, held, sealed, holdout_reason)
 
@@ -295,7 +303,7 @@ def _forward_ranking(store, run_id: int, ids, scores, at_k: int, seed: int):
     reason = forward_skip_reason(store, run_id, now.y)
     if reason is not None:
         return {"forward_skipped_reason": reason}, {"forward_skipped_reason": reason}
-    f_ndcg, f_prec, f_ndcg_rand, f_prec_rand = _evaluate(
+    f_ndcg, f_prec, f_ndcg_rand, f_prec_rand = evaluate_vs_random(
         now.y, [by_id[c] for c in now.ids], now.groups, at_k, seed)
     fwd = {"ndcg": f_ndcg, "precision": f_prec, "ndcg_random": f_ndcg_rand,
            "precision_random": f_prec_rand}
@@ -408,7 +416,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     every_texts = _candidate_texts(store, run_id, every.ids)
 
     chosen, oof, obj_info = _choose_objective(prior, texts, k, seed, at_k, objective)
-    ndcg, prec, ndcg_rand, prec_rand = _evaluate(prior.y, oof, prior.groups, at_k, seed)
+    ndcg, prec, ndcg_rand, prec_rand = evaluate_vs_random(prior.y, oof, prior.groups, at_k, seed)
     ranker = Ranker(seed=seed, objective=chosen).fit(prior.X, texts, prior.y)   # deploy
     scores = ranker.score(every.X, every_texts)               # this run: never its labels
     _write_ranks(store, every.ids, scores,
@@ -458,7 +466,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
 def latest_ranker(store, run_id: int | None = None):
     """The newest ranker `model` row whose scope covers ``run_id`` (any run when
     ``None``) as ``(row, calibration)``, or ``None`` — never another family's row."""
-    return select_latest(store, RANKER_MODEL_NAMES, run_id)
+    return select_latest(store, RANKER_MODEL_NAMES, run_id, score_column="rank_score")
 
 
 def load_ranker(store, row) -> LoadedModel | None:

@@ -432,5 +432,11 @@ def test_report_training_block_defaults_for_a_legacy_row(tmp_path):
         store.conn.execute("INSERT INTO model (name, version, feature_version, calibration) "
                            "VALUES ('logistic', 1, 1, '{}')")
         store.conn.commit()
+        # BUG-0074: a legacy row (no scope key) is credited only to a run that holds a
+        # stored classifier score — never to one it cannot be shown to have scored
+        assert build_report(store, run_id)["reproducibility"]["model_training"] == {}
+        store.conn.execute("INSERT INTO candidate (run_id, evidence, score) "
+                           "VALUES (?, '{}', 0.3)", (run_id,))
+        store.conn.commit()
         assert build_report(store, run_id)["reproducibility"]["model_training"] == {
             "logistic": {"trained_on": "run", "train_run_ids": None}}

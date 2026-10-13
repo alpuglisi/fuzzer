@@ -27,7 +27,8 @@ from urllib.parse import urlparse
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core.dedup import TemplateClusterer
 from fuzzlab.core.fingerprint import fingerprint
-from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET  # migration 13
+from fuzzlab.core.oracle_status import (CHECKED, NO_CONFIRMER, PENDING,  # migration 13
+                                         SKIPPED_BUDGET)
 from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
@@ -151,25 +152,45 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                 # the prioritizer failed: the cap still holds, spent in row order
                 budget_info.update(confirm_budget_error=1, budget_error=plan_order.error)
 
-    confirmed_keys: set[tuple] = set()
-    if selected is None:
-        # Unbudgeted (or fallback): every row in its original order, exactly as before
-        # (duplicates included) — order matters to a bandit scheduler.
-        for key, cid, ev in confirmable:
-            if oracle.confirm(_candidate_of(ev), sender) is not None:
-                confirmed_keys.add(key)
-            status[cid] = CHECKED
-    else:
-        chosen = set(selected)
-        for key in selected:                             # one confirmation per key
-            if oracle.confirm(_candidate_of(keyed[key][0][1]), sender) is not None:
-                confirmed_keys.add(key)
-        for key, members in keyed.items():
-            for cid, _ev in members:
-                status[cid] = CHECKED if key in chosen else SKIPPED_BUDGET
-    store.conn.executemany("UPDATE candidate SET oracle_status=? WHERE id=?",
-                           [(st, cid) for cid, st in status.items()])
+    # Crash safety (BUG-0071): before any probe, every candidate gets a status that is
+    # never read as a label — `no_confirmer` (already final) or `pending` (unlabelled
+    # until the oracle reaches it) — so a crash mid-loop never leaves a NULL, which the
+    # ML dataset would read as a confirmed negative.
+    store.conn.executemany(
+        "UPDATE candidate SET oracle_status=? WHERE id=?",
+        [(status.get(row["id"], PENDING), row["id"]) for row in rows])
     store.conn.commit()
+
+    confirmed_keys: set[tuple] = set()
+    try:
+        if selected is None:
+            # Unbudgeted (or fallback): one confirmation per key, on its first row, in
+            # the original row order (order matters to a bandit scheduler). Later rows
+            # of a key send the identical Candidate, so they are marked checked without
+            # another probe (BUG-0072: they used to re-confirm and duplicate findings).
+            confirmed_or_tried: set[tuple] = set()
+            for key, cid, ev in confirmable:
+                if key not in confirmed_or_tried:
+                    confirmed_or_tried.add(key)
+                    if oracle.confirm(_candidate_of(ev), sender) is not None:
+                        confirmed_keys.add(key)
+                status[cid] = CHECKED
+        else:
+            chosen = set(selected)
+            for key in selected:                             # one confirmation per key
+                if oracle.confirm(_candidate_of(keyed[key][0][1]), sender) is not None:
+                    confirmed_keys.add(key)
+                for cid, _ev in keyed[key]:
+                    status[cid] = CHECKED
+            for key, members in keyed.items():
+                for cid, _ev in members:
+                    status[cid] = CHECKED if key in chosen else SKIPPED_BUDGET
+    finally:
+        # the statuses gathered so far, even when the loop raised (rows never reached
+        # keep `pending`)
+        store.conn.executemany("UPDATE candidate SET oracle_status=? WHERE id=?",
+                               [(st, cid) for cid, st in status.items()])
+        store.conn.commit()
     checked_keys = len(keyed) if selected is None else len(selected)
 
     findings = store.conn.execute(

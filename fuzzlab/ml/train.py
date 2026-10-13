@@ -417,6 +417,9 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
 
     # Advisory scores onto the candidate rows (never labels).
     _write_scores(store, every.ids, scores, oof_by_id)
+    if run_id is None:
+        # a store-wide row covers exactly the runs it scored (BUG-0074)
+        calibration["scored_run_ids"] = run_ids_of(store, every.ids)
 
     if gate is not None:
         calibration.update(_gate_record(gate, ds.y))
@@ -686,7 +689,7 @@ def latest_classifier(store, run_id: int | None = None) -> ClassifierModel | Non
     """The newest classifier `model` row whose scope covers ``run_id`` (any run when
     ``None``), with its parsed calibration and conformal gate — never another model
     family's row (BUG-0061). The selection itself lives in `model_registry`."""
-    found = select_latest(store, CLASSIFIER_MODEL_NAMES, run_id)
+    found = select_latest(store, CLASSIFIER_MODEL_NAMES, run_id, score_column="score")
     if found is None:
         return None
     row, calibration = found

@@ -30,7 +30,12 @@ the oracle owns truth (the oracle/advisory split).
   classifier reads the candidate features, FR-ML-5.)*
 - **FR-ML-2 (ranker, A.2)** Learning-to-rank over parameters/forms from candidate
   features; writes `candidate.score`; costs **zero** requests. *(CC-ML-0021: a pairwise
-  learning-to-rank objective is built, opt-in — FR-ML-21.)*
+  learning-to-rank objective is built, opt-in — FR-ML-21.)* *(CC-ML-0023, BUG-0073:)*
+  NDCG@k / precision@k **average over tied scores**, giving the exact expectation over
+  every order of a tie: a constant scorer equals the random-order expectation, whatever
+  the input order. Non-finite scores are refused. A metric and its seeded random control
+  come from one function, `rank_train.evaluate_vs_random`, used by the trainer and the
+  ML tab, on scores rounded to the stored 6 dp.
 - **FR-ML-3 (anomaly, A.5)** ECOD / Isolation Forest tripwire over flows, later an
   XGBOD-style hybrid; tags anomalous responses. *(ECOD over candidates is wired as
   `fuzzlab auto --anomaly` and persisted per candidate — FR-ML-12. *(CC-ML-0021:)*
@@ -44,7 +49,11 @@ the oracle owns truth (the oracle/advisory split).
   records the `feature_version` it was trained against. *(Partially met, CC-ML-0021 /
   CC-CORE-0031: the candidate vector is computed by `core/features.extract_candidate_v1`
   (versioned, golden-pinned) and **recomputed on read**; `candidate.features_json` /
-  `feature_version` stay unwritten. Flagged.)*
+  `feature_version` stay unwritten. Flagged.)* *(CC-ML-0023 note:)* the `rules_fired`
+  feature counts fired evaluations by `(run, path, param)` with no method. Keying it by
+  method (BUG-0075's label fix) would change a feature's meaning, so it needs a
+  `FEATURE_VERSION` bump. It is flagged as a versioned follow-up. Labels and seen keys
+  are method-aware already (FR-ML-17).
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
   config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
   CC-FUZZ-0050 / CC-UI-0041.)*
@@ -114,8 +123,18 @@ the oracle owns truth (the oracle/advisory split).
   deployed model of a family for a run" goes through
   `fuzzlab.ml.model_registry.select_latest` (via `train.latest_classifier` /
   `rank_train.latest_ranker`). That returns the newest row of that family whose scope
-  covers the run (same `run_id`, null, or absent for legacy rows), never "the newest row
-  of any kind" (PA-0063, enforced by a source-scan guard test).
+  covers the run, never "the newest row of any kind" (PA-0063, enforced by a
+  source-scan guard test).
+
+  *(Amended CC-ML-0023, BUG-0074.)* "Covers" means:
+  - an int scope: that run;
+  - a null scope (store-wide train): the runs it recorded in
+    `calibration.scored_run_ids`;
+  - a null scope without that list, or a legacy row with no scope key: a run only when
+    that run holds a non-NULL score in the family's column.
+
+  `select_latest` takes that column as a required keyword (`score_column`: `score` /
+  `rank_score`). A model is never cited for a run it never scored.
 
 - **FR-ML-11 (budget prioritizer, CC-ML-0013)** `fuzzlab.ml.active.prioritize(store,
   run_id, candidate_ids, method=…)` orders a run's confirmable candidates for a
@@ -262,9 +281,15 @@ the oracle owns truth (the oracle/advisory split).
     budget-skipped one ("n/a (in-sample score)").
 - **FR-ML-17 (unlabelled statuses; canonical targets, CC-ML-0018)**
   - **Unlabelled.** `oracle_status` in `core.oracle_status.UNLABELLED` (`skipped_budget`,
-    `no_confirmer`) is unlabelled: never trained or evaluated on, still scored. NULL
+    `no_confirmer`, and `pending` — CC-CORE-0033: a row a crashed run never reached) is
+    unlabelled: never trained or evaluated on, still scored. NULL
     (legacy) rows keep the old meaning, so a store written before this change mixes
     both semantics for no-confirmer categories.
+  - **Method-aware labels** *(CC-ML-0023, BUG-0075)*. A candidate is positive when
+    its run has a finding with the same path, param, category **and HTTP method**,
+    normalised by `dataset.method_key` (upper-case; missing → GET). A finding with no
+    recorded method matches any method. `candidate_keys` / `seen_fraction` include the
+    method.
   - **Canonical targets.** Target matching for cross-run training and budget ordering
     compares `core.urls.canonical_origin`, so loopback aliases are one target and an
     unusable origin matches nothing.

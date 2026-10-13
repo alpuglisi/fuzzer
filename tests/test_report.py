@@ -27,9 +27,11 @@ def _seed(store) -> int:
         "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)", (run_id, "tp", 4.0))
     store.conn.execute(
         "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)", (run_id, "fp", 0.0))
+    # scoped to the run, as every production trainer writes it (a scope-less legacy row
+    # now covers only a run holding stored scores — BUG-0074)
     store.conn.execute(
         "INSERT OR IGNORE INTO model (name, version, feature_version, calibration) "
-        "VALUES ('logistic',1,1,'{}')")
+        "VALUES ('logistic',1,1,?)", (json.dumps({"run_id": run_id}),))
     store.conn.execute(
         "INSERT INTO run_plugin (run_id, name, version, priority) VALUES (?,?,?,?)",
         (run_id, "sample", "1.0", 10))

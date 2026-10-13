@@ -348,10 +348,14 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
                   if c is not None}
     if not scores:
         return {"available": False, "reason": "no ranker scores yet (run ranking)", "n": len(ds)}
-    prevalence = sum(labels) / len(labels) if labels else 0.0
     scatter = [{"score": round(s, 4), "uncertainty": round(u, 4), "label": y}
               for s, u, y in zip(scores, uncertainties, labels)] if has_uncertainty else []
     selected = _rank_calibration(store, run_id) or {}
+    # the metric and its random control over the same rows and groups, by the trainer's
+    # own function (BUG-0073: the baseline was the global prevalence, while the metric
+    # is a per-page mean over pages with a positive — a constant ranker looked 5x better)
+    ndcg, precision, ndcg_random, precision_random = _ml().rank_train.evaluate_vs_random(
+        labels, scores, groups, k, int(selected.get("seed", 0) or 0))
     return {
         "available": True, "n": len(scores), "k": k,
         "objective": objectives.pop() if len(objectives) == 1 else
@@ -365,9 +369,10 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
                                     "objective_used": selected.get("objective_used")},
         "evaluation": _evaluation(store, run_id, "rank_score", _rank_calibration),
         "oof": _ranker_oof(store, run_id),
-        "ndcg_at_k": _ml().ranking.mean_ndcg_at_k(labels, scores, groups, k=k),
-        "precision_at_k": _ml().ranking.mean_precision_at_k(labels, scores, groups, k=k),
-        "random_baseline_precision_at_k": round(prevalence, 4),
+        "ndcg_at_k": ndcg,
+        "precision_at_k": precision,
+        "random_baseline_ndcg_at_k": round(ndcg_random, 4),
+        "random_baseline_precision_at_k": round(precision_random, 4),
         "score_hist": _histogram(scores, bins=12),
         "uncertainty_hist": _histogram(uncertainties, bins=12) if has_uncertainty else None,
         "scatter": _stride_sample(scatter, max_scatter),
@@ -594,7 +599,11 @@ def bandit_panel(store) -> dict[str, Any]:
         a, b = float(r["alpha"]), float(r["beta"])
         xs, dens = _beta_density(a, b)
         lo, hi = _beta_ci(xs, dens)
-        pulls = max(0, round((a - 1.0) + (b - 1.0)))  # prior is Beta(1,1); pulls = a+b-2
+        # the scheduler's own per-arm pull counter (BUG-0077): α+β−2 assumed a Beta(1,1)
+        # prior, but arms carry informed priors and every applicable arm is seeded and
+        # saved, so it counted prior mass as pulls. `cost_n` (migration 5) is NOT NULL
+        # DEFAULT 0; a NULL could only be a hand-made row: shown "n/a", never 0.
+        pulls = None if r["cost_n"] is None else int(r["cost_n"])
         cost_n = r["cost_n"] or 0
         mean_cost = (r["cost_sum"] / cost_n) if cost_n else None
         arms.append({

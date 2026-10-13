@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urlparse
 
-from fuzzlab.harness.auto import run_auto
+from fuzzlab.harness.auto import plan_run, run_auto
 
 
 @dataclass
@@ -66,17 +66,28 @@ def run_targets(specs: list[TargetSpec], store, sender_for: SenderFor, *,
     here (a plain loop, never concurrently), and `OobListener` correlates hits by a
     fresh per-probe token, never by target, so nothing can cross-wire between them.
     """
+    # every target's plan is resolved before the first run row is written: a D15 /
+    # points-source error in target 3 must not leave runs 1-2 behind half a batch
+    # (BUG-0078 sweep, PA-0079)
+    for spec in specs:
+        plan_run(mode=spec.mode, ground_truth=spec.ground_truth,
+                 selected_categories=spec.selected_categories,
+                 points_source=spec.points_source)
     outcomes: list[TargetOutcome] = []
     for spec in specs:
         host = urlparse(spec.base_url).netloc or spec.base_url
         run_id = store.start_run("multitarget", host)
-        result = run_auto(base_url=spec.base_url, store=store, run_id=run_id,
-                          sender=sender_for(spec), mode=spec.mode,
-                          ground_truth=spec.ground_truth,
-                          selected_categories=spec.selected_categories,
-                          points_source=spec.points_source,
-                          browser=browser, scheduler=scheduler, plugins=plugins,
-                          oob=oob, coverage=coverage, dbfault=dbfault)
+        try:
+            result = run_auto(base_url=spec.base_url, store=store, run_id=run_id,
+                              sender=sender_for(spec), mode=spec.mode,
+                              ground_truth=spec.ground_truth,
+                              selected_categories=spec.selected_categories,
+                              points_source=spec.points_source,
+                              browser=browser, scheduler=scheduler, plugins=plugins,
+                              oob=oob, coverage=coverage, dbfault=dbfault)
+        except BaseException as exc:
+            store.mark_aborted(run_id, exc)
+            raise
         outcomes.append(TargetOutcome(name=spec.name, run_id=run_id,
                                       findings=result.findings, report=result.report,
                                       plugin_outcomes=result.plugin_outcomes))

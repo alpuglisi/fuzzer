@@ -193,10 +193,13 @@ bugs — the research-platform diagnostics of decision D2.
   (*amended CC-UI-0038:* log-odds per SD, other features held fixed, explicitly not
   feature importance; read from the saved model, FR-ML-13; a stated reason for a tree,
   fallback, legacy or incompatible model), nDCG@k/precision@k vs. random, rank
-  score/uncertainty histograms + a score-vs-uncertainty scatter, the conformal stacked
+  score/uncertainty histograms + a score-vs-uncertainty scatter (*amended CC-UI-0048:*
+the ranker's nDCG@k and precision@k baselines are computed by the trainer's
+`evaluate_vs_random` over the same rows and groups), the conformal stacked
   split + nonconformity histogram, the ECOD anomaly histogram, committee-disagreement
   histogram + a top-N query queue, bandit Beta posteriors (overlaid density + a
-  forest/interval table), and a mutation killed/survived table. `GET /api/ml/data`
+  forest/interval table; *CC-UI-0048:* pulls are the scheduler's recorded `cost_n`,
+  never `α + β − 2`), and a mutation killed/survived table. `GET /api/ml/data`
   (`fuzzlab/web/mlview.py`) is the sole data source — read-only over the store,
   optionally filtered by `run_id`; degrades to a documented "not available" reason per
   panel (never an error) on an empty or partially-populated store.

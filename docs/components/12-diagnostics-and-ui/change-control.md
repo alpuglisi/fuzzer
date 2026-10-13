@@ -3,6 +3,34 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0048 — Ranker panel baseline from the trainer's function (BUG-0073); bandit pulls from `cost_n` (BUG-0077); pending oracle status on the run page (BUG-0071) (2026-10-13)
+- Change:
+  - **Ranker panel (BUG-0073).** `mlview.ranker_panel` computes nDCG@k / precision@k and
+    their random baselines with `rank_train.evaluate_vs_random`, over the same rows and
+    groups, with the model's recorded seed. It adds `random_baseline_ndcg_at_k`. The JS
+    meta line shows both baselines, and the bars chart plots the real nDCG baseline (it
+    was 0).
+  - **Bandit panel (BUG-0077).** `pulls` is the stored `cost_n`, not `α + β − 2`. A NULL
+    shows "n/a (legacy)" in the forest table.
+  - **Run page (BUG-0071).** `_ml_context` counts `pending`. The Oracle-coverage card
+    shows "pending N (run interrupted before the oracle reached them)" and appears when
+    only pending rows exist.
+- Impact (other components / project): reads CC-ML-0023 (`evaluate_vs_random`) and
+  CC-CORE-0033 (`PENDING`). No route or JSON field was removed; `oracle_status` and the
+  ranker panel gain fields.
+- Risk: low. Display only.
+- Deliverables:
+  - [x] ranker baselines; bandit pulls; pending count — done
+  - [x] tests:
+    - a constant ranker shows no lift over its baseline (0.5 = 0.5, nDCG = the
+      permutation expectation);
+    - a production-writer bandit pull count;
+    - the panel pull test asserts `cost_n` (was the pinned `α + β − 2 = 14`);
+    - `pending: 0` in the ML context test — done
+  - [x] FR-UI-11 updated in place — done
+- Review: the review-phase draft agreed 3/3.
+- Effectiveness (assessed 2026-10-13): effective offline. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` verified to resolve to the copy): **26 of 26** review-batch mutants killed (one survivor, the ranker reader passing the classifier's score column, was killed after adding `test_each_family_reader_backs_a_legacy_row_with_its_own_score_column`). Every new regression test fails on the pre-fix code. Suite results: see the related suites (83 files: auto, pipeline, plugins, ML, web incl. real-browser, report, oracle, scheduler, CLI, contract writers, lint, no-ML, packaging, harness, store, migrations, diagnostics; `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1054 passed, 1 skipped, before the last three tests were added, which pass with their files; greybox / multitarget / auto / store / CLI: 143 passed. The non-labgen and full-suite runs were still in progress at commit time and are recorded in a follow-up entry.
+
 ### CC-UI-0047 — Report `feature_versions` per counter, from what the run actually read (BUG-0069); dead `overview_summary` removed; web lint (2026-10-13)
 - Change:
   - **`report/report.py` `_feature_versions`.**

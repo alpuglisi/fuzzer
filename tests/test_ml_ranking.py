@@ -36,10 +36,41 @@ def test_precision_at_k():
     assert precision_at_k(y, scores, k=3) == round(2 / 3, 6)
 
 
-def test_ties_break_to_original_order():
-    # constant scores -> input order preserved; positive is last -> not perfect
-    y = [0, 0, 1]
-    assert ndcg_at_k(y, [0.5, 0.5, 0.5], k=3) < 1.0
+def test_ties_are_averaged_never_broken_by_input_order():
+    """BUG-0073: a constant scorer gets the expected value over every order of the tie,
+    whatever the input order (it used to win when the input listed positives first)."""
+    const = [0.5, 0.5, 0.5]
+    first, last = ndcg_at_k([1, 0, 0], const, k=3), ndcg_at_k([0, 0, 1], const, k=3)
+    expected = (1 / math.log2(2) + 1 / math.log2(3) + 1 / math.log2(4)) / 3
+    assert first == last == round(expected, 6) < 1.0
+    assert precision_at_k([1, 0, 0], const, k=1) == precision_at_k([0, 0, 1], const, k=1) \
+        == round(1 / 3, 6)
+    # a partial tie: the untied top item is exact, the tied tail is averaged
+    y, s = [0, 1, 0, 1], [0.9, 0.2, 0.2, 0.2]
+    gains = [0, 2 / 3, 2 / 3]
+    dcg = sum(g / math.log2(i + 2) for i, g in enumerate(gains))
+    assert ndcg_at_k(y, s, k=3) == round(dcg / (1 + 1 / math.log2(3)), 6)
+    assert precision_at_k(y, s, k=2) == round((0 + 2 / 3) / 2, 6)
+
+
+def test_non_finite_scores_are_refused():
+    import pytest
+    with pytest.raises(ValueError):
+        ndcg_at_k([1, 0], [float("nan"), 0.5], k=2)
+
+
+def test_a_constant_scorer_equals_the_exact_random_expectation():
+    """Averaging ties = the expectation over uniformly random orders (checked by brute
+    force over every permutation)."""
+    from itertools import permutations
+    y = [1, 0, 1, 0, 0]
+    perms = list(permutations(range(len(y))))
+    for k in (1, 2, 3, 5):
+        exp_nd = sum(ndcg_at_k([y[i] for i in p], [5, 4, 3, 2, 1], k) for p in perms) / len(perms)
+        exp_pr = sum(precision_at_k([y[i] for i in p], [5, 4, 3, 2, 1], k)
+                     for p in perms) / len(perms)
+        assert abs(ndcg_at_k(y, [0.0] * 5, k) - exp_nd) < 1e-5
+        assert abs(precision_at_k(y, [0.0] * 5, k) - exp_pr) < 1e-5
 
 
 def test_mean_metrics_skip_pages_without_positives():
@@ -89,3 +120,13 @@ def test_short_text_and_unseen_ngrams():
     v = CharNgramVectorizer(n=3, max_features=16).fit(["idxx", "abcd"])
     (vec,) = v.transform(["zz"])                       # shorter than n, all-unseen
     assert vec == [0.0] * len(v.vocab)
+
+
+def test_the_trainer_ranks_on_the_stored_six_dp_values():
+    """Scores the store rounds to one value tie in the trainer's numbers too, so the ML
+    tab (which reads stored rank scores) recomputes the same metric (PA-0069(3))."""
+    from fuzzlab.ml.rank_train import evaluate_vs_random
+    y, groups = [0, 1], ["p", "p"]
+    near = evaluate_vs_random(y, [0.50000001, 0.5], groups, 2, 0)
+    stored = evaluate_vs_random(y, [0.5, 0.5], groups, 2, 0)
+    assert near == stored and near[0] < 1.0

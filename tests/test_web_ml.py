@@ -169,7 +169,28 @@ def test_bandit_panel_beta_posteriors(tmp_path):
     assert hi_mean_arm["mean"] > lo_mean_arm["mean"]
     assert hi_mean_arm["ci_low"] < hi_mean_arm["mean"] < hi_mean_arm["ci_high"]
     assert len(hi_mean_arm["density"]["x"]) == len(hi_mean_arm["density"]["y"]) == 200
-    assert hi_mean_arm["pulls"] == 14  # alpha+beta-2 = 12+4-2
+    # the recorded pull counter (BUG-0077), not alpha+beta-2 = 14, which counted prior mass
+    assert hi_mean_arm["pulls"] == 10 and lo_mean_arm["pulls"] == 8
+
+
+def test_bandit_panel_pulls_are_the_schedulers_counter(tmp_path):
+    """BUG-0077, through the production writer: one pull in total, informed priors, every
+    applicable arm seeded and saved — the panel shows 1 pull on the pulled arm, 0 on the
+    rest (α+β−2 showed 3 and 1)."""
+    import random
+
+    from fuzzlab.oracle.strategies import default_strategies
+    from fuzzlab.scheduler import ThompsonBandit, arm_priors
+    with Store(tmp_path / "b.db") as store:
+        b = ThompsonBandit(rng=random.Random(0), priors=arm_priors(default_strategies()),
+                           cost_normalized=True, backoff=True)
+        ctx = "sql-injection:query"
+        order = b.order(ctx, [s.arm for s in default_strategies()
+                              if s.category == "sql-injection"])
+        b.update(ctx, order[0], 1.0, cost=2)
+        b.save(store)
+        pulls = {a["arm"]: a["pulls"] for a in mlview.bandit_panel(store)["arms"]}
+    assert pulls[order[0]] == 1 and sum(pulls.values()) == 1
 
 
 def test_mutation_panel_killed_survived(tmp_path):
@@ -289,3 +310,37 @@ def test_chart_height_token_declared():
     c = _client("nonexistent.db")
     r = c.get("/static/tokens.css")
     assert "--chart-h" in r.text
+
+
+def test_a_constant_ranker_shows_no_lift_over_its_baseline(tmp_path):
+    """BUG-0073: the panel's metric and its random baseline come from the trainer's one
+    function over the same rows and groups. A thin-data run falls back to a constant
+    order: its precision@k equals the baseline (it used to show 0.5 vs a global
+    prevalence of 0.1, "5x better than random"), and its nDCG is the random-order
+    expectation whatever the input order (positives are inserted first here)."""
+    from itertools import permutations
+
+    from fuzzlab.ml.rank_train import train_and_rank
+    from fuzzlab.ml.ranking import ndcg_at_k
+    with Store(tmp_path / "c.db") as store:
+        rid = store.start_run("auto", "h")
+        for i in range(10):                                  # 10 pages x 4 params
+            for p in "abcd":
+                ev = json.dumps({"url": f"http://h/p{i}", "param": p, "category": "xss",
+                                 "method": "GET", "location": "query"})
+                store.conn.execute(
+                    "INSERT INTO candidate (run_id, rule, evidence, oracle_status) "
+                    "VALUES (?,?,?,'checked')", (rid, "x", ev))
+        for i, p in ((0, "a"), (0, "b"), (1, "a"), (1, "b")):    # listed first per page
+            store.conn.execute(
+                "INSERT INTO finding (run_id, vuln_class, label, url, method, param) "
+                "VALUES (?,?,1,?,?,?)", (rid, "xss", f"/p{i}", "GET", p))
+        store.conn.commit()
+        assert train_and_rank(store, rid)["fallback"] is True
+        panel = mlview.ranker_panel(store, rid)
+    assert panel["precision_at_k"] == panel["random_baseline_precision_at_k"] == 0.5
+    y = [1, 1, 0, 0]
+    expected = sum(ndcg_at_k([y[i] for i in p], [4, 3, 2, 1], 10)
+                   for p in permutations(range(4))) / 24
+    assert abs(panel["ndcg_at_k"] - expected) < 1e-5 and panel["ndcg_at_k"] < 1.0
+    assert "random_baseline_ndcg_at_k" in panel

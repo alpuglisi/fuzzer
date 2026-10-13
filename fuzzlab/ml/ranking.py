@@ -6,8 +6,11 @@ the top k are real) and NDCG@k (rank-discounted gain, normalized by the ideal or
 Positives are rare and correlated by page, so metrics are computed per group and
 averaged over the groups that actually have a positive to rank. Pure Python.
 
-Ties in the score are broken by the items' original order (a stable sort), so a constant
-scorer degrades to the input order rather than silently winning.
+Tied scores are **averaged**: each metric is its expected value over every order of the
+tied items (BUG-0073). A ranker that cannot tell items apart therefore scores exactly
+what a uniformly random order scores in expectation — a constant scorer can neither win
+nor lose by the input order (which used to break ties, so an input order that happened
+to list positives first made a constant ranker look better than random).
 """
 
 from __future__ import annotations
@@ -16,9 +19,22 @@ import math
 from typing import Sequence
 
 
-def _order(scores: Sequence[float]) -> list[int]:
-    """Indices sorted by score descending; ties keep their original order (stable)."""
-    return sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+def _expected_gains(y_true: Sequence[int], scores: Sequence[float]) -> list[float]:
+    """The expected relevance at each rank (0-based) when items are sorted by score
+    descending and every order of a tied group is equally likely: each slot a tied group
+    occupies holds its mean relevance (linearity of expectation)."""
+    tied: dict[float, list[int]] = {}
+    for i, s in enumerate(scores):
+        if not math.isfinite(s):
+            # NaN never equals itself: it would form its own group in an undefined order
+            raise ValueError(f"ranking scores must be finite, got {s!r} at {i}")
+        tied.setdefault(s, []).append(i)
+    gains: list[float] = []
+    for s in sorted(tied, reverse=True):
+        members = tied[s]
+        mean = sum(y_true[i] for i in members) / len(members)
+        gains.extend([mean] * len(members))
+    return gains
 
 
 def _dcg(rels: Sequence[float], k: int) -> float:
@@ -26,24 +42,22 @@ def _dcg(rels: Sequence[float], k: int) -> float:
 
 
 def ndcg_at_k(y_true: Sequence[int], scores: Sequence[float], k: int = 10) -> float:
-    """Normalized discounted cumulative gain at k (binary relevance).
+    """Normalized discounted cumulative gain at k (binary relevance), ties averaged.
 
     Returns 0.0 when the group has no positives (nothing to rank up).
     """
-    order = _order(scores)
-    ranked = [y_true[i] for i in order]
     ideal = _dcg(sorted(y_true, reverse=True), k)
     if ideal <= 0:
         return 0.0
-    return round(_dcg(ranked, k) / ideal, 6)
+    return round(_dcg(_expected_gains(y_true, scores), k) / ideal, 6)
 
 
 def precision_at_k(y_true: Sequence[int], scores: Sequence[float], k: int = 10) -> float:
-    """Fraction of the top-k that are positive (denominator = min(k, n))."""
+    """Fraction of the top-k that are positive (denominator = min(k, n)), ties averaged."""
     if not y_true:
         return 0.0
-    top = _order(scores)[:k]
-    return round(sum(y_true[i] for i in top) / min(k, len(y_true)), 6)
+    top = _expected_gains(y_true, scores)[:k]
+    return round(sum(top) / min(k, len(y_true)), 6)
 
 
 def _by_group(y_true, scores, groups):

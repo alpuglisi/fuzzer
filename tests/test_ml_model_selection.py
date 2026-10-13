@@ -14,6 +14,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from fuzzlab.core.store import Store
 from fuzzlab.ml import model_registry
 from fuzzlab.ml.rank_train import RANKER_MODEL_NAMES, latest_ranker, train_and_rank
@@ -48,30 +50,63 @@ def test_classifier_and_ranker_names_are_disjoint():
 
 def test_select_latest_scope_rules(tmp_path):
     with Store(tmp_path / "s.db") as store:
-        assert model_registry.select_latest(store, ["logistic"], 1) is None   # empty
+        assert model_registry.select_latest(store, ["logistic"], 1,
+                                             score_column="score") is None   # empty
         _model(store, "logistic", {"run_id": 1, "tag": "r1"}, 1)
         _model(store, "logistic", {"run_id": 2, "tag": "r2"}, 2)
         _model(store, "ranker", {"run_id": 1, "tag": "rank"}, 1)
-        pick = lambda run: model_registry.select_latest(store, ["logistic"], run)
+        pick = lambda run: model_registry.select_latest(store, ["logistic"], run,
+                                                        score_column="score")
         assert pick(1)[1]["tag"] == "r1"            # its own run, not the newer run 2
         assert pick(2)[1]["tag"] == "r2"
         assert pick(None)[1]["tag"] == "r2"         # any run -> newest of the family
         assert pick(3) is None                      # nothing covers run 3
-        _model(store, "logistic", {"run_id": None, "tag": "all"}, 3)  # store-wide train
+        # a store-wide train covers exactly the runs it scored (BUG-0074): runs 1 and 3,
+        # never a later run 4 it never saw — the pinned "covers everything" was the bug
+        _model(store, "logistic", {"run_id": None, "scored_run_ids": [1, 3],
+                                   "tag": "all"}, 3)
         assert pick(1)[1]["tag"] == "all"           # newest covering row wins
         assert pick(3)[1]["tag"] == "all"
-        assert model_registry.select_latest(store, ["ranker"], 2) is None   # family-only
+        assert pick(2)[1]["tag"] == "r2"            # not scored by it: its own row
+        assert pick(4) is None
+        assert model_registry.select_latest(store, ["ranker"], 2,
+                                            score_column="rank_score") is None  # family-only
+
+
+def _scored_run(store, *, score=None, rank_score=None) -> int:
+    run_id = store.start_run("auto", "h")
+    store.conn.execute("INSERT INTO candidate (run_id, evidence, score, rank_score) "
+                       "VALUES (?, '{}', ?, ?)", (run_id, score, rank_score))
+    store.conn.commit()
+    return run_id
 
 
 def test_select_latest_legacy_and_malformed_calibration(tmp_path):
+    """A legacy row (no `run_id` key) or a store-wide row without `scored_run_ids` covers
+    a run only when the run holds a stored score in the family's column (BUG-0074): the
+    old behaviour credited it to every run, even one never scored."""
     with Store(tmp_path / "s.db") as store:
+        scored = _scored_run(store, score=0.4)                     # classifier-scored
+        ranked = _scored_run(store, rank_score=0.7)                # ranker-only
+        bare = _scored_run(store)                                  # never scored
         _model(store, "logistic", {"t_lo": 0.2, "t_hi": 0.8})      # legacy: no run_id key
-        row, calib = model_registry.select_latest(store, ["logistic"], 7)
-        assert calib["t_hi"] == 0.8                  # legacy rows keep old behavior
-        _model(store, "gbt", "not json", 1)
-        row, calib = model_registry.select_latest(store, ["logistic", "gbt"], 7)
+        pick = lambda run, names=("logistic",): model_registry.select_latest(
+            store, list(names), run, score_column="score")
+        assert pick(scored)[1]["t_hi"] == 0.8        # a scored run keeps old behavior
+        assert pick(ranked) is None and pick(bare) is None
+        _model(store, "ranker", {"run_id": None})                  # store-wide, no list
+        rank_pick = lambda run: model_registry.select_latest(
+            store, ["ranker"], run, score_column="rank_score")
+        assert rank_pick(ranked) is not None and rank_pick(scored) is None
+        assert rank_pick(bare) is None
+        _model(store, "gbt", "not json", scored)
+        row, calib = pick(scored, ("logistic", "gbt"))
         assert row["name"] == "gbt" and calib == {}
-        assert model_registry.select_latest(store, [], 7) is None
+        assert pick(scored, ()) is None
+        with pytest.raises(ValueError):
+            model_registry.select_latest(store, ["logistic"], scored, score_column="evidence")
+        with pytest.raises(TypeError):                             # required keyword
+            model_registry.select_latest(store, ["logistic"], scored)
 
 
 # --- the classifier reader --------------------------------------------------
@@ -230,3 +265,38 @@ def test_family_readers_delegate_to_the_shared_selector():
         assert not any(_FROM_MODEL.search(s) for _, s in _strings(fn)), rel
         assert any(isinstance(n, ast.Name) and n.id == "select_latest"
                    for n in ast.walk(fn)), rel
+
+
+def test_a_store_wide_train_covers_exactly_the_runs_it_scored(tmp_path):
+    """BUG-0074: a store-wide classifier and ranker record `scored_run_ids`; a run with no
+    candidates at training time, and a later run, are never credited to them (the
+    report and run page used to cite the store-wide model for both)."""
+    from fuzzlab.report.report import build_report
+    with Store(tmp_path / "a.db") as store:
+        r1 = _seed_rich(store)
+        empty = store.start_run("auto", "h")                # <= the newest, no candidates
+        train_and_score(store, None)
+        train_and_rank(store, None)
+        later = _seed_rich(store)                           # after the train
+        clf, ranker = latest_classifier(store, r1), latest_ranker(store, r1)
+        assert clf.calibration["scored_run_ids"] == [r1]
+        assert ranker[1]["scored_run_ids"] == [r1]
+        for run in (empty, later):
+            assert latest_classifier(store, run) is None and latest_ranker(store, run) is None
+            assert build_report(store, run)["models"] == []
+        assert {m["name"] for m in build_report(store, r1)["models"]} == {
+            clf.name, ranker[0]["name"]}
+
+
+def test_each_family_reader_backs_a_legacy_row_with_its_own_score_column(tmp_path):
+    """`latest_classifier` reads `score`, `latest_ranker` `rank_score` (BUG-0074): a
+    scope-less legacy row is credited only to a run holding that family's score."""
+    with Store(tmp_path / "s.db") as store:
+        scored = _scored_run(store, score=0.4)
+        ranked = _scored_run(store, rank_score=0.7)
+        _model(store, "logistic", {})
+        _model(store, "ranker", {})
+        assert latest_classifier(store, scored) is not None
+        assert latest_classifier(store, ranked) is None
+        assert latest_ranker(store, ranked) is not None
+        assert latest_ranker(store, scored) is None

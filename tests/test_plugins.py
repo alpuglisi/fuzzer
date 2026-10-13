@@ -163,3 +163,79 @@ def test_registry_defaults_for_bare_plugin():
     reg = HookRegistry()
     info = reg.register(Bare())
     assert info.name == "Bare" and info.version == "0" and info.priority == 100
+
+
+# --- BUG-0076: plugin metadata and hook lookup are inside the containment boundary ---
+
+class _EP:
+    def __init__(self, obj, name):
+        self.obj, self.name = obj, name
+
+    def load(self):
+        return self.obj
+
+
+class _GoodRun:
+    name = "good"
+
+    def after_run(self, store, run_id):
+        return "ok"
+
+
+class _StrPriority:
+    name = "bad-priority"
+    priority = "high"
+
+
+class _BoolPriority:
+    name = "bool-priority"
+    priority = True
+
+
+class _RaisingName:
+    @property
+    def name(self):
+        raise RuntimeError("no name")
+
+
+class _RaisingHook:
+    name = "raising-hook"
+
+    @property
+    def on_candidate(self):
+        raise RuntimeError("hook lookup failed")
+
+
+def test_malformed_metadata_rejects_only_that_plugin():
+    from fuzzlab.plugins import PluginManager
+    pm = PluginManager.from_entry_points(entry_points=[
+        _EP(_GoodRun, "good"), _EP(_StrPriority, "s"), _EP(_BoolPriority, "b"),
+        _EP(_RaisingName, "n")])
+    assert [i.name for i in pm.registry.registered()] == ["good"]
+    why = {info.name: reason for info, reason in pm.rejections()}
+    assert set(why) == {"bad-priority", "bool-priority", "_RaisingName"}
+    assert all(r.startswith("invalid metadata: ") for r in why.values())
+    assert "ValueError" in why["bad-priority"] and "RuntimeError" in why["_RaisingName"]
+    assert [i.name for i in pm.rejected()] == list(why)
+
+
+def test_a_duplicate_name_is_still_refused_with_its_reason():
+    from fuzzlab.plugins import PluginManager
+    pm = PluginManager(plugins=[_GoodRun(), _GoodRun()])
+    assert [(i.name, r) for i, r in pm.rejections()] == [("good", "duplicate name")]
+
+
+def test_a_raising_hook_attribute_disables_only_that_plugin():
+    from fuzzlab.plugins import PluginManager
+    seen = []
+
+    class Watcher:
+        name = "watcher"
+
+        def on_candidate(self, c):
+            seen.append(c)
+    pm = PluginManager(plugins=[_RaisingHook(), Watcher()])
+    pm.on_candidate("c1")
+    assert seen == ["c1"]
+    assert pm.disabled() == {"raising-hook"} and "hook lookup failed" in pm.errors()[
+        "raising-hook"]
