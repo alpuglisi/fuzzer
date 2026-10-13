@@ -3,6 +3,50 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0046 — Ranker panel shows pairwise honestly; anomaly panel reads stored flags; anomaly method on the run page; `flow-anomaly` in the launcher (2026-10-13)
+- Change:
+  - **`mlview.ranker_panel`:**
+    - `uncertainty_available` (false for pairwise: no uncertainty histogram or scatter)
+      and `objective` (per pooled run's ranker; "mixed" when they differ);
+    - `global`: the selected ranker's stored per-fold run-wide NDCG / P@k, for a per-run
+      view or a store-wide train.
+  - **`mlview.anomaly_panel`:**
+    - per run, the **stored** scores and flags with `_anomaly_stage` (method and
+      contamination from the run's `ml-anomaly` config, or "unknown (assumed ECOD)");
+    - `flag_budget` from `run_metrics`, `reason` from `core.anomaly_flags.flag_note`,
+      and a per-method `axis`;
+    - otherwise ECOD is recomputed, labelled `source: "recomputed (ECOD, c)"`.
+  - **`ml.js`.** The ranker meta adds "objective …", "run-wide nDCG@k … (per-fold
+    scales — not pooled)" and "uncertainty n/a (pairwise)". The anomaly meta leads with
+    the source, method and contamination. The histogram axis is per method. All of it
+    is text.
+  - **Run page.** `_ml_context` adds `anomaly.method`, and the card shows "method X".
+  - **`commandspec._REGISTRY`** gains `flow-anomaly` (`sends_traffic=False`, loader
+    `_load_flow_anomaly`).
+- Impact:
+  - A run's anomaly panel now agrees with its run page and CLI: it shows the stored
+    flags, not a fresh ECOD refit.
+  - The batch-2 browser assertion on the anomaly meta was updated deliberately: it now
+    checks the stored path and the all-runs recomputed path.
+  - The launcher lists one more command.
+- Risk: low.
+- Deliverables:
+  - [x] ranker panel — done
+  - [x] anomaly panel — done
+  - [x] run page method — done
+  - [x] launcher entry — done
+  - [x] FR-UI-11 / FR-UI-19 notes — done
+  - [x] tests:
+    - data-level panel and run page tests (`tests/test_ml_batch4.py`);
+    - a real-browser test of the pairwise and iforest text;
+    - `tests/test_web_ml_context.py`'s updated stored / recomputed anomaly assertions;
+    - `flow-anomaly` in `command_names()`.
+
+    — done
+- Review: covered by CC-ML-0021's 3/3 pre-change review (A2, A3, B4-3, B4v2-1/2).
+  Renumbered from CC-UI-0045 (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (61 files incl. real-browser, no-ML, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 953 passed. Batch-4 files (`test_ml_batch4.py`, `test_candidate_features_core.py`, `test_no_ml.py`, `test_web_ml_context.py`): 57 passed after the mutation-driven additions. Its mutants are among CC-ML-0021's 28, all killed.
+
 ### CC-UI-0045 — ML tab: held-out rows left out of out-of-fold metrics; calibration evidence; sealed tables hidden (2026-10-13)
 - Change:
   - **`mlview._scored_pairs`** joins each row with its own run's scoring model and

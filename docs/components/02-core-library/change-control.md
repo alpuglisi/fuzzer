@@ -3,6 +3,34 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0031 — Migration 18 (flow anomaly columns); candidate features in `core/features.py` (2026-10-13)
+- Change:
+  - **Migration 18** adds `flow.anomaly_score REAL` and `flow.anomaly_flag INTEGER`.
+  - **`core/features.py`** gains `CANDIDATE_FEATURE_NAMES`,
+    `CANDIDATE_FEATURE_VERSION = 1` and `extract_candidate_v1`, with their regexes. They
+    were moved verbatim from `ml/dataset._features`, and the body diff is empty. They
+    import no ML.
+  - **Golden file.** `tests/data/candidate_features/v1_golden.json` holds 45 cases, all
+    captured from the old function **before** the move: cases 1–12 from the working
+    tree, cases 13–45 (one per name-regex alternative) from commit 7a2b3d7, the last
+    commit before it.
+- Impact:
+  - The schema head moves 17 → 18. It is additive.
+  - ML reads the vector from core under its old names (FR-ML-5, partly met: recomputed
+    on read).
+  - The response extractor's `FEATURE_VERSION` is independent.
+- Risk: low. Identity is proven by the golden vectors, and the name order is pinned.
+- Deliverables:
+  - [x] migration 18 — done
+  - [x] extractor moved — done
+  - [x] FR-CORE-20/21 — done
+  - [x] tests: golden vectors (core and the ML alias), names / version, the no-ML
+    import AST check (`tests/test_candidate_features_core.py`, 3), and migration 18
+    columns (`tests/test_ml_batch4.py`) — done
+- Review: covered by CC-ML-0021's 3/3 pre-change review (A6, A8, B4-5). Pre-assigned
+  number (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (61 files incl. real-browser, no-ML, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 953 passed. Batch-4 files (`test_ml_batch4.py`, `test_candidate_features_core.py`, `test_no_ml.py`, `test_web_ml_context.py`): 57 passed after the mutation-driven additions. Its mutants are among CC-ML-0021's 28, all killed.
+
 ### CC-CORE-0030 — Migration 17: the sealed holdout tables; `core/sealed.py` (2026-10-13)
 - Change:
   - **Migration 17** adds two tables, plus an index on `holdout_metric.run_id`:

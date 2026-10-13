@@ -215,7 +215,13 @@ def _validate(env) -> None:
         if not _is_num(p["value"]):
             _fail("constant.value: expected a finite number")
     else:                                            # ranker
-        _keys(p, {"seed", "vectorizer", "model", "feature_names"}, "ranker")
+        base = {"seed", "vectorizer", "model", "feature_names"}
+        if isinstance(p, dict) and "objective" in p:          # CC-ML-0021: pairwise only
+            _keys(p, base | {"objective"}, "ranker")
+            if p["objective"] != "pairwise":
+                _fail(f"ranker.objective: only 'pairwise' is stored, got {p['objective']!r}")
+        else:
+            _keys(p, base, "ranker")
         _check_vectorizer(p["vectorizer"])
         vocab = p["vectorizer"]["vocab"]
         if p["feature_names"] != names or names[len(names) - len(vocab):] != \

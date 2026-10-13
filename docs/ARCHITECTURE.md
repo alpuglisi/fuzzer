@@ -1356,6 +1356,18 @@ tracked in the requirements files, not here.
   - **Calibration.** `--calibrate platt` Platt-scales the classifier (cross-fitted
     calibrated `score_oof` feeds the gate; the full map is saved with the model, persist
     format 2) and records out-of-fold ECE / Brier before and after.
+- **Pairwise ranking, Isolation Forest, flow anomalies** `[built; opt-in]` (CC-ML-0021,
+  CC-CORE-0031, CC-FUZZ-0054, FR-ML-21..23):
+  - **Pairwise.** `--rank-objective pairwise|auto` trains the ranker on run-wide
+    (vulnerable, not) pair differences. Pairwise scores carry no uncertainty, and its
+    run-wide metrics are averaged per fold. The budget prioritizer stays pointwise.
+  - **Isolation Forest.** `--anomaly-method iforest` is an alternative to ECOD (still
+    the default).
+  - **Flows.** `fuzzlab flow-anomaly` flags each host's most unusual recorded flows into
+    `flow.anomaly_*` (migration 18). There is no UI panel yet.
+  - **Candidate features.** The vector is computed by `core/features.py` (golden-pinned)
+    and recomputed on read. `candidate.features_json` stays unwritten, and the
+    response-feature classifier is flagged (no candidate-linked responses).
 - **Train on earlier runs** `[built; on-host exits pending]` (CC-ML-0016, CC-FUZZ-0049,
   CC-UI-0040, FR-ML-14):
   - `fuzzlab auto --score/--rank --train-on earlier` trains the classifier / ranker
@@ -1635,7 +1647,7 @@ detail):
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
 | `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `skipped_budget` rows are scored, never trained on), UI |
-| `flow` (+ raw bytes) | proxy, http client | anomaly detector, UI, analysis |
+| `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |

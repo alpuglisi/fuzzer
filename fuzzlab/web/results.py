@@ -419,6 +419,11 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
                         + ("…" if len(error) > _ERROR_SHOWN else ""),
                         "error_full": error})
     anomaly_config = next((p["config"] for p in plugins if p["name"] == "ml-anomaly"), "")
+    try:                       # the detector that wrote the flags (CC-UI-0046)
+        method = json.loads(anomaly_config).get("method", "ecod") if anomaly_config \
+            else "unknown (assumed ECOD)"
+    except (ValueError, TypeError, AttributeError):
+        method = "unknown (assumed ECOD)"
     return {
         "oracle_status": {"checked": counts[CHECKED], "skipped_budget": counts[SKIPPED_BUDGET],
                           "no_confirmer": counts[NO_CONFIRMER], "unrecorded": counts[None]},
@@ -426,6 +431,7 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
                     "flagged": metrics.get("anomaly_flagged"),
                     "budget": metrics.get("anomaly_flag_budget"),
                     "note": flag_note(store, run_id, metrics),
+                    "method": method,
                     "config": anomaly_config},
         "plugins": plugins,
     }

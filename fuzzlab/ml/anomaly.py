@@ -10,6 +10,11 @@ It is **advisory** (same split as the Phase 5/7 ML): it produces scores/flags an
 hybrid feature for the classifier (XGBOD-style); it never writes `finding` labels. Use it
 as a tripwire over attempt/flow feature vectors, and via ``augment`` to feed the anomaly
 score into the detection classifier.
+
+**Isolation Forest** (CC-ML-0021, FR-ML-22) is the alternative detector
+(``method="iforest"``): random isolation trees, score ``2^(-E[h(x)] / c(ψ))`` in (0, 1),
+higher = more anomalous. Pure Python, deterministic per ``(seed, n_trees,
+max_samples)``. ECOD stays the default (parameter-free) and the hybrid feature.
 """
 
 from __future__ import annotations
@@ -91,6 +96,96 @@ class ECOD:
 FLAG_RULE = 2
 
 
+_EULER = 0.5772156649015329
+
+
+def average_path_length(n: int) -> float:
+    """``c(n)``: the average path length of an unsuccessful BST search over ``n`` points
+    — the normaliser of Isolation Forest path lengths. ``c(n) = 2·H(n-1) - 2(n-1)/n``
+    with the harmonic number computed exactly for ``n ≤ 10_000`` (``ln + γ`` above);
+    ``c(2) = 1``, ``c(n ≤ 1) = 0``."""
+    if n <= 1:
+        return 0.0
+    if n == 2:
+        return 1.0
+    m = n - 1
+    harmonic = sum(1.0 / i for i in range(1, m + 1)) if m <= 10_000 else \
+        math.log(m) + _EULER
+    return 2.0 * harmonic - 2.0 * (n - 1) / n
+
+
+class IsolationForest:
+    """Random isolation trees over feature rows (Liu, Ting & Zhou 2008).
+
+    Each tree is grown on a seeded sample of ``ψ = min(max_samples, n)`` rows to depth
+    ``ceil(log2 ψ)``: a node splits on a random feature **among those with range > 0**
+    at a uniform random value; a node with no such feature (all rows equal) is a leaf.
+    A leaf holding ``size`` rows adds ``c(size)``. With ``n ≤ 2`` there is nothing to
+    isolate: every score is 0.5 (and `detect_anomalies` flags nothing)."""
+
+    def __init__(self, n_trees: int = 100, max_samples: int = 256, seed: int = 0):
+        self.n_trees, self.max_samples, self.seed = n_trees, max_samples, seed
+        self._trees: list = []
+        self._psi = 0
+
+    def fit(self, X: Sequence[Sequence[float]]) -> "IsolationForest":
+        import random
+        n = len(X)
+        self._trees, self._psi = [], min(self.max_samples, n)
+        if n <= 2:
+            return self
+        rng = random.Random(self.seed)
+        limit = math.ceil(math.log2(self._psi))
+        for _ in range(self.n_trees):
+            rows = [list(X[i]) for i in rng.sample(range(n), self._psi)]
+            self._trees.append(self._grow(rows, 0, limit, rng))
+        return self
+
+    def _grow(self, rows, depth: int, limit: int, rng):
+        if depth >= limit or len(rows) <= 1:
+            return ("leaf", len(rows))
+        width = len(rows[0])
+        spans = [(j, min(r[j] for r in rows), max(r[j] for r in rows)) for j in range(width)]
+        spans = [s for s in spans if s[2] > s[1]]
+        if not spans:                                # all rows identical
+            return ("leaf", len(rows))
+        j, lo, hi = spans[rng.randrange(len(spans))]
+        cut = rng.uniform(lo, hi)
+        left = [r for r in rows if r[j] < cut]
+        right = [r for r in rows if r[j] >= cut]
+        return ("split", j, cut, self._grow(left, depth + 1, limit, rng),
+                self._grow(right, depth + 1, limit, rng))
+
+    def _path(self, x, node, depth: int = 0) -> float:
+        while node[0] == "split":
+            _, j, cut, left, right = node
+            node = left if x[j] < cut else right
+            depth += 1
+        return depth + average_path_length(node[1])
+
+    def score(self, x: Sequence[float]) -> float:
+        if not self._trees:
+            return 0.5
+        mean = sum(self._path(x, t) for t in self._trees) / len(self._trees)
+        return 2.0 ** (-mean / average_path_length(self._psi))
+
+    def scores(self, X: Sequence[Sequence[float]]) -> list[float]:
+        return [self.score(x) for x in X]
+
+
+#: `detect_anomalies(method=…)` choices; ECOD is the default (parameter-free).
+ANOMALY_METHODS = ("ecod", "iforest")
+
+
+def fit_detector(method: str, X, *, seed: int = 0):
+    """A fitted detector (``.scores(X)``) for ``method``."""
+    if method == "ecod":
+        return ECOD().fit(X)
+    if method == "iforest":
+        return IsolationForest(seed=seed).fit(X)
+    raise ValueError(f"anomaly method must be one of {ANOMALY_METHODS}, got {method!r}")
+
+
 def flag_budget(n: int, contamination: float) -> int:
     """The most candidates a ``contamination`` fraction may flag among ``n``:
     ``max(1, round(n·contamination))`` (0 when there are none). One definition for the
@@ -139,7 +234,7 @@ def augment(X: Sequence[Sequence[float]], ecod: ECOD) -> list[list[float]]:
 
 
 def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.1, *,
-                     persist: bool = True) -> dict:
+                     persist: bool = True, method: str = "ecod", seed: int = 0) -> dict:
     """Fit ECOD over the run's candidate feature vectors and flag outliers (advisory).
 
     Label-free, so every candidate is scored — including ones the oracle skipped for
@@ -152,18 +247,26 @@ def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.
 
     A flag is relative to the candidates scored together: call it per run (the CLI
     does); a later store-wide call (``run_id=None``) would overwrite per-run flags.
+
+    ``method="iforest"`` (CC-ML-0021) uses `IsolationForest` (seeded) instead of ECOD;
+    with two or fewer candidates it flags nothing.
     """
     if not 0 < contamination <= 0.5:
         raise ValueError(f"contamination must be in (0, 0.5], got {contamination!r}")
+    if method not in ANOMALY_METHODS:
+        raise ValueError(f"anomaly method must be one of {ANOMALY_METHODS}, got {method!r}")
     from fuzzlab.ml.dataset import build_dataset
     ds = build_dataset(store, run_id, include_unlabelled=True)
     if not len(ds):
         return {"rows": 0, "flagged": 0, "flag_budget": 0, "flag_reason": None,
-                "scores": [], "flags": [], "ids": []}
-    ecod = ECOD().fit(ds.X)
-    scores = ecod.scores(ds.X)
+                "method": method, "scores": [], "flags": [], "ids": []}
+    scores = fit_detector(method, ds.X, seed=seed).scores(ds.X)
     flags = flag_top(scores, contamination)
     k = flag_budget(len(scores), contamination)
+    reason = flag_reason(scores, flags, contamination)
+    if method == "iforest" and len(scores) <= 2:     # nothing to isolate: budget 0
+        flags, k = [False] * len(scores), 0
+        reason = "too few candidates to isolate (n ≤ 2)"
     if persist:
         for cid, sc, fl in zip(ds.ids, scores, flags):
             store.conn.execute(
@@ -176,6 +279,5 @@ def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.
                 "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
                 (run_id, key, float(value)))
     store.conn.commit()
-    return {"rows": len(ds), "flagged": sum(flags), "flag_budget": k,
-            "flag_reason": flag_reason(scores, flags, contamination), "scores": scores,
-            "flags": flags, "ids": ds.ids}
+    return {"rows": len(ds), "flagged": sum(flags), "flag_budget": k, "method": method,
+            "flag_reason": reason, "scores": scores, "flags": flags, "ids": ds.ids}

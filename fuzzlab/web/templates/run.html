@@ -99,7 +99,8 @@
   <h2>Anomaly tripwire (advisory)</h2>
   <p class="muted">The most unusual candidates by the stored anomaly score &mdash;
     unusual is not vulnerable. Flagged on this run:
-    {{ an.flagged|int if an.flagged is not none else 'unknown' }}{% if an.config %}
+    {{ an.flagged|int if an.flagged is not none else 'unknown' }}; method
+    <span data-field="anomaly-method">{{ an.method }}</span>{% if an.config %}
     (stage config <code>{{ an.config }}</code>){% endif %}. These are the last anomaly
     fit's values for this run.</p>
   {% if an.note %}<p class="muted" data-field="anomaly-note">Note: {{ an.note }}.</p>{% endif %}

@@ -1,0 +1,1082 @@
+{
+ "captured_from": "fuzzlab.ml.dataset._features before CC-CORE-0031 (cases 1-12 from the working tree before the move; cases 13+ from commit 7a2b3d7, the last commit before the move, one per regex alternative)",
+ "cases": [
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "id",
+    "url": "http://h/a.php?id=1"
+   },
+   "rules_fired": 2,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    2.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "next_url",
+    "url": "http://h/login"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    8.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "path-traversal",
+    "location": "body",
+    "method": "POST",
+    "param": "template_path",
+    "url": "http://h/f"
+   },
+   "rules_fired": 5,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    13.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    5.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "command-injection",
+    "param": "host_ip",
+    "url": "http://h/ping"
+   },
+   "rules_fired": 1,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    7.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "",
+    "param": ""
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {},
+   "rules_fired": 0,
+   "sink_context": "",
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "header",
+    "method": null,
+    "param": "user_id",
+    "url": "http://h/x"
+   },
+   "rules_fired": 3,
+   "sink_context": "js",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0,
+    7.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "method": "PUT",
+    "param": "ID",
+    "url": "http://h/y"
+   },
+   "rules_fired": 0,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    2.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "method": "GET",
+    "param": "redirect",
+    "url": "http://h/z"
+   },
+   "rules_fired": 7,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    8.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    7.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "param": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "url": "http://h/w"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    40.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "method": "GET",
+    "param": "cmd",
+    "url": "http://h/c"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    3.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "param": "folder",
+    "url": "http://h/d"
+   },
+   "rules_fired": 1,
+   "sink_context": "x",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    6.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "id",
+    "url": "http://h/w0"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    2.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "user_id",
+    "url": "http://h/w1"
+   },
+   "rules_fired": 1,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    7.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "id_x",
+    "url": "http://h/w2"
+   },
+   "rules_fired": 2,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    4.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "body",
+    "method": "GET",
+    "param": "uid",
+    "url": "http://h/w3"
+   },
+   "rules_fired": 3,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    3.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "method": "post",
+    "param": "Pid",
+    "url": "http://h/w4"
+   },
+   "rules_fired": 0,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    3.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "body",
+    "method": null,
+    "param": "url",
+    "url": "http://h/w5"
+   },
+   "rules_fired": 1,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    3.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "next",
+    "url": "http://h/w6"
+   },
+   "rules_fired": 2,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    4.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "redirect",
+    "url": "http://h/w7"
+   },
+   "rules_fired": 3,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    8.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "return",
+    "url": "http://h/w8"
+   },
+   "rules_fired": 0,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    6.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "body",
+    "method": "GET",
+    "param": "dest",
+    "url": "http://h/w9"
+   },
+   "rules_fired": 1,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    4.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "method": "post",
+    "param": "goto",
+    "url": "http://h/w10"
+   },
+   "rules_fired": 2,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    4.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "body",
+    "method": null,
+    "param": "continue",
+    "url": "http://h/w11"
+   },
+   "rules_fired": 3,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    8.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "target",
+    "url": "http://h/w12"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    6.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "file",
+    "url": "http://h/w13"
+   },
+   "rules_fired": 1,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    4.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "path",
+    "url": "http://h/w14"
+   },
+   "rules_fired": 2,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    4.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "body",
+    "method": "GET",
+    "param": "page",
+    "url": "http://h/w15"
+   },
+   "rules_fired": 3,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    4.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "method": "post",
+    "param": "include",
+    "url": "http://h/w16"
+   },
+   "rules_fired": 0,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    7.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "body",
+    "method": null,
+    "param": "template",
+    "url": "http://h/w17"
+   },
+   "rules_fired": 1,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    8.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "doc",
+    "url": "http://h/w18"
+   },
+   "rules_fired": 2,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    3.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "folder",
+    "url": "http://h/w19"
+   },
+   "rules_fired": 3,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    6.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "dir",
+    "url": "http://h/w20"
+   },
+   "rules_fired": 0,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    3.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "body",
+    "method": "GET",
+    "param": "load",
+    "url": "http://h/w21"
+   },
+   "rules_fired": 1,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    4.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "method": "post",
+    "param": "cmd",
+    "url": "http://h/w22"
+   },
+   "rules_fired": 2,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    3.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "body",
+    "method": null,
+    "param": "exec",
+    "url": "http://h/w23"
+   },
+   "rules_fired": 3,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    4.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "command",
+    "url": "http://h/w24"
+   },
+   "rules_fired": 0,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    7.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "ping",
+    "url": "http://h/w25"
+   },
+   "rules_fired": 1,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    4.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "host",
+    "url": "http://h/w26"
+   },
+   "rules_fired": 2,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    4.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "body",
+    "method": "GET",
+    "param": "dns",
+    "url": "http://h/w27"
+   },
+   "rules_fired": 3,
+   "sink_context": null,
+   "vector": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    3.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "query",
+    "method": "post",
+    "param": "domain",
+    "url": "http://h/w28"
+   },
+   "rules_fired": 0,
+   "sink_context": "html",
+   "vector": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    6.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "body",
+    "method": null,
+    "param": "ip",
+    "url": "http://h/w29"
+   },
+   "rules_fired": 1,
+   "sink_context": "attr",
+   "vector": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    2.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "sql-injection",
+    "location": "query",
+    "method": "GET",
+    "param": "zz",
+    "url": "http://h/w30"
+   },
+   "rules_fired": 2,
+   "sink_context": null,
+   "vector": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    2.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    2.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "xss",
+    "location": "body",
+    "method": "post",
+    "param": "IDENT",
+    "url": "http://h/w31"
+   },
+   "rules_fired": 3,
+   "sink_context": "html",
+   "vector": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    5.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    3.0
+   ]
+  },
+  {
+   "evidence": {
+    "category": "open-redirect",
+    "location": "query",
+    "method": null,
+    "param": "q",
+    "url": "http://h/w32"
+   },
+   "rules_fired": 0,
+   "sink_context": "attr",
+   "vector": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ ],
+ "feature_names": [
+  "loc_body",
+  "method_post",
+  "has_sink",
+  "cat_sqli",
+  "cat_xss",
+  "param_len",
+  "name_id",
+  "name_redirect",
+  "name_file",
+  "name_cmd",
+  "rules_fired"
+ ],
+ "feature_version": 1
+}

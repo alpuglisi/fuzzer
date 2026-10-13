@@ -21,19 +21,30 @@ the oracle owns truth (the oracle/advisory split).
   with probability calibration and a conformal flag/abstain/drop decision; writes
   scores + uncertainty, never labels. *(Note CC-ML-0019, BUG-0070: the conformal
   decision keeps its stated per-side bound — see FR-ML-18.)* *(Note CC-ML-0020:
-  probability calibration is Platt scaling, opt-in — FR-ML-20.)*
+  probability calibration is Platt scaling, opt-in — FR-ML-20.)* *(Not built, flagged
+  CC-ML-0021: the **response-feature** classifier. No response features are linked to
+  candidates or labels — greybox and fuzz-CSV `attempt` rows never set `candidate_id`,
+  and crawl `page.status` is per page — and the only per-candidate responses are the
+  oracle's own confirmation probes, which decide the label (D10: features must not
+  encode the label). Unblocking change: candidate-linked attempts. The built
+  classifier reads the candidate features, FR-ML-5.)*
 - **FR-ML-2 (ranker, A.2)** Learning-to-rank over parameters/forms from candidate
-  features; writes `candidate.score`; costs **zero** requests.
+  features; writes `candidate.score`; costs **zero** requests. *(CC-ML-0021: a pairwise
+  learning-to-rank objective is built, opt-in — FR-ML-21.)*
 - **FR-ML-3 (anomaly, A.5)** ECOD / Isolation Forest tripwire over flows, later an
   XGBOD-style hybrid; tags anomalous responses. *(ECOD over candidates is wired as
-  `fuzzlab auto --anomaly` and persisted per candidate — FR-ML-12. Isolation Forest and
-  flows are not built.)*
+  `fuzzlab auto --anomaly` and persisted per candidate — FR-ML-12. *(CC-ML-0021:)*
+  Isolation Forest is built as an alternative detector — FR-ML-22 — and the tripwire
+  over flows — FR-ML-23. Tagging anomalous *responses* inside a fuzzing loop is not.)*
 - **FR-ML-4 (active learner, A.6.5)** Allocate scarce oracle budget by model
   uncertainty and committee disagreement. *(Wired as `fuzzlab auto --confirm-budget N`
   — FR-ML-11. The user chose `score`, most-likely-first, as the default, because it
   maximises findings per confirmation; uncertainty and committee remain available.)*
 - **FR-ML-5** Read features via the `core/` versioned feature store; a model
-  records the `feature_version` it was trained against.
+  records the `feature_version` it was trained against. *(Partially met, CC-ML-0021 /
+  CC-CORE-0031: the candidate vector is computed by `core/features.extract_candidate_v1`
+  (versioned, golden-pinned) and **recomputed on read**; `candidate.features_json` /
+  `feature_version` stay unwritten. Flagged.)*
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
   config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
   CC-FUZZ-0050 / CC-UI-0041.)*
@@ -143,6 +154,9 @@ the oracle owns truth (the oracle/advisory split).
   - A flag is relative to the candidates scored together. The CLI scores per run; a
     later store-wide call would overwrite per-run flags.
   - Advisory only: unusual is not vulnerable, and it writes no labels.
+  - *(CC-ML-0021)* `method="ecod"` (default) or `"iforest"` (FR-ML-22); the anomaly
+    stage's config records `method` only when not `ecod`, and readers show the method
+    that wrote the stored flags ("unknown (assumed ECOD)" with no stage row).
 
 - **FR-ML-13 (saved models, CC-ML-0015)** Every `model` row written by
   `train_and_score` / `train_and_rank` carries the trained model itself.
@@ -151,6 +165,9 @@ the oracle owns truth (the oracle/advisory split).
     predict, and `params_sha256` holds the sha256 of exactly that text.
   - **Kinds:** `logistic`, `gbt`, `prevalence`, `ranker` (with its vectorizer and nested
     logistic model) and `constant`. A hybrid classifier also stores its fitted ECOD.
+  - *(CC-ML-0021)* A pairwise ranker's params carry `"objective": "pairwise"`; absent
+    means pointwise, so a pointwise ranker's text and sha are unchanged (pinned by a
+    recorded sha). Any other stored objective is refused.
   - *(CC-ML-0020)* **Format 2** = format 1 plus `"calibrator": {"kind": "platt", "a",
     "b"}`, written only when a `logistic` / `gbt` classifier is calibrated (finite `a > 0`
     and `b`; refused on any other kind). Without a calibrator the text — and so the sha
@@ -318,6 +335,49 @@ the oracle owns truth (the oracle/advisory split).
   - **All-or-nothing.** A degenerate full or fold fit (one class, no convergence, `a ≤
     1e-9`) calibrates nothing: `calibrator: "none (degenerate fit)"`, format-1 model.
   - Opt-in (`--calibrate`, default `none`); the thin-data fallback is never calibrated.
+- **FR-ML-21 (pairwise learning-to-rank, CC-ML-0021; FR-ML-2)**
+  - `Ranker(objective="pairwise")` fits the logistic model on pair differences
+    `x_pos − x_neg` (label 1) and `x_neg − x_pos` (label 0) over **every (positive,
+    negative) pair in the training set** — run-wide, because consumers order the whole
+    run (within-endpoint pairs would cancel every endpoint-level feature) — a seeded
+    sample capped at 5000 pairs. With no pair it falls back to pointwise
+    (`objective_used`). Pure Python, so a fit costs O(epochs × pairs × features).
+  - `train_and_rank(objective="pointwise"|"pairwise"|"auto")` (run and earlier modes;
+    `saved` applies whatever the saved ranker is). `pointwise` is the default and
+    unchanged. `auto` deploys the better **run-wide** out-of-fold NDCG, ties to
+    pointwise, recorded `selection_biased: true` (with `--holdout` the sealed number is
+    the honest one).
+  - **Run-wide metrics per fold.** `rank_ndcg_global` / `rank_precision_global` are
+    computed within each fold's test set and averaged — fold models' scales differ, so
+    pooled out-of-fold scores are never compared across folds. The ML tab shows that
+    stored number ("per-fold scales — not pooled"); per-endpoint NDCG stays valid
+    (an endpoint is never split across folds).
+  - **No uncertainty.** A pairwise score is not a probability: `rank_uncertainty` is
+    NULL and the ML tab says "uncertainty n/a (pairwise)".
+  - **The budget prioritizer stays pointwise.**
+- **FR-ML-22 (Isolation Forest, CC-ML-0021; FR-ML-3)**
+  - `anomaly.IsolationForest(n_trees=100, max_samples=256, seed)`: seeded random
+    isolation trees to depth `ceil(log2 ψ)`, splits only on features with range > 0, a
+    node with none is a leaf; score `2^(−E[h]/c(ψ))` in (0, 1), `c(n)` with the exact
+    harmonic number. Deterministic per `(seed, n_trees, max_samples)`.
+  - With ≤ 2 rows every score is 0.5; `detect_anomalies(method="iforest")` then flags
+    nothing (budget 0, reason "too few candidates to isolate").
+  - ECOD stays the default and the hybrid's feature. Detector state is not persisted
+    (scores are written per run).
+- **FR-ML-23 (flow anomalies, CC-ML-0021; FR-ML-3)**
+  - `ml/flow_anomaly.py`: a versioned vector per in-scope flow (`FLOW_FEATURE_VERSION =
+    1`): status class (+ missing), `log1p` elapsed (+ missing), `log1p` decoded request /
+    response body length from `LENGTH(data)` in SQL (+ missing — body content is never
+    loaded), path depth, query-parameter count, POST, protocol one-hots (`ws`, `h2`,
+    `http/1.1`; NULL counts as `http/1.1`).
+  - `detect_flow_anomalies(store, run_id, method, contamination, seed)` fits **per host**
+    (a host with < 3 flows is not scored), flags with `flag_top`, writes
+    `flow.anomaly_score` / `anomaly_flag` (migration 18) and clears every other flow of
+    the run in the same pass. `in_scope = 0` flows are ignored; NULL (HTTP client) is in
+    scope.
+  - Contamination is a **forced per-host fraction**: up to that share of every scored
+    host's flows is flagged, even on a clean host — "most unusual", not "malicious".
+  - Advisory only; no labels. No UI panel yet (the proxy history page could show it).
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

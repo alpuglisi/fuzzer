@@ -450,6 +450,14 @@ CREATE TABLE IF NOT EXISTS holdout_reveal (
 );
 """
 
+# Migration 18 (CC-CORE-0031, CC-ML-0021): advisory anomaly score/flag per flow
+# (FR-ML-23), written by `fuzzlab flow-anomaly`. Additive; existing rows read NULL
+# (never scored). Never labels.
+_M0018 = """
+ALTER TABLE flow ADD COLUMN anomaly_score REAL;
+ALTER TABLE flow ADD COLUMN anomaly_flag INTEGER;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -469,6 +477,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (15, _M0015),
     (16, _M0016),
     (17, _M0017),
+    (18, _M0018),
 ]
 
 

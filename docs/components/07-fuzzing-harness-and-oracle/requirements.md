@@ -1042,6 +1042,19 @@ rewards) derives from it.
     metrics and the store-wide reveal count for that membership version (core only, no
     traffic, no ML package needed); "nothing to reveal" records no reveal. Not in the
     web launcher, so a reveal is always a deliberate command.
+- **FR-FUZZ-37** *(ranker objective, anomaly method, flow anomalies; `CC-FUZZ-0054`,
+  2026-10-13).*
+  - **`--rank-objective {pointwise,pairwise,auto}`** (FR-ML-21) needs `--rank` and is a
+    usage error with `--train-on saved`; the summary prints the objective and its
+    run-wide per-fold NDCG / P@k (or the pointwise fallback).
+  - **`--anomaly-method {ecod,iforest}`** (FR-ML-22) needs `--anomaly`; the summary line
+    reads `anomaly (iforest): …` (unchanged for ECOD).
+  - Both appear in a stage's config only when not the default.
+  - **`fuzzlab flow-anomaly --store S --run N [--method] [--contamination] [--seed]`**
+    (FR-ML-23) writes the run's flow anomaly columns (no traffic, no `--authorized`),
+    prints per-host counts and the top flagged flows, and says contamination is a
+    forced per-host fraction. Reached through `import_ml`: without ML it exits 2 with
+    the "not installed" message. Registered in the launcher (`sends_traffic=False`).
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

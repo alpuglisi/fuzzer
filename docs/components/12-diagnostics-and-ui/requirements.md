@@ -238,6 +238,13 @@ bugs — the research-platform diagnostics of decision D2.
     sealed held-out rows (`train.metric_input`, per row with its own run's model). The
     reliability panel shows a calibrated classifier's out-of-fold ECE raw → cross-fitted
     (FR-ML-20), or "calibration: none (degenerate fit)".
+  - *(Note CC-UI-0046.)* Ranker panel: a pairwise ranker shows its objective, the
+    trainer's run-wide per-fold NDCG ("per-fold scales — not pooled") and "uncertainty
+    n/a (pairwise)" (no uncertainty chart or scatter). Anomaly panel: per run it shows
+    the **stored** flags with the method and contamination the run's stage recorded
+    ("unknown (assumed ECOD)" without one) and a per-method axis; only with nothing
+    stored, and always in the all-runs pooled view, it recomputes ECOD, labelled
+    "recomputed (ECOD, c)".
 - **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
   layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
   (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +
@@ -402,6 +409,8 @@ bugs — the research-platform diagnostics of decision D2.
     are the last fit's values for that run. *(CC-UI-0044:)* the card also shows
     `core.anomaly_flags.flag_note` — the pre-BUG-0070 label, or why fewer than k were
     flagged — and appears for a note even when nothing was flagged.
+  - **Anomaly method** *(CC-UI-0046):* the anomaly card names the detector that wrote
+    the stored flags.
   - **Gate notes** *(CC-UI-0044):* the "Model scores" card lists `train.gate_notes`
     (pre-BUG-0070 thresholds, or never flags / never drops with the counts).
   - **Plugins and ML stages:** each attached plugin with its config and status

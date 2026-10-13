@@ -3,6 +3,109 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0021 — Pairwise learning-to-rank (FR-ML-21), Isolation Forest (FR-ML-22), flow anomalies (FR-ML-23); candidate features read from core (2026-10-13)
+- **Context:** batch 4 of the remaining ML work, built while the user is away, taking
+  my own recommendation at each decision point. Decisions taken:
+  - **R-1:** pairwise is opt-in and pointwise stays the default;
+  - **A-1:** Isolation Forest is an alternative detector, and ECOD stays the default;
+  - **F-1:** the response-feature classifier is not built (flagged with the reason in
+    FR-ML-1).
+- Change:
+  - **`ml/ranker.py`:**
+    - `Ranker(objective=)`, `sample_pairs` (every (positive, negative) pair, a seeded
+      sample capped at `MAX_PAIRS` = 5000);
+    - the pairwise fit on symmetric pair differences, with a pointwise fallback when
+      there is no pair (`objective_used`);
+    - `to_params` adds `"objective": "pairwise"` only for a pairwise model.
+  - **`ml/persist.py`:** the ranker key set with an optional `objective` that must be
+    `"pairwise"`.
+  - **`ml/rank_train.py`:**
+    - `objective=` in run and earlier modes, with `RANK_OBJECTIVES`, `_choose_objective`,
+      `_fold_global` (run-wide metrics within each fold, averaged) and
+      `_objective_record`;
+    - `_write_ranks(probabilistic=)` writes NULL uncertainty for pairwise, saved mode
+      included;
+    - `rank_ndcg_global` / `rank_precision_global` metrics are recorded only for a
+      non-pointwise objective;
+    - `_SAVED_CARRY` gains the objective keys.
+  - **`ml/anomaly.py`:**
+    - `average_path_length`, `IsolationForest`, `ANOMALY_METHODS` and `fit_detector`;
+    - `detect_anomalies(method=, seed=)`: with ≤ 2 rows under iforest, budget 0 with a
+      reason.
+  - **`ml/flow_anomaly.py` (new):** `flow_vector`, `flow_features` and
+    `detect_flow_anomalies`.
+  - **`ml/dataset.py`:** the feature names, version and extractor now come from
+    `core/features.py` (CC-CORE-0031) under the old names.
+  - **`ml/plugins.py`:** `AnomalyPlugin(method)`, `RankerPlugin(objective)` (keys only
+    when not the default) and `stage_plugins(anomaly_method, rank_objective)`.
+- Impact:
+  - **CORE (CC-CORE-0031):** migration 18 and the candidate extractor.
+  - **FUZZ (CC-FUZZ-0054):** the two flags and `fuzzlab flow-anomaly`.
+  - **UI (CC-UI-0046):** the ranker panel's pairwise display, the anomaly panel reading
+    stored flags, the run page's anomaly method, and the launcher entry.
+  - **Defaults are bit-identical.**
+    - The pointwise ranker's sha is pinned against the pre-change code (`d21f003b…`).
+    - The golden summaries (incl. the prioritizer's `model 184ee66b22cc`) are unchanged.
+    - The candidate vectors are pinned by the golden file.
+- Risk: medium-low.
+  - **Pairwise runtime.** A pure-Python pairwise fit is slower (~30 s for ~700 pairs ×
+    6 fits). It is opt-in, and the cap bounds it.
+  - **`auto` is optimistic by selection.** This is recorded.
+  - **Forced per-host contamination.** It is stated everywhere.
+  - **Anomaly panel behaviour change.** A run's anomaly panel now shows its stored
+    flags, not a fresh ECOD refit, so it agrees with the run page and CLI.
+- Deliverables:
+  - [x] pairwise ranker + objective selection + persistence — done
+  - [x] Isolation Forest + method selection — done
+  - [x] flow anomalies — done
+  - [x] candidate features from core — done
+  - [x] Tests: `tests/test_ml_batch4.py` (31) — done. It covers:
+    - the pointwise sha pin;
+    - pairs (positive/negative only, seeded, capped, empty);
+    - the pairwise symmetric fit with zero intercept, the round trip, and the
+      no-pair fallback;
+    - bad objectives refused;
+    - `_fold_global` recomputed by hand;
+    - pairwise/auto training: NULL uncertainty, panel fields, `auto` choosing the
+      recorded winner, pointwise afterwards back to the old keys;
+    - validation, earlier/saved carrying the objective, and the prioritizer staying
+      pointwise;
+    - `c(n)` exact;
+    - iforest deterministic per seed and finding planted outliers;
+    - iforest edge cases n = 1 and 2 and identical rows;
+    - `detect_anomalies(iforest)`, plugin configs, and the panel/run page reading
+      stored method / unknown / recomputed;
+    - migration 18;
+    - flow vectors exact with missing values;
+    - per-host scoring, out-of-scope, small hosts, and stale values cleared;
+    - the flow CLI end to end;
+    - no network imports;
+    - CLI validation and the iforest summary label;
+    - a real browser.
+
+    plus the `auto` selection rule (pointwise wins / tie → pointwise / pairwise wins), and
+    iforest constant-feature and stored-score checks;
+    `tests/test_candidate_features_core.py` (3, 45 golden cases) — done.
+  - [x] Requirements FR-ML-1/2/3/5/12/13 notes, FR-ML-21/22/23; ARCHITECTURE;
+    CHANGELOG — done
+- Implementation divergence (from the agreed draft v2, written back here):
+  - **The all-runs anomaly view always recomputes ECOD.** It pools runs that were
+    scored separately, possibly with different methods. It is labelled "recomputed
+    (ECOD, c)". The per-run view reads the stored flags as agreed.
+  - **Key name.** The `auto` record key is `oof_ndcg_global_by_objective` (per-fold
+    run-wide NDCG), not `oof_ndcg_by_objective`, because it holds the global metric.
+  - **iforest with ≤ 2 rows records `anomaly_flag_budget = 0`** and the reason "too
+    few candidates to isolate (n ≤ 2)". The draft said only "nothing is flagged"; a
+    budget of 0 keeps the tie note from mis-explaining it.
+  - **A flow pass writes every flow of the run.** It clears out-of-scope and
+    small-host flows to NULL (PA-0068(3)), and writes no `run_metrics`.
+  - **Pairwise uses both orders of each pair,** as agreed, so the logistic intercept
+    stays at 0. The runtime cost is stated.
+- Review: the pre-change review gate cleared 3/3 over drafts v1 and v2 (the proposing
+  agent plus 2 independent reviewer agents; every raised issue adopted). It was
+  renumbered from CC-ML-0020 after BUG-0070 and batch 3 (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (61 files incl. real-browser, no-ML, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 953 passed. Batch-4 files (`test_ml_batch4.py`, `test_candidate_features_core.py`, `test_no_ml.py`, `test_web_ml_context.py`): 57 passed after the mutation-driven additions. Mutation-checked on a copy with bytecode caches cleared: all 28 mutants are killed. The first pass left 4 survivors, and each got a test: `auto` always pairwise (a direct `_choose_objective` test: pointwise wins / tie / pairwise wins); iforest splitting constant features (identical rows score exactly 0.5; a constant column is never split on); the method ignored (stored scores equal an `IsolationForest(seed=0)` refit); a regex word dropped (golden extended with one case per name-regex alternative, from the pre-move commit).
+
 ### CC-ML-0020 — Sealed blind holdout (FR-ML-19, FR-ML-7 partial) and Platt calibration (FR-ML-20) (2026-10-13)
 - **Context:** the user asked me to build the remaining ML work while away, taking my
   own recommendation at each decision point. This is batch 3 of that work. It builds on

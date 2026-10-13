@@ -132,6 +132,14 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
   is defined once in `core/oracle_status.py`.
+- **FR-CORE-20** *(migration 18; `CC-CORE-0031`, 2026-10-13).* `flow.anomaly_score REAL`
+  and `flow.anomaly_flag INTEGER` (FR-ML-23); existing rows read NULL (never scored).
+- **FR-CORE-21** *(candidate features; `CC-CORE-0031`, 2026-10-13).* `core/features.py`
+  holds the candidate vector: `CANDIDATE_FEATURE_NAMES`, `CANDIDATE_FEATURE_VERSION = 1`
+  and `extract_candidate_v1(evidence, sink_context, rules_fired)`, moved verbatim from
+  `ml/dataset` (which aliases them, so saved models are unaffected) and pinned by
+  `tests/data/candidate_features/v1_golden.json`, captured before the move. Its version
+  counter is separate from the response extractor's `FEATURE_VERSION`. It imports no ML.
 - **FR-CORE-19** *(migration 17; `CC-CORE-0030`, 2026-10-13).*
   - **Migration 17** adds `holdout_metric(id, run_id, model_id, holdout_version, key,
     value)` and `holdout_reveal(id, run_id, holdout_version, revealed_at)` (FR-ML-19).

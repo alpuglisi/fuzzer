@@ -12,23 +12,20 @@ Advisory only: this feeds scoring/ranking, never `finding` labels.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 
+from fuzzlab.core.features import (CANDIDATE_FEATURE_NAMES, CANDIDATE_FEATURE_VERSION,
+                                   extract_candidate_v1)
 from fuzzlab.core.oracle_status import UNLABELLED
 from fuzzlab.core.runmode import to_category
 from fuzzlab.core.urls import canonical_origin, to_path
 
-FEATURE_NAMES = [
-    "loc_body", "method_post", "has_sink", "cat_sqli", "cat_xss",
-    "param_len", "name_id", "name_redirect", "name_file", "name_cmd", "rules_fired",
-]
-FEATURE_VERSION = 1
-
-_RE_ID = re.compile(r"(^id$|_id$|^id_|id$)", re.I)
-_RE_REDIR = re.compile(r"url|next|redirect|return|dest|goto|continue|target", re.I)
-_RE_FILE = re.compile(r"file|path|page|include|template|doc|folder|dir|load", re.I)
-_RE_CMD = re.compile(r"cmd|exec|command|ping|host|dns|domain|ip", re.I)
+# The candidate feature vector is computed by `core/`'s versioned extractor (FR-ML-5,
+# CC-CORE-0031); these aliases keep every persisted model's `feature_names` /
+# `feature_version` and `check_compatible` unchanged.
+FEATURE_NAMES = CANDIDATE_FEATURE_NAMES
+FEATURE_VERSION = CANDIDATE_FEATURE_VERSION
+_features = extract_candidate_v1
 
 
 @dataclass
@@ -51,26 +48,6 @@ class Dataset:
         if len(self.labelled) != len(self.y):          # hand-built: all labelled
             return sum(self.y)
         return sum(y for y, lab in zip(self.y, self.labelled) if lab)
-
-
-def _features(ev: dict, sink_context, rules_fired: int) -> list[float]:
-    name = ev.get("param", "") or ""
-    loc = ev.get("location", "query")
-    method = (ev.get("method", "GET") or "GET").upper()
-    cat = ev.get("category", "")
-    return [
-        1.0 if loc == "body" else 0.0,
-        1.0 if method == "POST" else 0.0,
-        1.0 if sink_context else 0.0,
-        1.0 if cat == "sql-injection" else 0.0,
-        1.0 if cat == "xss" else 0.0,
-        float(len(name)),
-        1.0 if _RE_ID.search(name) else 0.0,
-        1.0 if _RE_REDIR.search(name) else 0.0,
-        1.0 if _RE_FILE.search(name) else 0.0,
-        1.0 if _RE_CMD.search(name) else 0.0,
-        float(rules_fired),
-    ]
 
 
 def endpoint_key(ev: dict) -> str:

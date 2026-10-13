@@ -34,6 +34,7 @@ commands:
   mutate-run [args]   learn + evade the live lab WAF, record variants (requires --authorized)
   report [args]       print a reproducible evaluation report for a stored run (read-only)
   reveal-holdout [args] print a run's sealed blind-holdout metrics (counts the reveal)
+  flow-anomaly [args] flag each host's most unusual recorded flows (writes the store; no traffic)
   lab-generate [args] render a lab manifest to source files via an emitter (read-only; --check runs build gates)
   build-db [args]     rebuild the indicator database
   version             print the version
@@ -81,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "report":
         from fuzzlab.report import cli as report_cli
         return report_cli.main(rest)
+
+    if command == "flow-anomaly":
+        from fuzzlab.harness import flow_anomaly_cli
+        return flow_anomaly_cli.main(rest)
 
     if command == "reveal-holdout":
         from fuzzlab.harness import reveal_cli

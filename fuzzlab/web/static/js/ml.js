@@ -139,13 +139,18 @@ function renderRanker(d) {
     : "";
   setMeta("ranker", `${d.evaluation} nDCG@${d.k} ${d.ndcg_at_k.toFixed(3)} · precision@${d.k} `
     + `${d.precision_at_k.toFixed(3)} (random baseline ${d.random_baseline_precision_at_k.toFixed(3)})`
-    + `${oof} · N=${d.n}`);
+    + `${oof} · N=${d.n}`
+    // CC-UI-0046: pairwise learning-to-rank — scores are no probabilities and fold
+    // models' scales differ, so run-wide metrics are the trainer's per-fold average
+    + (d.objective && d.objective !== "pointwise" ? ` · objective ${d.objective}` : "")
+    + (d.global ? ` · run-wide nDCG@k ${d.global.ndcg} (per-fold scales — not pooled)` : "")
+    + (d.uncertainty_available ? "" : " · uncertainty n/a (pairwise)"));
   bars("chart-rank-bars", ["nDCG@k", "precision@k"], [
     { label: "ranker", data: [d.ndcg_at_k, d.precision_at_k] },
     { label: "random baseline", data: [0, d.random_baseline_precision_at_k] },
   ], { caption: "nDCG@k / precision@k vs random" });
   histChart("chart-rank-score-hist", d.score_hist, "rank score");
-  histChart("chart-rank-unc-hist", d.uncertainty_hist, "rank uncertainty");
+  if (d.uncertainty_hist) histChart("chart-rank-unc-hist", d.uncertainty_hist, "rank uncertainty");
   if (d.scatter.length) {
     const sorted = [...d.scatter].sort((a, b) => a.score - b.score);
     line("chart-rank-scatter", sorted.map((p) => p.score), [
@@ -181,10 +186,14 @@ function renderConformal(d) {
 // --- anomaly --------------------------------------------------------------------
 function renderAnomaly(d) {
   if (!d.available) { showEmpty("anomaly", d.reason); return; }
-  setMeta("anomaly", `flagged ${d.flagged}/${d.n} (${(d.flagged_rate * 100).toFixed(1)}%, `
-    + `at most ${d.flag_budget}) · threshold ${d.threshold ?? "—"}`
+  // CC-UI-0046: per run the STORED flags, with the method/contamination that wrote them
+  setMeta("anomaly", `${d.source} · method ${d.method}`
+    + (d.contamination != null ? ` · contamination ${d.contamination}` : "")
+    + ` · flagged ${d.flagged}/${d.n} (${(d.flagged_rate * 100).toFixed(1)}%`
+    + (d.flag_budget != null ? `, at most ${d.flag_budget}` : "") + `)`
+    + ` · threshold ${d.threshold ?? "—"}`
     + (d.reason ? ` · ${d.reason}` : "") + " · unusual ≠ malicious");
-  histChart("chart-anomaly-hist", d.hist, "ECOD score");
+  histChart("chart-anomaly-hist", d.hist, d.axis || "anomaly score");
 }
 
 // --- active learning ------------------------------------------------------------

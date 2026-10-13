@@ -338,23 +338,38 @@ def ranker_panel(store, run_id: int | None = None, k: int = 10,
         if cid in rank_map:
             s, u = rank_map[cid]
             scores.append(s)
-            uncertainties.append(u if u is not None else 0.0)
+            uncertainties.append(u)
             labels.append(y)
             groups.append(g)
+    # a pairwise ranker's score is no probability: no uncertainty is stored (CC-UI-0046)
+    has_uncertainty = any(u is not None for u in uncertainties)
+    uncertainties = [u if u is not None else 0.0 for u in uncertainties]
+    objectives = {(c or {}).get("objective_used", "pointwise") for c in calib.values()
+                  if c is not None}
     if not scores:
         return {"available": False, "reason": "no ranker scores yet (run ranking)", "n": len(ds)}
     prevalence = sum(labels) / len(labels) if labels else 0.0
     scatter = [{"score": round(s, 4), "uncertainty": round(u, 4), "label": y}
-              for s, u, y in zip(scores, uncertainties, labels)]
+              for s, u, y in zip(scores, uncertainties, labels)] if has_uncertainty else []
+    selected = _rank_calibration(store, run_id) or {}
     return {
         "available": True, "n": len(scores), "k": k,
+        "objective": objectives.pop() if len(objectives) == 1 else
+        ("mixed" if objectives else "pointwise"),
+        "uncertainty_available": has_uncertainty,
+        # pairwise out-of-fold scores come from different fold models' scales: never
+        # pooled into one run-wide metric here; the trainer's per-fold average is shown
+        "global": None if "rank_ndcg_global" not in selected or not _oof_source(
+            selected, run_id) else {"ndcg": selected["rank_ndcg_global"],
+                                    "precision": selected.get("rank_precision_global"),
+                                    "objective_used": selected.get("objective_used")},
         "evaluation": _evaluation(store, run_id, "rank_score", _rank_calibration),
         "oof": _ranker_oof(store, run_id),
         "ndcg_at_k": _ml().ranking.mean_ndcg_at_k(labels, scores, groups, k=k),
         "precision_at_k": _ml().ranking.mean_precision_at_k(labels, scores, groups, k=k),
         "random_baseline_precision_at_k": round(prevalence, 4),
         "score_hist": _histogram(scores, bins=12),
-        "uncertainty_hist": _histogram(uncertainties, bins=12),
+        "uncertainty_hist": _histogram(uncertainties, bins=12) if has_uncertainty else None,
         "scatter": _stride_sample(scatter, max_scatter),
     }
 
@@ -427,15 +442,59 @@ def conformal_panel(store, run_id: int | None = None) -> dict[str, Any]:
     }
 
 
+#: Score-axis label per anomaly method (their scales differ).
+_ANOMALY_AXIS = {"ecod": "ECOD score (unbounded)", "iforest": "Isolation Forest score (0–1)"}
+
+
+def _anomaly_stage(store, run_id: int) -> tuple[str, float | None, bool]:
+    """``(method, contamination, recorded)`` from the run's `ml-anomaly` stage config;
+    a run with stored flags but no stage row is "assumed ECOD" (``recorded=False``)."""
+    import json
+    row = store.conn.execute(
+        "SELECT config FROM run_plugin WHERE run_id=? AND name='ml-anomaly' "
+        "ORDER BY id DESC LIMIT 1", (run_id,)).fetchone()
+    if row is None:
+        return "ecod", None, False
+    try:
+        cfg = json.loads(row["config"] or "{}")
+    except (ValueError, TypeError):
+        cfg = {}
+    return cfg.get("method", "ecod"), cfg.get("contamination"), True
+
+
 @_ml_panel
 def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) -> dict[str, Any]:
-    """ECOD outlier score histogram + threshold/flagged-rate. 'unusual != malicious'.
+    """Anomaly score histogram + flagged count. 'unusual != malicious'.
 
-    Fits ECOD over the already-stored candidate feature vectors on the fly (pure read —
-    unlike `fuzzlab.ml.anomaly.detect_anomalies`, this never writes to `run_metrics`).
-    Label-free, so it covers every candidate — the same population `detect_anomalies`
-    scores, budget-skipped ones included.
+    Per run (CC-UI-0046): the **stored** `anomaly_score` / `anomaly_flag` of that run,
+    with the method and contamination its `ml-anomaly` stage recorded — what the run
+    page and CLI reported, never a different refit. With nothing stored (or in the
+    all-runs view, which pools runs scored separately) ECOD is fitted on the fly over the
+    candidates (pure read), labelled "recomputed (ECOD, …)". Label-free either way.
     """
+    if run_id is not None:
+        rows = store.conn.execute(
+            "SELECT anomaly_score s, anomaly_flag f FROM candidate WHERE run_id=? AND "
+            "anomaly_score IS NOT NULL", (run_id,)).fetchall()
+        if rows:
+            from fuzzlab.core.anomaly_flags import flag_note
+            method, contam, recorded = _anomaly_stage(store, run_id)
+            metrics = {r["key"]: r["value"] for r in store.conn.execute(
+                "SELECT key, value FROM run_metrics WHERE run_id=? ORDER BY id", (run_id,))}
+            scores = [r["s"] for r in rows]
+            flagged = [r["s"] for r in rows if r["f"]]
+            return {
+                "available": True, "n": len(scores), "flagged": len(flagged),
+                "source": "stored", "method": method if recorded else
+                "unknown (assumed ECOD)", "contamination": contam,
+                "flag_budget": None if metrics.get("anomaly_flag_budget") is None
+                else int(metrics["anomaly_flag_budget"]),
+                "flagged_rate": round(len(flagged) / len(scores), 4),
+                "threshold": round(min(flagged), 4) if flagged else None,
+                "reason": flag_note(store, run_id, metrics),
+                "axis": _ANOMALY_AXIS.get(method, "anomaly score"),
+                "hist": _histogram(scores, bins=15),
+            }
     ds = _ml().dataset.build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 5:
         return {"available": False, "reason": "not enough candidates to fit an anomaly model"}
@@ -447,10 +506,13 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
     threshold = min((s for s, f in zip(scores, flags) if f), default=None)
     return {
         "available": True, "n": len(scores), "flagged": flagged,
+        "source": f"recomputed (ECOD, {contamination})", "method": "ecod",
+        "contamination": contamination,
         "flag_budget": anomaly.flag_budget(len(scores), contamination),
         "flagged_rate": round(flagged / len(scores), 4) if scores else 0.0,
         "threshold": None if threshold is None else round(threshold, 4),
         "reason": anomaly.flag_reason(scores, flags, contamination),
+        "axis": _ANOMALY_AXIS["ecod"],
         "hist": _histogram(scores, bins=15),
     }
 

@@ -85,3 +85,49 @@ def extract(request: Observation, response: Observation,
     except KeyError:  # pragma: no cover - guard
         raise ValueError(f"unknown feature_version {version}")
     return extractor(request, response, baseline)
+
+
+# --- candidate features (FR-ML-5, CC-CORE-0031) ------------------------------------------
+#
+# The candidate vector the classifier, ranker, budget prioritizer and anomaly tripwire
+# read: derived only from what discovery/audit record about an injection point (its
+# location, method, sink, category, parameter name shape and how many rules fired) —
+# never the payload, never the oracle's verdict. Moved here verbatim from
+# `fuzzlab.ml.dataset._features` (pinned by `tests/data/candidate_features/v1_golden.json`,
+# captured before the move). Its version counter is separate from `FEATURE_VERSION`
+# above (the response-behaviour extractor): the two vectors version independently.
+# Recomputed on read: `candidate.features_json` / `feature_version` stay unwritten.
+
+import re as _re
+
+CANDIDATE_FEATURE_NAMES = [
+    "loc_body", "method_post", "has_sink", "cat_sqli", "cat_xss",
+    "param_len", "name_id", "name_redirect", "name_file", "name_cmd", "rules_fired",
+]
+CANDIDATE_FEATURE_VERSION = 1
+
+_RE_ID = _re.compile(r"(^id$|_id$|^id_|id$)", _re.I)
+_RE_REDIR = _re.compile(r"url|next|redirect|return|dest|goto|continue|target", _re.I)
+_RE_FILE = _re.compile(r"file|path|page|include|template|doc|folder|dir|load", _re.I)
+_RE_CMD = _re.compile(r"cmd|exec|command|ping|host|dns|domain|ip", _re.I)
+
+
+def extract_candidate_v1(ev: dict, sink_context, rules_fired: int) -> list[float]:
+    """The v1 candidate vector, in `CANDIDATE_FEATURE_NAMES` order."""
+    name = ev.get("param", "") or ""
+    loc = ev.get("location", "query")
+    method = (ev.get("method", "GET") or "GET").upper()
+    cat = ev.get("category", "")
+    return [
+        1.0 if loc == "body" else 0.0,
+        1.0 if method == "POST" else 0.0,
+        1.0 if sink_context else 0.0,
+        1.0 if cat == "sql-injection" else 0.0,
+        1.0 if cat == "xss" else 0.0,
+        float(len(name)),
+        1.0 if _RE_ID.search(name) else 0.0,
+        1.0 if _RE_REDIR.search(name) else 0.0,
+        1.0 if _RE_FILE.search(name) else 0.0,
+        1.0 if _RE_CMD.search(name) else 0.0,
+        float(rules_fired),
+    ]

@@ -177,6 +177,11 @@ def _load_session() -> argparse.ArgumentParser:
     return build_parser()
 
 
+def _load_flow_anomaly() -> argparse.ArgumentParser:
+    from fuzzlab.harness.flow_anomaly_cli import build_parser
+    return build_parser()
+
+
 def _load_labgen() -> argparse.ArgumentParser:
     from fuzzlab.labgen.cli import build_parser
     return build_parser()
@@ -196,6 +201,9 @@ _REGISTRY: list[_Entry] = [
     _Entry("report", "Reproducible evaluation report for a stored run.", False, _load_report),
     _Entry("session", "Provision per-host credentials; print a session header.", True, _load_session),
     _Entry("build-db", "Rebuild the packaged indicator database (no traffic).", False, None),
+    # Writes `flow.anomaly_*` in the local store; sends no traffic (CC-UI-0046).
+    _Entry("flow-anomaly", "Flag each host's most unusual recorded flows (writes the "
+           "store; advisory).", False, _load_flow_anomaly),
     # Lab authoring: render a manifest to source files. Read-only (writes files;
     # `--check` runs build gates) — sends no traffic, so no authorized gate.
     _Entry("lab-generate",

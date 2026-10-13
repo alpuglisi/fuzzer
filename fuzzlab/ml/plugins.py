@@ -77,18 +77,21 @@ class RankerPlugin(_Stage):
     name, priority = "ml-ranker", 20
 
     def __init__(self, train_on: str = "run", model_id: int | None = None,
-                 holdout: bool = False):
+                 holdout: bool = False, objective: str = "pointwise"):
         super().__init__(train_on=train_on)
         if model_id is not None:
             self.config["model_id"] = model_id
         if holdout:
             self.config["holdout"] = True
+        if objective != "pointwise":              # only when not the default (CC-ML-0021)
+            self.config["objective"] = objective
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.rank_train import train_and_rank
         result = train_and_rank(store, run_id, train_on=self.config["train_on"],
                                 model_id=self.config.get("model_id"),
-                                holdout=self.config.get("holdout", False))
+                                holdout=self.config.get("holdout", False),
+                                objective=self.config.get("objective", "pointwise"))
         return _with_held_endpoints(store, run_id, result, self.config)
 
 
@@ -97,13 +100,16 @@ class AnomalyPlugin(_Stage):
     flag = "anomaly"     # the `fuzzlab auto` option that attaches it
     name, priority = "ml-anomaly", 30
 
-    def __init__(self, contamination: float = 0.1):
+    def __init__(self, contamination: float = 0.1, method: str = "ecod"):
         super().__init__(contamination=contamination)
+        if method != "ecod":                      # only when not the default (CC-ML-0021)
+            self.config["method"] = method
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.anomaly import detect_anomalies
         from fuzzlab.core.anomaly_flags import top_flagged
-        result = detect_anomalies(store, run_id, contamination=self.config["contamination"])
+        result = detect_anomalies(store, run_id, contamination=self.config["contamination"],
+                                  method=self.config.get("method", "ecod"))
         result["top"] = top_flagged(store, run_id)
         return result
 
@@ -134,7 +140,8 @@ def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = Fa
                   model_id: int | None = None, ranker_model_id: int | None = None,
                   confirm_budget: int | None = None, budget_method: str = "score",
                   budget_seed: int = 0, calibrate: str = "none",
-                  holdout: bool = False) -> list:
+                  holdout: bool = False, anomaly_method: str = "ecod",
+                  rank_objective: str = "pointwise") -> list:
     """The plugins a set of `fuzzlab auto` options asks for — the one options→plugins
     mapping (PA-0003)."""
     out: list = []
@@ -145,7 +152,7 @@ def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = Fa
                                     calibrate=calibrate, holdout=holdout))
     if rank:
         out.append(RankerPlugin(train_on=train_on, model_id=ranker_model_id,
-                                holdout=holdout))
+                                holdout=holdout, objective=rank_objective))
     if anomaly:
-        out.append(AnomalyPlugin(contamination=contamination))
+        out.append(AnomalyPlugin(contamination=contamination, method=anomaly_method))
     return out

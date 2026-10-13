@@ -22,6 +22,38 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0054 — `--rank-objective`, `--anomaly-method`; `fuzzlab flow-anomaly` (2026-10-13)
+- Change:
+  - **`--rank-objective {pointwise,pairwise,auto}`** needs `--rank`, and is a usage
+    error with `--train-on saved`.
+  - **`--anomaly-method {ecod,iforest}`** needs `--anomaly`.
+  - Both reach the stages through `stage_plugins`.
+  - **Summary.** It gains an `objective:` line under the ranker (with the run-wide
+    per-fold NDCG / P@k, or the fallback). The anomaly line reads `anomaly (iforest):`
+    for iforest; the ECOD line is unchanged.
+  - **New `harness/flow_anomaly_cli.py`** and `fuzzlab flow-anomaly`:
+    - reached through `import_ml`, exiting 2 when ML is missing;
+    - a missing store or bad contamination is a usage error;
+    - it prints per-host counts and the top flows, with the "forced per-host fraction"
+      wording;
+    - it is registered in `fuzzlab/cli.py`.
+- Impact: new flags and a new command. The defaults and golden summaries are unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] flags, validation and summary — done
+  - [x] flow-anomaly command — done
+  - [x] FR-FUZZ-37 — done
+  - [x] tests:
+    - three usage errors;
+    - the iforest summary label;
+    - the flow CLI end to end with a bad contamination;
+    - the no-ML child exiting 2 with the message (`tests/test_no_ml.py`).
+
+    — done
+- Review: covered by CC-ML-0021's 3/3 pre-change review (A7, B4-4). Renumbered from
+  CC-FUZZ-0053 (PA-0031).
+- Effectiveness (assessed 2026-10-13): effective offline. Related suites (61 files incl. real-browser, no-ML, multitarget; `FUZZLAB_REQUIRE_BROWSER=1`): 953 passed. Batch-4 files (`test_ml_batch4.py`, `test_candidate_features_core.py`, `test_no_ml.py`, `test_web_ml_context.py`): 57 passed after the mutation-driven additions. Its mutants are among CC-ML-0021's 28, all killed.
+
 ### CC-FUZZ-0053 — `fuzzlab auto --holdout` / `--calibrate`; `fuzzlab reveal-holdout` (2026-10-13)
 - Change:
   - **`--holdout`** passes `holdout=True` to the classifier, ranker and budget stages.

@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rank", action="store_true",
                    help="After the run, train the candidate ranker and write advisory "
                         "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
+    p.add_argument("--rank-objective", choices=["pointwise", "pairwise", "auto"],
+                   default="pointwise",
+                   help="With --rank (not --train-on saved): pointwise (default), pairwise "
+                        "learning-to-rank over (vulnerable, not) pairs run-wide, or auto "
+                        "(the better run-wide out-of-fold NDCG)")
     p.add_argument("--train-on", choices=["run", "earlier", "saved"], default="run",
                    help="What --score/--rank train on: run = this run's own labels "
                         "(labelled rows also get out-of-fold scores); earlier = earlier "
@@ -112,6 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--anomaly-contamination", type=float, default=0.1, metavar="F",
                    help="At most this fraction of candidates is flagged by --anomaly, "
                         "whole tie groups only, in (0, 0.5] (default 0.1)")
+    p.add_argument("--anomaly-method", choices=["ecod", "iforest"], default="ecod",
+                   help="With --anomaly: the detector — ecod (parameter-free, default) or "
+                        "iforest (Isolation Forest, seeded)")
     p.add_argument("--plugins", action="store_true",
                    help="Discover and attach entry-point plugins (Phase 10); the active "
                         "set is recorded on the run. Default off (runs with no plugins).")
@@ -137,6 +145,13 @@ def main(argv: list[str]) -> int:
         p.error("--confirm-budget must be at least 1")
     if not 0 < args.anomaly_contamination <= 0.5:
         p.error("--anomaly-contamination must be in (0, 0.5]")
+    if args.anomaly_method != "ecod" and not args.anomaly:
+        p.error("--anomaly-method needs --anomaly")
+    if args.rank_objective != "pointwise" and not args.rank:
+        p.error("--rank-objective needs --rank")
+    if args.rank_objective != "pointwise" and args.train_on == "saved":
+        p.error("--rank-objective does not apply to --train-on saved (a saved ranker keeps "
+                "its own)")
     if args.train_on != "run" and not (args.score or args.rank):
         p.error("--train-on needs --score and/or --rank")
     if args.hybrid and not args.score:
@@ -239,7 +254,8 @@ def _build_plugins(p, args):
                 ranker_model_id=args.ranker_model_id,
                 confirm_budget=args.confirm_budget, budget_method=args.budget_method,
                 budget_seed=args.budget_seed, calibrate=args.calibrate,
-                holdout=args.holdout)
+                holdout=args.holdout, anomaly_method=args.anomaly_method,
+                rank_objective=args.rank_objective)
     args.stage_names = {st.flag: st.name for st in stages}
     if not stages and not args.plugins:
         if args.confirm_budget is not None:
@@ -294,6 +310,13 @@ def _print_ml_extras(r: dict, run_id) -> None:
     """Calibration and holdout lines under a classifier / ranker line (CC-FUZZ-0053).
     The holdout line prints only label-free facts — how many endpoints are held out and
     whether sealed metrics were written — never a holdout number."""
+    if r.get("objective"):                           # CC-FUZZ-0054 (ranker)
+        how = r["objective"] if r["objective"] != "auto" else \
+            f"auto → {r.get('objective_used')} (selection-biased)"
+        print(f"    objective: {how}; run-wide per-fold NDCG@k {r.get('ndcg_global')}, "
+              f"P@k {r.get('precision_global')}"
+              + ("" if r.get("objective_used") == r["objective"] or r["objective"] == "auto"
+                 else f" (fit fell back to {r.get('objective_used')}: no pair)"))
     cal = r.get("calibration")
     if cal and cal.get("calibrator") == "platt":
         print(f"    calibration: platt — out-of-fold ECE {round(cal['ece_oof_raw'], 4)} raw "
@@ -417,7 +440,9 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     if rank is not None:
         _print_ml_extras(rank, getattr(args, "run_id", None))
     if anomaly is not None:
-        print(f"  anomaly: flagged {anomaly.get('flagged', 0)} of {anomaly.get('rows', 0)} "
+        method = anomaly.get("method", "ecod")
+        label = "anomaly" if method == "ecod" else f"anomaly ({method})"
+        print(f"  {label}: flagged {anomaly.get('flagged', 0)} of {anomaly.get('rows', 0)} "
               f"candidate(s)  (advisory — unusual is not vulnerable)")
         if anomaly.get("flag_reason"):               # ties are never split (BUG-0070)
             print(f"    note: {anomaly['flag_reason']}")

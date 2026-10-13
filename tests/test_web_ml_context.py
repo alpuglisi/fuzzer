@@ -263,8 +263,15 @@ def test_gate_and_anomaly_notes_show_as_text(site, tab):
     assert page.inner_text('[data-field="anomaly-note"]') == f"Note: {site['unscored_note']}."
     page = tab.open(f"/ml?run={site['trained']}", ".uplot")
     page.wait_for_timeout(800)
+    # per run: the run's STORED flags with the stage's method/contamination (CC-UI-0046)
     anomaly = page.inner_text('#panel-anomaly [data-field="summary"]')
-    assert "at most 2" in anomaly and "the next tie group of 6 would exceed it" in anomaly
+    assert "stored · method ecod · contamination 0.2" in anomaly and "at most 4" in anomaly
+    # all runs pool separately scored runs: recomputed, with the tie reason (BUG-0070)
+    page = tab.open("/ml", ".uplot")
+    page.wait_for_timeout(800)
+    pooled = page.inner_text('#panel-anomaly [data-field="summary"]')
+    assert pooled.startswith("recomputed (ECOD, 0.1) · method ecod")
+    assert "at most" in pooled
     summary = page.inner_text('#panel-conformal [data-field="summary"]')
     assert "t_lo=never" in summary and "never drops: needs ≥ 9 positives" in summary
     assert "-0" not in summary.split("t_hi=")[1].split(" ")[0]

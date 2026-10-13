@@ -85,6 +85,12 @@ def test_an_ml_flag_is_refused_cleanly_before_any_run(child):
     assert "Traceback" not in flag["stderr"]
 
 
+def test_flow_anomaly_exits_2_with_the_not_installed_message(child):
+    """CC-FUZZ-0054: `fuzzlab flow-anomaly` is reached through `import_ml` only."""
+    fa = child["flow_anomaly"]
+    assert fa["rc"] == 2 and UNAVAILABLE in fa["stderr"] and "Traceback" not in fa["stderr"]
+
+
 def test_the_report_marks_models_unavailable_and_keeps_the_plugin_record(child):
     rep = child["report"]
     assert rep["models"] == [] and rep["models_unavailable"] == UNAVAILABLE

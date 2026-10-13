@@ -22,7 +22,7 @@ from fuzzlab.ml.dataset import (FEATURE_NAMES, FEATURE_VERSION, build_dataset, r
 from fuzzlab.ml.model_registry import params_for, select_latest
 from fuzzlab.ml.persist import LoadedModel, dumps_model, loads_model
 from fuzzlab.ml.ranker import Ranker
-from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k
+from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k, ndcg_at_k, precision_at_k
 from fuzzlab.ml.train import (SCORE_DEPLOY, SCORE_EARLIER, SCORE_OOF_LABELLED, SCORE_SAVED,
                               _insert_model, _metric, _saved_oof_scope, _seal, _thin,
                               forward_skip_reason, saved_training_rows)
@@ -48,15 +48,72 @@ def _candidate_texts(store, run_id, ids: list[int]) -> list[str]:
     return [text_by_id.get(i, "") for i in ids]
 
 
-def _oof_scores(ds, texts, k: int, seed: int) -> list[float]:
+#: `train_and_rank(objective=…)` choices (CC-ML-0021, FR-ML-21).
+RANK_OBJECTIVES = ("pointwise", "pairwise", "auto")
+
+
+def _oof_scores(ds, texts, k: int, seed: int, objective: str = "pointwise") -> list[float]:
     oof = [0.0] * len(ds)
     for train, test in oof_folds(ds.groups, k=k, seed=seed):   # raises unless truly OOF
-        r = Ranker(seed=seed).fit([ds.X[i] for i in train], [texts[i] for i in train],
-                                  [ds.y[i] for i in train])
+        r = Ranker(seed=seed, objective=objective).fit(
+            [ds.X[i] for i in train], [texts[i] for i in train], [ds.y[i] for i in train])
         for idx, s in zip(test, r.score([ds.X[i] for i in test],
                                         [texts[i] for i in test])):
             oof[idx] = s
     return oof
+
+
+def _fold_global(ds, oof, k: int, seed: int, at_k: int) -> tuple[float, float]:
+    """Run-wide ("global") NDCG@k / precision@k computed **within each fold's test set**
+    and averaged over the folds with a positive (B4v2-1): out-of-fold scores pooled
+    across folds would compare different fold models' scales — for a pairwise score,
+    which is no probability, that comparison is meaningless."""
+    nd, pr = [], []
+    for _, test in oof_folds(ds.groups, k=k, seed=seed):
+        y = [ds.y[i] for i in test]
+        if not any(y):
+            continue
+        sc = [oof[i] for i in test]
+        nd.append(ndcg_at_k(y, sc, at_k))
+        pr.append(precision_at_k(y, sc, at_k))
+    return (round(sum(nd) / len(nd), 6) if nd else 0.0,
+            round(sum(pr) / len(pr), 6) if pr else 0.0)
+
+
+def _choose_objective(ds, texts, k: int, seed: int, at_k: int, objective: str):
+    """``(objective to deploy, its out-of-fold scores, calibration info)``. ``pointwise``
+    adds nothing (bit-identical to before); ``pairwise`` records the run-wide per-fold
+    metrics; ``auto`` evaluates both on the same folds and deploys the higher run-wide
+    NDCG (ties → pointwise) — optimistic by selection, so recorded
+    ``selection_biased`` (the sealed holdout, if on, is the honest number)."""
+    if objective not in RANK_OBJECTIVES:
+        raise ValueError(f"objective must be one of {RANK_OBJECTIVES}, got {objective!r}")
+    if objective == "pointwise":
+        return "pointwise", _oof_scores(ds, texts, k, seed), {}
+    by = {o: _oof_scores(ds, texts, k, seed, o) for o in
+          (("pointwise", "pairwise") if objective == "auto" else ("pairwise",))}
+    glob = {o: _fold_global(ds, sc, k, seed, at_k) for o, sc in by.items()}
+    chosen = "pairwise"
+    if objective == "auto":
+        chosen = "pairwise" if glob["pairwise"][0] > glob["pointwise"][0] else "pointwise"
+    info = {"objective": objective, "rank_ndcg_global": glob[chosen][0],
+            "rank_precision_global": glob[chosen][1]}
+    if objective == "auto":
+        info.update(objective_selected=chosen, selection_biased=True,
+                    oof_ndcg_global_by_objective={o: g[0] for o, g in glob.items()})
+    return chosen, by[chosen], info
+
+
+def _objective_record(calibration: dict, result: dict, info: dict, ranker) -> None:
+    """Record the objective (only when not plain pointwise) and what the deploy fit
+    actually used (a pairwise fit with no pair falls back to pointwise)."""
+    if not info:
+        return
+    calibration.update(info)
+    calibration["objective_used"] = ranker.objective_used
+    result.update(objective=info["objective"], objective_used=ranker.objective_used,
+                  ndcg_global=info["rank_ndcg_global"],
+                  precision_global=info["rank_precision_global"])
 
 
 def _evaluate(y, scores, groups, at_k: int, seed: int):
@@ -103,7 +160,8 @@ def _holdout_record(calibration: dict, result: dict, held, sealed, reason) -> No
 def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
                    min_positives: int = 5, k: int = 5, at_k: int = 10,
                    seed: int = 0, min_groups: int = 2, train_on: str = "run",
-                   model_id: int | None = None, holdout: bool = False) -> dict:
+                   model_id: int | None = None, holdout: bool = False,
+                   objective: str = "pointwise") -> dict:
     """Train the ranker, write advisory rank scores, and report NDCG@k/Precision@k vs a
     random-order baseline. Falls back to a constant order on thin data — including fewer
     than ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
@@ -117,8 +175,17 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     ``holdout=True`` (CC-ML-0020, FR-ML-19) keeps held-out endpoints out of training
     and out-of-fold evaluation, ranks them with the deploy ranker and seals their
-    metrics, as `train.train_and_score` does."""
+    metrics, as `train.train_and_score` does.
+
+    ``objective`` (CC-ML-0021, FR-ML-21): ``pointwise`` (default, unchanged),
+    ``pairwise`` (pair-difference learning-to-rank; its scores are not probabilities,
+    so ``rank_uncertainty`` is left NULL), or ``auto`` (the better run-wide out-of-fold
+    NDCG). The budget prioritizer always stays pointwise."""
+    if objective not in RANK_OBJECTIVES:
+        raise ValueError(f"objective must be one of {RANK_OBJECTIVES}, got {objective!r}")
     if train_on == "saved":
+        if objective != "pointwise":
+            raise ValueError("objective does not apply to a saved ranker (it keeps its own)")
         return _rank_from_saved(store, run_id, model_id=model_id, at_k=at_k, seed=seed,
                                 holdout=holdout)
     if model_id is not None:
@@ -126,7 +193,8 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     if train_on == "earlier":
         return _rank_from_earlier(store, run_id, min_rows=min_rows,
                                   min_positives=min_positives, k=k, at_k=at_k, seed=seed,
-                                  min_groups=min_groups, holdout=holdout)
+                                  min_groups=min_groups, holdout=holdout,
+                                  objective=objective)
     if train_on != "run":
         raise ValueError(f"train_on must be 'run', 'earlier' or 'saved', got {train_on!r}")
     if holdout and run_id is None:
@@ -146,6 +214,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     oof_by_id: dict = {}
     sealed, holdout_reason = None, None
+    pairwise = False
     if _thin(n, pos, groups, min_rows, min_positives, min_groups, k):
         holdout_reason = "fallback model"
         scores = [0.0] * len(every)              # constant order (no signal)
@@ -155,12 +224,12 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
         name = RANK_FALLBACK_NAME
         result.update(model=name, fallback=True)
     else:
-        oof = _oof_scores(ds, texts, k, seed)
+        chosen, oof, obj_info = _choose_objective(ds, texts, k, seed, at_k, objective)
         ndcg, prec, ndcg_rand, prec_rand = _evaluate(ds.y, oof, ds.groups, at_k, seed)
         # each labelled row's out-of-fold rank score, stored beside the deploy one
         oof_by_id = dict(zip(ds.ids, oof))
         calibration["score_source"] = SCORE_OOF_LABELLED
-        ranker = Ranker(seed=seed).fit(ds.X, texts, ds.y)   # deploy: fit on all data
+        ranker = Ranker(seed=seed, objective=chosen).fit(ds.X, texts, ds.y)   # deploy
         # advisory rank for EVERY row, including budget-skipped candidates
         scores = ranker.score(every.X, every_texts)
         params, params_sha = dumps_model("ranker", ranker,
@@ -172,10 +241,15 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
                       beats_baseline=(ndcg > ndcg_rand and prec >= prec_rand))
         calibration.update(oof_ndcg=ndcg, oof_precision=prec, oof_ndcg_random=ndcg_rand,
                            oof_precision_random=prec_rand)
+        _objective_record(calibration, result, obj_info, ranker)
+        pairwise = ranker.objective_used == "pairwise"
         if run_id is not None:
+            extra = ((("rank_ndcg_global", obj_info["rank_ndcg_global"]),
+                      ("rank_precision_global", obj_info["rank_precision_global"]))
+                     if obj_info else ())
             for key, val in (("rank_ndcg", ndcg), ("rank_precision", prec),
                              ("rank_ndcg_random", ndcg_rand),
-                             ("rank_precision_random", prec_rand)):
+                             ("rank_precision_random", prec_rand)) + extra:
                 store.conn.execute(
                     "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
                     (run_id, key, float(val)))
@@ -183,7 +257,8 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
             sealed, holdout_reason = _holdout_ranking(
                 store, run_id, held, dict(zip(every.ids, scores)), at_k, seed)
 
-    _write_ranks(store, every.ids, scores, oof_by_id)
+    _write_ranks(store, every.ids, scores, oof_by_id,
+                 probabilistic=not pairwise)
     if held is not None:
         _holdout_record(calibration, result, held, sealed, holdout_reason)
 
@@ -195,10 +270,11 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     return result
 
 
-def _write_ranks(store, ids, scores, oof_by_id=None) -> None:
+def _write_ranks(store, ids, scores, oof_by_id=None, probabilistic: bool = True) -> None:
     # Advisory rank score + uncertainty (max at the 0.5 boundary). Never labels.
     # Derive uncertainty from the rounded score so the two stored values are consistent.
     # `rank_score_oof` is written (or cleared) in the same pass (PA-0068 rule 3).
+    # A pairwise score is no probability, so it gets no uncertainty (NULL, CC-ML-0021).
     oof_by_id = oof_by_id or {}
     for cid, s in zip(ids, scores):
         sr = round(s, 6)
@@ -206,7 +282,7 @@ def _write_ranks(store, ids, scores, oof_by_id=None) -> None:
         store.conn.execute(
             "UPDATE candidate SET rank_score=?, rank_uncertainty=?, rank_score_oof=? "
             "WHERE id=?",
-            (sr, round(1.0 - abs(2.0 * sr - 1.0), 6),
+            (sr, round(1.0 - abs(2.0 * sr - 1.0), 6) if probabilistic else None,
              None if oof is None else round(oof, 6), cid))
 
 
@@ -232,7 +308,9 @@ def _forward_ranking(store, run_id: int, ids, scores, at_k: int, seed: int):
 
 #: Calibration keys a saved-mode ranker copy carries over from its original.
 _SAVED_CARRY = ("at_k", "seed", "feature_version", "oof_ndcg", "oof_precision",
-                "oof_ndcg_random", "oof_precision_random", "holdout")
+                "oof_ndcg_random", "oof_precision_random", "holdout", "objective",
+                "objective_used", "objective_selected", "selection_biased",
+                "rank_ndcg_global", "rank_precision_global")
 
 
 def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
@@ -263,7 +341,9 @@ def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
     every = build_dataset(store, run_id, include_unlabelled=True)
     texts = _candidate_texts(store, run_id, every.ids)
     scores = loaded.score(every.X, texts) if len(every) else []
-    _write_ranks(store, every.ids, scores)           # and clears rank_score_oof
+    _write_ranks(store, every.ids, scores,             # and clears rank_score_oof
+                 probabilistic=getattr(loaded.model, "objective_used", "pointwise")
+                 != "pairwise")
     train_runs = source.get("train_run_ids") or [source["run_id"]]
     seen = seen_fraction(store, saved_training_rows(store, source), every.ids)
     result = {**base, "at_k": at_k, "refused": False, "model": RANKER_NAME,
@@ -300,7 +380,7 @@ def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
 
 
 def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
-                       min_groups, holdout=False) -> dict:
+                       min_groups, holdout=False, objective="pointwise") -> dict:
     """Train the ranker on EARLIER runs against the same target; rank EVERY candidate
     of this run. The ranker counterpart of `train._score_from_earlier` — same refusal,
     same "not trained on this run's labels" (not out-of-sample) caveat."""
@@ -327,11 +407,12 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     every = build_dataset(store, run_id, include_unlabelled=True)           # to rank
     every_texts = _candidate_texts(store, run_id, every.ids)
 
-    ndcg, prec, ndcg_rand, prec_rand = _evaluate(
-        prior.y, _oof_scores(prior, texts, k, seed), prior.groups, at_k, seed)
-    ranker = Ranker(seed=seed).fit(prior.X, texts, prior.y)   # deploy: earlier labels
+    chosen, oof, obj_info = _choose_objective(prior, texts, k, seed, at_k, objective)
+    ndcg, prec, ndcg_rand, prec_rand = _evaluate(prior.y, oof, prior.groups, at_k, seed)
+    ranker = Ranker(seed=seed, objective=chosen).fit(prior.X, texts, prior.y)   # deploy
     scores = ranker.score(every.X, every_texts)               # this run: never its labels
-    _write_ranks(store, every.ids, scores)
+    _write_ranks(store, every.ids, scores,
+                 probabilistic=ranker.objective_used != "pairwise")
 
     seen = seen_fraction(store, prior.ids, every.ids)
     train_runs = run_ids_of(store, prior.ids)
@@ -357,6 +438,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
                                                    at_k, seed)
     result.update(fwd_result)
     calibration.update(fwd_calibration)
+    _objective_record(calibration, result, obj_info, ranker)
     sealed = None
     if held is not None:
         sealed, reason = _holdout_ranking(store, run_id, held,

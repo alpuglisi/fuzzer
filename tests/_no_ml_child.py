@@ -87,6 +87,12 @@ def check(seeded: Path, run_id: int, workdir: Path) -> dict:
             runs = store.conn.execute("SELECT COUNT(*) FROM run").fetchone()[0]
     out["score_flag"] = {"rc": rc, "stderr": err, "runs": runs}
 
+    from fuzzlab.harness import flow_anomaly_cli        # CC-FUZZ-0054: exits 2 cleanly
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        rc = flow_anomaly_cli.main(["--store", str(seeded), "--run", str(run_id)])
+    out["flow_anomaly"] = {"rc": rc, "stderr": err.getvalue()}
+
     with Store(seeded) as store:
         rep = build_report(store, run_id)
     out["report"] = {"models": rep["models"], "models_unavailable": rep.get("models_unavailable"),

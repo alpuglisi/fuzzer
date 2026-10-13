@@ -4,6 +4,20 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML: pairwise ranking, Isolation Forest, flow anomalies — CC-ML-0021)
+- **Pairwise learning-to-rank (opt-in).** `--rank-objective pairwise|auto` trains the
+  ranker to order (vulnerable, not) pairs across the whole run; `auto` keeps whichever
+  orders better out-of-fold. Pointwise stays the default until the on-host comparison.
+- **Isolation Forest (opt-in).** `--anomaly-method iforest` is an alternative anomaly
+  detector; ECOD stays the default. The ML tab now shows each run's stored anomaly flags
+  with the detector that wrote them, not a fresh refit.
+- **Flow anomalies.** The new `fuzzlab flow-anomaly` command flags each host's most
+  unusual recorded HTTP flows (advisory; writes the store, sends nothing).
+- **Candidate features moved into `core/`** (byte-identical, golden-pinned), toward
+  FR-ML-5. The response-feature classifier stays unbuilt: no responses are linked to
+  candidates yet, and the oracle's own would leak the label.
+- Records: CC-ML-0021, CC-CORE-0031 (migration 18), CC-FUZZ-0054, CC-UI-0046.
+
 ## 2026-10-13 (ML: sealed blind holdout and Platt calibration — CC-ML-0020)
 - **Blind holdout (opt-in).** `fuzzlab auto --holdout` keeps a fixed, versioned 20% of
   each target's endpoints out of every model's training, model selection and
