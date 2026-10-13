@@ -105,9 +105,14 @@ class RequestsCorrelatingSender:
     an authenticated surface. ``id_factory`` is injectable for deterministic tests.
     """
 
+    #: Operator-enumerated (ground-truth) URLs that may be probed even when they look
+    #: destructive (NFR-FUZZ-safe, CC-FUZZ-0060); see ``allow_explicit``.
+    _explicit: frozenset[str] = frozenset()
+
     def __init__(self, *, header: str = "X-Fzl-Cov", timeout: float = 15.0,
                  cookie: str | None = None, cookie_secure_only: bool = False,
-                 id_factory: Callable[[], str] | None = None, session=None):
+                 id_factory: Callable[[], str] | None = None, session=None,
+                 is_auth_endpoint: Callable[[str], bool] | None = None):
         import requests
         self._requests = requests
         if session is None:
@@ -120,18 +125,35 @@ class RequestsCorrelatingSender:
         self._cookie = cookie
         self._cookie_secure_only = cookie_secure_only    # BUG-0098: https-only cookie
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
+        self._is_auth_endpoint = is_auth_endpoint
+        self.auth_endpoint_anonymous_sends = 0
+
+    def allow_explicit(self, urls) -> None:
+        from fuzzlab.core.urls import url_key
+        self._explicit = frozenset(self._explicit | {url_key(u) for u in urls if u})
 
     def send_correlated(self, url: str, param: str, value: str, *,
                         method: str = "GET", location: str = "query"):
+        from fuzzlab.core.urls import check_send_url
+        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        # The operator's cookie is the only session material: none a probe response
+        # set rides along, and an auth endpoint is probed anonymously (BUG-0112).
+        jar = getattr(self._session, "cookies", None)   # an injected session may have none
+        if jar is not None:
+            jar.clear()
         cid = self._id_factory()
         headers = {self._header: cid}
-        if self._cookie:
+        cookie = self._cookie
+        if cookie and self._is_auth_endpoint is not None and self._is_auth_endpoint(url):
+            cookie = None
+            self.auth_endpoint_anonymous_sends += 1
+        if cookie:
             if self._cookie_secure_only and not url.lower().startswith("https:"):
                 from fuzzlab.session.manager import SessionAuthError
                 raise SessionAuthError(
                     f"refusing to send an https session cookie over plain http "
                     f"({url.split('?', 1)[0]})")
-            headers["Cookie"] = self._cookie
+            headers["Cookie"] = cookie
         # allow_redirects=False (BUG-0044/PA-0046, same fix as
         # fuzzlab.tools.probesender.RequestsProbeSender): this sender also
         # builds a `Probe` a `ConfirmationStrategy` inspects directly --
@@ -432,8 +454,10 @@ def points_with_classes(ground_truth, base_url: str, browser_available: bool = F
     return out, skipped
 
 
-def points_from_store(store, run_id: int, base_url: str) -> list[GreyboxPoint]:
-    """Crawl-discovered points as :class:`GreyboxPoint` (class unknown -> None)."""
+def points_from_store(store, run_id: int, base_url: str,
+                      skipped: list | None = None) -> list[GreyboxPoint]:
+    """Crawl-discovered points as :class:`GreyboxPoint` (class unknown -> None).
+    Destructive URLs are left out and reported in ``skipped`` (BUG-0112)."""
     from fuzzlab.harness.auto import injection_points_from_store
     return [GreyboxPoint(url=p.url, param=p.param, method=p.method, location=p.location)
-            for p in injection_points_from_store(store, run_id, base_url)]
+            for p in injection_points_from_store(store, run_id, base_url, skipped=skipped)]

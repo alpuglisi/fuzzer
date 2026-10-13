@@ -103,6 +103,8 @@ that shares the store, never a mandatory pipeline (D5).
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
 - **NFR-PROXY-safe** Scope-enforced and lab-only; the local CA never leaves the
   host; credentials/tokens redacted on write.
+  - Enforced by: `proxy.scope`, `core.net.require_loopback`, `proxy.ca`, `proxy.history` redaction — `tests/test_proxy_server.py::test_engine_bypasses_out_of_scope_untouched`, `tests/test_proxy_rules_and_scope.py::test_scope_matches_authorities`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_loopback_listeners.py::test_the_proxy_server_itself_refuses_a_non_loopback_bind`, `tests/test_proxy_ca_hardening.py::test_the_real_ca_key_is_0600_from_creation`, `tests/test_proxy_ca_hardening.py::test_the_path_backstop_holds_if_validation_were_bypassed`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_proxy_history.py::test_secrets_redacted_on_write`
+  - Not yet enforced: `Repeater.send` has no scope check; out-of-scope traffic is forwarded to any upstream (scope governs interception and recording only). (BUG-0111 sweep.)
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
   path.
 - **NFR-PROXY-optional** Nothing in the core pipeline requires the proxy to run.
@@ -113,6 +115,8 @@ that shares the store, never a mandatory pipeline (D5).
   `--dry-run` takes priority and performs neither action. Reuses the web
   launcher's dry-run plan/report logic (`fuzzlab/web/commandspec.py` +
   `fuzzlab/web/runner.py`) via the shared `fuzzlab/cli_dryrun.py` helper.
+  - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_proxy_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_proxy_dry_run_reports_plan_and_sends_nothing`
+  - Not yet enforced: `--dry-run` taking priority over `--export-ca` holds by branch order but is untested. (BUG-0111 sweep.)
 
 ## 5. Interfaces and data contracts
 Writes `flow` rows (+ raw bytes) to the store, read by the anomaly detector, UI,

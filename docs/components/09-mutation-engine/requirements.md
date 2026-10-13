@@ -51,14 +51,18 @@ feedback and the scheduler.
 - **NFR-MUT-safe** Never emit destructive payloads through the default-on path;
   the destructive gate still applies to generated payloads. *(CC-MUT-0012, BUG-0082:)*
   the gate sits at the **send** (FR-MUT-9), not only at the record.
+  - Enforced by: `mutation.catalog.refuse_destructive` at the send — `tests/test_destructive_send_gate.py::test_a_destructive_base_is_never_sent_nor_any_variant`, `tests/test_destructive_send_gate.py::test_a_variant_that_turns_destructive_is_not_sent`, `tests/test_destructive_send_gate.py::test_the_live_filter_refuses_at_the_send_itself`, `tests/test_destructive_send_gate.py::test_obfuscated_destructive_payloads_are_refused`, `tests/test_mutation_catalog.py::test_destructive_gate_refuses_by_default`
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
 - **NFR-MUT-offline** The LLM expansion path is offline and gated; nothing is sent
   to an external service without explicit opt-in.
+  - Enforced by: `LlmExpander` default off — `tests/test_mutation_catalog.py::test_llm_expander_default_off`, `tests/test_mutation_catalog.py::test_llm_disabled_ignores_generator`
+  - Not yet enforced: no static no-network check for `mutation/llm.py` (offline by construction: the generator is injected). (BUG-0111 sweep.)
 - **NFR-MUT-dry-run** `fuzzlab mutate-run` accepts `--dry-run`: plans and prints
   the exact argv/command it would run and sends nothing (no payload/probe), for
   headless use outside the web UI. Reuses the web launcher's dry-run plan/report
   logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
   `fuzzlab/cli_dryrun.py` helper.
+  - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_mutate_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_mutate_run_dry_run_reports_plan_and_sends_nothing`
 
 - **FR-MUT-8** `MutationSearch` optionally emits its per-step reward and novelty
   signal into `metric_series` (`source="mutation"`, `key="reward"`/`"novelty"`,

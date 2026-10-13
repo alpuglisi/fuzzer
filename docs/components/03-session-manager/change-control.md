@@ -3,6 +3,20 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0015 — Login discovery never follows a destructive hop (BUG-0111); traceability (PA-0112) (2026-10-13)
+- Change: `_navigation_ok` refuses a URL `destructive_reason` flags, other than the base
+  URL itself. `requirements.md` gains traceability lines for NFR-SESS-redaction
+  (partly; the logger path is untested and `login_url` is not redacted).
+- Impact: a login whose discovery redirects through `logout` / `reset` now fails loudly
+  instead of fetching it.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] test — done
+  - [x] FR-SESS-13 note — done
+- Review: reviewer A nit 2, on draft v2.
+- Effectiveness: verified by test.
+
 ### CC-SESS-0014 — Login forms submitted as a browser would (BUG-0110) (2026-10-13)
 - Change:
   - `detect.find_login_form` builds `LoginForm.fields` with `core.forms.form_entries`.

@@ -88,6 +88,7 @@ sources — without changing core code, via a registry of hooks on `core/`.
   tested by simulated absence in `tests/test_no_ml.py`, including a real browser.
 - **NFR-PLUG-safe** Plugins run in-process but are contained; a misbehaving plugin
   is disabled rather than allowed to corrupt the store.
+  - Enforced by: `plugins.registry.contain`, `plugins.guard.guarded` — `tests/test_plugins.py::test_failing_plugin_is_disabled_not_fatal`, `tests/test_plugins_post_run.py::test_a_failed_stage_leaves_no_uncommitted_writes_behind`, `tests/test_plugins_post_run.py::test_guard_blocks_each_label_write_vector`, `tests/test_plugins_post_run.py::test_read_only_guard_denies_every_write`
 - **NFR-PLUG-reproducible** The set and versions of active plugins are recorded
   onto the run.
 

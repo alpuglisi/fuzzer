@@ -33,6 +33,7 @@ from.
   run so results are reproducible.
 - **NFR-IND-safe** Destructive payloads are flagged so the default-off gate can
   exclude them.
+  - Not yet enforced: the indicator DB and catalogs carry no destructive flag (06 change-control: "destructive metadata — todo"); the payload-text gate `mutation.catalog.refuse_destructive` stands in where it is wired. (BUG-0111 sweep; reported to the operator.)
 - **NFR-IND-no-leak** Catalog identifiers used at run time carry no vulnerability
   class name where a tool-visible artifact would leak it (D9).
 

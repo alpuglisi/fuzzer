@@ -1414,3 +1414,15 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **At least one fixture is a captured third-party target's shape, not only our own
      lab's.** The lab never surfaces the divergence it was written around. (from
      BUG-0110)
+
+- **PA-0112** — Strengthens `PA-0083(2)` (related: `PA-0020`, `PA-0033`), after BUG-0111
+  and BUG-0112: NFR-CRAWL-safe and NFR-FUZZ-safe were specified and never built, and
+  nothing failed. PA-0083(2) covered docstring claims only, the wrong layer.
+  1. **Every NFR is classified** as SAFETY or NOT_SAFETY (with a reason) in
+     `tests/test_requirements_traceability.py`; an unclassified NFR fails.
+  2. **Every SAFETY NFR is traced in its `requirements.md`.** `Enforced by:` lines name
+     the enforcing code and `tests/<file>.py::<test_function>` (checked by AST to
+     exist), and a clause not yet enforced says `Not yet enforced:` plainly. A safety
+     clause is never presented as built without a test that fails when it is removed.
+  3. **The guard is proven on synthetic offenders:** a missing line, a test that does
+     not exist, an unclassified NFR. (from BUG-0111, BUG-0112)

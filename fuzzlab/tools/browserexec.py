@@ -46,11 +46,19 @@ class PlaywrightBrowserExecutor:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=self._headless)
             try:
-                context = browser.new_context()
+                context = browser.new_context(service_workers="block")   # BUG-0111
                 context.add_init_script(init)
                 if self._headers:
                     context.set_extra_http_headers(self._headers)
                 page = context.new_page()
+                # Abort destructive subresources/redirects; the navigation targets
+                # themselves are the explicit (ground-truth) points (BUG-0111).
+                from fuzzlab.core.urls import url_key
+                from fuzzlab.tools.navguard import guard_page
+                allowed = {url_key(request.url)}
+                if request.store is not None:
+                    allowed.add(url_key(request.store.url))
+                guard_page(context, allow=frozenset(allowed))
                 page.on("dialog", lambda d: (page.evaluate(
                     f"window.{SENTINEL}('{token}')"), d.dismiss()))
 

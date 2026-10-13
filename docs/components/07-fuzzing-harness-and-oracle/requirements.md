@@ -1107,6 +1107,10 @@ rewards) derives from it.
   verdicts are reproducible (state reset via snapshot/restore between iterations).
 - **NFR-FUZZ-safe** Destructive payload classes off by default; auth endpoints
   excluded from scope; no traffic off localhost.
+  - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`
+  - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
+  - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
+  - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.)
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
 - **NFR-FUZZ-dry-run** `fuzzlab fuzz`, `fuzzlab auto`, and `fuzzlab greybox-run`
@@ -1121,6 +1125,7 @@ rewards) derives from it.
   `--max-mutation-variants`/`--allow-destructive` flags `CC-FUZZ-0019` (Lane
   C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
   C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
+  - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_fuzz_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_auto_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_greybox_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_fuzz_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_auto_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_greybox_run_dry_run_reports_plan_and_sends_nothing`
 - **NFR-FUZZ-response-fidelity** *(`CC-FUZZ-0043`, `BUG-0044`/`PA-0046`)*
   Every sender that builds a `Probe` (or a timing measurement) a
   `ConfirmationStrategy`/timing oracle inspects as "the real target's
@@ -1290,3 +1295,26 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 
     A real ECMAScript parser, or browser-sentinel confirmation (M6), remains the
     stronger path.
+- **FR-FUZZ-40** *(auth endpoints and destructive URLs; `CC-FUZZ-0060`, 2026-10-13,
+  BUG-0112; NFR-FUZZ-safe).*
+  - **Send-time gate.** Every probe sender (`SeamProbeSender`, `RequestsProbeSender`,
+    greybox's `RequestsCorrelatingSender`, the blind-SQLi fuzzer's senders) calls
+    `core.urls.check_send_url` first. It refuses (`DestructiveUrlRefused`) a URL
+    `destructive_reason` flags unless it was explicitly enumerated:
+    - `run_auto` and `greybox-run` allow the ground-truth point (and store) URLs;
+    - `fuzz` allows its own `--url`;
+    - crawl-sourced runs allow nothing.
+
+    An AST guard requires the call in every HTTP probe sender.
+  - **Point selection.** `injection_points_from_store` (used by `auto` and
+    `greybox-run`) leaves out destructive crawl points and reports each in
+    `metrics["skipped_points"]`. `fuzzlab auto` prints them.
+  - **Auth endpoints are probed without the session.** An authenticated sender logs
+    in once before its first probe; a probe to one of the session's auth endpoints
+    (the login page and form action, `SessionManager.is_auth_endpoint`) is sent
+    anonymously, so it can neither log the run out nor re-authenticate it. This covers
+    every source, ground truth included, and the count is recorded as
+    `metrics["auth_endpoint_anonymous_sends"]`. Logout is excluded by
+    `destructive_reason`, because the recorded logout URL is a guess.
+  - **No cookie carries over.** The requests-based senders clear their jar before
+    each probe, so a probe response's `Set-Cookie` never rides on later probes.

@@ -3,6 +3,20 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0051 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
+- Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
+  NFR-UI-localhost, -read-only, -redacted, -no-auto-run, -control-plane-hardened, naming the enforcing code and the test functions that fail without it
+  (checked by `tests/test_requirements_traceability.py`). Open: Repeater/plugin-config redaction, "served separately", read-only by convention, several untested control-plane cases. No code change.
+- Impact: none at run time. The guard now fails if these lines go stale (a renamed or
+  deleted test) or if a new NFR is left unclassified.
+- Risk: none (documentation, plus a test that reads it).
+- Deliverables:
+  - [x] traceability lines — done
+  - [x] open clauses recorded and reported to the operator — done
+- Review: reviewers A and B (BUG-0111/0112 draft v2, AGREED) asked for one doc-only entry
+  per touched component.
+- Effectiveness: verified by the guard (3 passed, incl. synthetic offenders).
+
 ### CC-UI-0050 — The ML tab never shows a number computed from sealed labels (BUG-0091) (2026-10-13)
 - Change:
   - `mlview._scored_pairs` (classifier panel: PR, reliability, ECE) and `ranker_panel`

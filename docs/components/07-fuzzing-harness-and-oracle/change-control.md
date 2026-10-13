@@ -22,6 +22,55 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0060 — NFR-FUZZ-safe: send-time destructive gate, auth endpoints probed anonymously, no cookie carry-over (BUG-0112) (2026-10-13)
+- Change:
+  - **Send gate:** `check_send_url` is called first in `SeamProbeSender`,
+    `RequestsProbeSender`, greybox's `RequestsCorrelatingSender`, and the blind-SQLi
+    `RequestsSender` / `SeamSender`. Each has `allow_explicit(urls)`:
+    - `run_auto` and `greybox-run` pass ground-truth point and store URLs;
+    - `fuzz` passes its `--url`.
+  - **Point selection:** `injection_points_from_store(..., skipped=)` leaves out
+    destructive crawl points and reports them; `auto` prints them.
+  - **Auth endpoints:** `SeamProbeSender` logs in once, then probes auth endpoints
+    anonymously (counted in `auth_endpoint_anonymous_sends`). `make_probe_sender`
+    builds it with `make_auth`. Greybox drops its cookie for auth endpoints
+    (`_cookie_for` returns `is_auth_endpoint`).
+  - **Cookie jars:** the requests senders clear theirs per probe.
+  - **M6:** `browserexec` guards its context, with the observe and store URLs
+    allowed.
+  - **Tests:** a new AST guard.
+- Impact:
+  - **Behaviour change:** crawl runs skip destructive points; authenticated probes of
+    login endpoints carry no session; ground truth is unchanged;
+  - **SESS:** `is_auth_endpoint` now has callers;
+  - **Test doubles:** `test_auditor_seam`'s fake `get` accepts `allow_redirects`.
+  - **Behaviour change: cookie jars.** Unauthenticated probes no longer carry cookies
+    set by earlier responses. A target that needs a first-visit cookie (a
+    session-bound page, an anti-bot or consent cookie) now sees a fresh visitor on
+    every probe. That is the intent: a payload that logs in can no longer make later
+    "anonymous" probes authenticated. An on-host change in results may trace to this.
+  - **Late login failure:** a `SessionAuthError` from the first-probe login surfaces
+    inside the run and takes the existing aborted-run path (`mark_aborted`, BUG-0078;
+    `tests/test_auto_cli_side_effects.py::test_a_failure_after_the_run_starts_marks_it_aborted`).
+- Risk: medium. The send path of every sender changed. All of it is covered: the
+  sender, run_auto, greybox and blind-SQLi suites pass, and the mutation check killed
+  31/31. The destructive-payload gate on auto/fuzz was deliberately **not** added: it
+  could refuse oracle payloads in on-host benchmarks that cannot be verified here. It
+  is recorded as "Not yet enforced".
+- Deliverables:
+  - [x] senders, run_auto, greybox, blind-SQLi, M6 — done
+  - [x] tests (`tests/test_destructive_urls.py`) — done
+  - [x] FR-FUZZ-40 and traceability — done
+- Review: reviewers A and B, draft v1 (changes required) → v2 (AGREED, both) →
+  implementation AGREED by both. Their implementation nits were adopted:
+  service-worker blocking, a WebSocket gap note, the jar-clearing impact line, and the
+  late-login-failure path.
+  - **Adopted:** B3 (send-time gate), B4 and A4 (anonymous auth sends), B S1
+    (greybox cookie and jar), A nit 1 (the guard counts http/httpx/urllib3/socket
+    imports too).
+  - **[DEV] no crawl-point filter for auth endpoints:** accepted.
+- Effectiveness: verified offline. A live check follows in the operator's bWAPP run.
+
 ### CC-FUZZ-0059 — Token-aware regex/division lexing (BUG-0102); CLI quarantine line (BUG-0107); greybox cookie floor (BUG-0098) (2026-10-13)
 - Change:
   - **`oracle/context.js_states` (BUG-0102)** decides regex versus division from the

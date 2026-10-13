@@ -41,10 +41,13 @@ from fuzzlab.tools.authhttp import with_query_param
 class RequestsSender:
     """Standalone path: a raw requests.Session (unauthenticated, unchanged behavior)."""
 
-    def __init__(self, session):
+    def __init__(self, session, explicit: frozenset[str] = frozenset()):
         self._session = session
+        self._explicit = explicit          # the operator's own --url (BUG-0112)
 
     def get(self, url, param, value, timeout):
+        from fuzzlab.core.urls import check_send_url
+        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
         start = time.perf_counter()
         try:
             # allow_redirects=False (BUG-0044/PA-0046 sweep): a followed
@@ -66,12 +69,15 @@ class SeamSender:
     per host via the budget mutex) and the session is attached by the manager.
     """
 
-    def __init__(self, client, identity):
+    def __init__(self, client, identity, explicit: frozenset[str] = frozenset()):
         self._client = client
         self._identity = identity
+        self._explicit = explicit          # the operator's own --url (BUG-0112)
 
     def get(self, url, param, value, timeout):
         from fuzzlab.core.http import Request
+        from fuzzlab.core.urls import check_send_url
+        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
 
         req = Request("GET", with_query_param(url, param, value),
                       identity=self._identity, timing=True, component="fuzzer")
@@ -242,6 +248,12 @@ def parse_args(argv=None):
     return build_parser().parse_args(argv)
 
 
+def _explicit_url(url: str) -> frozenset[str]:
+    """``--url`` is the operator's explicit target, never refused as destructive."""
+    from fuzzlab.core.urls import url_key
+    return frozenset({url_key(url)})
+
+
 def main(argv=None):
     args = parse_args(argv)
     if args.dry_run:
@@ -259,13 +271,13 @@ def main(argv=None):
         from fuzzlab.tools.authhttp import make_authenticated_client
         client = make_authenticated_client(args.url, args.identity, args.timeout,
                                            store_path=args.store)
-        sender = SeamSender(client, args.identity)
+        sender = SeamSender(client, args.identity, explicit=_explicit_url(args.url))
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
         from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
         _session = requests.Session()
         _session.headers.update(DEFAULT_BROWSER_HEADERS)
-        sender = RequestsSender(_session)
+        sender = RequestsSender(_session, explicit=_explicit_url(args.url))
 
     try:
         baseline = establish_baseline(
@@ -285,6 +297,7 @@ def main(argv=None):
                 # Deterministic confirmation: the oracle is the sole finding-writer,
                 # replacing the fuzzer's provisional timing-only findings.
                 probe = make_probe_sender(args.url, args.identity, args.timeout)
+                probe.allow_explicit([args.url])
                 oracle = Oracle(store=store, run_id=run_id)
                 verdict = oracle.confirm(
                     Candidate(url=args.url, param=args.param, vuln_class="sqli"), probe)

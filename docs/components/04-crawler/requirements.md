@@ -37,7 +37,14 @@ fuzzer.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
-  to not clicking them.
+  to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
+  `core.urls.destructive_reason` (FR-CORE-28). A destructive URL is never queued,
+  never reached through a redirect (the static engine follows redirects by hand, each
+  hop checked), and never requested by the browser (`navguard.guard_page` aborts
+  navigations, scripts' fetch/XHR and subresources). The start URL is the operator's
+  own input and is exempt. The auditor never re-fetches one from a spider DB, old or
+  new. There is no opt-in: stricter than "default".
+  - Enforced by: `core.urls.destructive_reason`; `tools/spider.py` (queue filter, hand-followed redirects, `navguard.guard_page`); `tools/fetcher.py:load_urls` — `tests/test_destructive_urls.py::test_static_crawl_never_fetches_a_destructive_link_or_redirect`, `tests/test_destructive_urls.py::test_rendered_crawl_sends_no_destructive_request_at_all`, `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_login_discovery_never_follows_a_redirect_to_a_destructive_url`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
   spaces.
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →
@@ -47,6 +54,7 @@ fuzzer.
   headless use outside the web UI. Reuses the web launcher's dry-run plan/report
   logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
   `fuzzlab/cli_dryrun.py` helper, rather than a separate implementation.
+  - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_crawl_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_crawl_dry_run_reports_plan_and_sends_nothing`
 
 ## 5. Interfaces and data contracts
 Writes `page`, `endpoint`, and `parameter` rows (with a `source` of link vs xhr).

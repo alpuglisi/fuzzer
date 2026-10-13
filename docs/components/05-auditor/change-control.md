@@ -3,6 +3,24 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0029 — The auditor never re-fetches or follows to a destructive URL (BUG-0111) (2026-10-13)
+- Change: `tools/fetcher.py`:
+  - `load_urls` drops destructive URLs, so a spider DB written before the fix is safe
+    too;
+  - the raw static fetch follows redirects by hand (same origin, not destructive);
+  - the Playwright page gets `navguard.guard_page`;
+  - `requirements.md` gains traceability lines for NFR-AUD-safe (partly; there is no
+    destructive-check gate yet) and NFR-AUD-dry-run.
+- Impact: the auditor audits fewer URLs where they are destructive. Its raw path no
+  longer auto-follows redirects.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: old DB, redirect — done
+  - [x] traceability — done
+- Review: as CC-CORE-0038 (A2, B1).
+- Effectiveness: verified.
+
 ### CC-AUD-0028 — Field default values as a browser holds them (BUG-0110 sweep) (2026-10-13)
 - Change: `tools/fetcher.py::PageContext._field`'s `value` is
   `core.forms.default_value(el)`:

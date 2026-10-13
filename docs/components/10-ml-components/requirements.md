@@ -504,6 +504,7 @@ the oracle owns truth (the oracle/advisory split).
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
   the oracle's verdict is final and independent.
+  - Enforced by: the plugin write guard and the oracle as the only writer — `tests/test_plugins_post_run.py::test_guard_blocks_each_label_write_vector`, `tests/test_ml_anomaly.py::test_detect_anomalies_is_advisory`, `tests/test_plugins.py::test_oracle_is_the_only_plugin_path_to_a_writer`
 - **NFR-ML-reproducible** *(Amended CC-ML-0015: models are now versioned **and
   stored**, so a model reproduces from its row, sha-pinned. Note CC-ML-0018: the
   run-mode out-of-fold columns reproduce by deterministic, seeded re-training, not by

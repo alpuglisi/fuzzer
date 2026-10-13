@@ -3,6 +3,32 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0038 — `core.urls.destructive_reason` / `check_send_url` (BUG-0111/0112); NFR traceability (PA-0112) (2026-10-13)
+- Change:
+  - `core/urls.py` gains:
+    - `destructive_reason(url)`: decoded, camelCase-split, whole-token and pair
+      matching against `DESTRUCTIVE_TOKENS` / `DESTRUCTIVE_PAIRS`; `format` is
+      excluded;
+    - `url_key(url)`: canonical origin plus path;
+    - `check_send_url(url, explicit)`, raising `DestructiveUrlRefused`;
+  - `requirements.md` gains traceability lines for NFR-CORE-no-bypass (not yet
+    enforced) and NFR-CORE-secrets (partly).
+- Impact:
+  - **CRAWL, AUD, FUZZ, SESS:** they use the rule (their own entries);
+  - no store or schema change.
+- Risk: low. The rule only adds refusals. False positives cost coverage, recorded
+  (`password_reset`).
+- Deliverables:
+  - [x] the rule and the gate — done
+  - [x] tests: positives (encoded, camelCase, pairs), negatives — done
+  - [x] FR-CORE-28 — done
+- Review: reviewers A and B, draft v1 (changes required) → v2 (AGREED, both).
+  - **Adopted:** the extended token list and decoding (A3/B5), canonical allowance
+    keys (B nit).
+  - **[DEV] `format` excluded:** accepted by both.
+- Effectiveness: verified by `tests/test_destructive_urls.py`; the mutation check
+  killed 31/31.
+
 ### CC-CORE-0037 — `core.forms`: HTML form entry-list serialisation (BUG-0110) (2026-10-13)
 - Change:
   - new `fuzzlab/core/forms.py`:

@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
+from fuzzlab.core.urls import destructive_reason, url_key
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -147,6 +148,20 @@ class LocalSpider:
         self._page = None
         # URLs requested by JavaScript (fetch/XHR) during the current navigation.
         self._xhr_urls = []
+        # NFR-CRAWL-safe (BUG-0111): destructive links are never queued, fetched or
+        # followed through a redirect; the start URL is the operator's own input.
+        self._allow = frozenset({url_key(start_url)})
+        self.skipped_destructive: dict[str, str] = {}
+
+    def _destructive(self, url):
+        """The deny-list reason for ``url`` (None for the start URL), recorded once."""
+        if url_key(url) in self._allow:
+            return None
+        reason = destructive_reason(url)
+        if reason is not None and url not in self.skipped_destructive:
+            self.skipped_destructive[url] = reason
+            logging.info(f"skipped destructive link {url} ({reason!r})")
+        return reason
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -164,7 +179,11 @@ class LocalSpider:
         if exe:
             launch_kwargs["executable_path"] = exe
         self._browser = self._pw.chromium.launch(**launch_kwargs)
-        self._page = self._browser.new_page()
+        # service workers would fetch outside page.route (BUG-0111)
+        self._page = self._browser.new_page(service_workers="block")
+        from fuzzlab.tools.navguard import guard_page
+        guard_page(self._page, allow=self._allow,
+                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason))
         if self._session_manager and self._identity:
             from fuzzlab.tools import browserauth
             cookies, headers = browserauth.playwright_auth(
@@ -227,8 +246,11 @@ class LocalSpider:
 
     # ----- fetchers -----
     def _fetch_static(self, url):
-        """No JavaScript. Parses the raw HTML with BeautifulSoup."""
-        resp = self.session.get(url, timeout=self.timeout_ms / 1000)
+        """No JavaScript. Parses the raw HTML with BeautifulSoup. Redirects are
+        followed by hand, each hop in scope and not destructive (BUG-0111)."""
+        from fuzzlab.tools.navguard import get_checked
+        resp = get_checked(self.session, url, self.timeout_ms / 1000,
+                           lambda nxt: self._in_scope(nxt) and not self._destructive(nxt))
         ct = resp.headers.get('Content-Type', '')
         title, text, links = None, None, []
         if 'text/html' in ct:
@@ -314,14 +336,18 @@ class LocalSpider:
                         if 'text/html' in ct or ct == '':
                             for href in raw_links:
                                 absolute_link = urljoin(current_url, href).split('#')[0]
-                                if self._in_scope(absolute_link) and not self.storage.is_visited(absolute_link):
+                                if (self._in_scope(absolute_link)
+                                        and not self._destructive(absolute_link)
+                                        and not self.storage.is_visited(absolute_link)):
                                     queue.append((absolute_link, depth + 1, 'link'))
                         # XHR/fetch targets are queued whatever the page's own
                         # content type, so JSON APIs behind rendered pages land
                         # in the map and get audited like any other URL.
                         for href in xhr_links:
                             absolute_link = urljoin(current_url, href).split('#')[0]
-                            if self._in_scope(absolute_link) and not self.storage.is_visited(absolute_link):
+                            if (self._in_scope(absolute_link)
+                                    and not self._destructive(absolute_link)
+                                    and not self.storage.is_visited(absolute_link)):
                                 queue.append((absolute_link, depth + 1, 'xhr'))
 
                 except Exception as e:
@@ -343,6 +369,9 @@ class LocalSpider:
                 )
             else:
                 logging.info(f"Crawled {crawled} page(s).")
+            if self.skipped_destructive:
+                logging.info(f"Skipped {len(self.skipped_destructive)} destructive "
+                             f"URL(s) (NFR-CRAWL-safe).")
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 

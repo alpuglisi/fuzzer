@@ -248,6 +248,17 @@ plugin registry. It is the layer that makes the store the integration bus.
       `submitter_overrides`, never applied.
   - `default_value(el)` is the value a control holds before input, for reporting.
 
+- **FR-CORE-28** *(destructive URLs; `CC-CORE-0038`, 2026-10-13, BUG-0111/0112).*
+  - **The rule.** `core/urls.destructive_reason(url)` is the one rule for "this URL
+    performs a destructive or session-ending action". It decodes the path and query
+    (up to 3 rounds), splits camelCase, tokenises, and matches `DESTRUCTIVE_TOKENS`
+    or `DESTRUCTIVE_PAIRS`. `format` is deliberately absent, since it is the export
+    selector. Accepted false positives include `password_reset` pages.
+  - **Helpers.** `url_key(url)` (canonical origin plus path) names an explicit
+    allowance. `check_send_url(url, explicit)` raises `DestructiveUrlRefused`.
+  - **Users:** the crawler and auditor (NFR-CRAWL-safe), every probe sender
+    (FR-FUZZ-40), and login discovery's hop check (FR-SESS-13).
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).
@@ -260,7 +271,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   (request, response, baseline); recomputable over history.
 - **NFR-CORE-secrets** Secrets are referenced, never stored in the store or
   config; redaction on write.
+  - Enforced by: the credential store and the storage-redaction boundary — `tests/test_credentials.py::test_set_get_delete_per_host`, `tests/test_storage_redaction.py::test_the_http_client_records_no_secret`, `tests/test_storage_redaction.py::test_every_traffic_producer_goes_through_the_redaction_boundary`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_redaction.py::test_logs_use_the_same_predicate`
+  - Not yet enforced: config accepts secret values unchecked; `repeater_tab.raw_request` and `run_plugin.config` are stored unredacted; `session_state.login_url` is not passed through `redact_url`. (BUG-0111 sweep; reported to the operator.)
 - **NFR-CORE-no-bypass** No tool constructs HTTP or session state outside core.
+  - Not yet enforced: the spider, the auditor, the standalone fuzzer, `RequestsProbeSender`, the greybox sender and the login fetcher build their own `requests.Session`, and the proxy uses sockets; there is no guard test. The destructive-URL gate (BUG-0111/0112) is enforced at each of them instead. (BUG-0111 sweep; reported to the operator.)
 
 ## 5. Interfaces and data contracts
 Owns the store schema and migrations. Writes `run`, `schema_version`,

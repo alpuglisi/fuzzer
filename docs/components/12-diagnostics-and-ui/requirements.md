@@ -439,6 +439,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   Operationalized by **NFR-UI-control-plane-hardened** below: binding to loopback alone
   does not stop a hostile page the operator's browser visits from driving this app, since
   the panel is still reachable over HTTP like any other loopback service.
+  - Enforced by: `web.app.serve` via `core.net.require_loopback` — `tests/test_web_launcher.py::test_serve_refuses_non_loopback`, `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, `tests/test_web_proxy_serve.py::test_serve_refuses_non_loopback_proxy_host`
+  - Not yet enforced: "served separately from the target" is not checked (only the default ports differ). (BUG-0111 sweep.)
 - **NFR-UI-control-plane-hardened** *(added CC-UI-0026, R-13)* Every request is checked
   against an exact Host (`host:port`) allow-list (rolled ourselves — not Starlette's
   `TrustedHostMiddleware`, which strips the port and so cannot pin against DNS
@@ -459,15 +461,20 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   response, success or denial. Requires Starlette ≥1.0.1 (CVE-2026-48710, "BadHost":
   pre-1.0.1 Host-header validation bypass — this hardening keys off Host, so a bypass
   there defeats it). Implementation: `fuzzlab.web.app.SecurityGateMiddleware`.
+  - Enforced by: `web.app.SecurityGateMiddleware` — `tests/test_web_security.py::test_wrong_host_rejected_on_a_get`, `tests/test_web_security.py::test_dns_rebinding_wrong_host_but_perfect_fetch_metadata_still_rejected`, `tests/test_web_security.py::test_cross_origin_post_rejected_classic_csrf`, `tests/test_web_security.py::test_same_site_sibling_port_post_rejected`, `tests/test_web_security.py::test_same_origin_but_missing_custom_header_rejected_on_api`, `tests/test_web_security.py::test_form_post_same_origin_without_custom_header_passes`, `tests/test_web_security.py::test_no_fetch_metadata_falls_back_to_origin`, `tests/test_web_security.py::test_no_fetch_metadata_and_no_origin_falls_back_to_referer`, `tests/test_web_security.py::test_no_fetch_metadata_untrusted_referer_rejected`, `tests/test_web_security.py::test_security_headers_present_on_success`, `tests/test_web_security.py::test_security_headers_present_on_denial_too`, `tests/test_web_security.py::test_static_assets_are_not_marked_no_store`
+  - Not yet enforced (untested): Host port pinning, PUT/DELETE rejection, `Sec-Fetch-Site: same-origin` with a bad Origin, the multipart exemption, the fail-closed cases (no Host; no Origin/Referer/Fetch-Metadata), cookieless, the Starlette pin. (BUG-0111 sweep.)
 - **NFR-UI-no-auto-run** No tool traffic reaches the target as a side effect of
   bring-up; only an explicit automatic-mode selection or a manual tool invocation
   sends requests.
+  - Enforced by: `web.app` (POST + `authorized` to run) — `tests/test_web_launcher.py::test_index_offers_both_modes_and_does_not_run`, `tests/test_web_lab.py::test_page_loading_does_not_touch_containers`, `tests/test_web_proxy_serve.py::test_web_main_requires_authorized_for_proxy`, `tests/test_web_launcher.py::test_automatic_blocked_without_authorization`, `tests/test_web_runner.py::test_launch_blocks_traffic_tool_without_authorization`, `tests/test_web_repeater.py::test_routes_list_create_and_send_gate`
 - **NFR-UI-read-only** The UI itself does not write result tables
   (`finding`/`attempt`/`candidate`); in automatic mode those are written by the
   tools it invokes, not by the UI. `saved_views` (FR-UI-13, FR-CORE-9) is the
   one deliberate exception: it holds view *definitions* a person authored in
   the panel (filter/sort/column specs), never tool output, so writing it does
   not violate this invariant.
+  - Enforced by: `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
+  - Not yet enforced: read-only by convention (a read-write `Store`); attempt/candidate counts and the /results, /runs/{id} and /proxy routes are unchecked; the Repeater writes `repeater_tab`/`run`/`flow`. (BUG-0111 sweep.)
 - **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
   PA-0065)* Every HTML page loads in a real browser with zero page errors, zero console
   errors and zero CSP violations. The check is `tests/test_web_pages_browser.py`, which
@@ -480,6 +487,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   `fuzzlab/web/templates/` or `fuzzlab/web/static/` is verified with it set.
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
+  - Enforced by (at write time): `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`
+  - Not yet enforced: the Repeater returns and lists raw requests/responses; `run.html` renders plugin `config` unredacted; no UI test seeds a secret. (BUG-0111 sweep; reported to the operator.)
 
 ## 5. Interfaces and data contracts
 A local HTTP server on loopback serving the control panel/dashboard. Reads the

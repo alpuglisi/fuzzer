@@ -3,6 +3,20 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0022 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
+- Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
+  NFR-PROXY-safe, NFR-PROXY-dry-run, naming the enforcing code and the test functions that fail without it
+  (checked by `tests/test_requirements_traceability.py`). Open: the Repeater has no scope check; `--dry-run` over `--export-ca` is untested. No code change.
+- Impact: none at run time. The guard now fails if these lines go stale (a renamed or
+  deleted test) or if a new NFR is left unclassified.
+- Risk: none (documentation, plus a test that reads it).
+- Deliverables:
+  - [x] traceability lines — done
+  - [x] open clauses recorded and reported to the operator — done
+- Review: reviewers A and B (BUG-0111/0112 draft v2, AGREED) asked for one doc-only entry
+  per touched component.
+- Effectiveness: verified by the guard (3 passed, incl. synthetic offenders).
+
 ### CC-PROXY-0021 — Fail-closed history redaction incl. framed bodies (BUG-0100); bounded upstream reads off the loop (BUG-0101); atomic history flush (BUG-0106) (2026-10-13)
 - Change:
   - **`proxy/redact.py` (BUG-0100).**

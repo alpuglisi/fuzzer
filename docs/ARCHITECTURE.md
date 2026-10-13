@@ -1157,6 +1157,14 @@ tracked in the requirements files, not here.
     unparseable bodies, and sniffing; an AST guard enumerates the producers;
   - `core/evidence.py`: the one parser of candidate evidence. Unreadable rows are
     quarantined by the ML path, never fabricated (CC-CORE-0036, BUG-0107);
+  - `core/urls.destructive_reason` / `check_send_url`: the one destructive-URL rule
+    (CC-CORE-0038, BUG-0111/0112). The crawler and auditor never queue, follow or
+    browser-request such a URL (`tools/navguard.py`: hand-followed redirects and a
+    Playwright route guard). Every probe sender refuses one unless it was explicitly
+    enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
+    senders probe the session's auth endpoints anonymously;
+  - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
+    every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
     spec-cited rule table pinned by a fixture per rule). The session login and the
     passive auditor use it (CC-CORE-0037, BUG-0110);

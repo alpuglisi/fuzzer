@@ -394,7 +394,12 @@ class SessionManager:
 
     def _navigation_ok(self, url: str, base_url: str, floor_https: bool) -> bool:
         """May discovery fetch ``url``? The transport deny first, then an origin the
-        **operator** approved — the same anchor as `_credential_destination_ok`."""
+        **operator** approved — the same anchor as `_credential_destination_ok` — and
+        never a destructive URL other than the base URL itself (NFR-CRAWL-safe's rule,
+        BUG-0111)."""
+        from fuzzlab.core.urls import destructive_reason, url_key
+        if url_key(url) != url_key(base_url) and destructive_reason(url) is not None:
+            return False
         return self._credential_destination_ok(url, base_url, floor_https=floor_https)
 
     # -- credential destinations (BUG-0081, BUG-0092, BUG-0097) -------------

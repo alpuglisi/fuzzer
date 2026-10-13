@@ -9,16 +9,51 @@ from __future__ import annotations
 
 import time
 
+from fuzzlab.core.urls import check_send_url, url_key
 from fuzzlab.oracle.probe import Probe
-from fuzzlab.tools.authhttp import make_authenticated_client, with_query_param
+from fuzzlab.tools.authhttp import make_auth, with_query_param
 
 
-class SeamProbeSender:
-    """Authenticated: routes through the core HTTP seam + session manager."""
+class _ExplicitAllowance:
+    """``allow_explicit``: the operator-enumerated (ground-truth) URLs a sender may
+    probe even when they look destructive (NFR-FUZZ-safe, CC-FUZZ-0060)."""
 
-    def __init__(self, client, identity: str = "anonymous"):
+    _explicit: frozenset[str] = frozenset()
+
+    def allow_explicit(self, urls) -> None:
+        self._explicit = frozenset(self._explicit | {url_key(u) for u in urls if u})
+
+
+class SeamProbeSender(_ExplicitAllowance):
+    """Authenticated: routes through the core HTTP seam + session manager.
+
+    NFR-FUZZ-safe (BUG-0112): a probe to one of the session's auth endpoints (the login
+    page and form action) is sent **anonymously**, so it can neither log the run's
+    session out nor re-authenticate it. ``manager``/``base_url`` let the sender log in
+    once before its first probe, so those endpoints are known.
+    """
+
+    def __init__(self, client, identity: str = "anonymous", manager=None,
+                 base_url: str | None = None):
         self._client = client
         self._identity = identity
+        self._manager = manager
+        self._base_url = base_url
+        self._ensured = False
+        self.auth_endpoint_anonymous_sends = 0
+
+    def _identity_for(self, url: str) -> str:
+        if self._manager is None or self._identity == "anonymous":
+            return self._identity
+        if not self._ensured:
+            from urllib.parse import urlparse
+            base = self._base_url or url
+            self._manager.ensure(urlparse(base).hostname or "", self._identity, base)
+            self._ensured = True
+        if self._manager.is_auth_endpoint(url):
+            self.auth_endpoint_anonymous_sends += 1
+            return "anonymous"
+        return self._identity
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
@@ -26,9 +61,11 @@ class SeamProbeSender:
         from urllib.parse import urlencode
 
         from fuzzlab.core.http import Request
+        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        identity = self._identity_for(url)
         if location == "header":
             req = Request(method.upper(), url, headers={param: value},
-                          identity=self._identity, timing=timing, component="oracle")
+                          identity=identity, timing=timing, component="oracle")
         elif location == "body" and content_type:
             # A whole-body point (`param="body"`, no single named field): send
             # `value` as the raw body at the ground truth's own declared
@@ -43,21 +80,21 @@ class SeamProbeSender:
                          else value.encode("utf-8"))
             req = Request(method.upper(), url, headers={"Content-Type": content_type},
                           body=body_bytes,
-                          identity=self._identity, timing=timing, component="oracle")
+                          identity=identity, timing=timing, component="oracle")
         elif location == "body":
             req = Request(method.upper(), url,
                           headers={"Content-Type": "application/x-www-form-urlencoded"},
                           body=urlencode({param: value}).encode(),
-                          identity=self._identity, timing=timing, component="oracle")
+                          identity=identity, timing=timing, component="oracle")
         else:
             req = Request(method.upper(), with_query_param(url, param, value),
-                          identity=self._identity, timing=timing, component="oracle")
+                          identity=identity, timing=timing, component="oracle")
         r = self._client.send(req)
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers))
 
 
-class RequestsProbeSender:
+class RequestsProbeSender(_ExplicitAllowance):
     """Standalone: plain requests, no auth (unauthenticated confirmation)."""
 
     def __init__(self, session=None, timeout: float = 15.0):
@@ -90,6 +127,12 @@ class RequestsProbeSender:
         # client, which already sets this (see that module's own
         # request-building code) -- this was a real inconsistency between
         # the two `Sender` implementations, not a deliberate difference.
+        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        # Anonymous means anonymous: no cookie a probe response set (a payload that
+        # logs in, say) rides along on later probes (BUG-0112).
+        jar = getattr(self._session, "cookies", None)   # an injected session may have none
+        if jar is not None:
+            jar.clear()
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
         if location == "header":
             kwargs["headers"] = {param: value}
@@ -119,6 +162,6 @@ def make_probe_sender(target_url: str, identity: str | None = None,
                       timeout: float = 15.0):
     """Authenticated sender when an identity is given, else a standalone one."""
     if identity:
-        client = make_authenticated_client(target_url, identity, timeout)
-        return SeamProbeSender(client, identity)
+        manager, client = make_auth(target_url, timeout)
+        return SeamProbeSender(client, identity, manager=manager, base_url=target_url)
     return RequestsProbeSender(timeout=timeout)

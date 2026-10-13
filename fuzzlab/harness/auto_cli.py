@@ -443,11 +443,19 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
     skipped = m.get("skipped_points") or []
-    if skipped:
+    if skipped and m.get("points_source") == "crawl":
+        print(f"  not fuzzed ({len(skipped)} crawl point(s) on a destructive URL, "
+              f"NFR-FUZZ-safe):")
+        for path, method, param, reason in skipped:
+            print(f"    - {method} {path} [{param}]: {reason}")
+    elif skipped:
         print(f"  not audited ({len(skipped)} enumerated point(s) — scoped as future "
               f"capability; they score as false negatives):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
+    if m.get("auth_endpoint_anonymous_sends"):
+        print(f"  auth-endpoint probes sent without the session: "
+              f"{m['auth_endpoint_anonymous_sends']} (NFR-FUZZ-safe)")
     ml = stage("score") if args.score else None
     rank = stage("rank") if args.rank else None
     anomaly = stage("anomaly") if args.anomaly else None

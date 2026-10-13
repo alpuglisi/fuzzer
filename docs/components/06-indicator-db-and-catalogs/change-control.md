@@ -3,6 +3,20 @@
 Component code: **IND**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-IND-0003 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
+- Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
+  NFR-IND-safe, naming the enforcing code and the test functions that fail without it
+  (checked by `tests/test_requirements_traceability.py`). "Not yet enforced": no destructive flag in the catalogs. No code change.
+- Impact: none at run time. The guard now fails if these lines go stale (a renamed or
+  deleted test) or if a new NFR is left unclassified.
+- Risk: none (documentation, plus a test that reads it).
+- Deliverables:
+  - [x] traceability lines — done
+  - [x] open clauses recorded and reported to the operator — done
+- Review: reviewers A and B (BUG-0111/0112 draft v2, AGREED) asked for one doc-only entry
+  per touched component.
+- Effectiveness: verified by the guard (3 passed, incl. synthetic offenders).
+
 ### CC-IND-0002 — Relocated to packaged data path (2026-09-21)
 - Change: `php_indicators.db` moved to `fuzzlab/tools/data/php_indicators.db` and
   `build_sql_db.py` (now `fuzzlab/tools/build_sql_db.py`) defaults its output to

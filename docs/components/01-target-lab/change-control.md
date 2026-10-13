@@ -3,6 +3,20 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0252 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
+- Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
+  NFR-LAB-safety, NFR-LAB-no-secret-leak, naming the enforcing code and the test functions that fail without it
+  (checked by `tests/test_requirements_traceability.py`). One open clause each: no outbound route, and the destructive-class concept; the scan runs only under `--check`. No code change.
+- Impact: none at run time. The guard now fails if these lines go stale (a renamed or
+  deleted test) or if a new NFR is left unclassified.
+- Risk: none (documentation, plus a test that reads it).
+- Deliverables:
+  - [x] traceability lines — done
+  - [x] open clauses recorded and reported to the operator — done
+- Review: reviewers A and B (BUG-0111/0112 draft v2, AGREED) asked for one doc-only entry
+  per touched component.
+- Effectiveness: verified by the guard (3 passed, incl. synthetic offenders).
+
 ### CC-LAB-0251 — Lab-generator and corpus-sandbox lint: unused imports, placeholder-less f-strings, a redundant re-import (2026-10-13)
 
 **Status: built, offline-verified (behaviour-free).**

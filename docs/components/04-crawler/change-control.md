@@ -3,6 +3,31 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0011 — NFR-CRAWL-safe built: no destructive link queued, redirected to, or requested by the browser (BUG-0111) (2026-10-13)
+- Change: `tools/spider.py`:
+  - destructive links and XHR URLs are not queued (`_destructive`, logged and counted
+    in `skipped_destructive`);
+  - the static engine follows redirects by hand (`navguard.get_checked`), each hop in
+    scope and not destructive;
+  - the rendered engine installs `navguard.guard_page`, which aborts destructive
+    navigations, fetch/XHR and subresources;
+  - the start URL is exempt in both modes;
+  - pages open with `service_workers="block"`, because a worker's fetches bypass
+    `page.route` (reviewer B). WebSockets are not routed, a stated gap.
+
+  New `tools/navguard.py`.
+- Impact:
+  - **Behaviour change:** fewer pages crawled where links are destructive, and the
+    static engine no longer auto-follows redirects;
+  - **AUD:** the auditor shares `navguard`.
+- Risk: low. It adds refusals only, and a real-browser test covers the route.
+- Deliverables:
+  - [x] spider and navguard — done
+  - [x] tests: static (link, 302) and a real-browser crawl — done
+  - [x] NFR-CRAWL-safe amended, with traceability — done
+- Review: as CC-CORE-0038 (A1 and B1/B2 adopted).
+- Effectiveness: verified, including under `FUZZLAB_REQUIRE_BROWSER=1`.
+
 ### CC-CRAWL-0010 — Full browser header set (not UA alone), so a real external WAF stops 403ing a UA/Accept mismatch (2026-09-25, BUG-0060/PA-0062, recurrence of CC-CRAWL-0009)
 - **Change:** `LocalSpider.__init__`'s `requests.Session()` now applies
   `fuzzlab.core.http.DEFAULT_BROWSER_HEADERS` (UA + `Accept`/`Accept-Language`/

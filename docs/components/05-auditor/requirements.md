@@ -176,12 +176,15 @@ budget where a vulnerability is plausible.
   identities (no duplicate churn).
 - **NFR-AUD-safe** Probing uses non-destructive canaries only; destructive checks
   are gated off by default.
+  - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
+  - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)
 - **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).
 - **NFR-AUD-dry-run** `fuzzlab audit` accepts `--dry-run`: plans and prints the
   exact argv/command it would run and sends nothing (no probe is made), for
   headless use outside the web UI. Reuses the web launcher's dry-run plan/report
   logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
   `fuzzlab/cli_dryrun.py` helper.
+  - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_audit_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_audit_dry_run_reports_plan_and_sends_nothing`
 
 ## 5. Interfaces and data contracts
 Reads `page`, `endpoint`, `parameter` from the store; writes `candidate` rows

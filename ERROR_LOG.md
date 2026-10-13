@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Fuzzing: auth endpoints probed with the session; destructive crawl points fuzzed (fixed, BUG-0112/PA-0112)
+- **Symptom:** `is_auth_endpoint` had no caller; an authenticated crawl-sourced run would probe login.php/logout.php with the session.
+- **Root cause:** NFR-FUZZ-safe's exclusion was recorded but never consumed at the send; nothing traced the NFR to a test.
+- **Remediation:** `check_send_url` in every probe sender (explicit ground-truth allowance, AST guard); destructive crawl points skipped and reported; auth endpoints probed anonymously; no cookie carried between probes. CC-FUZZ-0060, CC-CORE-0038. `docs/bugs/BUG-0112-auth-endpoints-fuzzed-with-the-session.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Crawler: no destructive-link deny-list; would GET bWAPP's reset.php (DROP DATABASE) and logout.php (fixed, BUG-0111/PA-0112)
+- **Symptom:** found before an authenticated crawl of the loopback bWAPP: every same-host link, redirect, script fetch and subresource was followed, and the auditor re-fetched them.
+- **Root cause:** NFR-CRAWL-safe was specified and never built; safety NFRs were not traced to tests.
+- **Remediation:** `core.urls.destructive_reason`; queue filter, hand-followed redirects and a browser route guard in the spider; auditor and M6 guarded; discovery hops checked. PA-0112's traceability guard over every NFR. CC-CORE-0038, CC-CRAWL-0011, CC-AUD-0029, CC-SESS-0015. `docs/bugs/BUG-0111-crawler-followed-destructive-links.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Session: login to a real third-party target rejected with right credentials (fixed, BUG-0110/PA-0111)
 - **Symptom:** `fuzzlab session print` against a loopback bWAPP: "login for user@127.0.0.1 was rejected (status 200)".
 - **Root cause:** the login detector read each control's `value` attribute: no submit-button `form=submit`, and the `<select>` sent `""`.

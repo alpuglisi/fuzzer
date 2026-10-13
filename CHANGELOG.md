@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (BUG-0111/0112: safety NFRs enforced and traced; PA-0112)
+- **Why:** preparing an authenticated run against the operator's loopback bWAPP showed
+  two safety NFRs were specified but never built:
+  - the crawler would GET `reset.php` (`DROP DATABASE`) and `logout.php`
+    (NFR-CRAWL-safe);
+  - fuzzing never excluded auth endpoints (NFR-FUZZ-safe).
+- **What:**
+  - one deny rule, `core.urls.destructive_reason` (CC-CORE-0038);
+  - the crawler (CC-CRAWL-0011) and auditor (CC-AUD-0029) never queue, follow or
+    browser-request a destructive URL;
+  - every probe sender gates at the send with an explicit ground-truth allowance,
+    probes auth endpoints without the session, and carries no cookie between probes
+    (CC-FUZZ-0060);
+  - login discovery never follows a destructive hop (CC-SESS-0015);
+  - **PA-0112:** every NFR is classified, and every safety NFR names the tests that
+    enforce it or says "Not yet enforced". Doc-only traceability entries:
+    CC-LAB-0252, CC-IND-0003, CC-MUT-0013, CC-ML-0026, CC-PROXY-0022, CC-UI-0051,
+    CC-PLUG-0010;
+  - the remaining gaps are listed in each spec and were reported to the operator.
+
 ## 2026-10-13 (BUG-0110: login forms serialised as a browser does)
 - **Why:** run against a self-hosted, loopback-only bWAPP, fuzzlab could not log in with
   the right credentials. The detector sent no submit-button `name=value` and an empty

@@ -37,6 +37,6 @@ def test_static_fetch_standalone_uses_raw_requests():
         text = "<html>anon</html>"
         headers = {"Content-Type": "text/html"}
 
-    fetcher.session.get = lambda url, timeout=None: R()
+    fetcher.session.get = lambda url, timeout=None, allow_redirects=True: R()
     status, content_type, html, xhr = fetcher.fetch("http://localhost/index.php")
     assert status == 200 and "anon" in html and content_type == "text/html"

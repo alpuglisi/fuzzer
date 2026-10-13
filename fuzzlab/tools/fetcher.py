@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
 from fuzzlab.core.forms import default_value
+from fuzzlab.core.urls import canonical_origin, destructive_reason
 from fuzzlab.tools import paths
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -176,7 +177,16 @@ def load_urls(spider_db="spider_results.db"):
             cursor.execute("SELECT url FROM discovered_pages ORDER BY depth ASC")
             rows = [(row[0], 'link') for row in cursor.fetchall()]
         conn.close()
-        return rows
+        # NFR-CRAWL-safe (BUG-0111): never re-fetch a destructive URL, also from a
+        # spider DB written before the crawler gained its deny-list.
+        kept = []
+        for url, source in rows:
+            reason = destructive_reason(url)
+            if reason is not None:
+                logging.info(f"skipped destructive URL {url} ({reason!r})")
+                continue
+            kept.append((url, source))
+        return kept
     except sqlite3.Error as e:
         logging.error(f"Spider DB error: {e}")
         return []
@@ -325,7 +335,10 @@ class ContentFetcher:
             if exe:
                 launch_kwargs["executable_path"] = exe
             self._browser = self._pw.chromium.launch(**launch_kwargs)
-            self._page = self._browser.new_page()
+            # service workers would fetch outside page.route (BUG-0111)
+            self._page = self._browser.new_page(service_workers="block")
+            from fuzzlab.tools.navguard import guard_page
+            guard_page(self._page)                  # NFR-CRAWL-safe (BUG-0111)
             self._page.on("request", self._on_request)
             if self._session_manager and self._identity and self._auth_base_url:
                 from fuzzlab.tools import browserauth
@@ -390,7 +403,11 @@ class ContentFetcher:
             headers = {k.lower(): v for k, v in resp.headers.items()}
             html = resp.body.decode("utf-8", errors="replace")
             return resp.status, headers.get("content-type", ""), html, []
-        resp = self.session.get(url, timeout=self.timeout_ms / 1000)
+        from fuzzlab.tools.navguard import get_checked
+        origin = canonical_origin(url)
+        resp = get_checked(self.session, url, self.timeout_ms / 1000,
+                           lambda nxt: canonical_origin(nxt) == origin
+                           and destructive_reason(nxt) is None)
         return resp.status_code, resp.headers.get('Content-Type', ''), resp.text, []
 
 

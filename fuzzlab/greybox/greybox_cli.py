@@ -24,10 +24,12 @@ from fuzzlab.labels import contract
 from fuzzlab.tools.store_adapter import import_spider
 
 
-def _cookie_for(host: str, identity: str, base_url: str) -> tuple[str | None, bool]:
-    """``(Cookie header value or None, secure_only)`` for an authenticated surface
-    (fail loud). ``secure_only``: the session was established over https, so the sender
-    must never put the cookie on a plain-http request (BUG-0098)."""
+def _cookie_for(host: str, identity: str, base_url: str):
+    """``(Cookie header value or None, secure_only, is_auth_endpoint)`` for an
+    authenticated surface (fail loud). ``secure_only``: the session was established over
+    https, so the sender must never put the cookie on a plain-http request (BUG-0098).
+    ``is_auth_endpoint``: the session's login endpoints, probed without the cookie
+    (BUG-0112)."""
     from fuzzlab.core.config import load_config
     from fuzzlab.core.credentials import CredentialStore
     from fuzzlab.session.manager import SessionManager
@@ -41,8 +43,8 @@ def _cookie_for(host: str, identity: str, base_url: str) -> tuple[str | None, bo
     header = mgr.session_header(host, identity, base_url)   # SessionAuthError if wrong
     secure_only = bool(mgr.ensure(host, identity, base_url).secure_only)
     if header.startswith("Cookie: "):
-        return header[len("Cookie: "):], secure_only
-    return None, secure_only
+        return header[len("Cookie: "):], secure_only, mgr.is_auth_endpoint
+    return None, secure_only, mgr.is_auth_endpoint
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,11 +108,12 @@ def main(argv: list[str]) -> int:
         p.error("--points ground-truth requires --ground-truth")
 
     host = urlparse(args.base_url).hostname or args.base_url
-    cookie, cookie_secure_only = None, False
+    cookie, cookie_secure_only, is_auth_endpoint = None, False, None
     if args.identity:
         from fuzzlab.session.manager import SessionAuthError
         try:
-            cookie, cookie_secure_only = _cookie_for(host, args.identity, args.base_url)
+            cookie, cookie_secure_only, is_auth_endpoint = _cookie_for(
+                host, args.identity, args.base_url)
         except SessionAuthError as exc:
             p.error(f"authentication failed for {args.identity}@{host}: {exc}")
 
@@ -129,14 +132,18 @@ def main(argv: list[str]) -> int:
             if source != "ground-truth":
                 if os.path.exists(args.spider_db):
                     counts = import_spider(args.spider_db, store, run_id)
-                points = gbrun.points_from_store(store, run_id, args.base_url)
                 skipped = []
+                points = gbrun.points_from_store(store, run_id, args.base_url,
+                                                 skipped=skipped)
 
             if not points:
                 p.error("no injection points to probe (crawl first, or pass --ground-truth)")
 
             sender = gbrun.RequestsCorrelatingSender(cookie=cookie,
-                                                     cookie_secure_only=cookie_secure_only)
+                                                     cookie_secure_only=cookie_secure_only,
+                                                     is_auth_endpoint=is_auth_endpoint)
+            if source == "ground-truth":                 # explicit points (BUG-0112)
+                sender.allow_explicit(p.url for p in points)
             coverage_source = FileCoverageSource(args.cov_dir)
             dbfault_source = FileDbFaultSource(args.cov_dir)
             lab_control = ScriptLabControl(args.labctl) if args.labctl else None

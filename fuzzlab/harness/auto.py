@@ -127,8 +127,15 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     return points, skipped
 
 
-def injection_points_from_store(store, run_id: int, base_url: str) -> list[InjectionPoint]:
-    """Build injection points from the run's endpoint/parameter rows."""
+def injection_points_from_store(store, run_id: int, base_url: str,
+                                skipped: list | None = None) -> list[InjectionPoint]:
+    """Build injection points from the run's endpoint/parameter rows.
+
+    A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
+    delete, ...) is never fuzzed from a crawl (NFR-FUZZ-safe, BUG-0112); it is appended
+    to ``skipped`` as ``(path, method, param, reason)`` instead.
+    """
+    from fuzzlab.core.urls import destructive_reason
     base = base_url.rstrip("/")
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location "
@@ -145,6 +152,11 @@ def injection_points_from_store(store, run_id: int, base_url: str) -> list[Injec
         if key in seen:
             continue
         seen.add(key)
+        reason = destructive_reason(base + path)
+        if reason is not None:
+            if skipped is not None:
+                skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
+            continue
         points.append(InjectionPoint(url=base + path, param=r["name"],
                                      method=method, location=r["location"] or "query"))
     return points
@@ -229,8 +241,12 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     if source == "ground-truth":
         points, skipped = points_from_ground_truth(
             ground_truth, base_url, browser_available=browser is not None)
+        # The operator enumerated these: they may be probed even if they look
+        # destructive (NFR-FUZZ-safe's send-time gate, BUG-0112).
+        if hasattr(sender, "allow_explicit"):
+            sender.allow_explicit([u for p in points for u in (p.url, p.store_url)])
     else:
-        points = injection_points_from_store(store, run_id, base_url)
+        points = injection_points_from_store(store, run_id, base_url, skipped=skipped)
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
@@ -248,6 +264,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           prioritizer=prioritizer)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
+    anonymous = getattr(sender, "auth_endpoint_anonymous_sends", None)
+    if anonymous is not None:
+        result.metrics["auth_endpoint_anonymous_sends"] = anonymous
     if plugins is not None:
         # post-run stages (the ML stages, FR-ML-6), each its own guarded unit of work;
         # then close the run's plugin record with each plugin's final status
