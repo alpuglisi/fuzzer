@@ -1505,6 +1505,18 @@ tracked in the requirements files, not here.
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only
   `fuzzlab report [--run] [--json]`.
+- **Browser-verified pages** `[built]` (CC-UI-0036/0037, BUG-0063/0064, NFR-UI-browser-
+  verified):
+  - Until this change, no chart on the ML or Diagnostics tabs had ever rendered.
+    `chart.js` passed uPlot two class tokens, so every chart failed to build.
+  - Templates carried inline script and style that the app's own CSP blocks. As a
+    result, saved theme/density preferences were never applied, and the Overview
+    severity bar was empty.
+  - Both are fixed (the no-FOUC script is now `static/js/prefs.js`; the severity bar is
+    SVG). `tests/test_web_pages_browser.py` loads every HTML page (walked from
+    `app.routes`) in real Chromium and asserts zero page errors, console errors and CSP
+    violations. `tests/test_web_templates_csp.py` ties the templates to `_CSP`.
+  - `FUZZLAB_REQUIRE_BROWSER=1` makes any browser-test skip a failure.
 - **Depends on (components):** `core/` (store and logging); in automatic mode the
   web app invokes the tools (crawler, auditor, fuzzer, harness).
 - **Purpose:** the research-platform diagnostics from decision D2, made easy to

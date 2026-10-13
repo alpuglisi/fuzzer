@@ -938,3 +938,30 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      number is produced or displayed, not only the module where it was found. Enforced
      for `fuzzlab/ml/` by `tests/test_ml_oof.py::test_no_out_of_fold_scorer_bypasses_oof_folds`
      and that file's degenerate-branch tests. (from BUG-0062)
+
+- **PA-0065** — Strengthens `PA-0005`, whose "skippable when it needs an environment
+  feature" escape hatch had no backstop. It is extended to the web UI, where
+  `TestClient` is the test double for the browser: it renders templates but never runs
+  their JavaScript, applies the CSP, or draws a chart.
+  1. **Every HTML page is smoked in a real browser.** `tests/test_web_pages_browser.py`
+     walks `app.routes`, so a new page is covered automatically, and fails if it meets a
+     page it cannot classify or fill. It asserts zero page errors, zero console errors
+     and zero CSP violations, plus each page's key rendered output. Extend it whenever a
+     page gains client-side behavior.
+  2. **A skip must fail somewhere.** `FUZZLAB_REQUIRE_BROWSER=1` (`tests/_browser.py`)
+     turns every browser-test skip (no web extra, no Playwright, no launchable
+     Chromium) into a failure. A change touching `fuzzlab/web/templates/` or
+     `fuzzlab/web/static/` is verified with it set. Its change-control effectiveness
+     entry quotes the browser tests' **pass** count. "N skipped" is not verification.
+  3. **"Renders" needs a browser.** An effectiveness claim that something renders or
+     works in the UI requires a real-browser run. A payload or markup test supports only
+     "the data is served".
+  4. **Policy ↔ markup are tied mechanically.** No template may contain what the app's
+     own CSP blocks (inline `<script>`, `<style>`, `style=`, `on*=`, `javascript:`).
+     `tests/test_web_templates_csp.py` enforces this. A change that tightens a browser
+     security policy is verified across every page in a real browser, not only by
+     checking the response header.
+  5. **Adapters pass vendored-library options in the exact shape the vendored source
+     handles.** Read the source, e.g. uPlot's `class` → `classList.add(c)` takes one
+     token. This extends `PA-0026`'s precondition enumeration to adapters such as
+     `static/js/chart.js`. (from BUG-0063, BUG-0064)

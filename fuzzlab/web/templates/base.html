@@ -4,20 +4,7 @@
   <meta charset="utf-8">
   <title>{% block title %}fuzzlab control panel{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script>
-    /* No-FOUC: apply the persisted theme/density before first paint. Wrapped in
-       try/catch so a blocked/absent localStorage never stops the page rendering.
-       Runs on every full-page load under the MPA (U0) — required, since a stored
-       theme/density would otherwise flash on each navigation. */
-    try {
-      var t = localStorage.getItem("fl-theme");
-      if (t) document.documentElement.setAttribute("data-theme", t);
-      var d = localStorage.getItem("fl-density");
-      if (d) document.documentElement.setAttribute("data-density", d);
-      if (localStorage.getItem("fl-collapsed") === "1")
-        document.documentElement.setAttribute("data-collapsed", "1");
-    } catch (e) { /* no storage — render with defaults */ }
-  </script>
+  <script src="/static/js/prefs.js"></script>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/css/shell.css">
   {% block styles %}{% endblock %}

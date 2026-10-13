@@ -224,13 +224,24 @@ async function initMl() {
   const emptyBanner = document.getElementById("ml-empty");
   if (emptyBanner) emptyBanner.hidden = !!data.available_any;
 
-  renderClassifier(data.classifier || { available: false });
-  renderRanker(data.ranker || { available: false });
-  renderConformal(data.conformal || { available: false });
-  renderAnomaly(data.anomaly || { available: false });
-  renderDisagreement(data.disagreement || { available: false });
-  renderBandit(data.bandit || { available: false });
-  renderMutation(data.mutation || { available: false });
+  renderSafely("calibration", renderClassifier, data.classifier);
+  renderSafely("ranker", renderRanker, data.ranker);
+  renderSafely("conformal", renderConformal, data.conformal);
+  renderSafely("anomaly", renderAnomaly, data.anomaly);
+  renderSafely("disagreement", renderDisagreement, data.disagreement);
+  renderSafely("bandit", renderBandit, data.bandit);
+  renderSafely("mutation", renderMutation, data.mutation);
+}
+
+// One panel's failure must not blank every later panel (BUG-0063: a throw in the first
+// chart used to abort the whole render chain). The error still reaches the console.
+function renderSafely(panelId, render, payload) {
+  try {
+    render(payload || { available: false });
+  } catch (e) {
+    console.error(`ml: could not render panel "${panelId}"`, e);
+    showEmpty(panelId, "Could not render this panel (see the browser console).");
+  }
 }
 
 initMl();

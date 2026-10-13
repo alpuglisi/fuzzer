@@ -168,11 +168,13 @@ function initControls() {
     const el = document.getElementById("diag-trend-chart");
     if (!el) return;
     const data = [xs, ys];
-    const seriesSpec = [{}, { label: state.key }];
+    // createChart prepends the x series itself — pass only the y series (BUG-0063).
+    const seriesSpec = [{ label: state.key }];
     if (trendChart) trendChart.destroy();
     trendChart = createChart(el, {
       id: "diag-trend", type: "line", data, series: seriesSpec,
-      opts: { ariaLabel: `cross-run trend for ${state.key}`, scales: { x: { time: false } } },
+      opts: { xLabel: "run", caption: `cross-run trend for ${state.key}`,
+              scales: { x: { time: false } } },
     });
   }
 
@@ -201,7 +203,7 @@ function initControls() {
       xs = xs.map((_, i) => i);
     }
     const cols = [xs];
-    const seriesSpec = [{}];
+    const seriesSpec = [];                       // x series is prepended by createChart
     for (const rid of runIds) {
       const smoothed = state.ema > 0
         ? ema(lastSeriesRaw.series[rid].values, state.ema)
@@ -213,8 +215,10 @@ function initControls() {
     seriesChart = createChart(el, {
       id: "diag-series", type: "line", data: cols, series: seriesSpec,
       opts: {
-        ariaLabel: `${state.source}/${state.key} intra-run series`,
-        scales: { y: { distr: state.yLog ? 3 : 1 } },
+        xLabel: "step",
+        caption: `${state.source}/${state.key} intra-run series`,
+        // step indices, not timestamps (uPlot's x scale defaults to time)
+        scales: { x: { time: false }, y: { distr: state.yLog ? 3 : 1 } },
       },
     });
   }

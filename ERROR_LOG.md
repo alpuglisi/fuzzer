@@ -18,6 +18,47 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — UI: saved theme/density/sidebar never restored; Overview severity bar empty — templates blocked by the app's own CSP (fixed, BUG-0064/PA-0065)
+
+- **Symptom:** a saved dark theme, compact density or collapsed sidebar reset to the
+  default on every page load. The Overview "Findings by severity" bar drew no segments.
+  Chromium logged "Refused to execute inline script … script-src 'self'" on every page
+  and "Refused to apply inline style … style-src" on `/` and `/launcher`.
+- **Root cause:** `CC-UI-0026`'s CSP (correctly) forbids inline script and style, but
+  `base.html` kept the inline script that applies saved preferences (`shell.js` only
+  writes them), and three templates used `style=""`. The CSP was verified only at the
+  header level, the browser tests were skipped where verification ran, and
+  `test_web_frontend.py` asserted that the inline script was present.
+- **Remediation:** the script moved to `static/js/prefs.js` (a blocking `<script src>`);
+  the severity bar is now server-rendered SVG `<rect>`s; the margins use a class. A
+  static guard ties the templates to the CSP, and a real-browser smoke of every page
+  asserts zero CSP violations (CC-UI-0037, CC-UI-0036).
+- **Status:** Fixed (offline in real Chromium; `tests/test_web_templates_csp.py` 20
+  passed and flags exactly the four original sites when reverted).
+
+---
+## 2026-10-13 — UI: no chart on the ML or Diagnostics tabs ever rendered (fixed, BUG-0063/PA-0065, recurrence of the BUG-0005/PA-0005 class)
+
+- **Symptom:** every chart on the ML and Diagnostics tabs was blank. Chromium reported
+  "Failed to execute 'add' on 'DOMTokenList': The token provided ('fl-chart
+  fl-chart--line') contains HTML space characters". On the ML tab the first failure
+  also stopped every later panel from rendering, tables included.
+- **Root cause:** `static/js/chart.js` passed uPlot's single-token `class` option two
+  class names, so `new uPlot()` threw for every chart (present since CC-UI-0031). Behind
+  it were three `diagnostics.js` misuses of `createChart` and a `role="img"` that hid the
+  charts' screen-reader table. No test ran the panel's JS in a browser: the two browser
+  tests covered other pages, never checked console errors, and were skipped where
+  verification ran.
+- **Remediation:** one class token plus a per-type modifier added in `build()`;
+  `diagnostics.js` fixed; `role="figure"` with a refreshed accessible name; `ml.js`
+  renders each panel in isolation. `tests/_browser.py` with `FUZZLAB_REQUIRE_BROWSER=1`
+  (a skip becomes a failure), and `tests/test_web_pages_browser.py` smokes every HTML
+  page in Chromium (CC-UI-0036).
+- **Status:** Fixed (offline in real Chromium; web + ML suites 354 passed / 0 skipped
+  under `FUZZLAB_REQUIRE_BROWSER=1`; the new browser tests fail when the fix is
+  reverted).
+
+---
 ## 2026-10-13 — ML: one-endpoint datasets reported in-sample PR-AUC / nDCG as out-of-fold (fixed, BUG-0062/PA-0064, recurrence of the BUG-0016/PA-0017 class)
 
 - **Symptom:** `train_and_score` / `train_and_rank` on a run whose candidates all sit on

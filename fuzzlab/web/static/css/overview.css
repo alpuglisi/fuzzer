@@ -84,12 +84,12 @@
   background: var(--surface2);
   border: 1px solid var(--border);
 }
-.sev-seg { height: 100%; }
-.sev-seg.sev-critical { background: var(--crit); }
-.sev-seg.sev-high { background: var(--high); }
-.sev-seg.sev-medium { background: var(--med); }
-.sev-seg.sev-low { background: var(--low); }
-.sev-seg.sev-info { background: var(--info); }
+.sev-bar { display: block; }            /* the bar is an <svg> (BUG-0064) */
+.sev-seg.sev-critical { fill: var(--crit); }
+.sev-seg.sev-high { fill: var(--high); }
+.sev-seg.sev-medium { fill: var(--med); }
+.sev-seg.sev-low { fill: var(--low); }
+.sev-seg.sev-info { fill: var(--info); }
 
 .sev-legend {
   list-style: none; margin: .7rem 0 0; padding: 0;

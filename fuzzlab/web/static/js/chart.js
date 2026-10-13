@@ -187,7 +187,10 @@ export function createChart(el, { id, type = "line", data, series = [], opts = {
         width,
         height,
         id: `chart-${id}`,
-        class: `fl-chart fl-chart--${type}`,
+        // uPlot's `class` is ONE class token (1.6.32 `addClass` → `classList.add(c)`);
+        // two space-separated tokens made `new uPlot()` throw for every chart (BUG-0063).
+        // The per-type modifier is added below, inside build(), so rebuild() keeps it.
+        class: "fl-chart",
         series: [{ label: opts.xLabel || "x" }].concat(builtSeries),
         axes: opts.axes || [xAxis, yAxis],
         scales: opts.scales,
@@ -200,13 +203,27 @@ export function createChart(el, { id, type = "line", data, series = [], opts = {
 
     el.replaceChildren();
     u = new uPlot(uOpts, data, el);
+    u.root.classList.add(`fl-chart--${type}`);
     const canvas = el.querySelector("canvas");
     if (canvas) canvas.setAttribute("aria-hidden", "true");
     const seriesLabels = [opts.xLabel || "x"].concat(series.map((s) => s.label || ""));
     a11y = buildA11yTable(data, seriesLabels, opts.caption);
     el.appendChild(a11y.wrapper);
-    if (!el.hasAttribute("role")) el.setAttribute("role", "img");
-    if (opts.caption && !el.hasAttribute("aria-label")) el.setAttribute("aria-label", opts.caption);
+    // `figure`, not `img`: an img's children are presentational, which hid the
+    // visually-hidden data table above from assistive tech (BUG-0063 sweep).
+    if (!el.hasAttribute("role")) el.setAttribute("role", "figure");
+    // Own the mount's label only if we set it (a reused mount, e.g. Diagnostics, must not
+    // keep the first chart's caption); never overwrite a template-authored aria-label.
+    const ownsLabel = el.dataset.flAria === "1" || !el.hasAttribute("aria-label");
+    if (ownsLabel) {
+      if (opts.caption) {
+        el.setAttribute("aria-label", opts.caption);
+        el.dataset.flAria = "1";
+      } else {
+        el.removeAttribute("aria-label");
+        delete el.dataset.flAria;
+      }
+    }
   }
 
   function rebuild() {

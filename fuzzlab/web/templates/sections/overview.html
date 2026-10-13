@@ -113,15 +113,20 @@
     <div class="card ov-panel-b" aria-labelledby="ov-sev-h2">
       <h2 id="ov-sev-h2">Findings by severity</h2>
       {% if total_findings %}
-      <div class="sev-bar" role="img"
+      {# SVG, not width-styled divs: an inline style="" is blocked by the app's own CSP
+         (style-src 'self'), while <rect> x/width are presentation attributes, which it
+         allows. Server-rendered; needs no JS (BUG-0064). #}
+      {% set bar = namespace(x=0) %}
+      <svg class="sev-bar" viewBox="0 0 100 10" preserveAspectRatio="none" role="img"
            aria-label="{% for sev in ('critical','high','medium','low','info') %}{% if severity[sev] %}{{ severity[sev] }} {{ sev }}, {% endif %}{% endfor %}">
         {% for sev in ("critical", "high", "medium", "low", "info") %}
         {% if severity[sev] %}
-        <div class="sev-seg sev-{{ sev }}" style="width:{{ (severity[sev] / total_findings * 100) | round(2) }}%"
-             title="{{ sev }}: {{ severity[sev] }}"></div>
+        {% set w = (severity[sev] / total_findings * 100) | round(4) %}
+        <rect class="sev-seg sev-{{ sev }}" x="{{ bar.x | round(4) }}" y="0" width="{{ w }}" height="10"><title>{{ sev }}: {{ severity[sev] }}</title></rect>
+        {% set bar.x = bar.x + w %}
         {% endif %}
         {% endfor %}
-      </div>
+      </svg>
       <ul class="sev-legend">
         {% for sev in ("critical", "high", "medium", "low", "info") %}
         <li><span class="sev-dot sev-{{ sev }}"></span>{{ sev }} <b>{{ severity[sev] }}</b></li>

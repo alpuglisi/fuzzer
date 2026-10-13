@@ -230,6 +230,15 @@ bugs — the research-platform diagnostics of decision D2.
   removes the `matchMedia` listener, cancels any pending `requestAnimationFrame`, calls
   `uPlot.destroy()`, and drops the chart from the registry — required because the
   observers otherwise hold references and leak across an MPA navigation.
+  *(Amended CC-UI-0036, BUG-0063.)* Options are passed in the exact shape the vendored
+  source handles: uPlot's `class` is **one** token (`fl-chart`); the per-type modifier
+  `fl-chart--<type>` is added to `u.root` inside `build()` so a rebuild keeps it. Callers
+  pass only their y series (`createChart` prepends the x series) and use the documented
+  `opts` (`xLabel`, `caption`, `scales`, …). The mount is `role="figure"` (so its a11y
+  table stays exposed) with an `aria-label` from `caption` that chart.js refreshes on
+  every build when it set it, and never overwrites when a template set it. On the ML tab
+  each panel renders in isolation: one that throws shows "Could not render this panel"
+  and the rest still render.
 
 - **FR-UI-13** *(added CC-UI-0029, U2)* The **Findings workbench** (`/findings`,
   `/findings/{id}`) offers faceted filtering + saved views over `finding`/`attempt`,
@@ -364,6 +373,16 @@ bugs — the research-platform diagnostics of decision D2.
   one deliberate exception: it holds view *definitions* a person authored in
   the panel (filter/sort/column specs), never tool output, so writing it does
   not violate this invariant.
+- **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
+  PA-0065)* Every HTML page loads in a real browser with zero page errors, zero console
+  errors and zero CSP violations. The check is `tests/test_web_pages_browser.py`, which
+  walks every non-`/api` GET route of the app (a new page is covered automatically) plus
+  the not-found page, and asserts each page's key rendered output (ML/Diagnostics charts,
+  saved preferences, the severity bar). No template contains markup the app's own CSP
+  blocks: inline `<script>`, `<style>`, `style=`, `on*=`, `javascript:`
+  (`tests/test_web_templates_csp.py`). Browser tests skip only when the real browser
+  cannot run, and `FUZZLAB_REQUIRE_BROWSER=1` turns that skip into a failure. A change to
+  `fuzzlab/web/templates/` or `fuzzlab/web/static/` is verified with it set.
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
 

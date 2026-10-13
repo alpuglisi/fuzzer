@@ -3,6 +3,115 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0037 — Templates comply with the app's own CSP: no inline script/style (BUG-0064) (2026-10-13)
+- Change:
+  - `templates/base.html`: inline no-FOUC `<script>` moved verbatim to new
+    `static/js/prefs.js`, loaded by a classic blocking `<script src="/static/js/prefs.js">`
+    at the same place in `<head>` (still before first paint; allowed by `script-src
+    'self'`; CC-UI-0026's CSP unchanged — a hash would break on any whitespace edit, a
+    nonce needs per-response plumbing through the raw ASGI middleware).
+  - `templates/sections/overview.html`: severity bar → one inline `<svg class="sev-bar-svg"
+    viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="…">` with a
+    `<rect class="sev-seg sev-{sev}" x="…" width="…" height="10"><title>{sev}:
+    {n}</title></rect>` per non-zero severity (x accumulated with a Jinja `namespace`).
+    Presentation attributes are not inline styles (reviewer-verified: zero violations under
+    the real `_CSP`, proportional widths, no JS). `overview.css`: `fill:` per `.sev-seg.sev-*`;
+    svg sized to the existing `.sev-bar` box.
+  - `templates/sections/launcher.html:129` and `launch.html:126`: `style="margin-top:.7rem"`
+    → class `ft2--spaced` in the existing section stylesheet. `launch.html` is rendered by
+    no route (grep) — fixed so the guard holds; recorded as dead in the bug doc, not
+    deleted here.
+  - Tests: `tests/test_web_frontend.py:110` asserts `/static/js/prefs.js` is referenced in
+    `<head>` before the stylesheets (it previously asserted the inline script — the test
+    enshrined the bug); `tests/test_web_overview.py:168-169` asserts the `<rect
+    class="sev-seg sev-…"` markup; new static guard `tests/test_web_templates_csp.py`:
+    every template under `fuzzlab/web/templates/` has no `<script>` without `src`, no
+    `<style>` block, no `style=` attribute, no `\son[a-z]+\s*=` handler, no `javascript:`
+    URL — each pattern proven first on must-match and must-not-match fixtures
+    (`data-section=`, `content=`, `aria-controls=`, `<script src=…>`; PA-0022/PA-0034(2)).
+- Impact (other components / project): UI only. Persisted theme/density/collapsed preferences
+  apply on load for the first time since CC-UI-0026; the Overview severity bar shows. CSP
+  unchanged.
+- Risk (level; mitigation or accepted-risk justification): low; one cacheable same-origin
+  static fetch in `<head>`. Covered by CC-UI-0036's browser test (zero violations on every
+  page; (e), (f)) and the static guard.
+- Deliverables:
+  - [ ] `static/js/prefs.js` + `base.html` — done
+  - [ ] SVG severity bar + `overview.css` — done
+  - [ ] margin class (launcher.html, launch.html) — done
+  - [ ] `test_web_frontend.py`, `test_web_overview.py` updated; `test_web_templates_csp.py` — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3, both reviewers verifying the fixes in real Chromium; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective — zero CSP violations on every page in real Chromium (CC-UI-0036's smoke); a persisted `fl-theme=dark` is applied after reload; severity `<rect>` widths are proportional to the seeded counts (critical:high = 6:1 within 5%); `tests/test_web_templates_csp.py` 20 passed and, with the fix reverted, flags exactly `base.html:7`, `launch.html:126`, `launcher.html:129`, `overview.html:120`; `test_web_frontend.py` + `test_web_overview.py` 42 passed.
+
+### CC-UI-0036 — Charts actually render: uPlot option misuse fixed, ML panels fail-isolated, every page browser-smoked (BUG-0063) (2026-10-13)
+- Change:
+  - `static/js/chart.js::createChart.build()`: uPlot `class: "fl-chart"` (one token —
+    uPlot 1.6.32 `addClass` is `classList.add(c)`, `uPlot.esm.js:85-90,2940`), then
+    `u.root.classList.add(\`fl-chart--${type}\`)` right after `new uPlot(...)` inside
+    `build()`, so `rebuild()` (theme/density change) keeps it. Mount gets
+    `role="figure"` instead of `role="img"` (children of `img` are presentational, which
+    hid the visually-hidden a11y data table from assistive tech). The mount's
+    `aria-label` from `opts.caption` is refreshed on every `build()` when chart.js set it
+    (marked `data-fl-aria="1"`); a template-authored `aria-label` is never overwritten
+    (`chart.js:209` previously set it only once, so a reused mount kept a stale label); a
+    rebuild without a caption removes a label chart.js set (reviewer edge case).
+  - `static/js/diagnostics.js`: `renderTrendChart` / `renderSeriesChart` stop passing an
+    x-series of their own (`[{}, …]`, `[{}]`) — `createChart` already prepends it, so they
+    produced one series more than data columns (uPlot throws `reading 'length'`) and
+    mislabeled the y series; the x label is passed as `opts.xLabel` ("run" / "step"). The
+    series chart gets `scales.x.time = false` (step indices were drawn as timestamps).
+    Both pass `caption` (the documented option, `chart.js:128`) instead of the ignored
+    `ariaLabel`.
+  - `static/js/ml.js::initMl`: each `renderX(...)` runs through `renderSafely(panelKey,
+    fn)` — catch, `console.error`, and show that panel's existing empty state "could not
+    render this panel (see console)" — so one panel's throw no longer blanks every later
+    panel. `diagnostics.js` needs no equivalent: each chart is built in its own handler and
+    the loaders are independent promises.
+  - New `tests/_browser.py`: `launch_browser_or_skip(pw)` — imports Playwright, launches
+    real Chromium (pre-installed `/opt/pw-browsers/chromium-*` fallback, as the existing
+    tests do); on failure it skips, **or fails when `FUZZLAB_REQUIRE_BROWSER=1`** — which
+    also fails (instead of skipping) when the `web` extra (`fastapi`) is missing. The two
+    existing browser tests switch from module-level `importorskip("playwright")` to it
+    (`fastapi` import-skip kept: without the web extra there is no page to test).
+  - New `tests/test_web_pages_browser.py` (real Chromium + uvicorn, existing `_Server`
+    pattern): store seeded with real `train_and_score` + `train_and_rank`, findings of two
+    severities, metric series; `labcontrol.fetch_states` stubbed. It
+    (a) walks every `GET` route in `create_app(cfg).routes` whose response is HTML (path
+        params filled from seeded ids: `/runs/{id}`, `/findings/{id}`), plus one unknown
+        path (404 page) — failing if any non-`/api` GET route is not an HTML route or has a
+        path param it cannot fill, so a new page cannot be silently left out — and asserts zero `pageerror`s, zero console errors and zero
+        `securitypolicyviolation` events (init-script collector);
+    (b) `/ml`: every chart mount the `/api/ml/data` payload makes available renders a
+        `.uplot.fl-chart` with an `fl-chart--<type>` class (count derived from the
+        payload's `available` panels, not a literal); the ranker meta line shows
+        "in-sample" (CC-UI-0035, previously hidden by the cascade);
+    (c) `/diagnostics`: check a run, click a metric → trend + series charts render, legend
+        shows the metric / `run #N` labels, no errors; clicking a second metric updates the
+        mount's `aria-label`;
+    (d) isolation: `page.route` serves `/api/ml/data` with a malformed `classifier`
+        payload → its panel shows the could-not-render reason and the later panels still
+        render;
+    (e) a persisted `fl-theme=dark` in localStorage is applied on reload (`html[data-theme
+        =dark]`) — CC-UI-0037;
+    (f) `/`: severity `<rect>`s render with widths proportional to the seeded counts —
+        CC-UI-0037.
+- Impact (other components / project): UI only. Every chart on the ML and Diagnostics tabs
+  renders for the first time; FR-UI-11/12/14 hold in a browser, not only in payload tests.
+  No route/payload/Python change. Test infra: one shared browser helper.
+- Risk (level; mitigation or accepted-risk justification): low. Small JS edits verified in
+  Chromium by both reviewers (patched via `page.route`: 10 ML charts render, classes survive
+  resize). Newly rendering charts may expose further latent bugs — the smoke test is what
+  surfaces them. Browser tests add ~10–20 s where Chromium exists.
+- Deliverables:
+  - [ ] `chart.js` class token + modifier in `build()` + `role="figure"` — done
+  - [ ] `diagnostics.js` series spec / `xLabel` / `time:false` / `caption` — done
+  - [ ] `ml.js` `renderSafely` — done
+  - [ ] `tests/_browser.py` + the two existing browser tests migrated — done
+  - [ ] `tests/test_web_pages_browser.py` (a)–(f) — done
+  - [ ] UI requirements: new NFR-UI-browser-verified — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3, both reviewers verifying the fixes in real Chromium; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective — in real Chromium 141 (pre-installed build), `tests/test_web_pages_browser.py` 7 passed: every HTML GET route (10, walked from `app.routes`) plus the not-found page load with zero page errors, console errors and CSP violations; every chart mount in each available ML panel renders a `.uplot.fl-chart` with its `fl-chart--<type>` class; the Diagnostics trend + series charts render, labelled, and the accessible name follows the selected metric; a throwing ML panel no longer blanks the rest. With the `fuzzlab/` changes reverted, all 6 behavior tests fail (and with only `diagnostics.js` reverted, the Diagnostics test fails). Web + ML suites under `FUZZLAB_REQUIRE_BROWSER=1`: 354 passed, 0 skipped. This entry also corrects the record of `CC-UI-0031`/`CC-UI-0032`: their "every panel renders" effectiveness was established by payload/markup tests only; no chart had rendered in a browser until this change (BUG-0063).
+
 ### CC-UI-0035 — ML tab labels in-sample metrics and shows the scoring model's own out-of-fold metrics (BUG-0062 sweep) (2026-10-13)
 - Change: `fuzzlab/web/mlview.py::classifier_panel` / `ranker_panel` compute PR-AUC /
   ECE / nDCG@k / precision@k from stored `candidate.score` / `rank_score`, i.e. the

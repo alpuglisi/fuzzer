@@ -8,15 +8,13 @@ Chromium build isn't available, and it tears the server down unconditionally.
 
 from __future__ import annotations
 
-import glob
 import socket
 import threading
 import time
 
-import pytest
+from tests._browser import launch_browser_or_skip, require_modules
 
-pytest.importorskip("fastapi")
-pytest.importorskip("playwright")
+require_modules()   # skip — or fail under FUZZLAB_REQUIRE_BROWSER=1 (PA-0065)
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
@@ -82,16 +80,7 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
     base = f"http://127.0.0.1:{port}/launcher"
     try:
         with sync_playwright() as pw:
-            # The pinned Playwright may expect a browser build that isn't installed;
-            # point it at the pre-installed Chromium binary if we can find one.
-            found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))
-            launch_kw = {"headless": True}
-            if found:
-                launch_kw["executable_path"] = found[-1]
-            try:
-                browser = pw.chromium.launch(**launch_kw)
-            except Exception as exc:  # noqa: BLE001 - no usable browser build here
-                pytest.skip(f"chromium unavailable: {exc}")
+            browser = launch_browser_or_skip(pw)
             page = browser.new_page()
             page.set_default_timeout(15000)
             page.goto(base)

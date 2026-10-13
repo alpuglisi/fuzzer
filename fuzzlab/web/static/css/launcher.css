@@ -38,6 +38,8 @@
   font-weight: 700; margin: .75rem .55rem .3rem;
 }
 .actscroll .ft2:first-child { margin-top: .25rem; }
+/* was an inline style="margin-top:.7rem", blocked by the CSP's style-src (BUG-0064) */
+.ft2.ft2--spaced { margin-top: .7rem; }
 .act {
   position: relative; display: flex; align-items: center; gap: .4rem; padding: .5rem .6rem;
   border-radius: 8px; color: var(--text); cursor: pointer; font-size: .9rem;

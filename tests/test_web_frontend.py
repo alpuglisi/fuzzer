@@ -73,6 +73,15 @@ def test_static_shell_js_is_served():
     assert "function initTabs" not in r.text
 
 
+def test_static_prefs_js_is_served_as_javascript():
+    # served with a JavaScript MIME type: under `X-Content-Type-Options: nosniff` a
+    # script with any other type is refused (BUG-0064 / CC-UI-0037)
+    r = _client().get("/static/js/prefs.js")
+    assert r.status_code == 200
+    assert "javascript" in r.headers["content-type"]
+    assert 'localStorage.getItem("fl-theme")' in r.text
+
+
 def test_static_section_js_modules_are_served():
     for path, needle in [
         ("/static/js/common.js", "export function subscribe"),
@@ -107,7 +116,13 @@ def test_section_route_renders_the_app_shell(path, section, needle):
     assert body.index('/static/tokens.css') < body.index('/static/css/shell.css')
     assert 'id="theme-toggle"' in body and 'id="density-toggle"' in body
     assert 'id="proxy-chip"' in body
-    assert 'localStorage.getItem("fl-theme")' in body  # no-FOUC inline script
+    # no-FOUC preferences: a same-origin <script src> in <head>, before the stylesheets —
+    # never an inline <script>, which the app's own CSP blocks (BUG-0064; this assertion
+    # used to require the inline script, enshrining the bug)
+    head = body[:body.index("</head>")]
+    assert '<script src="/static/js/prefs.js"></script>' in head
+    assert head.index("/static/js/prefs.js") < head.index("/static/tokens.css")
+    assert 'localStorage.getItem("fl-theme")' not in body
     # the context bar reflects config (authorization state) server-side
     assert "not authorized" in body
     # the section itself rendered, not just the shared shell

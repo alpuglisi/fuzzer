@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (UI: charts render and pages comply with the app's own CSP — BUG-0063/BUG-0064, PA-0065; CC-UI-0036/0037)
+- **BUG-0063: no chart in the control panel had ever rendered.** `static/js/chart.js`
+  passed uPlot's single-token `class` option two names, so `new uPlot()` threw for every
+  chart. On the ML tab, that first error also blanked every later panel.
+  - Fixed: the class option itself, three `diagnostics.js` misuses of `createChart`
+    hidden behind it, and an a11y role that hid the charts' data tables from screen
+    readers. `ml.js` now renders each panel in isolation.
+- **BUG-0064: templates broke the app's own CSP.** Inline script and style meant saved
+  theme/density/sidebar preferences were never applied, and the Overview severity bar
+  was empty.
+  - Fixed: the no-FOUC script moved to `static/js/prefs.js`, and the severity bar is now
+    server-rendered SVG.
+- **Root cause (both):** no test ran the panel's JS in a real browser; the only browser
+  tests were skipped where verification ran.
+- **Now enforced (PA-0065):**
+  - `tests/test_web_pages_browser.py` loads every HTML page in Chromium and asserts zero
+    errors and zero CSP violations.
+  - `tests/test_web_templates_csp.py` ties the templates to `_CSP`.
+  - `FUZZLAB_REQUIRE_BROWSER=1` turns a browser-test skip into a failure.
+- **Review:** passed the pre-change review gate 3/3.
+- **Full-suite results for the earlier ML change:** recorded in CC-ML-0011/0012 and
+  CC-UI-0034/0035. 2801 passed; the 33 failures are environmental (missing scipy,
+  scikit-learn and `gitleaks`) and identical on `main`.
+
 ## 2026-10-13 (ML/UI: two ML defects fixed with full bug protocol — BUG-0061/PA-0063, BUG-0062/PA-0064; CC-ML-0011/0012, CC-UI-0034/0035)
 - **BUG-0061: the wrong `model` row was read.** The run page and the ML tab took "the
   newest `model` row of any kind". After `fuzzlab auto --score --rank` that row was the

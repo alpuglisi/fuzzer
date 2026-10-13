@@ -7,15 +7,13 @@ client restores CRLF that the textarea normalized to LF. Skipped without a brows
 
 from __future__ import annotations
 
-import glob
 import socket
 import threading
 import time
 
-import pytest
+from tests._browser import launch_browser_or_skip, require_modules
 
-pytest.importorskip("fastapi")
-pytest.importorskip("playwright")
+require_modules()   # skip — or fail under FUZZLAB_REQUIRE_BROWSER=1 (PA-0065)
 from playwright.sync_api import sync_playwright  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
@@ -87,14 +85,7 @@ def test_repeater_create_and_send_in_browser(tmp_path):
     server.start()
     try:
         with sync_playwright() as pw:
-            found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"))
-            kw = {"headless": True}
-            if found:
-                kw["executable_path"] = found[-1]
-            try:
-                browser = pw.chromium.launch(**kw)
-            except Exception as exc:  # noqa: BLE001
-                pytest.skip(f"chromium unavailable: {exc}")
+            browser = launch_browser_or_skip(pw)
             pg = browser.new_page()
             pg.set_default_timeout(15000)
             pg.goto(f"http://127.0.0.1:{web_port}/")
