@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — ML: the store-wide dataset leaked labels and inflated rule counts across runs (fixed, BUG-0065/PA-0066, recurrence of the BUG-0061/PA-0063 class)
+
+- **Symptom:** on a store with two runs of the same app, a candidate the oracle
+  *rejected* in run 2 was labelled positive in the store-wide ML dataset because run 1
+  confirmed the same `path`/`param`, and `rules_fired` doubled (1.0 per run, 2.0
+  store-wide). That is the dataset behind the ML tab's default all-runs view and
+  store-wide training.
+- **Root cause:** `ml/dataset.py::build_dataset` built its finding→label and
+  evaluation→count lookups keyed on `(path, param[, category])` across every run in
+  scope. That key is unique only within one run (and drops the host, so different
+  targets also collided). Every test seeded a single run.
+- **Remediation:** both lookups are keyed by `run_id` as well, so the store-wide dataset
+  equals the per-run datasets concatenated. A two-run regression test and a two-target
+  test were added. The by-mechanism sweep found no other content-keyed cross-run join
+  (CC-ML-0014).
+- **Status:** Fixed (offline; regression tests fail with either half of the old keying
+  restored).
+
+---
 ## 2026-10-13 — UI: saved theme/density/sidebar never restored; Overview severity bar empty — templates blocked by the app's own CSP (fixed, BUG-0064/PA-0065)
 
 - **Symptom:** a saved dark theme, compact density or collapsed sidebar reset to the

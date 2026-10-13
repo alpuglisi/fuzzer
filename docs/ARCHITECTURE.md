@@ -1305,14 +1305,24 @@ tracked in the requirements files, not here.
   per-candidate explanations. Evaluated by NDCG@k/Precision@k vs a random-order baseline
   (GroupKFold); wired as `fuzzlab auto --rank`. The real-lab held-out exit (T7.4) is
   on-host.
-- **Active learner** (A.6.5) `[built; live budget exit on-host]` (Phase 7): allocates
-  oracle budget by uncertainty sampling (reusing `rank_uncertainty`) and query-by-
-  committee (a bootstrap `Committee` of rankers) — `active.py::propose_queries` returns
-  the candidates to confirm next. Advisory: it proposes; the oracle confirms.
+- **Active learner** (A.6.5) `[built + wired; live budget exit on-host]` (Phase 7):
+  - **Wired as `fuzzlab auto --confirm-budget N`** (CC-ML-0013 / CC-FUZZ-0048). The
+    oracle confirms at most N distinct candidates, ordered by
+    `active.py::prioritize` from a model trained only on **earlier runs against the
+    same target**.
+  - Methods: `score` (default, most likely first), `uncertainty`, `committee`, and a
+    seeded `random` control.
+  - The rest are recorded as `skipped_budget`. They are never counted as rejections or
+    training negatives, but are still scored and ranked.
+  - With no usable earlier labels the budget is not applied, and the run says so.
+  - `propose_queries` remains the standalone proposer.
+  - Advisory: it orders oracle work; the oracle alone confirms.
 - **Anomaly detector** (A.5) `[built; held-out flow eval on-host]` (Phase 10): a
   parameter-free, pure-Python **ECOD** tripwire (`ml/anomaly.py`) over the store's feature
-  vectors — advisory scores/flags (`detect_anomalies` records `anomaly_flagged`), never
-  labels — plus the **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
+  vectors. It gives advisory scores/flags, never labels. **Wired as
+  `fuzzlab auto --anomaly`**, which persists `candidate.anomaly_score` /
+  `anomaly_flag` for every candidate (migration 13) and records `anomaly_flagged`.
+  It also offers **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
   that feeds the anomaly score into the classifier.
 - **Model registry + honest evaluation** `[built]` (CC-ML-0011/0012, BUG-0061/0062):
   - The `model` table is shared by the classifier and ranker families and by every
@@ -1553,7 +1563,7 @@ detail):
 | `run`, `schema_version` | core | everything |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
-| `candidate` (rule evidence, features, score) | auditor, ranker | scheduler, fuzzer |
+| `candidate` (rule evidence, features, score, rank, `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `skipped_budget` rows are scored, never trained on), UI |
 | `flow` (+ raw bytes) | proxy, http client | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |

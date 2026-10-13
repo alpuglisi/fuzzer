@@ -248,8 +248,10 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
 
     Fits ECOD over the already-stored candidate feature vectors on the fly (pure read —
     unlike `fuzzlab.ml.anomaly.detect_anomalies`, this never writes to `run_metrics`).
+    Label-free, so it covers every candidate — the same population `detect_anomalies`
+    scores, budget-skipped ones included.
     """
-    ds = build_dataset(store, run_id)
+    ds = build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 5:
         return {"available": False, "reason": "not enough candidates to fit an anomaly model"}
     from fuzzlab.ml.anomaly import ECOD, flag_top
@@ -269,8 +271,11 @@ def anomaly_panel(store, run_id: int | None = None, contamination: float = 0.1) 
 
 def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
                        top_n: int = 10) -> dict[str, Any]:
-    """Committee (bootstrap ranker ensemble) disagreement histogram + top-N query queue."""
-    ds = build_dataset(store, run_id)
+    """Committee (bootstrap ranker ensemble) disagreement histogram + top-N query queue.
+
+    The committee is fit on labelled candidates only; the queue covers every candidate,
+    including ones the oracle skipped for budget — the ones actually left to query."""
+    ds = build_dataset(store, run_id, include_unlabelled=True)
     if len(ds) < 10:
         return {"available": False, "reason": "not enough candidates to train a committee"}
     n = len(ds)
@@ -285,8 +290,13 @@ def disagreement_panel(store, run_id: int | None = None, n_members: int = 5,
     from fuzzlab.ml.active import Committee, disagreement
     from fuzzlab.ml.rank_train import _candidate_texts
     texts = _candidate_texts(store, run_id, ids_sub)
+    fit_idx = [j for j, i in enumerate(idxs) if ds.labelled[i]]      # never fit on a
+    if len(fit_idx) < 10:                                            # placeholder label
+        return {"available": False, "reason": "not enough labelled candidates to train a committee"}
     try:
-        com = Committee(n_members=n_members, seed=0).fit(X_sub, texts, y_sub)
+        com = Committee(n_members=n_members, seed=0).fit(
+            [X_sub[j] for j in fit_idx], [texts[j] for j in fit_idx],
+            [y_sub[j] for j in fit_idx])
         member_scores = com.member_scores(X_sub, texts)
     except Exception:  # noqa: BLE001 - degrade to an empty panel, never break the tab
         return {"available": False, "reason": "committee fit failed on this dataset"}

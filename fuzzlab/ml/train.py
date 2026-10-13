@@ -80,10 +80,14 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     leakage). Falls back to the prevalence baseline on thin data — including fewer than
     ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
     exists and any "OOF" metric would be in-sample (BUG-0062)."""
-    ds = build_dataset(store, run_id)
-    if hybrid and len(ds):
+    ds = build_dataset(store, run_id)                         # train/evaluate: labelled
+    every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
+    if hybrid and len(every):
+        # ECOD is label-free: fit it ONCE on every row and apply that same detector to
+        # both sets, so the scored rows' anomaly feature is the one the model trained on.
         from fuzzlab.ml.anomaly import ECOD, augment
-        ds.X = augment(ds.X, ECOD().fit(ds.X))       # append anomaly score (no labels used)
+        ecod = ECOD().fit(every.X)
+        ds.X, every.X = augment(ds.X, ecod), augment(every.X, ecod)
         ds.feature_names = list(ds.feature_names) + ["anomaly_ecod"]
     n, pos = len(ds), ds.positives
     groups = len(set(ds.groups))
@@ -95,7 +99,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
             or groups < max(2, min_groups) or k < 2):
         # Fallback: not enough labelled data for a model — score with the base rate.
         model = PrevalenceBaseline().fit(ds.X, ds.y)
-        scores = model.predict_proba(ds.X)
+        scores = model.predict_proba(every.X)
         gate, name = None, PREVALENCE_FALLBACK_NAME
         result.update(model=name, fallback=True)
     else:
@@ -113,8 +117,10 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
         gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
         model = _MODELS[name]()
-        _fit_with_metrics(model, ds.X, ds.y, store, run_id, name)   # deploy: fit on all data
-        scores = model.predict_proba(ds.X)
+        _fit_with_metrics(model, ds.X, ds.y, store, run_id, name)   # deploy: fit on all labels
+        # advisory scores for EVERY row, including candidates the oracle skipped for
+        # budget (they have no label to train on, but they are the ones to triage)
+        scores = model.predict_proba(every.X)
         result.update(model=name, fallback=False, pr_auc=prauc,
                       baseline_prevalence=prevalence, baseline_sigma=sigma,
                       beats_baselines=prauc > prevalence and prauc > sigma)
@@ -128,7 +134,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
                     (run_id, key, float(val)))
 
     # Advisory scores onto the candidate rows (never labels).
-    for cid, s in zip(ds.ids, scores):
+    for cid, s in zip(every.ids, scores):
         store.conn.execute("UPDATE candidate SET score=? WHERE id=?", (round(s, 6), cid))
 
     if gate is not None:

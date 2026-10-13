@@ -972,6 +972,28 @@ rewards) derives from it.
   real detection, closing Booking.com's own toolkit-side detection
   coverage entirely.
 
+- **FR-FUZZ-32** *(confirmation budget + anomaly tripwire; `CC-FUZZ-0048`,
+  2026-10-13).* The automatic pipeline records an `oracle_status` on every candidate
+  (FR-CORE-14). The CLI also offers a post-run `--anomaly` step.
+  - **`fuzzlab auto --confirm-budget N`** sends at most N **distinct** candidates to the
+    oracle. A confirmation key is `(url, param, method, location, category)`; duplicate
+    rows share one key, one confirmation and one status.
+  - **Order:** `--budget-method {score,uncertainty,committee,random}`, default `score`,
+    from `fuzzlab.ml.active.prioritize` (FR-ML-11).
+  - **Skipped candidates** are `skipped_budget`. They are never counted as oracle
+    rejections or training negatives. A scored run counts them as misses.
+  - **Fallback:** with no usable earlier labels for the target, the budget is not
+    applied, every candidate is confirmed, and the summary says so
+    (`pipeline_confirm_budget_fallback=1`).
+  - **Metrics:** `pipeline_oracle_rejected` is counted per key (checked keys minus
+    confirmed keys). The pipeline also records `pipeline_oracle_checked`, `_skipped`,
+    `_no_confirmer`, `_checked_keys`, `pipeline_confirmable_keys` and
+    `pipeline_confirm_budget`.
+  - **Without a budget**, every row is confirmed exactly as before.
+  - **`--anomaly [--anomaly-contamination F]`** runs the persisted ECOD tripwire after
+    the run (FR-ML-12) and prints the top flagged candidates.
+  - All flags appear in the launcher form, as number inputs, via `commandspec`.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

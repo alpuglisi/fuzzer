@@ -36,6 +36,9 @@ class Dataset:
     y: list[int] = field(default_factory=list)
     groups: list[str] = field(default_factory=list)
     ids: list[int] = field(default_factory=list)       # candidate ids, to write scores back
+    # False for a budget-skipped row (only present with include_unlabelled=True):
+    # its y is a placeholder 0, never a negative label
+    labelled: list[bool] = field(default_factory=list)
     feature_names: list[str] = field(default_factory=lambda: list(FEATURE_NAMES))
     feature_version: int = FEATURE_VERSION
 
@@ -44,7 +47,9 @@ class Dataset:
 
     @property
     def positives(self) -> int:
-        return sum(self.y)
+        if len(self.labelled) != len(self.y):          # hand-built: all labelled
+            return sum(self.y)
+        return sum(y for y, lab in zip(self.y, self.labelled) if lab)
 
 
 def _features(ev: dict, sink_context, rules_fired: int) -> list[float]:
@@ -67,35 +72,77 @@ def _features(ev: dict, sink_context, rules_fired: int) -> list[float]:
     ]
 
 
-def build_dataset(store, run_id: int | None = None) -> Dataset:
-    where = "WHERE run_id=?" if run_id is not None else ""
-    args: tuple = (run_id,) if run_id is not None else ()
+#: `candidate.oracle_status` of a row the oracle never looked at because the
+#: confirmation budget ran out (migration 13). "No finding" is not a negative there.
+SKIPPED_BUDGET = "skipped_budget"
 
-    positives: set[tuple[str, str, str]] = set()
+
+def _run_filter(run_id, before_run_id, target) -> tuple[str, tuple]:
+    """SQL condition on a table's `run_id` column for the requested scope."""
+    conds, args = [], []
+    if run_id is not None:
+        conds.append("run_id=?")
+        args.append(run_id)
+    if before_run_id is not None:
+        conds.append("run_id<?")
+        args.append(before_run_id)
+    if target is not None:
+        # only pipeline runs record a target row; a run without one never matches
+        conds.append("run_id IN (SELECT run_id FROM target WHERE base_url=?)")
+        args.append(target)
+    return (" AND ".join(conds) or "1=1"), tuple(args)
+
+
+def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool = False,
+                  before_run_id: int | None = None, target: str | None = None) -> Dataset:
+    """One example per candidate in scope.
+
+    Scope: one run (``run_id``), or every run (``None``), optionally narrowed to runs
+    before ``before_run_id`` and/or against ``target`` (the pipeline's
+    ``target.base_url``). Labels and the ``rules_fired`` count come from each
+    candidate's **own run** only — never from another run's findings or evaluations
+    (BUG-0065: the store-wide view used to pool them, leaking labels across runs and
+    targets and inflating counts).
+
+    Candidates the oracle skipped for budget (``oracle_status='skipped_budget'``) have
+    no label, so they are left out unless ``include_unlabelled`` (label-free uses:
+    scoring every row, anomaly detection); they are then marked ``labelled=False``.
+    """
+    where, args = _run_filter(run_id, before_run_id, target)
+
+    positives: set[tuple[int, str, str, str]] = set()
     for f in store.conn.execute(
-            f"SELECT url, param, vuln_class FROM finding {where}", args).fetchall():
-        positives.add((f["url"], f["param"], to_category(f["vuln_class"])))
+            f"SELECT run_id, url, param, vuln_class FROM finding WHERE {where}",
+            args).fetchall():
+        positives.add((int(f["run_id"]), f["url"], f["param"], to_category(f["vuln_class"])))
 
-    fired: dict[tuple[str, str], int] = {}
+    fired: dict[tuple[int, str, str], int] = {}
     for e in store.conn.execute(
-            f"SELECT url, param, fired FROM evaluation {where}", args).fetchall():
+            f"SELECT run_id, url, param, fired FROM evaluation WHERE {where}",
+            args).fetchall():
         if e["fired"]:
-            key = (to_path(e["url"]), e["param"])
+            key = (int(e["run_id"]), to_path(e["url"]), e["param"])
             fired[key] = fired.get(key, 0) + 1
 
     ds = Dataset()
     for c in store.conn.execute(
-            f"SELECT id, evidence, sink_context FROM candidate {where}", args).fetchall():
+            f"SELECT id, run_id, evidence, sink_context, oracle_status FROM candidate "
+            f"WHERE {where} ORDER BY id", args).fetchall():
+        unlabelled = c["oracle_status"] == SKIPPED_BUDGET
+        if unlabelled and not include_unlabelled:
+            continue
         try:
             ev = json.loads(c["evidence"] or "{}")
         except (ValueError, TypeError):
             ev = {}
+        rid = int(c["run_id"])
         path = to_path(ev.get("url", ""))
         param = ev.get("param", "")
         cat = ev.get("category", "")
-        label = 1 if (path, param, cat) in positives else 0
-        ds.X.append(_features(ev, c["sink_context"], fired.get((path, param), 0)))
-        ds.y.append(label)
+        label = 1 if (rid, path, param, cat) in positives else 0
+        ds.X.append(_features(ev, c["sink_context"], fired.get((rid, path, param), 0)))
+        ds.y.append(0 if unlabelled else label)
         ds.groups.append(path)
         ds.ids.append(int(c["id"]))
+        ds.labelled.append(not unlabelled)
     return ds

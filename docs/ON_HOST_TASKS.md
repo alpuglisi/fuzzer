@@ -142,7 +142,13 @@ real dataset:
   `rank_ndcg_random` in `run_metrics`.
 - [ ] **T7.4 active-learning exit:** show a fixed uncertainty/committee budget of *b*
   candidates (`active.propose_queries`) captures **more positives per confirmation** than
-  a random budget of the same size, over held-out pages.
+  a random budget of the same size, over held-out pages. *(2026-10-13, CC-FUZZ-0048: now runnable from the CLI.
+  Run `fuzzlab auto --confirm-budget b --budget-method score` (or `uncertainty` /
+  `committee`) and then `--budget-method random` with the same `b` on the same crawl, and
+  compare `pipeline_findings` per `pipeline_oracle_checked_keys`. The model trains on
+  earlier runs of the same target, and its text features include the URL path, so
+  "held-out pages" means endpoints absent from those earlier runs. Not yet run on the
+  host; `[design]` per PA-0015.)*
 
 ## Phase 8 — mutation engine: live filter-bypass + coverage exit
 

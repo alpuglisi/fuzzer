@@ -180,7 +180,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              ground_truth=None, selected_categories=None, points_source: str = "auto",
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
              coverage=None, dbfault=None,
-             scheduler=None, plugins=None) -> PipelineResult:
+             scheduler=None, plugins=None, confirm_budget: int | None = None,
+             prioritizer=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
@@ -222,7 +223,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           ground_truth=ground_truth, pages_html=pages_html,
                           budget=counting, browser=browser, oob=oob,
                           coverage=coverage, dbfault=dbfault, scheduler=scheduler,
-                          plugins=plugins)
+                          plugins=plugins, confirm_budget=confirm_budget,
+                          prioritizer=prioritizer)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
     return result

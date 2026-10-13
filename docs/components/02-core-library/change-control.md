@@ -3,6 +3,32 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0026 — Migration 13: candidate oracle status + anomaly score/flag (2026-10-13)
+- Change: `fuzzlab/core/migrations.py` gains `_M0013`, appended as `(13, _M0013)`:
+  ```sql
+  ALTER TABLE candidate ADD COLUMN oracle_status TEXT;   -- 'checked' | 'skipped_budget' | 'no_confirmer'
+  ALTER TABLE candidate ADD COLUMN anomaly_score REAL;   -- ECOD outlier score (advisory)
+  ALTER TABLE candidate ADD COLUMN anomaly_flag INTEGER; -- 1 = in the flagged top fraction
+  ```
+  - The migration is additive, and existing rows read NULL.
+  - `oracle_status` NULL means "unknown": written before migration 13, or by a writer
+    outside the pipeline (`tools/store_adapter.py:119`). It keeps today's semantics,
+    i.e. it is treated as oracle-labelled.
+  - Only the pipeline writes `oracle_status`, and only `ml/anomaly.detect_anomalies`
+    writes the anomaly columns. Neither is a `finding` label.
+- Impact (other components / project):
+  - ML and FUZZ consume the new columns.
+  - Head-version tests derive the head from `MIGRATIONS`
+    (`test_ml_ranker.py:43`, `test_plugins.py:45`).
+  - ARCHITECTURE's store-contract `candidate` row is updated.
+- Risk: low. The migration is additive and idempotent through `schema_version`.
+- Deliverables:
+  - [ ] `_M0013` + registry — done
+  - [ ] Test: a fresh store has the columns, and a store at 12 migrates to 13 with NULLs — done
+  - [ ] FR-CORE-14 — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; the budget-ordering objective was put to the user, who chose `score` as the default; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 13 with `oracle_status`, `anomaly_score`, `anomaly_flag` (`tests/test_ml_budget_and_scope.py::test_migration_13_adds_the_candidate_columns`, head derived from `MIGRATIONS`); head-version tests in `test_ml_ranker.py`/`test_plugins.py` pass unchanged. Full suite: see the follow-up record.
+
 ### CC-CORE-0025 — Add `DEFAULT_BROWSER_HEADERS` (full header set, not UA alone) to `fuzzlab/core/http.py` (2026-09-25, BUG-0060/PA-0062)
 - **Change:** adds `DEFAULT_BROWSER_HEADERS` (a dict: `DEFAULT_USER_AGENT` plus a
   matching `Accept`, `Accept-Language`, `Sec-Fetch-*` set, and

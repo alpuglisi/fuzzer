@@ -70,6 +70,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rank", action="store_true",
                    help="After the run, train the candidate ranker and write advisory "
                         "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
+    p.add_argument("--confirm-budget", type=int, default=None, metavar="N",
+                   help="Send at most N distinct candidates to the oracle, chosen by a "
+                        "model trained on EARLIER runs against the same target (active "
+                        "learning, Phase 7). The rest are recorded as skipped, not "
+                        "rejected. With no usable earlier labels every candidate is "
+                        "confirmed (the summary says so). Default: confirm all.")
+    p.add_argument("--budget-method", default="score",
+                   choices=["score", "uncertainty", "committee", "random"],
+                   help="Order for --confirm-budget: score = most likely vulnerable first "
+                        "(most findings per request); uncertainty / committee = least sure "
+                        "first (best for improving the model); random = seeded control")
+    p.add_argument("--budget-seed", type=int, default=0,
+                   help="Seed for --budget-method random / committee (default 0)")
+    p.add_argument("--anomaly", action="store_true",
+                   help="After the run, score every candidate with the ECOD anomaly "
+                        "tripwire and store anomaly_score/anomaly_flag (Phase 10; "
+                        "unusual != vulnerable; never labels)")
+    p.add_argument("--anomaly-contamination", type=float, default=0.1, metavar="F",
+                   help="Fraction of candidates --anomaly flags, in (0, 0.5] (default 0.1)")
     p.add_argument("--plugins", action="store_true",
                    help="Discover and attach entry-point plugins (Phase 10); the active "
                         "set is recorded on the run. Default off (runs with no plugins).")
@@ -91,6 +110,10 @@ def main(argv: list[str]) -> int:
 
     if not args.authorized:
         p.error("refusing to send probes without --authorized (lab-only)")
+    if args.confirm_budget is not None and args.confirm_budget < 1:
+        p.error("--confirm-budget must be at least 1")
+    if not 0 < args.anomaly_contamination <= 0.5:
+        p.error("--anomaly-contamination must be in (0, 0.5]")
 
     selected = [c.strip() for c in args.categories.split(",")] if args.categories else None
     try:
@@ -134,12 +157,19 @@ def main(argv: list[str]) -> int:
         if args.plugins:
             from fuzzlab.plugins import PluginManager
             plugins = PluginManager.from_entry_points()   # entry-point discovery (Phase 10)
+        prioritizer = None
+        if args.confirm_budget is not None:
+            from functools import partial
+            from fuzzlab.ml.active import prioritize
+            prioritizer = partial(prioritize, method=args.budget_method,
+                                  seed=args.budget_seed)
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
                               selected_categories=selected, points_source=args.points,
                               browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
-                              scheduler=scheduler, plugins=plugins)
+                              scheduler=scheduler, plugins=plugins,
+                              confirm_budget=args.confirm_budget, prioritizer=prioritizer)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
         finally:
@@ -160,11 +190,56 @@ def main(argv: list[str]) -> int:
             from fuzzlab.ml.rank_train import train_and_rank
             # advisory rank scores + NDCG@k/Precision@k vs random; never labels.
             rank = train_and_rank(store, run_id)
-        _print_summary(args, counts, result, ml, rank)
+        anomaly = None
+        if args.anomaly:
+            from fuzzlab.ml.anomaly import detect_anomalies
+            # advisory per-candidate anomaly score/flag (persisted); never labels.
+            anomaly = detect_anomalies(store, run_id, contamination=args.anomaly_contamination)
+            anomaly["top"] = _top_flagged(store, anomaly)
+        _print_summary(args, counts, result, ml, rank, anomaly)
     return 0
 
 
-def _print_summary(args, counts, result, ml=None, rank=None) -> None:
+def _top_flagged(store, anomaly: dict, limit: int = 5) -> list[dict]:
+    """The most anomalous flagged candidates (path, param, category, score)."""
+    import json
+    from fuzzlab.core.urls import to_path
+    flagged = sorted(((s, cid) for cid, s, f in zip(anomaly["ids"], anomaly["scores"],
+                                                     anomaly["flags"]) if f), reverse=True)
+    out = []
+    for score, cid in flagged[:limit]:
+        row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
+        try:
+            ev = json.loads(row["evidence"] or "{}") if row else {}
+        except (ValueError, TypeError):
+            ev = {}
+        out.append({"path": to_path(ev.get("url", "")), "param": ev.get("param", ""),
+                    "category": ev.get("category", ""), "score": round(score, 3)})
+    return out
+
+
+def _print_budget(m: dict) -> None:
+    if "confirm_budget" not in m:
+        return
+    confirmable = m.get("confirmable_keys", 0)
+    if m.get("confirm_budget_fallback"):
+        print(f"  oracle budget NOT applied: no usable earlier labels for this target — "
+              f"confirmed all {confirmable} confirmable candidate(s)")
+        return
+    if m.get("budget_method") == "random":
+        how = "random order — the control for T7.4"
+    else:
+        how = (f"ordered by {m.get('budget_method')}, trained on "
+               f"{m.get('budget_training_rows', 0)} earlier labelled candidate(s) "
+               f"from this target")
+    print(f"  oracle budget: checked {m.get('oracle_checked_keys', 0)} of {confirmable} "
+          f"confirmable candidate(s); {confirmable - m.get('oracle_checked_keys', 0)} "
+          f"skipped ({how})")
+    if m.get("scored") and m.get("oracle_skipped"):
+        print("    skipped candidates count as misses in the score")
+
+
+def _print_summary(args, counts, result, ml=None, rank=None, anomaly=None) -> None:
     plan = result.plan
     m = result.metrics
     print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
@@ -176,6 +251,7 @@ def _print_summary(args, counts, result, ml=None, rank=None) -> None:
     print(f"  points audited: {result.points_audited}   "
           f"candidates: {result.candidates}   negatives: {result.negatives}")
     print(f"  findings (oracle-confirmed): {result.findings}")
+    _print_budget(m)
     if result.report is not None:
         r = result.report
         print(f"  score vs ground truth: tp={r.tp} fp={r.fp} fn={r.fn} tn={r.tn}")
@@ -205,3 +281,8 @@ def _print_summary(args, counts, result, ml=None, rank=None) -> None:
                      f"P@{rank.get('at_k')}={rank.get('precision')} "
                      f"(random {rank.get('baseline_precision')})")
         print(line + "  (advisory — never labels)")
+    if anomaly is not None:
+        print(f"  anomaly: flagged {anomaly.get('flagged', 0)} of {anomaly.get('rows', 0)} "
+              f"candidate(s)  (advisory — unusual is not vulnerable)")
+        for t in anomaly.get("top", []):
+            print(f"    - {t['path']} [{t['param']}] {t['category']}  score {t['score']}")

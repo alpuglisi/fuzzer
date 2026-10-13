@@ -965,3 +965,19 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      handles.** Read the source, e.g. uPlot's `class` → `classList.add(c)` takes one
      token. This extends `PA-0026`'s precondition enumeration to adapters such as
      `static/js/chart.js`. (from BUG-0063, BUG-0064)
+
+- **PA-0066** — Strengthens `PA-0063`, which named only *row selection* from a
+  multi-producer table, and whose sweep was keyed on the "newest row" query shape. It is
+  extended to every multi-run read:
+  1. **Run-keyed joins.** A lookup built from one per-run table and applied to rows of
+     another (finding → candidate labels, evaluation → candidate counts, any feature
+     join) is keyed by `run_id` plus the content key. Content such as `(path, param)`
+     is unique only within one run, and across targets not even that.
+  2. **Test the wide scope against the narrow one.** A function that can run at more
+     than one scope (one run, or every run) has a test that seeds **at least two runs**
+     and asserts the wide-scope result equals the concatenation of the per-run results.
+     A single-run fixture cannot tell a scoped join from a leaking one. See
+     `tests/test_ml_budget_and_scope.py::test_store_wide_dataset_takes_labels_and_counts_from_each_rows_own_run`.
+  3. **Sweep by mechanism.** The `PA-0002` sweep for a scope bug greps every read of a
+     per-run table that has no `run_id` filter or id join, not only the query shape
+     that surfaced the bug (the `PA-0018` lesson). (from BUG-0065)

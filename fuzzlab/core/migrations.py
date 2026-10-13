@@ -372,6 +372,23 @@ CREATE TABLE saved_views (
 CREATE INDEX idx_saved_views_table ON saved_views(table_key);
 """
 
+# --- migration 13: candidate oracle status + anomaly score (CC-CORE-0026) ------
+# `oracle_status` records whether the oracle looked at a candidate:
+#   'checked'        — confirmed or rejected by the oracle (a real label);
+#   'skipped_budget' — not sent to the oracle because `fuzzlab auto --confirm-budget`
+#                      ran out (NOT a negative: training must exclude it);
+#   'no_confirmer'   — its category has no oracle confirmer yet;
+#   NULL             — written before this migration or by a non-pipeline writer;
+#                      keeps the old meaning (treated as oracle-labelled).
+# `anomaly_score`/`anomaly_flag` are the ECOD tripwire's advisory output
+# (`fuzzlab.ml.anomaly.detect_anomalies`). None of these is a `finding` label.
+# Additive; existing rows read NULL.
+_M0013 = """
+ALTER TABLE candidate ADD COLUMN oracle_status TEXT;
+ALTER TABLE candidate ADD COLUMN anomaly_score REAL;
+ALTER TABLE candidate ADD COLUMN anomaly_flag INTEGER;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -386,6 +403,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (10, _M0010),
     (11, _M0011),
     (12, _M0012),
+    (13, _M0013),
 ]
 
 

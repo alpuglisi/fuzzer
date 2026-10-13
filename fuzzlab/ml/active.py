@@ -101,11 +101,94 @@ def propose_queries(store, run_id: int | None, budget: int,
 
     if method == "committee":
         from fuzzlab.ml.rank_train import _candidate_texts
-        ds = build_dataset(store, run_id)
+        ds = build_dataset(store, run_id)                         # fit on labelled rows
         if not len(ds):
             return []
-        texts = _candidate_texts(store, run_id, ds.ids)
-        com = Committee(n_members=n_members, seed=seed).fit(ds.X, texts, ds.y)
-        return query_by_committee(com.member_scores(ds.X, texts), budget, ids=ds.ids)
+        every = build_dataset(store, run_id, include_unlabelled=True)   # query any row
+        com = Committee(n_members=n_members, seed=seed).fit(
+            ds.X, _candidate_texts(store, run_id, ds.ids), ds.y)
+        every_texts = _candidate_texts(store, run_id, every.ids)
+        return query_by_committee(com.member_scores(every.X, every_texts), budget,
+                                  ids=every.ids)
 
     raise ValueError(f"unknown active-learning method: {method!r}")
+
+
+# --- budgeted confirmation (CC-ML-0013, FR-ML-11) -----------------------------
+
+BUDGET_METHODS = ("score", "uncertainty", "committee", "random")
+
+
+@dataclass
+class Prioritized:
+    """The order in which to spend an oracle budget on a run's candidates."""
+    order: list[int]                 # candidate ids, most-wanted first
+    method: str
+    training_rows: int = 0           # earlier labelled candidates the model learned from
+    training_positives: int = 0
+
+
+def _target_of(store, run_id: int) -> str | None:
+    row = store.conn.execute(
+        "SELECT base_url FROM target WHERE run_id=? ORDER BY id LIMIT 1", (run_id,)).fetchone()
+    return row["base_url"] if row else None
+
+
+def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str = "score",
+               n_members: int = 5, seed: int = 0, min_rows: int = 20,
+               min_positives: int = 5, min_groups: int = 2) -> Prioritized | None:
+    """Order ``candidate_ids`` (this run's confirmable candidates) for a confirmation budget.
+
+    The model learns only from **earlier runs against the same target** (the pipeline's
+    ``target.base_url``) — never from this run, whose labels do not exist yet. Methods:
+
+    * ``score`` — most likely vulnerable first (a ranker's score; the default, which
+      maximises findings per confirmation);
+    * ``uncertainty`` — closest to the 0.5 boundary first (best for improving labels);
+    * ``committee`` — most committee disagreement first (likewise);
+    * ``random`` — a seeded shuffle; the control a budget method must beat (T7.4).
+
+    Returns ``None`` — meaning "confirm everything" — when the earlier data is too thin
+    to train on (fewer than ``min_rows`` rows or ``min_positives`` positives, no
+    negatives, or fewer than ``min_groups`` endpoints). ``random`` never needs data.
+    Advisory: it only orders work for the oracle, which alone confirms.
+
+    Limitation: candidate text includes the URL path, so a model trained on earlier runs
+    of the same app partly remembers which endpoints were vulnerable — useful for
+    re-testing, but a "beats random" claim must be measured on held-out endpoints.
+    """
+    if method not in BUDGET_METHODS:
+        raise ValueError(f"unknown budget method: {method!r} (choose from {BUDGET_METHODS})")
+    wanted = list(dict.fromkeys(int(i) for i in candidate_ids))
+    if method == "random":
+        order = list(wanted)
+        random.Random(seed).shuffle(order)
+        return Prioritized(order=order, method=method)
+
+    target = _target_of(store, run_id)
+    if target is None:
+        return None
+    prior = build_dataset(store, before_run_id=run_id, target=target)
+    n, pos = len(prior), prior.positives
+    if (n < min_rows or pos < min_positives or (n - pos) < 1
+            or len(set(prior.groups)) < max(2, min_groups)):
+        return None
+
+    from fuzzlab.ml.rank_train import _candidate_texts
+    prior_texts = _candidate_texts(store, None, prior.ids)
+    now = build_dataset(store, run_id, include_unlabelled=True)
+    index = {cid: i for i, cid in enumerate(now.ids)}
+    ids = [cid for cid in wanted if cid in index]
+    X = [now.X[index[cid]] for cid in ids]
+    texts = _candidate_texts(store, run_id, ids)
+
+    if method == "committee":
+        com = Committee(n_members=n_members, seed=seed).fit(prior.X, prior_texts, prior.y)
+        key = disagreement(com.member_scores(X, texts))
+    else:
+        scores = Ranker(seed=seed).fit(prior.X, prior_texts, prior.y).score(X, texts)
+        key = scores if method == "score" else [uncertainty(sc) for sc in scores]
+    ranked = sorted(range(len(ids)), key=lambda i: key[i], reverse=True)   # stable ties
+    order = [ids[i] for i in ranked]
+    order += [cid for cid in wanted if cid not in index]   # unknown ids: last, in order
+    return Prioritized(order=order, method=method, training_rows=n, training_positives=pos)

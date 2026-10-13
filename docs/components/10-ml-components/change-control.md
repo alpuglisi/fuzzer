@@ -3,6 +3,129 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0014 — Store-wide dataset keys labels and rule counts by run (BUG-0065) (2026-10-13)
+- Change: `ml/dataset.py::build_dataset` builds `positives` from
+  `(run_id, path, param, category)` and `fired` from `(run_id, path, param)`. A
+  candidate therefore takes its label and its `rules_fired` from its own run only,
+  never from another run's (or another target's) findings or evaluations.
+  - Per-run calls (`run_id=N`) are unchanged.
+  - Store-wide calls (`run_id=None`: the ML tab's default view, the store-wide trainers,
+    `propose_queries(None)`) stop leaking labels and stop inflating counts.
+- Impact: the ML tab's all-runs metrics change on multi-run stores, becoming correct.
+  Per-run behavior is identical. No schema change.
+- Risk: low. Fixes a silent label leak. Existing tests use single-run stores, and a new
+  multi-run regression covers the fix.
+- Deliverables:
+  - [ ] Run-keyed `positives` / `fired` — done
+  - [ ] Regression: two copies of `_seed_rich` where run 2 has fewer findings. Store-wide
+    labels equal the per-run labels concatenated, and `rules_fired` equals the
+    single-run value. Both fail on the old code — done
+  - [ ] Full bug protocol: ERROR_LOG, BUG-0065, PA-0066, recurrence review against
+    BUG-0061/PA-0063 (cross-run scope) — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; the budget-ordering objective was put to the user, who chose `score` as the default; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — the two-run and two-target regressions pass, and each fails with either half of the old keying restored (mutation-checked: label key, fired key). Store-wide dataset == per-run datasets concatenated, labels and features. Full suite: see the follow-up record.
+
+### CC-ML-0013 — Budget prioritizer trained on earlier same-target runs; skipped candidates scored but never trained on; anomaly scores persisted (2026-10-13)
+- Change:
+  - **`ml/dataset.py`:**
+    - `Dataset` gains `labelled: list[bool]`.
+    - `build_dataset(store, run_id=None, *, include_unlabelled=False, before_run_id=None,
+      target=None)` gains three filters:
+      - Rows with `oracle_status = 'skipped_budget'` are excluded by default, because
+        the oracle never looked at them. They are kept, with `labelled=False`, when
+        `include_unlabelled=True`.
+      - `before_run_id` restricts to `run.id < before_run_id`.
+      - `target` restricts to runs whose pipeline `target.base_url` equals `target`.
+        A run with no `target` row (one that is not a pipeline run) never matches. The
+        URL is compared exactly as the pipeline recorded it (`scheme://netloc`), so
+        `localhost:8080` and `127.0.0.1:8080` count as different targets. That is
+        recorded in FR-ML-11; loopback-alias normalisation is not done here.
+    - Existing calls are unchanged, and with no skipped rows the result is identical.
+  - **Trainers (`train.py::train_and_score`, `rank_train.py::train_and_rank`):** fit,
+    evaluate and calibrate on the labelled dataset, then write `score` / `rank_score`
+    for **every** row of the run (`include_unlabelled=True`, same fitted model).
+    Skipped candidates therefore get advisory scores.
+    - With `hybrid=True`, ECOD is fitted **once**, on the all-rows set (it is
+      label-free), and the same fitted detector augments both the training rows and the
+      scored rows. The model is never applied to a feature computed differently from
+      the one it was trained on.
+  - **`ml/active.py`:** `Prioritized(order, method, training_rows, training_positives)`
+    and `prioritize(store, run_id, candidate_ids, *, method="score", n_members=5,
+    seed=0, min_rows=20, min_positives=5, min_groups=2) -> Prioritized | None`.
+    - It trains only on **earlier runs against the same target**
+      (`before_run_id=run_id`, `target=<this run's target.base_url>`, which the
+      pipeline writes before the prioritizer is called), never on the current run.
+    - It returns `None` (meaning "confirm all") on thin data: fewer than `min_rows` rows,
+      fewer than `min_positives` positives, no negatives, or fewer than `min_groups`
+      endpoints. `method="random"` needs no training data and never returns `None`.
+    - The current run's features come from `build_dataset(store, run_id,
+      include_unlabelled=True)`. These are audit-time features only (rules fired, sink
+      context, parameter/path text), so no label leaks in.
+    - Orderings:
+      - `score`: one `Ranker`, highest score first.
+      - `uncertainty`: one `Ranker`, highest `uncertainty(score)` first.
+      - `committee`: a bootstrap `Committee`, highest disagreement first.
+      - `random`: `random.Random(seed)` shuffle.
+      - Ties keep candidate-id order.
+    - `propose_queries` uses `include_unlabelled=True`.
+  - **`ml/anomaly.py::detect_anomalies(store, run_id=None, contamination=0.1, *,
+    persist=True)`:**
+    - Uses `include_unlabelled=True`; ECOD is label-free.
+    - Recorded limitation (FR-ML-12): `anomaly_flag` is relative to the set of
+      candidates scored together. A later store-wide call (`run_id=None`) would
+      overwrite per-run flags. The CLI always passes `run_id`.
+    - Validates `contamination` to the range (0, 0.5].
+    - When `persist` is set, writes each row's `anomaly_score` / `anomaly_flag`. It
+      still records `run_metrics.anomaly_flagged`.
+  - **`web/mlview.py` (read-only):** `anomaly_panel` and `disagreement_panel` use
+    `include_unlabelled=True`, so they cover the same population as `detect_anomalies`
+    and the query queue. The classifier and ranker metric panels stay on labelled rows.
+- PA-0063(2) reader audit. Every `FROM candidate` reader in `fuzzlab/`:
+  - `pipeline.py:86` is rewritten (CC-FUZZ-0048).
+  - `dataset.py:88` adds the filter.
+  - `mlview.py:146` and `:186` join scores onto the labelled dataset. Metrics are
+    computed on labelled rows, which is correct.
+  - `mlview.py:230` (conformal split), `results.py:58` (top scored), `diagnostics.py:181`
+    (score histogram) now include skipped candidates' advisory scores. That is
+    intended: they are the ones awaiting triage.
+  - `report.py:48` (candidate count) and `:73` (feature versions) are unaffected. The
+    report also lists the new `pipeline_oracle_*` metrics.
+  - `active.py:98` (`rank_uncertainty`) and `rank_train.py:37` (texts by id) are
+    unaffected.
+- Recorded limitation: `candidate_text` includes the path (`text_features.py:24-30`), so
+  a prior-run model partly memorizes which endpoints were vulnerable. That is useful for
+  re-testing the same app. T7.4's "positives per confirmation vs random" must therefore
+  be measured on held-out endpoints (PA-0017/PA-0064), recorded in FR-ML-11 and in
+  ON_HOST_TASKS' T7.4 note.
+- Divergence noted in FR-ML-11: `no_confirmer` rows still train as negatives (unchanged),
+  while `pipeline_oracle_rejected` now excludes them. Flagged for a decision, not
+  changed.
+- Impact: FUZZ calls `prioritize` through an injected callable. CORE supplies the
+  columns. FR-ML-11 (prioritizer, scope, limitation), FR-ML-12 (anomaly persistence),
+  FR-ML-3 and FR-ML-4 annotated "wired".
+- Risk: medium-low. Fallbacks keep today's behavior. Cross-run use depends on
+  CC-ML-0014.
+- Deliverables:
+  - [ ] `build_dataset` filters + `labelled` — done
+  - [ ] Trainers score every row (including a `hybrid=True` test proving the scored
+    rows' anomaly feature equals the training rows') — done
+  - [ ] `prioritize` (4 methods) + `Prioritized`; `propose_queries` unlabelled — done
+  - [ ] `detect_anomalies` persistence + validation; mlview anomaly/disagreement unlabelled — done
+  - [ ] Tests:
+    - skipped rows are excluded from training, included with `include_unlabelled`, and
+      still scored or ranked;
+    - `before_run_id` and `target` filters work;
+    - `prioritize` returns None for: no earlier runs, a later run only, another target
+      only, thin data, one class, one endpoint;
+    - current-run findings do not change the order;
+    - each method is deterministic, returns exactly the given ids, and `score` puts the
+      highest-scored first;
+    - anomaly values are persisted, the flagged count equals the metric, and
+      contamination is validated — done
+  - [ ] ML requirements updated — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; the budget-ordering objective was put to the user, who chose `score` as the default; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_budget_and_scope.py` 20 passed (skipped rows excluded from training / included and labelled False on request / still scored and ranked; one ECOD fit for `hybrid`; `prioritize` falls back for no-earlier, later-only, other-target, one-class data; all four methods deterministic over exactly the given ids; `score` puts the earlier-runs' vulnerable shape first; current-run labels never change the order; committee queue and anomaly panel cover skipped rows; anomaly values persisted and equal to the metric; contamination validated). Mutation-checked: training on the current run, ignoring the target, not excluding skipped rows, scoring labelled rows only, a second ECOD fit, and not persisting anomaly values each make a test fail. Full suite: see the follow-up record.
+
 ### CC-ML-0012 — Out-of-fold evaluation can never be in-sample (BUG-0062) (2026-10-13)
 - Change:
   - `fuzzlab/ml/metrics.py::group_kfold`: `k < 2` or fewer than 2 distinct groups yields

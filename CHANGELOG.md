@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/FUZZ/CORE: active learner wired as a confirmation budget, anomaly tripwire wired and persisted; BUG-0065/PA-0066 — CC-CORE-0026, CC-ML-0013/0014, CC-FUZZ-0048)
+- **`fuzzlab auto --confirm-budget N`**: the oracle confirms at most N distinct
+  candidates, chosen by a model trained only on **earlier runs against the same
+  target**. The rest are recorded as `skipped_budget`: never counted as rejections or
+  training negatives, but still scored and ranked.
+  - `--budget-method`: `score` (default, most likely vulnerable first — the user's
+    choice), `uncertainty`, `committee`, and a seeded `random` control for the T7.4
+    exit.
+  - With no usable earlier labels the budget is not applied, and the summary says so.
+- **`fuzzlab auto --anomaly`**: scores every candidate with the ECOD tripwire and stores
+  the per-candidate `anomaly_score` / `anomaly_flag` (migration 13 also adds
+  `candidate.oracle_status`).
+- **Why:** the active learner and anomaly detector were built but unreachable. Since the
+  pipeline confirmed every candidate, active learning only means something as a
+  confirmation budget.
+- **BUG-0065 (found in review):** the store-wide ML dataset (the ML tab's default view)
+  pooled labels and rule counts across runs and targets. A rejected candidate could be
+  labelled positive because another run confirmed the same path. Lookups are now keyed
+  by run.
+- Passed the pre-change review gate 3/3.
+
 ## 2026-10-13 (UI: charts render and pages comply with the app's own CSP — BUG-0063/BUG-0064, PA-0065; CC-UI-0036/0037)
 - **BUG-0063: no chart in the control panel had ever rendered.** `static/js/chart.js`
   passed uPlot's single-token `class` option two names, so `new uPlot()` threw for every

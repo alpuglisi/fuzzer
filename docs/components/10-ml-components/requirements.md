@@ -23,9 +23,13 @@ the oracle owns truth (the oracle/advisory split).
 - **FR-ML-2 (ranker, A.2)** Learning-to-rank over parameters/forms from candidate
   features; writes `candidate.score`; costs **zero** requests.
 - **FR-ML-3 (anomaly, A.5)** ECOD / Isolation Forest tripwire over flows, later an
-  XGBOD-style hybrid; tags anomalous responses.
+  XGBOD-style hybrid; tags anomalous responses. *(ECOD over candidates is wired as
+  `fuzzlab auto --anomaly` and persisted per candidate — FR-ML-12. Isolation Forest and
+  flows are not built.)*
 - **FR-ML-4 (active learner, A.6.5)** Allocate scarce oracle budget by model
-  uncertainty and committee disagreement.
+  uncertainty and committee disagreement. *(Wired as `fuzzlab auto --confirm-budget N`
+  — FR-ML-11. The user chose `score`, most-likely-first, as the default, because it
+  maximises findings per confirmation; uncertainty and committee remain available.)*
 - **FR-ML-5** Read features via the `core/` versioned feature store; a model
   records the `feature_version` it was trained against.
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
@@ -77,13 +81,51 @@ the oracle owns truth (the oracle/advisory split).
   covers the run (same `run_id`, null, or absent for legacy rows), never "the newest row
   of any kind" (PA-0063, enforced by a source-scan guard test).
 
+- **FR-ML-11 (budget prioritizer, CC-ML-0013)** `fuzzlab.ml.active.prioritize(store,
+  run_id, candidate_ids, method=…)` orders a run's confirmable candidates for a
+  confirmation budget.
+  - **Training data:** a model trained only on **earlier runs** (`run_id < current`)
+    **against the same target** (exact match on the pipeline's `target.base_url`; runs
+    with no `target` row never qualify). It never uses the current run's labels.
+  - **Methods:**
+    - `score` (default): highest ranker score first, i.e. most likely vulnerable;
+    - `uncertainty`: closest to the 0.5 boundary first;
+    - `committee`: largest bootstrap-committee disagreement first;
+    - `random`: a seeded shuffle, the control for T7.4.
+  - **Thin data:** fewer than 20 rows or 5 positives, no negatives, or fewer than 2
+    endpoints gives `None`, so the pipeline confirms everything and says so. `random`
+    never needs data.
+  - **Skipped candidates:** those the oracle skipped for budget (`oracle_status=
+    'skipped_budget'`) are never training rows, since they have no label. The trainers
+    still give them advisory `score` / `rank_score`.
+  - **Known limitations:**
+    - Candidate text includes the URL path, so a model trained on earlier runs of the
+      same app partly memorises vulnerable endpoints. A T7.4 "beats random" claim must
+      be measured on held-out endpoints.
+    - `localhost:8080` and `127.0.0.1:8080` count as different targets.
+    - `no_confirmer` rows still train as negatives, although
+      `pipeline_oracle_rejected` excludes them. That divergence is flagged for a
+      decision.
+- **FR-ML-12 (anomaly persistence, CC-ML-0013)** `detect_anomalies(store, run_id,
+  contamination)` scores **every** candidate of the run with ECOD (label-free, so
+  budget-skipped ones included).
+  - It writes `candidate.anomaly_score` / `anomaly_flag` and records
+    `run_metrics.anomaly_flagged`.
+  - `contamination` must be in (0, 0.5].
+  - A flag is relative to the candidates scored together. The CLI scores per run; a
+    later store-wide call would overwrite per-run flags.
+  - Advisory only: unusual is not vulnerable, and it writes no labels.
+
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
   the oracle's verdict is final and independent.
 - **NFR-ML-reproducible** Deterministic pipeline: fixed seeds, versioned features,
   versioned models, recorded metrics.
 - **NFR-ML-no-leak** Train/test split prevents leakage across cells/transforms; the
-  blind holdout is never trained on. *(Amended CC-ML-0012, BUG-0062.)*
+  blind holdout is never trained on. *(Amended CC-ML-0014, BUG-0065:)* a candidate's
+  label and rule counts come from its **own run** only. `build_dataset` keys finding and
+  evaluation lookups by `run_id`, so a store-wide dataset equals the per-run datasets
+  concatenated. *(Amended CC-ML-0012, BUG-0062.)*
   - `group_kfold` never yields a fold whose train and test overlap. With `k < 2` or
     fewer than 2 distinct groups it yields no fold.
   - Every out-of-fold scorer goes through `metrics.oof_folds`, which fails closed unless

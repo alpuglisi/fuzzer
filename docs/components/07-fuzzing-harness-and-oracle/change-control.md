@@ -22,6 +22,100 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0048 — `fuzzlab auto --confirm-budget N` and `--anomaly` (2026-10-13)
+- Change:
+  - **`harness/pipeline.py::run_pipeline(..., confirm_budget: int | None = None,
+    prioritizer=None)`:**
+    - After the audit, rows are grouped by their **confirmation key** `(url, param,
+      method, location, category)`, so duplicate rows from several rules firing share
+      one status.
+    - Keys whose category has no oracle class get `no_confirmer`.
+    - **No budget:** every row is confirmed exactly as today (same loop, same calls,
+      duplicates included), and confirmable rows get `checked`.
+    - **Budget N with a prioritizer:**
+      - `order = prioritizer(store, run_id, <one representative candidate id per
+        confirmable key>)`.
+      - If it returns `None`, the run falls back to confirming everything as above, with
+        `confirm_budget_fallback=1`.
+      - Otherwise the first N keys of `order` are confirmed once each (`checked`), and
+        every row of the remaining keys gets `skipped_budget`.
+    - `confirm_budget < 1` raises `ValueError`.
+    - Metrics:
+      - `oracle_rejected = checked keys - confirmed keys`. A key is confirmed when any
+        `Oracle.confirm` call for it returned a verdict, which happens exactly when it
+        wrote a finding (`oracle.py:54-82`). Counting by key means a duplicate row
+        confirmed once (budget) and a duplicate row confirmed twice (no budget) both
+        count once. Rows that were never checked are not rejections;
+      - new: `oracle_checked`, `oracle_skipped`, `oracle_no_confirmer`,
+        `confirm_budget` (budget only), `confirm_budget_fallback` (budget only);
+      - `negatives = rule_negatives + oracle_rejected`;
+      - the result's metrics dict also carries the method name and the prioritizer's
+        training size.
+    - **Exact no-budget differences from today:**
+      - `oracle_status` is written;
+      - three new `pipeline_oracle_*` rows appear in `run_metrics` (visible in
+        Diagnostics);
+      - `oracle_rejected` and `negatives` are now counted per key, so they drop by the
+        number of `no_confirmer` keys and duplicate rows.
+        - Every built-in rule category has a confirmer, so `no_confirmer` keys only
+          appear with plugin rules.
+        - Duplicates come from multi-rule categories such as `price-integrity-bypass`.
+        - `pipeline_findings` is unchanged (it counts `finding` rows).
+  - **`harness/auto.py::run_auto`:** passes `confirm_budget` and `prioritizer` through.
+  - **`harness/auto_cli.py`:**
+    - Flags:
+      - `--confirm-budget N` (`type=int`; `p.error` unless N >= 1);
+      - `--budget-method {score,uncertainty,committee,random}` (default `score`);
+      - `--budget-seed` (`type=int`, default 0);
+      - `--anomaly`;
+      - `--anomaly-contamination F` (`type=float`, default 0.1; `p.error` unless
+        0 < F <= 0.5).
+    - The prioritizer is `functools.partial(prioritize, method=..., seed=...)`.
+    - Post-run order: score, then rank, then anomaly.
+    - Summary lines:
+      - With the budget applied: "oracle budget: checked X of Y confirmable
+        candidate(s); Z skipped (ordered by <method>, trained on R earlier labelled
+        candidate(s) from this target)". For `random` the parenthesis reads "(random
+        order, seed S — the control for T7.4)".
+      - On fallback: "oracle budget NOT applied: no usable earlier labels for this
+        target — confirmed all Y".
+      - When a scored run skipped candidates: "skipped candidates count as misses in
+        the score".
+      - `--anomaly`: "anomaly: flagged K of M candidate(s)", plus up to 5 flagged rows
+        (path, param, category, score).
+- Impact:
+  - ML and CORE as above.
+  - UI: the launcher form gains the five flags through `commandspec`. Int and float
+    flags render as number inputs (`commandspec.py:76-87`), with no UI code change. A
+    test asserts this.
+  - Budgeted scored runs report skipped real vulnerabilities as false negatives. That is
+    intended: it is the trade the budget makes.
+  - FR-FUZZ-32.
+- Risk: medium. The confirm loop changes shape. Mitigations:
+  - the no-budget loop is kept identical, so every existing pipeline and auto test
+    passes unchanged;
+  - the prioritizer is injected, with a confirm-all fallback;
+  - the T7.4 measurement stays on-host.
+- Deliverables:
+  - [ ] Pipeline (keys, statuses, budget, fallback, metrics) — done
+  - [ ] `run_auto` passthrough; CLI flags, validation and summary — done
+  - [ ] Tests:
+    - no budget: existing tests pass, and rows are marked `checked` / `no_confirmer`;
+    - a stub prioritizer confirms exactly the first N keys once each (counting fake
+      sender/oracle), and duplicates share a status;
+    - fallback, metrics, and `ValueError`;
+    - CLI end-to-end per B5: two earlier `_seed_rich` runs on the same target, then a
+      budgeted ground-truth run with `--budget-method random` and `score`, plus
+      `--anomaly`; also a no-earlier-runs fallback and an other-target-only fallback.
+      Both fallback tests use `--budget-method score`, since `random` never falls back.
+      The seeded earlier runs get `target` rows for `http://127.0.0.1:8080`, matching
+      `--base-url`. A duplicate-key metrics test is included;
+    - argparse validation, dry-run, and the launcher rendering the new number inputs — done
+  - [ ] FR-FUZZ-32 — done
+- Implementation divergence (reflected back per the review gate): the pipeline also records `oracle_checked_keys` and `confirmable_keys` (the per-key counts behind `oracle_rejected` and the budget summary line) as `pipeline_*` metrics.
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; the budget-ordering objective was put to the user, who chose `score` as the default; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_auto_budget.py` 17 passed: unbudgeted runs confirm every row, in its original row order (duplicates not regrouped — order matters to the bandit), and mark it `checked`; a stub prioritizer's first N keys are confirmed exactly once each and the rest are `skipped_budget`; fallback confirms all and records it; duplicate rows share one key/confirmation/status; `no_confirmer` rows are recorded and are not rejections; `oracle_rejected` equals checked keys minus confirmed keys; the CLI end to end (two earlier `_seed_rich` runs on `http://127.0.0.1:8080`, then a ground-truth run with `--confirm-budget 2` under each of the four methods plus `--anomaly`) checks exactly 2 keys, skips the rest, prints the budget/anomaly lines, and persists anomaly values; both fallbacks (no earlier runs; other target only) confirm all and say so; bad values are rejected; the launcher renders int/float/choice/bool inputs. Mutation-checked: ignoring the budget, per-row rejection counting, and regrouping the unbudgeted loop by key each make a test fail. Related suites (ML, auto, web incl. browser smoke under `FUZZLAB_REQUIRE_BROWSER=1`, report, dry-run, plugins, core, multitarget, oracle): 491 passed, 0 failed before the final row-order fix; the re-run after it, and the full suite, are recorded in the follow-up entry note. Full suite: see the follow-up record.
+
 ### CC-FUZZ-0047 — `PriceIntegrityBypassStrategy` anchor moves from a JSON fragment to an HTML attribute (2026-09-25, FR-FUZZ-31, `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`)
 
 **Status: pre-change review gate cleared, 3/3 agreement reached 2026-09-25

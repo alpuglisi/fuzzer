@@ -87,24 +87,37 @@ def augment(X: Sequence[Sequence[float]], ecod: ECOD) -> list[list[float]]:
     return [list(row) + [ecod.score(row)] for row in X]
 
 
-def detect_anomalies(store, run_id: int | None = None,
-                     contamination: float = 0.1) -> dict:
+def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.1, *,
+                     persist: bool = True) -> dict:
     """Fit ECOD over the run's candidate feature vectors and flag outliers (advisory).
 
-    Returns scores + flags and records the flagged count in `run_metrics`. Writes **no**
-    labels — this is a tripwire, not a confirmer.
+    Label-free, so every candidate is scored — including ones the oracle skipped for
+    budget. With ``persist`` (default) each candidate's ``anomaly_score`` /
+    ``anomaly_flag`` is written to the store (migration 13), and the flagged count is
+    recorded in `run_metrics` as ``anomaly_flagged``. Writes **no** labels — this is a
+    tripwire, not a confirmer.
+
+    A flag is relative to the candidates scored together: call it per run (the CLI
+    does); a later store-wide call (``run_id=None``) would overwrite per-run flags.
     """
+    if not 0 < contamination <= 0.5:
+        raise ValueError(f"contamination must be in (0, 0.5], got {contamination!r}")
     from fuzzlab.ml.dataset import build_dataset
-    ds = build_dataset(store, run_id)
+    ds = build_dataset(store, run_id, include_unlabelled=True)
     if not len(ds):
         return {"rows": 0, "flagged": 0, "scores": [], "flags": [], "ids": []}
     ecod = ECOD().fit(ds.X)
     scores = ecod.scores(ds.X)
     flags = flag_top(scores, contamination)
+    if persist:
+        for cid, sc, fl in zip(ds.ids, scores, flags):
+            store.conn.execute(
+                "UPDATE candidate SET anomaly_score=?, anomaly_flag=? WHERE id=?",
+                (sc, 1 if fl else 0, cid))
     if run_id is not None:
         store.conn.execute(
             "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
             (run_id, "anomaly_flagged", float(sum(flags))))
-        store.conn.commit()
+    store.conn.commit()
     return {"rows": len(ds), "flagged": sum(flags), "scores": scores,
             "flags": flags, "ids": ds.ids}

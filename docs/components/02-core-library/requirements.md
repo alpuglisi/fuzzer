@@ -112,6 +112,19 @@ plugin registry. It is the layer that makes the store the integration bus.
   and the last of Booking.com's own classes; only Expedia's own
   `insecure_deserialization` remains unmapped in this category.
 
+- **FR-CORE-14** *(migration 13; `CC-CORE-0026`, 2026-10-13).* `candidate` carries:
+  - `oracle_status`:
+    - `checked`: the oracle confirmed or rejected it;
+    - `skipped_budget`: not sent to the oracle because `fuzzlab auto --confirm-budget`
+      ran out. This is **not** a negative label;
+    - `no_confirmer`: its category has no oracle confirmer;
+    - NULL: written before migration 13 or by a writer outside the pipeline, with the
+      old meaning (treated as oracle-labelled).
+  - `anomaly_score` / `anomaly_flag`: the ECOD tripwire's advisory output.
+  - Only the pipeline writes `oracle_status`, and only
+    `fuzzlab.ml.anomaly.detect_anomalies` writes the anomaly columns. None of them is a
+    `finding` label.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

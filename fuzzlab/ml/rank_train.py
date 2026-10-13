@@ -67,8 +67,10 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     random-order baseline. Falls back to a constant order on thin data — including fewer
     than ``max(2, min_groups)`` distinct endpoints or ``k < 2``, where no out-of-fold split
     exists and any "OOF" metric would be in-sample (BUG-0062)."""
-    ds = build_dataset(store, run_id)
+    ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     texts = _candidate_texts(store, run_id, ds.ids)
+    every = build_dataset(store, run_id, include_unlabelled=True)   # rank: every row
+    every_texts = _candidate_texts(store, run_id, every.ids)
     n, pos = len(ds), ds.positives
     groups = len(set(ds.groups))
     result: dict = {"rows": n, "positives": pos, "groups": groups, "at_k": at_k}
@@ -76,7 +78,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     if (n < min_rows or pos < min_positives or (n - pos) < 1
             or groups < max(2, min_groups) or k < 2):
-        scores = [0.0] * n                       # constant order (no signal)
+        scores = [0.0] * len(every)              # constant order (no signal)
         name = RANK_FALLBACK_NAME
         result.update(model=name, fallback=True)
     else:
@@ -88,7 +90,8 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
         ndcg_rand = mean_ndcg_at_k(ds.y, rand, ds.groups, at_k)
         prec_rand = mean_precision_at_k(ds.y, rand, ds.groups, at_k)
         ranker = Ranker(seed=seed).fit(ds.X, texts, ds.y)   # deploy: fit on all data
-        scores = ranker.score(ds.X, texts)
+        # advisory rank for EVERY row, including budget-skipped candidates
+        scores = ranker.score(every.X, every_texts)
         name = RANKER_NAME
         result.update(model=name, fallback=False, ndcg=ndcg, precision=prec,
                       baseline_ndcg=ndcg_rand, baseline_precision=prec_rand,
@@ -105,7 +108,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     # Advisory rank score + uncertainty (max at the 0.5 boundary). Never labels.
     # Derive uncertainty from the rounded score so the two stored values are consistent.
-    for cid, s in zip(ds.ids, scores):
+    for cid, s in zip(every.ids, scores):
         sr = round(s, 6)
         store.conn.execute(
             "UPDATE candidate SET rank_score=?, rank_uncertainty=? WHERE id=?",
