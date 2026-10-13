@@ -3,6 +3,18 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0012 — The crawler logs in from its start URL (BUG-0113) (2026-10-13)
+- Change: `LocalSpider._auth_base_url = start_url`, not its origin. `playwright_auth`
+  marks it as operator input and scopes the injected cookies to the origin root.
+- Impact: authenticated crawls of sub-path apps work, and pages outside the start
+  page's directory receive the cookie.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (unit, plus a real-browser sibling-cookie test) — done
+- Review: as CC-SESS-0016.
+- Effectiveness: verified live (bWAPP).
+
 ### CC-CRAWL-0011 — NFR-CRAWL-safe built: no destructive link queued, redirected to, or requested by the browser (BUG-0111) (2026-10-13)
 - Change: `tools/spider.py`:
   - destructive links and XHR URLs are not queued (`_destructive`, logged and counted

@@ -25,7 +25,8 @@ def test_cookie_session_becomes_playwright_cookies():
     mgr = SessionManager(_store(), scope_hosts=["localhost"],
                          fetch_factory=_factory(CookieLoginFetcher()))
     cookies, headers = browserauth.playwright_auth(mgr, "admin", "http://localhost")
-    assert cookies == [{"name": "PHPSESSID", "value": "sess1", "url": "http://localhost"}]
+    # scoped to the origin root, whatever path the base has (BUG-0113)
+    assert cookies == [{"name": "PHPSESSID", "value": "sess1", "url": "http://localhost/"}]
     assert headers == {}
 
     ctx = FakeContext()

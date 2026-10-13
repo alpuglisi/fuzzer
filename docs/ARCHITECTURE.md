@@ -1201,7 +1201,10 @@ tracked in the requirements files, not here.
   identity, prepared_host)` re-checks a request after a plugin edits it. Login
   discovery walks redirects by hand, anchored to operator input; an https session is
   never sent over http (`secure_only`) on any send path (CC-SESS-0013,
-  BUG-0097/0098). Internally the
+  BUG-0097/0098). The discovery base is the operator's own URL, path kept
+  (`ensure(..., operator=True)`, remembered per host and identity for re-login); a
+  derived base is the request's directory without its query, never the bare origin
+  (CC-SESS-0016, BUG-0113). Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
   header-key) — implementation detail, not user config. Post-Phase 6, logins
   detection can't crack are handled by **adopting a session the proxy captures

@@ -101,8 +101,9 @@ class LocalSpider:
         # are crawled authenticated (Option A, browser path).
         self._session_manager = session_manager
         self._identity = identity
-        parts = urlparse(start_url)
-        self._auth_base_url = f"{parts.scheme}://{parts.netloc}"
+        # The login is discovered from the start URL itself, never its bare origin: the
+        # app may live under a path (/bWAPP/), BUG-0113.
+        self._auth_base_url = start_url
         # Link-following scope: the start URL's own host (see _in_scope).
         self._scope_host = self._norm_host(start_url)
 

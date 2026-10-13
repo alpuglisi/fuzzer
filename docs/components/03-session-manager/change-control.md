@@ -3,6 +3,56 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0016 — Discovery base is the operator's URL, never its origin (BUG-0113) (2026-10-13)
+- Change:
+  - `ensure(host, identity, base_url, *, operator=False)`. An operator base is
+    remembered in `_bases` and recorded in `_operator_bases`, which are the only bases
+    exempt from `_navigation_ok`'s destructive check.
+  - `prepare` re-ensures with the remembered base, else `_directory(request.url)`:
+    the path to its last `/`, with no query or fragment. `_base_url` (origin-only) is
+    removed.
+  - `session_header(..., operator=)` passes through.
+  - A Basic session records `login_url=None`.
+  - `session/cli.py`, greybox and `browserauth` pass `operator=True`.
+  - **"Logged out" means *this* login form.** `detect.shows_login_form` (a password
+    form posting to the session's login action, or with exactly the login form's
+    entry names, `SessionState.login_fields`, in memory) replaces "any password input" in the
+    login-response check, the verification probe and `detect_logout`; `observe`
+    passes the page URL. Found live: start pages with their own password form failed
+    verification, and `password_change.php` read as a logout. Basic sessions
+    (`content_check=False`) log out by 401/403 only, and are verified by status
+    only.
+- Impact:
+  - **Behaviour:** sub-path apps log in. Re-logins use the operator's base. A probe URL
+    is never a discovery base. A Basic session's logout detection is 401/403 only.
+  - **CRAWL, AUD, FUZZ:** they pass operator URLs (their own entries).
+  - **Test doubles:** `test_browserauth` expects origin-root cookie URLs.
+- Risk: low-medium, since the login path changed. The credential-destination anchor is
+  unchanged (origin, in-scope hosts, `auth_origins`), and the session suites pass.
+- Deliverables:
+  - [x] code — done
+  - [x] `tests/test_subpath_apps.py` — done
+  - [x] FR-SESS-15 — done
+- Review: reviewers A and B, draft v1 (changes required) → v2 (AGREED, both).
+  - **Adopted:** A1 (cookie path), A2 / B-M1 (directory fallback, no query;
+    operator-only exemption), A3 (limitation stated), A's nit (`operator=False` by
+    default, fail-closed), B-S1 (pre-login), B-S2 (Basic `login_url`), and B's nit (a
+    destructive derived-base test).
+  Implementation round: both AGREED. Their nits were adopted:
+  - **B:** an operator call on a cached session still records the base (test added);
+  - **A:** a `SeamProbeSender` built without a base never marks a probe URL as
+    operator input (test added).
+
+  The login-form refinement was found in the live run after both AGREED, and went back
+  to them (PA-0093(2)). Both AGREED, requiring:
+  - an entry-name signal, so an in-place re-render is still a logout (A, B1);
+  - status-only Basic verification (B2).
+
+  Both are adopted. The mutation check killed 23/23.
+- Known limitation: sessions and bases are per `(host, identity)` (D12), so use
+  distinct identities for two apps on one host:port.
+- Effectiveness: verified live. The authenticated bWAPP crawl logs in.
+
 ### CC-SESS-0015 — Login discovery never follows a destructive hop (BUG-0111); traceability (PA-0112) (2026-10-13)
 - Change: `_navigation_ok` refuses a URL `destructive_reason` flags, other than the base
   URL itself. `requirements.md` gains traceability lines for NFR-SESS-redaction

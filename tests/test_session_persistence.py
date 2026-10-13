@@ -46,8 +46,10 @@ def test_logout_updates_persisted_validity(tmp_path):
                              fetch_factory=_factory(CookieLoginFetcher()), store=store)
         mgr.ensure("localhost", "admin", "http://localhost")
         assert store.get_session_state("localhost", "admin")["valid"] == 1
-        # A login-page response => logged out => persisted valid flips to 0.
-        login_html = b"<form><input type=password name=password></form>"
+        # The app's own login form (posting to its login action) => logged out =>
+        # persisted valid flips to 0. (Any other password form is not, BUG-0113.)
+        login_html = (b"<form method=post action='/login.php'>"
+                      b"<input type=password name=password></form>")
         req = Request("GET", "http://localhost/profile.php", identity="admin")
         mgr.observe(req, Response(200, {}, login_html, 5.0), "admin")
         assert store.get_session_state("localhost", "admin")["valid"] == 0

@@ -103,6 +103,11 @@ class SessionManager:
         self._store = store       # optional: persist NON-SECRET session state (T1.7)
         self._state: dict[tuple[str, str], SessionState] = {}
         self._auth_endpoints: dict[str, set[str]] = {}
+        # BUG-0113: the operator's base URL per session (a re-login reuses it, path and
+        # all), and the set of operator-supplied bases (the only ones exempt from the
+        # destructive-URL check during discovery).
+        self._bases: dict[tuple[str, str], str] = {}
+        self._operator_bases: set[str] = set()
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._failures: dict[tuple[str, str], int] = {}
@@ -157,7 +162,11 @@ class SessionManager:
             return
         state = self._state.get((host, identity))
         if state is None or not state.valid or state.is_time_expired():
-            self.ensure(host, identity, _base_url(request.url))
+            # The operator's own base when one is known; else the request's directory
+            # (never its origin: the app may live under a path; never the probe URL
+            # itself: discovery must not replay a payload) — BUG-0113.
+            self.ensure(host, identity,
+                        self._bases.get((host, identity)) or _directory(request.url))
             state = self._state[(host, identity)]
         _check_transport(state, request.url)          # BUG-0098: before any secret
         request.headers = state.apply(request.headers)
@@ -184,12 +193,26 @@ class SessionManager:
             return
         body = _text(response.body)
         if detect.detect_logout(response.status, response.headers, body,
-                                login_url=state.login_url):
+                                login_url=state.login_url, page_url=request.url,
+                                content_check=state.kind != "basic",
+                                login_fields=state.login_fields):
             state.valid = False  # next prepare() re-authenticates
             self._persist(state)
 
     # -- explicit / standalone -------------------------------------------
-    def ensure(self, host: str, identity: str, base_url: str) -> SessionState:
+    def ensure(self, host: str, identity: str, base_url: str, *,
+               operator: bool = False) -> SessionState:
+        """Log ``identity`` in on ``host`` (once; single-flight), discovering the login
+        from ``base_url``. ``operator=True`` marks ``base_url`` as the operator's own
+        input (a CLI's ``--base-url``/``--start``/``--url``): it is remembered for
+        re-logins and is the only kind of base exempt from the destructive-URL check
+        during discovery (BUG-0113). Internal callers leave it False (fail closed)."""
+        if operator:
+            # recorded on every operator call, a cached session included, so a later
+            # re-login uses the operator's base (reviewer B, BUG-0113)
+            from fuzzlab.core.urls import url_key
+            self._operator_bases.add(url_key(base_url))
+            self._bases[(host, identity)] = base_url
         if identity == ANONYMOUS:
             state = SessionState(host, identity, kind="none", valid=True)
             self._state[(host, identity)] = state
@@ -214,12 +237,13 @@ class SessionManager:
             self._state[(host, identity)] = state
             return state
 
-    def session_header(self, host: str, identity: str, base_url: str) -> str:
+    def session_header(self, host: str, identity: str, base_url: str, *,
+                       operator: bool = False) -> str:
         """Standalone: a ready-to-use Cookie/Authorization header for an identity, for
         use against ``base_url``. Refuses (`SessionAuthError`) an https-established
         session for an http ``base_url`` (BUG-0098); a consumer that sends it to other
         URLs (greybox) must enforce the same floor per request (``secure_only``)."""
-        state = self.ensure(host, identity, base_url)
+        state = self.ensure(host, identity, base_url, operator=operator)
         _check_transport(state, base_url)
         applied = state.apply({})
         if "Cookie" in applied:
@@ -298,7 +322,10 @@ class SessionManager:
         # page, so the fetcher's jar already holds a PHPSESSID from _discover_login_form's
         # GET, before any credentials are sent). Require a positive signal that the login
         # response left the login page behind before trusting the cookie. (BUG-0008)
-        if resp.status in (401, 403) or detect.is_login_page(resp.text):
+        landed = getattr(resp, "url", None) or form.action_url
+        login_fields = tuple(sorted(form.fields.names()))
+        if resp.status in (401, 403) or detect.shows_login_form(
+                resp.text, landed, form.action_url, login_fields):
             raise SessionAuthError(
                 f"login for {identity}@{host} was rejected: credentials wrong, or the "
                 f"login response was still a login page (status {resp.status})"
@@ -314,6 +341,7 @@ class SessionManager:
         state = SessionState(host=host, identity=identity, kind=detected.kind,
                              cookies=dict(detected.cookies), headers=dict(detected.headers),
                              token_exp=detected.token_exp, login_url=form.action_url,
+                             login_fields=login_fields,
                              logout_url=urljoin(base_url, "logout"),
                              secure_only=floor_https)
         if detected.kind == "basic":
@@ -395,10 +423,12 @@ class SessionManager:
     def _navigation_ok(self, url: str, base_url: str, floor_https: bool) -> bool:
         """May discovery fetch ``url``? The transport deny first, then an origin the
         **operator** approved — the same anchor as `_credential_destination_ok` — and
-        never a destructive URL other than the base URL itself (NFR-CRAWL-safe's rule,
-        BUG-0111)."""
+        never a destructive URL (NFR-CRAWL-safe's rule, BUG-0111), unless it is an
+        **operator-supplied** base itself (BUG-0113: a base derived from a request URL
+        gets no exemption)."""
         from fuzzlab.core.urls import destructive_reason, url_key
-        if url_key(url) != url_key(base_url) and destructive_reason(url) is not None:
+        exempt = url_key(url) == url_key(base_url) and url_key(base_url) in self._operator_bases
+        if not exempt and destructive_reason(url) is not None:
             return False
         return self._credential_destination_ok(url, base_url, floor_https=floor_https)
 
@@ -455,7 +485,9 @@ class SessionManager:
         token = base64.b64encode(f"{cred.username}:{cred.password}".encode()).decode()
         state = SessionState(host=host, identity=identity, kind="basic", cookies={},
                              headers={"Authorization": f"Basic {token}"}, token_exp=None,
-                             login_url=base_url, logout_url=urljoin(base_url, "logout"),
+                             # no login page: a Basic session's logout signal is the
+                             # 401/403, never a redirect to some app page (BUG-0113)
+                             login_url=None, logout_url=urljoin(base_url, "logout"),
                              secure_only=urlparse(base_url).scheme.lower() == "https"
                              if secure_only is None else secure_only)
         if not self._verify_authenticated(fetcher, base_url, state):
@@ -483,11 +515,16 @@ class SessionManager:
         # the probe walks redirects hop by hop too, inside the approved origins and over
         # the transport floor, carrying the session's headers (BUG-0097)
         floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
-        probe, _page, _floor = self._navigate(fetcher, base_url, base_url, floor,
-                                              headers=state.headers or None)
+        probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
+                                             headers=state.headers or None)
         if probe.status in (401, 403):
             return False
-        return not detect.is_login_page(probe.text)
+        if state.kind == "basic":       # Basic: 401/403 only, as in observe (BUG-0113)
+            return True
+        # only the login form itself means "not logged in": the base may be an app page
+        # that has a password field of its own (BUG-0113)
+        return not detect.shows_login_form(probe.text, page, state.login_url,
+                                           state.login_fields)
 
 
 #: The most redirects login discovery follows from one candidate URL (BUG-0097).
@@ -534,9 +571,13 @@ def _post_no_redirects(fetcher, url: str, data) -> FetchResponse:
     return fetcher.post(url, data=data)
 
 
-def _base_url(url: str) -> str:
+def _directory(url: str) -> str:
+    """``url``'s directory: scheme, host and the path up to its last ``/``, with no
+    query or fragment (``/app/x.php?q=1`` -> ``/app/``). A discovery base derived from
+    a request (BUG-0113)."""
     parts = urlparse(url)
-    return f"{parts.scheme}://{parts.netloc}"
+    path = parts.path or "/"
+    return f"{parts.scheme}://{parts.netloc}{path[:path.rfind('/') + 1]}"
 
 
 def _text(body) -> str:

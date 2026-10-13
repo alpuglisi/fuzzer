@@ -27,6 +27,10 @@ class SessionState:
     #: Basic header are never sent over plain http (BUG-0098, FR-SESS-13). ``None``
     #: (not given) derives it from ``login_url``: an https login is secure-only.
     secure_only: bool | None = None
+    #: The login form's entry names (non-secret; in memory only). A page that shows a
+    #: password form with exactly these names is the login form re-rendered in place,
+    #: wherever it posts (BUG-0113).
+    login_fields: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.secure_only is None:

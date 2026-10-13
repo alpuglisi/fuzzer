@@ -268,9 +268,14 @@ def main(argv=None):
                                      "identity": args.identity})
 
     if args.identity:
-        from fuzzlab.tools.authhttp import make_authenticated_client
-        client = make_authenticated_client(args.url, args.identity, args.timeout,
-                                           store_path=args.store)
+        from urllib.parse import urlparse
+
+        from fuzzlab.tools.authhttp import make_auth
+        manager, client = make_auth(args.url, args.timeout, store_path=args.store)
+        # Log in from the operator's own --url first (its directory is discovery's
+        # base for any re-login), BUG-0113.
+        manager.ensure(urlparse(args.url).hostname or "", args.identity, args.url,
+                       operator=True)
         sender = SeamSender(client, args.identity, explicit=_explicit_url(args.url))
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).

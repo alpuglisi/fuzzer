@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (BUG-0113: apps under a sub-path work authenticated; PA-0113)
+- **Why:** with BUG-0110..0112 fixed, the authenticated bWAPP crawl still could not log
+  in. The crawler and the session manager discovered the login at the bare origin, and
+  `auto` crawl points doubled the app's path.
+- **What:**
+  - the operator's URL is kept, and remembered for re-login;
+  - a derived fallback base is the request's directory, with no query, and is never
+    exempt from the destructive check;
+  - browser cookies are scoped to the origin root;
+  - the auditor and `fuzz` log in first;
+  - crawl points join to the origin;
+  - a Basic session has no login page.
+- **Entries:** CC-SESS-0016, CC-CRAWL-0012, CC-AUD-0030, CC-FUZZ-0061; BUG-0113 and
+  PA-0113, which strengthens PA-0111.
+
 ## 2026-10-13 (BUG-0111/0112: safety NFRs enforced and traced; PA-0112)
 - **Why:** preparing an authenticated run against the operator's loopback bWAPP showed
   two safety NFRs were specified but never built:

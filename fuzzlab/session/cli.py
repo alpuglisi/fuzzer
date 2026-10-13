@@ -52,7 +52,8 @@ def main(argv: list[str]) -> int:
             scope.append(args.host)
         mgr = SessionManager(store, scope_hosts=scope)
         try:
-            header = mgr.session_header(args.host, args.identity, args.base_url)
+            header = mgr.session_header(args.host, args.identity, args.base_url,
+                                        operator=True)
         except SessionAuthError as exc:
             print(f"login failed: {exc}")
             return 1

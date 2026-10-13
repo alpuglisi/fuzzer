@@ -1318,3 +1318,7 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     `destructive_reason`, because the recorded logout URL is a guess.
   - **No cookie carries over.** The requests-based senders clear their jar before
     each probe, so a probe response's `Set-Cookie` never rides on later probes.
+- **FR-FUZZ-41** *(sub-path targets; `CC-FUZZ-0061`, 2026-10-13, BUG-0113).*
+  Crawl-sourced points join their stored absolute paths to `--base-url`'s origin, so
+  the base may carry the app's path (`.../bWAPP/`). Authenticated senders (`fuzz`,
+  `SeamProbeSender`) log in from the operator's URL before the first probe.

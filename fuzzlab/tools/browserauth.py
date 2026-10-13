@@ -22,9 +22,13 @@ def playwright_auth(manager, identity: str, base_url: str):
     ``cookies`` is a list of Playwright cookie dicts ({name, value, url});
     ``headers`` is an extra-HTTP-headers dict (e.g. Authorization for bearer).
     """
-    host = urlparse(base_url).hostname or ""
-    state = manager.ensure(host, identity, base_url)
-    cookies = [{"name": name, "value": value, "url": base_url}
+    parts = urlparse(base_url)
+    host = parts.hostname or ""
+    state = manager.ensure(host, identity, base_url, operator=True)
+    # Scoped to the origin root, as a server's `Set-Cookie: ...; path=/` would be: a
+    # cookie keyed to a sub-path start page would not reach its sibling pages (BUG-0113).
+    root = f"{parts.scheme}://{parts.netloc}/"
+    cookies = [{"name": name, "value": value, "url": root}
                for name, value in state.cookies.items()]
     headers = dict(state.headers)
     return cookies, headers

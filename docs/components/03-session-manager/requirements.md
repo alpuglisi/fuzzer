@@ -108,6 +108,26 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-15 (the discovery base is the operator's URL, CC-SESS-0016, BUG-0113)**
+  - **Operator bases.** `ensure(..., operator=True)` is called by every operator entry
+    point with the operator's own URL, path kept. It is remembered per
+    `(host, identity)` for re-login, and it is the only kind of base exempt from the
+    destructive-URL check during discovery. The default is `operator=False`
+    (fail-closed).
+  - **Derived bases.** With no remembered base, `prepare` uses the request URL's
+    directory, with no query or fragment: a probe URL or its payload is never a
+    discovery base.
+  - **Basic auth.** A Basic session has `login_url=None`, so its logout signal is
+    401/403.
+  - **"The login page" is this session's login form.** A rejected login, a failed
+    verification and a logout are recognised by a password form posting to the
+    session's login action or carrying exactly its entry names
+    (`detect.shows_login_form`), never by any password field:
+    app pages such as change-password or LDAP-settings have one. Without a known login
+    URL (an adopted session), any password input still counts.
+  - **Known limitation (D12).** Sessions and remembered bases are keyed per
+    `(host, identity)`, so two sub-path apps on one host:port share them. Use distinct
+    identities per app.
 - **FR-SESS-14 (login form serialised as a browser would, CC-SESS-0014, BUG-0110)**
   - **The credential POST body** is the login form's entry list from
     `core.forms.form_entries` (FR-CORE-27), with the username and password entries

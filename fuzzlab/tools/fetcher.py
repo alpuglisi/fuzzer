@@ -875,6 +875,11 @@ if __name__ == "__main__":
         from fuzzlab.tools.authhttp import make_auth
         session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000,
                                           store_path=args.store)
+        # Log in from the operator's own --base-url before any fetch, so a re-login
+        # reuses it rather than a page's directory (BUG-0113).
+        from urllib.parse import urlparse as _urlparse
+        session_manager.ensure(_urlparse(args.base_url).hostname or "", args.identity,
+                               args.base_url, operator=True)
         log.info("auditing authenticated", extra={"identity": args.identity})
 
     targets = load_urls(args.spider_db)

@@ -47,8 +47,16 @@ class SeamProbeSender(_ExplicitAllowance):
             return self._identity
         if not self._ensured:
             from urllib.parse import urlparse
-            base = self._base_url or url
-            self._manager.ensure(urlparse(base).hostname or "", self._identity, base)
+
+            from fuzzlab.session.manager import _directory
+            # Only the operator's own base is operator input; a probe URL is not
+            # (its directory, never exempt, never remembered) — BUG-0113.
+            if self._base_url:
+                self._manager.ensure(urlparse(self._base_url).hostname or "",
+                                     self._identity, self._base_url, operator=True)
+            else:
+                self._manager.ensure(urlparse(url).hostname or "", self._identity,
+                                     _directory(url))
             self._ensured = True
         if self._manager.is_auth_endpoint(url):
             self.auth_endpoint_anonymous_sends += 1

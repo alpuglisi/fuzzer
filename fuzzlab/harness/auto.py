@@ -135,8 +135,14 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     delete, ...) is never fuzzed from a crawl (NFR-FUZZ-safe, BUG-0112); it is appended
     to ``skipped`` as ``(path, method, param, reason)`` instead.
     """
+    from urllib.parse import urlsplit
+
     from fuzzlab.core.urls import destructive_reason
-    base = base_url.rstrip("/")
+    # Stored crawl paths are absolute (`to_path`), so they join to the base URL's
+    # origin, never its path: `--base-url .../bWAPP/` must not give /bWAPP/bWAPP/
+    # (BUG-0113).
+    parts = urlsplit(base_url)
+    base = f"{parts.scheme}://{parts.netloc}"
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "

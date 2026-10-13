@@ -22,6 +22,25 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0061 — Crawl points join to the origin; `fuzz` logs in from `--url` (BUG-0113) (2026-10-13)
+- Change:
+  - `injection_points_from_store` joins stored absolute paths to `base_url`'s
+    **origin**, so `--base-url .../bWAPP/` no longer gives `/bWAPP/bWAPP/`;
+  - `fuzz --identity` calls `make_auth` and
+    `ensure(host, identity, --url, operator=True)` before the baseline;
+  - `SeamProbeSender`'s pre-login passes `operator=True`.
+- Impact:
+  - **Behaviour:** `auto` / `greybox-run` crawl points are correct for any base path
+    (an origin base behaves as before);
+  - ground-truth points are unchanged (app-relative by contract).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests — done
+  - [x] FR-FUZZ-41 — done
+- Review: as CC-SESS-0016.
+- Effectiveness: verified by test, and live in the operator's bWAPP run.
+
 ### CC-FUZZ-0060 — NFR-FUZZ-safe: send-time destructive gate, auth endpoints probed anonymously, no cookie carry-over (BUG-0112) (2026-10-13)
 - Change:
   - **Send gate:** `check_send_url` is called first in `SeamProbeSender`,

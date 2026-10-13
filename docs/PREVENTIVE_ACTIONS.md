@@ -1426,3 +1426,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      clause is never presented as built without a test that fails when it is removed.
   3. **The guard is proven on synthetic offenders:** a missing line, a test that does
      not exist, an unclassified NFR. (from BUG-0111, BUG-0112)
+
+- **PA-0113** — Strengthens `PA-0111`, after BUG-0113: authenticated tools truncated the
+  operator's URL to its origin, so an app under a sub-path could not log in. PA-0111
+  covered emulated algorithms, not deployment layout.
+  1. **A base URL is never truncated to its origin.** It keeps its path for discovery
+     and joins. Query and fragment are dropped when a URL becomes a discovery base.
+     Stored absolute paths join to the origin.
+  2. **A session cookie's scope is the origin root unless the server says otherwise.**
+  3. **Every component that takes an operator URL has a test with the app under a
+     sub-path (`/app/`).** Our own labs all serve at the root and cannot surface this.
+     (from BUG-0113)

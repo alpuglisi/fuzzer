@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Session/crawler: an app under a sub-path could not log in; crawl points doubled the path (fixed, BUG-0113/PA-0113)
+- **Symptom:** `fuzzlab crawl --start http://127.0.0.1:8090/bWAPP/portal.php --identity user`: "no login form found from http://127.0.0.1:8090".
+- **Root cause:** the spider and `SessionManager.prepare` truncated the operator's URL to its origin; `injection_points_from_store` joined absolute paths to the base's path. Our labs all serve at `/`.
+- **Remediation:** discovery from the operator's URL (remembered for re-login), a directory fallback without query, operator-only destructive exemption, origin-root cookies, pre-login in the auditor and fuzz, origin joins. CC-SESS-0016, CC-CRAWL-0012, CC-AUD-0030, CC-FUZZ-0061. `docs/bugs/BUG-0113-base-url-truncated-to-origin.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Fuzzing: auth endpoints probed with the session; destructive crawl points fuzzed (fixed, BUG-0112/PA-0112)
 - **Symptom:** `is_auth_endpoint` had no caller; an authenticated crawl-sourced run would probe login.php/logout.php with the session.
 - **Root cause:** NFR-FUZZ-safe's exclusion was recorded but never consumed at the send; nothing traced the NFR to a test.

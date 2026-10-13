@@ -70,6 +70,31 @@ def is_login_page(html: str) -> bool:
     return soup.find("input", attrs={"type": "password"}) is not None
 
 
+def shows_login_form(html: str, page_url: str, login_url: str | None,
+                     login_fields=None) -> bool:
+    """True if the page shows *this session's* login form: a password form that posts
+    to ``login_url`` (canonical origin and path), or whose entry names are exactly
+    ``login_fields`` (the login form re-rendered in place, posting to itself). Any
+    password field is not enough — an LDAP-settings, change-password or SQLi-login
+    lab page has one (BUG-0113). With no known ``login_url``, any password input counts
+    (the old, coarse rule)."""
+    if not login_url:
+        return is_login_page(html)
+    from fuzzlab.core.urls import url_key
+    wanted = frozenset(login_fields) if login_fields else None
+    soup = BeautifulSoup(html or "", "html.parser")
+    for form in soup.find_all("form"):
+        if form.find("input", attrs={"type": "password"}) is None:
+            continue
+        action = form.get("action")
+        target = urljoin(page_url, action) if action else page_url
+        if url_key(target) == url_key(login_url):
+            return True
+        if wanted is not None and frozenset(form_entries(form).names()) == wanted:
+            return True
+    return False
+
+
 def find_login_form(html: str, page_url: str) -> LoginForm | None:
     """Find the login form on a page: the form containing a password input."""
     soup = BeautifulSoup(html or "", "html.parser")
@@ -180,7 +205,8 @@ def detect_session_credential(status: int, headers: dict[str, str], body: str,
 
 
 def detect_logout(status: int, headers: dict[str, str], body: str,
-                  login_url: str | None = None) -> bool:
+                  login_url: str | None = None, page_url: str | None = None,
+                  content_check: bool = True, login_fields=None) -> bool:
     """Detect that a response indicates an expired/absent session."""
     if status in (401, 403):
         return True
@@ -189,7 +215,12 @@ def detect_logout(status: int, headers: dict[str, str], body: str,
     if location and ("login" in location.lower()
                      or (login_url and login_url in location)):
         return True
-    # A protected page that came back as a login page means we were logged out.
-    if status == 200 and is_login_page(body):
-        return True
+    # A protected page that came back as *the* login page means we were logged out.
+    # With a known login form and page, only that form counts: an app page with a
+    # password field of its own is not a logout (BUG-0113). ``content_check=False``
+    # (a Basic session) logs out by 401/403 only.
+    if status == 200 and content_check:
+        if login_url and page_url:
+            return shows_login_form(body, page_url, login_url, login_fields)
+        return is_login_page(body)
     return False

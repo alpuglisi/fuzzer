@@ -25,7 +25,9 @@ fuzzer.
 - **FR-CRAWL-4** Crawl as a state machine (state = DOM-skeleton hash + identity),
   reaching pages behind multi-step flows.
 - **FR-CRAWL-5** Crawl per identity, using the session manager; detect logout and
-  re-authenticate.
+  re-authenticate. The login is discovered from the start URL itself, path and all,
+  never its bare origin; injected cookies are scoped to the origin root (CC-CRAWL-0012,
+  BUG-0113).
 - **FR-CRAWL-6** Respect a crawl budget and deadline via the shared budget
   manager; never overlap headless work with timing-sensitive fuzzing.
 - **FR-CRAWL-7** Link-following scope is the **start URL's own host** (loopback

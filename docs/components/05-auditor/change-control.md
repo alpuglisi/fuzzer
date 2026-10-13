@@ -3,6 +3,19 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0030 — The auditor logs in from `--base-url` before any fetch (BUG-0113) (2026-10-13)
+- Change: with `--identity`, after `make_auth`, the auditor calls
+  `ensure(host, identity, --base-url, operator=True)`, so seam requests and re-logins
+  use the operator's base rather than a page's directory.
+- Impact: an authenticated audit of a sub-path app works. A wrong credential fails
+  before the first fetch.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] test — done
+- Review: B-S1 (BUG-0113 v2).
+- Effectiveness: verified by test.
+
 ### CC-AUD-0029 — The auditor never re-fetches or follows to a destructive URL (BUG-0111) (2026-10-13)
 - Change: `tools/fetcher.py`:
   - `load_urls` drops destructive URLs, so a spider DB written before the fix is safe

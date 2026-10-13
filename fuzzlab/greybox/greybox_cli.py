@@ -40,8 +40,9 @@ def _cookie_for(host: str, identity: str, base_url: str):
     if host not in scope:
         scope.append(host)
     mgr = SessionManager(store, scope_hosts=scope)
-    header = mgr.session_header(host, identity, base_url)   # SessionAuthError if wrong
-    secure_only = bool(mgr.ensure(host, identity, base_url).secure_only)
+    header = mgr.session_header(host, identity, base_url,     # SessionAuthError if wrong
+                                operator=True)
+    secure_only = bool(mgr.ensure(host, identity, base_url, operator=True).secure_only)
     if header.startswith("Cookie: "):
         return header[len("Cookie: "):], secure_only, mgr.is_auth_endpoint
     return None, secure_only, mgr.is_auth_endpoint
