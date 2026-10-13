@@ -72,17 +72,32 @@ JS_MIME_TYPES = frozenset({
     "text/javascript1.3", "text/javascript1.4", "text/javascript1.5", "text/jscript",
     "text/livescript", "text/x-ecmascript", "text/x-javascript"})
 _ASCII_WS = " \t\n\f\r"
-_REGEX_PREV = set("(,=:[!&|?{};+-*%<>~^") | {""}
+#: Keywords after which a ``/`` begins a regex literal (an expression is expected).
+REGEX_KEYWORDS = frozenset({"return", "typeof", "instanceof", "in", "of", "new", "delete",
+                            "void", "throw", "case", "do", "else", "yield", "await",
+                            "default"})
+#: Keywords whose ``( … )`` is a statement head: a ``/`` after its ``)`` is a regex.
+_STATEMENT_PARENS = frozenset({"if", "while", "for", "with"})
+_IDENT = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$")
 
 
 def js_states(src: str) -> list[str]:
     """The lexical state at each character of JavaScript ``src``: ``code``, a quote
     character (``'`` ``"`` `` ` ``), ``comment`` or ``regex``. Returns ``[UNSURE] *
     len(src)`` when the lexer cannot be sure (a string or regex literal left open at the
-    end): the caller then gives no verdict (fail closed, PA-0025)."""
+    end, or a ``/`` whose meaning the grammar leaves open): the caller then gives no
+    verdict (fail closed, PA-0025).
+
+    Regex versus division is decided from the previous **token**, not one character
+    (BUG-0102, PA-0103): a regex follows an operator or punctuator, a keyword in
+    `REGEX_KEYWORDS`, or the ``)`` closing an ``if`` / ``while`` / ``for`` / ``with``
+    head; a division follows an identifier (``this`` / ``null`` / ``true`` … included),
+    a number, a string, a regex, ``]``, any other ``)`` and postfix ``++`` / ``--``. A
+    ``/`` right after ``}`` (a block or an object literal) is ambiguous: UNSURE."""
     out: list[str] = []
     state, i, n = "code", 0, len(src)
-    prev = ""                                  # last non-space code character
+    last: tuple = ("start",)                   # the previous significant token
+    parens: list[tuple] = []                   # the token before each open '('
     while i < n:
         c = src[i]
         if state == "code":
@@ -102,29 +117,62 @@ def js_states(src: str) -> list[str]:
                 out.extend(["comment"] * (j + 2 - i))
                 i = j + 2
                 continue
-            elif c == "/" and prev in _REGEX_PREV:
-                j, in_class = i + 1, False       # a regex literal: skip to its end
-                while j < n and src[j] != "\n":
-                    if src[j] == "\\":
-                        j += 2
-                        continue
-                    if src[j] == "[":
-                        in_class = True
-                    elif src[j] == "]":
-                        in_class = False
-                    elif src[j] == "/" and not in_class:
-                        break
-                    j += 1
-                if j >= n or src[j] != "/":
+            elif c == "/":
+                kind = _slash_kind(last)
+                if kind == UNSURE:
                     return [UNSURE] * n
-                out.extend(["regex"] * (j + 1 - i))
-                i = j + 1
-                prev = "/"
+                if kind == "regex":
+                    j, in_class = i + 1, False   # a regex literal: skip to its end
+                    while j < n and src[j] != "\n":
+                        if src[j] == "\\":
+                            j += 2
+                            continue
+                        if src[j] == "[":
+                            in_class = True
+                        elif src[j] == "]":
+                            in_class = False
+                        elif src[j] == "/" and not in_class:
+                            break
+                        j += 1
+                    if j >= n or src[j] != "/":
+                        return [UNSURE] * n
+                    out.extend(["regex"] * (j + 1 - i))
+                    i = j + 1
+                    last = ("operand",)
+                    continue
+                out.append("code")              # division
+                last = ("punct", "/")
+            elif c in _IDENT:
+                j = i
+                while j < n and src[j] in _IDENT:
+                    j += 1
+                word = src[i:j]
+                out.extend(["code"] * (j - i))
+                last = ("operand",) if word[0].isdigit() else ("word", word)
+                i = j
+                continue
+            elif src.startswith("++", i) or src.startswith("--", i):
+                out.extend(["code", "code"])
+                # postfix after an operand ends an expression; prefix starts one
+                last = ("operand",) if last[0] in ("word", "operand", "close") \
+                    else ("punct", c)
+                i += 2
                 continue
             else:
                 out.append("code")
-                if not c.isspace():
-                    prev = c
+                if c == "(":
+                    parens.append(last)
+                    last = ("punct", "(")
+                elif c == ")":
+                    opener = parens.pop() if parens else ("start",)
+                    head = opener[0] == "word" and opener[1] in _STATEMENT_PARENS
+                    last = ("punct", ")") if head else ("close",)
+                elif c == "]":
+                    last = ("close",)
+                elif c == "}":
+                    last = ("brace",)
+                elif not c.isspace():
+                    last = ("punct", c)
         else:                                   # inside a string literal
             out.append(state)
             if c == "\\" and i + 1 < n:
@@ -132,13 +180,25 @@ def js_states(src: str) -> list[str]:
                 i += 2
                 continue
             if c == state:
-                state, prev = "code", c
+                state, last = "code", ("operand",)
             elif c == "\n" and state != "`":
                 return [UNSURE] * n             # an unterminated string
         i += 1
     if state != "code":
         return [UNSURE] * n
     return out
+
+
+def _slash_kind(last: tuple) -> str:
+    """``regex``, ``division`` or `UNSURE` for a ``/`` after token ``last``."""
+    kind = last[0]
+    if kind in ("start", "punct"):
+        return "regex"
+    if kind == "word":
+        return "regex" if last[1] in REGEX_KEYWORDS else "division"
+    if kind in ("operand", "close"):
+        return "division"
+    return UNSURE                               # "brace": block end or object literal
 
 
 def _attr(tag, name: str) -> str | None:

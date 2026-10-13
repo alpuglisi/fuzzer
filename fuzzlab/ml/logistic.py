@@ -11,6 +11,12 @@ import math
 from typing import Callable, Sequence
 
 
+#: The smallest standard deviation a feature is scaled by (BUG-0103). A smaller one —
+#: a near-constant feature — is treated like a constant one (scaled by 1.0), so a fitted
+#: model never divides by a value that turns a finite feature into infinity.
+STD_FLOOR = 1e-12
+
+
 def _sigmoid(z: float) -> float:
     if z < -60:
         return 0.0
@@ -50,7 +56,8 @@ class LogisticRegression:
         self._std = []
         for j in range(d):
             var = sum((r[j] - self._mean[j]) ** 2 for r in X) / n
-            self._std.append(math.sqrt(var) or 1.0)
+            sd = math.sqrt(var)
+            self._std.append(sd if sd >= STD_FLOOR else 1.0)
         Xs = self._standardize(X)
         self._w = [0.0] * d
         self._b = 0.0
@@ -80,6 +87,17 @@ class LogisticRegression:
                 l2_norm = math.sqrt(sum(w * w for w in self._w))
                 on_epoch(epoch, {"train/loss": loss / n, "train/l2_norm": l2_norm})
         return self
+
+    def check_finite(self, X: Sequence[Sequence[float]]) -> None:
+        """Raise ``ValueError`` unless every standardized feature and every logit of
+        ``X`` is finite (BUG-0103: individually finite parameters do not prove the
+        arithmetic stays finite)."""
+        for row in self._standardize(X):
+            if not all(math.isfinite(z) for z in row):
+                raise ValueError("a standardized feature is not finite")
+            logit = sum(self._w[j] * row[j] for j in range(len(self._w))) + self._b
+            if not math.isfinite(logit):
+                raise ValueError("a logit is not finite")
 
     def predict_proba(self, X: Sequence[Sequence[float]]) -> list[float]:
         Xs = self._standardize(X)

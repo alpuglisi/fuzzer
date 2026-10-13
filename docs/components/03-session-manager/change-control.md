@@ -3,6 +3,49 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0013 — Login navigation anchored to operator input (BUG-0097); sessions bound to their transport floor (BUG-0098) (2026-10-13)
+- Change:
+  - **Discovery (BUG-0097):**
+    - `_discover_login_form` walks redirects by hand (`_navigate`, `MAX_LOGIN_HOPS` = 5,
+      `_get_no_redirects`), authorising every hop **before** fetching it, with the
+      transport deny first;
+    - a fetcher that cannot refuse redirects must report the URL asked for, or
+      discovery refuses (A3);
+    - `_credential_destination_ok(target, base_url, ...)` is anchored to the base URL,
+      its https upgrade, in-scope hosts and `auth_origins`; the page exemption is
+      removed;
+    - the post-login probe walks hops the same way;
+    - the default fetcher's `get` takes `allow_redirects`.
+  - **Sessions (BUG-0098):**
+    - `SessionState.secure_only` is derived from the login's floor or an https
+      `login_url`, persisted as metadata, and derived failing closed for legacy
+      records (`secure_only_of`);
+    - `_check_transport` runs in `prepare` and `session_header`;
+    - the new `authorize(request, identity, prepared_host)` is used after plugin
+      retargets;
+    - `SessionCapture` marks https or `Secure` captures;
+    - greybox's sender refuses an https cookie over http.
+- Impact (other components / project):
+  - **CORE** (CC-CORE-0036): `HttpClient` calls `authorize`.
+  - **FUZZ:** the greybox sender gains `cookie_secure_only`.
+  - **PROXY:** session capture.
+  - **Behaviour change:** an https session is refused over http, and a discovery hop
+    outside scope / `auth_origins` is refused loudly.
+  - **Test doubles:** their `get` declares `allow_redirects`.
+- Risk: medium. A stricter login path: every allow path is tested, and in-scope
+  multi-hop and SSO logins still work.
+- Deliverables:
+  - [x] anchored, hop-by-hop discovery — done
+  - [x] `secure_only` on every send path — done
+  - [x] tests: `test_session_transport_binding` (new); the redirect tests rewritten in
+        `test_session_credential_destination` — done
+  - [x] FR-SESS-12 amended, FR-SESS-13 added — done
+- Implementation divergence: the post-login verification probe also walks hops. It
+  previously let the fetcher follow redirects; found while testing, and in scope of
+  PA-0098(2).
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-SESS-0012 — Credentials never over a downgrade from https to http: deny before allow (BUG-0092) (2026-10-13)
 - Change:
   - `SessionManager._transport_ok(target, floor_https)` is the transport deny, checked

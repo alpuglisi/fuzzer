@@ -3,6 +3,54 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0036 — One fail-closed storage-redaction boundary (BUG-0099/0100); recorder redacted; durable-or-told fsync (BUG-0105); keyring lock and verified delete (BUG-0108/0109); evidence parser (BUG-0107); migration 19 (BUG-0104) (2026-10-13)
+- Change:
+  - **`core/redaction.py` (BUG-0099 / BUG-0100).** It gains the storage boundary:
+    - `redact_query` / `redact_url` / `redact_body` and the per-type helpers, moved
+      from `proxy/redact.py`;
+    - `MAX_REDACT_BYTES`, `MAX_JSON_DEPTH`;
+    - the whole-body scan `mentions_sensitive_name`;
+    - sniffing (`body_kind`);
+    - the omission markers.
+  - **`core/http.py`.** `_record` redacts the URL and both bodies (a case-insensitive
+    content type). `send` calls `session.authorize` after a plugin changes the URL.
+  - **`core/secretfile.py` (BUG-0105).** `_fsync_dir` skips only `UNSUPPORTED_ERRNOS` or
+    a missing `O_DIRECTORY`; otherwise `DurabilityUnknown` after the rename.
+  - **`core/credentials.py` (BUG-0108 / 0109).** A lock (thread + `flock` on
+    `<keyring>.lock`) is held across load → save; `delete` verifies the entry is gone;
+    `DurabilityUnknown` becomes a `CredentialError` saying "retry is safe".
+  - **`core/evidence.py` (new, BUG-0107):** `parse_evidence` / `display_evidence`.
+    `core/anomaly_flags` uses the display form.
+  - **`core/migrations.py` (BUG-0104).** Migration 19 adds `holdout_seal` and
+    `holdout_seal_meta`. `POST_STEPS = {19: _backfill_holdout_seal}` runs in the
+    migration's own `BEGIN IMMEDIATE` transaction.
+- Impact (other components / project):
+  - **PROXY** re-exports the redaction functions.
+  - **ML** reads and writes `holdout_seal` and uses the evidence parser.
+  - **SESS:** `authorize`.
+  - **PLUG** (CC-PLUG-0009): the guard allow-list.
+  - **Contract changes:**
+    - schema version 19;
+    - FR-CORE-6's "raw bytes" becomes "redacted bodies";
+    - an unparseable or oversized redactable body is stored as a marker.
+- Risk: medium (a schema migration with a backfill). Mitigated by:
+  - the migration being transactional;
+  - an upgrade test from 18;
+  - six concurrent upgraders backfilling once;
+  - readers proven write-free.
+- Deliverables:
+  - [x] storage boundary + recorder — done
+  - [x] directory-fsync swallow list — done
+  - [x] keyring lock + verified delete — done
+  - [x] evidence parser — done
+  - [x] migration 19 + backfill — done
+  - [x] tests: `test_storage_redaction`, `test_secretfile`, `test_holdout_seal_table`,
+        `test_dataset_evidence` — done
+  - [x] FR-CORE-6 / FR-CORE-25 amended, FR-CORE-26 added — done
+- Implementation divergence: none.
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-CORE-0035 — Plural-aware secret names (BUG-0090); complete, fsynced, atomic secret files (BUG-0096) (2026-10-13)
 - Change:
   - **`core/redaction.py` (BUG-0090).** `_fold` drops a trailing plural `s` only when

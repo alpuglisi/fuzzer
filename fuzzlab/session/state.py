@@ -23,6 +23,15 @@ class SessionState:
     logout_url: str | None = None
     token_exp: float | None = None           # unix ts, for JWT proactive refresh
     valid: bool = False
+    #: established over https (the login's transport floor): its cookies, tokens and
+    #: Basic header are never sent over plain http (BUG-0098, FR-SESS-13). ``None``
+    #: (not given) derives it from ``login_url``: an https login is secure-only.
+    secure_only: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.secure_only is None:
+            self.secure_only = bool(self.login_url) and \
+                str(self.login_url).lower().startswith("https:")
 
     def apply(self, headers: dict[str, str]) -> dict[str, str]:
         """Return ``headers`` with this session's cookies/auth headers merged in."""
@@ -67,4 +76,19 @@ class SessionState:
             "login_url": self.login_url,
             "logout_url": self.logout_url,
             "token_exp": self.token_exp,
+            "secure_only": self.secure_only,
         }
+
+
+def secure_only_of(record: dict | None) -> bool:
+    """``secure_only`` for a persisted (metadata-only) session record. Records written
+    before BUG-0098 lack the field: it is derived from the stored ``login_url`` scheme,
+    and an unknown ``login_url`` fails closed (``True``; a fresh login recomputes it)."""
+    if not record:
+        return True
+    if record.get("secure_only") is not None:
+        return bool(record["secure_only"])
+    login_url = record.get("login_url")
+    if not login_url:
+        return True
+    return str(login_url).lower().startswith("https:")

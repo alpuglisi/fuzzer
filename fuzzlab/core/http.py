@@ -86,6 +86,14 @@ def _requests_transport(method: str, url: str, headers: Mapping[str, str],
     return resp.status_code, dict(resp.headers), resp.content
 
 
+def _content_type(headers) -> str:
+    """The Content-Type of a header mapping, looked up case-insensitively."""
+    for name, value in (headers or {}).items():
+        if str(name).lower() == "content-type":
+            return value if isinstance(value, str) else bytes(value).decode("latin-1")
+    return ""
+
+
 class HttpClient:
     def __init__(self, budget: RequestBudget, scope_hosts: list[str],
                  session: Any | None = None, store: Any | None = None,
@@ -112,8 +120,13 @@ class HttpClient:
         if self._session is not None:
             self._session.prepare(request, request.identity)
         if self._plugins is not None:                      # on_request: plugins may edit
+            prepared_url = request.url
             request = self._plugins.on_request(request)
             host = self._check_scope(request.url)          # re-check if a plugin retargeted
+            if self._session is not None and request.url != prepared_url:
+                # a retarget must not carry the session elsewhere or over http (BUG-0098)
+                self._session.authorize(request, request.identity,
+                                        prepared_host=urlparse(prepared_url).hostname or "")
 
         def _do() -> Response:
             start = time.perf_counter()
@@ -137,14 +150,22 @@ class HttpClient:
         return response
 
     def _record(self, request: Request, response: Response) -> None:
+        """Persist the flow **redacted** through the one storage boundary
+        (`core.redaction`, BUG-0099): the URL's sensitive query values and the bodies'
+        sensitive fields never reach the store; the wire request is never modified."""
         if self._store is None or self._run_id is None:
             return
-        req_sha = self._store.put_body(request.body) if request.body else None
-        resp_sha = self._store.put_body(response.body) if response.body else None
+        from fuzzlab.core.redaction import redact_body, redact_url
+        req_body = redact_body(request.body, _content_type(request.headers)) \
+            if request.body else None
+        resp_body = redact_body(response.body, _content_type(response.headers)) \
+            if response.body else None
+        req_sha = self._store.put_body(req_body) if req_body else None
+        resp_sha = self._store.put_body(resp_body) if resp_body else None
         self._store.conn.execute(
             "INSERT INTO flow (run_id, identity, method, url, status, elapsed_ms, "
             "req_body_sha, resp_body_sha) VALUES (?,?,?,?,?,?,?,?)",
-            (self._run_id, request.identity, request.method, request.url,
+            (self._run_id, request.identity, request.method, redact_url(request.url),
              response.status, response.elapsed_ms, req_sha, resp_sha),
         )
         self._store.conn.commit()

@@ -102,7 +102,9 @@ def propose_queries(store, run_id: int | None, budget: int,
     if method == "committee":
         from fuzzlab.ml.rank_train import _candidate_texts
         from fuzzlab.ml.train import _apply_seal
+        from fuzzlab.ml.train import _refuse_quarantine
         ds = build_dataset(store, run_id)                         # fit on labelled rows
+        _refuse_quarantine(ds)                                    # BUG-0107
         ds = _apply_seal(store, run_id, ds, False)[0]       # never on sealed rows
         if not len(ds):
             return []
@@ -183,6 +185,8 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     from fuzzlab.ml import holdout as ho
     hplan = ho.holdout_plan(store, run_id, holdout)    # raises SealingUnknown
     prior = build_dataset(store, before_run_id=run_id, target=target)
+    from fuzzlab.ml.train import _refuse_quarantine
+    _refuse_quarantine(prior)              # raises, never None (BUG-0107, like B's nit)
     if hplan is not None:
         prior = ho.sealed_split(store, prior, run_id=run_id, plan=hplan)[0]
     n, pos = len(prior), prior.positives

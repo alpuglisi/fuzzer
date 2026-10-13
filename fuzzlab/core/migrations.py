@@ -458,6 +458,73 @@ ALTER TABLE flow ADD COLUMN anomaly_score REAL;
 ALTER TABLE flow ADD COLUMN anomaly_flag INTEGER;
 """
 
+# Migration 19 (CC-CORE-0036, BUG-0104, FR-CORE-26): the blind holdout's seals, kept
+# apart from the mutable model calibration JSON (append-only), plus the backfill
+# watermark. The backfill itself is `_backfill_holdout_seal`, a Python post-step run in
+# the same transaction (POST_STEPS), so no reader ever writes.
+_M0019 = """
+CREATE TABLE IF NOT EXISTS holdout_seal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin TEXT NOT NULL,
+    record TEXT NOT NULL,
+    version INTEGER,
+    fraction REAL,
+    model_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_holdout_seal_origin ON holdout_seal(origin);
+CREATE TABLE IF NOT EXISTS holdout_seal_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    watermark INTEGER NOT NULL
+);
+"""
+
+
+def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
+    """Migration 19's post-step: copy every present ``holdout`` record of an existing
+    model row (valid or malformed, as recorded) into `holdout_seal`, then record the
+    watermark (the highest model id now). Rows past the watermark seal themselves when
+    written; an unparseable row at or below it fails closed on read (BUG-0104)."""
+    import json as _json
+
+    from fuzzlab.core.urls import canonical_origin
+    origin_of_run: dict[int, str | None] = {}
+    for r in conn.execute("SELECT run_id, base_url FROM target WHERE run_id IS NOT NULL "
+                          "ORDER BY id").fetchall():
+        origin_of_run.setdefault(int(r[0]), canonical_origin(r[1]))
+    top = 0
+    for model_id, raw in conn.execute("SELECT id, calibration FROM model ORDER BY id"):
+        top = max(top, int(model_id))
+        try:
+            cal = _json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            continue                              # read side fails closed on it
+        if not isinstance(cal, dict) or "holdout" not in cal:
+            continue
+        rid = cal.get("run_id")
+        if not isinstance(rid, int) or isinstance(rid, bool):
+            continue
+        origin = origin_of_run.get(rid)
+        if origin is None:
+            continue                              # no target: never sealed
+        rec = cal["holdout"]
+        version = rec.get("version") if isinstance(rec, dict) else None
+        fraction = rec.get("fraction") if isinstance(rec, dict) else None
+        conn.execute(
+            "INSERT INTO holdout_seal (origin, record, version, fraction, model_id) "
+            "VALUES (?,?,?,?,?)",
+            (origin, _json.dumps(rec),
+             version if isinstance(version, int) and not isinstance(version, bool)
+             else None,
+             fraction if isinstance(fraction, (int, float))
+             and not isinstance(fraction, bool) else None, int(model_id)))
+    conn.execute("INSERT OR REPLACE INTO holdout_seal_meta (id, watermark) VALUES (1, ?)",
+                 (top,))
+
+
+#: Python steps run inside a migration's own transaction, after its SQL.
+POST_STEPS = {19: _backfill_holdout_seal}
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -478,6 +545,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (16, _M0016),
     (17, _M0017),
     (18, _M0018),
+    (19, _M0019),
 ]
 
 
@@ -540,6 +608,8 @@ def migrate(conn: sqlite3.Connection) -> int:
                     continue
                 for stmt in split_statements(sql):
                     conn.execute(stmt)
+                if version in POST_STEPS:              # same transaction (BUG-0104)
+                    POST_STEPS[version](conn)
                 conn.execute("INSERT INTO schema_version (version) VALUES (?)",
                              (version,))
                 conn.execute("COMMIT")

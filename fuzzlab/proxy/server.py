@@ -103,7 +103,8 @@ class ProxyEngine:
         # matches any port, and a second, bare-host check let a port-specific exclude
         # be overridden by a host-wide include
         if not self.scope.in_scope(_authority(host, port), path):
-            return self.sender(host, port, use_tls, raw)     # transparent bypass
+            # blocking socket I/O never runs on the event loop (BUG-0101)
+            return await asyncio.to_thread(self.sender, host, port, use_tls, raw)
 
         if self.matchreplace is not None:
             msg = self.matchreplace.apply(msg)
@@ -113,7 +114,8 @@ class ProxyEngine:
                 return None                                  # dropped by the user
             msg = decided
 
-        resp = self.sender(host, port, use_tls, msg.raw)     # byte-exact forward
+        resp = await asyncio.to_thread(self.sender, host, port, use_tls,
+                                       msg.raw)                       # byte-exact forward
         # Optional response interception (Burp-style "intercept responses"): only when
         # the interceptor opts in, so the default path stays byte-exact (the wrap+`.raw`
         # round-trips the exact bytes). A dropped response sends nothing to the client.

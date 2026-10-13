@@ -141,8 +141,10 @@ def _check_logistic(p, width: int, what: str = "logistic") -> None:
         _fail(f"{what}: bad hyperparameter or bias types")
     for k in ("w", "mean", "std"):                 # all equal to the feature width
         _nums(p[k], f"{what}.{k}", width)
-    if any(s == 0 for s in p["std"]):
-        _fail(f"{what}.std: zero standard deviation")
+    from fuzzlab.ml.logistic import STD_FLOOR
+    if any(not s >= STD_FLOOR for s in p["std"]):
+        _fail(f"{what}.std: a standard deviation below {STD_FLOOR} (zero, negative or "
+              f"subnormal; BUG-0103)")
 
 
 def _check_tree(node, width: int, depth: int, max_depth: int) -> None:
@@ -393,8 +395,20 @@ class LoadedModel:
         if self.ecod is not None:
             from fuzzlab.ml.anomaly import augment
             X = augment(X, self.ecod)
+        if self.kind == "logistic":
+            self._finite(lambda: self.model.check_finite(X))
         probs = self.model.predict_proba(X)
-        return self.calibrator.transform(probs) if self.calibrator is not None else probs
+        if self.calibrator is not None:
+            probs = self.calibrator.transform(probs)
+        return _closed(probs, probabilities=True)
+
+    @staticmethod
+    def _finite(check) -> None:
+        try:
+            check()
+        except (ValueError, OverflowError, ZeroDivisionError) as exc:
+            raise ModelParamsError(f"the saved model's arithmetic is not finite on "
+                                   f"these rows: {exc}") from None
 
     def score(self, X: Sequence[Sequence[float]], texts: Sequence[str]) -> list[float]:
         """Ranker kinds: rank scores for feature rows + candidate texts."""
@@ -402,5 +416,18 @@ class LoadedModel:
             raise TypeError(f"{self.kind!r} is not a ranker")
         self._check_rows(X)
         if self.kind == "constant":
-            return [float(self.model)] * len(X)
-        return self.model.score(X, texts)
+            return _closed([float(self.model)] * len(X), probabilities=False)
+        self._finite(lambda: self.model.model.check_finite(
+            self.model._augment(X, texts, fit=False)))
+        return _closed(self.model.score(X, texts), probabilities=False)
+
+
+def _closed(scores, *, probabilities: bool) -> list[float]:
+    """``scores`` if every one is finite (and in [0, 1] for probabilities), else
+    `ModelParamsError` before any is used (BUG-0103, PA-0104)."""
+    for s in scores:
+        if not isinstance(s, (int, float)) or not math.isfinite(s) \
+                or (probabilities and not 0.0 <= s <= 1.0):
+            raise ModelParamsError("the saved model produced a non-finite or out-of-range "
+                                   "score")
+    return list(scores)

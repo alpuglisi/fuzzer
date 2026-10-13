@@ -11,9 +11,9 @@ Advisory only: this feeds scoring/ranking, never `finding` labels.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 
+from fuzzlab.core.evidence import parse_evidence
 from fuzzlab.core.features import (CANDIDATE_FEATURE_NAMES, CANDIDATE_FEATURE_VERSION,
                                    extract_candidate_v1)
 from fuzzlab.core.oracle_status import UNLABELLED
@@ -39,6 +39,13 @@ class Dataset:
     labelled: list[bool] = field(default_factory=list)
     feature_names: list[str] = field(default_factory=lambda: list(FEATURE_NAMES))
     feature_version: int = FEATURE_VERSION
+    #: candidates in scope whose evidence is unreadable: skipped, never fabricated
+    #: (BUG-0107); `scope_total` counts every candidate the query selected
+    quarantined: list[int] = field(default_factory=list)
+    scope_total: int = 0
+    #: runs with a quarantined row and a finding no readable candidate matches: a
+    #: label may have been lost with the quarantined row
+    label_loss_runs: list[int] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.y)
@@ -135,29 +142,62 @@ def build_dataset(store, run_id: int | None = None, *, include_unlabelled: bool 
             fired[key] = fired.get(key, 0) + 1
 
     ds = Dataset()
+    matched: set = set()                        # finding keys a readable row matched
+    quarantined_runs: set[int] = set()
     for c in store.conn.execute(
             f"SELECT id, run_id, evidence, sink_context, oracle_status FROM candidate "
             f"WHERE {where} ORDER BY id", args).fetchall():
-        unlabelled = c["oracle_status"] in UNLABELLED
-        if unlabelled and not include_unlabelled:
-            continue
-        try:
-            ev = json.loads(c["evidence"] or "{}")
-        except (ValueError, TypeError):
-            ev = {}
+        ds.scope_total += 1
         rid = int(c["run_id"])
+        ev = parse_evidence(c["evidence"])
+        if ev is None:                          # unreadable: quarantine, never invent
+            ds.quarantined.append(int(c["id"]))
+            quarantined_runs.add(rid)
+            continue
         path = endpoint_key(ev)
         param = ev.get("param", "")
         cat = ev.get("category", "")
         key = (rid, path, param, cat)
-        label = 1 if ((*key, method_key(ev.get("method"))) in positives
-                      or key in any_method) else 0
+        mkey = (*key, method_key(ev.get("method")))
+        if mkey in positives:
+            matched.add(mkey)
+        if key in any_method:
+            matched.add(key)
+        unlabelled = c["oracle_status"] in UNLABELLED
+        if unlabelled and not include_unlabelled:
+            continue
+        label = 1 if (mkey in positives or key in any_method) else 0
         ds.X.append(_features(ev, c["sink_context"], fired.get((rid, path, param), 0)))
         ds.y.append(0 if unlabelled else label)
         ds.groups.append(path)
         ds.ids.append(int(c["id"]))
         ds.labelled.append(not unlabelled)
+    lost = {k[0] for k in (positives | any_method) - matched}
+    ds.label_loss_runs = sorted(quarantined_runs & lost)
     return ds
+
+
+#: The most of a training scope that may be quarantined before a trainer refuses.
+MAX_QUARANTINED_FRACTION = 0.05
+
+
+class DatasetEvidenceError(ValueError):
+    """Too much of the training scope has unreadable evidence, or a label may have been
+    lost with a quarantined row (BUG-0107): the train refuses rather than shift."""
+
+
+def quarantine_refusal(ds: Dataset) -> str | None:
+    """Why a trainer must refuse ``ds`` (FR-ML-24), or ``None``: a run with a quarantined
+    row has a finding no readable candidate matches, or more than
+    `MAX_QUARANTINED_FRACTION` of the scope's candidates are quarantined."""
+    if ds.label_loss_runs:
+        return (f"run(s) {ds.label_loss_runs} have candidates with unreadable evidence and "
+                f"a finding no readable candidate matches (a label may be lost); repair "
+                f"the evidence")
+    if ds.scope_total and len(ds.quarantined) > MAX_QUARANTINED_FRACTION * ds.scope_total:
+        return (f"{len(ds.quarantined)} of {ds.scope_total} candidates have unreadable "
+                f"evidence (more than {MAX_QUARANTINED_FRACTION:.0%}); repair the evidence")
+    return None
 
 
 def target_of(store, run_id: int) -> str | None:
@@ -176,10 +216,10 @@ def candidate_keys(store, ids) -> list[tuple[str, str, str, str]]:
     out = []
     for cid in ids:
         row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
-        try:
-            ev = json.loads(row["evidence"] or "{}") if row else {}
-        except (ValueError, TypeError):
-            ev = {}
+        ev = parse_evidence(row["evidence"]) if row else None
+        if ev is None:                          # unreadable: a key nothing else shares
+            out.append(("\0quarantined", str(cid), "", ""))
+            continue
         out.append((to_path(ev.get("url", "")), ev.get("param", ""), ev.get("category", ""),
                     method_key(ev.get("method"))))
     return out

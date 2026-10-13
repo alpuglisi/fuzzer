@@ -15,17 +15,32 @@ in full, raises on no progress, and ``fsync``\\ s before returning.
   file that must never be silently replaced, such as the proxy's CA key.
 - `replace_secret` writes a unique temporary file in the same directory, fsyncs it,
   renames it over ``path`` and fsyncs the directory: readers see the old file or the
-  new one, never a partial one. On any error the temporary file is removed and the
-  original is untouched.
+  new one, never a partial one. On an error **before** the rename the temporary file is
+  removed and the original is untouched. If the directory fsync fails **after** the
+  rename, `DurabilityUnknown` is raised: the new content is already visible, but its
+  crash durability is not established — a retry is idempotent (BUG-0105).
+
+The directory fsync is skipped only where the platform cannot do it — no
+``O_DIRECTORY``, or ``EINVAL`` / ``ENOTSUP`` / ``EOPNOTSUPP`` (`UNSUPPORTED_ERRNOS`) —
+never on any other error (PA-0106: an explicit swallow list).
 """
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
 from pathlib import Path
 
 _MODE = 0o600
+#: The only errors that mean "this platform/filesystem cannot fsync a directory".
+UNSUPPORTED_ERRNOS = frozenset(e for e in (getattr(errno, n, None) for n in
+                                           ("EINVAL", "ENOTSUP", "EOPNOTSUPP")) if e)
+
+
+class DurabilityUnknown(OSError):
+    """The replacement is visible at its path, but the directory fsync failed, so its
+    crash durability is not established. Retrying the same write is idempotent."""
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -75,7 +90,12 @@ def replace_secret(path: str | Path, data: bytes) -> None:
     except BaseException:
         _unlink_quietly(tmp)
         raise
-    _fsync_dir(path.parent)
+    try:
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise DurabilityUnknown(
+            exc.errno, f"replacement visible at {path}; crash durability not established "
+                       f"({exc.strerror or exc}) — retrying the write is safe") from exc
 
 
 def _unlink_quietly(path) -> None:
@@ -86,15 +106,20 @@ def _unlink_quietly(path) -> None:
 
 
 def _fsync_dir(directory: Path) -> None:
-    """Make a rename durable. A no-op where a directory cannot be opened or fsynced."""
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    try:
-        fd = os.open(directory, flags)
-    except OSError:
+    """Make a rename durable. Skipped only where the platform cannot fsync a directory
+    (no ``O_DIRECTORY``, or an `UNSUPPORTED_ERRNOS` error); any other error raises."""
+    if not hasattr(os, "O_DIRECTORY"):
         return
     try:
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as exc:
+        if exc.errno in UNSUPPORTED_ERRNOS:
+            return
+        raise
+    try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as exc:
+        if exc.errno not in UNSUPPORTED_ERRNOS:
+            raise
     finally:
         os.close(fd)

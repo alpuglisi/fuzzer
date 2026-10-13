@@ -30,7 +30,8 @@ from contextlib import contextmanager
 #: built-in ML stages' measured footprint is exactly this (CC-ML-0017).
 ADVISORY_WRITES: dict[str, frozenset] = {
     "insert": frozenset({"model", "run_metrics", "metric_series",
-                         "holdout_metric"}),                     # CC-PLUG-0007
+                         "holdout_metric",                       # CC-PLUG-0007
+                         "holdout_seal"}),           # CC-PLUG-0009: add a seal, never remove
     "update_candidate": frozenset({"score", "rank_score", "rank_uncertainty",
                                    "anomaly_score", "anomaly_flag",
                                    "score_oof", "rank_score_oof"}),     # CC-PLUG-0006

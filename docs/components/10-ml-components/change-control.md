@@ -3,6 +3,53 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0025 — Loaded-model arithmetic closure (BUG-0103); seals in `holdout_seal`, malformed fails closed (BUG-0104); evidence quarantine (BUG-0107) (2026-10-13)
+- Change:
+  - **`logistic` / `persist` (BUG-0103).**
+    - `STD_FLOOR` = 1e-12: the trainer floors near-constant features, and the loader
+      rejects a smaller std.
+    - `LogisticRegression.check_finite` checks z and the logit.
+    - `LoadedModel` checks z and the logit, and its outputs via `_closed`, before
+      returning.
+    - Saved mode scores inside its guard.
+  - **`holdout` (BUG-0104).**
+    - `_recorded` reads the table plus calibration above the watermark. A present
+      record is always a record, so a malformed one is `UNKNOWN`. An unparseable row ≤
+      the watermark makes every target unknown (`_AllUnknown`).
+    - `write_seal` is called from `train._insert_model`.
+  - **`dataset` (BUG-0107).**
+    - `build_dataset` quarantines via `core.evidence`, recording `quarantined`,
+      `scope_total` and `label_loss_runs`.
+    - `quarantine_refusal` and `DatasetEvidenceError`.
+    - `candidate_keys` and `rank_train._candidate_texts` handle quarantined rows.
+    - Trainers refuse or record (`record_quarantine` → calibration, result,
+      `ml_quarantined_rows`).
+    - The prioritizer and `propose_queries` raise.
+- Impact (other components / project):
+  - **CORE** (migration 19, the evidence parser).
+  - **PLUG** (CC-PLUG-0009).
+  - **FUZZ** (the CLI line).
+  - **Behaviour changes:**
+    - a saved model whose arithmetic leaves the finite range is a refusal;
+    - a near-constant feature is scaled by 1.0 (params change only in that degenerate
+      case);
+    - a malformed seal refuses training;
+    - a store with >5% unreadable evidence, or a possibly lost label, refuses training.
+- Risk: medium. Mitigated by:
+  - existing ML suites green;
+  - the invariant that clean pipeline stores never trip the quarantine check;
+  - the upgrade test.
+- Deliverables:
+  - [x] arithmetic closure — done
+  - [x] durable seals — done
+  - [x] quarantine — done
+  - [x] tests: `test_ml_persist`, `test_holdout_seal_table`, `test_dataset_evidence` —
+        done
+  - [x] FR-ML-13 / FR-ML-19 amended, FR-ML-24 added — done
+- Implementation divergence: none.
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-ML-0024 — The holdout is sealed per target, at every producer (BUG-0091); `flag_top` in one pass (BUG-0094); the model loader types extremes and bounds sizes (BUG-0095) (2026-10-13)
 - Change:
   - **Holdout seal (BUG-0091), `ml/holdout.py`:**

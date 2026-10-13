@@ -32,7 +32,7 @@ class CookieLoginFetcher:
         self._cookies = {}
         self.post_count = 0
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         if url.endswith("/login.php"):
             return FetchResponse(200, {}, LOGIN_HTML)
         if self.logged_in:
@@ -67,7 +67,7 @@ class AnonCookieLoginFetcher:
         self._cookies: dict[str, str] = {}
         self.post_count = 0
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         self._cookies.setdefault("PHPSESSID", "anon-sess")   # set on EVERY page
         if url.endswith("/login.php"):
             return FetchResponse(200, {}, LOGIN_HTML)
@@ -95,7 +95,7 @@ class BearerLoginFetcher:
         self.token = token
         self.logged_in = False
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         if self.logged_in:
             return FetchResponse(200, {}, "<html>dashboard</html>")
         # login form served on the base URL, posting to a JSON endpoint
@@ -179,7 +179,7 @@ def test_anon_cookie_still_allows_real_login():
 
 def test_no_login_form_fails_loud():
     class NoFormFetcher:
-        def get(self, url, headers=None):
+        def get(self, url, headers=None, allow_redirects=True):
             return FetchResponse(200, {}, "<html>no login here</html>")
         def post(self, url, data=None, headers=None):
             return FetchResponse(200, {}, "")

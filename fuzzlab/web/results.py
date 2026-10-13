@@ -11,6 +11,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from fuzzlab.core.evidence import display_evidence
 from fuzzlab.core.urls import to_path
 
 # Score keys the harness records (report.as_dict); surfaced as a group in the UI.
@@ -68,10 +69,7 @@ def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None
         "SELECT evidence, score, score_oof, oracle_status FROM candidate "
         "WHERE run_id=? AND score IS NOT NULL ORDER BY score DESC LIMIT ?",
         (run_id, limit)).fetchall():
-        try:
-            ev = json.loads(c["evidence"] or "{}")
-        except (ValueError, TypeError):
-            ev = {}
+        ev = display_evidence(c["evidence"])         # display only (BUG-0107)
         judged = None
         if gate is not None:
             judged = train.gate_input(clf.calibration, c["oracle_status"], c["score"],

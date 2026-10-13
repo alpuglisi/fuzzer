@@ -103,22 +103,74 @@ def _run_origins(store) -> dict[int, str | None]:
     return out
 
 
-def _recorded(store, run_origin: dict) -> dict[str, list]:
-    """Canonical origin -> the holdout records of every model row scoped to one of its
-    runs (a store-wide row has no run, so no origin)."""
+class _AllUnknown(dict):
+    """Every target `UNKNOWN`: a seal may have been lost with an unreadable record
+    whose target cannot be recovered (BUG-0104, fail closed)."""
+
+    def __init__(self, reason: str):
+        super().__init__()
+        self.reason = reason
+
+    def get(self, key, default=None):
+        return UNKNOWN if key is not None else default
+
+
+def write_seal(store, run_id, record, model_id) -> None:
+    """Seal ``run_id``'s target with ``record`` (append-only `holdout_seal`, migration
+    19). Called by the trainers in the model row's own transaction; a run with no
+    target is never sealed."""
+    origin = run_origin(store, run_id)
+    if origin is None:
+        return
+    version = record.get("version") if isinstance(record, dict) else None
+    fraction = record.get("fraction") if isinstance(record, dict) else None
+    store.conn.execute(
+        "INSERT INTO holdout_seal (origin, record, version, fraction, model_id) "
+        "VALUES (?,?,?,?,?)",
+        (origin, json.dumps(record),
+         version if isinstance(version, int) and not isinstance(version, bool) else None,
+         fraction if isinstance(fraction, (int, float)) and not isinstance(fraction, bool)
+         else None, model_id))
+
+
+def _recorded(store, run_origin: dict) -> dict[str, list] | _AllUnknown:
+    """Canonical origin -> every holdout record sealing it.
+
+    The records are the `holdout_seal` table (migration 19; its backfill copied every
+    older model row's record) plus, for defence in depth, the calibration records of
+    model rows written after the backfill watermark. A **present** ``holdout`` value is
+    always a record — ``{}``, ``None``, ``False`` included, which `_registered` rejects
+    (fail closed, never read as "no seal"). An unparseable calibration at or below the
+    watermark — whose seal the backfill could not copy — makes every target unknown,
+    naming the model id (BUG-0104)."""
     out: dict[str, list] = {}
-    for row in store.conn.execute("SELECT calibration FROM model").fetchall():
+    for row in store.conn.execute("SELECT origin, record FROM holdout_seal").fetchall():
+        try:
+            rec = json.loads(row["record"])
+        except (ValueError, TypeError):
+            rec = "unreadable"
+        out.setdefault(row["origin"], []).append(rec)
+    meta = store.conn.execute("SELECT watermark FROM holdout_seal_meta WHERE id=1"
+                              ).fetchone()
+    watermark = int(meta["watermark"]) if meta is not None else -1
+    for row in store.conn.execute("SELECT id, calibration FROM model").fetchall():
         try:
             cal = json.loads(row["calibration"] or "{}")
         except (ValueError, TypeError):
+            cal = None
+        if not isinstance(cal, dict):
+            if int(row["id"]) <= watermark:
+                return _AllUnknown(f"model #{row['id']} has unreadable calibration "
+                                   f"(its holdout seal may be lost); repair it")
+            continue                              # sealed in holdout_seal when written
+        if int(row["id"]) <= watermark or "holdout" not in cal:
             continue
-        rec = cal.get("holdout") if isinstance(cal, dict) else None
-        rid = cal.get("run_id") if isinstance(cal, dict) else None
-        if not rec or not isinstance(rid, int) or isinstance(rid, bool):
+        rid = cal.get("run_id")
+        if not isinstance(rid, int) or isinstance(rid, bool):
             continue
         origin = run_origin.get(rid)
         if origin is not None:
-            out.setdefault(origin, []).append(rec)
+            out.setdefault(origin, []).append(cal["holdout"])
     return out
 
 
@@ -127,6 +179,8 @@ def sealings(store, also: dict | None = None) -> dict[str, tuple | str]:
     ``also`` adds records not yet stored (``{origin: record}``: a model being trained
     now)."""
     recs = _recorded(store, _run_origins(store))
+    if isinstance(recs, _AllUnknown):
+        return recs
     for origin, rec in (also or {}).items():
         if origin is not None:
             recs.setdefault(origin, []).append(rec)

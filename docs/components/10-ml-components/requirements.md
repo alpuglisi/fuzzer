@@ -219,6 +219,11 @@ the oracle owns truth (the oracle/advisory split).
 
       A hybrid model's stored ECOD columns bound it to about 35k training rows, and a
       larger one is refused at save time (stated limit).
+  - *(CC-ML-0025, BUG-0103)* **Arithmetic closure.** `std ≥ STD_FLOOR` (1e-12): the
+    trainer scales a near-constant feature by 1.0, and the loader rejects anything
+    smaller. `LoadedModel` checks each standardised feature and logit, and every output
+    (finite, a probability in [0, 1]), before returning any. Otherwise it raises
+    `ModelParamsError`, and saved mode refuses.
   - **Identity, not authentication:** the sha detects corruption and pins identity;
     anyone who can write the store can recompute it.
   - **Compatibility:** `LoadedModel.check_compatible()` raises `ModelIncompatibleError`
@@ -385,6 +390,15 @@ the oracle owns truth (the oracle/advisory split).
     - **Tested** by flipping every sealed label and asserting every public number and
       every trained artefact is unchanged, with a control flip proving the check is
       live.
+  - **Durable seals (CC-ML-0025, BUG-0104).**
+    - Seals live in `holdout_seal` (FR-CORE-26). Every trainer that records a holdout
+      writes one in its model row's transaction (`holdout.write_seal`; the plugin
+      guard allows INSERT only, CC-PLUG-0009).
+    - Readers use the table, plus calibration records above the backfill watermark.
+    - A **present** `holdout` value is always a record, so a malformed one (`{}`,
+      `None`, `False` …) is `UNKNOWN`, never read as "no seal".
+    - An unparseable calibration at or below the watermark makes every target
+      `UNKNOWN`, naming the model id.
   - **Stored facts.** Held-out labelled rows keep `score_oof` NULL; the model's
     calibration records `holdout: {version, fraction, rows}` (no label counts). A labelled
     row of such a model with no `score_oof` is held out, so `gate_input` judges it on
@@ -471,6 +485,21 @@ the oracle owns truth (the oracle/advisory split).
   - Contamination is a **forced per-host fraction**: up to that share of every scored
     host's flows is flagged, even on a clean host — "most unusual", not "malicious".
   - Advisory only; no labels. No UI panel yet (the proxy history page could show it).
+
+- **FR-ML-24 (evidence quarantine, CC-ML-0025, BUG-0107)**
+  - `build_dataset` parses evidence with `core.evidence.parse_evidence`. An unreadable
+    row is **quarantined**: skipped and counted in `Dataset.quarantined` /
+    `scope_total`, never replaced by defaults.
+  - **Trainers refuse** (`quarantine_refusal`: run mode raises `DatasetEvidenceError`,
+    earlier mode refuses with the reason, the prioritizer and `propose_queries` raise)
+    when either holds:
+    - a run with a quarantined row has a finding no readable candidate matches (a label
+      may be lost);
+    - more than 5% of the scope's candidates are quarantined.
+  - **Otherwise they record** `quarantined_rows` in the model calibration, the result
+    and `run_metrics.ml_quarantined_rows`, and the CLI prints a line.
+  - Quarantined ids are scored by no model, and the prioritizer orders them after the
+    scored candidates.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

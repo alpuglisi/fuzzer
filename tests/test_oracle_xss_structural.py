@@ -230,3 +230,52 @@ def test_script_executes_is_the_one_predicate():
     for name, render in EXECUTING_SCRIPTS.items():
         tag = BeautifulSoup(render("x"), "html.parser").find("script")
         assert script_executes(tag), name
+
+
+# --- BUG-0102 / PA-0103: regex versus division is decided by grammar context --------
+
+@pytest.mark.parametrize("src", [
+    "function f(){ return /TOK/; }",             # after a keyword
+    "x = typeof /TOK/;",
+    "if (x) /TOK/.test(y)",                      # after a statement head's ')'
+    "while (a) /TOK/g.exec(s)",
+    "switch (v) { case /TOK/: 1 }",
+    "export default /TOK/",
+    "f(() => /TOK/)",                            # after '=>'
+    "x = [/TOK/]",
+    "y = /[/]TOK/",                              # a slash inside a character class
+    "y = /a\\/TOK/",                             # an escaped slash
+])
+def test_a_token_inside_a_regex_literal_is_not_code(src):
+    assert not js_token_in_code(src, "TOK"), src
+
+
+@pytest.mark.parametrize("src", [
+    "x = a / TOK",                               # after an identifier
+    "x = this / TOK",
+    "x = f(a) / TOK",                            # after a call's ')'
+    "x = arr[0] / TOK",                          # after ']'
+    "x = 10 / TOK",                              # after a number
+    "x = a\n/TOK/g",                             # JS reads division across the newline
+    "x = i++ / TOK",
+    "x = 'a' / TOK",
+])
+def test_a_token_after_a_division_is_code(src):
+    assert js_token_in_code(src, "TOK"), src
+
+
+def test_a_slash_after_a_closing_brace_is_unsure():
+    """`}` ends a block or an object literal: the grammar alone cannot decide."""
+    assert js_states("if (a) {} /TOK/.test(s)") == [UNSURE] * len(
+        "if (a) {} /TOK/.test(s)")
+    assert js_token_in_code("var o = {}; TOK", "TOK")       # no '/' after it: fine
+
+
+def test_the_audits_regex_reflection_never_confirms():
+    import re
+
+    def render(v):
+        return "<script>function f(){ return /" + re.escape(v).replace("/", r"\/") + \
+            "/; }</script>"
+    v, page = _confirm(render)
+    assert v is None, page.sent

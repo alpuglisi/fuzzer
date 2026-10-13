@@ -356,6 +356,8 @@ def _print_ml_extras(r: dict, run_id) -> None:
               f"{round(cal['brier_oof_raw'], 4)} → {round(cal['brier_oof_calibrated'], 4)}")
     elif cal:
         print(f"    calibration: {cal.get('calibrator')} — scores left uncalibrated")
+    if r.get("quarantined_rows"):                    # BUG-0107 (FR-ML-24)
+        print(f"    {r['quarantined_rows']} candidate(s) with unreadable evidence skipped")
     h = r.get("holdout")
     if h is not None:
         held = h.get("endpoints")

@@ -3,6 +3,23 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0009 — The advisory guard may INSERT into `holdout_seal` (BUG-0104) (2026-10-13)
+- Change: `plugins.guard.ADVISORY_WRITES["insert"]` adds `holdout_seal`, so an
+  `after_run` ML stage that trains with a holdout (explicit or implied) can record its
+  seal. INSERT only: a plugin can add a seal, never update or delete one.
+  `holdout_seal_meta` is written only by migration 19, never in a hook.
+- Impact (other components / project):
+  - **ML / CORE** (CC-ML-0025, CC-CORE-0036).
+  - The pinned allow-list test is updated.
+- Risk: low. Adding a seal only makes the blind holdout stricter.
+- Deliverables:
+  - [x] allow-list — done
+  - [x] tests: a guarded ADVISORY holdout stage writes its seal, and a READ_ONLY
+        prioritizer reads seals (`test_holdout_seal_table`) — done
+- Implementation divergence: none.
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-PLUG-0008 — Plugin metadata and hook lookup are contained (BUG-0076) (2026-10-13)
 - Change:
   - **Metadata is contained.** `HookRegistry.register` catches **every** exception from

@@ -1280,3 +1280,13 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     ancestor. **Stated limit:** structural state is not proof of execution, and
     client-rendered `text/template` blocks are a false negative here. Browser-backed
     confirmation (M6) is the stronger path.
+  - **Regex versus division (CC-FUZZ-0059, BUG-0102)** is decided from the previous
+    token:
+    - **regex** after a punctuator, a `REGEX_KEYWORDS` keyword (`return`, `typeof`,
+      `case`, `default` …) or an `if` / `while` / `for` / `with` head's `)`;
+    - **division** after an identifier (`this` / `null` / `true` …), a number, a
+      string, a regex, `]`, another `)` or a postfix `++` / `--`;
+    - a `/` after `}` makes the source UNSURE.
+
+    A real ECMAScript parser, or browser-sentinel confirmation (M6), remains the
+    stronger path.

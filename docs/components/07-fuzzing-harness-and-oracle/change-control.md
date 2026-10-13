@@ -22,6 +22,34 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0059 — Token-aware regex/division lexing (BUG-0102); CLI quarantine line (BUG-0107); greybox cookie floor (BUG-0098) (2026-10-13)
+- Change:
+  - **`oracle/context.js_states` (BUG-0102)** decides regex versus division from the
+    previous **token**:
+    - `REGEX_KEYWORDS` (`default` included);
+    - a paren stack for `if` / `while` / `for` / `with` heads;
+    - identifiers (`this` / `null` / `true` …), numbers, strings, `]`, other `)` and
+      postfix `++` / `--` → division;
+    - `}` followed by `/` → UNSURE.
+  - **`harness/auto_cli._print_ml_extras`** prints "N candidate(s) with unreadable
+    evidence skipped".
+  - **Greybox:** `greybox_cli._cookie_for` returns `(cookie, secure_only)`, and
+    `RequestsCorrelatingSender(cookie_secure_only=)` refuses http.
+- Impact (other components / project):
+  - **ML:** fewer false confirmations, so fewer false positive labels.
+  - **SESS** (CC-SESS-0013).
+  - The lab sink verdicts are unchanged (existing tests).
+- Risk: low. 18 grammar cases plus every existing XSS fixture.
+- Deliverables:
+  - [x] lexer — done
+  - [x] CLI line — done
+  - [x] greybox floor — done
+  - [x] tests — done
+  - [x] FR-FUZZ-39 amended — done
+- Implementation divergence: none.
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-FUZZ-0058 — Reflected-XSS confirmation models script executability (BUG-0093); CLI says when a holdout is implied (BUG-0091) (2026-10-13)
 - Change:
   - **`oracle/context.script_executes(tag)`** applies the HTML standard's script type

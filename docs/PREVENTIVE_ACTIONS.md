@@ -1319,3 +1319,87 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      `O_EXCL`.**
   4. **Each is tested with an injected mid-write failure**, including a real kernel short
      write where the platform allows it. (from BUG-0096)
+
+- **PA-0098** — Strengthens `PA-0082` and `PA-0093`, after BUG-0097: a login-page
+  redirect to another origin made that origin the credential allow-list's anchor.
+  1. **The trust anchor of an allow-list is operator input only** (base URL, scope,
+     allow-lists). A URL a response supplies is checked against the anchor, never added
+     to it.
+  2. **Every navigation hop is authorised before it is fetched.**
+  3. **A client that cannot refuse redirects must prove it followed none, or fail
+     closed.** (from BUG-0097)
+
+- **PA-0099** — Strengthens `PA-0093`, after BUG-0098: an https-established session was
+  reused over plain http.
+  1. **A transport floor binds every credential-bearing artefact** (password, cookie,
+     token, Basic header) **at every point it is sent**: cached or fresh, through any
+     helper that hands it to another sender, and again after anything edits the
+     request. (from BUG-0098)
+
+- **PA-0100** — Generalises `PA-0092(1)` from evaluation numbers to persisted traffic,
+  after BUG-0099: a second producer stored secrets unredacted.
+  1. **Every producer of persisted traffic goes through the one storage boundary**
+     (`core.redaction`). An AST guard enumerates the producers and is proven on a
+     synthetic offender (PA-0034(2)). (from BUG-0099)
+
+- **PA-0101** — Strengthens `PA-0091`, after BUG-0100: the JSON redactor kept bodies it
+  could not parse.
+  1. **A redactor fails closed.** A body it cannot prove clean is omitted, never stored
+     as received.
+  2. **It is tested with malformed, huge-number, deep, oversized, mislabelled, chunked
+     and compressed bodies carrying secrets** (PA-0096's extremes, applied to
+     redaction). (from BUG-0100)
+
+- **PA-0102** — Extends `PA-0095` to I/O, after BUG-0101: unbounded, re-copying,
+  event-loop-blocking upstream reads.
+  1. **A network read has a byte cap and an overall deadline**, not only an idle
+     timeout.
+  2. **Accumulation never re-copies the buffer inside the read loop.** `bytes(buf)` in
+     a loop is a swept pattern.
+  3. **Blocking I/O never runs on an event loop.** (from BUG-0101)
+
+- **PA-0103** — Strengthens `PA-0084` and `PA-0094`, after BUG-0102: a regex literal
+  after `return` was lexed as code.
+  1. **A hand-written lexer is tested on every grammar ambiguity it resolves.**
+  2. **Where the grammar alone cannot decide, the result is UNSURE, never "code".**
+     (from BUG-0102)
+
+- **PA-0104** — Strengthens `PA-0096`, after BUG-0103: finite parameters produced NaN.
+  1. **A loaded model's intermediate values and outputs are validated (finite, in
+     range) before use.** Operand validation alone does not prove closure. (from
+     BUG-0103)
+
+- **PA-0105** — Strengthens `PA-0092`, after BUG-0104: a falsy holdout record was read
+  as "no seal".
+  1. **Fail-closed state distinguishes absent from malformed**, and malformed is never
+     read as absent.
+  2. **Safety state lives in its own append-only table, not inside a mutable blob.** Any
+     backfill runs in the migration, never on first use by a reader. (from BUG-0104)
+
+- **PA-0106** — Enforces `PA-0093(2)`, after BUG-0105: an agreed "no-op where
+  unsupported" became "no-op on any error".
+  1. **An error is swallowed only by an explicit, named list of conditions**, never by a
+     bare `except OSError` / `except Exception`.
+  2. **A swallow list is tested with one swallowed and one propagated error**, and
+     guarded against bare swallows with a synthetic offender. (from BUG-0105)
+
+- **PA-0107** — Generalises `PA-0088(1)`, after BUG-0106: a "one transaction" history
+  flush was not atomic.
+  1. **Every documented batch or transaction claim has an injected-failure test.**
+  2. **A batch writer prepares before it writes, and rolls back to its own
+     savepoint.** (from BUG-0106)
+
+- **PA-0108** — Generalises `PA-0096`, after BUG-0107: bad evidence crashed datasets or
+  became a fabricated row.
+  1. **Every reader of stored JSON validates shape and types at one parser.**
+  2. **Malformed rows are quarantined and counted, never replaced by defaults that
+     fabricate data.** (from BUG-0107)
+
+- **PA-0109** — Generalises `PA-0088(2)` to files, after BUG-0108: concurrent keyring
+  updates lost one.
+  1. **A read-modify-write on any shared store, files included, holds an interprocess
+     lock across the read, and has a two-writer test.** (from BUG-0108)
+
+- **PA-0110** — New, after BUG-0109: a failed delete reported success.
+  1. **An operation reports success only when its effect is verified, or when the
+     swallowed failure is exactly the documented no-op case.** (from BUG-0109)

@@ -16,16 +16,28 @@ from __future__ import annotations
 
 import socket
 import ssl
+import time
 
 from fuzzlab.proxy.message import RawMessage
 
 _CHUNK = 65536
+#: Bounds on one upstream response (BUG-0101, FR-PROXY-12): a peer that never stops
+#: sending, or drips bytes forever, cannot hold the proxy or exhaust memory.
+MAX_HEAD_BYTES = 64 * 1024
+MAX_BODY_BYTES = 64 * 1024 * 1024
+DEADLINE_FACTOR = 4                      # overall deadline = idle timeout × this
 
 
-def _body_complete(head: RawMessage, body: bytes) -> bool | None:
+class UpstreamResponseError(OSError):
+    """An upstream response exceeded the header / body cap or the overall deadline."""
+
+
+def _body_complete(head: RawMessage, body) -> bool | None:
     """Return True/False if body completeness is known from the head, else None.
 
-    ``None`` means "no framing header" (read until the peer closes).
+    ``None`` means "no framing header" (read until the peer closes). ``body`` may be a
+    ``bytearray``: only ``len`` / ``endswith`` are used, so nothing is copied
+    (BUG-0101: the whole body was once copied per received chunk — quadratic).
     """
     te = head.get("Transfer-Encoding")
     if te and b"chunked" in te.lower():
@@ -38,36 +50,53 @@ def _body_complete(head: RawMessage, body: bytes) -> bool | None:
     return None
 
 
-def recv_http_response(sock: socket.socket, timeout: float) -> bytes:
-    """Read one full HTTP/1 response from ``sock`` and return the exact bytes."""
+def recv_http_response(sock: socket.socket, timeout: float, *,
+                       max_head: int = MAX_HEAD_BYTES, max_body: int = MAX_BODY_BYTES,
+                       deadline: float | None = None) -> bytes:
+    """Read one full HTTP/1 response from ``sock`` and return the exact bytes.
+
+    ``timeout`` bounds each idle read; ``deadline`` (seconds, default ``timeout ×
+    DEADLINE_FACTOR``) bounds the whole read, so a peer dripping bytes cannot hold it.
+    Headers past ``max_head`` or a body past ``max_body`` raise
+    `UpstreamResponseError`. Bytes accumulate in one ``bytearray``, never re-copied."""
     sock.settimeout(timeout)
+    end = time.monotonic() + (deadline if deadline is not None
+                              else timeout * DEADLINE_FACTOR)
+
+    def _recv() -> bytes | None:
+        if time.monotonic() > end:
+            raise UpstreamResponseError("upstream response exceeded the overall deadline")
+        try:
+            return sock.recv(_CHUNK)
+        except (socket.timeout, TimeoutError):
+            return None
+
     buf = bytearray()
     while b"\r\n\r\n" not in buf:
-        try:
-            chunk = sock.recv(_CHUNK)
-        except (socket.timeout, TimeoutError):
-            return bytes(buf)
+        chunk = _recv()
         if not chunk:
-            return bytes(buf)                      # closed before headers completed
+            return bytes(buf)                      # closed / idle before headers completed
         buf += chunk
+        if len(buf) > max_head and b"\r\n\r\n" not in buf[:max_head + 4]:
+            raise UpstreamResponseError(f"upstream response headers exceed {max_head} bytes")
 
-    head_bytes, sep, rest = bytes(buf).partition(b"\r\n\r\n")
-    head = RawMessage.from_bytes(head_bytes + sep)
-    body = bytearray(rest)
-    known = _body_complete(head, bytes(body))
-    if known is True:
-        return head_bytes + sep + bytes(body)
+    split = buf.index(b"\r\n\r\n") + 4
+    head = RawMessage.from_bytes(bytes(buf[:split]))
+    body = buf[split:]
+    if len(body) > max_body:
+        raise UpstreamResponseError(f"upstream response body exceeds {max_body} bytes")
+    if _body_complete(head, body) is True:
+        return bytes(buf[:split]) + bytes(body)
     while True:
-        try:
-            chunk = sock.recv(_CHUNK)
-        except (socket.timeout, TimeoutError):
-            break
+        chunk = _recv()
         if not chunk:
             break
         body += chunk
-        if _body_complete(head, bytes(body)) is True:
+        if len(body) > max_body:
+            raise UpstreamResponseError(f"upstream response body exceeds {max_body} bytes")
+        if _body_complete(head, body) is True:
             break
-    return head_bytes + sep + bytes(body)
+    return bytes(buf[:split]) + bytes(body)
 
 
 class SocketSender:
@@ -75,12 +104,19 @@ class SocketSender:
 
     ``__call__(host, port, use_tls, raw) -> bytes``. Set ``verify_tls=False`` only for a
     lab origin with a self-signed cert; it defaults to full verification so MITM'd
-    upstreams are validated normally.
+    upstreams are validated normally. ``max_body`` / ``deadline`` bound one response
+    (FR-PROXY-12): they cut off long-lived streams and very large downloads, by design.
+    Stateless between calls (one socket per call), so the engine runs it in a worker
+    thread (`asyncio.to_thread`, the default executor: at most min(32, CPUs + 4)
+    concurrent upstream calls).
     """
 
-    def __init__(self, timeout: float = 15.0, verify_tls: bool = True):
+    def __init__(self, timeout: float = 15.0, verify_tls: bool = True, *,
+                 max_body: int = MAX_BODY_BYTES, deadline: float | None = None):
         self._timeout = timeout
         self._verify_tls = verify_tls
+        self._max_body = max_body
+        self._deadline = deadline            # None: timeout × DEADLINE_FACTOR
 
     def __call__(self, host: str, port: int, use_tls: bool, raw: bytes) -> bytes:
         sock = socket.create_connection((host, port), timeout=self._timeout)
@@ -92,7 +128,8 @@ class SocketSender:
                     ctx.verify_mode = ssl.CERT_NONE
                 sock = ctx.wrap_socket(sock, server_hostname=host)
             sock.sendall(raw)
-            return recv_http_response(sock, self._timeout)
+            return recv_http_response(sock, self._timeout, max_body=self._max_body,
+                                      deadline=self._deadline)
         finally:
             try:
                 sock.close()

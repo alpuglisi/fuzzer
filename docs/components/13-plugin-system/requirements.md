@@ -43,8 +43,9 @@ sources — without changing core code, via a registry of hooks on `core/`.
     `run_metrics` and `metric_series`, and UPDATE of `candidate.score`, `rank_score`,
     `rank_uncertainty`, `anomaly_score` and `anomaly_flag` — plus, *(CC-PLUG-0006)*,
     `score_oof` and `rank_score_oof`, and *(CC-PLUG-0007)* INSERT into
-    `holdout_metric` (the sealed holdout metrics). `holdout_reveal` is never written by
-    a plugin.
+    `holdout_metric` (the sealed holdout metrics), and *(CC-PLUG-0009, BUG-0104)* INSERT
+    into `holdout_seal`: a stage can add a seal, never update or delete one.
+    `holdout_reveal` and `holdout_seal_meta` are never written by a plugin.
   - **Denied:** every other write (`finding`; label-defining `candidate` state;
     UPDATE/DELETE of the output tables), all DDL including `IF NOT EXISTS`,
     ATTACH/DETACH, and PRAGMA assignment.

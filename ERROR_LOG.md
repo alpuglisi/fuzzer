@@ -18,6 +18,84 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Credentials: a failed credential delete reported success (fixed, BUG-0109/PA-0110)
+- **Symptom:** a backend PermissionError on delete returned normally; the credential stayed usable.
+- **Root cause:** `except Exception: pass` around the backend delete.
+- **Remediation:** delete verifies the entry is gone, else CredentialError with the cause. CC-CORE-0036. `docs/bugs/BUG-0109-credential-delete-reported-false-success.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Credentials: concurrent keyring updates lost one (fixed, BUG-0108/PA-0109)
+- **Symptom:** three writer processes kept 6 of 18 credentials.
+- **Root cause:** an unlocked load-modify-replace.
+- **Remediation:** a thread lock plus a flock on a stable <keyring>.lock, held across load → save. CC-CORE-0036. `docs/bugs/BUG-0108-keyring-lost-update.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: unreadable evidence crashed datasets or fabricated a training row (fixed, BUG-0107/PA-0108)
+- **Symptom:** `[]` evidence → AttributeError; `{not json` → a fake negative row on `/`.
+- **Root cause:** no shape validation; `{}` default.
+- **Remediation:** one parser (`core.evidence`); quarantine, count and record; refuse past 5% or on possible label loss. CC-ML-0025, CC-FUZZ-0059. `docs/bugs/BUG-0107-bad-evidence-crashed-or-fabricated-rows.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: a failed history flush left a partial transaction; retry duplicated rows (fixed, BUG-0106/PA-0107)
+- **Symptom:** an open transaction with one row visible; a retry wrote it twice.
+- **Root cause:** interleaved redact/insert with no savepoint or rollback.
+- **Remediation:** prepare first, then write in a savepoint, roll back on error, commit only an owned transaction. CC-PROXY-0021. `docs/bugs/BUG-0106-history-flush-not-atomic.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Storage: directory-fsync failures were swallowed after a secret replace (fixed, BUG-0105/PA-0106)
+- **Symptom:** an injected EIO returned normally.
+- **Root cause:** a bare `except OSError` (agreed only for unsupported platforms).
+- **Remediation:** skip only EINVAL/ENOTSUP/EOPNOTSUPP or no O_DIRECTORY; else DurabilityUnknown. CC-CORE-0036. `docs/bugs/BUG-0105-directory-fsync-errors-swallowed.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: malformed holdout metadata removed the seal (fixed, BUG-0104/PA-0105)
+- **Symptom:** `holdout: {}`/None/False/unparseable read as unsealed.
+- **Root cause:** truthiness for presence; the seal only in mutable JSON.
+- **Remediation:** present-but-malformed → UNKNOWN; migration 19 `holdout_seal` with an in-migration backfill; guard allow-list. CC-ML-0025, CC-CORE-0036, CC-PLUG-0009. `docs/bugs/BUG-0104-malformed-holdout-record-removed-seal.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — ML: a finite saved model predicted NaN (fixed, BUG-0103/PA-0104)
+- **Symptom:** std=5e-324 → predict_proba [nan].
+- **Root cause:** operands validated, arithmetic not.
+- **Remediation:** std ≥ 1e-12 (trainer floors too); z, logit and outputs checked before return. CC-ML-0025. `docs/bugs/BUG-0103-finite-model-predicts-nan.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Oracle: a regex literal was lexed as code (false XSS) (fixed, BUG-0102/PA-0103)
+- **Symptom:** `return /TOK/` with escaped slashes → CONFIRMED.
+- **Root cause:** a one-character regex/division look-behind.
+- **Remediation:** token-aware context (keywords, paren heads), `}/` → UNSURE. CC-FUZZ-0059. `docs/bugs/BUG-0102-regex-literal-lexed-as-code.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy: upstream reads were unbounded, quadratic and blocked the loop (fixed, BUG-0101/PA-0102)
+- **Symptom:** 541 MB copied for an 8 MiB body; a slow upstream stalled others.
+- **Root cause:** bytes(body) per chunk, no caps, sync sender in a coroutine.
+- **Remediation:** one bytearray, header/body caps and a deadline, sender in a thread. CC-PROXY-0021. `docs/bugs/BUG-0101-unbounded-upstream-read.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Proxy/core: JSON redaction failed open; deep input crashed (fixed, BUG-0100/PA-0101)
+- **Symptom:** a huge int, trailing comma or unquoted key kept the password; 1,100-deep raised.
+- **Root cause:** `except ValueError: return body`; no bounds; type-only dispatch.
+- **Remediation:** fail closed: a whole-body token scan, size and depth bounds, sniffing, framed bodies decoded or omitted. CC-CORE-0036, CC-PROXY-0021. `docs/bugs/BUG-0100-redaction-failed-open.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Core: the HTTP client's recorder stored secrets (fixed, BUG-0099/PA-0100)
+- **Symptom:** URL token, request password and response token persisted in flow/body.
+- **Root cause:** a second producer outside the proxy's redaction.
+- **Remediation:** one storage boundary in core.redaction used by both producers; an AST producer guard. CC-CORE-0036. `docs/bugs/BUG-0099-http-client-recorder-stored-secrets.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Session: an https session was reused over plain http (fixed, BUG-0098/PA-0099)
+- **Symptom:** cookie and bearer applied to http://; greybox sent the cookie unchecked.
+- **Root cause:** the floor bound only the login POST.
+- **Remediation:** SessionState.secure_only checked by prepare, authorize (after plugins), session_header and greybox. CC-SESS-0013, CC-CORE-0036. `docs/bugs/BUG-0098-https-session-reused-over-http.md`.
+- **Status:** Fixed
+
+## 2026-10-13 — Session: a redirected login page became a trusted credential origin (fixed, BUG-0097/PA-0098)
+- **Symptom:** the password was POSTed to attacker.example/collect.
+- **Root cause:** BUG-0092 made the response-derived final URL the allow-list anchor.
+- **Remediation:** hops walked by hand and authorised before fetching; the anchor is operator input only. CC-SESS-0013. `docs/bugs/BUG-0097-redirected-login-page-trusted-as-credential-origin.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Storage: a short write left a truncated secret file and reported success (fixed, BUG-0096/PA-0097)
 - **Symptom:** under a real file-size limit, `write_secret` returned normally with 4 of 11 bytes on disk; the keyring would rename such a temp over the good keyring.
 - **Root cause:** a single `os.write` with its count ignored; no fsync; a non-atomic replace.

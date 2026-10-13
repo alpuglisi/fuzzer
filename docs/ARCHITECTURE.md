@@ -1151,14 +1151,24 @@ tracked in the requirements files, not here.
     AST guard test;
   - `core/redaction.py`: the one secret-name predicate, by name token (plurals folded,
     CC-CORE-0035), for logs and proxy history. A sensitive JSON key's whole value is
-    redacted (CC-PROXY-0020);
+    redacted (CC-PROXY-0020). It is also **the one fail-closed storage-redaction
+    boundary** (CC-CORE-0036, BUG-0099/0100), used by proxy history and the core HTTP
+    client's recorder alike. It applies size and depth bounds, a whole-body scan for
+    unparseable bodies, and sniffing; an AST guard enumerates the producers;
+  - `core/evidence.py`: the one parser of candidate evidence. Unreadable rows are
+    quarantined by the ML path, never fabricated (CC-CORE-0036, BUG-0107);
   - `core/secretfile.py`: secret files are 0600 from creation, complete or an error
     (`fsync`ed), and replaced atomically (`replace_secret`). A trust root is created
     with `O_EXCL` (`create_secret`). Used by the keyring and the proxy CA, which checks
-    its key/cert pair on load (CC-CORE-0035, CC-PROXY-0020).
+    its key/cert pair on load (CC-CORE-0035, CC-PROXY-0020). A failed directory sync
+    after the rename raises `DurabilityUnknown` unless the platform cannot do it
+    (CC-CORE-0036, BUG-0105). The keyring serialises updates with a lock file and
+    verifies deletes (BUG-0108/0109).
 - **Migrations are atomic and race-safe** (CC-CORE-0034, FR-CORE-24): one
   `BEGIN IMMEDIATE` per migration, the version re-checked under the lock,
-  statement-by-statement, with rollback on error.
+  statement-by-statement, with rollback on error. A migration may carry a Python
+  post-step (`POST_STEPS`) run in the same transaction. Migration 19 backfills
+  `holdout_seal` this way (CC-CORE-0036), so no reader ever writes.
 - **Credential store** `[built]`: keyring-abstracted, with an encrypted-file
   headless/CI fallback on `cryptography` Fernet (PBKDF2, 0600, atomic write; D12);
   secrets by reference only, never in the project store (`core/credentials.py`).
@@ -1176,7 +1186,11 @@ tracked in the requirements files, not here.
   `core/` credential store (OS keyring + encrypted-file headless fallback, D12).
   Detection-only: no hand-written per-host profiles; unparseable logins fail loud.
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
-  identity)`, `ensure(identity)`, resolved by the request's host. Internally the
+  identity)`, `ensure(identity)`, resolved by the request's host. `authorize(request,
+  identity, prepared_host)` re-checks a request after a plugin edits it. Login
+  discovery walks redirects by hand, anchored to operator input; an https session is
+  never sent over http (`secure_only`) on any send path (CC-SESS-0013,
+  BUG-0097/0098). Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
   header-key) — implementation detail, not user config. Post-Phase 6, logins
   detection can't crack are handled by **adopting a session the proxy captures
@@ -1373,7 +1387,10 @@ tracked in the requirements files, not here.
     forward evaluation and ML-tab panel reads public rows only. One mechanism decides
     it (`holdout.sealed_split` / `held_ids`), from the target's recorded memberships
     and the registry `holdout.MEMBERSHIPS`. An unknown membership fails closed: trainers
-    refuse, and the prioritizer raises so the budget cap holds.
+    refuse, and the prioritizer raises so the budget cap holds. *(CC-ML-0025, BUG-0104)*
+    Seals are durable in `holdout_seal` (migration 19, append-only, written by the
+    trainers; the plugin guard allows the INSERT, CC-PLUG-0009). A malformed record is
+    unknown, never "no seal".
   - **Calibration.** `--calibrate platt` Platt-scales the classifier (cross-fitted
     calibrated `score_oof` feeds the gate; the full map is saved with the model, persist
     format 2) and records out-of-fold ECE / Brier before and after.
@@ -1464,7 +1481,12 @@ tracked in the requirements files, not here.
   - the proxy binds loopback only (`core.net`);
   - CA leaves are minted only for a valid host, inside `leaves/`, with 0600 keys;
   - history redacts URL query parameters and form / JSON / multipart bodies by name
-    token (FR-PROXY-10/11).
+    token (FR-PROXY-10/11), failing closed through `core.redaction`. Chunked or
+    compressed bodies are decoded with bounds, and a secret-bearing one is omitted
+    (CC-PROXY-0021). A flush is all-or-nothing (savepoint, BUG-0106);
+  - upstream reads are bounded (64 KiB headers, a configurable 64 MiB body and overall
+    deadline) and never re-copied, and the blocking sender runs off the event loop
+    (FR-PROXY-12, BUG-0101).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
   (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
   redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay
@@ -1693,6 +1715,7 @@ detail):
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |
+| `holdout_seal`, `holdout_seal_meta` (append-only blind-holdout seals per target, plus the backfill watermark; migration 19) | ML trainers via `holdout.write_seal` (INSERT only); migration 19's post-step (backfill, watermark) | `fuzzlab.ml.holdout` (sealing) |
 | `holdout_metric`, `holdout_reveal` (sealed blind-holdout metrics and the reveal count; migration 17) | ML trainers via `core.sealed.write_metrics`; `fuzzlab reveal-holdout` (reveal rows) | only `core.sealed.reveal` (`fuzzlab reveal-holdout`); hidden from the store browser (`SEALED_TABLES`) |
 | `model` (versions, calibration incl. `run_id` scope — a store-wide row also records `scored_run_ids` (CC-ML-0023) — + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
 | `request_budget` | all tools | budget manager, UI |

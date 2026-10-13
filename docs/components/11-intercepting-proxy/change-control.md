@@ -3,6 +3,51 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0021 — Fail-closed history redaction incl. framed bodies (BUG-0100); bounded upstream reads off the loop (BUG-0101); atomic history flush (BUG-0106) (2026-10-13)
+- Change:
+  - **`proxy/redact.py` (BUG-0100).**
+    - It delegates body and URL redaction to `core.redaction`.
+    - Chunked or compressed bodies are decoded with bounds (de-chunked;
+      gzip/deflate) and checked: a clean one is kept byte-exact; a secret, or an
+      undecodable redactable body, becomes the marker, with TE/CE dropped and
+      Content-Length set.
+    - `redact_body_for` follows the same rule.
+  - **`proxy/socketsender.py` (BUG-0101).**
+    - One bytearray and no per-chunk copy.
+    - `MAX_HEAD_BYTES`, `max_body` and an overall `deadline`, breached with
+      `UpstreamResponseError`.
+    - `SocketSender(max_body=, deadline=)` and `fuzzlab proxy --max-response-bytes /
+      --response-deadline`.
+  - **`proxy/server.py`.** Both sender calls use `await asyncio.to_thread(...)`.
+  - **`proxy/history.py` (BUG-0106).**
+    - `flush` prepares first, contains a failed record with omitted bodies, and writes
+      in `SAVEPOINT history_flush` (roll back and re-raise on error).
+    - It commits only a transaction it owns, and keeps only the written records out of
+      the buffer.
+    - An `RLock` guards `record` / `flush`.
+  - **`proxy/session_capture.py`.** `secure_only` is set from https URLs or `Secure`
+    cookies (BUG-0098).
+- Impact (other components / project):
+  - **CORE:** the boundary.
+  - **SESS:** capture.
+  - **Behaviour changes:**
+    - the former framed-body residual is closed;
+    - an oversized or unparseable sensitive body is stored as a marker;
+    - long-lived or large responses are cut off at the configurable bounds;
+    - history `errors` lists contained records.
+- Risk: medium. These are proxy data-path changes. The proxy suites pass, and bounds
+  and containment are tested.
+- Deliverables:
+  - [x] framed-body redaction — done
+  - [x] bounded reads + thread offload + CLI options — done
+  - [x] atomic flush — done
+  - [x] tests: `test_proxy_upstream_and_flush` (new), `test_proxy_redaction` (the
+        residual test replaced), `test_storage_redaction` — done
+  - [x] FR-PROXY-11 amended, FR-PROXY-12 added — done
+- Implementation divergence: none.
+- Review: the review-9 draft (all 13 findings reproduced first on `1619932`) went v1 → v4 through both reviewers. A: 2 must-fix, 6 should-fix and 4 nits on v1, then 1 must-fix and 1 nit on v2. B: 2 must-fix, 7 should-fix and 5 nits on v1, then 1 must-fix on v2, and S9 on v3. AGREED 3/3 on v3. S9, a narrowing, was adopted as v4 with A's confirmation.
+- Effectiveness (assessed 2026-10-13): effective offline. All 13 findings were reproduced on `1619932` (`scratchpad/ext2/f01..f13`). Each now has a test that fails there (or cannot import there, its repro script showing the old behaviour), and the repros show the fixed behaviour on the new tree. Mutation check (a copy of the working tree, `PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH` set to the copy): 47 mutants across the 13 fixes. 45 were killed on the first pass. The 2 survivors each showed a test gap, and both gaps were closed: the in-scope path of the event-loop test, and the thread lock without `fcntl`. Result: 47/47. Full non-labgen suite (150 files, `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 2003 passed, 13 skipped, 2 xfailed. The 1 error was `test_no_ml`'s real build, which builds from git-tracked files; it passes once the new files are staged (the no-ML and packaging files: 17 passed, 1 known environmental skip). The two gap-closing test files, re-run after the suite: 55 passed. The labgen half was not re-run, since no labgen code changed.
+
 ### CC-PROXY-0020 — Whole-subtree JSON redaction (BUG-0090); CA key never silently replaced, pair checked, atomic leaf writes (BUG-0096) (2026-10-13)
 - Change:
   - **Redaction (BUG-0090).** `proxy.redact._redact_json` replaces a sensitive key's

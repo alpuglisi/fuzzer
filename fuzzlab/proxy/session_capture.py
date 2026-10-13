@@ -29,6 +29,7 @@ class SessionCapture:
         self._headers: dict[str, str] = {}
         self._token_exp: float | None = None
         self._login_url: str | None = None
+        self._https_seen = False             # any https URL or Secure cookie (BUG-0098)
 
     # --- observation ---------------------------------------------------------
     def observe_request(self, raw: bytes, url: str | None = None) -> None:
@@ -45,12 +46,18 @@ class SessionCapture:
                 self._token_exp = detect.decode_jwt_exp(value[7:].strip())
         if url is not None:
             self._login_url = url
+            self._https_seen |= url.lower().startswith("https:")
 
     def observe_response(self, raw: bytes, url: str | None = None) -> None:
         """Capture cookies the server sets (Set-Cookie) during the login."""
         msg = RawMessage.from_bytes(raw)
+        if url is not None:
+            self._https_seen |= url.lower().startswith("https:")
         for sc in msg.get_all("Set-Cookie"):
-            self._cookies.update(detect.parse_set_cookie(sc.decode("latin-1", "replace")))
+            text = sc.decode("latin-1", "replace")
+            self._cookies.update(detect.parse_set_cookie(text))
+            if any(a.strip().lower() == "secure" for a in text.split(";")[1:]):
+                self._https_seen = True
 
     # --- result --------------------------------------------------------------
     def has_session(self) -> bool:
@@ -66,6 +73,7 @@ class SessionCapture:
             host=self.host, identity=self.identity, kind=kind,
             cookies=dict(self._cookies), headers=dict(self._headers),
             token_exp=self._token_exp, login_url=self._login_url, valid=True,
+            secure_only=self._https_seen,
         )
 
     def adopt_into(self, manager: SessionManager) -> SessionState:

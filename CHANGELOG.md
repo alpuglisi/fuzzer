@@ -4,6 +4,39 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Error review 9: a third-party audit's 13 findings fixed — BUG-0097..0109)
+- **None was a deliberately vulnerable lab behaviour:** all 13 are in `fuzzlab/`. Each
+  was reproduced on `1619932` first.
+- **Session (CC-SESS-0013):**
+  - login redirects are walked hop by hop and anchored to operator input. This fixes
+    BUG-0097, a regression from BUG-0092 that sent the password to a redirected
+    origin;
+  - an https session is never sent over http on any send path, greybox included
+    (BUG-0098).
+- **Redaction (CC-CORE-0036, CC-PROXY-0021):**
+  - one fail-closed storage boundary in `core.redaction` is now also used by the HTTP
+    client's recorder (BUG-0099);
+  - unparseable, deep, oversized, mislabelled, chunked and compressed bodies no longer
+    keep secrets (BUG-0100).
+- **Proxy:**
+  - bounded, non-copying upstream reads, off the event loop (BUG-0101);
+  - an all-or-nothing history flush (BUG-0106).
+- **Oracle:** token-aware regex/division lexing, so no false XSS from regex literals
+  (CC-FUZZ-0059, BUG-0102).
+- **ML (CC-ML-0025, CC-PLUG-0009):**
+  - a loaded model's arithmetic is checked (BUG-0103);
+  - holdout seals are durable in a new `holdout_seal` table (migration 19, backfilled
+    in the migration), and malformed seals fail closed (BUG-0104);
+  - unreadable evidence is quarantined, counted, and refused past 5% (BUG-0107).
+- **Storage and credentials (CC-CORE-0036):**
+  - real directory-fsync errors surface (BUG-0105);
+  - keyring updates are locked (BUG-0108);
+  - deletes are verified (BUG-0109).
+- **Why:**
+  - three of these came from my own previous commit (BUG-0097, 0104, 0105);
+  - each bug doc carries a prior-PA failure analysis;
+  - PA-0098..0110 strengthen the rules that missed them.
+
 ## 2026-10-13 (Error review 8: an external review's seven findings fixed — BUG-0090..0096)
 - A third-party review of `5eb4be9` reported seven defects, and each was reproduced
   before fixing.

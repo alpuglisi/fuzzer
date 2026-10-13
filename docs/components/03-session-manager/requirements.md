@@ -85,6 +85,26 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     are followed by hand as a GET, only to an allowed origin; 307/308 never.
   - **HTTP Basic.** A base URL answering `401` + `WWW-Authenticate: Basic` (no form)
     authenticates with the Basic header, sent only to that in-scope base URL.
+- **FR-SESS-13 (session transport binding, CC-SESS-0013, BUG-0097/0098)**
+  - **Navigation.** Login discovery and the post-login probe never let the fetcher
+    follow redirects. Each hop (at most 5) is authorised **before** it is fetched, by
+    the same predicate as credential destinations. A fetcher that cannot refuse
+    redirects must report the URL it was asked for, or discovery refuses.
+  - **The anchor is operator input only:** the base URL's origin, its https upgrade,
+    in-scope hosts (any port: host-level scope, D12), and `auth_origins`, which is the
+    origin-precise alternative. A response-derived page is never an anchor.
+  - **`SessionState.secure_only`.** Set when the login, a captured session or the stored
+    `login_url` was https. An unknown legacy `login_url` fails closed.
+  - **Where it is enforced.** An https session's cookies, tokens and Basic header are
+    never sent over plain http:
+    - `prepare`;
+    - `authorize`, after a plugin retarget, which also refuses another host;
+    - `session_header`;
+    - greybox's sender.
+  - **Per host, by design (D12).** A session is keyed per host, so other ports of the
+    same host are allowed. Cookie Path is not enforced: a stated residual, since the
+    same origin learns nothing new.
+
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth.
 - **NFR-SESS-zero-request** Prefer validity signals that cost no request (e.g.

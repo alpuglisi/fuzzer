@@ -24,11 +24,18 @@ import base64
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from fuzzlab.core.secretfile import replace_secret
+from fuzzlab.core.secretfile import DurabilityUnknown, replace_secret
+
+try:                                    # POSIX advisory locks; absent on Windows
+    import fcntl
+except ImportError:  # pragma: no cover - platform dependent
+    fcntl = None
 
 SERVICE = "fuzzlab"
 
@@ -124,10 +131,27 @@ class CredentialStore:
         return cred
 
     def delete(self, host: str, identity: str) -> None:
+        """Delete a stored credential, and **verify** it is gone (BUG-0109): a backend
+        error is ignored only when the entry is in fact absent afterwards (deleting a
+        missing entry is not an error). Otherwise `CredentialError`, with the backend's
+        exception as its cause — never a secret in the message."""
+        account = self._account(host, identity)
+        failure: Exception | None = None
         try:
-            self._backend.delete_password(SERVICE, self._account(host, identity))
-        except Exception:  # noqa: BLE001 - deleting a missing entry is not an error
-            pass
+            self._backend.delete_password(SERVICE, account)
+        except Exception as exc:  # noqa: BLE001 - judged by the verification below
+            failure = exc
+        try:
+            still = self._backend.get_password(SERVICE, account)
+        except Exception as exc:  # noqa: BLE001 - cannot verify: not deleted
+            raise CredentialError(
+                f"could not verify deleting {identity!r} on {_norm_host(host)!r}: "
+                f"{type(exc).__name__}") from (failure or exc)
+        if still is not None:
+            raise CredentialError(
+                f"could not delete the credential for {identity!r} on "
+                f"{_norm_host(host)!r}"
+                + (f": {type(failure).__name__}" if failure else "")) from failure
 
     def _from_env(self, host: str, identity: str) -> Credential | None:
         key = f"FUZZLAB_CRED_{_norm(host)}_{_norm(identity)}"
@@ -180,6 +204,26 @@ class _CryptographyFileBackend:
     def __init__(self, path: str, passphrase: str):
         self._path = Path(path)
         self._passphrase = passphrase.encode("utf-8")
+        self._thread_lock = threading.Lock()
+
+    @contextmanager
+    def _locked(self):
+        """Serialise a load → mutate → save (BUG-0108, PA-0109): a thread lock, plus an
+        exclusive ``flock`` on a stable ``<keyring>.lock`` (0600, never the keyring
+        inode, which each save replaces). Without ``fcntl`` (non-POSIX) only threads
+        are serialised; ``flock`` is advisory and unreliable on NFS — both stated."""
+        with self._thread_lock:
+            if fcntl is None:
+                yield
+                return
+            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(str(self._path) + ".lock",
+                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                yield
+            finally:
+                os.close(fd)                     # releases the flock
 
     def _fernet(self, salt: bytes):
         from cryptography.fernet import Fernet
@@ -219,18 +263,25 @@ class _CryptographyFileBackend:
         self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         # owner-only from creation (PA-0080), complete or an error, and an atomic
         # replace: a failed save leaves the previous keyring intact (BUG-0096)
-        replace_secret(self._path, self._MAGIC + salt + token)
+        try:
+            replace_secret(self._path, self._MAGIC + salt + token)
+        except DurabilityUnknown as exc:
+            raise CredentialError(
+                f"the keyring was saved to {self._path} but its durability could not be "
+                f"confirmed ({exc.strerror}); retrying is safe") from exc
 
     def get_password(self, service: str, account: str) -> str | None:
         _, data = self._load()
         return data.get(f"{service}:{account}")
 
     def set_password(self, service: str, account: str, password: str) -> None:
-        salt, data = self._load()
-        data[f"{service}:{account}"] = password
-        self._save(salt, data)
+        with self._locked():
+            salt, data = self._load()
+            data[f"{service}:{account}"] = password
+            self._save(salt, data)
 
     def delete_password(self, service: str, account: str) -> None:
-        salt, data = self._load()
-        if data.pop(f"{service}:{account}", None) is not None:
-            self._save(salt, data)
+        with self._locked():
+            salt, data = self._load()
+            if data.pop(f"{service}:{account}", None) is not None:
+                self._save(salt, data)

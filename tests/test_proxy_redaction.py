@@ -80,16 +80,41 @@ def test_multipart_fields_are_redacted_but_files_are_not():
     assert b"mp-secret" not in out and b"alice" in out and b"file-bytes" in out
 
 
-def test_chunked_and_compressed_bodies_are_stored_as_received():
-    """A stated residual: the proxy never rewrites framing it does not control."""
+def test_chunked_and_compressed_bodies_with_a_secret_are_omitted():
+    """BUG-0100 closed the former residual: a framed body is decoded (bounded) and
+    checked; one carrying a secret is replaced by the marker, with consistent framing
+    (no Transfer-/Content-Encoding, Content-Length = the marker's length)."""
+    from fuzzlab.core.redaction import OMIT_UNSAFE
+    from fuzzlab.proxy.message import RawMessage
     gz = gzip.compress(b"password=hunter2")
     raw = (b"POST /l HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-urlencoded"
            b"\r\nContent-Encoding: gzip\r\n\r\n" + gz)
-    assert redact(raw).endswith(gz)
     chunked = (b"POST /l HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-"
                b"urlencoded\r\nTransfer-Encoding: chunked\r\n\r\n10\r\npassword=hunter2\r\n0"
                b"\r\n\r\n")
-    assert redact(chunked) == chunked
+    for message in (raw, chunked):
+        out = RawMessage.from_bytes(redact(message))
+        assert out.body == OMIT_UNSAFE and b"hunter2" not in out.raw
+        assert out.get("Transfer-Encoding") is None and out.get("Content-Encoding") is None
+        assert out.get("Content-Length") == str(len(OMIT_UNSAFE)).encode()
+
+
+def test_clean_chunked_and_compressed_bodies_stay_byte_exact():
+    gz = gzip.compress(b"q=puppies&page=2")
+    raw = (b"POST /l HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-urlencoded"
+           b"\r\nContent-Encoding: gzip\r\n\r\n" + gz)
+    chunked = (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: "
+               b"chunked\r\n\r\n9\r\n{\"a\":\"b\"}\r\n0\r\n\r\n")
+    assert redact(raw) == raw and redact(chunked) == chunked
+
+
+def test_a_decompression_bomb_is_bounded(monkeypatch):
+    import fuzzlab.proxy.redact as r
+    monkeypatch.setattr(r, "MAX_REDACT_BYTES", 1000)
+    bomb = gzip.compress(b"a" * 100_000)
+    raw = (b"POST /l HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n"
+           b"Content-Encoding: gzip\r\n\r\n" + bomb)
+    assert r.redact(raw).endswith(r.OMIT_UNSAFE)        # undecodable within the bound
 
 
 @pytest.mark.parametrize("name", ["password", "user_password", "accessToken", "api_key",

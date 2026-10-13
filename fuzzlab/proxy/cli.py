@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Local CA directory (holds fuzzlab-ca.crt / .key)")
     p.add_argument("--store", default=None, help="Store (SQLite) to record flow history")
     p.add_argument("--identity", default=None, help="Tag recorded flows with this identity")
+    p.add_argument("--max-response-bytes", type=int, default=None,
+                   help="Cap on one upstream response body (default 64 MiB; FR-PROXY-12)")
+    p.add_argument("--response-deadline", type=float, default=None,
+                   help="Overall seconds for one upstream response (default 4x the idle "
+                        "timeout; long-lived streams are cut off by design)")
     p.add_argument("--no-verify-tls", action="store_true",
                    help="Do not verify upstream TLS certs (self-signed lab origins)")
     p.add_argument("--export-ca", action="store_true",
@@ -79,7 +84,10 @@ def main(argv: list[str]) -> int:
     except ValueError as exc:
         p.error(str(exc))
 
-    sender = SocketSender(verify_tls=not args.no_verify_tls)
+    from fuzzlab.proxy.socketsender import MAX_BODY_BYTES
+    sender = SocketSender(verify_tls=not args.no_verify_tls,
+                          max_body=args.max_response_bytes or MAX_BODY_BYTES,
+                          deadline=args.response_deadline)
     scope = _build_scope(args.scope)
 
     store = None

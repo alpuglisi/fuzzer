@@ -546,3 +546,45 @@ def test_the_loader_boundary_types_every_extreme_failure(monkeypatch, exc):
     monkeypatch.setattr(persist, "_build", boom)
     with pytest.raises(ModelParamsError, match="out of range"):
         loads_model(text, sha)
+
+
+# --- BUG-0103 / PA-0104: a loaded model's arithmetic must stay finite ---------------
+
+def _logistic_env(w, std, d=len(FEATURE_NAMES)):
+    env = copy.deepcopy(_good())
+    env["params"].update(w=[w] * d, mean=[0.0] * d, std=[std] * d)
+    return env
+
+
+@pytest.mark.parametrize("std", [5e-324, 1e-300, 1e-13, -1.0])
+def test_a_std_below_the_floor_is_refused(std):
+    text, sha = _resealed(_logistic_env(0.0, std))
+    with pytest.raises(ModelParamsError, match="standard deviation"):
+        loads_model(text, sha)
+
+
+def test_a_finite_model_whose_arithmetic_overflows_is_refused_at_scoring():
+    """Valid parameters, but an input of 1e300 / std 1e-12 is not a finite z."""
+    text, sha = _resealed(_logistic_env(1.0, 1e-12))
+    m = loads_model(text, sha)
+    with pytest.raises(ModelParamsError, match="not finite"):
+        m.predict_proba([[1e300] * len(FEATURE_NAMES)])
+
+
+def test_scores_are_checked_before_any_is_returned(monkeypatch):
+    text, sha = _resealed(_good())
+    m = loads_model(text, sha)
+    monkeypatch.setattr(m.model, "predict_proba", lambda X: [0.5, float("nan")])
+    with pytest.raises(ModelParamsError, match="non-finite"):
+        m.predict_proba([[0.0] * len(FEATURE_NAMES)] * 2)
+
+
+def test_the_trainer_floors_a_near_constant_features_std():
+    from fuzzlab.ml.logistic import STD_FLOOR
+    X = [[1.0 + (1e-15 if i % 2 else 0.0)] + [float(i % 3)] * (len(FEATURE_NAMES) - 1)
+         for i in range(20)]
+    model = LogisticRegression().fit(X, [i % 2 for i in range(20)])
+    assert all(s >= STD_FLOOR for s in model._std)
+    text, sha = dumps_model("logistic", model, feature_names=FEATURE_NAMES,
+                            feature_version=FEATURE_VERSION)
+    assert loads_model(text, sha) is not None

@@ -28,8 +28,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   and `flow_id` where applicable, plus an audit log of every request.
 - **FR-CORE-5** Provide a request-budget manager with per-component caps and a
   per-host mutex that serializes timing-sensitive traffic to concurrency 1.
-- **FR-CORE-6** Provide an HTTP send helper that requires a session context and
-  records raw bytes.
+- **FR-CORE-6** Provide an HTTP send helper that requires a session context.
+  *(Amended CC-CORE-0036, BUG-0099.)* It records flows **redacted**, through the
+  `core.redaction` storage boundary (URL query and both bodies; the content type is
+  matched case-insensitively). The wire request stays exact. This resolves the former
+  conflict between "records raw bytes" and NFR-CORE-secrets.
 - **FR-CORE-7** Provide a plugin registry (entry points plus hooks).
 - **FR-CORE-8** Provide a generic cross-run scalar time-series sink,
   `metric_series(run_id, source, key, step, ts, value)`, for per-step
@@ -160,6 +163,39 @@ plugin registry. It is the layer that makes the store the integration bus.
       failure the original is intact and no temp is left).
 
     The encrypted keyring saves through `replace_secret`.
+  - *(CC-CORE-0036, BUG-0105)* The directory fsync is skipped only where the platform
+    cannot do it (no `O_DIRECTORY`; `EINVAL` / `ENOTSUP` / `EOPNOTSUPP`). Any other
+    error after the rename raises `DurabilityUnknown`: the new content is visible,
+    durability is not established, and a retry is safe.
+  - *(CC-CORE-0036, BUG-0100/0099)* **`core.redaction` is the one storage-redaction
+    boundary** (`redact_url`, `redact_body`) for every producer of persisted traffic,
+    and it **fails closed**:
+    - a body over `MAX_REDACT_BYTES` (8 MiB) is omitted;
+    - unparseable JSON, or JSON deeper than `MAX_JSON_DEPTH` (64), is omitted when any
+      identifier-like token or quoted string in it is a sensitive name, and kept
+      otherwise;
+    - untyped and `text/plain` bodies are sniffed (JSON if it parses, form if it has
+      the urlencoded shape).
+
+    An AST guard enumerates the producers.
+  - *(CC-CORE-0036, BUG-0108/0109)* The encrypted keyring serialises load → save with a
+    thread lock plus `flock` on `<keyring>.lock`. Non-POSIX gets threads only, and
+    `flock` is advisory and unreliable on NFS (both stated). `CredentialStore.delete`
+    verifies the entry is gone, or raises `CredentialError`.
+  - *(CC-CORE-0036, BUG-0107)* `core.evidence.parse_evidence` is the one parser of
+    candidate evidence: an object with string `url` / `param` / `category`, and
+    `method` absent or a string; anything else is `None`. `display_evidence` is the
+    display-only, never-raising variant.
+- **FR-CORE-26** *(migration 19; `CC-CORE-0036`, 2026-10-13, BUG-0104).*
+  - `holdout_seal` (`origin`, `record`, `version`, `fraction`, `model_id`,
+    `created_at`; append-only) holds every blind-holdout seal, apart from the mutable
+    model calibration JSON.
+  - `holdout_seal_meta` holds the backfill watermark (the highest model id at
+    migration time).
+  - `migrations.POST_STEPS = {19: _backfill_holdout_seal}` copies every present legacy
+    `holdout` record (valid or malformed) **inside the migration's own
+    `BEGIN IMMEDIATE` transaction**, so no reader ever writes.
+  - The tables hold membership facts only, and stay browsable.
 - **FR-CORE-23** *(aborted runs; `CC-CORE-0033`, 2026-10-13, BUG-0078).*
   `Store.mark_aborted(run_id, exc)` records on a run that failed after it started
   `run.notes = "aborted: <Type>: <message>"`, or `"aborted: exit N"` for `SystemExit`,

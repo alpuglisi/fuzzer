@@ -106,7 +106,7 @@ class RequestsCorrelatingSender:
     """
 
     def __init__(self, *, header: str = "X-Fzl-Cov", timeout: float = 15.0,
-                 cookie: str | None = None,
+                 cookie: str | None = None, cookie_secure_only: bool = False,
                  id_factory: Callable[[], str] | None = None, session=None):
         import requests
         self._requests = requests
@@ -118,6 +118,7 @@ class RequestsCorrelatingSender:
         self._header = header
         self._timeout = timeout
         self._cookie = cookie
+        self._cookie_secure_only = cookie_secure_only    # BUG-0098: https-only cookie
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
 
     def send_correlated(self, url: str, param: str, value: str, *,
@@ -125,6 +126,11 @@ class RequestsCorrelatingSender:
         cid = self._id_factory()
         headers = {self._header: cid}
         if self._cookie:
+            if self._cookie_secure_only and not url.lower().startswith("https:"):
+                from fuzzlab.session.manager import SessionAuthError
+                raise SessionAuthError(
+                    f"refusing to send an https session cookie over plain http "
+                    f"({url.split('?', 1)[0]})")
             headers["Cookie"] = self._cookie
         # allow_redirects=False (BUG-0044/PA-0046, same fix as
         # fuzzlab.tools.probesender.RequestsProbeSender): this sender also

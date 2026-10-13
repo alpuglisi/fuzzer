@@ -25,6 +25,7 @@ from fuzzlab.ml.ranker import Ranker
 from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k, ndcg_at_k, precision_at_k
 from fuzzlab.ml.train import (SCORE_DEPLOY, SCORE_EARLIER, SCORE_OOF_LABELLED, SCORE_SAVED,
                               _apply_seal, _insert_model, _metric, _record_holdout,
+                              _refuse_quarantine, record_quarantine,
                               _saved_oof_scope, _seal, _thin, forward_rows,
                               forward_skip_reason, saved_training_rows)
 from fuzzlab.ml.text_features import candidate_text
@@ -202,6 +203,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     if holdout and run_id is None:
         raise ValueError("holdout needs a run: membership is per target")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
+    _refuse_quarantine(ds)                                    # BUG-0107
     # sealed rows never train, evaluate or choose the objective — explicit or implied
     # by a sealed target (FR-ML-19, BUG-0091)
     ds, held, hplan, store_seal = _apply_seal(store, run_id, ds, holdout)
@@ -263,6 +265,7 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     if run_id is None:
         # a store-wide row covers exactly the runs it ranked (BUG-0074)
         calibration["scored_run_ids"] = run_ids_of(store, every.ids)
+    record_quarantine(store, run_id, ds, calibration, result)
     if held is not None:
         _record_holdout(calibration, result, hplan, held, sealed, holdout_reason)
     elif store_seal is not None:
@@ -344,16 +347,16 @@ def _rank_from_saved(store, run_id, *, model_id=None, at_k: int = 10,
                                        model_id=model_id)
     if row is None:
         return {**base, "refused": True, "reason": reason}
-    try:
-        loaded = loads_model(*params_for(store, row["id"]))
-        loaded.check_compatible()
-    except (ModelParamsError, ModelIncompatibleError) as exc:
-        return {**base, "refused": True,
-                "reason": f"saved model #{row['id']} cannot be applied: {exc}"}
     at_k = source.get("at_k", at_k)
     every = build_dataset(store, run_id, include_unlabelled=True)
     texts = _candidate_texts(store, run_id, every.ids)
-    scores = loaded.score(every.X, texts) if len(every) else []
+    try:
+        loaded = loads_model(*params_for(store, row["id"]))
+        loaded.check_compatible()
+        scores = loaded.score(every.X, texts) if len(every) else []    # BUG-0103
+    except (ModelParamsError, ModelIncompatibleError) as exc:
+        return {**base, "refused": True,
+                "reason": f"saved model #{row['id']} cannot be applied: {exc}"}
     _write_ranks(store, every.ids, scores,             # and clears rank_score_oof
                  probabilistic=getattr(loaded.model, "objective_used", "pointwise")
                  != "pairwise")
@@ -409,6 +412,10 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     except ho.SealingUnknown as exc:
         return {**base, "refused": True, "reason": str(exc)}
     prior = build_dataset(store, before_run_id=run_id, target=target)       # labelled
+    from fuzzlab.ml.dataset import quarantine_refusal
+    if (reason := quarantine_refusal(prior)) is not None:                  # BUG-0107
+        return {**base, "refused": True, "reason": reason}
+    quarantine_ds = prior
     held = None
     if hplan is not None:
         prior = ho.sealed_split(store, prior, run_id=run_id, plan=hplan)[0]
@@ -456,6 +463,7 @@ def _rank_from_earlier(store, run_id, *, min_rows, min_positives, k, at_k, seed,
     result.update(fwd_result)
     calibration.update(fwd_calibration)
     _objective_record(calibration, result, obj_info, ranker)
+    record_quarantine(store, run_id, quarantine_ds, calibration, result)
     sealed = None
     if held is not None:
         sealed, reason = _holdout_ranking(store, run_id, held,

@@ -38,7 +38,7 @@ class _Site:
         self.post_resp = post_resp or FetchResponse(200, {"Set-Cookie": "s=1"}, "welcome")
         self.follow = follow or {}
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         self.log.append(("GET", url))
         if url in self.follow:
             return self.follow[url]
@@ -128,7 +128,7 @@ class _BasicSite:
         self.good = "Basic " + base64.b64encode(f"alice:{password}".encode()).decode()
         self.log = []
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         self.log.append((url, (headers or {}).get("Authorization")))
         if (headers or {}).get("Authorization") == self.good:
             return FetchResponse(200, {}, "<p>private</p>")
@@ -156,7 +156,7 @@ def test_wrong_basic_credentials_are_rejected():
 
 def test_a_post_answering_401_basic_switches_to_basic():
     class Hybrid(_BasicSite):
-        def get(self, url, headers=None):
+        def get(self, url, headers=None, allow_redirects=True):
             if url.endswith("/login") and not headers:
                 return FetchResponse(200, {}, FORM.format(action="/login"))
             if not headers:
@@ -184,7 +184,7 @@ class _HttpsSite(_Site):
         super().__init__(action, **kw)
         self.login_redirect = login_redirect
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, allow_redirects=True):
         resp = super().get(url, headers)
         if url.endswith("/login") and self.login_redirect:
             # the fetcher followed an https -> http redirect to the real login page
@@ -226,11 +226,30 @@ def test_every_allow_path_is_overridden_by_the_deny():
         assert not m._credential_destination_ok(target, "https://lab.example/login")
 
 
+class _Hops(_Site):
+    """``_Site`` whose ``/login`` answers a chain of 302s (the fetcher never follows:
+    the manager walks the hops itself, BUG-0097)."""
+
+    def __init__(self, action, hops, **kw):
+        super().__init__(action, **kw)
+        self.hops = hops                          # {url: next_url}
+
+    def get(self, url, headers=None, allow_redirects=True):
+        if url in self.hops:
+            self.log.append(("GET", url))
+            return FetchResponse(302, {"Location": self.hops[url]}, "")
+        if url.startswith("http://lab.example/real-login"):
+            self.log.append(("GET", url))
+            return FetchResponse(200, {}, FORM.format(action=self.action))
+        return super().get(url, headers)
+
+
 def test_a_discovery_redirect_from_https_to_http_is_refused():
-    """base_url https -> 302 -> an http login page: refused before any POST."""
-    site = _HttpsSite("/login", login_redirect="http://lab.example/login")
+    """base_url https -> 302 -> an http login page: refused before it is even fetched."""
+    site = _Hops("/login", {"https://lab.example/login": "http://lab.example/real-login"})
     with pytest.raises(SessionAuthError, match="downgrade"):
         _manager(site, scope=["lab.example"]).ensure("lab.example", "user", _HTTPS)
+    assert ("GET", "http://lab.example/real-login") not in site.log
     assert not [e for e in site.log if e[0] == "POST"]
 
 
@@ -264,17 +283,11 @@ def test_the_default_fetcher_reports_the_final_url_and_every_hop():
 
 def test_an_https_hop_in_discovery_sets_the_floor_even_for_an_http_base():
     """http base -> https hop -> http login page: the chain went down from https, so
-    the page (and its form) is refused before any POST."""
-    class Chain(_Site):
-        def get(self, url, headers=None):
-            resp = super().get(url, headers)
-            if url.endswith("/login"):
-                return FetchResponse(resp.status, resp.headers, resp.text,
-                                     url="http://lab.example/login",
-                                     history_schemes=("http", "https", "http"))
-            return resp
-    site = Chain("/login")
+    the http hop is refused before any request to it or any POST."""
+    site = _Hops("/login", {"http://lab.example/login": "https://lab.example/sso",
+                            "https://lab.example/sso": "http://lab.example/real-login"})
     with pytest.raises(SessionAuthError, match="downgrade"):
         _manager(site, scope=["lab.example"]).ensure("lab.example", "user",
                                                      "http://lab.example/")
+    assert ("GET", "http://lab.example/real-login") not in site.log
     assert not [e for e in site.log if e[0] == "POST"]

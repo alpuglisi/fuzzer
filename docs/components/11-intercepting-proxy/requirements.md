@@ -72,7 +72,14 @@ that shares the store, never a mandatory pipeline (D5).
   - form, JSON (any depth) and multipart (non-file) request and response bodies. *(CC-PROXY-0020,
     BUG-0090:)* a sensitive JSON key's **whole value** is replaced, whatever its type
     (scalar, list, object or nested), and plural names are sensitive
-    (`core.redaction`);
+    (`core.redaction`). *(CC-PROXY-0021, BUG-0100:)* it fails closed through the shared
+    boundary (FR-CORE-25). Chunked or compressed bodies are decoded with bounds
+    (gzip / deflate): a clean one is stored byte-exact; one with a secret, or
+    undecodable with a redactable type, is replaced by the marker, with
+    `Transfer-Encoding` / `Content-Encoding` dropped and `Content-Length` set. The
+    former residual is closed. `HistoryWriter.flush` is all-or-nothing (a savepoint;
+    it commits only a transaction it owns), and a record whose redaction fails is
+    stored with omitted bodies (BUG-0106);
   - `flow.url` and the separately stored bodies.
 
   Sensitivity is by name token (`core.redaction.is_sensitive_name`). Benign messages
@@ -80,6 +87,18 @@ that shares the store, never a mandatory pipeline (D5).
   bodies are stored as received (a residual). Trade-off: a Repeater tab seeded from
   history carries placeholders, and `HistoryWriter(redact_secrets=False)` is the
   lab-local opt-out.
+- **FR-PROXY-12 (bounded upstream reads, CC-PROXY-0021, BUG-0101)**
+  - `recv_http_response` accumulates in one buffer, never re-copied.
+  - **Bounds:** headers ≤ 64 KiB; the body ≤ `max_body` (default 64 MiB); an overall
+    deadline (default the idle timeout × 4). Breaching any of them raises
+    `UpstreamResponseError`, and the connection is answered with a 502.
+  - **Configurable:** `SocketSender(max_body=, deadline=)` and `fuzzlab proxy
+    --max-response-bytes / --response-deadline`. They cut off long-lived streams and
+    very large downloads, by design.
+  - **Off the event loop:** the engine runs the (stateless) sender with
+    `asyncio.to_thread`, with at most min(32, CPUs + 4) concurrent upstream calls.
+    History is recorded on the loop thread.
+
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
 - **NFR-PROXY-safe** Scope-enforced and lab-only; the local CA never leaves the

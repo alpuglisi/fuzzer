@@ -265,12 +265,17 @@ def _holdout_metrics(store, run_id: int, held, scores_by_id: dict, gate) -> tupl
 
 
 def _insert_model(store, name, feature_version, calibration, params, params_sha) -> tuple:
-    """Insert a `model` row; ``(version, id)``."""
+    """Insert a `model` row; ``(version, id)``. A run-scoped row that records a holdout
+    also seals its target in `holdout_seal`, in the same transaction (BUG-0104): the
+    seal never depends on the calibration JSON alone."""
     version = _next_version(store, name)
     cur = store.conn.execute(
         "INSERT INTO model (name, version, feature_version, calibration, params, "
         "params_sha256) VALUES (?,?,?,?,?,?)",
         (name, version, feature_version, json.dumps(calibration), params, params_sha))
+    if "holdout" in calibration and calibration.get("run_id") is not None:
+        from fuzzlab.ml.holdout import write_seal
+        write_seal(store, calibration["run_id"], calibration["holdout"], cur.lastrowid)
     return version, cur.lastrowid
 
 
@@ -352,6 +357,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     if holdout and run_id is None:
         raise ValueError("holdout needs a run: membership is per target")
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
+    _refuse_quarantine(ds)                                    # BUG-0107
     every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
     # sealed rows never train, select, cross-validate, calibrate or set the gate —
     # with --holdout, or implied once the target is sealed (FR-ML-19, BUG-0091)
@@ -428,6 +434,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
 
     if gate is not None:
         calibration.update(_gate_record(gate, ds.y))
+    record_quarantine(store, run_id, ds, calibration, result)
     if held is not None:
         _record_holdout(calibration, result, hplan, held, sealed, holdout_reason)
     elif store_seal is not None:
@@ -444,6 +451,26 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     store.conn.commit()
     result.update(version=version, scored=len(scores), params_sha256=params_sha)
     return result
+
+
+def _refuse_quarantine(ds) -> None:
+    """Raise `DatasetEvidenceError` when ``ds``'s quarantine must stop a train
+    (`dataset.quarantine_refusal`, BUG-0107)."""
+    from fuzzlab.ml.dataset import DatasetEvidenceError, quarantine_refusal
+    reason = quarantine_refusal(ds)
+    if reason is not None:
+        raise DatasetEvidenceError(reason)
+
+
+def record_quarantine(store, run_id, ds, calibration: dict, result: dict) -> None:
+    """Record how many candidates in scope were skipped for unreadable evidence — in
+    the model's calibration, the result and (per run) `run_metrics` (FR-ML-24)."""
+    if not ds.quarantined:
+        return
+    calibration["quarantined_rows"] = len(ds.quarantined)
+    result["quarantined_rows"] = len(ds.quarantined)
+    if run_id is not None:
+        _metric(store, run_id, "ml_quarantined_rows", len(ds.quarantined))
 
 
 def _apply_seal(store, run_id, ds, explicit: bool):
@@ -513,6 +540,10 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
     except ho.SealingUnknown as exc:
         return {**base, "refused": True, "reason": str(exc)}
     prior = build_dataset(store, before_run_id=run_id, target=target)       # labelled
+    from fuzzlab.ml.dataset import quarantine_refusal
+    if (reason := quarantine_refusal(prior)) is not None:                  # BUG-0107
+        return {**base, "refused": True, "reason": reason}
+    quarantine_ds = prior
     every = build_dataset(store, run_id, include_unlabelled=True)           # to score
     held = None
     if hplan is not None:
@@ -580,6 +611,7 @@ def _score_from_earlier(store, run_id, *, model_kind, min_rows, min_positives, k
                    **_gate_record(gate, prior.y)}
     calibration.update(fwd_calibration)
     calibration.update(cal_info)
+    record_quarantine(store, run_id, quarantine_ds, calibration, result)
     if cal_info:
         result["calibration"] = cal_info
     sealed = None
@@ -683,14 +715,16 @@ def _score_from_saved(store, run_id, *, model_id=None, holdout=False) -> dict:
                                        model_id=model_id)
     if row is None:
         return {**base, "refused": True, "reason": reason}
+    every = build_dataset(store, run_id, include_unlabelled=True)
     try:
         loaded = loads_model(*params_for(store, row["id"]))
         loaded.check_compatible()
+        # scored inside the guard: a model whose arithmetic leaves the finite range is
+        # a refusal, never NaN in the store (BUG-0103)
+        scores = loaded.predict_proba(every.X) if len(every) else []
     except (ModelParamsError, ModelIncompatibleError) as exc:
         return {**base, "refused": True,
                 "reason": f"saved model #{row['id']} cannot be applied: {exc}"}
-    every = build_dataset(store, run_id, include_unlabelled=True)
-    scores = loaded.predict_proba(every.X) if len(every) else []
     _write_scores(store, every.ids, scores)            # and clears score_oof
     train_runs = source.get("train_run_ids") or [source["run_id"]]
     seen = seen_fraction(store, saved_training_rows(store, source), every.ids)

@@ -14,10 +14,15 @@ redacts:
   **whole value** is replaced, whatever its type (list, object, scalar; BUG-0090).
 
 Sensitivity is by name **token** (`core.redaction`, BUG-0084), so benign fields such as
-``author`` stay readable. A body whose bytes the proxy cannot safely rewrite — chunked
-or ``Content-Encoding``-compressed — is stored as received: a stated residual. A JSON
-body is re-serialised only when it holds a sensitive key, so every other body stays
-byte-identical. ``Content-Length`` is recomputed when a redacted body changes length,
+``author`` stay readable. Body redaction is the shared, fail-closed storage boundary in
+`core.redaction` (BUG-0099/0100): unparseable or oversized bodies that may hold a secret
+are replaced by an omission marker, and untyped / ``text/plain`` bodies are sniffed. A
+chunked or ``Content-Encoding``-compressed body is decoded (bounded, gzip / deflate) and
+checked: a clean one is stored byte-exact, one carrying a secret (or undecodable with a
+redactable type) is replaced by the marker with ``Transfer-Encoding`` /
+``Content-Encoding`` dropped and ``Content-Length`` set — closing the former residual.
+A JSON body is re-serialised only when it holds a sensitive key, so every other body
+stays byte-identical. ``Content-Length`` is recomputed when a redacted body changes length,
 if it was consistent before.
 
 Trade-off: a Repeater tab seeded from history carries the placeholders, so replaying a
@@ -27,15 +32,16 @@ False)`` (lab-local opt-out).
 
 from __future__ import annotations
 
-import json
 import re
-from urllib.parse import unquote_plus, urlsplit, urlunsplit
+import zlib
 
-from fuzzlab.core.redaction import is_sensitive_name
+from fuzzlab.core.redaction import (MAX_REDACT_BYTES, OMIT_UNSAFE, PLACEHOLDER, body_kind,
+                                    is_sensitive_name, mentions_sensitive_name,
+                                    redact_body, redact_url)
+from fuzzlab.core.redaction import redact_query  # noqa: F401  (re-exported: one boundary)
 from fuzzlab.proxy.message import RawMessage
 
-REDACTED = b"__REDACTED__"
-_TEXT = REDACTED.decode()
+REDACTED = PLACEHOLDER.encode()
 
 # Header names whose values are secrets. Compared case-insensitively.
 SENSITIVE_HEADERS = (
@@ -49,74 +55,67 @@ SENSITIVE_HEADERS = (
 _URL_HEADERS = ("location", "content-location", "refresh")
 
 
-def redact_query(query: str) -> str:
-    """``query`` with each sensitively named parameter's value replaced."""
-    if not query:
-        return query
-    out = []
-    for part in query.split("&"):
-        name, eq, _value = part.partition("=")
-        out.append(f"{name}={_TEXT}" if eq and is_sensitive_name(unquote_plus(name))
-                   else part)
-    return "&".join(out)
-
-
-def redact_url(url: str) -> str:
-    """``url`` (absolute or origin-form) with sensitive query values replaced."""
-    if "?" not in (url or ""):
-        return url
-    parts = urlsplit(url)
-    new = redact_query(parts.query)
-    return url if new == parts.query else urlunsplit(parts._replace(query=new))
-
-
-def _redact_json(value):
-    # A sensitive key's whole value is the secret, whatever its shape: a scalar, a list
-    # or a nested object is replaced by the placeholder (BUG-0090, PA-0091).
-    if isinstance(value, dict):
-        return {k: (_TEXT if is_sensitive_name(str(k)) else _redact_json(v))
-                for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_json(v) for v in value]
-    return value
-
-
-def _redact_multipart(body: bytes, content_type: str) -> bytes:
-    m = re.search(r'boundary="?([^";]+)"?', content_type, re.I)
-    if not m:
-        return body
-    delim = b"--" + m.group(1).encode("latin-1")
-    parts = body.split(delim)
-    for i, part in enumerate(parts):
-        head, sep, data = part.partition(b"\r\n\r\n")
-        name = re.search(rb'\bname="([^"]*)"', head)
-        if sep and name and b"filename=" not in head \
-                and is_sensitive_name(name.group(1).decode("latin-1")):
-            parts[i] = head + sep + REDACTED + (b"\r\n" if data.endswith(b"\r\n") else b"")
-    return delim.join(parts)
-
-
-def redact_body(body: bytes, content_type: str) -> bytes:
-    """``body`` with sensitively named fields replaced, per its content type."""
-    if not body:
-        return body
-    ct = (content_type or "").split(";", 1)[0].strip().lower()
-    if ct == "application/x-www-form-urlencoded":
-        text = body.decode("latin-1")
-        new = redact_query(text)
-        return body if new == text else new.encode("latin-1")
-    if ct == "application/json" or ct.endswith("+json"):
+def _dechunk(body: bytes, limit: int) -> bytes | None:
+    """The payload of a chunked body (trailers ignored), or ``None`` if malformed or
+    longer than ``limit``."""
+    out, i = bytearray(), 0
+    while True:
+        j = body.find(b"\r\n", i)
+        if j == -1:
+            return None
         try:
-            doc = json.loads(body.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            return body
-        new = _redact_json(doc)
-        if new == doc:
-            return body                              # byte-identical when nothing matched
-        return json.dumps(new, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    if ct.startswith("multipart/form-data"):
-        return _redact_multipart(body, content_type or "")
-    return body
+            size = int(body[i:j].split(b";", 1)[0].strip(), 16)
+        except ValueError:
+            return None
+        if size == 0:
+            return bytes(out)
+        if len(out) + size > limit or j + 2 + size > len(body):
+            return None
+        out += body[j + 2:j + 2 + size]
+        i = j + 2 + size + 2
+
+
+def _decompress(data: bytes, encoding: str, limit: int) -> bytes | None:
+    """``data`` decoded per ``Content-Encoding`` (gzip / x-gzip / deflate), bounded to
+    ``limit`` bytes of output; ``None`` if unknown, malformed or too large."""
+    enc = encoding.strip().lower()
+    if enc in ("", "identity"):
+        return data
+    modes = {"gzip": (16 + zlib.MAX_WBITS,), "x-gzip": (16 + zlib.MAX_WBITS,),
+             "deflate": (zlib.MAX_WBITS, -zlib.MAX_WBITS)}.get(enc)
+    if modes is None:
+        return None                                       # br, zstd, chains: not decoded
+    for wbits in modes:
+        d = zlib.decompressobj(wbits)
+        try:
+            out = d.decompress(data, limit + 1)
+        except zlib.error:
+            continue
+        if len(out) > limit or d.unconsumed_tail:
+            return None                                   # a decompression bomb
+        return out
+    return None
+
+
+def _framed_payload(msg: RawMessage, body: bytes) -> bytes | None:
+    """``body`` with its transfer and content codings removed (bounded), or ``None``."""
+    data = body
+    if (te := _header(msg, "Transfer-Encoding")) and "chunked" in te.lower():
+        data = _dechunk(data, MAX_REDACT_BYTES)
+        if data is None:
+            return None
+    return _decompress(data, _header(msg, "Content-Encoding"), MAX_REDACT_BYTES)
+
+
+def _framed_body_unsafe(msg: RawMessage, body: bytes) -> bool:
+    """For a chunked / compressed body: True when it must not be stored as received —
+    its decoded payload carries a secret, or it cannot be decoded while its type is
+    redactable (fail closed, BUG-0100). A clean one is kept byte-exact."""
+    ct = _header(msg, "Content-Type")
+    payload = _framed_payload(msg, body)
+    if payload is None:
+        return body_kind(b"", ct) is not None or mentions_sensitive_name(body)
+    return redact_body(payload, ct) != payload
 
 
 def _original_name(msg: RawMessage, name: str) -> bytes:
@@ -165,9 +164,16 @@ def redact(raw: bytes, extra_headers: tuple[str, ...] = ()) -> bytes:
                 flags=re.I)
             if new != value:
                 msg = msg.with_header(_original_name(msg, name), new)
-    # bodies: never rewrite framing we do not control
-    if msg.body and msg.get("Transfer-Encoding") is None \
-            and msg.get("Content-Encoding") is None:
+    # bodies. Chunked / compressed: decoded (bounded) and checked; a body that is not
+    # provably clean is replaced by the marker with framing made consistent (B-S3),
+    # a clean one is kept byte-exact.
+    if msg.body and (msg.get("Transfer-Encoding") is not None
+                     or msg.get("Content-Encoding") is not None):
+        if _framed_body_unsafe(msg, msg.body):
+            msg = msg.without_header("Transfer-Encoding").without_header(
+                "Content-Encoding").with_body(OMIT_UNSAFE)
+            msg = msg.with_header("Content-Length", str(len(OMIT_UNSAFE)))
+    elif msg.body:
         old = msg.body
         new = redact_body(old, _header(msg, "Content-Type"))
         if new != old:
@@ -185,5 +191,5 @@ def redact_body_for(raw: bytes, body: bytes) -> bytes:
         return body
     msg = RawMessage.from_bytes(raw or b"")
     if msg.get("Transfer-Encoding") is not None or msg.get("Content-Encoding") is not None:
-        return body
+        return OMIT_UNSAFE if _framed_body_unsafe(msg, body) else body
     return redact_body(body, _header(msg, "Content-Type"))

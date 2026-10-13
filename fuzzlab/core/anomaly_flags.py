@@ -9,7 +9,7 @@ would overwrite them), so readers show them beside the run's own `anomaly_flagge
 
 from __future__ import annotations
 
-import json
+from fuzzlab.core.evidence import display_evidence
 
 from fuzzlab.core.urls import to_path
 
@@ -22,10 +22,7 @@ def top_flagged(store, run_id: int, limit: int = 5) -> list[dict]:
             "SELECT evidence, anomaly_score FROM candidate WHERE run_id=? AND "
             "anomaly_flag=1 AND anomaly_score IS NOT NULL "
             "ORDER BY anomaly_score DESC, id DESC LIMIT ?", (run_id, limit)).fetchall():
-        try:
-            ev = json.loads(row["evidence"] or "{}")
-        except (ValueError, TypeError):
-            ev = {}
+        ev = display_evidence(row["evidence"])          # display only (BUG-0107)
         out.append({"path": to_path(ev.get("url", "")), "param": ev.get("param", ""),
                     "category": ev.get("category", ""), "score": round(row["anomaly_score"], 3)})
     return out

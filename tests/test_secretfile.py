@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -154,7 +155,8 @@ def test_a_failed_keyring_save_keeps_the_previous_keyring(tmp_path, monkeypatch)
             "h", "admin", "u", "pw2")
     monkeypatch.undo()
     assert path.read_bytes() == before
-    assert [p.name for p in tmp_path.iterdir()] == ["keyring.cfg"]
+    # no temp file left; the stable lock file (BUG-0108) is expected beside it
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["keyring.cfg", "keyring.cfg.lock"]
     again = CredentialStore(backend=_encrypted_file_backend(str(path), env))
     assert again.get("h", "admin").password == "pw1"
 
@@ -211,3 +213,182 @@ def test_a_corrupted_leaf_on_disk_heals_on_the_next_use(tmp_path):
     cert2, key2 = ca.leaf_cert_files("lab.local")
     assert (cert2.read_bytes(), key2.read_bytes()) == good
     ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER).load_cert_chain(str(cert2), str(key2))
+
+
+# --- BUG-0105 / PA-0106: directory-sync errors are swallowed only when unsupported --
+
+def _dir_fsync_fails(monkeypatch, err):
+    real_open, real_fsync, dirs = os.open, os.fsync, set()
+
+    def op(path, flags, *a):
+        fd = real_open(path, flags, *a)
+        if os.path.isdir(path):
+            dirs.add(fd)
+        return fd
+
+    def fs(fd):
+        if fd in dirs:
+            raise OSError(err, os.strerror(err))
+        return real_fsync(fd)
+    monkeypatch.setattr(secretfile.os, "open", op)
+    monkeypatch.setattr(secretfile.os, "fsync", fs)
+
+
+def test_a_real_directory_fsync_error_raises_durability_unknown(tmp_path, monkeypatch):
+    import errno
+    from fuzzlab.core.secretfile import DurabilityUnknown
+    path = tmp_path / "k"
+    path.write_bytes(b"OLD")
+    _dir_fsync_fails(monkeypatch, errno.EIO)
+    with pytest.raises(DurabilityUnknown, match="durability not established"):
+        replace_secret(path, b"NEW")
+    assert path.read_bytes() == b"NEW"           # visible, as the error says
+
+
+@pytest.mark.parametrize("name", ["EINVAL", "ENOTSUP", "EOPNOTSUPP"])
+def test_an_unsupported_directory_fsync_is_skipped(tmp_path, monkeypatch, name):
+    import errno
+    _dir_fsync_fails(monkeypatch, getattr(errno, name))
+    replace_secret(tmp_path / "k", b"NEW")
+    assert (tmp_path / "k").read_bytes() == b"NEW"
+
+
+def test_ebadf_is_not_swallowed(tmp_path, monkeypatch):
+    """A8: EBADF is a programming error, not "unsupported"."""
+    import errno
+    from fuzzlab.core.secretfile import DurabilityUnknown
+    _dir_fsync_fails(monkeypatch, errno.EBADF)
+    with pytest.raises(DurabilityUnknown):
+        replace_secret(tmp_path / "k", b"NEW")
+
+
+def test_no_o_directory_is_skipped(tmp_path, monkeypatch):
+    monkeypatch.delattr(secretfile.os, "O_DIRECTORY", raising=False)
+    replace_secret(tmp_path / "k", b"NEW")
+    assert (tmp_path / "k").read_bytes() == b"NEW"
+
+
+def test_the_keyring_reports_unknown_durability(tmp_path, monkeypatch):
+    import errno
+    pytest.importorskip("cryptography")
+    from fuzzlab.core.credentials import (CredentialError, CredentialStore,
+                                          _encrypted_file_backend)
+    env = {"FUZZLAB_KEYRING_PASSPHRASE": "lab-pass"}
+    store = CredentialStore(backend=_encrypted_file_backend(str(tmp_path / "k.cfg"), env))
+    _dir_fsync_fails(monkeypatch, errno.EIO)
+    with pytest.raises(CredentialError, match="retrying is safe"):
+        store.set("h", "u", "user", "pw")
+
+
+def test_swallow_lists_are_explicit():
+    """PA-0106 guard: no bare `except OSError: pass` / `return` in secretfile."""
+    import ast
+    src = (REPO / "fuzzlab" / "core" / "secretfile.py").read_text()
+    offenders = [h.lineno for h in ast.walk(ast.parse(src))
+                 if isinstance(h, ast.ExceptHandler) and isinstance(h.type, ast.Name)
+                 and h.type.id in ("OSError", "Exception")
+                 and len(h.body) == 1 and isinstance(h.body[0], (ast.Pass, ast.Return))
+                 and not _in_unlink(src, h.lineno)]
+    assert offenders == []
+
+
+def _in_unlink(src, line):
+    """`_unlink_quietly` is the one stated swallow (cleanup of our own temp file)."""
+    lines = src.splitlines()[:line]
+    for prev in reversed(lines):
+        if prev.startswith("def "):
+            return prev.startswith("def _unlink_quietly")
+    return False
+
+
+def test_the_swallow_guard_catches_an_offender():
+    import ast
+    bad = "def f():\n    try:\n        g()\n    except OSError:\n        pass\n"
+    handlers = [h for h in ast.walk(ast.parse(bad)) if isinstance(h, ast.ExceptHandler)]
+    assert handlers and isinstance(handlers[0].body[0], ast.Pass)
+    assert not _in_unlink(bad, handlers[0].lineno)
+
+
+# --- BUG-0108 / PA-0109: keyring updates are serialised; BUG-0109: deletes verified --
+
+def _bulk_set(path, who, n):
+    from fuzzlab.core.credentials import CredentialStore, _encrypted_file_backend
+    env = {"FUZZLAB_KEYRING_PASSPHRASE": "lab-pass"}
+    for i in range(n):
+        CredentialStore(backend=_encrypted_file_backend(path, env)).set("h", f"{who}{i}",
+                                                                        "u", "p")
+
+
+def test_concurrent_processes_lose_no_update(tmp_path):
+    """The audit's lost update: two writers loaded the same map; one change vanished."""
+    pytest.importorskip("cryptography")
+    import multiprocessing as mp
+    from fuzzlab.core.credentials import CredentialStore, _encrypted_file_backend
+    path = str(tmp_path / "keyring.cfg")
+    ctx = mp.get_context("fork")
+    procs = [ctx.Process(target=_bulk_set, args=(path, w, 5)) for w in "abc"]
+    [p.start() for p in procs]
+    [p.join(60) for p in procs]
+    s = CredentialStore(backend=_encrypted_file_backend(
+        path, {"FUZZLAB_KEYRING_PASSPHRASE": "lab-pass"}))
+    assert all(s.get("h", f"{w}{i}") for w in "abc" for i in range(5))
+    lock = tmp_path / "keyring.cfg.lock"
+    assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("with_fcntl", [True, False])
+def test_two_threads_never_interleave_a_load_and_save(tmp_path, monkeypatch, with_fcntl):
+    """Without fcntl (non-POSIX) the thread lock alone must still serialise."""
+    pytest.importorskip("cryptography")
+    if not with_fcntl:
+        import fuzzlab.core.credentials as creds
+        monkeypatch.setattr(creds, "fcntl", None)
+    import threading
+    from fuzzlab.core.credentials import _encrypted_file_backend
+    env = {"FUZZLAB_KEYRING_PASSPHRASE": "lab-pass"}
+    be = _encrypted_file_backend(str(tmp_path / "k.cfg"), env)
+    inside, overlap = [0], []
+    real = be._load
+
+    def load():
+        inside[0] += 1
+        overlap.append(inside[0])
+        try:
+            time.sleep(0.01)                     # widen the window an overlap needs
+            return real()
+        finally:
+            inside[0] -= 1
+    be._load = load
+    ts = [threading.Thread(target=lambda i=i: be.set_password("fuzzlab", f"a{i}", "p"))
+          for i in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert max(overlap) == 1
+
+
+def test_a_failed_delete_is_reported_and_a_missing_one_is_not():
+    from fuzzlab.core.credentials import CredentialError, CredentialStore
+
+    class Backend:
+        def __init__(self, fail_with=None):
+            self.data, self.fail_with = {}, fail_with
+
+        def get_password(self, s, a):
+            return self.data.get((s, a))
+
+        def set_password(self, s, a, p):
+            self.data[(s, a)] = p
+
+        def delete_password(self, s, a):
+            if self.fail_with is not None:
+                raise self.fail_with
+            self.data.pop((s, a), None)
+
+    s = CredentialStore(backend=Backend(PermissionError("locked keyring")))
+    s.set("h", "admin", "u", "pw")
+    with pytest.raises(CredentialError, match="could not delete") as info:
+        s.delete("h", "admin")
+    assert isinstance(info.value.__cause__, PermissionError) and "pw" not in str(info.value)
+    # deleting a missing entry: the backend's "not found" error is verified away
+    CredentialStore(backend=Backend(KeyError("missing"))).delete("h", "nobody")
+    CredentialStore(backend=Backend()).delete("h", "nobody")
