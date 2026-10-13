@@ -118,6 +118,13 @@ def detect_flow_anomalies(store, run_id: int, *, method: str = "ecod",
     for fid, s in score.items():
         store.conn.execute("UPDATE flow SET anomaly_score=?, anomaly_flag=? WHERE id=?",
                            (s, 1 if flag[fid] else 0, fid))
+    # the flow feature version the stored flags read (BUG-0069); a rerun replaces it
+    store.conn.execute("DELETE FROM run_metrics WHERE run_id=? AND key=?",
+                       (run_id, "flow_anomaly_feature_version"))
+    if score:
+        store.conn.execute("INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                           (run_id, "flow_anomaly_feature_version",
+                            float(FLOW_FEATURE_VERSION)))
     store.conn.commit()
     flagged_ids = sorted((f for f in score if flag[f]), key=lambda f: (-score[f], f))
     top_rows = []

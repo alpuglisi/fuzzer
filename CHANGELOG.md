@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Packaging fixed; report feature versions fixed; on-host run via the CLI — BUG-0068, BUG-0069)
+- **Installed builds now work (BUG-0068).** A built package shipped only 87 of its 485
+  data files, so an installed `fuzzlab web` had no tab templates or assets and the lab
+  generator lacked its templates. One recursive rule now ships every tracked data file,
+  minus a declared list that never ships (keys, `.env`, SQLite side files, junk). A test
+  builds the package and compares it with the source tree. A real build without the ML
+  package now passes the same checks as the simulated one; that build needs two config
+  lines, which are documented.
+- **Reproducibility metadata fixed (BUG-0069).** The report's feature versions were
+  always empty. They now list the candidate and flow feature versions the run's models
+  and stages actually read. A new guard makes every column a reader can rely on have a
+  real writer.
+- **On-host run uses the shipped commands.** The on-host script and runbook drive every
+  ML step through the CLI, with checks that fail when a budget silently falls back. Using
+  the blind holdout there is opt-in.
+- **Housekeeping.** pyflakes-clean code with a lint test; a dead duplicate dashboard
+  function removed; the missing FR-FUZZ-31 requirement backfilled.
+- Records: CC-CORE-0032, CC-ML-0022, CC-FUZZ-0055, CC-UI-0047, CC-LAB-0251,
+  CC-SESS-0010; BUG-0068, BUG-0069; PA-0070, PA-0071.
+
 ## 2026-10-13 (ML: pairwise ranking, Isolation Forest, flow anomalies — CC-ML-0021)
 - **Pairwise learning-to-rank (opt-in).** `--rank-objective pairwise|auto` trains the
   ranker to order (vulnerable, not) pairs across the whole run; `auto` keeps whichever

@@ -70,6 +70,39 @@ def child(seeded):
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
+@pytest.fixture(scope="module")
+def built_child(seeded, tmp_path_factory):
+    """The same checks against a **real no-ML build** (CC-ML-0022): the package is built
+    with the FR-ML-6 switch (both lines) and put first on the path — no import blocker."""
+    require_modules(module_level=False)
+    from tests.test_packaging import _tracked, build_no_ml
+    out = build_no_ml(tmp_path_factory.mktemp("nomlbuild"), _tracked())
+    db, run_id, tmp = seeded
+    work = tmp / "built_child"
+    work.mkdir()
+    env = _env()
+    env["PYTHONPATH"] = str(out) + os.pathsep + env["PYTHONPATH"]
+    env["FUZZLAB_NOML_REAL"] = "1"
+    proc = subprocess.run([sys.executable, str(CHILD), "check", str(db), str(run_id),
+                           str(work)], capture_output=True, text=True, env=env,
+                          cwd=str(REPO), timeout=300)    # GT_DIR is repo-relative
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    return json.loads(proc.stdout.strip().splitlines()[-1]), out
+
+
+def test_a_real_no_ml_build_passes_the_same_checks(built_child, child):
+    got, out = built_child
+    assert got["fuzzlab_path"].startswith(str(out))          # the built tree, not the repo
+    assert got["ml_blocked"] is True                          # genuinely absent
+    assert got["dropped_finders"]                   # the dev-only editable finder is gone
+    assert got["scan"]["rc"] == 0 and got["scan"]["findings"] == child["scan"]["findings"]
+    assert got["score_flag"]["rc"] == 2 and got["score_flag"]["runs"] == 0
+    assert got["flow_anomaly"]["rc"] == 2
+    assert got["report"]["models_unavailable"] == child["report"]["models_unavailable"]
+    assert got["pages"] == child["pages"]
+    assert got["ml_data"] == child["ml_data"]
+
+
 def test_the_child_really_runs_without_ml(child):
     assert child["ml_blocked"] is True               # not vacuous
 

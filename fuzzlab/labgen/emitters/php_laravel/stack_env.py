@@ -77,7 +77,7 @@ class StackEnv:
         lane disabling ``/docs`` for the same reason.
         """
         lines = (
-            f"APP_NAME=FuzzlabPhpLaravelLab",
+            "APP_NAME=FuzzlabPhpLaravelLab",
             "APP_ENV=production",
             "APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             "APP_DEBUG=false",

@@ -174,6 +174,10 @@ def _class_for(spec: ProbeSpec, point_class: str | None) -> str:
     return "sqli" if spec.kind == "sqli" else "xss" if spec.kind == "xss" else ""
 
 
+#: Names the greybox attempt-feature dict written to `attempt.features_json` (CC-FUZZ-0055).
+ATTEMPT_FEATURE_SCHEMA = "greybox/1"
+
+
 def _insert_attempt(store, run_id: int, family: str, features: dict,
                     reward: float) -> int:
     cur = store.conn.execute(
@@ -327,6 +331,9 @@ def run_greybox(*, base_url: str, store, run_id: int,
                                    db_fault=fault.faulted, sink_covered=sink_covered)
             reward = shaped_reward(signal)
             features = {
+                # this writer's own feature schema (BUG-0069 sweep): not the core
+                # extractor's vector, so `attempt.feature_version` stays NULL
+                "_schema": ATTEMPT_FEATURE_SCHEMA,
                 "payload_family": spec.family,
                 "payload_kind": spec.kind,
                 "param": pt.param,

@@ -72,7 +72,7 @@ Design (settled, from the plan):
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np

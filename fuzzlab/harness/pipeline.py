@@ -140,7 +140,10 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                                budget_training_rows=plan_order.training_rows,
                                budget_training_positives=plan_order.training_positives,
                                budget_seed=getattr(plan_order, "seed", 0),
-                               budget_model_sha256=getattr(plan_order, "model_sha256", None))
+                               budget_model_sha256=getattr(plan_order, "model_sha256", None),
+                               # the candidate feature version its model read (BUG-0069)
+                               budget_feature_version=getattr(plan_order, "feature_version",
+                                                              None))
             budget_plugin = getattr(prioritizer, "plugin_name", None)
             if budget_plugin is not None:
                 budget_info["budget_plugin"] = budget_plugin

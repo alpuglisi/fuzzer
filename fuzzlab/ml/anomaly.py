@@ -278,6 +278,12 @@ def detect_anomalies(store, run_id: int | None = None, contamination: float = 0.
             store.conn.execute(
                 "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
                 (run_id, key, float(value)))
+        if persist:          # the candidate feature version the stored flags read (BUG-0069)
+            # appended like the other anomaly metrics: the stage runs under the advisory
+            # write guard, which denies DELETE; a rerun adds an identical value
+            store.conn.execute(
+                "INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                (run_id, "anomaly_feature_version", float(ds.feature_version)))
     store.conn.commit()
     return {"rows": len(ds), "flagged": sum(flags), "flag_budget": k, "method": method,
             "flag_reason": reason, "scores": scores, "flags": flags, "ids": ds.ids}

@@ -292,8 +292,8 @@ def locate_tool(name: str, explicit_path: Optional[str] = None) -> str:
         f"{name!r} executable not found "
         + (f"at explicit path {explicit_path!r} or " if explicit_path else "")
         + "on PATH. Install it (see docs/LAB_SEED_AUTHORING_PLAYBOOK.md's "
-        f"'Recommended next action') or pass an explicit path via the "
-        f"`tool_path` parameter."
+        "'Recommended next action') or pass an explicit path via the "
+        "`tool_path` parameter."
     )
 
 

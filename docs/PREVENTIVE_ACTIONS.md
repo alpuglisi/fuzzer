@@ -1036,3 +1036,32 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Sweep every order-statistic threshold.** The PA-0002 sweep for this class covers
      every order-statistic threshold in the codebase (`sorted(…)[k]`, quantiles,
      fractions, contamination), not only the reported one. (from BUG-0070)
+
+- **PA-0070** — Strengthens and generalises `PA-0065(3)` (verify in the real browser)
+  and `PA-0035` (a probe exercises the real operation path), after BUG-0068: the built
+  package shipped 87 of 485 data files while every test passed against the editable
+  install. Each prior rule was scoped to one layer; this one covers any shipped
+  artefact.
+  1. **Shipped or installed behaviour is verified on the built artefact** (or the real
+     runtime), never only on the development stand-in. For the package:
+     `tests/test_packaging.py` builds it and compares the built file set with the tracked
+     source.
+  2. **Package-data rules are recursive** (`**`) and include dotfiles; exclusions are an
+     explicit deny-list that is asserted never to match a tracked file. Hidden
+     *directories* are not matched by `**/.*` — the equality test is the backstop.
+  3. **The PA-0002 sweep for this class covers every build/ship path** (package data,
+     scripts that copy files, container build COPY lists). (from BUG-0068)
+
+- **PA-0071** — A reader may depend only on what production writes, after BUG-0069: the
+  report read `candidate.feature_version`, which nothing ever wrote, and its test passed
+  because the fixture wrote the column by hand.
+  1. **A contract column or key that a reader depends on must have a production writer;
+     a test must not supply by hand a value production never writes.** If a reader
+     needs such a column, build the writer, or stop presenting the column as a recorded
+     fact.
+  2. **Enforced mechanically:** `tests/test_contract_writers.py` takes the contract
+     tables' columns from the migrated schema and asserts each has an INSERT/UPDATE
+     writer in `fuzzlab/` or an allowlist entry with its reason; it is proven on a
+     synthetic writer-less column, and a stale allowlist entry fails too.
+  3. **The PA-0002 sweep for this class covers every writer-less column** (the
+     allowlist records each one's reason). (from BUG-0069)

@@ -39,6 +39,29 @@ def _training(calibration: dict) -> dict:
     return {"trained_on": "run", "train_run_ids": None}
 
 
+#: Stage metrics that record the candidate / flow feature version a stage read on a run
+#: without saving a `model` row (BUG-0069, CC-UI-0047).
+_CANDIDATE_VERSION_METRICS = ("anomaly_feature_version", "pipeline_budget_feature_version")
+_FLOW_VERSION_METRICS = ("flow_anomaly_feature_version",)
+
+
+def _feature_versions(store, run_id: int, models: list[dict], metrics: dict) -> dict:
+    """The feature versions this run's results were computed from, per counter
+    (BUG-0069): ``candidate`` — stored `candidate.feature_version` values, the run's
+    pinned models' `feature_version`, and every stage that read candidate features
+    without saving a model (anomaly tripwire, budget prioritizer); ``flow`` — the flow
+    tripwire's. An empty list means no stage computed that vector on this run. (The
+    response extractor's counter is not listed: nothing records it on a run yet.)"""
+    candidate = {int(r["feature_version"]) for r in store.conn.execute(
+        "SELECT DISTINCT feature_version FROM candidate WHERE run_id=? "
+        "AND feature_version IS NOT NULL", (run_id,))}
+    candidate |= {int(m["feature_version"]) for m in models
+                  if m.get("feature_version") is not None}
+    candidate |= {int(metrics[k]) for k in _CANDIDATE_VERSION_METRICS if k in metrics}
+    flow = {int(metrics[k]) for k in _FLOW_VERSION_METRICS if k in metrics}
+    return {"candidate": sorted(candidate), "flow": sorted(flow)}
+
+
 def _run_models(store, run_id: int) -> tuple[list[dict], dict[str, str | None], dict] | None:
     """The classifier and ranker whose scope covers ``run_id`` (FR-ML-10), plus each
     one's saved-params sha (None: trained before models were saved, migration 14) and
@@ -114,9 +137,7 @@ def build_report(store, run_id: int | None = None) -> dict:
         "SELECT name, version, priority, config, status, error FROM run_plugin "
         "WHERE run_id=? ORDER BY priority, name", (run_id,))]
 
-    feature_versions = sorted({int(r["feature_version"]) for r in store.conn.execute(
-        "SELECT DISTINCT feature_version FROM candidate WHERE run_id=? "
-        "AND feature_version IS NOT NULL", (run_id,))})
+    feature_versions = _feature_versions(store, run_id, models, metrics)
 
     report = {
         "run": run,
@@ -166,7 +187,10 @@ def format_text(report: dict) -> str:
         return "no runs in the store"
     lines = [f"fuzzlab run #{run['id']} ({run['tool']}, {run['started_at']})",
              f"  config_hash: {run.get('config_hash')}   schema: "
-             f"{report['reproducibility']['schema_version']}"]
+             f"{report['reproducibility']['schema_version']}",
+             "  feature versions: candidate "
+             f"{report['reproducibility']['feature_versions']['candidate'] or '—'}, flow "
+             f"{report['reproducibility']['feature_versions']['flow'] or '—'}"]
     tgt = report.get("target")
     if tgt:
         lines.append(f"  target: {tgt['base_url']}  dbms={tgt['dbms']} "

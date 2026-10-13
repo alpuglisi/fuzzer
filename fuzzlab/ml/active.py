@@ -130,6 +130,10 @@ class Prioritized:
     # (seeded, on earlier runs only) and not saved as a `model` row; this sha pins it.
     model_sha256: str | None = None
     seed: int = 0
+    # The candidate feature version the order model read (BUG-0069; None for `random`,
+    # which reads no features) — recorded by the pipeline as
+    # `pipeline_budget_feature_version` for the report's reproducibility block.
+    feature_version: int | None = None
 
 
 def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str = "score",
@@ -206,4 +210,4 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     order = [ids[i] for i in ranked]
     order += [cid for cid in wanted if cid not in index]   # unknown ids: last, in order
     return Prioritized(order=order, method=method, training_rows=n, training_positives=pos,
-                       model_sha256=model_sha, seed=seed)
+                       model_sha256=model_sha, seed=seed, feature_version=prior.feature_version)

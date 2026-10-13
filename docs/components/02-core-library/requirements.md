@@ -132,6 +132,13 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
   is defined once in `core/oracle_status.py`.
+- **FR-CORE-22** *(packaging; `CC-CORE-0032`, 2026-10-13, BUG-0068).* Every tracked
+  non-Python file under `fuzzlab/` ships in the built package (wheel, sdist,
+  `build_py`), except the declared exclusions (`exclude-package-data "*"`: caches,
+  credentials/keys, SQLite side files, OS/editor junk); executable bits are kept. The
+  deny-list never matches a tracked file; release builds come from a clean checkout
+  (stray `*.db` / `.env` variants cannot all be denied). Verified on the built artefact
+  by `tests/test_packaging.py` (PA-0070).
 - **FR-CORE-20** *(migration 18; `CC-CORE-0031`, 2026-10-13).* `flow.anomaly_score REAL`
   and `flow.anomaly_flag INTEGER` (FR-ML-23); existing rows read NULL (never scored).
 - **FR-CORE-21** *(candidate features; `CC-CORE-0031`, 2026-10-13).* `core/features.py`

@@ -3,6 +3,65 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0047 — Report `feature_versions` per counter, from what the run actually read (BUG-0069); dead `overview_summary` removed; web lint (2026-10-13)
+- Change:
+  - **`report/report.py` `_feature_versions`.**
+    `reproducibility.feature_versions` becomes `{"candidate": [...], "flow": [...]}`.
+    **This is a JSON contract change from a list.**
+    - **candidate:** stored `candidate.feature_version`, the run's pinned models'
+      `feature_version`, and the `anomaly_feature_version` /
+      `pipeline_budget_feature_version` metrics;
+    - **flow:** `flow_anomaly_feature_version`.
+
+    The text report gains a `feature versions:` line.
+  - **`web/results.py`.** The first, dead `overview_summary` (R1: category / 7-day
+    breakdown) is removed. It was entirely shadowed by the second (U1: severity), which
+    every consumer, the template and the tests use, so behaviour is unchanged.
+  - **`web/proxycontrol.py`.** An unused import is removed.
+- Impact:
+  - Consumers of the report JSON reading `feature_versions` as a list must read the
+    dict. The only in-repo consumer is `tests/test_report.py`, which is updated.
+  - Nothing else changes in behaviour.
+- Risk: low.
+- Deliverables:
+  - [x] report — done
+  - [x] dead definition removed — done
+  - [x] FR-UI-17 note — done
+  - [x] tests:
+    - a production-writers-only report test: no stage → `[]`, trained → `[1]`, anomaly
+      only → `[1]`, a read-only refit records nothing;
+    - flow (once across reruns) and the prioritizer;
+    - `test_report`'s updated expectation;
+    - `tests/test_lint.py` (pyflakes clean, honouring `# noqa`; `FUZZLAB_REQUIRE_LINT=1`
+      makes a missing pyflakes fail).
+
+    — done
+  - [x] BUG-0069 report, ERROR_LOG, PA-0071, `tests/test_contract_writers.py` — done
+- Review: covered by the batch-5 3/3 pre-change review (A4, A5, B5, B10, B3 v2).
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (95 files: ML, auto, web incl. real-browser, plugins, report,
+    no-ML incl. the real no-ML build, harness, multitarget, pipeline, diagnostics, core,
+    CLI, store, migrations, packaging, lint, contract writers, on-host script, greybox,
+    store adapter, session, labgen CLI, mutation, oracle;
+    `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1249 passed, 3 skipped,
+    11 failed.
+    - 10 failures are `test_labgen_cli.py` tests, among the 33 known environmental
+      failures (no scipy, sklearn or gitleaks).
+    - The 11th, the multitarget live-boot test, failed with a connection reset from its
+      locally booted server while two other suites held the CPU. It passes alone
+      (2 passed).
+  - **Mutation check** (a staged git copy, bytecode caches cleared): all 21 batch-5
+    mutants are killed. Three were first mis-anchored by shell expansion in the
+    mutation script and were re-run correctly. Killed:
+    - old per-directory globs; no dotfiles;
+    - deny-list missing pem / env; an over-broad deny pattern; a one-line no-ML switch;
+    - report union missing models / stage metrics / flow;
+    - the anomaly version on the read-only path, or missing;
+    - flow-version duplicates; prioritizer / pipeline version missing;
+    - CSV / greybox schema missing;
+    - `_check_sql` never failing; the reveal not opt-in; a literal 5 in the budget check;
+    - a lint regression; the dropped `Probe` import.
+
 ### CC-UI-0046 — Ranker panel shows pairwise honestly; anomaly panel reads stored flags; anomaly method on the run page; `flow-anomaly` in the launcher (2026-10-13)
 - Change:
   - **`mlview.ranker_panel`:**

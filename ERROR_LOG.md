@@ -18,6 +18,51 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Packaging: the built package shipped 87 of 485 data files (fixed, BUG-0068/PA-0070)
+- **Symptom:** a setuptools build of the tracked tree omitted every web tab template,
+  all JS/CSS/vendor assets, and the lab generator's nested templates and skeletons. An
+  installed `fuzzlab web` would 404, and `lab-generate` would fail. Editable installs
+  hid it.
+- **Root cause:** per-directory, non-recursive package-data globs, and a shipped
+  artefact that was only ever verified through the editable install.
+- **Remediation:**
+  - one recursive rule (`**/*`, `**/.*`) plus a declared deny-list;
+  - the no-ML switch documented as two lines;
+  - `tests/test_packaging.py`: build_py / sdist / wheel against the tracked tree, a
+    planted-secret check, and an untracked-store guard;
+  - a real no-ML build runs the no-ML checks.
+
+  CC-CORE-0032, CC-ML-0022; `docs/bugs/BUG-0068-wheel-omits-package-data.md`; PA-0070.
+- **Status:** Fixed
+
+## 2026-10-13 — Environment: `bdist_wheel` fails with Debian's patched setuptools (`install_layout`)
+- **Symptom:** `setup.py bdist_wheel` (and system pip builds) raise `AttributeError:
+  install_layout` in this container.
+- **Root cause:** Debian's patched system setuptools (68.1.2) expects a distutils option
+  its own install command no longer sets. This is an environment issue, not a project
+  one.
+- **Remediation:** the packaging test builds with `build_py` and `sdist`, which work. The
+  wheel test skips with this reason unless `FUZZLAB_REQUIRE_WHEEL=1`. A venv with
+  upstream setuptools builds wheels normally.
+- **Status:** Environment
+
+## 2026-10-13 — Report: `reproducibility.feature_versions` always empty (fixed, BUG-0069/PA-0071)
+- **Symptom:** every real run's report listed `feature_versions: []`, even when its
+  models and stages read version-1 candidate features.
+- **Root cause:** the report read `candidate.feature_version`, which no production code
+  writes (features are recomputed on read). Its test passed because the fixture wrote
+  the column by hand.
+- **Remediation:**
+  - the report reports `{candidate, flow}` versions from the run's pinned models, the
+    stored values, and every feature-reading stage, which now records its version;
+  - each attempt writer names its own feature schema;
+  - `tests/test_contract_writers.py` asserts every contract column has a production
+    writer, or a reasoned allowlist entry.
+
+  CC-UI-0047, CC-ML-0022, CC-FUZZ-0055; `docs/bugs/BUG-0069-report-feature-versions-always-empty.md`;
+  PA-0071.
+- **Status:** Fixed
+
 ## 2026-10-13 — ML: the conformal gate exceeded its α; anomaly flags exceeded their fraction (fixed, BUG-0070/PA-0069)
 
 - **Symptom:** while building batch 3, its invariant test (each side's error ≤ α on the

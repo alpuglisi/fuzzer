@@ -208,6 +208,9 @@ def test_cli_budgeted_run_trained_on_earlier_runs(tmp_path, monkeypatch, capsys,
         assert st.get("skipped_budget", 0) > 0
         assert _metric(store, run_id, "pipeline_oracle_checked_keys") == 2
         assert _metric(store, run_id, "pipeline_confirm_budget_fallback") == 0
+        # BUG-0069: the candidate feature version the order model read (none for random)
+        assert _metric(store, run_id, "pipeline_budget_feature_version") == \
+            (None if method == "random" else 1.0)
         flagged = store.conn.execute(
             "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND anomaly_flag=1",
             (run_id,)).fetchone()["c"]

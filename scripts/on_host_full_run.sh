@@ -149,6 +149,16 @@ run_sql() {
   sqlite3 "$store" "$query" >>"$OUT_FILE" 2>&1 || echo "(no data -- store/table missing, likely because the producing task above did not complete)" >>"$OUT_FILE"
 }
 
+# _check_sql STORE QUERY EXPECTED -- an asserting read-back (CC-FUZZ-0055): prints the
+# value and fails (non-zero) unless it equals EXPECTED. Use through run_task, so a
+# mismatch is recorded as that check's FAIL in the log — a read-back alone never fails.
+_check_sql() {
+  local got
+  got="$(sqlite3 "$1" "$2" 2>&1)"
+  echo "got=$got expected=$3"
+  [ "$got" = "$3" ]
+}
+
 log_header
 
 # ============================================================================
@@ -249,15 +259,32 @@ run_task "auto --rank (train + score ranker)" H \
 run_sql auto.db "SELECT key, value FROM run_metrics WHERE key LIKE 'rank_%';" "Part H: NDCG/precision vs random (T7.4 exit check)"
 run_sql auto.db "SELECT id, round(rank_score,3), round(rank_uncertainty,3) FROM candidate WHERE run_id=(SELECT MAX(id) FROM run) AND rank_score IS NOT NULL ORDER BY rank_score DESC LIMIT 10;" "Part H: top ranked candidates"
 
-run_task "active learning: propose_queries (uncertainty + committee)" H \
-"python3 - <<'PY'
-from fuzzlab.core.store import Store
-from fuzzlab.ml.active import propose_queries
-with Store('auto.db') as s:
-    rid = s.conn.execute('SELECT MAX(id) FROM run').fetchone()[0]
-    print('uncertainty:', propose_queries(s, rid, budget=5, method='uncertainty'))
-    print('committee:  ', propose_queries(s, rid, budget=5, method='committee'))
-PY"
+# CC-FUZZ-0055 — every ML step goes through the shipped CLI (never the ML package
+# directly), so the on-host run exercises what users run. `propose_queries` is now
+# library-only: the budgeted runs below are its wired path (FR-ML-4 / FR-ML-11).
+# [not yet executed on host] — the steps marked so below were added offline.
+# Each budgeted run must really apply the budget: the asserting check fails when it
+# silently fell back to "confirm all" or checked more/fewer than min(5, confirmable).
+Q_BUDGET_APPLIED="SELECT (SELECT value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key='pipeline_confirm_budget_fallback') = 0 AND (SELECT value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key='pipeline_oracle_checked_keys') = MIN(5, (SELECT value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key='pipeline_confirmable_keys'));"
+for method in uncertainty committee; do
+  run_task "budgeted run: --confirm-budget 5 --budget-method $method [not yet executed on host]" H \
+    "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store auto.db --ground-truth '$GT_DIR' --confirm-budget 5 --budget-method $method --authorized"
+  run_task "check: the $method budget was applied (no fallback; min(5, confirmable) checked)" H \
+    '_check_sql auto.db "$Q_BUDGET_APPLIED" 1'
+done
+
+run_task "ranker objective auto: pairwise vs pointwise [not yet executed on host]" H \
+  "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store auto.db --ground-truth '$GT_DIR' --rank --rank-objective auto --authorized"
+run_sql auto.db "SELECT key, value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key LIKE 'rank_%';" "Part H: run-wide per-fold NDCG of the chosen objective (T7.4: pairwise vs pointwise)"
+
+run_task "classifier with Platt calibration and the blind holdout [not yet executed on host]" H \
+  "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store auto.db --ground-truth '$GT_DIR' --score --calibrate platt --holdout --authorized"
+run_sql auto.db "SELECT json_extract(calibration,'$.calibrator'), json_extract(calibration,'$.ece_oof_raw'), json_extract(calibration,'$.ece_oof_calibrated'), json_extract(calibration,'$.holdout') FROM model WHERE json_extract(calibration,'$.run_id')=(SELECT MAX(id) FROM run) ORDER BY id DESC LIMIT 1;" "Part H: calibration evidence + holdout record (T5.5)"
+# The holdout is blind: reading it uses it up (each reveal is counted). Opt in only.
+if [ -n "${REVEAL_HOLDOUT:-}" ]; then
+  run_task "reveal the sealed holdout metrics (REVEAL_HOLDOUT set; counted)" H \
+    "fuzzlab reveal-holdout --store auto.db --run \$(sqlite3 auto.db 'SELECT MAX(id) FROM run')"
+fi
 
 # ============================================================================
 # Part I — Phase 6: intercepting proxy, live TLS (single script)
@@ -288,19 +315,19 @@ run_task "optional parsed h2/wsproto path tests" K \
 # ============================================================================
 # Part L — Phase 10: plugins, anomaly tripwire, report, transfer
 # ============================================================================
-run_task "auto --plugins (sample entry-point plugin attaches)" L \
-  "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store auto.db --ground-truth '$GT_DIR' --plugins --authorized"
+# One run attaches the entry-point plugins AND the anomaly tripwire (CC-FUZZ-0055), so
+# the report below shows both the plugin set and the anomaly stage on the same run.
+run_task "auto --plugins --anomaly (plugins + ECOD tripwire, advisory) [not yet executed on host]" L \
+  "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store auto.db --ground-truth '$GT_DIR' --plugins --anomaly --authorized"
 
-run_sql auto.db "SELECT name, version, priority FROM run_plugin WHERE run_id=(SELECT MAX(id) FROM run);" "Part L: active plugin set"
+run_sql auto.db "SELECT name, version, priority, config, status FROM run_plugin WHERE run_id=(SELECT MAX(id) FROM run);" "Part L: active plugin set (incl. ml-anomaly)"
+run_sql auto.db "SELECT key, value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key LIKE 'anomaly_%';" "Part L: anomaly_flagged / flag budget / rule (BUG-0070: ties never split)"
 
-run_task "anomaly tripwire (ECOD, advisory) over the latest run" L \
-"python3 - <<'PY'
-from fuzzlab.core.store import Store
-from fuzzlab.ml.anomaly import detect_anomalies
-with Store('auto.db') as s:
-    rid = s.conn.execute('SELECT MAX(id) FROM run').fetchone()[0]
-    print(detect_anomalies(s, rid, contamination=0.1))
-PY"
+run_task "anomaly tripwire with Isolation Forest [not yet executed on host]" L \
+  "fuzzlab auto --base-url '$BASE_URL' --spider-db spider_results.db --store anomaly_iforest.db --ground-truth '$GT_DIR' --anomaly --anomaly-method iforest --authorized"
+
+run_task "flow anomalies over the proxy run's recorded flows [not yet executed on host]" L \
+  "fuzzlab flow-anomaly --store '${PROXY_STORE:-proxy_flows.db}' --run \$(sqlite3 '${PROXY_STORE:-proxy_flows.db}' 'SELECT MAX(id) FROM run')"
 
 run_task "reproducible report (human summary)" L "fuzzlab report --store auto.db"
 run_task "reproducible report (canonical JSON)" L "fuzzlab report --store auto.db --json"

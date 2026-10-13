@@ -3,6 +3,81 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0032 — Packaging ships every tracked data file (BUG-0068); FR-CORE-22 (2026-10-13)
+- Change:
+  - **Package data.** `pyproject.toml` `[tool.setuptools.package-data]` drops the
+    per-directory, non-recursive globs for one recursive rule, `"*" = ["**/*", "**/.*"]`.
+  - **Deny-list.** `[tool.setuptools.exclude-package-data] "*"` names what never ships:
+    - caches;
+    - `.env` and its `.local` / `.production` / `.development` / `.staging` / `.test`
+      variants;
+    - `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*id_rsa*`;
+    - `*.sqlite*` and `*.db-journal`, `-wal`, `-shm`;
+    - OS and editor junk.
+
+    These are fnmatch patterns, so `*` crosses `/`. `**/` patterns do nothing in
+    setuptools 68 (measured).
+  - **The FR-ML-6 no-ML switch** is documented as two lines.
+  - **`pyflakes` added to the `dev` extra** (for `tests/test_lint.py`).
+  - **New `tests/test_packaging.py` (8 tests):**
+    - build_py equality with the tracked set;
+    - executable bits kept;
+    - the deny-list matching no tracked file;
+    - planted secrets and junk never built, while `.env.example` is;
+    - an untracked store/secret guard (a disk walk minus `git ls-files`);
+    - sdist ships every tracked file, with modes;
+    - the wheel (skips with the Debian `install_layout` reason unless
+      `FUZZLAB_REQUIRE_WHEEL=1`);
+    - the no-ML switch removes exactly `fuzzlab/ml/`.
+- Impact:
+  - **Every non-editable install** now has the web UI's templates and assets, the lab
+    generator's trees and skeletons, and all packaged data.
+  - **The FR-ML-6 knob** gains its required second line.
+  - **The project-level `pyproject.toml`** is recorded here because FR-CORE-22 states
+    the distribution contract.
+  - No runtime code changes.
+- Risk: low-medium.
+  - **Shipping more could ship something unintended.** Mitigated by the deny-list (proven
+    by planted files), the converse check, and the untracked-file guard.
+  - **Residual, stated:** a stray `*.db` or an unlisted `.env` variant can't be denied
+    by setuptools, so release builds come from a clean checkout (runbook).
+- Deliverables:
+  - [x] package-data rule + deny-list — done
+  - [x] tests — done
+  - [x] FR-CORE-22 — done
+  - [x] BUG-0068 report, ERROR_LOG, PA-0070 — done
+  - [x] runbook "Release builds" — done
+- Implementation divergence:
+  - `*.env.staging` and `*.env.test` were added to the deny-list (A3/B3 nits).
+  - The untracked guard walks the disk (A4), so it also sees ignored files.
+- Review: pre-change review gate cleared 3/3 over drafts v1 and v2 (the proposing agent
+  plus 2 independent reviewer agents; every issue adopted). The decisive items were
+  A1/B1: the recursive rule re-shipped `fuzzlab/ml` as data under the documented no-ML
+  exclude. Both reviewers reproduced it.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (95 files: ML, auto, web incl. real-browser, plugins, report,
+    no-ML incl. the real no-ML build, harness, multitarget, pipeline, diagnostics, core,
+    CLI, store, migrations, packaging, lint, contract writers, on-host script, greybox,
+    store adapter, session, labgen CLI, mutation, oracle;
+    `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1249 passed, 3 skipped,
+    11 failed.
+    - 10 failures are `test_labgen_cli.py` tests, among the 33 known environmental
+      failures (no scipy, sklearn or gitleaks).
+    - The 11th, the multitarget live-boot test, failed with a connection reset from its
+      locally booted server while two other suites held the CPU. It passes alone
+      (2 passed).
+  - **Mutation check** (a staged git copy, bytecode caches cleared): all 21 batch-5
+    mutants are killed. Three were first mis-anchored by shell expansion in the
+    mutation script and were re-run correctly. Killed:
+    - old per-directory globs; no dotfiles;
+    - deny-list missing pem / env; an over-broad deny pattern; a one-line no-ML switch;
+    - report union missing models / stage metrics / flow;
+    - the anomaly version on the read-only path, or missing;
+    - flow-version duplicates; prioritizer / pipeline version missing;
+    - CSV / greybox schema missing;
+    - `_check_sql` never failing; the reveal not opt-in; a literal 5 in the budget check;
+    - a lint regression; the dropped `Probe` import.
+
 ### CC-CORE-0031 — Migration 18 (flow anomaly columns); candidate features in `core/features.py` (2026-10-13)
 - Change:
   - **Migration 18** adds `flow.anomaly_score REAL` and `flow.anomaly_flag INTEGER`.

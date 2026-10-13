@@ -56,7 +56,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 

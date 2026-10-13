@@ -52,7 +52,9 @@ def test_build_report_captures_the_run(tmp_path):
         assert rep["plugins"] == [{"name": "sample", "version": "1.0", "priority": 10,
                                    "config": None, "status": None, "error": None}]
         repro = rep["reproducibility"]
-        assert repro["feature_versions"] == [1] and repro["model_versions"] == {"logistic": 1}
+        # per counter since BUG-0069 (report JSON contract change, CC-UI-0047)
+        assert repro["feature_versions"] == {"candidate": [1], "flow": []}
+        assert repro["model_versions"] == {"logistic": 1}
         assert repro["plugins"] == {"sample": "1.0"} and repro["schema_version"] >= 10
         assert repro["plugin_config"] == {"sample": None}       # CC-UI-0041 siblings
         assert repro["plugin_status"] == {"sample": None}
@@ -99,3 +101,58 @@ def test_cli_prints_report(tmp_path, capsys):
     assert "fuzzlab run #" in capsys.readouterr().out
     assert report_main(["--store", str(db), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["counts"]["findings"] == 1
+
+
+# --- BUG-0069: feature versions come from what the run's stages actually read ----------
+
+def test_feature_versions_come_from_production_writers_only(tmp_path):
+    """Seeded only through production writers (PA-0071): no hand-written
+    `candidate.feature_version`."""
+    from fuzzlab.ml.anomaly import detect_anomalies
+    from fuzzlab.ml.rank_train import train_and_rank
+    from fuzzlab.ml.train import train_and_score
+    from tests.test_ml_train import _seed_rich
+    with Store(tmp_path / "f.db") as store:
+        plain = _seed_rich(store)                         # no ML stage ran
+        assert build_report(store, plain)["reproducibility"]["feature_versions"] == \
+            {"candidate": [], "flow": []}
+        trained = _seed_rich(store)
+        train_and_score(store, trained)
+        train_and_rank(store, trained)
+        rep = build_report(store, trained)
+        assert rep["reproducibility"]["feature_versions"] == {"candidate": [1], "flow": []}
+        assert "feature versions: candidate [1], flow —" in format_text(rep)
+        anomaly_only = _seed_rich(store)
+        detect_anomalies(store, anomaly_only)
+        assert build_report(store, anomaly_only)["reproducibility"]["feature_versions"][
+            "candidate"] == [1]
+        detect_anomalies(store, plain, persist=False)    # a read-only refit records nothing
+        assert build_report(store, plain)["reproducibility"]["feature_versions"][
+            "candidate"] == []
+
+
+def test_flow_and_budget_stages_record_their_versions(tmp_path):
+    from fuzzlab.ml.flow_anomaly import FLOW_FEATURE_VERSION, detect_flow_anomalies
+    with Store(tmp_path / "g.db") as store:
+        r = store.start_run("proxy", "h")
+        for i in range(5):
+            store.conn.execute("INSERT INTO flow (run_id, method, url, host, status) "
+                               "VALUES (?,?,?,?,?)", (r, "GET", f"http://a/p{i}", "a", 200))
+        store.conn.commit()
+        detect_flow_anomalies(store, r)
+        detect_flow_anomalies(store, r)                  # a rerun replaces, never duplicates
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM run_metrics WHERE run_id=? AND "
+            "key='flow_anomaly_feature_version'", (r,)).fetchone()[0] == 1
+        assert build_report(store, r)["reproducibility"]["feature_versions"] == \
+            {"candidate": [], "flow": [FLOW_FEATURE_VERSION]}
+
+
+def test_the_budget_prioritizer_reports_its_feature_version(tmp_path):
+    from fuzzlab.ml.active import prioritize
+    from tests.test_ml_budget_and_scope import _current_run, _prior_runs
+    with Store(tmp_path / "b.db") as store:
+        _prior_runs(store)
+        run_id, ids = _current_run(store)
+        assert prioritize(store, run_id, ids).feature_version == 1
+        assert prioritize(store, run_id, ids, method="random").feature_version is None

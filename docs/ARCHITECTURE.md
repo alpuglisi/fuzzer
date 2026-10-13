@@ -1403,7 +1403,14 @@ tracked in the requirements files, not here.
     the run with their options.
   - Nothing outside `fuzzlab/ml/` imports ML except `plugins/optional.import_ml`.
     Without the package the scan, report and web app still work (simulated-absence
-    tested). A packaged no-ML build is not built here.
+    tested). *(CC-ML-0022, BUG-0068:)* a real no-ML **build** passes the same checks;
+    the switch is two `pyproject.toml` lines (`packages.find exclude` plus
+    `exclude-package-data "fuzzlab" = ["ml/*"]`).
+- **Packaging** `[built]` (CC-CORE-0032, FR-CORE-22, BUG-0068): one recursive
+  package-data rule ships every tracked non-Python file (templates, static assets,
+  lab-generator trees, data) minus a declared deny-list (caches, keys, SQLite side
+  files, junk); `tests/test_packaging.py` builds the package and compares it with the
+  tracked tree. Release builds come from a clean checkout.
 
 ### 11. Intercepting proxy `[partial — full offline stack built; live TLS serving on-host]` (Phase 6)
 - **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**

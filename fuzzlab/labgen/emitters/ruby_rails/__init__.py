@@ -608,7 +608,6 @@ def assemble_ruby_rails_app(dest: str) -> None:
     including this stack's own ephemeral `SECRET_KEY_BASE` generation
     (never written here, never committed -- D12)."""
     import shutil
-    from pathlib import Path
 
     from fuzzlab.labgen.conformance.rails_live_boot import SKELETON_DIR
     from fuzzlab.labgen.emitters.ruby_rails.route_accumulator import RouteAccumulator

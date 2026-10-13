@@ -23,7 +23,22 @@ class _BlockML(importlib.abc.MetaPathFinder):
         return None
 
 
-sys.meta_path.insert(0, _BlockML())
+import os  # noqa: E402
+
+# FUZZLAB_NOML_REAL=1: run against a genuinely ML-free *built* package (first on
+# PYTHONPATH, CC-ML-0022) — no blocker; the package is really absent.
+_DROPPED_FINDERS: list[str] = []
+if not os.environ.get("FUZZLAB_NOML_REAL"):
+    sys.meta_path.insert(0, _BlockML())
+else:
+    # A development checkout's *editable* install adds a meta-path finder that maps
+    # `fuzzlab.*` back to the source tree whenever the built tree lacks a module — so it
+    # would resurrect `fuzzlab.ml`. A real (non-editable) install has no such finder.
+    for finder in list(sys.meta_path):
+        if type(finder).__name__.startswith("__editable__") or \
+                getattr(finder, "__module__", "").startswith("__editable__"):
+            sys.meta_path.remove(finder)
+            _DROPPED_FINDERS.append(getattr(finder, "__module__", type(finder).__name__))
 
 import contextlib  # noqa: E402
 import io  # noqa: E402
@@ -72,7 +87,9 @@ def _app(seeded: Path, port: int = 8787):
 def check(seeded: Path, run_id: int, workdir: Path) -> dict:
     from fuzzlab.core.store import Store
     from fuzzlab.report.report import build_report, format_text
-    out: dict = {"ml_blocked": _ml_blocked()}
+    import fuzzlab
+    out: dict = {"ml_blocked": _ml_blocked(), "fuzzlab_path": fuzzlab.__file__,
+                 "dropped_finders": _DROPPED_FINDERS}
 
     fresh = workdir / "fresh.db"
     rc, stdout, _ = _auto([], workdir, fresh)

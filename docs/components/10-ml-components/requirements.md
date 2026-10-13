@@ -57,8 +57,12 @@ the oracle owns truth (the oracle/advisory split).
     `plugins.optional.import_ml` (FR-PLUG-9).
   - **Without the package:** the scan, report and web app work (tested by simulated
     absence).
-  - **Not built (flagged):** a packaged no-ML distribution. The knob is
-    `[tool.setuptools.packages.find] exclude = ["fuzzlab.ml*"]`.
+  - **No-ML build** *(verified CC-ML-0022, BUG-0068):* the switch is **two lines** —
+    `[tool.setuptools.packages.find] exclude = ["fuzzlab.ml*"]` **and**
+    `[tool.setuptools.exclude-package-data] "fuzzlab" = ["ml/*"]` (the recursive
+    package-data rule would otherwise ship the ML modules as data). A real no-ML build
+    passes the same checks as the simulated absence
+    (`tests/test_no_ml.py::test_a_real_no_ml_build_passes_the_same_checks`).
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
   *(Partially implemented, CC-ML-0020 — FR-ML-19:)* a deterministic, versioned,
@@ -157,6 +161,9 @@ the oracle owns truth (the oracle/advisory split).
   - *(CC-ML-0021)* `method="ecod"` (default) or `"iforest"` (FR-ML-22); the anomaly
     stage's config records `method` only when not `ecod`, and readers show the method
     that wrote the stored flags ("unknown (assumed ECOD)" with no stage row).
+  - *(CC-ML-0022, BUG-0069)* When it persists flags for a run it records
+    `run_metrics.anomaly_feature_version` (the candidate feature version read); the
+    read-only refit records nothing.
 
 - **FR-ML-13 (saved models, CC-ML-0015)** Every `model` row written by
   `train_and_score` / `train_and_rank` carries the trained model itself.
@@ -354,7 +361,10 @@ the oracle owns truth (the oracle/advisory split).
     (an endpoint is never split across folds).
   - **No uncertainty.** A pairwise score is not a probability: `rank_uncertainty` is
     NULL and the ML tab says "uncertainty n/a (pairwise)".
-  - **The budget prioritizer stays pointwise.**
+  - **The budget prioritizer stays pointwise.** *(CC-ML-0022)* `Prioritized` carries the
+    `feature_version` its order model read (none for `random`), recorded by the pipeline
+    for the report (BUG-0069). `detect_flow_anomalies` likewise records
+    `flow_anomaly_feature_version`.
 - **FR-ML-22 (Isolation Forest, CC-ML-0021; FR-ML-3)**
   - `anomaly.IsolationForest(n_trees=100, max_samples=256, seed)`: seeded random
     isolation trees to depth `ceil(log2 ψ)`, splits only on features with range > 0, a

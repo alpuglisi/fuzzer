@@ -3,6 +3,65 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0022 — A real no-ML build passes the no-ML checks; feature-reading stages record their feature version (BUG-0069) (2026-10-13)
+- Change:
+  - **Real no-ML build.** `tests/test_no_ml.py::test_a_real_no_ml_build_passes_the_same_checks`
+    builds the package with the FR-ML-6 switch (both lines) and puts it first on the
+    path. The child (`tests/_no_ml_child.py`, `FUZZLAB_NOML_REAL=1`) runs with no import
+    blocker. It drops the editable install's dev-only meta-path finder, which would
+    resurrect `fuzzlab.ml` from the source tree, and records that it did. The test then
+    asserts the same scan, refusal, report, pages, ML panels and `flow-anomaly` exit
+    code as the simulated absence.
+  - **Feature versions recorded (BUG-0069):**
+    - `detect_anomalies` records `run_metrics.anomaly_feature_version` when it persists
+      (never on the read-only refit). It appends, because the advisory guard denies
+      DELETE.
+    - `Prioritized.feature_version` is set for model-based methods and is `None` for
+      `random`.
+    - `detect_flow_anomalies` records `flow_anomaly_feature_version`, replacing it on
+      rerun.
+- Impact:
+  - FR-ML-6's "packaged no-ML distribution" flag is resolved by a real build.
+  - The report's `feature_versions` (CC-UI-0047) reads the new metrics.
+  - The pipeline records the prioritizer's version (CC-FUZZ-0055).
+- Risk: low.
+- Deliverables:
+  - [x] real no-ML build test — done
+  - [x] stage version metrics — done
+  - [x] FR-ML-6 / FR-ML-12 / FR-ML-21 notes — done
+- Implementation divergence:
+  - The anomaly version metric **appends** rather than replacing, as B5 had suggested:
+    the advisory write guard (PLUG §6) denies DELETE on output tables. Discovered when
+    the golden summaries failed with the stage FAILED. A rerun adds an identical value
+    (documented).
+  - `FailedBudgetOrder` (PLUG) was **not** given a `feature_version` field. The
+    pipeline reads it with `getattr(…, None)`, so no PLUG change was needed (A5 asked
+    for both).
+- Review: covered by the batch-5 3/3 pre-change review (A1/B1, B5, A5).
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (95 files: ML, auto, web incl. real-browser, plugins, report,
+    no-ML incl. the real no-ML build, harness, multitarget, pipeline, diagnostics, core,
+    CLI, store, migrations, packaging, lint, contract writers, on-host script, greybox,
+    store adapter, session, labgen CLI, mutation, oracle;
+    `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1249 passed, 3 skipped,
+    11 failed.
+    - 10 failures are `test_labgen_cli.py` tests, among the 33 known environmental
+      failures (no scipy, sklearn or gitleaks).
+    - The 11th, the multitarget live-boot test, failed with a connection reset from its
+      locally booted server while two other suites held the CPU. It passes alone
+      (2 passed).
+  - **Mutation check** (a staged git copy, bytecode caches cleared): all 21 batch-5
+    mutants are killed. Three were first mis-anchored by shell expansion in the
+    mutation script and were re-run correctly. Killed:
+    - old per-directory globs; no dotfiles;
+    - deny-list missing pem / env; an over-broad deny pattern; a one-line no-ML switch;
+    - report union missing models / stage metrics / flow;
+    - the anomaly version on the read-only path, or missing;
+    - flow-version duplicates; prioritizer / pipeline version missing;
+    - CSV / greybox schema missing;
+    - `_check_sql` never failing; the reveal not opt-in; a literal 5 in the budget check;
+    - a lint regression; the dropped `Probe` import.
+
 ### CC-ML-0021 — Pairwise learning-to-rank (FR-ML-21), Isolation Forest (FR-ML-22), flow anomalies (FR-ML-23); candidate features read from core (2026-10-13)
 - **Context:** batch 4 of the remaining ML work, built while the user is away, taking
   my own recommendation at each decision point. Decisions taken:

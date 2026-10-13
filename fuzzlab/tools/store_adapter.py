@@ -140,6 +140,9 @@ def import_fuzz_csv(csv_path: str | Path, store: Store, run_id: int) -> dict[str
         for row in csv.DictReader(fh):
             detected = str(row.get("time_delay_detected", "0")).strip() in ("1", "true", "True")
             features = {
+                # this writer's own schema (BUG-0069 sweep, CC-FUZZ-0055): fuzz-CSV
+                # telemetry, not the core extractor's vector — feature_version stays NULL
+                "_schema": "fuzz-csv/1",
                 "server_response_status": _to_int(row.get("server_response_status")),
                 "server_response_length": _to_int(row.get("server_response_length")),
                 "observed_latency_seconds": _to_float(row.get("observed_latency_seconds")),

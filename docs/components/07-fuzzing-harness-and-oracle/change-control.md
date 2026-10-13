@@ -22,6 +22,83 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0055 — On-host run through the CLI; budget feature version; attempt feature schemas; FR-FUZZ-31 backfill; oracle lint (2026-10-13)
+- Change:
+  - **`scripts/on_host_full_run.sh`.** No ML step calls `fuzzlab.ml` any more:
+    - **Part H.** The inline `propose_queries` is replaced by budgeted `fuzzlab auto`
+      runs (uncertainty, committee), each followed by an **asserting** `_check_sql`
+      (new helper): no fallback, and `min(5, confirmable)` keys checked. New steps:
+      `--rank-objective auto`, and `--score --calibrate platt --holdout`. The holdout
+      reveal runs only with `REVEAL_HOLDOUT` set.
+    - **Part L.** It is one `--plugins --anomaly` run, so the report shows both, then an
+      `--anomaly-method iforest` run (its own store) and `fuzzlab flow-anomaly` over
+      Part I's proxy flows.
+    - New steps are marked "[not yet executed on host]".
+  - **`docs/ON_HOST_RUNBOOK.md`** matches, plus a "Release builds" section (BUG-0068).
+  - **`harness/pipeline.py`** records `pipeline_budget_feature_version` from the
+    prioritizer's order (BUG-0069).
+  - **Attempt feature schemas.**
+    - `greybox/run.py`: `ATTEMPT_FEATURE_SCHEMA = "greybox/1"`, written as `"_schema"`
+      inside each attempt's `features_json`.
+    - `tools/store_adapter.py`: `"_schema": "fuzz-csv/1"`.
+
+    `attempt.feature_version` stays NULL (BUG-0069 sweep; allowlisted).
+  - **FR-FUZZ-31 backfilled** from CC-FUZZ-0047. It landed 2026-09-25 with its
+    effectiveness recorded, but the requirement was never written.
+  - **`oracle/strategies.py`** imports `Probe`, which was used only in a postponed
+    annotation (pyflakes "undefined name").
+- Impact:
+  - The on-host run now exercises the shipped CLI paths and fails visibly when a budget
+    silently falls back.
+  - `propose_queries` becomes library-only. It has no CLI caller; the budgeted run is
+    its wired path.
+  - Attempt rows gain a `_schema` key in their JSON; existing keys are unchanged.
+- Risk: low. The script changes are offline-verified only: `bash -n`, the guard tests,
+  and `_check_sql` against a stand-in `sqlite3`. They are marked as such.
+- Deliverables:
+  - [x] script + runbook — done
+  - [x] pipeline metric — done
+  - [x] attempt schemas — done
+  - [x] FR-FUZZ-31 backfill, FR-FUZZ-38 — done
+  - [x] tests:
+    - `tests/test_on_host_script.py` (4): no `fuzzlab.ml`, syntax, opt-in reveal and the
+      asserting check, `_check_sql` failing on a mismatch;
+    - `test_auto_budget` (the pipeline metric per method);
+    - `test_contract_writers` (the attempt schemas).
+
+    — done
+- Implementation divergence:
+  - **FR-FUZZ-38** is a new requirement ID for the script and pipeline record; it was
+    not pre-assigned. This is the only lane, so there is no collision.
+  - **The iforest step uses its own store** (`anomaly_iforest.db`), so the reports that
+    follow still describe the `--plugins --anomaly` run.
+  - **CC-MUT-0012 was not needed.** `mutation/xss.py`'s flagged import is a deliberate
+    `# noqa` re-export, which the lint test honours, so the file is unchanged.
+- Review: covered by the batch-5 3/3 pre-change review (B3, A7, A9, A1, A5).
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (95 files: ML, auto, web incl. real-browser, plugins, report,
+    no-ML incl. the real no-ML build, harness, multitarget, pipeline, diagnostics, core,
+    CLI, store, migrations, packaging, lint, contract writers, on-host script, greybox,
+    store adapter, session, labgen CLI, mutation, oracle;
+    `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1249 passed, 3 skipped,
+    11 failed.
+    - 10 failures are `test_labgen_cli.py` tests, among the 33 known environmental
+      failures (no scipy, sklearn or gitleaks).
+    - The 11th, the multitarget live-boot test, failed with a connection reset from its
+      locally booted server while two other suites held the CPU. It passes alone
+      (2 passed).
+  - **Mutation check** (a staged git copy, bytecode caches cleared): all 21 batch-5
+    mutants are killed. Three were first mis-anchored by shell expansion in the
+    mutation script and were re-run correctly. Killed:
+    - old per-directory globs; no dotfiles;
+    - deny-list missing pem / env; an over-broad deny pattern; a one-line no-ML switch;
+    - report union missing models / stage metrics / flow;
+    - the anomaly version on the read-only path, or missing;
+    - flow-version duplicates; prioritizer / pipeline version missing;
+    - CSV / greybox schema missing;
+    - `_check_sql` never failing; the reveal not opt-in; a literal 5 in the budget check;
+    - a lint regression; the dropped `Probe` import.
+
 ### CC-FUZZ-0054 — `--rank-objective`, `--anomaly-method`; `fuzzlab flow-anomaly` (2026-10-13)
 - Change:
   - **`--rank-objective {pointwise,pairwise,auto}`** needs `--rank`, and is a usage

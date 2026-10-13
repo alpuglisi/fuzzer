@@ -972,6 +972,15 @@ rewards) derives from it.
   real detection, closing Booking.com's own toolkit-side detection
   coverage entirely.
 
+- **FR-FUZZ-31** *(`PriceIntegrityBypassStrategy` anchor; `CC-FUZZ-0047`, 2026-09-25;
+  backfilled CC-FUZZ-0055 — the change landed with CC-LAB-0239 but this requirement was
+  never written).* The price-integrity-bypass confirmation (`price_integrity_bypass`,
+  `LABGEN-BC-0005`/`0006`) is anchored to the confirmation page's
+  `data-charged-amount="<canary>"` HTML attribute (after whitespace stripping), an exact
+  anchored match rather than a bare substring. The canary has three decimal places and
+  excludes the real rate-table values (`89.00`/`149.00`/`249.00`). It replaced the
+  earlier `"charged_amount":"<canary>"` JSON-fragment anchor when the checkout response
+  became an HTML page.
 - **FR-FUZZ-32** *(confirmation budget + anomaly tripwire; `CC-FUZZ-0048`,
   2026-10-13).* The automatic pipeline records an `oracle_status` on every candidate
   (FR-CORE-14). The CLI also offers a post-run `--anomaly` step.
@@ -1055,6 +1064,19 @@ rewards) derives from it.
     prints per-host counts and the top flagged flows, and says contamination is a
     forced per-host fraction. Reached through `import_ml`: without ML it exits 2 with
     the "not installed" message. Registered in the launcher (`sends_traffic=False`).
+- **FR-FUZZ-38** *(on-host run through the CLI; feature-version record; `CC-FUZZ-0055`,
+  2026-10-13).*
+  - `scripts/on_host_full_run.sh` and `docs/ON_HOST_RUNBOOK.md` exercise every ML step
+    through the shipped CLI (never the ML package directly; guarded by
+    `tests/test_on_host_script.py`): budgeted runs with an **asserting** check
+    (`_check_sql`: no fallback, `min(5, confirmable)` keys checked), `--rank-objective
+    auto`, `--calibrate platt --holdout`, `--plugins --anomaly` in one run,
+    `--anomaly-method iforest`, `fuzzlab flow-anomaly`. The holdout reveal runs only with
+    `REVEAL_HOLDOUT` set. New steps are marked "[not yet executed on host]".
+  - The pipeline records `pipeline_budget_feature_version` (the candidate feature
+    version the budget order model read; none for `random`) — BUG-0069.
+  - Attempt writers name their own feature schema inside `features_json` (`_schema`:
+    `greybox/1`, `fuzz-csv/1`); `attempt.feature_version` stays NULL (BUG-0069 sweep).
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

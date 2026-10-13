@@ -89,7 +89,7 @@ labgen-python-fastapi = [
     "httpx>=0.27,<1",
 ]
 # Developer tooling.
-dev = ["pytest>=8,<9"]
+dev = ["pytest>=8,<9", "pyflakes>=3,<4"]
 
 [project.scripts]
 # Single entry point; `fuzzlab <command>` dispatches (crawler, auditor, fuzzer,
@@ -100,17 +100,30 @@ fuzzlab = "fuzzlab.cli:main"
 include = ["fuzzlab*"]
 
 [tool.setuptools.package-data]
-"fuzzlab.tools" = ["data/*.db"]
-"fuzzlab.labels" = ["schemas/*.json"]
-"fuzzlab.audit.rules_data" = ["*.json"]
-"fuzzlab.web" = ["templates/*.html", "static/*"]
-"fuzzlab.labgen.modules" = ["sources/*.j2", "transforms/*.j2", "sinks/*.j2", "complexities/*.j2"]
-"fuzzlab.labgen.emitters.python_fastapi" = [
-    "templates/sources/*.j2",
-    "templates/transforms/*.j2",
-    "templates/sinks/*.j2",
-    "templates/complexities/*.j2",
-    "templates/scaffold/*.j2",
+# Every non-Python file inside the package ships (BUG-0068, FR-CORE-22): web templates and
+# static assets at any depth, lab-generator templates and stack skeletons (dotfiles
+# included), data files. One recursive rule instead of per-directory globs, which
+# silently missed nested directories. `tests/test_packaging.py` builds the package and
+# compares the built file set with the tracked source tree.
+#
+# No-ML build (FR-ML-6): add BOTH `exclude = ["fuzzlab.ml*"]` under
+# [tool.setuptools.packages.find] AND `"fuzzlab" = ["ml/*"]` under
+# [tool.setuptools.exclude-package-data] — the recursive data rule would otherwise ship
+# the ML modules as data of the parent package.
+"*" = ["**/*", "**/.*"]
+
+[tool.setuptools.exclude-package-data]
+# Never shipped (fnmatch: `*` also crosses `/`): caches, credentials and keys, SQLite side
+# files, OS/editor junk. `*.db` cannot be listed without dropping the tracked indicator
+# DB (setuptools has no re-include), so stray stores are caught by the untracked-file
+# guard in `tests/test_packaging.py`, and release builds come from a clean checkout.
+"*" = [
+    "*.pyc", "*.pyo", "__pycache__/*", "*/__pycache__/*",
+    ".env", "*/.env", "*.env.local", "*.env.production", "*.env.development",
+    "*.env.staging", "*.env.test",
+    "*.pem", "*.key", "*.p12", "*.pfx", "*id_rsa*",
+    "*.sqlite", "*.sqlite3", "*.db-journal", "*.db-wal", "*.db-shm",
+    "*.DS_Store", "*.swp", "*~",
 ]
 
 [tool.pytest.ini_options]

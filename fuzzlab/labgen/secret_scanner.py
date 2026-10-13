@@ -146,7 +146,7 @@ def locate_gitleaks(explicit_path: Optional[str] = None) -> str:
     if explicit_path and Path(explicit_path).is_file():
         return str(Path(explicit_path).resolve())
     raise ToolNotFoundError(
-        f"'gitleaks' executable not found "
+        "'gitleaks' executable not found "
         + (f"at explicit path {explicit_path!r} or " if explicit_path else "")
         + "on PATH. Install it (e.g. `apt-get install gitleaks`, or see "
         "https://github.com/gitleaks/gitleaks for other install methods) or "

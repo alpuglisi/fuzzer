@@ -3,6 +3,38 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0010 — Lint: unused `dataclasses.field` import in `session/manager.py` (2026-10-13)
+- Change: removed the unused import (pyflakes). No behaviour change.
+- Impact: none.
+- Risk: none.
+- Deliverables:
+  - [x] fix — done
+  - [x] `tests/test_lint.py` keeps it clean — done
+- Review: covered by the batch-5 3/3 pre-change review (A5). Pre-assigned number.
+- Effectiveness (assessed 2026-10-13): effective offline.
+  - **Related suites** (95 files: ML, auto, web incl. real-browser, plugins, report,
+    no-ML incl. the real no-ML build, harness, multitarget, pipeline, diagnostics, core,
+    CLI, store, migrations, packaging, lint, contract writers, on-host script, greybox,
+    store adapter, session, labgen CLI, mutation, oracle;
+    `FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_LINT=1`): 1249 passed, 3 skipped,
+    11 failed.
+    - 10 failures are `test_labgen_cli.py` tests, among the 33 known environmental
+      failures (no scipy, sklearn or gitleaks).
+    - The 11th, the multitarget live-boot test, failed with a connection reset from its
+      locally booted server while two other suites held the CPU. It passes alone
+      (2 passed).
+  - **Mutation check** (a staged git copy, bytecode caches cleared): all 21 batch-5
+    mutants are killed. Three were first mis-anchored by shell expansion in the
+    mutation script and were re-run correctly. Killed:
+    - old per-directory globs; no dotfiles;
+    - deny-list missing pem / env; an over-broad deny pattern; a one-line no-ML switch;
+    - report union missing models / stage metrics / flow;
+    - the anomaly version on the read-only path, or missing;
+    - flow-version duplicates; prioritizer / pipeline version missing;
+    - CSV / greybox schema missing;
+    - `_check_sql` never failing; the reveal not opt-in; a literal 5 in the budget check;
+    - a lint regression; the dropped `Probe` import.
+
 ### CC-SESS-0009 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/session/cli.py` now factors its argparse setup (including the
   `set-credential`/`print` subparsers) into `build_parser()`; `main()` delegates parsing.

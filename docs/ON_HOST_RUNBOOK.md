@@ -455,18 +455,40 @@ sqlite3 auto.db "SELECT id, round(rank_score,3), round(rank_uncertainty,3) FROM 
   WHERE run_id=(SELECT MAX(id) FROM run) AND rank_score IS NOT NULL \
   ORDER BY rank_score DESC LIMIT 10;"
 ```
-**Active learning** (library, no CLI flag) — pick the most informative candidates to
-confirm next:
+**Active learning through the shipped CLI** (CC-FUZZ-0055) `[not yet executed on host]`
+— a confirmation budget ordered by uncertainty, then by committee disagreement. Each run
+must really apply the budget, so check it (the script's `_check_sql` fails the step
+otherwise):
 ```bash
-python - <<'PY'
-from fuzzlab.core.store import Store
-from fuzzlab.ml.active import propose_queries
-with Store("auto.db") as s:
-    rid = s.conn.execute("SELECT MAX(id) FROM run").fetchone()[0]
-    print("uncertainty:", propose_queries(s, rid, budget=5, method="uncertainty"))
-    print("committee:  ", propose_queries(s, rid, budget=5, method="committee"))
-PY
+for m in uncertainty committee; do
+  fuzzlab auto --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
+               --store auto.db --ground-truth lab/ground-truth \
+               --confirm-budget 5 --budget-method $m --authorized
+  sqlite3 auto.db "SELECT key, value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) \
+    AND key IN ('pipeline_confirm_budget_fallback','pipeline_oracle_checked_keys','pipeline_confirmable_keys');"
+done   # expect fallback 0 and checked = min(5, confirmable)
 ```
+(`propose_queries` remains a library function; the budgeted run is its wired path.)
+
+**Ranker objective (T7.4)** `[not yet executed on host]` — pairwise vs pointwise on the
+real lab; `auto` keeps the better run-wide per-fold NDCG (selection-biased: confirm with
+`--holdout`):
+```bash
+fuzzlab auto ... --store auto.db --rank --rank-objective auto --authorized
+sqlite3 auto.db "SELECT key, value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) AND key LIKE 'rank_%';"
+```
+
+**Calibration and the blind holdout (T5.5)** `[not yet executed on host]` — the run
+records out-of-fold ECE / Brier before and after Platt scaling, and seals the held-out
+endpoints' metrics:
+```bash
+fuzzlab auto ... --store auto.db --score --calibrate platt --holdout --authorized
+REVEAL_HOLDOUT=1 scripts/on_host_full_run.sh --only H   # or, deliberately:
+fuzzlab reveal-holdout --store auto.db --run <run id>   # each read is counted
+```
+The holdout is blind: every reveal is counted per membership version, and tuning on it
+uses it up (bump `HOLDOUT_VERSION` to draw a fresh one). The script reveals only with
+`REVEAL_HOLDOUT` set.
 
 ## Part I — Phase 6: intercepting proxy, live TLS `[run]`
 
@@ -646,17 +668,20 @@ Everything stays loopback, on infrastructure you own.
      WHERE run_id=(SELECT MAX(id) FROM run);"
    ```
    The active set is recorded per run; a failing plugin is contained, not fatal.
-2. **Anomaly tripwire** (ECOD, advisory) over the run's candidates:
+2. **Anomaly tripwire** (advisory) `[not yet executed on host]` — in the same run as the
+   plugins, so the report shows both (CC-FUZZ-0055):
    ```bash
-   python - <<'PY'
-   from fuzzlab.core.store import Store
-   from fuzzlab.ml.anomaly import detect_anomalies
-   with Store("auto.db") as s:
-       rid = s.conn.execute("SELECT MAX(id) FROM run").fetchone()[0]
-       print(detect_anomalies(s, rid, contamination=0.1))
-   PY
+   fuzzlab auto ... --store auto.db --plugins --anomaly --authorized
+   sqlite3 auto.db "SELECT key, value FROM run_metrics WHERE run_id=(SELECT MAX(id) FROM run) \
+     AND key LIKE 'anomaly_%';"     # flagged ≤ budget; ties are never split (BUG-0070)
+   fuzzlab auto ... --store anomaly_iforest.db --anomaly --anomaly-method iforest --authorized
+   fuzzlab flow-anomaly --store proxy_flows.db --run <proxy run id>   # Part I's flows
    ```
-3. **Reproducible report** for any run (read-only; save it alongside your numbers):
+   Flow anomalies flag up to 10% of **every** host's flows (forced per-host fraction):
+   "most unusual", not "malicious".
+3. **Reproducible report** for any run (read-only; save it alongside your numbers). Its
+   `reproducibility.feature_versions` now lists the candidate / flow feature versions
+   the run's stages actually read (BUG-0069):
    ```bash
    fuzzlab report --store auto.db            # human summary
    fuzzlab report --store auto.db --json     # canonical JSON for diffing
@@ -715,3 +740,12 @@ header for every other knob (`BASE_URL`, `IDENTITY`, `PROXY_PORT`, …).
   lab-only throwaway credentials.
 - Automatic runs against a target with **no** ground truth fail safe (D15): explicit
   `--categories` required, run unscored, all gates on.
+
+## Release builds (BUG-0068)
+Build a distributable package **from a clean checkout** (`git clone`, or `git status`
+showing nothing untracked under `fuzzlab/`): the package ships every non-Python file
+under `fuzzlab/`, and setuptools cannot exclude every stray `*.db` store or `.env`
+variant (`tests/test_packaging.py::test_no_untracked_store_or_secret_under_the_package`
+catches them during development). A no-ML build needs both lines documented in
+`pyproject.toml` (FR-ML-6).
+

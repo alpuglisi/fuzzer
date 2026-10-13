@@ -390,6 +390,12 @@ bugs — the research-platform diagnostics of decision D2.
   *(Extended CC-UI-0041.)* `plugins` items carry `config`, `status` and `error`.
   `reproducibility` gains `plugin_config` and `plugin_status`. A failed plugin is
   marked `(FAILED)` in the text report.
+  *(Changed CC-UI-0047, BUG-0069 — a JSON contract change.)*
+  `reproducibility.feature_versions` is `{"candidate": [...], "flow": [...]}`: the
+  candidate versions the run's pinned models, stored candidate rows and feature-reading
+  stages (anomaly tripwire, budget prioritizer) used, and the flow tripwire's version;
+  `[]` when no stage read that vector. The text report prints `feature versions:
+  candidate …, flow …`.
 - **FR-UI-18** *(added CC-UI-0041, 2026-10-13)* The web app and report work without the
   `fuzzlab.ml` package (FR-ML-6).
   - **ML tab:** its ML-backed panels (classifier, weights, ranker, conformal, anomaly,

@@ -25,7 +25,7 @@ from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
 from fuzzlab.oracle.oob import OobListener
-from fuzzlab.oracle.probe import Candidate, Sender, Verdict
+from fuzzlab.oracle.probe import Candidate, Probe, Sender, Verdict
 
 # --- error signatures (M2) ---------------------------------------------------
 SQL_ERROR_SIGNATURES = [
