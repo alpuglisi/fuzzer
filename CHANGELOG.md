@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (UI: ML tab run picker; run page ML context — CC-UI-0043)
+- **ML tab run picker.** The tab gains a run picker, so a single run's own out-of-fold
+  numbers and gate can be inspected; until now the tab only showed all runs pooled.
+  Switching runs never leaves a stale chart or a late response on screen.
+- **Run page ML context.** The run page now shows:
+  - what the oracle checked or skipped;
+  - the run's top anomaly flags;
+  - which plugins and ML stages ran, with their status.
+
+  These are read straight from the store, so they work without the ML package.
+- **Tests:** browser-verified (14 tests in real Chromium, hostile values included).
+  Every behavioural mutant is killed.
+
 ## 2026-10-13 (ML/CORE/PLUG/FUZZ/UI: saved-model scoring, three ML decisions, BUG-0067 — CC-ML-0018, CC-CORE-0029, CC-PLUG-0006, CC-FUZZ-0051, CC-UI-0042)
 - **Batch 1 of the remaining ML work**, built while the user was away, taking my own
   recommendation at each decision point.

@@ -17,7 +17,6 @@ stage's result carries. The post-run hooks run under the advisory write guard
 
 from __future__ import annotations
 
-import json
 from functools import partial
 
 #: Bumped when a stage's options change meaning (not when a model retrains).
@@ -78,8 +77,9 @@ class AnomalyPlugin(_Stage):
 
     def after_run(self, store, run_id):
         from fuzzlab.ml.anomaly import detect_anomalies
+        from fuzzlab.core.anomaly_flags import top_flagged
         result = detect_anomalies(store, run_id, contamination=self.config["contamination"])
-        result["top"] = top_flagged(store, result)
+        result["top"] = top_flagged(store, run_id)
         return result
 
 
@@ -117,21 +117,4 @@ def stage_plugins(*, score: bool = False, rank: bool = False, anomaly: bool = Fa
         out.append(RankerPlugin(train_on=train_on, model_id=ranker_model_id))
     if anomaly:
         out.append(AnomalyPlugin(contamination=contamination))
-    return out
-
-
-def top_flagged(store, anomaly: dict, limit: int = 5) -> list[dict]:
-    """The most anomalous flagged candidates (path, param, category, score)."""
-    from fuzzlab.core.urls import to_path
-    flagged = sorted(((s, cid) for cid, s, f in zip(anomaly["ids"], anomaly["scores"],
-                                                     anomaly["flags"]) if f), reverse=True)
-    out = []
-    for score, cid in flagged[:limit]:
-        row = store.conn.execute("SELECT evidence FROM candidate WHERE id=?", (cid,)).fetchone()
-        try:
-            ev = json.loads(row["evidence"] or "{}") if row else {}
-        except (ValueError, TypeError):
-            ev = {}
-        out.append({"path": to_path(ev.get("url", "")), "param": ev.get("param", ""),
-                    "category": ev.get("category", ""), "score": round(score, 3)})
     return out

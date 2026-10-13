@@ -96,8 +96,11 @@ def list_runs(store) -> list[dict]:
     for r in rows:
         findings = store.conn.execute(
             "SELECT COUNT(*) c FROM finding WHERE run_id=?", (r["id"],)).fetchone()["c"]
+        candidates = store.conn.execute(
+            "SELECT COUNT(*) c FROM candidate WHERE run_id=?", (r["id"],)).fetchone()["c"]
         out.append({"id": r["id"], "tool": r["tool"], "target": r["config_hash"],
-                    "started_at": r["started_at"], "findings": findings})
+                    "started_at": r["started_at"], "findings": findings,
+                    "candidates": candidates})
     return out
 
 
@@ -378,6 +381,49 @@ def run_detail(store, run_id: int) -> dict | None:
         "model": model,
         "scored": scored,
         "ml_unavailable": None if ml_available() else ML_UNAVAILABLE,
+        **_ml_context(store, run_id, metrics),
+    }
+
+
+#: How a `run_plugin.status` reads on the run page (CC-UI-0043). NULL is a row written
+#: before migration 15; `attached` means `finalize` never ran (the run did not finish).
+_PLUGIN_STATUS_TEXT = {None: "unknown", "attached": "attached — run did not finish",
+                       "ok": "ok", "failed": "FAILED"}
+_ERROR_SHOWN = 300
+
+
+def _ml_context(store, run_id: int, metrics: dict) -> dict:
+    """The run's ML context for its page (CC-UI-0043, FR-UI-19): what the oracle checked,
+    the stored anomaly flags, and the plugins (ML stages included) that were attached —
+    all plain per-run store reads, so they show without the ML package."""
+    from fuzzlab.core.anomaly_flags import top_flagged
+    from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET
+    counts = dict.fromkeys((CHECKED, SKIPPED_BUDGET, NO_CONFIRMER, None), 0)
+    for r in store.conn.execute(
+            "SELECT oracle_status s, COUNT(*) c FROM candidate WHERE run_id=? "
+            "GROUP BY oracle_status", (run_id,)).fetchall():
+        counts[r["s"] if r["s"] in counts else None] += r["c"]    # unknown → unrecorded
+    plugins = []
+    for r in store.conn.execute(
+            "SELECT name, version, config, status, error FROM run_plugin WHERE run_id=? "
+            "ORDER BY priority, name", (run_id,)).fetchall():
+        error = r["error"] or ""
+        plugins.append({"name": r["name"], "version": r["version"],
+                        "config": r["config"] or "",
+                        "status": r["status"],
+                        "status_text": _PLUGIN_STATUS_TEXT.get(r["status"], r["status"]),
+                        "failed": r["status"] == "failed",
+                        "error": error[:_ERROR_SHOWN]
+                        + ("…" if len(error) > _ERROR_SHOWN else ""),
+                        "error_full": error})
+    anomaly_config = next((p["config"] for p in plugins if p["name"] == "ml-anomaly"), "")
+    return {
+        "oracle_status": {"checked": counts[CHECKED], "skipped_budget": counts[SKIPPED_BUDGET],
+                          "no_confirmer": counts[NO_CONFIRMER], "unrecorded": counts[None]},
+        "anomaly": {"top": top_flagged(store, run_id, limit=10),
+                    "flagged": metrics.get("anomaly_flagged"),
+                    "config": anomaly_config},
+        "plugins": plugins,
     }
 
 

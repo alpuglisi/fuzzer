@@ -198,6 +198,9 @@ bugs — the research-platform diagnostics of decision D2.
   (`fuzzlab/web/mlview.py`) is the sole data source — read-only over the store,
   optionally filtered by `run_id`; degrades to a documented "not available" reason per
   panel (never an error) on an empty or partially-populated store.
+  *(Note, CC-UI-0043.)* A run picker (`/ml?run=N`) selects that filter. Only the latest
+  choice renders, every panel is reset before re-rendering, and the bandit panel is
+  labelled "(all runs)".
   *(Amended CC-UI-0034/CC-UI-0035, BUG-0061/BUG-0062.)*
   - The conformal split is gated by the classifier that scored the run, read through
     `fuzzlab.ml.train.latest_classifier(store, run_id)` (FR-ML-10). It is never "the
@@ -380,6 +383,16 @@ bugs — the research-platform diagnostics of decision D2.
   - **Report:** it gives `models_unavailable` instead of claiming no models.
   - **No direct imports:** nothing in `web/` or `report/` imports `fuzzlab.ml` except
     through `import_ml`.
+
+- **FR-UI-19** *(added CC-UI-0043, 2026-10-13)* A run's page shows its ML context.
+  These are plain per-run store reads, so they work without the ML package.
+  - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded counts.
+  - **Anomaly flags:** the stored top flagged candidates (`core.anomaly_flags`), with the
+    run's own `anomaly_flagged` and the anomaly stage's config as provenance. The flags
+    are the last fit's values for that run.
+  - **Plugins and ML stages:** each attached plugin with its config and status
+    (unknown / attached — run did not finish / FAILED: error / ok).
+  - **Safety:** every value renders as text.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

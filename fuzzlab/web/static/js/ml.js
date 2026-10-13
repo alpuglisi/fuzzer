@@ -1,7 +1,7 @@
 // ML section (U4/CC-UI-0031, CC-ML-0010) — read-only, advisory (R-06). Fetches
-// /api/ml/data once on load and renders every panel from it; nothing here writes to
-// the store, and nothing here ever calls a score a "finding" or "vulnerable" (verb
-// hygiene: scored/ranked/flagged only).
+// /api/ml/data (all runs, or one run picked in #ml-run — CC-UI-0043) and renders every
+// panel from it; nothing here writes to the store, and nothing here ever calls a score
+// a "finding" or "vulnerable" (verb hygiene: scored/ranked/flagged only).
 import { createChart } from "/static/js/chart.js";
 
 const BAND = { flag: "band-flag", abstain: "band-abstain", drop: "band-drop",
@@ -242,27 +242,99 @@ function renderMutation(d) {
   }
 }
 
-async function initMl() {
-  const root = document.getElementById("panel-conformal");
-  if (!root) return; // not the ML page
+// Every panel the payload fills, by its DOM id (`#panel-<id>`) and payload key.
+const PANELS = [
+  ["calibration", "classifier", () => renderClassifier], ["weights", "weights", () => renderWeights],
+  ["ranker", "ranker", () => renderRanker], ["conformal", "conformal", () => renderConformal],
+  ["anomaly", "anomaly", () => renderAnomaly], ["disagreement", "disagreement", () => renderDisagreement],
+  ["bandit", "bandit", () => renderBandit], ["mutation", "mutation", () => renderMutation],
+];
+
+// Back to a blank panel before every render, so switching runs never leaves an old chart
+// under a "no data" message or a stale message over a new chart (CC-UI-0043).
+function resetPanel(panelId) {
+  const panel = document.getElementById(`panel-${panelId}`);
+  if (!panel) return;
+  const empty = panel.querySelector('[data-field="empty"]');
+  if (empty) { empty.hidden = true; empty.textContent = ""; }
+  panel.querySelectorAll('[data-field="summary"]').forEach((p) => p.replaceChildren());
+  panel.querySelectorAll(".ml-chart").forEach((mount) => {
+    const handle = window.__charts && window.__charts.get(mount.id);
+    if (handle) handle.destroy();
+    mount.replaceChildren();
+    mount.removeAttribute("aria-label");
+  });
+  panel.querySelectorAll("tbody").forEach((t) => t.replaceChildren());
+}
+
+function render(data) {
+  const emptyBanner = document.getElementById("ml-empty");
+  if (emptyBanner) emptyBanner.hidden = !!data.available_any;
+  for (const [panelId, key, renderer] of PANELS) {
+    resetPanel(panelId);
+    renderSafely(panelId, renderer(), data[key]);
+  }
+}
+
+// A positive integer `?run=` value, else "" (all runs). Anything else is ignored.
+function runFromUrl() {
+  const v = new URLSearchParams(window.location.search).get("run") || "";
+  return /^[1-9][0-9]*$/.test(v) ? v : "";
+}
+
+let loadSeq = 0;
+let inflight = null;
+
+// Only the latest choice may render: an older response arriving last is dropped, and
+// the in-flight request is aborted on every new choice.
+async function load(runId) {
+  const mine = ++loadSeq;
+  if (inflight) inflight.abort();
+  inflight = new AbortController();
   let data;
   try {
-    const r = await fetch("/api/ml/data");
+    const r = await fetch("/api/ml/data" + (runId ? `?run_id=${encodeURIComponent(runId)}` : ""),
+                          { signal: inflight.signal });
     data = await r.json();
   } catch (e) {
     return;
   }
-  const emptyBanner = document.getElementById("ml-empty");
-  if (emptyBanner) emptyBanner.hidden = !!data.available_any;
+  if (mine !== loadSeq) return;
+  render(data);
+}
 
-  renderSafely("calibration", renderClassifier, data.classifier);
-  renderSafely("weights", renderWeights, data.weights);
-  renderSafely("ranker", renderRanker, data.ranker);
-  renderSafely("conformal", renderConformal, data.conformal);
-  renderSafely("anomaly", renderAnomaly, data.anomaly);
-  renderSafely("disagreement", renderDisagreement, data.disagreement);
-  renderSafely("bandit", renderBandit, data.bandit);
-  renderSafely("mutation", renderMutation, data.mutation);
+async function fillRuns(select) {
+  try {
+    const r = await fetch("/api/runs");
+    const { runs } = await r.json();
+    for (const run of runs || []) {
+      const label = `#${run.id} ${run.tool || ""} ${run.started_at || ""}`
+        + (run.candidates ? "" : " (no candidates)");
+      const opt = new Option(label, String(run.id));       // text only, never markup
+      opt.disabled = !run.candidates;
+      select.add(opt);
+    }
+  } catch (e) {
+    // the picker stays at "All runs"
+  }
+}
+
+async function initMl() {
+  const root = document.getElementById("panel-conformal");
+  if (!root) return; // not the ML page
+  const select = document.getElementById("ml-run");
+  if (!select) { load(""); return; }
+  await fillRuns(select);
+  const want = runFromUrl();
+  const known = want && [...select.options].some((o) => o.value === want && !o.disabled);
+  select.value = known ? want : "";
+  if (want && !known) window.history.replaceState(null, "", window.location.pathname);
+  select.addEventListener("change", () => {
+    const v = select.value;
+    window.history.replaceState(null, "", v ? `?run=${v}` : window.location.pathname);
+    load(v);
+  });
+  load(select.value);
 }
 
 // One panel's failure must not blank every later panel (BUG-0063: a throw in the first

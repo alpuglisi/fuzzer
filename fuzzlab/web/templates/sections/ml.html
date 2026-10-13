@@ -26,6 +26,10 @@
     <p class="muted" id="ml-empty" hidden>No model internals in the store yet &mdash;
       run training, ranking, or a mutation search first (<code>fuzzlab auto</code> or
       the individual <code>fuzzlab</code> ML subcommands).</p>
+    <p class="ml-run-picker"><label for="ml-run">Run</label>
+      <select id="ml-run"><option value="">All runs</option></select>
+      <span class="muted">&mdash; a single run shows its own model's out-of-fold numbers
+        and gate; all runs pools them.</span></p>
   </div>
 
   <!-- Conformal triage: leads the tab per R-06 (flag/abstain/drop + the nonconformity
@@ -119,7 +123,7 @@
 
   <div class="card ml-panel" id="panel-bandit" data-panel="bandit">
     <h2>Bandit posteriors <span class="muted">&mdash; Thompson sampling, Beta(&alpha;,
-      &beta;)</span></h2>
+      &beta;) (all runs)</span></h2>
     <div class="ml-chart-row">
       <div class="ml-chart-cell"><h3>Overlaid density</h3>
         <div class="ml-chart" id="chart-bandit-density"></div></div>

@@ -1492,6 +1492,12 @@ tracked in the requirements files, not here.
   ES module (native `<table>`, `textContent`-only rendering, scheme-checked pivot
   hrefs) meant for reuse by U1's recent-runs table and U5's store explorer (D4: no
   table dependency).
+- **ML tab run picker and run-page ML context** `[built]` (CC-UI-0043):
+  - **`/ml?run=N`** picks one run's own numbers and gate. Only the latest choice
+    renders, and every panel is reset before re-rendering.
+  - **The run page** shows oracle coverage (checked / skipped / no confirmer), the
+    stored top anomaly flags, and the plugin / ML-stage record. These are plain store
+    reads that work without ML.
 - **U4 — ML tab (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0031/CC-ML-0010, 2026-09-22,
   Phase 3, Wave 1, built on U0):** filled in `/ml` with read-only, advisory panels over
   model internals already in the store — classifier PR curve + reliability/ECE, ranker

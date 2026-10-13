@@ -75,6 +75,58 @@
 </div>
 {% endif %}
 
+{% set os = detail.oracle_status %}
+{% if os and (os.checked or os.skipped_budget or os.no_confirmer) %}
+<div class="card" id="run-oracle-status">
+  <h2>Oracle coverage</h2>
+  <p>Oracle: checked {{ os.checked }} &middot; skipped (budget) {{ os.skipped_budget }}
+    &middot; no confirmer {{ os.no_confirmer }}{% if os.unrecorded %} &middot;
+    unrecorded {{ os.unrecorded }}{% endif %}</p>
+  {% if os.skipped_budget or os.no_confirmer %}
+  <p class="muted">Skipped and no-confirmer candidates were never checked by the oracle:
+    they are unlabelled (never training data) and are still scored and ranked.
+    {% if detail.score %}Skipped candidates count as misses in this run's score.{% endif %}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% set an = detail.anomaly %}
+{% if an and an.top %}
+<div class="card" id="run-anomaly">
+  <h2>Anomaly tripwire (advisory)</h2>
+  <p class="muted">The most unusual candidates by the stored anomaly score &mdash;
+    unusual is not vulnerable. Flagged on this run:
+    {{ an.flagged|int if an.flagged is not none else 'unknown' }}{% if an.config %}
+    (stage config <code>{{ an.config }}</code>){% endif %}. These are the last anomaly
+    fit's values for this run.</p>
+  <table>
+    <thead><tr><th>path</th><th>param</th><th>category</th><th>anomaly score</th></tr></thead>
+    <tbody>
+      {% for t in an.top %}
+      <tr><td><code>{{ t.path }}</code></td><td>{{ t.param }}</td><td>{{ t.category }}</td>
+        <td>{{ t.score }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if detail.plugins %}
+<div class="card" id="run-plugins">
+  <h2>Plugins and ML stages</h2>
+  <table>
+    <thead><tr><th>plugin</th><th>version</th><th>config</th><th>status</th></tr></thead>
+    <tbody>
+      {% for p in detail.plugins %}
+      <tr><td><code>{{ p.name }}</code></td><td>{{ p.version or '' }}</td>
+        <td><code>{{ p.config }}</code></td>
+        <td{% if p.failed %} class="bad"{% endif %}{% if p.error_full %} title="{{ p.error_full }}"{% endif %}>{{ p.status_text }}{% if p.error %}: {{ p.error }}{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Metrics</h2>
   <ul>

@@ -3,6 +3,81 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0043 — ML tab run picker; run page shows oracle coverage, anomaly flags and the plugin record (2026-10-13)
+- Change:
+  - **ML tab** (`sections/ml.html`, `static/js/ml.js`):
+    - **Picker.** `<select id="ml-run">` offers "All runs" plus each run from
+      `GET /api/runs` (newest first, labelled "#id tool started_at").
+      - Options are built with `new Option(text, value)`, so text only.
+      - Runs with no candidates are suffixed "(no candidates)" and disabled.
+    - **Choosing a run** fetches `/api/ml/data?run_id=N` and re-renders every panel.
+      - Before each render, `resetPanel` hides the empty message, clears the meta lines,
+        destroys the panel's charts and empties its tables.
+      - Only the latest choice renders: a sequence token drops late responses, and an
+        `AbortController` cancels the in-flight one.
+    - **URL.** The choice is kept as `/ml?run=N` (`history.replaceState`). A value that is
+      not a positive integer, an unknown id, or a disabled run falls back to all runs,
+      with no request for it.
+    - **Bandit panel** is titled "(all runs)", since it is store-wide in every view.
+  - **Run page** (`results.run_detail` + `run.html`): three new cards, all plain per-run
+    store reads, so they work without the ML package.
+    - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded
+      counts, bound to `core.oracle_status`. The note that skipped rows count as misses
+      appears only on a scored run.
+    - **Anomaly tripwire:**
+      - the top 10 flagged candidates by stored score, read through the new ML-free
+        `core/anomaly_flags.top_flagged`;
+      - the run's own `anomaly_flagged`, and the `ml-anomaly` stage config, as
+        provenance;
+      - a note that these are the last fit's values.
+    - **Plugins and ML stages:** name, version, config, and the status as text: NULL →
+      "unknown", `attached` → "attached — run did not finish", `failed` → "FAILED:
+      <error>" (truncated to 300 characters, full text in `title`), `ok`.
+  - **One reader.** `core/anomaly_flags.top_flagged(store, run_id, limit)` replaces the ML
+    stage's copy (PA-0003). It orders by score, then id, descending, the order the CLI
+    always printed, so the golden summaries are unchanged.
+  - **`list_runs`** gains each run's candidate count, one more COUNT per run (accepted:
+    the runs list is small).
+- Impact: read-only UI. FR-UI-19 is added and FR-UI-11 gets a note.
+  - **PA-0063(2) / PA-0067(1) reader audit:** the new `run_plugin`, `oracle_status`,
+    anomaly and `run_metrics` reads on the run page are per run, filtered by `run_id`,
+    which matches their reader (one run's page).
+- Risk: low.
+- Deliverables:
+  - [x] Picker, reset, stale-response guard, URL state; run-page cards; shared
+    `top_flagged` — done
+  - [x] `tests/test_web_ml_context.py` (14, real Chromium, `FUZZLAB_REQUIRE_BROWSER=1`) — done:
+    - **Run data:** the coverage counts; anomaly order, limit and provenance; every
+      plugin status text, including truncation; candidate counts in `list_runs`; the
+      per-run payload.
+    - **Picker:** lists runs as text, with a hostile run label rendered literally, no
+      injected element, no CSP violation, empty runs disabled.
+    - **Choosing a run:** the request carries `run_id=N`, and that run's own OOF line
+      appears.
+    - **Switching:** available → unavailable → available leaves no stale panel; a late
+      response for an older choice is dropped.
+    - **`?run=`:** `0`, `-1`, `abc`, an unknown id and a disabled run all fall back;
+      a valid choice is restored.
+    - **Run page:** the coverage, anomaly and plugin cards render hostile values as
+      literal text.
+- Review: pre-change review gate cleared 3/3 over drafts v1 to v3 (every raised issue
+  adopted).
+- Effectiveness (assessed 2026-10-13): effective in a real browser.
+  - **Tests:** `test_web_ml_context.py` 14 passed under `FUZZLAB_REQUIRE_BROWSER=1`.
+    The browser smoke (`test_web_pages_browser.py`) and the no-ML child
+    (`test_no_ml.py`) still pass, as do `test_web_templates_csp.py` and the golden
+    summaries.
+  - **Mutation check** on a copy: every behavioural mutant is killed:
+    - the per-panel reset;
+    - stale-response handling (the sequence check and the abort removed together);
+    - the picker ignored; `innerHTML` options; empty runs enabled; a disabled or unknown
+      run accepted from the URL;
+    - NULL status shown as ok; error truncation; `|safe` in the template;
+    - the anomaly order; the flagged count.
+  - **Equivalent mutants**, stated and not counted:
+    - removing *only* the sequence check, or *only* the abort, is masked by the other
+      guard;
+    - removing the URL's integer regex is masked by the known-option check.
 ### CC-UI-0042 — Gates judge the score they were calibrated for (BUG-0067 fix site); evaluation labels; saved models in the report (2026-10-13)
 - Change:
   - **Run page** (`results._scored_candidates` + `run.html`):
