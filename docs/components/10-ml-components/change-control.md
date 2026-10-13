@@ -3,6 +3,132 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0015 — Trained models are saved as verified JSON and reload to identical predictions (2026-10-13)
+- Change:
+  - **Per-class serialisation.** Each class gains `to_params()` and
+    `classmethod from_params(d)`, holding only the hyperparameters and the fitted state
+    needed to predict:
+    - **`LogisticRegression`:** `{epochs, lr, l2, class_balanced, w, b, mean, std}`.
+      Prediction is `sigmoid(Σ w·(x−mean)/std + b)` (`logistic.py:84-87`).
+    - **`GradientBoostedTrees`:** `{n_estimators, lr, max_depth, min_leaf,
+      class_balanced, f0, trees}`. Prediction is `sigmoid(f0 + lr·Σ tree(x))`
+      (`gbt.py:155-159`). Each tree is a nested node: `{"f","t","l","r"}` for a split,
+      `{"v"}` for a leaf. A depth-3 tree has at most 15 nodes, so 60 trees hold at most
+      900. The per-sample training weights `_w` are not stored.
+    - **`PrevalenceBaseline`:** `{rate}`.
+    - **`CharNgramVectorizer`:** `{n, max_features, vocab, idf}`; `_index` is rebuilt
+      from `vocab`. `_ngrams` behaviour on short texts depends only on `n`.
+    - **`Ranker`:** `{seed, vectorizer, model: {"kind": "logistic", "params": …},
+      feature_names}`. The ranker accepts an injected model (`ranker.py:32`), so the
+      nested model carries its own kind.
+    - **`ECOD`:** `{n, d, sorted, skew}`.
+  - **New `fuzzlab/ml/persist.py`** is the only home of the envelope convention
+    (PA-0003).
+    - `dumps_model(kind, model, *, feature_names, feature_version, ecod=None) -> (text,
+      sha256)`.
+      - Envelope: `{"format": 1, "kind", "feature_names", "feature_version", "params",
+        "ecod"}`.
+      - Serialised canonically: `json.dumps(…, sort_keys=True, separators=(",", ":"),
+        allow_nan=False)`.
+      - Finite floats round-trip exactly (`repr`). A NaN or Infinity in a fitted model
+        raises at dump time instead of being stored.
+    - `loads_model(text, sha256) -> LoadedModel`. It **fails closed** with
+      `ModelParamsError` (PA-0021) on any of:
+      - a sha mismatch;
+      - text that is not UTF-8 JSON (bytes, a pickle payload);
+      - `NaN`/`Infinity` (`parse_constant` rejects them);
+      - `RecursionError`, which is caught and mapped;
+      - an unknown `format` or `kind`, or wrong types;
+      - unequal lengths, checked as an explicit all-equal: logistic `w`/`mean`/`std`/
+        feature names; ranker `len(w) == len(FEATURE_NAMES-shaped structural part) +
+        len(vocab)`, `len(idf) == len(vocab)`; ECOD `len(sorted) == len(skew) == d`
+        with each column holding `n` entries;
+      - tree nodes that are not exactly a split (in-range feature index, finite
+        threshold, both children) or a leaf (finite `v`), or deeper than `max_depth`.
+    - The sha detects corruption and pins a model's identity for reproducibility. It is
+      **not** authentication: anyone who can write the store can recompute it.
+    - It never uses `pickle`, `marshal` or `eval`, since unpickling a movable store file
+      would be CWE-502.
+    - Kinds: `logistic`, `gbt`, `prevalence`, `ranker`, `constant` (the ranker fallback,
+      `{value}`).
+  - **`LoadedModel`:**
+    - `check_compatible()` raises `ModelIncompatibleError` unless `feature_version ==
+      dataset.FEATURE_VERSION` and the stored `feature_names` match the current ones
+      exactly:
+      - classifier kinds: `FEATURE_NAMES`, plus `anomaly_ecod` when an ECOD is stored;
+      - ranker: `FEATURE_NAMES` plus its own vectorizer names.
+
+      Every model reads features by position, so a reorder would otherwise misalign
+      silently. Step 2 will call this before scoring a new run.
+    - `predict_proba(X)` (classifier kinds) checks each row's width against the stored
+      structural feature count and applies the stored ECOD augment itself, so callers
+      pass plain `dataset` vectors.
+    - `score(X, texts)` serves the ranker.
+  - **Writers:**
+    - `train_and_score` stores the deployed model (`logistic` / `gbt`, or `prevalence`
+      on fallback), plus its fitted ECOD when `hybrid=True`.
+    - `train_and_rank` stores the deployed `Ranker`, or `constant` on fallback.
+    - Both write `params` and `params_sha256` in the same `INSERT`.
+  - **Readers, all through `model_registry` (PA-0063):**
+    - New `params_for(store, model_id) -> (text, sha) | None` fetches one row's params by
+      id. `select_latest` keeps scanning only the narrow columns; it already returns
+      `id`.
+    - `ClassifierModel` gains `id` (from `row["id"]`) and `params_sha256` (from
+      `params_for`).
+    - New `train.load_classifier(store, clf)` and `rank_train.load_ranker(store, row)`
+      each return a `LoadedModel`, or `None` for a pre-migration-14 row.
+  - **Budget prioritizer identity.** It still retrains per call, and is not stored as a
+    `model` row, which would add a third model family for every selector to exclude (the
+    BUG-0061 hazard). `Prioritized` gains `model_sha256: str | None = None`, so existing
+    constructions stay valid. It holds:
+    - `score` / `uncertainty`: the sha from `dumps_model("ranker", …)` of the fitted
+      ranker;
+    - `committee`: `sha256(("committee/1:" + ",".join(member_shas)).encode())`, where
+      `member_shas` are the members' own `dumps_model("ranker", …)` shas in member
+      order. This is a defined, deterministic format that needs no new envelope kind,
+      since the committee is never reloaded;
+    - `random`: `None`.
+
+    `Prioritized` also gains `seed: int = 0`. The pipeline adds `budget_seed` (an int)
+    to the result metrics, so it also lands in `run_metrics` as `pipeline_budget_seed`
+    (every numeric metric does, `pipeline.py:192-196`). `budget_model_sha256` is a
+    string, so it stays in the result dict only. The CLI budget line prints the sha's
+    first 12 characters.
+- Impact:
+  - UI: weights panel and report (CC-UI-0038/0039).
+  - Step 2 will call `load_*` + `check_compatible` + `predict_proba`/`score`. Nothing
+    else changes behaviour now.
+  - `model` rows grow by tens of KB at most for GBT; a hybrid model's ECOD is about
+    12 floats per training candidate.
+  - FR-ML-13 is added. FR-ML-9's "weights not persisted" gap is closed.
+    NFR-ML-reproducible: a model is reproducible from its stored row.
+- Risk: medium-low. Additive, validated and fail-closed. Exact-equality round-trip tests
+  cover float reproduction.
+- Deliverables:
+  - [ ] `to_params` / `from_params` on six classes — done
+  - [ ] `persist.py`: dump/load, sha, validation, `ModelParamsError`,
+    `ModelIncompatibleError`, `LoadedModel` — done
+  - [ ] Trainers persist; `params_for`; `load_classifier`; `load_ranker`; `Prioritized.model_sha256` + pipeline/CLI — done
+  - [ ] Tests:
+    - Round trips for every kind, including hybrid logistic+ECOD, gbt and ranker,
+      reproduce predictions exactly.
+    - Rows from the trainers reload and reproduce the stored `score` / `rank_score`.
+    - Rejection cases: tampering (sha), NaN/Infinity on dump and on load, a pickle
+      payload, non-JSON bytes, deep nesting, unknown format/kind, length mismatches,
+      a malformed tree (out-of-range feature, one child, too deep), a bad ECOD shape.
+    - `check_compatible` fails on a feature_version bump, a reordered name, and a
+      missing `anomaly_ecod`.
+    - A row-width mismatch raises.
+    - A legacy NULL row loads as `None`.
+    - The same model dumped twice gives the same sha.
+    - `persist.py` imports no `pickle` or `marshal`.
+    - The prioritizer sha is deterministic and recorded, for `score` and `committee`,
+      and `None` for `random`; `pipeline_budget_seed` is recorded. — done
+  - [ ] FR-ML-13, FR-ML-9, NFR-ML-reproducible — done
+- Implementation divergence (reflected back per the review gate): (1) `model_registry` also gained `params_sha256_for(store, id)`, so `latest_classifier` reads only the sha (not the params text) on every call; (2) the trainers' result dicts gain `params_sha256`; (3) the loader also requires that a classifier's names end in `anomaly_ecod` exactly when an ECOD is stored, a gap found while debugging the stale-bytecode episode.
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `tests/test_ml_persist.py` 47 passed: exact-equality round trips for logistic, gbt, prevalence, hybrid logistic+ECOD, ranker and constant; rows written by the trainers reload and reproduce the stored `score` / `rank_score` (logistic, gbt, hybrid; ranker); fallbacks saved; legacy NULL rows load as None; identical canonical text and sha on re-dump; fail-closed rejection of tampering, a pickle payload, non-JSON text, NaN/Infinity tokens (asserted to be refused at parse time), runaway nesting, unknown format/kind, length/type/key errors, a zero std, malformed and over-deep trees, an unsorted ECOD, and a hybrid name without its ECOD (and vice versa); non-finite models refused at dump (asserted at the serialiser); no pickle/marshal import; `check_compatible` rejects reordered names and a version bump; wrong-width rows refused; the prioritizer sha is deterministic per seed and None for random. Mutation-checked with bytecode caches cleared before every run (a stale-.pyc false result was caught and corrected during this work): removing the sha check, the NaN dump/parse guards, the depth check, the ECOD sort check, the row-width check, `check_compatible`, or saving the hybrid's ECOD each make a test fail. Related suites (ML, report, budget, web incl. browser smoke under `FUZZLAB_REQUIRE_BROWSER=1`): 174 + 270 passed.
+
 ### CC-ML-0014 — Store-wide dataset keys labels and rule counts by run (BUG-0065) (2026-10-13)
 - Change: `ml/dataset.py::build_dataset` builds `positives` from
   `(run_id, path, param, category)` and `fired` from `(run_id, path, param)`. A

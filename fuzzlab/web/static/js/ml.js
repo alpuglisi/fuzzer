@@ -92,6 +92,17 @@ function renderClassifier(d) {
   }
 }
 
+// --- saved logistic coefficients (CC-UI-0038) ------------------------------------
+function renderWeights(d) {
+  if (!d.available) { showEmpty("weights", d.reason); return; }
+  const sha = d.model.params_sha256 ? ` · sha ${d.model.params_sha256.slice(0, 12)}` : "";
+  setMeta("weights", `${d.model.name} v${d.model.version}${sha} · bias `
+    + `${d.bias.toFixed(3)} (standardised space) · ${d.note}`);
+  bars("chart-weights", d.weights.map((w) => w.feature),
+    [{ label: "coefficient", data: d.weights.map((w) => w.weight) }],
+    { caption: "Standardised logistic coefficients (log-odds per SD)" });
+}
+
 // --- ranker -----------------------------------------------------------------------
 function renderRanker(d) {
   if (!d.available) { showEmpty("ranker", d.reason); return; }
@@ -225,6 +236,7 @@ async function initMl() {
   if (emptyBanner) emptyBanner.hidden = !!data.available_any;
 
   renderSafely("calibration", renderClassifier, data.classifier);
+  renderSafely("weights", renderWeights, data.weights);
   renderSafely("ranker", renderRanker, data.ranker);
   renderSafely("conformal", renderConformal, data.conformal);
   renderSafely("anomaly", renderAnomaly, data.anomaly);

@@ -18,6 +18,23 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — REPORT: `fuzzlab report` for a run pinned the store's newest models, not the run's own (fixed, BUG-0066/PA-0067, recurrence of BUG-0061/PA-0063)
+
+- **Symptom:** with two runs that each trained a classifier and a ranker, run 1's report
+  said `model_versions: {logistic: 2, ranker: 2}`, which are run 2's models, in its
+  "Reproducibility" block.
+- **Root cause:** `report.py::build_report` (one run) read `MAX(version) … GROUP BY name`
+  across the whole store. BUG-0061's sweep had examined that exact line and cleared it as
+  "per-family correct", judging it against the table's producers instead of the reader's
+  per-run scope.
+- **Remediation:** the report reads the run's own models through `latest_classifier` /
+  `latest_ranker(store, run_id)`. The model-table guard now also flags un-filtered
+  `MAX(version)` reads. Every site BUG-0061's sweep cleared was re-swept by reader scope
+  (CC-UI-0039).
+- **Status:** Fixed (offline; the two-run regression and the extended guard both fail
+  on the old query).
+
+---
 ## 2026-10-13 — ML: the store-wide dataset leaked labels and inflated rule counts across runs (fixed, BUG-0065/PA-0066, recurrence of the BUG-0061/PA-0063 class)
 
 - **Symptom:** on a store with two runs of the same app, a candidate the oracle

@@ -148,7 +148,9 @@ def test_conformal_panel_reasons(tmp_path):
 # --- guard: no inline "newest row" read of `model` anywhere (PA-0063) -------
 
 _FROM_MODEL = re.compile(r"\bFROM\s+model\b", re.I)
-_NEWEST = re.compile(r"\bDESC\b|\bLIMIT\s+1\b", re.I)
+# "newest row" shapes: ORDER BY … DESC, LIMIT 1, and MAX(version) (BUG-0066: the
+# per-run report's `MAX(version) … GROUP BY name` was the same mistake in another shape)
+_NEWEST = re.compile(r"\bDESC\b|\bLIMIT\s+1\b|\bMAX\s*\(\s*version\s*\)", re.I)
 _BY_NAME = re.compile(r"\bWHERE\s+name\b", re.I)
 
 
@@ -184,6 +186,9 @@ def test_guard_catches_the_buggy_shapes():           # PA-0034(2): prove it on b
         'q = ("SELECT name, calibration FROM model "\n     "ORDER BY id DESC LIMIT 1")',
         'q = f"SELECT {cols} FROM model ORDER BY id DESC"',
         'q = "select * from model limit 1"',
+        # the old per-run report query (BUG-0066)
+        'q = ("SELECT name, MAX(version) AS version, feature_version FROM model "\n'
+        '     "GROUP BY name ORDER BY name")',
     ]
     for src in buggy:
         assert _offenders(src), src
@@ -194,9 +199,6 @@ def test_guard_ignores_legitimate_model_queries():   # PA-0022: no false positiv
         # diagnostics.model_registry_timeline (lists every row on purpose)
         'q = ("SELECT name, version, feature_version, calibration, created_at FROM model "\n'
         '     "ORDER BY created_at, id")',
-        # report.py: latest version per name
-        'q = ("SELECT name, MAX(version) AS version, feature_version FROM model "\n'
-        '     "GROUP BY name ORDER BY name")',
         # train/rank_train._next_version
         'q = "SELECT MAX(version) v FROM model WHERE name=?"',
         # a different table whose name merely starts with "model"

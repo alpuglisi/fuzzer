@@ -26,6 +26,15 @@ class PrevalenceBaseline:
     def predict_proba(self, X: Sequence[Sequence[float]]) -> list[float]:
         return [self._rate for _ in X]
 
+    def to_params(self) -> dict:                       # CC-ML-0015
+        return {"rate": self._rate}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "PrevalenceBaseline":
+        m = cls()
+        m._rate = d["rate"]
+        return m
+
 
 class SigmaBaseline:
     """Anomaly score = max over features of the z-score |x-mean|/std (squashed to [0,1))."""

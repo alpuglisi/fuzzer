@@ -157,3 +157,33 @@ class GradientBoostedTrees:
 
     def predict_proba(self, X: Sequence[Sequence[float]]) -> list[float]:
         return [_sigmoid(self._raw(x)) for x in X]
+
+    # --- persistence (CC-ML-0015; envelope + validation live in fuzzlab.ml.persist) ---
+    # A tree is a nested node: {"f", "t", "l", "r"} for a split, {"v"} for a leaf.
+    # The per-sample training weights (`_w`) are not needed to predict and not stored.
+    def to_params(self) -> dict:
+        def node(n: _Node) -> dict:
+            if n.is_leaf:
+                return {"v": n.value}
+            return {"f": n.feature, "t": n.threshold, "l": node(n.left), "r": node(n.right)}
+        return {"n_estimators": self.n_estimators, "lr": self.lr,
+                "max_depth": self.max_depth, "min_leaf": self.min_leaf,
+                "class_balanced": self.class_balanced, "f0": self._f0,
+                "trees": [node(t.root) for t in self._trees]}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "GradientBoostedTrees":
+        def node(x: dict) -> _Node:
+            if "v" in x:
+                return _Node(value=x["v"])
+            return _Node(feature=x["f"], threshold=x["t"], left=node(x["l"]),
+                         right=node(x["r"]))
+        m = cls(n_estimators=d["n_estimators"], lr=d["lr"], max_depth=d["max_depth"],
+                min_leaf=d["min_leaf"], class_balanced=d["class_balanced"])
+        m._f0 = d["f0"]
+        m._trees = []
+        for t in d["trees"]:
+            tree = _RegressionTree(m.max_depth, m.min_leaf)
+            tree.root = node(t)
+            m._trees.append(tree)
+        return m

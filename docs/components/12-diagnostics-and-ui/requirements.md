@@ -187,8 +187,10 @@ bugs — the research-platform diagnostics of decision D2.
   "detected/vulnerable/confirmed" (`fuzzlab/web/static/js/ml.js`, `templates/sections/
   ml.html`). Palette is neutral blue/amber only (`--accent`/`--warn`) — never the
   oracle's red/green (`--crit`/`--ok`, reserved for Results/Findings). Panels: PR curve
-  + reliability/ECE, logistic weights (documented not-available — see
-  `10-ml-components/requirements.md` FR-ML-8), nDCG@k/precision@k vs. random, rank
+  + reliability/ECE, the saved logistic model's **standardised coefficients**
+  (*amended CC-UI-0038:* log-odds per SD, other features held fixed, explicitly not
+  feature importance; read from the saved model, FR-ML-13; a stated reason for a tree,
+  fallback, legacy or incompatible model), nDCG@k/precision@k vs. random, rank
   score/uncertainty histograms + a score-vs-uncertainty scatter, the conformal stacked
   split + nonconformity histogram, the ECOD anomaly histogram, committee-disagreement
   histogram + a top-N query queue, bandit Beta posteriors (overlaid density + a
@@ -336,6 +338,13 @@ bugs — the research-platform diagnostics of decision D2.
   (FR-ML-10): never another model family's row (e.g. the ranker's), never another
   run's. The decision is `n/a` only when that classifier has no conformal calibration
   (a `prevalence-fallback`). Scores are advisory and never presented as findings.
+
+- **FR-UI-17** *(added CC-UI-0039, 2026-10-13, BUG-0066)* `fuzzlab report` for a run
+  pins **that run's own** models: `models` and `reproducibility.model_versions` come
+  from `latest_classifier` / `latest_ranker(store, run_id)` (FR-ML-10). They are never
+  the store's newest version of each name. `reproducibility.model_params_sha256` gives
+  each pinned model's saved-params sha (FR-ML-13), or `null` for a model trained
+  before models were saved.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

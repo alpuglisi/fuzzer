@@ -16,9 +16,10 @@ from __future__ import annotations
 import json
 import random
 
-from fuzzlab.ml.dataset import build_dataset
 from fuzzlab.ml.metrics import oof_folds
-from fuzzlab.ml.model_registry import select_latest
+from fuzzlab.ml.dataset import FEATURE_NAMES, FEATURE_VERSION, build_dataset
+from fuzzlab.ml.model_registry import params_for, select_latest
+from fuzzlab.ml.persist import LoadedModel, dumps_model, loads_model
 from fuzzlab.ml.ranker import Ranker
 from fuzzlab.ml.ranking import mean_ndcg_at_k, mean_precision_at_k
 from fuzzlab.ml.text_features import candidate_text
@@ -79,6 +80,8 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
     if (n < min_rows or pos < min_positives or (n - pos) < 1
             or groups < max(2, min_groups) or k < 2):
         scores = [0.0] * len(every)              # constant order (no signal)
+        params, params_sha = dumps_model("constant", 0.0, feature_names=FEATURE_NAMES,
+                                         feature_version=FEATURE_VERSION)
         name = RANK_FALLBACK_NAME
         result.update(model=name, fallback=True)
     else:
@@ -92,6 +95,9 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
         ranker = Ranker(seed=seed).fit(ds.X, texts, ds.y)   # deploy: fit on all data
         # advisory rank for EVERY row, including budget-skipped candidates
         scores = ranker.score(every.X, every_texts)
+        params, params_sha = dumps_model("ranker", ranker,
+                                         feature_names=ranker.feature_names,
+                                         feature_version=ds.feature_version)
         name = RANKER_NAME
         result.update(model=name, fallback=False, ndcg=ndcg, precision=prec,
                       baseline_ndcg=ndcg_rand, baseline_precision=prec_rand,
@@ -116,10 +122,11 @@ def train_and_rank(store, run_id: int | None = None, *, min_rows: int = 20,
 
     version = _next_version(store, name)
     store.conn.execute(
-        "INSERT INTO model (name, version, feature_version, calibration) VALUES (?,?,?,?)",
-        (name, version, ds.feature_version, json.dumps(calibration)))
+        "INSERT INTO model (name, version, feature_version, calibration, params, "
+        "params_sha256) VALUES (?,?,?,?,?,?)",
+        (name, version, ds.feature_version, json.dumps(calibration), params, params_sha))
     store.conn.commit()
-    result.update(version=version, ranked=len(scores))
+    result.update(version=version, ranked=len(scores), params_sha256=params_sha)
     return result
 
 
@@ -127,3 +134,11 @@ def latest_ranker(store, run_id: int | None = None):
     """The newest ranker `model` row whose scope covers ``run_id`` (any run when
     ``None``) as ``(row, calibration)``, or ``None`` — never another family's row."""
     return select_latest(store, RANKER_MODEL_NAMES, run_id)
+
+
+def load_ranker(store, row) -> LoadedModel | None:
+    """Rebuild a ranker row's saved model (``row`` from `latest_ranker`), or ``None``
+    if it was trained before models were saved. Raises `persist.ModelParamsError` on
+    corrupted params; call `check_compatible()` before using it on new data."""
+    saved = params_for(store, row["id"])
+    return None if saved is None else loads_model(*saved)

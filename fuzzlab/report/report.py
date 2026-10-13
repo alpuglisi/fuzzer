@@ -27,6 +27,27 @@ def latest_run_id(store) -> int | None:
     return int(row["id"]) if row and row["id"] is not None else None
 
 
+def _run_models(store, run_id: int) -> tuple[list[dict], dict[str, str | None]]:
+    """The classifier and ranker whose scope covers ``run_id`` (FR-ML-10), plus each
+    one's saved-params sha (None: trained before models were saved, migration 14)."""
+    from fuzzlab.ml.model_registry import params_sha256_for
+    from fuzzlab.ml.rank_train import latest_ranker
+    from fuzzlab.ml.train import latest_classifier
+    found = []
+    clf = latest_classifier(store, run_id)
+    if clf is not None:
+        found.append(({"name": clf.name, "version": clf.version,
+                       "feature_version": clf.feature_version}, clf.params_sha256))
+    ranked = latest_ranker(store, run_id)
+    if ranked is not None:
+        row = ranked[0]
+        found.append(({"name": row["name"], "version": row["version"],
+                       "feature_version": row["feature_version"]},
+                      params_sha256_for(store, row["id"])))
+    found.sort(key=lambda pair: pair[0]["name"])
+    return [m for m, _ in found], {m["name"]: sha for m, sha in found}
+
+
 def build_report(store, run_id: int | None = None) -> dict:
     """Assemble the deterministic report for ``run_id`` (default: the latest run)."""
     if run_id is None:
@@ -60,10 +81,10 @@ def build_report(store, run_id: int | None = None) -> dict:
     metrics = {r["key"]: r["value"] for r in store.conn.execute(
         "SELECT key, value FROM run_metrics WHERE run_id=? ORDER BY key", (run_id,))}
 
-    # Latest version per model name (the deployed models), for reproducibility.
-    models = [dict(r) for r in store.conn.execute(
-        "SELECT name, MAX(version) AS version, feature_version FROM model "
-        "GROUP BY name ORDER BY name")]
+    # The models THIS run used (classifier + ranker), for reproducibility — read through
+    # the run-scoped readers, never "the newest version of each name" store-wide, which
+    # would cite a later run's model in an earlier run's report (BUG-0066).
+    models, model_shas = _run_models(store, run_id)
 
     plugins = [dict(r) for r in store.conn.execute(
         "SELECT name, version, priority FROM run_plugin WHERE run_id=? "
@@ -85,6 +106,7 @@ def build_report(store, run_id: int | None = None) -> dict:
             "config_hash": run.get("config_hash") if run else None,
             "feature_versions": feature_versions,
             "model_versions": {m["name"]: m["version"] for m in models},
+            "model_params_sha256": model_shas,
             "plugins": {p["name"]: p["version"] for p in plugins},
             "schema_version": store.schema_version(),
         },

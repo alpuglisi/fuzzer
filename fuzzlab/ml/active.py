@@ -126,6 +126,10 @@ class Prioritized:
     method: str
     training_rows: int = 0           # earlier labelled candidates the model learned from
     training_positives: int = 0
+    # Identity of the model that produced `order` (CC-ML-0015). It is retrained per call
+    # (seeded, on earlier runs only) and not saved as a `model` row; this sha pins it.
+    model_sha256: str | None = None
+    seed: int = 0
 
 
 def _target_of(store, run_id: int) -> str | None:
@@ -163,7 +167,7 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     if method == "random":
         order = list(wanted)
         random.Random(seed).shuffle(order)
-        return Prioritized(order=order, method=method)
+        return Prioritized(order=order, method=method, seed=seed)
 
     target = _target_of(store, run_id)
     if target is None:
@@ -182,13 +186,23 @@ def prioritize(store, run_id: int, candidate_ids: Sequence[int], *, method: str 
     X = [now.X[index[cid]] for cid in ids]
     texts = _candidate_texts(store, run_id, ids)
 
+    from fuzzlab.ml.persist import committee_sha, dumps_model
+
+    def ranker_sha(r: Ranker) -> str:
+        return dumps_model("ranker", r, feature_names=r.feature_names,
+                           feature_version=prior.feature_version)[1]
+
     if method == "committee":
         com = Committee(n_members=n_members, seed=seed).fit(prior.X, prior_texts, prior.y)
         key = disagreement(com.member_scores(X, texts))
+        model_sha = committee_sha([ranker_sha(m) for m in com.members])
     else:
-        scores = Ranker(seed=seed).fit(prior.X, prior_texts, prior.y).score(X, texts)
+        ranker = Ranker(seed=seed).fit(prior.X, prior_texts, prior.y)
+        scores = ranker.score(X, texts)
         key = scores if method == "score" else [uncertainty(sc) for sc in scores]
+        model_sha = ranker_sha(ranker)
     ranked = sorted(range(len(ids)), key=lambda i: key[i], reverse=True)   # stable ties
     order = [ids[i] for i in ranked]
     order += [cid for cid in wanted if cid not in index]   # unknown ids: last, in order
-    return Prioritized(order=order, method=method, training_rows=n, training_positives=pos)
+    return Prioritized(order=order, method=method, training_rows=n, training_positives=pos,
+                       model_sha256=model_sha, seed=seed)

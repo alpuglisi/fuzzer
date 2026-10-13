@@ -64,3 +64,21 @@ class Ranker:
                 contribs.append((name, w[j] * (X[j] - mean[j]) / std[j]))
         contribs.sort(key=lambda t: abs(t[1]), reverse=True)
         return Explanation(score=round(score, 6), contributions=contribs[:top])
+
+    # --- persistence (CC-ML-0015; envelope + validation live in fuzzlab.ml.persist) ---
+    # The ranker accepts an injected model, so the nested model records its own kind.
+    def to_params(self) -> dict:
+        if not isinstance(self.model, LogisticRegression):
+            raise TypeError(f"cannot persist a ranker over {type(self.model).__name__}")
+        return {"seed": self.seed, "vectorizer": self.vectorizer.to_params(),
+                "model": {"kind": "logistic", "params": self.model.to_params()},
+                "feature_names": list(self.feature_names)}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "Ranker":
+        if d["model"]["kind"] != "logistic":
+            raise ValueError(f"unsupported ranker model kind {d['model']['kind']!r}")
+        r = cls(seed=d["seed"], model=LogisticRegression.from_params(d["model"]["params"]))
+        r.vectorizer = CharNgramVectorizer.from_params(d["vectorizer"])
+        r.feature_names = list(d["feature_names"])
+        return r

@@ -393,11 +393,53 @@ def mutation_panel(store, run_id: int | None = None, limit: int = 100) -> dict[s
             "variants": variants}
 
 
+def weights_panel(store, run_id: int | None = None) -> dict[str, Any]:
+    """The saved logistic classifier's coefficients (CC-UI-0038). Read-only.
+
+    These are **standardised** log-odds coefficients — per standard deviation of each
+    feature, other features held fixed. They are not feature importance: correlated
+    features share weight under L2, and "per SD" reads oddly for 0/1 features."""
+    from fuzzlab.ml.persist import ModelIncompatibleError, ModelParamsError
+    from fuzzlab.ml.train import load_classifier
+    clf = latest_classifier(store, run_id)
+    if clf is None:
+        return {"available": False, "reason": "no trained classifier yet"}
+    model_info = {"name": clf.name, "version": clf.version,
+                  "params_sha256": clf.params_sha256}
+    try:
+        loaded = load_classifier(store, clf)
+    except ModelParamsError as exc:
+        return {"available": False, "model": model_info,
+                "reason": f"saved model is unreadable: {exc}"}
+    if loaded is None:
+        return {"available": False, "model": model_info,
+                "reason": "this classifier was trained before models were saved"}
+    if loaded.kind == "gbt":
+        return {"available": False, "model": model_info,
+                "reason": "tree model — no linear coefficients"}
+    if loaded.kind != "logistic":
+        return {"available": False, "model": model_info,
+                "reason": "fallback model — no features were learned"}
+    try:
+        loaded.check_compatible()
+    except ModelIncompatibleError as exc:
+        return {"available": False, "model": model_info, "reason": str(exc)}
+    params = loaded.model.to_params()
+    weights = [{"feature": "anomaly score (ECOD)" if name == "anomaly_ecod" else name,
+                "weight": w} for name, w in zip(loaded.feature_names, params["w"])]
+    weights.sort(key=lambda r: abs(r["weight"]), reverse=True)
+    return {"available": True, "model": model_info, "weights": weights,
+            "bias": params["b"],
+            "note": "standardised log-odds coefficients (per SD, other features held "
+                    "fixed); not feature importance"}
+
+
 def ml_overview(store, run_id: int | None = None) -> dict[str, Any]:
     """Every ML panel in one read-only payload for `/api/ml/data` (R-06's full list)."""
     return {
         "run_id": run_id,
         "classifier": classifier_panel(store, run_id),
+        "weights": weights_panel(store, run_id),
         "ranker": ranker_panel(store, run_id),
         "conformal": conformal_panel(store, run_id),
         "anomaly": anomaly_panel(store, run_id),

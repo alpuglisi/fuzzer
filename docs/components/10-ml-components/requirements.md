@@ -54,7 +54,9 @@ the oracle owns truth (the oracle/advisory split).
   UI's "logistic weights diverging bar" panel (R-06) renders a documented
   not-available state rather than a value; making it real needs either a schema change
   (persist trained weights) or a training-time change (write on every `train_and_score`
-  call), both out of scope for a read-only lane.
+  call), both out of scope for a read-only lane. *(Gap closed by CC-ML-0015 /
+  CC-UI-0038: trained models are saved (FR-ML-13), and the panel shows the saved
+  logistic model's standardised coefficients.)*
 - **FR-ML-8 (training telemetry, CC-ML-0009)** When trained with a `run_id`, the
   GBT and logistic classifiers (`FR-ML-1`) emit per-round/per-epoch scalar
   training metrics (at minimum `train/loss`) to `core/`'s cross-run
@@ -116,10 +118,34 @@ the oracle owns truth (the oracle/advisory split).
     later store-wide call would overwrite per-run flags.
   - Advisory only: unusual is not vulnerable, and it writes no labels.
 
+- **FR-ML-13 (saved models, CC-ML-0015)** Every `model` row written by
+  `train_and_score` / `train_and_rank` carries the trained model itself.
+  - **Storage:** `params` holds canonical JSON (`fuzzlab.ml.persist.dumps_model`:
+    sorted keys, compact separators, no NaN/Infinity) of the fitted state needed to
+    predict, and `params_sha256` holds the sha256 of exactly that text.
+  - **Kinds:** `logistic`, `gbt`, `prevalence`, `ranker` (with its vectorizer and nested
+    logistic model) and `constant`. A hybrid classifier also stores its fitted ECOD.
+  - **Loading:** `loads_model` rebuilds the model with exactly equal predictions, and
+    fails closed with `ModelParamsError` on anything malformed (sha mismatch, non-JSON
+    or pickle input, NaN/Infinity, runaway nesting, unknown format or kind, bad types or
+    lengths, malformed trees, unsorted ECOD columns). It never uses
+    `pickle`/`marshal`/`eval` (CWE-502).
+  - **Identity, not authentication:** the sha detects corruption and pins identity;
+    anyone who can write the store can recompute it.
+  - **Compatibility:** `LoadedModel.check_compatible()` raises `ModelIncompatibleError`
+    unless the stored `feature_version` and exact feature-name order match the current
+    layout. Callers check it before using a saved model on new data.
+  - **Readers:** `train.load_classifier` and `rank_train.load_ranker`, through
+    `model_registry.params_for`. Rows trained before migration 14 load as `None`.
+  - **Budget prioritizer:** not saved as a `model` row. Its `Prioritized.model_sha256`
+    pins the model that ordered a budget: a ranker sha, or for `committee`
+    `sha256("committee/1:" + member shas)`.
+
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
   the oracle's verdict is final and independent.
-- **NFR-ML-reproducible** Deterministic pipeline: fixed seeds, versioned features,
+- **NFR-ML-reproducible** *(Amended CC-ML-0015: models are now versioned **and
+  stored**, so a model reproduces from its row, sha-pinned.)* Deterministic pipeline: fixed seeds, versioned features,
   versioned models, recorded metrics.
 - **NFR-ML-no-leak** Train/test split prevents leakage across cells/transforms; the
   blind holdout is never trained on. *(Amended CC-ML-0014, BUG-0065:)* a candidate's

@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (ML/CORE/UI: trained models are saved and reloadable; BUG-0066/PA-0067 — CC-CORE-0027, CC-ML-0015, CC-UI-0038/0039)
+- **Trained models are now saved** (step 1 of the user's order: save models, then
+  `--score`/`--rank` from earlier runs, then plugins). Every classifier and ranker row
+  stores its fitted model as canonical JSON plus a sha256 (migration 14).
+  - It reloads to **exactly** the same predictions through `fuzzlab/ml/persist.py`.
+  - The loader fails closed on anything malformed and never unpickles (CWE-502).
+  - A compatibility check guards the feature layout for when step 2 reuses a model on
+    a new run.
+- **Why:** previously no model could be reloaded or reproduced. Every step retrained,
+  and the ML tab's coefficient panel was permanently "not available".
+- **ML tab:** shows the saved logistic model's standardised coefficients (labelled as
+  not feature importance).
+- **Budget prioritizer:** its model is pinned by a sha in the run result.
+- **BUG-0066 (found in review):** `fuzzlab report` for one run pinned the store's newest
+  model versions, so an earlier run's report cited a later run's models. BUG-0061's
+  sweep had wrongly cleared that line. The report now pins the run's own models and
+  their shas. PA-0067 makes sweeps judge each site by its reader's scope, and the
+  model-table guard now also flags un-filtered `MAX(version)` reads.
+- Passed the pre-change review gate 3/3.
+
 ## 2026-10-13 (ML/FUZZ/CORE: active learner wired as a confirmation budget, anomaly tripwire wired and persisted; BUG-0065/PA-0066 — CC-CORE-0026, CC-ML-0013/0014, CC-FUZZ-0048)
 - **`fuzzlab auto --confirm-budget N`**: the oracle confirms at most N distinct
   candidates, chosen by a model trained only on **earlier runs against the same

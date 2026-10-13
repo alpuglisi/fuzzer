@@ -981,3 +981,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Sweep by mechanism.** The `PA-0002` sweep for a scope bug greps every read of a
      per-run table that has no `run_id` filter or id join, not only the query shape
      that surfaced the bug (the `PA-0018` lesson). (from BUG-0065)
+
+- **PA-0067** — Strengthens `PA-0063` / `PA-0066` in how a sweep **judges** a site, after
+  the per-run report (`BUG-0066`) recurred in a line `BUG-0061`'s sweep had explicitly
+  cleared as "per-family correct". `PA-0066` widened what to look for, but not how to
+  judge what was found.
+  1. **A sweep verdict names the reader's scope.** For each site, record what the reader
+     is *for* (one run's page or report, one run's training, a store-wide view), and
+     whether the query's scope matches it. "Correct per family / per name" is not a
+     verdict for a per-run reader. A site cleared without naming its reader's scope
+     counts as unswept.
+  2. **Per-run readers of `model` go through the run-scoped readers** (`select_latest`,
+     `latest_classifier`, `latest_ranker` with the run's `run_id`). The guard
+     `tests/test_ml_model_selection.py::test_no_module_reads_model_as_newest_row_of_any_family`
+     now also flags `MAX(version)` reads of `model` that have no name filter. It was
+     proven to flag the old report query.
+  3. **A recurrence in a site a prior sweep cleared triggers a re-sweep** of every site
+     that sweep cleared, judged by rule 1. The re-sweep is recorded in the new bug
+     report. (from BUG-0066)

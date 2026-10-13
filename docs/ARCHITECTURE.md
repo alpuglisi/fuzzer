@@ -1324,6 +1324,13 @@ tracked in the requirements files, not here.
   `anomaly_flag` for every candidate (migration 13) and records `anomaly_flagged`.
   It also offers **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
   that feeds the anomaly score into the classifier.
+- **Saved models** `[built]` (CC-ML-0015, CC-CORE-0027, FR-ML-13):
+  - Each trained classifier or ranker is stored in its `model` row as canonical JSON plus
+    its sha256.
+  - It reloads to exactly equal predictions through `ml/persist.py`, which fails closed
+    and never unpickles. A compatibility check guards the feature layout.
+  - The ML tab shows the saved logistic coefficients. `fuzzlab report` pins each run's
+    own models and their shas (BUG-0066 fixed).
 - **Model registry + honest evaluation** `[built]` (CC-ML-0011/0012, BUG-0061/0062):
   - The `model` table is shared by the classifier and ranker families and by every
     run's training. Each row's `calibration` records its `run_id` scope and its
@@ -1568,7 +1575,7 @@ detail):
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |
-| `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics) | ML training (classifier, ranker) | ML inference, UI — only via `ml/model_registry.select_latest` (FR-ML-10) |
+| `model` (versions, calibration incl. `run_id` scope + `oof_*` metrics, saved model `params` + `params_sha256`) | ML training (classifier, ranker) via `ml/persist.dumps_model` | ML inference, UI, report — only via `ml/model_registry` (FR-ML-10) and `ml/persist.loads_model` (FR-ML-13) |
 | `request_budget` | all tools | budget manager, UI |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
 | `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |

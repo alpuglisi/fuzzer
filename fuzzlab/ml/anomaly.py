@@ -72,6 +72,18 @@ class ECOD:
     def scores(self, X: Sequence[Sequence[float]]) -> list[float]:
         return [self.score(row) for row in X]
 
+    def to_params(self) -> dict:                       # CC-ML-0015
+        return {"n": self._n, "d": self._d, "sorted": [list(c) for c in self._sorted],
+                "skew": list(self._skew)}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "ECOD":
+        e = cls()
+        e._n, e._d = d["n"], d["d"]
+        e._sorted = [list(c) for c in d["sorted"]]
+        e._skew = list(d["skew"])
+        return e
+
 
 def flag_top(scores: Sequence[float], contamination: float = 0.1) -> list[bool]:
     """Flag the top ``contamination`` fraction of scores as anomalies (advisory)."""

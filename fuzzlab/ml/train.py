@@ -24,7 +24,8 @@ from fuzzlab.ml.dataset import build_dataset
 from fuzzlab.ml.gbt import GradientBoostedTrees
 from fuzzlab.ml.logistic import LogisticRegression
 from fuzzlab.ml.metrics import oof_folds, pr_auc
-from fuzzlab.ml.model_registry import select_latest
+from fuzzlab.ml.model_registry import params_for, params_sha256_for, select_latest
+from fuzzlab.ml.persist import LoadedModel, dumps_model, loads_model
 
 _MODELS = {"logistic": LogisticRegression, "gbt": GradientBoostedTrees}
 
@@ -82,6 +83,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
     exists and any "OOF" metric would be in-sample (BUG-0062)."""
     ds = build_dataset(store, run_id)                         # train/evaluate: labelled
     every = build_dataset(store, run_id, include_unlabelled=True)   # score: every row
+    ecod = None                                  # the hybrid's fitted detector, if any
     if hybrid and len(every):
         # ECOD is label-free: fit it ONCE on every row and apply that same detector to
         # both sets, so the scored rows' anomaly feature is the one the model trained on.
@@ -100,7 +102,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         # Fallback: not enough labelled data for a model — score with the base rate.
         model = PrevalenceBaseline().fit(ds.X, ds.y)
         scores = model.predict_proba(every.X)
-        gate, name = None, PREVALENCE_FALLBACK_NAME
+        gate, name, kind = None, PREVALENCE_FALLBACK_NAME, "prevalence"
         result.update(model=name, fallback=True)
     else:
         if model_kind == "auto":
@@ -116,7 +118,7 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
         sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
         gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
-        model = _MODELS[name]()
+        model, kind = _MODELS[name](), name
         _fit_with_metrics(model, ds.X, ds.y, store, run_id, name)   # deploy: fit on all labels
         # advisory scores for EVERY row, including candidates the oracle skipped for
         # budget (they have no label to train on, but they are the ones to triage)
@@ -139,12 +141,16 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
 
     if gate is not None:
         calibration.update(t_lo=gate.t_lo, t_hi=gate.t_hi)
+    # Save the deployed model itself (CC-ML-0015): reloadable, sha-pinned.
+    params, params_sha = dumps_model(kind, model, feature_names=ds.feature_names,
+                                     feature_version=ds.feature_version, ecod=ecod)
     version = _next_version(store, name)
     store.conn.execute(
-        "INSERT INTO model (name, version, feature_version, calibration) VALUES (?,?,?,?)",
-        (name, version, ds.feature_version, json.dumps(calibration)))
+        "INSERT INTO model (name, version, feature_version, calibration, params, "
+        "params_sha256) VALUES (?,?,?,?,?,?)",
+        (name, version, ds.feature_version, json.dumps(calibration), params, params_sha))
     store.conn.commit()
-    result.update(version=version, scored=len(scores))
+    result.update(version=version, scored=len(scores), params_sha256=params_sha)
     return result
 
 
@@ -156,6 +162,8 @@ class ClassifierModel:
     feature_version: int | None
     calibration: dict
     gate: ConformalGate | None          # None when the row has no conformal thresholds
+    id: int | None = None               # the `model` row (to fetch its saved params)
+    params_sha256: str | None = None    # None: trained before models were saved
 
 
 def latest_classifier(store, run_id: int | None = None) -> ClassifierModel | None:
@@ -171,4 +179,13 @@ def latest_classifier(store, run_id: int | None = None) -> ClassifierModel | Non
         gate = ConformalGate(t_lo=calibration["t_lo"], t_hi=calibration["t_hi"])
     return ClassifierModel(name=row["name"], version=row["version"],
                            feature_version=row["feature_version"],
-                           calibration=calibration, gate=gate)
+                           calibration=calibration, gate=gate, id=row["id"],
+                           params_sha256=params_sha256_for(store, row["id"]))
+
+
+def load_classifier(store, clf: ClassifierModel) -> LoadedModel | None:
+    """Rebuild a classifier's saved model, or ``None`` if it was trained before models
+    were saved. Raises `persist.ModelParamsError` if the stored params are corrupted;
+    call `check_compatible()` before using it on new data."""
+    saved = params_for(store, clf.id) if clf.id is not None else None
+    return None if saved is None else loads_model(*saved)

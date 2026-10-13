@@ -3,6 +3,61 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0039 — Per-run report pins the run's own models, not the store's newest (BUG-0066) (2026-10-13)
+- Change: in `report/report.py::build_report`, `models` and `reproducibility.model_versions`
+  come from `latest_classifier(store, run_id)` and `latest_ranker(store, run_id)`: the
+  models whose scope covers *this* run (FR-ML-10). They no longer come from
+  `SELECT name, MAX(version) … GROUP BY name` over the whole store.
+  - Each entry is `{name, version, feature_version}`, as before.
+  - A run with no trained model lists none.
+  - Legacy rows without a `run_id` scope still cover every run, which is the old
+    behaviour.
+- Impact: on multi-run stores, reports of earlier runs stop citing later runs' models.
+  `test_report.py:50,53` (single run) is unchanged. FR-UI-17.
+- Risk: low.
+- Deliverables:
+  - [ ] Report reads through the scoped readers — done
+  - [ ] Regression: two runs each train; run 1's report pins run 1's model versions, and
+    fails on the old query — done
+  - [ ] Full bug protocol: ERROR_LOG, BUG-0066, PA-0067, with a recurrence review naming
+    BUG-0061's wrong sweep verdict — done
+- Implementation divergence (reflected back per the review gate): per PA-0067 the model-table guard (`tests/test_ml_model_selection.py`) now also flags `MAX(version)` reads of `model` without a name filter; the old report query moved from its must-not-match fixtures to its must-match fixtures.
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — `test_report_pins_the_runs_own_models_not_the_newest` and the extended model-table guard both fail on the old `MAX(version) … GROUP BY name` query and pass on the fix; `tests/test_report.py` passes unchanged.
+
+### CC-UI-0038 — ML tab shows the saved logistic coefficients; report pins model params (2026-10-13)
+- Change:
+  - **`web/mlview.py::weights_panel(store, run_id)`**, added to `ml_overview` as
+    `weights`:
+    - For a `logistic` classifier it returns `{available, model: {name, version,
+      params_sha256}, weights: [{feature, weight}] (sorted by |weight|), bias, note}`.
+      An `anomaly_ecod` weight is labelled "anomaly score (ECOD)".
+    - Otherwise it gives a reason: no classifier yet; trained before model saving;
+      `gbt` ("tree model — no linear coefficients"); `prevalence` ("fallback has no
+      features"); or the stored features no longer match (`check_compatible` failed).
+  - **`ml.html`:** the panel gets the standard hidden `empty` / `summary` fields. The
+    heading becomes "Logistic coefficients", with the caption "standardised log-odds
+    coefficients — per standard deviation of each feature, other features held fixed;
+    not feature importance (correlated features share weight; 0/1 features read
+    oddly per SD)". The per-instance sentence is removed.
+  - **`ml.js`:** `renderWeights` draws a signed bars chart, with meta "logistic vN ·
+    sha <12> · bias b (standardised space)", through `renderSafely("weights", …)`.
+  - **`report.py`:** the reproducibility block gains `model_params_sha256: {name:
+    sha | null}` for the run's own models (CC-UI-0039).
+- Impact: read-only. FR-UI-11 updated (weights panel real, per-instance sentence
+  removed). The browser smoke covers the panel automatically.
+- Risk: low.
+- Deliverables:
+  - [ ] `weights_panel` + overview; template; `ml.js`; report sha — done
+  - [ ] Tests:
+    - payload weights equal the stored `w`, mapped to names;
+    - reasons for gbt, prevalence, legacy, none and incompatible;
+    - the browser renders the weights chart with zero errors;
+    - the report sha equals the row's sha, and is null for legacy — done
+  - [ ] FR-UI-11 — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — weights payload equals the saved model's `w` mapped to names (the hybrid's ECOD weight labelled), sorted by |weight|; reasons for none / gbt / fallback / legacy; the report's sha block equals the row's sha and is null for a legacy row; the browser smoke renders the coefficients chart (its panel is available in the seeded store) with zero page/console errors and zero CSP violations (`test_web*.py` 270 passed under `FUZZLAB_REQUIRE_BROWSER=1`).
+
 ### CC-UI-0037 — Templates comply with the app's own CSP: no inline script/style (BUG-0064) (2026-10-13)
 - Change:
   - `templates/base.html`: inline no-FOUC `<script>` moved verbatim to new

@@ -229,9 +229,10 @@ def _print_budget(m: dict) -> None:
     if m.get("budget_method") == "random":
         how = "random order — the control for T7.4"
     else:
+        sha = m.get("budget_model_sha256")
         how = (f"ordered by {m.get('budget_method')}, trained on "
                f"{m.get('budget_training_rows', 0)} earlier labelled candidate(s) "
-               f"from this target")
+               f"from this target" + (f"; model {sha[:12]}" if sha else ""))
     print(f"  oracle budget: checked {m.get('oracle_checked_keys', 0)} of {confirmable} "
           f"confirmable candidate(s); {confirmable - m.get('oracle_checked_keys', 0)} "
           f"skipped ({how})")

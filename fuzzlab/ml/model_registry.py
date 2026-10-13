@@ -28,6 +28,23 @@ def _covers(calibration: dict, run_id: int | None) -> bool:
     return scope is _ABSENT or scope is None or scope == run_id
 
 
+def params_for(store, model_id: int) -> tuple[str, str] | None:
+    """The saved model of one `model` row as ``(params_text, params_sha256)``, or
+    ``None`` for a row trained before models were saved (migration 14). Fetched by id
+    on its own so `select_latest`'s scan never pulls every row's params."""
+    row = store.conn.execute(
+        "SELECT params, params_sha256 FROM model WHERE id=?", (model_id,)).fetchone()
+    if row is None or row["params"] is None:
+        return None
+    return row["params"], row["params_sha256"]
+
+
+def params_sha256_for(store, model_id: int) -> str | None:
+    row = store.conn.execute(
+        "SELECT params_sha256 FROM model WHERE id=?", (model_id,)).fetchone()
+    return row["params_sha256"] if row else None
+
+
 def select_latest(store, names: Sequence[str], run_id: int | None = None):
     """The newest `model` row named in ``names`` whose scope covers ``run_id``.
 

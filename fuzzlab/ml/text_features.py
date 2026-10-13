@@ -80,3 +80,15 @@ class CharNgramVectorizer:
 
     def feature_names(self) -> list[str]:
         return [f"ng[{g}]" for g in self.vocab]
+
+    def to_params(self) -> dict:                       # CC-ML-0015
+        return {"n": self.n, "max_features": self.max_features, "vocab": list(self.vocab),
+                "idf": list(self._idf)}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "CharNgramVectorizer":
+        v = cls(n=d["n"], max_features=d["max_features"])
+        v.vocab = list(d["vocab"])
+        v._index = {g: j for j, g in enumerate(v.vocab)}
+        v._idf = list(d["idf"])
+        return v

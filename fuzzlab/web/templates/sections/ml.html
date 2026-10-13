@@ -63,16 +63,13 @@
   </div>
 
   <div class="card ml-panel" id="panel-weights" data-panel="weights">
-    <h2>Logistic weights <span class="muted">&mdash; log-odds</span></h2>
-    <p class="muted">Global &beta; vs. a per-instance &beta;&middot;x contribution
-      (diverging bar; global and per-instance are labeled separately so they are never
-      mistaken for one another).</p>
+    <h2>Logistic coefficients <span class="muted">&mdash; standardised log-odds</span></h2>
+    <p class="muted">Per standard deviation of each feature, other features held fixed.
+      Not feature importance: correlated features share weight, and &ldquo;per SD&rdquo;
+      reads oddly for 0/1 features. Read from the saved model.</p>
+    <p class="ml-meta" data-field="summary"></p>
     <div class="ml-chart-cell"><div class="ml-chart" id="chart-weights"></div></div>
-    <p class="muted" data-field="empty">Not available: coefficients are trained
-      per-request and are not persisted to the store (only the conformal calibration
-      thresholds are), so this lane cannot surface them without a schema/training
-      change out of its read-only scope. Documented as a known gap &mdash; see
-      requirements.md FR-UI-11.</p>
+    <p class="muted" data-field="empty" hidden></p>
   </div>
 
   <div class="card ml-panel" id="panel-ranker" data-panel="ranker">

@@ -125,6 +125,11 @@ plugin registry. It is the layer that makes the store the integration bus.
     `fuzzlab.ml.anomaly.detect_anomalies` writes the anomaly columns. None of them is a
     `finding` label.
 
+- **FR-CORE-15** *(migration 14; `CC-CORE-0027`, 2026-10-13).* `model` carries
+  `params` (canonical JSON of the trained model) and `params_sha256` (sha256 of that
+  exact text). Only the ML trainers write them, through `fuzzlab.ml.persist`; rows
+  from before migration 14 read NULL and are not reloadable.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

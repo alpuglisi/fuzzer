@@ -389,6 +389,18 @@ ALTER TABLE candidate ADD COLUMN anomaly_score REAL;
 ALTER TABLE candidate ADD COLUMN anomaly_flag INTEGER;
 """
 
+# --- migration 14: saved trained models (CC-CORE-0027) --------------------------
+# A `model` row now carries the trained model itself: `params` is canonical JSON of
+# the fitted state needed to predict, `params_sha256` the sha256 of exactly that text
+# (a corruption check and identity pin, not authentication). Written only by the ML
+# trainers through `fuzzlab.ml.persist.dumps_model`; read only through
+# `fuzzlab.ml.persist.loads_model`, which fails closed. Rows trained before this
+# migration read NULL and cannot be reloaded (the weights were never stored).
+_M0014 = """
+ALTER TABLE model ADD COLUMN params TEXT;
+ALTER TABLE model ADD COLUMN params_sha256 TEXT;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -404,6 +416,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (11, _M0011),
     (12, _M0012),
     (13, _M0013),
+    (14, _M0014),
 ]
 
 

@@ -3,6 +3,25 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0027 — Migration 14: `model.params` + `model.params_sha256` (2026-10-13)
+- Change: `_M0014`:
+  ```sql
+  ALTER TABLE model ADD COLUMN params TEXT;         -- canonical JSON of the trained model
+  ALTER TABLE model ADD COLUMN params_sha256 TEXT;  -- sha256 of exactly that text
+  ```
+  - The migration is additive. Rows trained before it read NULL and are "not
+    reloadable" (no backfill is possible).
+  - Only the ML trainers write these columns.
+- Impact: ML writes them; UI and report read them through ML's loader. ARCHITECTURE's
+  store-contract `model` row is updated.
+- Risk: low; additive.
+- Deliverables:
+  - [ ] `_M0014` + registry — done
+  - [ ] Migration test — done
+  - [ ] FR-CORE-15 — done
+- Review: pre-change review gate cleared 3/3 (proposing agent + 2 independent reviewer agents, three rounds v1→v3; both reviewers independently found BUG-0066; every raised issue adopted).
+- Effectiveness (assessed 2026-10-13): effective offline — a fresh store is at head 14 with `model.params` / `params_sha256` (`tests/test_ml_persist.py::test_migration_14_adds_the_model_params_columns`, head derived from `MIGRATIONS`).
+
 ### CC-CORE-0026 — Migration 13: candidate oracle status + anomaly score/flag (2026-10-13)
 - Change: `fuzzlab/core/migrations.py` gains `_M0013`, appended as `(13, _M0013)`:
   ```sql

@@ -85,3 +85,17 @@ class LogisticRegression:
         Xs = self._standardize(X)
         return [_sigmoid(sum(self._w[j] * row[j] for j in range(len(self._w))) + self._b)
                 for row in Xs]
+
+    # --- persistence (CC-ML-0015; envelope + validation live in fuzzlab.ml.persist) ---
+    def to_params(self) -> dict:
+        return {"epochs": self.epochs, "lr": self.lr, "l2": self.l2,
+                "class_balanced": self.class_balanced, "w": list(self._w), "b": self._b,
+                "mean": list(self._mean), "std": list(self._std)}
+
+    @classmethod
+    def from_params(cls, d: dict) -> "LogisticRegression":
+        m = cls(epochs=d["epochs"], lr=d["lr"], l2=d["l2"],
+                class_balanced=d["class_balanced"])
+        m._w, m._b = list(d["w"]), d["b"]
+        m._mean, m._std = list(d["mean"]), list(d["std"])
+        return m

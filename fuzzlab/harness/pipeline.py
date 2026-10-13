@@ -140,7 +140,9 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             selected = ordered[:confirm_budget]
             budget_info.update(budget_method=plan_order.method,
                                budget_training_rows=plan_order.training_rows,
-                               budget_training_positives=plan_order.training_positives)
+                               budget_training_positives=plan_order.training_positives,
+                               budget_seed=getattr(plan_order, "seed", 0),
+                               budget_model_sha256=getattr(plan_order, "model_sha256", None))
 
     confirmed_keys: set[tuple] = set()
     if selected is None:
