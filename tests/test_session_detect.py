@@ -33,9 +33,9 @@ def test_find_login_form_and_carry_hidden_fields():
     assert form.username_field == "username"
     assert form.password_field == "password"
     data = form.fill("admin", "admin123")
-    assert data["username"] == "admin"
-    assert data["password"] == "admin123"
-    assert data["user_token"] == "abc123"        # CSRF hidden field carried through
+    assert data.get("username") == "admin"
+    assert data.get("password") == "admin123"
+    assert data.get("user_token") == "abc123"        # CSRF hidden field carried through
 
 
 def test_is_login_page():

@@ -19,6 +19,9 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+from fuzzlab.core.forms import (FormEntries, form_entries, is_disabled, owned_controls,
+                                submitter_overrides)
+
 _USERNAME_HINT = re.compile(r"user|email|login|uname|account", re.I)
 _TOKEN_KEYS = {"token", "access_token", "accesstoken", "jwt", "id_token", "bearer"}
 
@@ -43,16 +46,22 @@ def decode_jwt_exp(token: str) -> float | None:
 class LoginForm:
     action_url: str
     method: str
-    fields: dict[str, str]
+    #: The form's entry list as a browser would send it (BUG-0110): ordered pairs,
+    #: duplicates kept, the submitter's name=value included.
+    fields: FormEntries
     username_field: str | None
     password_field: str
+    #: ``formaction``/``formmethod``/``formenctype`` on the submitter. Not applied:
+    #: the session manager refuses a form that carries any (BUG-0110).
+    submitter_overrides: tuple[str, ...] = ()
 
-    def fill(self, username: str, password: str) -> dict[str, str]:
-        data = dict(self.fields)                 # carries hidden fields (e.g. CSRF)
+    def fill(self, username: str, password: str) -> FormEntries:
+        """The entry list with the credentials put in place of the username and
+        password entries (hidden fields such as a CSRF token are carried through)."""
+        data = self.fields
         if self.username_field:
-            data[self.username_field] = username
-        data[self.password_field] = password
-        return data
+            data = data.replace(self.username_field, username)
+        return data.replace(self.password_field, password)
 
 
 def is_login_page(html: str) -> bool:
@@ -67,15 +76,15 @@ def find_login_form(html: str, page_url: str) -> LoginForm | None:
     for form in soup.find_all("form"):
         password_field = None
         username_field = None
-        fields: dict[str, str] = {}
+        # What a browser would POST on an unmodified submit (BUG-0110): the submitter's
+        # name=value, a select's default option, only checked boxes, no disabled controls.
+        fields = form_entries(form)
         text_candidates: list[str] = []
-        for el in form.find_all(["input", "textarea", "select"]):
+        for el in owned_controls(form):
             name = el.get("name")
-            itype = (el.get("type") or "text").lower()
-            if itype in ("submit", "button", "image", "reset"):
+            if el.name != "input" or not name or is_disabled(el):
                 continue
-            if name:
-                fields[name] = el.get("value") or ""
+            itype = (el.get("type") or "text").lower()
             if itype == "password" and password_field is None:
                 password_field = name
             elif itype in ("text", "email", "tel", "") and name:
@@ -92,7 +101,8 @@ def find_login_form(html: str, page_url: str) -> LoginForm | None:
         action = form.get("action")
         action_url = urljoin(page_url, action) if action else page_url
         method = (form.get("method") or "GET").upper()
-        return LoginForm(action_url, method, fields, username_field, password_field)
+        return LoginForm(action_url, method, fields, username_field, password_field,
+                         submitter_overrides(form))
     return None
 
 

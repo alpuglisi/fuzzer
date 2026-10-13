@@ -1157,6 +1157,9 @@ tracked in the requirements files, not here.
     unparseable bodies, and sniffing; an AST guard enumerates the producers;
   - `core/evidence.py`: the one parser of candidate evidence. Unreadable rows are
     quarantined by the ML path, never fabricated (CC-CORE-0036, BUG-0107);
+  - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
+    spec-cited rule table pinned by a fixture per rule). The session login and the
+    passive auditor use it (CC-CORE-0037, BUG-0110);
   - `core/secretfile.py`: secret files are 0600 from creation, complete or an error
     (`fsync`ed), and replaced atomically (`replace_secret`). A trust root is created
     with `O_EXCL` (`create_secret`). Used by the keyring and the proxy CA, which checks

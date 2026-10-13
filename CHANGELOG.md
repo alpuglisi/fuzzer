@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (BUG-0110: login forms serialised as a browser does)
+- **Why:** run against a self-hosted, loopback-only bWAPP, fuzzlab could not log in with
+  the right credentials. The detector sent no submit-button `name=value` and an empty
+  `<select>`.
+- **What:**
+  - new `fuzzlab.core.forms` builds a form's entry list per HTML §4.10.21.4, with a rule
+    table that a guard test pins one fixture per rule (CC-CORE-0037);
+  - the login detector uses it and refuses a submit button with
+    `formaction` / `formmethod` / `formenctype` (CC-SESS-0014);
+  - the auditor reports a select's or textarea's real default value (CC-AUD-0028);
+  - BUG-0110 and PA-0111, which strengthens PA-0061 and PA-0062.
+
 ## 2026-10-13 (Error review 9: a third-party audit's 13 findings fixed — BUG-0097..0109)
 - **None was a deliberately vulnerable lab behaviour:** all 13 are in `fuzzlab/`. Each
   was reproduced on `1619932` first.

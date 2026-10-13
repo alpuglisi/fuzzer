@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Session: login to a real third-party target rejected with right credentials (fixed, BUG-0110/PA-0111)
+- **Symptom:** `fuzzlab session print` against a loopback bWAPP: "login for user@127.0.0.1 was rejected (status 200)".
+- **Root cause:** the login detector read each control's `value` attribute: no submit-button `form=submit`, and the `<select>` sent `""`.
+- **Remediation:** `core.forms.form_entries` builds the HTML entry list, rule by rule; a submitter override is refused. CC-CORE-0037, CC-SESS-0014, CC-AUD-0028. `docs/bugs/BUG-0110-login-form-not-serialised-like-a-browser.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Credentials: a failed credential delete reported success (fixed, BUG-0109/PA-0110)
 - **Symptom:** a backend PermissionError on delete returned normally; the credential stayed usable.
 - **Root cause:** `except Exception: pass` around the backend delete.

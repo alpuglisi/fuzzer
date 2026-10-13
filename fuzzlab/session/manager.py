@@ -16,7 +16,7 @@ from __future__ import annotations
 import base64
 import threading
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Sequence
 from urllib.parse import urljoin, urlparse
 
 from fuzzlab.core.urls import canonical_origin
@@ -50,7 +50,7 @@ class Fetcher:
     """Login-handshake HTTP with its own cookie jar (default: requests-backed)."""
 
     def get(self, url: str, headers: dict[str, str] | None = None) -> FetchResponse: ...
-    def post(self, url: str, data: dict[str, str] | None = None,
+    def post(self, url: str, data: Sequence[tuple[str, str]] | None = None,
              headers: dict[str, str] | None = None,
              allow_redirects: bool = True) -> FetchResponse: ...
     def cookies(self) -> dict[str, str]: ...
@@ -270,6 +270,13 @@ class SessionManager:
             raise SessionAuthError(
                 f"refusing to log {identity}@{host} in: the login page {login_page_url} "
                 f"was reached by a downgrade from https to http")
+        if form.submitter_overrides:
+            # A browser would send the form where/how its submit button says, which
+            # this login does not emulate: refuse rather than send it elsewhere.
+            raise SessionAuthError(
+                f"refusing to log {identity}@{host} in: the login form's submit button "
+                f"overrides the form with {', '.join(form.submitter_overrides)} "
+                f"(not supported; capture the session via the proxy instead)")
         if not self._credential_destination_ok(form.action_url, base_url,
                                                floor_https=floor_https):
             raise SessionAuthError(
@@ -423,7 +430,7 @@ class SessionManager:
         host = (t.hostname or "").lower()
         return host in self._scope or f"{host}:{t.port}" in self._scope
 
-    def _post_credentials(self, fetcher: Fetcher, url: str, data: dict,
+    def _post_credentials(self, fetcher: Fetcher, url: str, data,
                           base_url: str, *, floor_https: bool = False) -> FetchResponse:
         """POST the credentials without letting the HTTP client follow redirects: a 307 /
         308 re-sends the body (the credentials) to wherever ``Location`` says. A 301 /
@@ -508,7 +515,7 @@ def _get_no_redirects(fetcher, url: str,
     return fetcher.get(url, headers=headers), False
 
 
-def _post_no_redirects(fetcher, url: str, data: dict) -> FetchResponse:
+def _post_no_redirects(fetcher, url: str, data) -> FetchResponse:
     """``fetcher.post`` with redirects off. A fetcher without the keyword (an old test
     double, which never follows redirects anyway) is called without it."""
     import inspect

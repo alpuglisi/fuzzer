@@ -3,6 +3,41 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0037 — `core.forms`: HTML form entry-list serialisation (BUG-0110) (2026-10-13)
+- Change:
+  - new `fuzzlab/core/forms.py`:
+    - `form_entries(form)` returns an ordered `FormEntries` list of `(name, value)`
+      pairs, following §4.10.21.4;
+    - `submitter` / `submitter_overrides`, `owned_controls` (form ownership,
+      including `form=`), `select_values`, `option_value`, `textarea_value`,
+      `default_value`, `is_disabled`;
+  - `RULES` lists each implemented rule with its spec step (PA-0111);
+  - `FormEntries.get` returns the last value for a name (what `$_POST` and `dict()`
+    see); `replace` sets a name in place.
+- Impact:
+  - **SESS:** the login detector uses it;
+  - **AUD:** `tools/fetcher.py` uses `default_value`;
+  - no store or schema change.
+- Risk: low. A new pure module; every rule has a fixture, and the mutation check killed
+  26/26.
+- Deliverables:
+  - [x] `core/forms.py` — done
+  - [x] `tests/test_form_entries.py` (rule-table guard plus a fixture per rule) — done
+  - [x] FR-CORE-27 — done
+- Review: reviewers A and B both AGREED the BUG-0110 draft with required changes, and all
+  were adopted:
+  - **A:** form ownership, listbox and optgroup rules, the first enabled submitter
+    stated as a deviation, the unnamed image submitter, the FR ids, the PA wording, the
+    sweep widened to redirects and cookies;
+  - **B:** ordered pairs instead of first-wins, presence-not-truthiness fixtures, a
+    machine-checked rule table, submitter overrides refused.
+  - **Implementation round:** both AGREED. Both found that a disabled `selected`
+    option was replaced by the first enabled one (a browser sends nothing for it); that
+    is fixed (`select-selected-disabled-not-sent`). Their nits are recorded as module
+    limitations: duplicate form ids and `_charset_`.
+- Effectiveness: verified live. `session print` against the loopback bWAPP now
+  authenticates.
+
 ### CC-CORE-0036 — One fail-closed storage-redaction boundary (BUG-0099/0100); recorder redacted; durable-or-told fsync (BUG-0105); keyring lock and verified delete (BUG-0108/0109); evidence parser (BUG-0107); migration 19 (BUG-0104) (2026-10-13)
 - Change:
   - **`core/redaction.py` (BUG-0099 / BUG-0100).** It gains the storage boundary:

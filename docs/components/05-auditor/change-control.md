@@ -3,6 +3,29 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0028 — Field default values as a browser holds them (BUG-0110 sweep) (2026-10-13)
+- Change: `tools/fetcher.py::PageContext._field`'s `value` is
+  `core.forms.default_value(el)`:
+  - a select reports its selected or first option;
+  - a textarea reports its text;
+  - a checkbox or radio reports its value, or `on`.
+- Impact:
+  - **Behaviour change:** these values feed `candidates()` and the value-based rules
+    (`rule_nosql_operators`, `rule_serialized_tokens`, `rule_export_endpoints`'s
+    example, `rule_privileged_hidden_fields`). They can now emit an indicator for a
+    select or textarea that holds a token or operator; before, those values were
+    always `""`;
+  - no schema change.
+- Risk: low. It adds correct indicators only; names and targets are unchanged.
+- Deliverables:
+  - [x] `_field` uses `default_value` — done
+  - [x] tests: default values, and a serialised token in a textarea now found — done
+  - [x] FR-AUD-18 — done
+- Review: as CC-CORE-0037. The draft named this CC-CRAWL-0011, but `tools/fetcher.py`'s
+  log is the Auditor's, so it was corrected here. Reviewer A asked for this exact
+  behaviour-change note.
+- Effectiveness: verified by the tests above.
+
 ### CC-AUD-0027 — `R-PATH-TRAVERSAL` audit rule closes category 4's last known real, tracked detection gap (2026-09-23)
 
 - Change: adds `R-PATH-TRAVERSAL`, category `path-traversal`, to

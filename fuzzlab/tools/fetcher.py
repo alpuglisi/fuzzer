@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
+from fuzzlab.core.forms import default_value
 from fuzzlab.tools import paths
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -451,7 +452,8 @@ class PageContext:
         ftype = (el.get('type') or el.name).lower()
         return {
             'name': name,
-            'value': el.get('value') or '',
+            # A select's value is its default option's, a textarea's its text (BUG-0110).
+            'value': default_value(el),
             'ftype': ftype,
             'action': action,
             'method': method,

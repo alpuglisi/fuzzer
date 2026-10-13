@@ -235,6 +235,18 @@ plugin registry. It is the layer that makes the store the integration bus.
   `config` (canonical JSON of the plugin's options), `status` (`attached`, then `ok` /
   `failed`) and `error`. They are written by `PluginManager.record` / `finalize`
   (FR-PLUG-7) and read per run by `fuzzlab report`. Legacy rows read NULL.
+- **FR-CORE-27** *(form serialisation; `CC-CORE-0037`, 2026-10-13, BUG-0110).*
+  - `core/forms.form_entries(form)` is the one way a scraped HTML form is serialised:
+    - the result is the browser's entry list (HTML §4.10.21.4) as ordered
+      `(name, value)` pairs, duplicates included;
+    - `core/forms.RULES` lists every implemented rule with its spec step;
+    - a guard test requires one fixture per rule (PA-0111).
+  - **Stated deviations:**
+    - the submitter is the first *enabled* submit control;
+    - `dirname` and script-set state are not modelled;
+    - the submitter's `formaction` / `formmethod` / `formenctype` are reported by
+      `submitter_overrides`, never applied.
+  - `default_value(el)` is the value a control holds before input, for reporting.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

@@ -3,6 +3,35 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0014 — Login forms submitted as a browser would (BUG-0110) (2026-10-13)
+- Change:
+  - `detect.find_login_form` builds `LoginForm.fields` with `core.forms.form_entries`.
+    It now includes the submitter's `name=value` and a select's default option, and
+    leaves out unchecked boxes, disabled controls and file inputs;
+  - username and password detection read the form's owned, enabled inputs;
+  - `LoginForm.fill` returns the entry list with the credentials replaced in place;
+  - `LoginForm.submitter_overrides` is set, and `SessionManager` refuses such a form
+    before any credential request;
+  - the `Fetcher.post` data annotation is a sequence of pairs.
+- Impact:
+  - **Behaviour change:** login POST bodies gain the submitter's field and select
+    defaults, and lose unchecked and disabled controls;
+  - **Test doubles:** they receive a `FormEntries` (a list with `.get`), so the
+    existing `data.get` doubles work unchanged;
+  - **Credential destinations:** unchanged (`form.action` through
+    `_credential_destination_ok`);
+  - **PROXY / FUZZ:** not affected.
+- Risk: low-medium. A login that relied on the old body (sending a disabled or unchecked
+  field) would change. That is browser-incorrect, and no lab target relies on it (the
+  session suites pass).
+- Deliverables:
+  - [x] detector and manager — done
+  - [x] tests: the bWAPP-shaped end-to-end login; overrides refused with no request — done
+  - [x] FR-SESS-3 amended, FR-SESS-14 added — done
+- Review: as CC-CORE-0037 (A and B AGREED with required changes, all adopted).
+- Effectiveness: verified live against the loopback bWAPP (`PHPSESSID` and
+  `security_level=0`).
+
 ### CC-SESS-0013 — Login navigation anchored to operator input (BUG-0097); sessions bound to their transport floor (BUG-0098) (2026-10-13)
 - Change:
   - **Discovery (BUG-0097):**

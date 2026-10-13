@@ -1403,3 +1403,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
 - **PA-0110** — New, after BUG-0109: a failed delete reported success.
   1. **An operation reports success only when its effect is verified, or when the
      swallowed failure is exactly the documented no-op case.** (from BUG-0109)
+
+- **PA-0111** — Strengthens `PA-0061` and `PA-0062`, after BUG-0110: the login detector
+  serialised a form unlike a browser. PA-0062 checked emulated request headers only.
+  1. **Code that emulates a browser or protocol behaviour (form submission, redirects,
+     cookies, headers) implements the named algorithm rule by rule.** Its rules are
+     listed in a rule table that cites the spec step for each (e.g.
+     `fuzzlab.core.forms.RULES`).
+  2. **A guard test fails if any listed rule has no fixture.**
+  3. **At least one fixture is a captured third-party target's shape, not only our own
+     lab's.** The lab never surfaces the divergence it was written around. (from
+     BUG-0110)

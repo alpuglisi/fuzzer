@@ -163,6 +163,12 @@ budget where a vulnerability is plausible.
   automatic run today. Rule-generation only — confirmation is
   `fuzzlab.oracle`'s job (`FR-FUZZ-30`).
 
+- **FR-AUD-18** *(`CC-AUD-0028`, 2026-10-13, BUG-0110).* The passive auditor
+  (`tools/fetcher.py`) reports each field's default value as a browser holds it
+  (`core.forms.default_value`): a select's selected or first option, a textarea's
+  text, a checkbox's value or `on`. These values feed the value-based indicator
+  rules.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

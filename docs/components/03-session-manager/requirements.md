@@ -26,10 +26,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
 - **FR-SESS-2** Expose `prepare(request, identity)`, `observe(request, response,
   identity)`, and `ensure(identity)`, resolved against the request's host.
 - **FR-SESS-3 (login detection)** Detect a host's login dynamically: find the
-  login form (a form containing a password field), carry its hidden fields
-  (e.g. a CSRF `user_token`) through by re-fetching the form immediately before
-  submit (fresh, never cached), map the username/password fields, and submit the
-  host's credentials. (D13)
+  login form (a form containing an enabled password field), carry its other fields
+  (e.g. a CSRF `user_token`, the submit button's `name=value`, a select's default)
+  through by re-fetching the form immediately before submit (fresh, never cached),
+  map the username/password fields, and submit the host's credentials. The body is
+  serialised per FR-SESS-14. (D13)
 - **FR-SESS-4 (session-credential detection)** Detect what the login response
   establishes and reuse it: `Set-Cookie` → session cookie; a token/JWT in a JSON
   body → `Authorization: Bearer` (read `exp` locally to refresh proactively); a
@@ -104,6 +105,18 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **Per host, by design (D12).** A session is keyed per host, so other ports of the
     same host are allowed. Cookie Path is not enforced: a stated residual, since the
     same origin learns nothing new.
+- **FR-SESS-14 (login form serialised as a browser would, CC-SESS-0014, BUG-0110)**
+  - **The credential POST body** is the login form's entry list from
+    `core.forms.form_entries` (FR-CORE-27), with the username and password entries
+    replaced in place. It includes the submitter's `name=value` and a select's
+    default option, and leaves out unchecked and disabled controls.
+  - **Submitter overrides are refused.** A submit button carrying `formaction`,
+    `formmethod` or `formenctype` makes the login fail loudly **before any credential
+    request**. A browser would follow those, and they are not emulated.
+  - **Known divergence:** the credentials are always sent as a urlencoded POST to
+    `form.action`, also for a `method=GET` or `multipart/form-data` form.
+  - **Known limitation:** the first form with a password field is taken (a signup
+    form before the login form would be chosen).
 
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth.
