@@ -23,7 +23,9 @@ Newest first.
   - **targets and labels:** the localhost alias dropped, an empty host matching, no_confirmer labelled, exact-text target matching;
   - **UI and report:** the tab's metrics on deploy scores, the out-of-fold label missing, the report's saved block missing;
   - **CLI:** `--hybrid` allowed with saved.
-  Full-suite result: recorded in a follow-up commit.
+  Full-suite result (on commit c16477e, `FUZZLAB_REQUIRE_BROWSER=1`): 3113 passed, 65
+  skipped, 9 xfailed, 33 failed. The 33 failures are exactly the known environmental
+  labgen failures (no scipy, sklearn or gitleaks), identical to the step-3 baseline.
 
 ### CC-PLUG-0005 — Post-run and budget-order hooks; advisory write guard; the run record (2026-10-13)
 - Change:
