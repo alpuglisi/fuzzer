@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (UI/LAB: a Lab page with an on/off switch per lab container, CC-UI-0033/CC-LAB-0250, FR-UI-15/FR-LAB-172)
+- The control panel gained a **Lab** section (`/lab`, sidebar "Lab") listing every
+  service in `lab/compose.yaml` -- the PFF app and its database, the opt-in downgrade
+  front-end, and the ten browsable apps -- with its live container state, its loopback
+  URL, and a Start/Stop switch, so the lab no longer has to be brought up and down by
+  hand from a terminal. The rows are **derived from `compose.yaml`** (`PA-0059`(2): no
+  hand-kept service list), each switch runs `lab/labctl.sh start|stop <service>` as a
+  gated child process through the launcher's existing `Runner` (D18: argv list, no
+  shell, live SSE output), and state is read from the container engine's real
+  post-state via a new `labctl.sh ps` (`PA-0059`(1)). `labctl.sh` gained `start`,
+  `stop` and `ps` subcommands (a profiled service is enabled through the existing
+  `PFF_PROFILE` knob, which the page sets from the service's own `profiles:` key;
+  `stop` verifies the engine actually stopped the container and stops it directly if
+  compose did not). Lab-only by construction: nothing on the page sends traffic to a
+  target, so it sits outside the `--authorized` gate and inside the control plane's
+  state-change gate like every other `POST /api/*`. New: `fuzzlab/web/labcontrol.py`,
+  `sections/lab.html`, `js/lab.js`, `css/lab.css`, `tests/test_web_lab.py`;
+  `Runner.launch` gained an optional `env`. Offline-verified only (this sandbox has no
+  container engine); first live use on the lab host is the Effectiveness check-back.
+
 ## 2026-09-25 (Crawler/CORE: fix real 403s from external WAFs, header-consistency follow-up to BUG-0059, BUG-0060/PA-0062/CC-CRAWL-0010/CC-CORE-0025)
 - The prior UA-only fix (below) left every other header at `requests`' defaults
   (`Accept: */*`, no `Accept-Language`), a mismatch against a Chrome UA that

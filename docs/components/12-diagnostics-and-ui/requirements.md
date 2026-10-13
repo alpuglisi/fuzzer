@@ -1,6 +1,6 @@
 # Diagnostics and UI — Requirement Specification
 
-Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-22
+Component code: **UI** · Status: `[planned]` · Last updated: 2026-10-13
 
 Related: `ARCHITECTURE.md` #12; `DECISIONS_AND_ROADMAP.md` (D2, D5, D11);
 `./change-control.md`.
@@ -292,6 +292,19 @@ bugs — the research-platform diagnostics of decision D2.
   websocket streaming — a manual page refresh (or re-running the query)
   picks up new data from an active run. See FR-UI-2 for the store-explorer
   half of this same route.
+- **FR-UI-15** *(added CC-UI-0033, 2026-10-13)* The **Lab** route (`/lab`) lists every
+  service of the target lab's `lab/compose.yaml` -- derived from that file, never a
+  hand-kept list -- with its live container state, its first compose profile, its
+  published loopback URL, and a Start/Stop switch. `GET /api/lab/services` returns the
+  rows merged with the container engine's real state (via `labctl.sh ps`; an engine or
+  lab error is reported in the payload rather than guessed around); `POST
+  /api/lab/{service}/{start|stop}` resolves the name against the compose-derived list
+  (unknown → 404) and runs `lab/labctl.sh <action> <service>` as a gated child process
+  through the launcher's `Runner` (argv list, no shell, the service's profile passed as
+  `PFF_PROFILE`), streaming its output over the existing `/api/launch/{token}/stream`.
+  Rendering the page runs nothing (no-auto-run, D11); the switches are explicit POSTs
+  behind the control-plane gate (NFR-UI-control-plane-hardened). Nothing on the route
+  sends traffic to a target, so it is not `--authorized`-gated.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, findingsview, mlview, results, savedviews
+from fuzzlab.web import commandspec, findingsview, labcontrol, mlview, results, savedviews
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -219,6 +219,8 @@ NAV: list[dict[str, Any]] = [
         # its own route ("/launcher") so the dashboard doesn't overload it (R-10).
         {"id": "overview", "label": "Overview", "href": "/", "icon": "◆"},
         {"id": "launcher", "label": "Launcher", "href": "/launcher", "icon": "▸"},
+        # CC-UI-0033: on/off switches for the lab's own containers (labctl.sh start/stop).
+        {"id": "lab", "label": "Lab", "href": "/lab", "icon": "⏻"},
         {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
         {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑"},
         {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
@@ -816,6 +818,42 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.post("/api/launch/{token}/stop")
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
+
+    # --- Lab page (CC-UI-0033 / CC-LAB-0250): on/off switches for the lab's own
+    # containers. The rows come from lab/compose.yaml (see web/labcontrol.py); each
+    # switch runs `labctl.sh start|stop <service>` as a gated child process through the
+    # launcher's Runner (D18: argv list, no shell; output streams over the existing
+    # /api/launch/{token}/stream). Lab-only by construction: nothing here sends traffic
+    # to a target, so no --authorized gate applies; the control-plane state-change gate
+    # (SecurityGateMiddleware) covers the POSTs like every other /api/* route.
+
+    @app.get("/lab", response_class=HTMLResponse)
+    def lab_page(request: Request):
+        return templates.TemplateResponse(request, "sections/lab.html", {
+            **_shell_context(cfg, active="lab"),
+            "services": [s.to_dict() for s in labcontrol.services()],
+            "lab_available": labcontrol.available(),
+        })
+
+    @app.get("/api/lab/services")
+    async def lab_services():
+        states, error = await labcontrol.fetch_states()
+        return {
+            "services": [{**s.to_dict(), **labcontrol.state_for(s, states)}
+                         for s in labcontrol.services()],
+            "error": error,
+        }
+
+    @app.post("/api/lab/{service}/{action}")
+    async def lab_control(service: str, action: str):
+        svc = labcontrol.find(service)
+        if svc is None or action not in labcontrol.ACTIONS:
+            return JSONResponse({"error": f"unknown lab service or action "
+                                          f"{service!r}/{action!r}"}, status_code=404)
+        argv = labcontrol.control_argv(action, svc)
+        token = await runner.launch(argv, env=labcontrol.control_env(svc))
+        state.history.append(f"lab {action} {svc.name}")
+        return {"token": token, "service": svc.name, "action": action, "argv": argv}
 
     # --- ML tab (U4/CC-UI-0031, CC-ML-0010): read-only, advisory (R-06) ---------
 

@@ -1,0 +1,15 @@
+/* Lab section (CC-UI-0033): container on/off switches. Tokens from tokens.css. */
+.lab-head { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; }
+.lab-head h2 { margin-top: 0; }
+.lab-actions { flex: none; }
+.lab-table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .92em; }
+.lab-table th, .lab-table td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border, #3333); vertical-align: middle; }
+.lab-table th { font-weight: 600; color: var(--muted, #888); font-size: .85em; }
+.lab-state { white-space: nowrap; }
+.lab-state .led { margin-right: .4rem; }
+.lab-state-text { color: var(--muted, #888); }
+tr[data-state="running"] .lab-state-text { color: inherit; }
+.lab-switch { white-space: nowrap; }
+.lab-switch button { margin-right: .3rem; }
+.lab-note { margin-top: .8rem; }
+#lab-output { min-height: 6rem; max-height: 24rem; overflow: auto; }

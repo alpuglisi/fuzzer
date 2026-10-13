@@ -1,7 +1,7 @@
 # Target Lab and Ground Truth — Requirement Specification
 
 Component code: **LAB** · Status: `[built; generator is the single source of the PHP lab since L-P3.3c-CUT (2026-09-22) -- the hand-built app is retired]`
-· Last updated: 2026-09-23
+· Last updated: 2026-10-13
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
 `./change-control.md`.
@@ -6254,6 +6254,18 @@ lane) can submit a payload as
   pass/fail summary table. Does not need a real compose boot (plan §5's own
   R2 recommendation) -- `FR-LAB-170`'s own compose services are verified
   separately, live, in `CC-LAB-0247`'s change-control entry.
+- **FR-LAB-172** *(per-service lifecycle for the web panel's Lab page; `CC-LAB-0250`,
+  2026-10-13).* `lab/labctl.sh` offers, beside the whole-stack `up`/`down`/`reset`,
+  three per-service subcommands: `start <service>` (build + start that compose service
+  and its `depends_on`; a profiled service is enabled through the existing
+  `PFF_PROFILE` knob), `stop <service>` (stop, not remove, so `start` resumes it; the
+  engine's real post-state is checked and the container stopped directly if compose
+  left it running, `PA-0059`(1)), and `ps` (one `<name> TAB <state> TAB <status>` line
+  per container of this compose project, selected by the compose project label both
+  `docker compose` and podman-compose set, so callers never depend on a provider's
+  container-naming scheme). The project name is read from `compose.yaml`'s `name:` key
+  (`PA-0059`(2)). A service name is validated against a strict identifier pattern
+  before it reaches any compose or engine command line. Consumer: `FR-UI-15`.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

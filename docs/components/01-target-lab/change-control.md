@@ -3,6 +3,53 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0250 — `labctl.sh start|stop <service>` and `ps`, for the web panel's Lab page (2026-10-13, FR-LAB-172; pairs with CC-UI-0033)
+
+**Status: built, offline-verified; first live run on the lab host pending.**
+
+- **Change:** three per-service subcommands in `lab/labctl.sh`, so the control panel's
+  new Lab page (`CC-UI-0033`) can switch individual containers on and off instead of
+  only the whole stack: `start <service>` (`compose up -d --build <service>`, which
+  also starts the service's `depends_on`; a profiled service is enabled via the
+  existing `PFF_PROFILE` knob, which the page sets from the service's own compose
+  `profiles:` key), `stop <service>` (`compose stop <service>`, container kept so
+  `start` resumes it without a rebuild), and `ps` (one `<name> TAB <state> TAB <status>`
+  line per project container). Supporting helpers: `_engine()` picks the container
+  engine CLI (podman, else docker) as distinct from the compose provider; `_project_ps`
+  selects containers by the compose **project label** both providers set, so the
+  output does not depend on either provider's container-naming scheme; the project
+  name is read from `compose.yaml`'s own `name:` key rather than duplicated
+  (`PA-0059`(2)); `_check_service_name` rejects anything but a plain compose
+  identifier before it reaches a compose/engine command line (sentinel-marked block,
+  executed in a real bash subshell by `tests/test_web_lab.py`, the same pattern as
+  `tests/test_lab_labctl_profile_parsing.py`). `stop` checks the engine's **real
+  post-state** afterwards and stops the container directly if compose left it running
+  (`PA-0059`(1): a compose command's exit code is not trusted as the sole signal).
+- **Why:** the lab now has 13 compose services across two profiles; bringing one app
+  up or down meant a terminal, the right `PFF_PROFILE`, and remembering the service
+  name. The panel already hosts gated subprocess launches (D18), so exposing lifecycle
+  there is the natural home, and it needed a per-service surface on `labctl.sh` that
+  `up`/`down` (whole stack) did not offer.
+- **Impact:** additive -- `up`/`down`/`reset`/`status`/`logs`/`exec`/`snapshot`/
+  `restore`/`pin` are unchanged; the compose provider discovery and `PROFILE_ARGS`
+  block are reused as-is. UI: `CC-UI-0033` is the only caller. `docs/ON_HOST_RUNBOOK.md`
+  is deliberately **not** given a `[run]` step for the page yet (`PA-0015`: runbook
+  steps are written from an executed run; this sandbox has no engine).
+- **Risk:** low. The engine-direct fallback in `stop` is the one path not exercised
+  offline; it is bounded to the containers `_service_containers` attributes to the
+  named service. `bash -n` and the sentinel-block tests cover syntax and the name
+  check; a `shellcheck` pass is a host follow-up (not installed here).
+- **Deliverables:**
+  - [x] `lab/labctl.sh`: `start`/`stop`/`ps` + helpers + header usage -- done
+  - [x] `tests/test_web_lab.py` (bash syntax, usage lines, name-check block) -- done
+  - [x] `requirements.md` FR-LAB-172 -- done
+  - [ ] Live: `PFF_PROFILE=apps ./labctl.sh start pictrail`, `./labctl.sh ps`,
+        `./labctl.sh stop pictrail` on the Podman host, then the same from the page --
+        caller follow-up; add the runbook `[run]` step from that executed run
+- **Effectiveness (assessed 2026-10-13, offline):** `bash -n lab/labctl.sh` clean;
+  `tests/test_web_lab.py` + `tests/test_lab_labctl_profile_parsing.py` passing. Live
+  check-back pending.
+
 ### CC-LAB-0249 — Fully-qualify base images to stop Podman short-name-resolution hang (2026-09-25, `BUG-0058`/`PA-0060`)
 
 **Status: fixed, offline-verified.**

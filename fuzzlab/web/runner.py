@@ -89,8 +89,12 @@ class Runner:
     def __init__(self) -> None:
         self._runs: dict[str, _Run] = {}
 
-    async def launch(self, argv: list[str]) -> str:
-        """Start ``argv`` as a child process; return its run token."""
+    async def launch(self, argv: list[str], *, env: dict[str, str] | None = None) -> str:
+        """Start ``argv`` as a child process; return its run token.
+
+        ``env`` is the child's complete environment (``None`` inherits this process's);
+        the Lab page uses it to hand ``PFF_PROFILE`` to ``labctl.sh``.
+        """
         token = secrets.token_hex(8)
         run = _Run(token, argv)
         self._runs[token] = run
@@ -98,6 +102,7 @@ class Runner:
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
         asyncio.create_task(self._pump(run))
         return token

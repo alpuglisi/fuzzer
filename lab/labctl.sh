@@ -9,6 +9,12 @@
 #   ./labctl.sh snapshot [name]  dump the DB to .snapshots/<name>.sql (default baseline)
 #   ./labctl.sh restore  [name]  restore the DB from .snapshots/<name>.sql (T3.5)
 #   ./labctl.sh pin      print pulled image digests to pin in web.Dockerfile (D7)
+#   ./labctl.sh start <service>  build + start one compose service (and its depends_on);
+#                        a profiled service needs PFF_PROFILE set, e.g.
+#                        PFF_PROFILE=apps ./labctl.sh start pictrail
+#   ./labctl.sh stop <service>   stop one service's container (kept; `start` resumes it)
+#   ./labctl.sh ps       one line per project container: <name> TAB <state> TAB <status>
+#                        (start/stop/ps back the web panel's Lab page, CC-LAB-0250)
 #
 # Uses `docker compose` (Podman-compatible: `podman compose` or podman-compose
 # also work against compose.yaml).
@@ -90,6 +96,50 @@ _force_clean() {
   return 0
 }
 
+# --- per-service control, CC-LAB-0250 (backs the web panel's Lab page) --------------
+# Compose project name, read from compose.yaml's own `name:` key (PA-0059(2): no
+# hand-kept duplicate).
+PROJECT="$(sed -n 's/^name:[[:space:]]*//p' compose.yaml | head -n 1)"
+PROJECT="${PROJECT:-pff-lab}"
+
+# The container engine CLI (podman or docker), as opposed to the compose provider
+# chosen above. `ps` and `stop` read the engine's real state (PA-0059(1)).
+_engine() {
+  if command -v podman >/dev/null 2>&1; then echo podman
+  elif command -v docker >/dev/null 2>&1; then echo docker
+  else return 1
+  fi
+}
+
+# Every container of this compose project: `<name> TAB <state> TAB <status>`. Selected
+# by the compose project label, which both providers set, so the output does not
+# depend on either provider's container-naming scheme.
+_project_ps() {
+  local eng
+  eng="$(_engine)" || { echo "no container engine (podman/docker) on PATH" >&2; return 1; }
+  "$eng" ps -a --filter "label=com.docker.compose.project=${PROJECT}" \
+    --format '{{.Names}}	{{.State}}	{{.Status}}'
+}
+
+# Containers of one service (`<name> TAB <state>`): drop the project prefix and the
+# trailing replica index from each name and compare what is left.
+_service_containers() {
+  _project_ps | awk -F'\t' -v p="$PROJECT" -v s="$1" '
+    { n = $1; sub("^" p "[-_]", "", n); sub("[-_][0-9]+$", "", n); if (n == s) print $1 "\t" $2 }'
+}
+
+# The web panel resolves a service name against compose.yaml before calling start/stop;
+# this re-check keeps anything but a plain compose identifier out of the command line.
+# tests/test_web_lab.py runs exactly this block via its sentinel markers.
+# SERVICE_NAME_CHECK_BLOCK_BEGIN
+_check_service_name() {
+  if [[ ! "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    echo "invalid service name: $1" >&2
+    return 2
+  fi
+}
+# SERVICE_NAME_CHECK_BLOCK_END
+
 case "${1:-}" in
   up)
     # podman-compose cannot recreate a running stack in place when the env or profile
@@ -142,6 +192,33 @@ case "${1:-}" in
       "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build
     fi
     echo "lab reset + up: http://127.0.0.1:${PORT}/"
+    ;;
+  start)
+    # One service, plus whatever it depends_on (compose starts those for it). A
+    # profiled service needs PFF_PROFILE (the Lab page sets it from compose.yaml's own
+    # `profiles:` key); PROFILE_ARGS above turns it into `--profile` flags.
+    svc="${2:?usage: ./labctl.sh start <service>}"
+    _check_service_name "$svc"
+    "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build "$svc"
+    echo "started: ${svc}"
+    ;;
+  stop)
+    # Stop, not remove, one service's container, then check the engine's real state
+    # and stop the container directly if compose left it running (PA-0059(1)). The
+    # container is kept, so `start` resumes it without a rebuild.
+    svc="${2:?usage: ./labctl.sh stop <service>}"
+    _check_service_name "$svc"
+    "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" stop "$svc" || true
+    still_up="$(_service_containers "$svc" | awk -F'\t' '$2 == "running" { print $1 }')"
+    if [ -n "$still_up" ]; then
+      echo "compose stop left ${svc} running; stopping its container(s) directly..." >&2
+      eng="$(_engine)"
+      for c in $still_up; do "$eng" stop "$c" >/dev/null; done
+    fi
+    echo "stopped: ${svc}"
+    ;;
+  ps)
+    _project_ps
     ;;
   status)
     "${COMPOSE[@]}" ps

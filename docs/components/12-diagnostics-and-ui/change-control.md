@@ -3,6 +3,70 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0033 — Lab page: an on/off switch per lab container (2026-10-13, FR-UI-15; pairs with CC-LAB-0250)
+- Change: a new **Lab** section (`GET /lab`, sidebar entry "Lab" in the Workbench
+  group) that lists every compose service of the target lab with its live state and a
+  Start/Stop switch, replacing the manual `labctl.sh up`/`down` round-trip to a
+  terminal for day-to-day lab use. Built from the control plane's existing pieces
+  rather than new machinery: the table is rendered server-side (no-JS shows the
+  services; the switches need JS, stated on the page) from a new pure module
+  `fuzzlab/web/labcontrol.py`, which **parses `lab/compose.yaml`** for the service
+  list, each service's first compose profile, and its published loopback port
+  (resolving `${VAR:-default}` host ports through the environment so the row links
+  where the lab is actually published); only the human-facing app labels are a
+  hand-kept map (an unlabelled service still renders under its compose name).
+  `GET /api/lab/services` merges that list with the engine's real container state
+  (`labctl.sh ps`, parsed back to services independently of the provider's naming
+  scheme -- `pff-lab_web_1` vs `pff-lab-web-1`); `POST /api/lab/{service}/{action}`
+  (`start`|`stop`) resolves the name against the compose-derived list first (unknown
+  → 404, never an argument), then launches `bash lab/labctl.sh <action> <service>`
+  through the launcher's `Runner` with the service's profile as `PFF_PROFILE` in the
+  child's environment (`Runner.launch` gained an optional `env=`), and the page
+  streams the run's output over the existing `/api/launch/{token}/stream` SSE route,
+  re-reading state when it finishes. Files: `fuzzlab/web/labcontrol.py` (new),
+  `fuzzlab/web/app.py` (NAV entry + 3 routes + import), `fuzzlab/web/runner.py`
+  (`env=`), `templates/sections/lab.html`, `static/js/lab.js`, `static/css/lab.css`
+  (new), `tests/test_web_lab.py` (new).
+- Impact (other components / project): LAB -- `lab/labctl.sh` gained the `start`,
+  `stop` and `ps` subcommands this page drives (`CC-LAB-0250`, `FR-LAB-172`); no other
+  component touched. Additive to the UI: no existing route, template, or contract
+  changed; `Runner.launch(argv)` callers are unaffected (`env` is keyword-only and
+  defaults to inherit). D11's no-auto-run holds (rendering `/lab` runs nothing; a
+  switch is an explicit POST). This is the first control-plane action that runs a
+  host command other than `python -m fuzzlab.cli`, so its argv is fixed-shape
+  (`bash <labctl> <start|stop> <service>`) with the only variable token validated on
+  both sides (compose-derived allowlist here; a strict identifier regex in
+  `labctl.sh`).
+- Risk (level; mitigation or accepted-risk justification): low-medium.
+  - *A hostile page flipping lab containers:* the POSTs sit behind the existing
+    `SecurityGateMiddleware` (Host allow-list + same-origin Fetch Metadata + the
+    `X-Fuzzlab-Client` header), tested cross-origin in `test_web_lab.py`. Accepted:
+    anyone who can already POST to the loopback panel same-origin could already run
+    `labctl.sh` themselves.
+  - *Argument injection through the service name:* mitigated twice (above) and tested
+    with shell-metacharacter, path-shaped and uppercase names on both layers.
+  - *Provider drift (docker compose vs podman-compose):* `ps`/`stop` key on the
+    compose project label both providers set and on real engine state, not on either
+    provider's container names or exit codes (`PA-0059`(1)). Not live-verified here
+    (no engine in this sandbox) -- see Effectiveness.
+  - *Stale `PFF_PROFILE` in the panel's own environment:* `control_env` strips it for a
+    default-profile service so a switch never enables profiles the user did not pick
+    (tested).
+- Deliverables:
+  - [x] `fuzzlab/web/labcontrol.py` + routes + NAV entry -- done
+  - [x] `sections/lab.html`, `js/lab.js`, `css/lab.css` -- done
+  - [x] `tests/test_web_lab.py` (compose parsing, port/env resolution, both naming
+        schemes, routes, gate, name validation on both layers) -- done, passing
+  - [x] `requirements.md` FR-UI-15; `ARCHITECTURE.md` #12 -- done
+  - [ ] First live use on the lab host (switch a default-profile and an `apps`-profile
+        service on and off from the page under the real provider) -- caller follow-up
+- Effectiveness (assessed 2026-10-13, offline): `PYTHONPATH=<worktree> pytest tests/test_web_lab.py
+  tests/test_web_runner.py tests/test_web_launcher.py tests/test_web_security.py
+  tests/test_web_frontend.py tests/test_lab_labctl_profile_parsing.py` -- 107 passed;
+  the whole non-slow suite is green apart from the 14 pre-existing `--check` tests that
+  need `gitleaks` on PATH (environment, unchanged by this entry). Live check-back pending
+  the deliverable above.
+
 ### CC-UI-0032 — Lane U5: Diagnostics tab + store explorer (2026-09-22)
 - Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U5) and its resolved
   R-02/R-05/R-12, built out the Diagnostics section (previously a stub since

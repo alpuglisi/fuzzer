@@ -1481,6 +1481,16 @@ tracked in the requirements files, not here.
   discarded. Known gap: the wall-clock/relative-time x-axis modes fall back to
   step order pending real per-point timestamps in the `metric_series_data` wire
   payload (a follow-up, not a regression — step order is still monotonic).
+- **Lab page (`/lab`, CC-UI-0033 + CC-LAB-0250, 2026-10-13) `[built; live check-back on
+  the lab host pending]`:** an on/off switch per lab container. `fuzzlab/web/labcontrol.py`
+  derives the rows from `lab/compose.yaml` (service, first profile, published loopback
+  port -- no hand-kept list, PA-0059(2)), reads live state from the container engine via
+  the new `labctl.sh ps`, and each switch runs `lab/labctl.sh start|stop <service>` as a
+  gated child process through the launcher's `Runner` (D18; the service's profile travels
+  as `PFF_PROFILE`), with output on the existing SSE stream. Lab-only by construction
+  (no target traffic, so outside the `--authorized` gate; inside the control-plane
+  state-change gate). `labctl.sh` gained `start`/`stop`/`ps` (FR-LAB-172); the page is
+  FR-UI-15.
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only
