@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0134 review round 1: no other-origin document in an authenticated browser; `--auth-origin`)
+- **Why:** reviewer A showed live that a redirected landing on another origin ran that
+  app's script with the session's cookies and localStorage, and that `route.fetch` let
+  the other origin write the shared cookie jar; the login handshake still accepted any
+  port of an in-scope host.
+- **What:** in an authenticated browser context other-origin documents and WebSockets
+  are aborted and subresources fetched through a cookie-less request context; the login
+  is anchored to the base origin, its same-host https upgrade and the new repeatable
+  `--auth-origin` flag (crawl, auto, session print, greybox-run); `prepare` records its
+  decision on the request; the host-compare guard sees through case calls, aliases and
+  membership. CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023 amendments.
+
 ## 2026-10-14 (BUG-0134: a session is sent only to its own origins, FR-SESS-20)
 - **Why:** a session keyed by host went to every port of it, so on the loopback lab one
   app's cookie and bearer reached another app (and could log in there); BUG-0132's review

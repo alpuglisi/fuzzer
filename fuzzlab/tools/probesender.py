@@ -653,21 +653,17 @@ class SeamProbeSender(_ExplicitAllowance):
             self._last_main_was_header = (param, url) if location == "header" else None
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers),
-                     session=self._session_note(client, identity, req.url))
+                     session=self._session_note(req))
 
-    def _session_note(self, client, identity: str, url: str) -> str | None:
-        """What the session manager decided for this send (FR-SESS-20, O2): its
-        `session_note` -- ``"anonymous (out of origin)"`` when the run's (or the copy's)
-        session was withheld because ``url`` is on another origin -- else None."""
-        if identity == "anonymous":
-            return None
-        manager = self._manager
-        if client is not self._client:
-            with self._iso_lock:
-                manager = next((c.manager for c in self._all_copies
-                                if c.client is client), None)
-        note = getattr(manager, "session_note", None)
-        return note(url, identity) if callable(note) else None
+    @staticmethod
+    def _session_note(req) -> str | None:
+        """What the session manager's `prepare` recorded on this request (FR-SESS-20,
+        R6): ``"anonymous (out of origin)"`` when it withheld the run's (or the copy's)
+        session because the URL is on another origin; else None. Read, never
+        recomputed."""
+        from fuzzlab.session.manager import SESSION_DECISION
+        note = getattr(req, SESSION_DECISION, None)
+        return note if isinstance(note, str) else None
 
 
 class RequestsProbeSender(_ExplicitAllowance):
@@ -794,11 +790,13 @@ class RequestsProbeSender(_ExplicitAllowance):
 
 
 def make_probe_sender(target_url: str, identity: str | None = None,
-                      timeout: float = 15.0):
-    """Authenticated sender when an identity is given, else a standalone one."""
+                      timeout: float = 15.0, auth_origins=()):
+    """Authenticated sender when an identity is given, else a standalone one.
+    ``auth_origins`` (``--auth-origin``, FR-SESS-20) go to the session manager."""
     if identity:
         from fuzzlab.tools.authhttp import make_auth_with_isolation
-        manager, client, isolated_client = make_auth_with_isolation(target_url, timeout)
+        manager, client, isolated_client = make_auth_with_isolation(
+            target_url, timeout, auth_origins=auth_origins)
         return SeamProbeSender(client, identity, manager=manager, base_url=target_url,
                                isolated_client=isolated_client)
     return RequestsProbeSender(timeout=timeout)

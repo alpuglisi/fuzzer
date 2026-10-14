@@ -915,7 +915,7 @@ def test_make_probe_sender_wires_an_isolated_client_on_the_runs_budget(monkeypat
         pass
     budget = RequestBudget(7)
     monkeypatch.setattr(authhttp, "_build_parts",
-                        lambda url, timeout, store_path=None: (
+                        lambda url, timeout, store_path=None, auth_origins=(): (
                             FakeMgr(), "client", budget, ["localhost"]))
     sender = probesender.make_probe_sender(BASE, "admin")
     copy_client = sender._isolated_client(FakeMgr())

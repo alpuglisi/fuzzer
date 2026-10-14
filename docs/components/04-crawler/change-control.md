@@ -37,6 +37,27 @@ Newest first.
 - Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (mutation checks of
   `header_scope_for`, the cookie strip and its landing rule each fail their tests);
   the browser scope / browser login / SPA / forms phase 4 suites pass.
+- Review round 1 of 0046b77 (2026-10-14; R1, R2, R5 of the reconciled fix list):
+  - **R1 (A-M1, seen live: the landing ran B's script under A's URL and read A's
+    cookie and localStorage):** the landing-response branch is removed. In an
+    authenticated context every document (navigation, top-level or frame; a redirect
+    landing) and every WebSocket on an in-scope origin outside `cookie_scope` is aborted
+    and reported (`on_session_withheld(url, kind)`, kind `document` / `frame` /
+    `websocket` / `request`). The spider records it in `skipped_other_origin`, skips such
+    a queued URL without navigating, and raises `SessionWithheld` (no static fallback,
+    nothing extracted) when a page navigation landed there.
+  - **R2 (A-M2, seen live: `route.fetch` wrote B's `Set-Cookie` into the shared jar):**
+    the empty-`Cookie` trick is replaced: withheld requests and hops go through one
+    cookie-less `playwright.request.new_context()` per guard
+    (`guard_page(isolated_request=)`; retired once it holds a cookie and disposed at the
+    next fetch, since its answer is still being fulfilled; the spider disposes all at the
+    end), fulfilled with `Set-Cookie` removed.
+  - **R5:** `fuzzlab crawl --auth-origin ORIGIN` (validated in `parse_args`).
+  - Mutation checks: R1a (documents loaded through the isolated context), R1b (a
+    redirect landing loaded), R1c (a WebSocket connected) and R2 (back to `route.fetch`
+    with an empty Cookie) each fail the route unit test and/or the real-Chromium crawl
+    (`test_an_authenticated_crawl_never_hands_the_session_to_another_port`, now with a
+    frame, a WebSocket, a beaconing landing and a cookie-setting image of B).
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

@@ -1723,4 +1723,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      allowances; proven on BUG-0134's own shapes (PA-0034(2))
      (`tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts`).
      The guard is a lint: the real-server tests (B receives nothing) are the proof.
+     *(Review round 1:)* it sees through `.lower()` / `.casefold()` / `str()`, follows
+     names and `self.` attributes assigned from a host, and flags `in` / `not in`.
+  4. *(Review round 1.)* **A browser context that holds a session never loads another
+     origin's document or socket, and no other origin's response may read or write its
+     jar**: in such a context a document or WebSocket off the session's origins is
+     aborted, and any other request there goes through a separate cookie-less client
+     whose `Set-Cookie` is dropped. Withholding a header is not enough when the client
+     shares state (a cookie jar, `document.cookie`, `localStorage`) with the session.
   (from BUG-0134)

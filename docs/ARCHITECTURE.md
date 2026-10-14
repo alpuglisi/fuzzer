@@ -1327,7 +1327,11 @@ tracked in the requirements files, not here.
   destination, `auth_origins`; in memory only) and every carrier -- `prepare`,
   `authorize`, `observe`, `verify_live`, greybox's `cookie_origins`, the browser
   route's `header_scope`/`cookie_scope`, `session_header(s)` -- checks membership;
-  another port of the host is another app (FR-SESS-20, CC-SESS-0023, BUG-0134). `authorize(request,
+  another port of the host is another app (FR-SESS-20, CC-SESS-0023, BUG-0134). In an
+  authenticated browser context another origin's documents and WebSockets are aborted
+  and its subresources fetched through a cookie-less request context; the login itself
+  is anchored to the base origin, its same-host https upgrade and `--auth-origin` (the
+  CLIs' repeatable flag; review round 1). `authorize(request,
   identity, prepared_host)` re-checks a request after a plugin edits it. Login
   discovery walks redirects by hand, anchored to operator input; an https session is
   never sent over http (`secure_only`) on any send path (CC-SESS-0013,

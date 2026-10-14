@@ -44,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Comma-separated categories (manual, or D15 fail-safe)")
     p.add_argument("--identity", default=None,
                    help="Authenticated run as this identity (else anonymous)")
+    from fuzzlab.session.manager import AUTH_ORIGIN_HELP
+    p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
+                   help=AUTH_ORIGIN_HELP)
     p.add_argument("--browser", action="store_true",
                    help="Enable M6 browser execution (stored/DOM XSS) via Playwright")
     p.add_argument("--oob", action="store_true",
@@ -203,6 +206,7 @@ def main(argv: list[str]) -> int:
         p.error(str(exc))
     _precheck_environment(p, args)
     _precheck_header_budget(p, args)
+    args.auth_origin = _auth_origins(p, args.auth_origin, args.base_url)
 
     with Store(args.store) as store:
         run_id = store.start_run("auto", host)
@@ -249,6 +253,19 @@ def _precheck_header_budget(p, args) -> None:
                 f"budget_total in the fuzzlab config, or name fewer headers")
 
 
+def _auth_origins(p, values, target_url) -> list[str]:
+    """``--auth-origin`` values as canonical origins, or a usage error before any side
+    effect (FR-SESS-20, R5, PA-0079)."""
+    if not values:
+        return []
+    from fuzzlab.session.manager import parse_auth_origins
+    from fuzzlab.tools.authhttp import scope_hosts_for
+    try:
+        return parse_auth_origins(values, scope_hosts_for(target_url))
+    except ValueError as exc:
+        p.error(str(exc))
+
+
 def _precheck_environment(p, args) -> None:
     """Refuse, before the store is opened, a flag whose environment is missing."""
     import importlib.util
@@ -265,7 +282,10 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     counts = import_spider(args.spider_db, store, run_id,
                            fuzz_json_writes=getattr(args, "fuzz_json_writes", False)) if \
         os.path.exists(args.spider_db) else {}
-    sender = make_probe_sender(args.base_url, args.identity)
+    # --auth-origin (FR-SESS-20, R5): passed only when given
+    extra = {"auth_origins": args.auth_origin} if getattr(args, "auth_origin", None) \
+        else {}
+    sender = make_probe_sender(args.base_url, args.identity, **extra)
     browser = None
     if args.browser:
         from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor

@@ -290,6 +290,11 @@ _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
 
 
+class SessionWithheld(RuntimeError):
+    """A navigation met a document on another origin than the authenticated session's
+    (FR-SESS-20): it is not crawled, and nothing is extracted from it."""
+
+
 class LocalSpider:
     """Crawls a local site, optionally rendering JavaScript with a headless browser."""
 
@@ -378,6 +383,12 @@ class LocalSpider:
         self._cookie_scope = None
         #: in-scope requests sent without the session: another origin (FR-SESS-20)
         self.session_out_of_origin = 0
+        #: in-scope pages (documents, WebSockets) never loaded because they are on
+        #: another origin than the session's, with the reason (FR-SESS-20, R1)
+        self.skipped_other_origin: dict[str, str] = {}
+        self._withheld_document = False
+        #: the cookie-less request contexts the guards made (R2), disposed at the end
+        self._isolated_requests: list = []
         #: the in-scope localStorage entries the crawl adopted, ``{origin: {name:
         #: value}}``, checked after each authenticated submission (FR-CRAWL-14)
         self._adopted_storage: dict = {}
@@ -541,10 +552,11 @@ class LocalSpider:
         scope, the destructive rule, the DELETE rule and the passive observer (which
         reads script bodies only in the crawl's own context). ``session``: the crawl's
         own authenticated context, whose route adds the session's headers to in-scope
-        requests on the session's origins (FR-CRAWL-14) and withholds the context's
-        port-agnostic cookies from an in-scope request on any other origin (FR-SESS-20,
-        BUG-0134: an external crawl's scope is its host on every port); an
-        unauthenticated context gets neither."""
+        requests on the session's origins (FR-CRAWL-14); for an in-scope request on any
+        other origin it aborts documents and WebSockets and fetches the rest through a
+        cookie-less request context (FR-SESS-20, BUG-0134: an external crawl's scope is
+        its host on every port, and the jar is port-agnostic); an unauthenticated
+        context gets none of this."""
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
                    on_abort=self._note_guard_abort,
@@ -557,6 +569,7 @@ class LocalSpider:
                    header_scope=self._header_scope if session else None,
                    cookie_scope=self._cookie_scope if session else None,
                    on_session_withheld=self._note_session_withheld if session else None,
+                   isolated_request=self._isolated_request if session else None,
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
@@ -803,6 +816,9 @@ class LocalSpider:
             if self._context is not None:
                 from fuzzlab.tools.navguard import release
                 release(self._context)
+            for ctx in self._isolated_requests:          # R2's cookie-less contexts
+                with contextlib.suppress(Exception):
+                    ctx.dispose()
             if self._browser:
                 self._browser.close()
         finally:
@@ -852,9 +868,34 @@ class LocalSpider:
         host = urlparse(url).hostname or "?"
         self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
 
-    def _note_session_withheld(self, url):
-        """An in-scope request went without the session: another origin (FR-SESS-20)."""
+    #: Why an in-scope page on another origin than the session's is not crawled.
+    OTHER_ORIGIN_REASON = ("another origin than the session's: crawl that origin "
+                           "separately, or pass --auth-origin if it is this app's "
+                           "(FR-SESS-20)")
+
+    def _note_session_withheld(self, url, kind="request"):
+        """An in-scope request went without the session (another origin, FR-SESS-20). A
+        document, frame or WebSocket there is never loaded (R1): recorded as skipped;
+        the page navigation that met such a document (its own or a redirect landing,
+        never a child frame's) extracts nothing."""
         self.session_out_of_origin += 1
+        if kind in ("document", "frame", "websocket"):
+            self._withheld_document = self._withheld_document or kind == "document"
+            if url not in self.skipped_other_origin:
+                self.skipped_other_origin[url] = self.OTHER_ORIGIN_REASON
+                logging.info(f"skipped {url} ({kind}): {self.OTHER_ORIGIN_REASON}")
+
+    def _isolated_request(self):
+        """A cookie-less, storage-less request context for the guard's withheld fetches
+        (FR-SESS-20, R2); disposed when the browser stops."""
+        ctx = self._pw.request.new_context()
+        self._isolated_requests.append(ctx)
+        return ctx
+
+    def _other_origin(self, url):
+        """Is ``url`` outside the authenticated session's origins (FR-SESS-20)?"""
+        return self._cookie_scope is not None and self._in_scope(url) and \
+            not self._cookie_scope(url)
 
     # ----- fetchers -----
     def _fetch_static(self, url):
@@ -884,9 +925,15 @@ class LocalSpider:
         """
         self._xhr_urls = []   # collected by _on_request during this navigation
         self._rendered_ok = False
+        self._withheld_document = False
         try:
             return self._goto_and_parse(url)
         except Exception as e:
+            if self._withheld_document:
+                # the navigation met a document on another origin than the session's
+                # (a redirect landing, R1): nothing is extracted, no static fallback
+                # (it would file that origin's page under this URL)
+                raise SessionWithheld(url) from None
             logging.info(f"Browser could not render {url} ({str(e).splitlines()[0][:80]}); "
                          f"falling back to a static request")
             return self._fetch_static(url)
@@ -1716,7 +1763,7 @@ class LocalSpider:
                 # another origin than the session's: none of the jar's port-agnostic
                 # cookies go with it (FR-SESS-20, BUG-0134)
                 storage = {**storage, "cookies": []}
-                self._note_session_withheld(action_url)
+                self._note_session_withheld(action_url, "request")
             ctx = self._pw.request.new_context(storage_state=storage,
                                                extra_http_headers=headers)
             try:
@@ -1826,6 +1873,10 @@ class LocalSpider:
 
                 if depth > self.max_depth or self.storage.is_visited(current_url):
                     continue
+                if self._other_origin(current_url):
+                    # FR-SESS-20 (R1): never loaded in the authenticated crawl
+                    self._note_session_withheld(current_url, "document")
+                    continue
 
                 try:
                     self._current_url = current_url
@@ -1870,6 +1921,10 @@ class LocalSpider:
                                     and not self.storage.is_visited(absolute_link)):
                                 queue.append((absolute_link, depth + 1, 'xhr'))
 
+                except SessionWithheld:
+                    # landed on another origin than the session's (FR-SESS-20, R1):
+                    # visited, nothing extracted
+                    self.storage.mark_visited(current_url, 0, depth, source=source)
                 except Exception as e:
                     logging.error(f"Failed to process {current_url}: {e}")
                     self.storage.mark_visited(current_url, 0, depth, source=source)
@@ -1901,6 +1956,9 @@ class LocalSpider:
                 logging.info(f"Sent {self.session_out_of_origin} in-scope request(s) "
                              f"without the session: another origin than the session's "
                              f"(session_out_of_origin, FR-SESS-20).")
+            if self.skipped_other_origin:
+                logging.info(f"Skipped {len(self.skipped_other_origin)} in-scope page(s) "
+                             f"on another origin: {self.OTHER_ORIGIN_REASON}.")
             for line in self.spa_summary():
                 logging.info(line)
             self.storage.record_stats({**self.spa_counts,
@@ -1934,6 +1992,9 @@ def build_parser():
     p.add_argument("--identity", default=None,
                    help="Crawl authenticated as this identity via the session manager "
                         "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
+    from fuzzlab.session.manager import AUTH_ORIGIN_HELP
+    p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
+                   help=AUTH_ORIGIN_HELP)
     p.add_argument("--follow-selector-forms", nargs="?", const="", default=None,
                    metavar="SELECT[,SELECT...]",
                    help="Navigate through menu-like forms (one <select> and a button). "
@@ -1973,8 +2034,18 @@ def spa_route_names(values):
     return [r for v in values for r in v.replace(",", " ").split() if r]
 
 
-def parse_args():
-    return build_parser().parse_args()
+def parse_args(argv=None):
+    p = build_parser()
+    args = p.parse_args(argv)
+    if args.auth_origin:                 # a usage error before any side effect (R5)
+        from fuzzlab.session.manager import parse_auth_origins
+        from fuzzlab.tools.authhttp import scope_hosts_for
+        try:
+            args.auth_origin = parse_auth_origins(args.auth_origin,
+                                                  scope_hosts_for(args.start))
+        except ValueError as exc:
+            p.error(str(exc))
+    return args
 
 
 if __name__ == "__main__":
@@ -1989,7 +2060,8 @@ if __name__ == "__main__":
     session_manager = None
     if args.identity:
         from fuzzlab.tools.authhttp import make_session_manager
-        session_manager = make_session_manager(args.start, store_path=args.store)
+        session_manager = make_session_manager(args.start, store_path=args.store,
+                                               auth_origins=args.auth_origin)
     spider = LocalSpider(
         args.start,
         max_depth=args.max_depth,

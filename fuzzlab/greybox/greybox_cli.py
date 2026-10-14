@@ -24,7 +24,7 @@ from fuzzlab.labels import contract
 from fuzzlab.tools.store_adapter import import_spider
 
 
-def _cookie_for(host: str, identity: str, base_url: str):
+def _cookie_for(host: str, identity: str, base_url: str, auth_origins=()):
     """``(Cookie header value or None, secure_only, is_auth_endpoint, origins)`` for an
     authenticated surface (fail loud). ``secure_only``: the session was established over
     https, so the sender must never put the cookie on a plain-http request (BUG-0098).
@@ -40,7 +40,7 @@ def _cookie_for(host: str, identity: str, base_url: str):
     scope = list(cfg.get("scope_hosts", []))
     if host not in scope:
         scope.append(host)
-    mgr = SessionManager(store, scope_hosts=scope)
+    mgr = SessionManager(store, scope_hosts=scope, auth_origins=list(auth_origins))
     header = mgr.session_header(host, identity, base_url,     # SessionAuthError if wrong
                                 operator=True)
     state = mgr.ensure(host, identity, base_url, operator=True)
@@ -70,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Restore the DB baseline between stateful (non-GET) points")
     p.add_argument("--identity", default=None,
                    help="Probe an authenticated surface as this identity (optional)")
+    from fuzzlab.session.manager import AUTH_ORIGIN_HELP
+    p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
+                   help=AUTH_ORIGIN_HELP)
     p.add_argument("--settle", type=float, default=0.0,
                    help="Seconds to wait after each request for the shim to flush")
     p.add_argument("--mutation-variants", action="store_true",
@@ -111,12 +114,21 @@ def main(argv: list[str]) -> int:
         p.error("--points ground-truth requires --ground-truth")
 
     host = urlparse(args.base_url).hostname or args.base_url
+    auth_origins = []
+    if args.auth_origin:                 # a usage error before any side effect (R5)
+        from fuzzlab.session.manager import parse_auth_origins
+        from fuzzlab.tools.authhttp import scope_hosts_for
+        try:
+            auth_origins = parse_auth_origins(args.auth_origin,
+                                              scope_hosts_for(args.base_url))
+        except ValueError as exc:
+            p.error(str(exc))
     cookie, cookie_secure_only, is_auth_endpoint, cookie_origins = None, False, None, None
     if args.identity:
         from fuzzlab.session.manager import SessionAuthError
         try:
             cookie, cookie_secure_only, is_auth_endpoint, cookie_origins = _cookie_for(
-                host, args.identity, args.base_url)
+                host, args.identity, args.base_url, auth_origins)
         except SessionAuthError as exc:
             p.error(f"authentication failed for {args.identity}@{host}: {exc}")
 

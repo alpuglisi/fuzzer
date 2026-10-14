@@ -74,7 +74,8 @@ def test_a_cross_origin_form_action_gets_no_credentials(action):
     ("/login", {}),                                        # relative
     ("http://127.0.0.1:8080/login", {}),                   # same origin, absolute
     ("https://127.0.0.1:8080/login", {}),                  # same host, https upgrade
-    ("http://127.0.0.1:9000/auth", {}),                    # in-scope host, other port
+    # another port only as an authorised auth origin (FR-SESS-20, R3, BUG-0134)
+    ("http://127.0.0.1:9000/auth", {"auth_origins": ["http://127.0.0.1:9000"]}),
     ("http://auth.lab:7000/sso", {"auth_origins": ["http://auth.lab:7000"]}),
 ])
 def test_an_allowed_destination_gets_the_post(action, kw):
@@ -213,12 +214,14 @@ def test_an_https_login_never_sends_credentials_over_http(action, kw):
 
 
 def test_every_allow_path_is_overridden_by_the_deny():
-    """A destination each allow rule admits (same origin, in-scope host, auth_origins)
-    is refused once the transport floor is https (PA-0093: deny before allow)."""
+    """A destination each allow rule admits (same origin, auth_origins; the in-scope
+    host rule is gone since FR-SESS-20) is refused once the transport floor is https
+    (PA-0093: deny before allow)."""
     m = _manager(_Site("/login"), scope=["lab.example"],
-                 auth_origins=["http://lab.example", "http://auth.lab"])
+                 auth_origins=["http://lab.example", "http://auth.lab",
+                               "http://lab.example:81"])
     for target in ("http://lab.example/login",            # same origin as the page
-                   "http://lab.example:81/x",             # in scope
+                   "http://lab.example:81/x",             # another port, authorised
                    "http://auth.lab/sso"):                # auth_origins
         assert m._credential_destination_ok(target, "http://lab.example/login")
         assert not m._credential_destination_ok(target, "http://lab.example/login",
@@ -262,9 +265,11 @@ def test_a_post_redirect_from_https_to_http_is_not_followed():
 
 @pytest.mark.parametrize("action,base,kw", [
     ("https://lab.example/login", _HTTPS, {}),                         # https -> https
-    ("https://lab.example:8443/login", _HTTPS, {}),                    # in scope, https
+    ("https://lab.example:8443/login", _HTTPS,                         # authorised
+     {"auth_origins": ["https://lab.example:8443"]}),
     ("https://lab.example/login", "http://lab.example/", {}),          # upgrade
-    ("http://lab.example:9000/login", "http://lab.example/", {}),      # http in scope
+    ("http://lab.example:9000/login", "http://lab.example/",           # authorised
+     {"auth_origins": ["http://lab.example:9000"]}),
 ])
 def test_same_or_upgraded_transport_is_still_allowed(action, base, kw):
     site = _HttpsSite(action)
@@ -290,4 +295,16 @@ def test_an_https_hop_in_discovery_sets_the_floor_even_for_an_http_base():
         _manager(site, scope=["lab.example"]).ensure("lab.example", "user",
                                                      "http://lab.example/")
     assert ("GET", "http://lab.example/real-login") not in site.log
+    assert not [e for e in site.log if e[0] == "POST"]
+
+
+@pytest.mark.parametrize("action", ["http://127.0.0.1:9000/auth",      # another port
+                                    "https://127.0.0.1:8443/auth"])   # upgrade elsewhere
+def test_another_port_of_an_in_scope_host_gets_no_credentials(action):
+    """Superseded rule (FR-SESS-20, R3, BUG-0134): an in-scope host on another port, or
+    an https upgrade to another port, was a credential destination. It is another app:
+    refused, naming --auth-origin."""
+    site = _Site(action)
+    with pytest.raises(SessionAuthError, match="--auth-origin"):
+        _manager(site).ensure("127.0.0.1", "user", "http://127.0.0.1:8080/")
     assert not [e for e in site.log if e[0] == "POST"]

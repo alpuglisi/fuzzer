@@ -17,8 +17,10 @@ Browser cookies are port-agnostic (RFC 6265 §8.5: a cookie for ``127.0.0.1`` go
 every port), so the context's jar alone would hand the session to another app on
 another port of the host. The session is **origin-scoped** (FR-SESS-20, BUG-0134):
 `header_scope_for` admits only the session's origins, and the guarded route uses the
-same predicate (``BrowserSession.cookie_scope``) to withhold the jar's cookies from an
-in-scope request on any other origin (``navguard.guard_page(cookie_scope=...)``).
+same predicate (``BrowserSession.cookie_scope``) for any other in-scope origin: its
+documents and WebSockets are never loaded, and its other requests go through a
+cookie-less request context with ``Set-Cookie`` removed
+(``navguard.guard_page(cookie_scope=..., isolated_request=...)``).
 
 Playwright itself is not imported here — this only shapes the data and applies it
 to whatever context object it is given — so it stays unit-testable without a

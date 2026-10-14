@@ -55,6 +55,12 @@ note of the same date.
   - [x] FR-FUZZ-8 and FR-FUZZ-44 amended in place — done
 - Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (the greybox gate mutation
   fails its test); the oracle, greybox, sender-conformance, PRG and lane A/B suites pass.
+- Review round 1 of 0046b77 (2026-10-14; R5, R6):
+  - **R6:** `SeamProbeSender` copies `Probe.session` from the decision `prepare`
+    recorded on the request (`SESSION_DECISION`), never recomputed after the send.
+  - **R5:** `fuzzlab auto --auth-origin` and `greybox-run --auth-origin` (repeatable;
+    bare, in-scope origins; a usage error before any side effect); `make_probe_sender`
+    and greybox's `_cookie_for` take `auth_origins` (auto passes it only when given).
 
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's

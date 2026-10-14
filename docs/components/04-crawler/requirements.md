@@ -197,16 +197,22 @@ fuzzer.
     https-only (`browserauth.header_scope_for`).
   - **Cookies withheld from another origin** *(CC-CRAWL-0026, FR-SESS-20).* Browser
     cookies are port-agnostic (RFC 6265 §8.5), and an external crawl's scope is its
-    host on every port (BUG-0050). In the crawl's authenticated context the route
-    withholds the context's jar (`BrowserSession.cookie_scope`, the header-scope
-    predicate) from an in-scope request or redirect hop on another origin: fetched with
-    an explicit empty `Cookie` header through `route.fetch(headers=)` / the request
-    client, without the session's headers; a redirected navigation landing there is
-    answered with the landing response (the browser's own unrouted re-request would
-    carry the jar; verified live). The selector-form API client drops the jar's cookies
-    for such an action. Each is counted (`session_out_of_origin`) and summarised at the
-    end of the crawl. Residual: an in-scope WebSocket on another origin is connected by
-    the browser. Never `set_extra_http_headers` or a browser
+    host on every port (BUG-0050). In the crawl's authenticated context
+    (`BrowserSession.cookie_scope`, the header-scope predicate), for an in-scope origin
+    outside the session's *(review round 1, R1/R2, CC-CRAWL-0026 amendment)*:
+    - every **document** (a navigation, top-level or frame, and a redirect landing
+      there) and every **WebSocket** is aborted, never loaded or connected: such a page is
+      recorded as skipped (`skipped_other_origin`: "crawl that origin separately, or
+      --auth-origin"), nothing is extracted from the navigation that met it, and no
+      static fallback files it under another URL;
+    - every other request there, and every hop, is fetched through one cookie-less
+      request context per guard (`navguard.guard_page(isolated_request=)`, the spider's
+      `pw.request.new_context()`, disposed at the end) and fulfilled with `Set-Cookie`
+      removed, so that origin neither receives nor writes the jar;
+    - the selector-form API client drops the jar's cookies for such an action.
+    Each is counted (`session_out_of_origin`) and summarised at the end of the crawl.
+    `fuzzlab crawl --auth-origin ORIGIN` (repeatable; a bare, in-scope origin, else a
+    usage error) makes an origin one of the session's (FR-SESS-20). Never `set_extra_http_headers` or a browser
     context's `extra_http_headers` (an AST guard over `fuzzlab/`). An unauthenticated
     submission context gets none. The selector-form API client sends them only when the
     action passes the same header scope. The auditor's browser (CC-AUD-0038) and the M6

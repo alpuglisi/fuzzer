@@ -42,6 +42,11 @@ _LOG = logging.getLogger(__name__)
 #: ``evidence["session"]``.
 OUT_OF_ORIGIN = "anonymous (out of origin)"
 
+#: The attribute `prepare` records its decision under, on the request it was given
+#: (FR-SESS-20, R6): `OUT_OF_ORIGIN` when it withheld the session. A sender that built
+#: the request reads it after the send (``Probe.session``); nothing recomputes it.
+SESSION_DECISION = "session_decision"
+
 #: The remedy every origin refusal names (O3, O13): two apps on one host share the
 #: host-keyed credential entry unless their identities differ.
 DISTINCT_IDENTITY_ADVICE = ("use a distinct identity name per app (fuzzlab session "
@@ -56,11 +61,52 @@ def session_origins(*urls: str | None, auth_origins=()) -> frozenset[str]:
     return origin_scope(*urls) | origin_scope(*auth_origins)
 
 
+#: The ``--auth-origin`` help shared by every session-using CLI (crawl, auto, session
+#: print, greybox-run; FR-SESS-20, R5).
+AUTH_ORIGIN_HELP = ("an origin, scheme://host[:port] with no path, that belongs to this "
+                    "app (an SSO, an API or app shell on another port): it authorises "
+                    "the login's credential destination there AND the session's sends "
+                    "there (FR-SESS-20). Repeatable; its host must be in scope. Another "
+                    "port of a host is another app unless named here")
+
+
+def parse_auth_origins(values, scope_hosts) -> list[str]:
+    """The canonical origins of ``--auth-origin`` values (FR-SESS-20, R5), or
+    `ValueError`: each must be a bare http(s) origin (no user, path, query or fragment)
+    whose host is in ``scope_hosts`` (the CLI's scope: the config's ``scope_hosts`` plus
+    the target's host). A usage error, checked before any side effect (PA-0079)."""
+    from urllib.parse import urlsplit
+    scope = {str(h).lower() for h in scope_hosts or ()}
+    out: list[str] = []
+    for value in values or ():
+        text = str(value).strip()
+        parts = urlsplit(text)
+        try:
+            parts.port
+        except ValueError:
+            parts = None
+        if parts is None or parts.scheme.lower() not in ("http", "https") or \
+                not parts.hostname or parts.username or parts.password or \
+                parts.path not in ("", "/") or parts.query or parts.fragment or \
+                "?" in text or "#" in text:
+            raise ValueError(f"--auth-origin {text!r}: give a bare origin, "
+                             f"scheme://host[:port] (no user, path, query or fragment)")
+        origin = canonical_origin(text)
+        if origin is None:
+            raise ValueError(f"--auth-origin {text!r}: not an origin")
+        if parts.hostname.lower() not in scope:           # the CLI's scope, as the seam's
+            raise ValueError(f"--auth-origin {text!r}: its host is not in scope "
+                             f"({', '.join(sorted(scope)) or 'none'}); add it to "
+                             f"scope_hosts first")
+        out.append(origin)
+    return out
+
+
 def auth_origin_advice(origin: str | None) -> str:
     """The advice an origin refusal or warning names (O12): authorise the origin as an
     auth origin when it belongs to this app."""
-    return (f"if {origin} belongs to this app, authorise it as an auth origin "
-            f"(SessionManager(auth_origins=[{origin!r}]))")
+    return (f"if {origin} belongs to this app, pass --auth-origin {origin} (crawl, auto, "
+            f"session print, greybox-run; SessionManager(auth_origins=[{origin!r}]))")
 
 
 class SessionAuthError(RuntimeError):
@@ -256,6 +302,8 @@ class SessionManager:
                 f"refusing to adopt the captured session of {state.identity}@{state.host}: "
                 f"no origin was observed for it, so it could be sent nowhere (capture "
                 f"its requests with their URLs; FR-SESS-20)")
+        # the operator's authorised auth origins are this session's too (R5, A-N2)
+        state.origins = frozenset(state.origins) | frozenset(self._auth_origins)
         state.valid = True
         self._scope.add(state.host)
         self._state[(state.host, state.identity)] = state
@@ -272,7 +320,8 @@ class SessionManager:
         A request to an in-scope host but another origin (another port: another app)
         goes out **without** the session, as that app's anonymous visitor: it never
         triggers a login there, is logged once per (origin, identity) and counted
-        (`out_of_origin_sends`); `session_note` reports the decision to the sender."""
+        (`out_of_origin_sends`); the decision is recorded on the request itself
+        (``request.session_decision = OUT_OF_ORIGIN``, R6) for its sender."""
         host = urlparse(request.url).hostname or ""
         identity = self._own_identity(identity)
         if identity == ANONYMOUS or host not in self._scope:
@@ -285,7 +334,7 @@ class SessionManager:
                 # this host's session lives on other origins: never a login here (O3);
                 # an https session's http request is still refused loudly (BUG-0098)
                 _check_transport(existing, request.url)
-                self._withhold(origin, identity)
+                self._withhold(origin, identity, request)
                 return
             # no session on this host yet: the operator's own base when one is known;
             # else the request's directory (never its origin: the app may live under a
@@ -299,7 +348,7 @@ class SessionManager:
                                 or _directory(request.url))
         _check_transport(state, request.url)          # BUG-0098: before any secret
         if origin is None or origin not in state.origins:
-            self._withhold(origin, identity)          # FR-SESS-20: before any secret
+            self._withhold(origin, identity, request)  # FR-SESS-20: before any secret
             return
         request.headers = state.apply(request.headers)
 
@@ -464,23 +513,6 @@ class SessionManager:
         (greybox) or a listener comparing a logout's origin uses (FR-SESS-20)."""
         state = self._state_for(url, self._own_identity(identity))
         return frozenset(state.origins) if state is not None else frozenset()
-
-    def session_note(self, url: str, identity: str) -> str | None:
-        """`OUT_OF_ORIGIN` when a send of ``identity`` to ``url`` goes without the
-        session because ``url``'s origin is not one of its origins -- the decision
-        `prepare` made (FR-SESS-20, O2) -- else None. Pure: never a login, never a
-        network request."""
-        try:
-            identity = self._own_identity(identity)
-        except SessionAuthError:
-            return None
-        host = urlparse(url).hostname or ""
-        if identity == ANONYMOUS or host not in self._scope:
-            return None
-        if self._state_for(url, identity) is None and \
-                ((host, identity) in self._state or (host, identity) in self._bases):
-            return OUT_OF_ORIGIN
-        return None
 
     @property
     def out_of_origin_sends(self) -> int:
@@ -697,9 +729,11 @@ class SessionManager:
                 f"which is not one of the session's origins: the session is not sent "
                 f"there (FR-SESS-20); {auth_origin_advice(origin)}")
 
-    def _withhold(self, origin: str | None, identity: str) -> None:
-        """Count (and log once per (origin, identity)) a send made without the session
-        because its origin is not one of the session's (FR-SESS-20)."""
+    def _withhold(self, origin: str | None, identity: str, request) -> None:
+        """Record on ``request`` (R6), count, and log once per (origin, identity) a send
+        made without the session because its origin is not one of the session's
+        (FR-SESS-20)."""
+        setattr(request, SESSION_DECISION, OUT_OF_ORIGIN)
         with self._origin_guard:
             self._out_of_origin += 1
             first = (origin or "?", identity) not in self._out_of_origin_seen
@@ -1049,24 +1083,31 @@ class SessionManager:
         **Deny first** (BUG-0092, PA-0093): the scheme must be http or https, and https
         whenever the floor is (``base_url``, any discovery hop, or the page was https);
         nothing overrides it. **The anchor is operator input only** (BUG-0097,
-        PA-0098): ``target``'s origin must be ``base_url``'s own, that host upgraded
-        http→https, an in-scope host (any port: host-level scope, D12), or an
-        authorised ``auth_origins`` entry. A URL from response content (a redirect, a
-        form action, a page) is checked against this anchor, never added to it."""
+        PA-0098), as origins (FR-SESS-20, R3; `_login_anchors`): ``target``'s origin must
+        be ``base_url``'s own, its https upgrade on the same host at the default or the
+        same port, or an authorised ``auth_origins`` entry (``--auth-origin``). An
+        in-scope host on another port is no longer an anchor: another port is another
+        app. A URL from response content (a redirect, a form action, a page) is checked
+        against this anchor, never added to it."""
         floor_https = floor_https or urlparse(base_url).scheme.lower() == "https"
         if not self._transport_ok(target, floor_https):
             return False
-        origin, base = canonical_origin(target), canonical_origin(base_url)
-        if origin is None:
-            return False
-        if origin == base or origin in self._auth_origins:
-            return True
-        t, b = urlparse(target), urlparse(base_url)
-        if t.scheme == "https" and b.scheme == "http" and \
-                (t.hostname or "").lower() == (b.hostname or "").lower():
-            return True
-        host = (t.hostname or "").lower()
-        return host in self._scope or f"{host}:{t.port}" in self._scope
+        origin = canonical_origin(target)
+        return origin is not None and origin in self._login_anchors(base_url)
+
+    def _login_anchors(self, base_url: str) -> frozenset[str]:
+        """Where a login may go (FR-SESS-20, R3): ``base_url``'s canonical origin; for an
+        http base, its https upgrade on the same host at the default port or at the
+        base's own port; and the operator's ``auth_origins``. Origins only, never a
+        host compare (PA-0134)."""
+        out = set(origin_scope(base_url)) | set(self._auth_origins)
+        parts = urlparse(base_url)
+        if parts.scheme.lower() == "http" and parts.hostname:
+            authority = parts.netloc.rsplit("@", 1)[-1]           # host[:port], no userinfo
+            bare = authority[:authority.rfind("]") + 1] if authority.startswith("[") \
+                else authority.split(":", 1)[0]
+            out |= origin_scope(f"https://{bare}/", f"https://{authority}/")
+        return frozenset(out)
 
     def _post_credentials(self, fetcher: Fetcher, url: str, data,
                           base_url: str, *, floor_https: bool = False,
@@ -1090,8 +1131,13 @@ class SessionManager:
                                                            seen=seen)
                     return landed
                 except SessionAuthError as exc:
-                    if self._log:
-                        self._log.info(f"post-login redirect not followed: {exc}")
+                    (self._log or _LOG).warning(f"post-login redirect not followed: {exc}")
+            else:
+                origin = canonical_origin(nxt)
+                (self._log or _LOG).warning(
+                    f"the login redirected to {origin}, which is not one of the login's "
+                    f"origins (FR-SESS-20): not followed, the session is not sent there; "
+                    f"{auth_origin_advice(origin)}")
         return resp                          # 307/308 never followed: judged as is
 
     def _basic_login(self, fetcher: Fetcher, host: str, identity: str, base_url: str,
@@ -1132,8 +1178,11 @@ class SessionManager:
         # the probe walks redirects hop by hop too, inside the approved origins and over
         # the transport floor, carrying the session's headers (BUG-0097)
         floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
+        # the session's origins only (FR-SESS-20, R3): a hop elsewhere is refused before
+        # it is fetched, so its headers (a Basic or bearer token) never go there
         probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
-                                             headers=state.headers or None, seen=seen)
+                                             headers=state.headers or None, seen=seen,
+                                             session_origins=state.origins)
         if probe.status in (401, 403):
             return False
         if state.kind == "basic":       # Basic: 401/403 only, as in observe (BUG-0113)
@@ -1183,13 +1232,17 @@ MAX_LOGIN_HOPS = 5
 
 
 def _carries(request, state: SessionState) -> bool:
-    """Does ``request`` carry any of ``state``'s credentials (a header value, or a
-    cookie pair in its ``Cookie``)? What `prepare` applied, as `authorize` sees it."""
-    headers = {str(k).lower(): str(v) for k, v in (request.headers or {}).items()}
-    if any(headers.get(str(k).lower()) == str(v) for k, v in (state.headers or {}).items()):
-        return True
-    pairs = {p.strip() for p in headers.get("cookie", "").split(";")}
-    return any(f"{k}={v}" in pairs for k, v in (state.cookies or {}).items())
+    """Does ``request`` carry any of ``state``'s secrets anywhere in its headers (a
+    header value, a token, a cookie value), by containment (R7: an edit that appends to
+    a value, ``sid=<v>'OR1``, still carries it)? What `prepare` applied, as `authorize`
+    sees it."""
+    secrets = {str(v) for v in (state.cookies or {}).values()}
+    for value in (state.headers or {}).values():
+        _scheme, sep, token = str(value).partition(" ")
+        secrets |= {str(value), token} if sep else {str(value)}
+    secrets = {v for v in secrets if v}
+    sent = [str(v) for v in (request.headers or {}).values()]
+    return any(secret in value for secret in secrets for value in sent)
 
 
 def _check_origin(state: SessionState, url: str) -> None:

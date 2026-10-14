@@ -58,9 +58,13 @@ class _App:
     ``/login.php`` is a login page. ``redirects`` maps a path to a ``Location``. Every
     request is recorded as ``(method, path, Cookie, Authorization)``."""
 
-    def __init__(self, host: str = "127.0.0.1", links: str = ""):
+    def __init__(self, host: str = "127.0.0.1", links: str = "", basic: bool = False):
         self.host = host
         self.links = links
+        #: path -> (status, body, extra headers): served as is (R1/R2 fixtures)
+        self.pages: dict[str, tuple[int, bytes, list]] = {}
+        #: HTTP Basic: every GET without the right Authorization answers 401 (R3)
+        self.basic = basic
         self.requests: list[tuple[str, str, str | None, str | None]] = []
         self.sessions: set[str] = set()
         self.redirects: dict[str, str] = {}
@@ -99,6 +103,16 @@ class _App:
             def do_GET(self):  # noqa: N802 - http.server API
                 self._record("GET")
                 path = self.path.split("?", 1)[0]
+                if app.basic:
+                    import base64
+                    good = "Basic " + base64.b64encode(
+                        f"{USER}:{PASSWORD}".encode()).decode()
+                    if self.headers.get("Authorization") != good:
+                        return self._send(401, b"auth", [("WWW-Authenticate",
+                                                          'Basic realm="lab"')])
+                if path in app.pages:
+                    status, body, extra = app.pages[path]
+                    return self._send(status, body, extra)
                 if path in app.redirects:
                     return self._send(302, headers=[("Location", app.redirects[path])])
                 if path in ("/login", "/login.php"):
@@ -218,8 +232,21 @@ def test_a_send_to_another_port_carries_no_session_and_never_logs_in_there(apps)
     assert b.requests and not b.got_session()          # B received no session
     assert b.login_posts == 0 and ("POST", "/login", None, None) not in b.requests
     assert mgr.out_of_origin_sends == 2
-    assert mgr.session_note(b.base + "page", "user") == OUT_OF_ORIGIN
-    assert mgr.session_note(a.base + "page", "user") is None
+
+
+def test_prepare_records_its_decision_on_the_request(apps):
+    """R6: the decision is recorded on the request prepare was given, never recomputed
+    after the send."""
+    from fuzzlab.session.manager import SESSION_DECISION
+    a, b = apps
+    mgr = _mgr()
+    mgr.ensure("127.0.0.1", "user", a.base, operator=True)
+    out = Request("GET", b.base + "x", identity="user")
+    mgr.prepare(out, "user")
+    inside = Request("GET", a.base + "x", identity="user")
+    mgr.prepare(inside, "user")
+    assert getattr(out, SESSION_DECISION) == OUT_OF_ORIGIN
+    assert getattr(inside, SESSION_DECISION, None) is None
 
 
 def test_an_operator_base_logs_in_on_its_own_origin_never_on_the_requests(apps):
@@ -405,8 +432,24 @@ def test_verify_live_never_follows_a_redirect_to_another_port(apps):
     mgr.ensure("127.0.0.1", "user", a.base, operator=True)
     assert mgr.verify_live("127.0.0.1", "user", a.base) is True
     a.redirects["/"] = b.base + "landing"
-    with pytest.raises(SessionAuthError, match="not one of its origins"):
+    with pytest.raises(SessionAuthError, match="--auth-origin"):
         mgr.verify_live("127.0.0.1", "user", a.base)       # cannot verify: fail closed
+    assert b.requests == []
+
+
+def test_verify_live_keeps_the_session_inside_its_origins_even_where_a_login_may_go(apps):
+    """O5's own layer: an origin a *login* may reach (an auth origin) that is not one of
+    *this session's* origins (here a session adopted before B was authorised) is still
+    never sent the session (`_navigate(session_origins=)`)."""
+    a, b = apps
+    mgr = _mgr(auth_origins=[b.base])
+    a.sessions.add("sid-adopted-0123456789abcdef")
+    mgr._state[("127.0.0.1", "user")] = SessionState(
+        "127.0.0.1", "user", kind="cookie", valid=True,
+        cookies={"sid": "sid-adopted-0123456789abcdef"}, origins=origin_scope(a.base))
+    a.redirects["/"] = b.base + "landing"
+    with pytest.raises(SessionAuthError, match="not one of its origins"):
+        mgr.verify_live("127.0.0.1", "user", a.base)
     assert b.requests == []
 
 
@@ -542,67 +585,131 @@ def test_header_scope_admits_only_the_sessions_origins():
     assert bare("http://h:81/x") and not bare("http://h:82/x")     # no origins: base only
 
 
+class _Resp:
+    def __init__(self, status=200, headers=None):
+        self.status, self.headers = status, dict(headers or {})
+
+
 class _HdrRoute:
-    def __init__(self, url, site=None):
+    def __init__(self, url, site=None, navigation=True):
         self.request = type("Req", (), {
             "url": url, "method": "GET", "headers": {"accept": "*/*"},
-            "post_data_buffer": None, "is_navigation_request": lambda _s: True})()
+            "post_data_buffer": None, "resource_type": "document" if navigation else "image",
+            "is_navigation_request": lambda _s: navigation})()
         self.site = site or {}
         self.sent_headers = "unset"
+        self.fetched = False
         self.outcome = None
+        self.fulfilled = None
 
     def fetch(self, max_redirects=None, headers=None):
-        self.sent_headers = headers
-        return self.site.get(self.request.url, type("R", (), {"status": 200,
-                                                              "headers": {}})())
+        self.fetched, self.sent_headers = True, headers
+        return self.site.get(self.request.url, _Resp())
 
     def abort(self, *a):
         self.outcome = "abort"
 
     def fulfill(self, response=None, status=None, headers=None):
         self.outcome = "fulfill"
-        self.fulfilled_with = "response" if response is not None else "redirect"
+        self.fulfilled = (response, status, headers)
 
 
-def test_the_route_withholds_the_jar_from_another_origin_and_its_hops():
+class _Iso:
+    """The guard's cookie-less request context: records fetches; an answer may set a
+    cookie (B's ``sid=FROM_B``)."""
+
+    def __init__(self, site):
+        self.site, self.calls, self.disposed = site, [], False
+
+    def fetch(self, url, method=None, max_redirects=None, data=None, headers=None):
+        assert max_redirects == 0
+        self.calls.append((url, method, headers))
+        return self.site.get(url, _Resp(200, {"set-cookie": "sid=FROM_B",
+                                              "content-type": "image/png"}))
+
+    def dispose(self):
+        self.disposed = True
+
+
+def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_less():
+    """R1 + R2 (review round 1, A-M1/A-M2): in an authenticated context a document on
+    another origin -- a navigation, or a redirect landing there -- is aborted, never
+    fetched; a subresource there (and every hop) goes through the guard's cookie-less
+    request context, never `route.fetch` or the context's client (which send the jar
+    and store that origin's Set-Cookie in it), and is fulfilled without Set-Cookie."""
     from fuzzlab.tools.navguard import make_route_handler
     host_scope = lambda u: "127.0.0.2" in u                         # noqa: E731
     origins = origin_scope("http://127.0.0.2:3000/")
     cookie_scope = lambda u: in_origin_scope(u, origins)            # noqa: E731
-    withheld, calls = [], []
+    withheld, api_calls, made = [], [], []
 
     class Api:
         def fetch(self, url, method=None, max_redirects=None, data=None, headers=None):
-            calls.append((url, headers))
-            return type("R", (), {"status": 200, "headers": {}})()
+            api_calls.append(url)
+            return _Resp(200)
+
+    def factory():
+        made.append(_Iso({}))
+        return made[-1]
     bearer = {"Authorization": "Bearer T"}
     handler = make_route_handler(in_scope=host_scope, api=Api(), headers=bearer,
                                  header_scope=cookie_scope, cookie_scope=cookie_scope,
-                                 on_session_withheld=withheld.append)
+                                 on_session_withheld=lambda u, k: withheld.append((u, k)),
+                                 isolated_request=factory)
     own = _HdrRoute("http://127.0.0.2:3000/a")
     handler(own)
-    assert own.sent_headers == {"accept": "*/*", **bearer}
-    other = _HdrRoute("http://127.0.0.2:8090/a")
-    handler(other)
-    assert other.sent_headers == {"accept": "*/*", "cookie": ""}   # no jar, no bearer
-    site = {"http://127.0.0.2:3000/r": type("R", (), {
-        "status": 302, "headers": {"location": "http://127.0.0.2:8090/b"}})()}
-    hop = _HdrRoute("http://127.0.0.2:3000/r", site)
-    handler(hop)
-    assert calls == [("http://127.0.0.2:8090/b", {"cookie": ""})]
-    assert withheld == ["http://127.0.0.2:8090/a", "http://127.0.0.2:8090/b"]
-    # a navigation landing on another origin is answered with the landing response, not
-    # a redirect Chromium would follow unrouted with its jar
-    assert hop.outcome == "fulfill" and hop.fulfilled_with == "response"
-    calls.clear()
-    site = {"http://127.0.0.2:3000/r2": type("R", (), {
-        "status": 302, "headers": {"location": "/own"}})()}
-    own_hop = _HdrRoute("http://127.0.0.2:3000/r2", site)
-    handler(own_hop)
-    assert own_hop.fulfilled_with == "redirect"            # its own origin: as before
+    assert own.sent_headers == {"accept": "*/*", **bearer}           # its own origin
+    doc = _HdrRoute("http://127.0.0.2:8090/a")
+    handler(doc)
+    assert doc.outcome == "abort" and not doc.fetched and made == []  # never loaded
+    frame = _HdrRoute("http://127.0.0.2:8090/f")
+    frame.request.frame = type("F", (), {"parent_frame": object()})()
+    handler(frame)
+    assert frame.outcome == "abort" and ("http://127.0.0.2:8090/f", "frame") in withheld
+    img = _HdrRoute("http://127.0.0.2:8090/i.png", navigation=False)
+    handler(img)
+    assert not img.fetched and made[0].calls == [
+        ("http://127.0.0.2:8090/i.png", "GET", {"accept": "*/*"})]   # no cookie, no bearer
+    assert "set-cookie" not in {k.lower() for k in img.fulfilled[2]}
+    assert not made[0].disposed                      # its answer is still being fulfilled
+    handler(_HdrRoute("http://127.0.0.2:8090/j.png", navigation=False))
+    assert made[0].disposed                          # it got a cookie: never reused
+    assert len(made) == 2 and made[1].calls[0][0] == "http://127.0.0.2:8090/j.png"
+    site = {"http://127.0.0.2:3000/go": _Resp(302, {"location": "http://127.0.0.2:8090/land"})}
+    nav = _HdrRoute("http://127.0.0.2:3000/go", site)
+    handler(nav)
+    assert nav.outcome == "abort" and api_calls == []               # the landing: aborted
+    sub = _HdrRoute("http://127.0.0.2:3000/go", site, navigation=False)
+    handler(sub)
+    assert api_calls == [] and made[-1].calls[-1][0] == "http://127.0.0.2:8090/land"
+    assert ("http://127.0.0.2:8090/a", "document") in withheld and \
+        ("http://127.0.0.2:8090/land", "document") in withheld and \
+        ("http://127.0.0.2:8090/i.png", "request") in withheld
+    lone = _HdrRoute("http://127.0.0.2:8090/i.png", navigation=False)
+    make_route_handler(in_scope=host_scope, cookie_scope=cookie_scope)(lone)
+    assert lone.outcome == "abort" and not lone.fetched              # no context: closed
     plain = _HdrRoute("http://127.0.0.2:8090/a")
     make_route_handler(in_scope=host_scope)(plain)                  # no session: as is
-    assert plain.sent_headers is None
+    assert plain.fetched and plain.sent_headers is None
+
+
+def test_a_websocket_to_another_origin_is_never_connected_in_an_authenticated_context():
+    from fuzzlab.tools.navguard import make_ws_handler
+    origins = origin_scope("http://127.0.0.2:3000/")
+    told, connected = [], []
+
+    class WS:
+        def __init__(self, url):
+            self.url = url
+
+        def connect_to_server(self):
+            connected.append(self.url)
+    handler = make_ws_handler(lambda u: "127.0.0.2" in u,
+                              cookie_scope=lambda u: in_origin_scope(u, origins),
+                              on_session_withheld=lambda u, k: told.append(k))
+    handler(WS("ws://127.0.0.2:3000/s"))
+    handler(WS("ws://127.0.0.2:8090/s"))
+    assert connected == ["ws://127.0.0.2:3000/s"] and told == ["websocket"]
 
 
 def test_the_spiders_isolated_submit_withholds_the_jar_from_another_origin(tmp_path):
@@ -651,20 +758,35 @@ def _chromium_or_skip(monkeypatch):
 def test_an_authenticated_crawl_never_hands_the_session_to_another_port(monkeypatch,
                                                                         tmp_path):
     """Real Chromium. An external (host-scoped, every port) crawl of 127.0.0.2:A,
-    logged in with a cookie, whose page links, embeds and redirects to 127.0.0.2:B (in
-    scope). Browser cookies are port-agnostic (RFC 6265), so before FR-SESS-20 B got
-    A's cookie; now B is crawled anonymously and receives no cookie value and no
-    Authorization, while A's own requests carry the session."""
+    logged in with a cookie. A's page links B directly, embeds an image from B (which
+    answers ``Set-Cookie: sid=FROM_B``), frames a page of B, opens a WebSocket to B,
+    and links ``/go``, which
+    302s to B's ``/land``: a page that beacons ``document.cookie`` and ``localStorage``
+    back to a relative ``/leak`` and links a relative ``/only-b``. Review round 1 saw
+    the landing load under A's URL and leak (A-M1), and B's cookie land in the shared
+    jar (A-M2). Now: no document of B ever loads (R1), B's image is fetched without any
+    cookie and its Set-Cookie never reaches the jar (R2), the WebSocket is never
+    connected, and nothing of B is filed under A."""
+    import sqlite3
+
     from tests._browser import skip_or_fail
     from fuzzlab.tools.spider import LocalSpider
     _chromium_or_skip(monkeypatch)
     b = _App("127.0.0.2")
-    a = _App("127.0.0.2", links=(f"<a href='{b.base}link'>b</a>"
-                                 f"<img src='{b.base}img.png'><a href='/go'>go</a>"))
-    a.redirects["/go"] = b.base + "redirected"
+    a = _App("127.0.0.2", links=(
+        f"<a href='{b.base}link'>b</a><img src='{b.base}img.png'><a href='/go'>go</a>"
+        f"<iframe src='{b.base}frame'></iframe>"
+        f"<script>localStorage.setItem('k','LS-SECRET');"
+        f"try{{new WebSocket('ws://127.0.0.2:{b.port}/ws')}}catch(e){{}}</script>"))
+    a.redirects["/go"] = b.base + "land"
+    b.pages["/land"] = (200, (
+        b"<html><body><p>B-LANDING-BODY</p><a href='/only-b'>only</a><script>"
+        b"fetch('/leak?c='+encodeURIComponent(document.cookie+'|'+"
+        b"localStorage.getItem('k')))</script></body></html>"), [])
+    b.pages["/img.png"] = (200, b"png", [("Set-Cookie", "sid=FROM_B; Path=/")])
     try:
         mgr = _mgr(host="127.0.0.2")
-        sp = LocalSpider(a.base, max_depth=1, db_name=str(tmp_path / "s.db"),
+        sp = LocalSpider(a.base, max_depth=2, db_name=str(tmp_path / "s.db"),
                          engine="playwright", timeout_ms=8000, session_manager=mgr,
                          identity="user")
         if sp.engine != "playwright":
@@ -673,17 +795,33 @@ def test_an_authenticated_crawl_never_hands_the_session_to_another_port(monkeypa
             sp.crawl()
         except Exception as exc:  # noqa: BLE001 - a launch failure is a skip, not a pass
             skip_or_fail(f"chromium could not launch: {exc}")
-        a_paths = {p for _m, p, c, _h in a.requests if c and "sid=" in c}
-        b_paths = {p for _m, p, _c, _h in b.requests}
     finally:
         a.close()
         b.close()
-    assert "/" in a_paths                                  # the crawl was logged in on A
-    # B was in scope and reached: a link, a subresource, and a redirected navigation
-    # (whose landing the browser would otherwise re-request unrouted, with its jar)
-    assert {"/link", "/img.png", "/redirected"} <= b_paths
-    assert not b.got_session()                              # ... with no session at all
-    assert sp.session_out_of_origin >= 2
+    a_paths = [p for _m, p, _c, _h in a.requests]
+    b_paths = [p for _m, p, _c, _h in b.requests]
+    a_sessions = {c for _m, _p, c, _h in a.requests if c and "sid=" in c}
+    assert "/" in {p for _m, p, c, _h in a.requests if c and "sid=sid-" in (c or "")}
+    assert "/img.png" in b_paths                            # B reached, as a subresource
+    assert not b.got_session()                              # ... with no cookie at all
+    # no document of B (a link, a frame, a redirect landing) and no socket to B
+    assert not {"/link", "/frame", "/land", "/ws", "/only-b"} & set(b_paths)
+    assert not [p for p in a_paths if p.startswith(("/leak", "/only-b"))]
+    assert not [c for c in a_sessions if "FROM_B" in c]     # B's cookie never in the jar
+    assert a_sessions and all(any(f"sid={v}" in c for v in a.sessions)
+                              for c in a_sessions)          # A keeps getting A's value
+    rows = sqlite3.connect(str(tmp_path / "s.db")).execute(
+        "SELECT url, content FROM discovered_pages").fetchall()
+    assert not [u for u, c in rows if "B-LANDING-BODY" in (c or "")]
+    assert sp.session_out_of_origin >= 1
+    assert {b.base + "link", b.base + "land", b.base + "frame"} <= \
+        set(sp.skipped_other_origin)
+    # a child frame of B never costs A's own page its rendering
+    assert [c for u, c in rows if u == a.base and "home" in (c or "") or
+            u == a.base and "welcome" in (c or "")]
+    # residual pinned (R8): the static engine's anonymous jar never holds the session
+    sids = {sid for sid in a.sessions}
+    assert not {c.value for c in sp.session.cookies} & sids
 
 
 # --- O9: auth endpoints ---------------------------------------------------------------
@@ -737,8 +875,10 @@ class _Web:
     def __init__(self, routes, post=None):
         self.routes = routes
         self.post_resp = post
+        self.log = []
 
     def get(self, url, headers=None, allow_redirects=True):
+        self.log.append(("GET", url))
         return self.routes.get(url, FetchResponse(200, {}, "<p>home</p>"))
 
     def post(self, url, data=None, headers=None, allow_redirects=True):
@@ -761,12 +901,13 @@ def test_the_destination_refusal_names_the_origin_and_how_to_authorise_it():
     with pytest.raises(SessionAuthError) as err:
         mgr.ensure("lab.example", "user", "http://lab.example/")
     assert "http://sso.example:8443" in str(err.value)
-    assert "auth_origins=['http://sso.example:8443']" in str(err.value)
+    assert "--auth-origin http://sso.example:8443" in str(err.value)
 
 
 def test_a_login_redirect_to_another_origin_warns_with_the_same_advice(caplog):
-    """The post-login redirect lands on another port (an app shell): the login works,
-    the session is not sent there, and the operator is told how to authorise it."""
+    """The post-login redirect points at another port (an app shell): it is never
+    followed (R3), the login is judged on the POST's own answer, the session is not
+    sent there, and the operator is told how to authorise it (--auth-origin)."""
     form = FetchResponse(200, {}, "<form method=post action='/login'><input name=u>"
                                   "<input type=password name=p></form>")
     web = _Web({"http://lab.example/login": form,
@@ -776,8 +917,9 @@ def test_a_login_redirect_to_another_origin_warns_with_the_same_advice(caplog):
     with caplog.at_level(logging.WARNING):
         state = mgr.ensure("lab.example", "user", "http://lab.example/")
     assert state.origins == origin_scope("http://lab.example/")
+    assert ("GET", "http://lab.example:3001/shell") not in web.log
     text = caplog.text
-    assert "http://lab.example:3001" in text and "auth_origins=" in text
+    assert "http://lab.example:3001" in text and "--auth-origin" in text
 
 
 def test_the_cli_help_names_distinct_identities_per_app():
@@ -789,53 +931,129 @@ def test_the_cli_help_names_distinct_identities_per_app():
 
 # --- PA-0134(3): no session send decision compares hosts ------------------------------
 ROOT = Path(__file__).resolve().parents[1]
-#: The modules that decide where a session's secrets go (PA-0134).
+#: The modules that decide where a session's secrets go (PA-0134; R4 added the
+#: crawler, the auditor's fetcher and the M6 executor).
 SESSION_SEND_MODULES = ("fuzzlab/session/manager.py", "fuzzlab/session/browserlogin.py",
                         "fuzzlab/tools/browserauth.py", "fuzzlab/tools/navguard.py",
                         "fuzzlab/tools/probesender.py", "fuzzlab/greybox/run.py",
                         "fuzzlab/greybox/greybox_cli.py",
-                        "fuzzlab/proxy/session_capture.py")
-#: Host comparisons that decide no send, each with its reason (``module:function``).
+                        "fuzzlab/proxy/session_capture.py", "fuzzlab/tools/spider.py",
+                        "fuzzlab/tools/fetcher.py", "fuzzlab/tools/browserexec.py")
 HOST_COMPARE_ALLOWED = {
+    # each is a deny-only gate (a host scope that refuses, never admits a session) or
+    # a filter of what is adopted; where a session goes is decided by origin elsewhere
+    "fuzzlab/session/manager.py:prepare":
+        "the seam's host scope gate (refuses); the session is applied by origin after",
+    "fuzzlab/session/manager.py:ensure":
+        "the host scope gate (refuses a login outside scope); bases checked by origin",
+    "fuzzlab/session/manager.py:authorize":
+        "refuses a retarget to another host (deny only); origins checked after",
     "fuzzlab/session/manager.py:auth_endpoints":
         "lists recorded endpoints by host for display; never a send decision",
     "fuzzlab/session/manager.py:_states_on_host":
         "selects the sessions a retargeted request may carry, to refuse (deny only)",
+    "fuzzlab/session/manager.py:_jar_cookies":
+        "which jar cookies the session carries (cookie domain match); sent by origin",
+    "fuzzlab/session/manager.py:parse_auth_origins":
+        "--auth-origin validation: an origin whose host is out of scope is refused",
+    "fuzzlab/session/browserlogin.py:filter_storage_state":
+        "which jar cookies a browser context adopts (domain match); sent by origin "
+        "(the route's cookie_scope)",
+    "fuzzlab/session/browserlogin.py:cookie_ok":
+        "filter_storage_state's cookie-domain predicate (same reason)",
+    "fuzzlab/greybox/greybox_cli.py:_cookie_for":
+        "builds the scope list; the cookie goes by cookie_origins",
     "fuzzlab/proxy/session_capture.py:_note_origin":
         "keeps only the capture host's origins (narrows; deny only)",
+    "fuzzlab/tools/spider.py:_in_scope":
+        "the crawl's request scope (BUG-0050/0123), not where the session goes "
+        "(cookie_scope / header_scope by origin)",
+    "fuzzlab/tools/spider.py:_start_browser":
+        "a loopback start chooses the launch's resolver rules (scope), not a session",
 }
+#: Calls whose result is a host (``canonical_host`` and the crawler's ``_norm_host``).
+_HOST_CALLS = {"canonical_host", "_norm_host", "_canonical_host"}
+#: Calls that change a value's case or whitespace, never what host it names (R4).
+_SEE_THROUGH = {"lower", "casefold", "upper", "strip", "lstrip", "rstrip"}
 
 
-def _hostish(node) -> bool:
-    """``X.hostname``, ``canonical_host(...)``, or either inside ``(... or "")``."""
+def _strip(node):
+    """``node`` without the case/whitespace/str() calls around it (R4)."""
+    while isinstance(node, ast.Call):
+        f = node.func
+        if isinstance(f, ast.Attribute) and f.attr in _SEE_THROUGH:
+            node = f.value
+        elif isinstance(f, ast.Name) and f.id == "str" and len(node.args) == 1:
+            node = node.args[0]
+        else:
+            break
+    return node
+
+
+def _hostish(node, tainted=frozenset()) -> bool:
+    """A host: ``X.hostname``, a host-returning call, a name or ``self`` attribute
+    assigned from one, or any of those inside ``(... or "")``, an f-string or a
+    case/whitespace/str() call (R4)."""
+    node = _strip(node)
     if isinstance(node, ast.BoolOp):
-        return any(_hostish(v) for v in node.values)
-    if isinstance(node, ast.Attribute) and node.attr == "hostname":
-        return True
+        return any(_hostish(v, tainted) for v in node.values)
+    if isinstance(node, ast.JoinedStr):
+        return any(isinstance(v, ast.FormattedValue) and _hostish(v.value, tainted)
+                   for v in node.values)
+    if isinstance(node, ast.Attribute):
+        if node.attr == "hostname":
+            return True
+        return isinstance(node.value, ast.Name) and node.value.id == "self" and \
+            f"self.{node.attr}" in tainted
+    if isinstance(node, ast.Name):
+        return node.id in tainted
     if isinstance(node, ast.Call):
         f = node.func
         name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-        return name == "canonical_host"
+        return name in _HOST_CALLS
     return False
 
 
-def host_compare_offenders(source: str, module: str) -> list[str]:
-    """``==``/``!=`` comparisons with a hostname on either side, by function, outside
-    `HOST_COMPARE_ALLOWED` (PA-0134: a send decision compares origins, never hosts)."""
-    tree = ast.parse(source)
-    out = []
+def _tainted_names(tree) -> frozenset:
+    """Names and ``self.`` attributes assigned from a host (to a fixed point)."""
+    tainted: set[str] = set()
+    while True:
+        before = len(tainted)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None \
+                    and _hostish(node.value, frozenset(tainted)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for t in targets:
+                    if isinstance(t, ast.Name):
+                        tainted.add(t.id)
+                    elif isinstance(t, ast.Attribute) and \
+                            isinstance(t.value, ast.Name) and t.value.id == "self":
+                        tainted.add(f"self.{t.attr}")
+        if len(tainted) == before:
+            return frozenset(tainted)
+
+
+def _host_compares(tree):
+    """``(function, line)`` of every ``==``/``!=``/``in``/``not in`` with a host on
+    either side (R4)."""
+    tainted = _tainted_names(tree)
+    ops = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for node in ast.walk(fn):
-            if not isinstance(node, ast.Compare) or \
-                    not any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops):
-                continue
-            if any(_hostish(side) for side in [node.left, *node.comparators]):
-                key = f"{module}:{fn.name}"
-                if key not in HOST_COMPARE_ALLOWED:
-                    out.append(f"{key}:{node.lineno}")
-    return sorted(set(out))
+            if isinstance(node, ast.Compare) and \
+                    any(isinstance(op, ops) for op in node.ops) and \
+                    any(_hostish(side, tainted)
+                        for side in [node.left, *node.comparators]):
+                yield fn.name, node.lineno
+
+
+def host_compare_offenders(source: str, module: str) -> list[str]:
+    """Host comparisons outside `HOST_COMPARE_ALLOWED` (PA-0134: a send decision
+    compares origins, never hosts)."""
+    return sorted({f"{module}:{fn}:{line}" for fn, line in _host_compares(ast.parse(source))
+                   if f"{module}:{fn}" not in HOST_COMPARE_ALLOWED})
 
 
 def test_no_session_send_decision_compares_hosts():
@@ -848,13 +1066,8 @@ def test_no_session_send_decision_compares_hosts():
 def test_every_host_compare_allowance_is_still_used():
     used = set()
     for module in SESSION_SEND_MODULES:
-        tree = ast.parse((ROOT / module).read_text())
-        for fn in ast.walk(tree):
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-                    isinstance(n, ast.Compare) and any(
-                        _hostish(s) for s in [n.left, *n.comparators])
-                    for n in ast.walk(fn)):
-                used.add(f"{module}:{fn.name}")
+        used |= {f"{module}:{fn}" for fn, _line in
+                 _host_compares(ast.parse((ROOT / module).read_text()))}
     assert set(HOST_COMPARE_ALLOWED) <= used
 
 
@@ -864,6 +1077,14 @@ def test_every_host_compare_allowance_is_still_used():
     ("def nav(current, session_host):\n"
      "    if (urlparse(current).hostname or '') != session_host:\n        raise X\n"),
     "def probe(url, host):\n    return urlparse(url).hostname == host\n",
+    # R4 (review A-M4): case calls, str(), an aliased name, membership, an attribute
+    "def a(t, b):\n    return (t.hostname or '').lower() == (b.hostname or '').lower()\n",
+    "def b(u, h):\n    return str(urlparse(u).hostname).casefold() == h\n",
+    "def c(u, h):\n    host = urlparse(u).hostname or ''\n    return host == h\n",
+    "def d(self, u):\n    host = urlparse(u).hostname\n    return host in self._scope\n",
+    "def e(self, u):\n    return f'{urlparse(u).hostname}:1' not in self._scope\n",
+    ("class S:\n    def l(self, u):\n        self._run_host = urlparse(u).hostname\n"
+     "    def m(self, h):\n        return h != self._run_host\n"),
 ])
 def test_the_host_compare_guard_catches_synthetic_offenders(src):
     assert host_compare_offenders(src, "rogue.py") != []
@@ -883,3 +1104,217 @@ def test_an_anonymous_out_of_origin_request_may_still_be_edited_on_its_origin(ap
     mgr.ensure("127.0.0.1", "user", a.base, operator=True)
     _get(_client(mgr, plugins=_Retarget(b.base + "x?edited=1")), b.base + "x")
     assert b.requests[-1][1] == "/x?edited=1" and not b.got_session()
+
+
+# --- R3: the login handshake stays on the login's anchors -----------------------------
+def test_a_form_action_on_another_port_is_refused_with_the_advice(apps):
+    """R3 (review A-M3): an in-scope host on another port is no longer a credential
+    destination; B's login form never receives the password."""
+    a, b = apps
+    a.pages["/login"] = (200, LOGIN_FORM.replace("action='/login'",
+                                                 f"action='{b.base}login'").encode(), [])
+    mgr = _mgr()
+    with pytest.raises(SessionAuthError, match=f"--auth-origin http://127.0.0.1:{b.port}"):
+        mgr.ensure("127.0.0.1", "user", a.base, operator=True)
+    assert b.login_posts == 0 and b.requests == []
+
+
+def test_a_basic_login_whose_base_redirects_to_another_port_sends_it_nothing():
+    """R3: the Basic header is never carried by a hop the login may not take."""
+    import base64
+    good = "Basic " + base64.b64encode(f"{USER}:{PASSWORD}".encode()).decode()
+    a, b = _App(basic=True), _App()
+    a.redirects["/"] = b.base + "home"
+    try:
+        with pytest.raises(SessionAuthError, match="--auth-origin"):
+            _mgr().ensure("127.0.0.1", "user", a.base, operator=True)
+        assert any(r[3] == good for r in a.requests)          # the base was challenged
+    finally:
+        a.close()
+        b.close()
+    assert b.requests == []
+
+
+def test_the_post_login_check_keeps_the_header_inside_the_sessions_origins():
+    """R3's second layer: `_verify_authenticated` carries the session's header only to
+    its origins, even to an origin a login may reach (the https upgrade)."""
+    class Basic:
+        def __init__(self):
+            self.log = []
+
+        def get(self, url, headers=None, allow_redirects=True):
+            self.log.append((url, dict(headers or {})))
+            if (headers or {}).get("Authorization"):
+                return FetchResponse(302, {"Location": "https://lab.example/home"}, "")
+            return FetchResponse(401, {"WWW-Authenticate": 'Basic realm="x"'}, "")
+
+        def post(self, *a, **k):
+            raise AssertionError("no form")
+
+        def cookies(self):
+            return {}
+    web = Basic()
+    mgr = SessionManager(_Creds(), scope_hosts=["lab.example"], fetch_factory=lambda: web)
+    with pytest.raises(SessionAuthError, match="not one of its origins"):
+        mgr.ensure("lab.example", "user", "http://lab.example/")
+    assert not [u for u, h in web.log if u.startswith("https:")]
+
+
+@pytest.mark.parametrize("target,ok", [
+    ("http://h:8080/login", True),                    # the base's own origin
+    ("https://h/login", True),                        # its https upgrade, default port
+    ("https://h:8080/login", True),                   # ... or the same port
+    ("https://h:8443/login", False),                  # an upgrade to another port
+    ("http://h:9090/login", False),                   # another port of an in-scope host
+    ("http://other.h/login", False),                  # another in-scope host
+    ("http://sso.h:9/login", True),                   # an authorised auth origin
+])
+def test_the_login_anchors_are_origins(target, ok):
+    mgr = SessionManager(None, scope_hosts=["h", "other.h"], auth_origins=["http://sso.h:9"])
+    assert mgr._credential_destination_ok(target, "http://h:8080/app/") is ok
+
+
+def test_after_a_login_the_origins_are_the_base_and_the_auth_origins(apps):
+    a, b = apps
+    state = _mgr(auth_origins=[b.base]).ensure("127.0.0.1", "user", a.base, operator=True)
+    assert state.origins <= origin_scope(a.base, b.base)
+
+
+# --- R5: --auth-origin ----------------------------------------------------------------
+@pytest.fixture
+def no_config(monkeypatch):
+    from fuzzlab.core import config
+    monkeypatch.setattr(config, "load_config", lambda: {"scope_hosts": []})
+
+
+def test_auth_origin_values_are_bare_in_scope_origins():
+    from fuzzlab.session.manager import parse_auth_origins
+    assert parse_auth_origins(["http://localhost:9/", "https://h"], ["localhost", "h"]) == [
+        "http://127.0.0.1:9", "https://h:443"]
+    for bad in ("http://h:9/sso", "http://h:9?x=1", "ftp://h:9", "http://u:p@h:9", "h:9",
+                "http://h:99999"):
+        with pytest.raises(ValueError, match="bare origin|not an origin"):
+            parse_auth_origins([bad], ["h"])
+    with pytest.raises(ValueError, match="not in scope"):
+        parse_auth_origins(["http://elsewhere:9"], ["h"])
+
+
+def test_the_crawl_takes_auth_origins_and_rejects_bad_ones(no_config, capsys):
+    from fuzzlab.tools.spider import parse_args
+    args = parse_args(["--start", "http://127.0.0.1:3000/", "--auth-origin",
+                       "http://127.0.0.1:3001"])
+    assert args.auth_origin == ["http://127.0.0.1:3001"]
+    for bad in ("http://127.0.0.1:3001/app", "http://elsewhere.example:1"):
+        with pytest.raises(SystemExit):
+            parse_args(["--start", "http://127.0.0.1:3000/", "--auth-origin", bad])
+        assert "--auth-origin" in capsys.readouterr().err
+    assert "--auth-origin" in __import__("fuzzlab.tools.spider", fromlist=["x"]) \
+        .build_parser().format_help()
+
+
+def test_auto_takes_auth_origins_and_rejects_bad_ones_before_any_side_effect(
+        no_config, tmp_path, monkeypatch, capsys):
+    from fuzzlab.harness import auto_cli
+    from tests.test_auto import GT_DIR, AutoSender
+    got = []
+
+    def make(base, identity=None, **kw):
+        got.append(kw)
+        return AutoSender()
+    monkeypatch.setattr(auto_cli, "make_probe_sender", make)
+    args = ["--base-url", "http://127.0.0.1:8080", "--spider-db", str(tmp_path / "n.db"),
+            "--ground-truth", GT_DIR, "--points", "ground-truth", "--authorized"]
+    for bad, why in (("http://127.0.0.1:3001/app", "bare origin"),
+                     ("http://elsewhere.example:1", "not in scope")):
+        with pytest.raises(SystemExit):
+            auto_cli.main([*args, "--store", str(tmp_path / "bad.db"), "--auth-origin", bad])
+        assert why in capsys.readouterr().err
+    assert not (tmp_path / "bad.db").exists() and got == []
+    assert auto_cli.main([*args, "--store", str(tmp_path / "u.db"), "--auth-origin",
+                          "http://127.0.0.1:3001/"]) == 0
+    assert got == [{"auth_origins": ["http://127.0.0.1:3001"]}]
+    assert "--auth-origin" in auto_cli.build_parser().format_help()
+
+
+def test_greybox_rejects_a_bad_auth_origin_before_any_side_effect(no_config, tmp_path,
+                                                                 capsys):
+    from fuzzlab.greybox import greybox_cli
+    with pytest.raises(SystemExit):
+        greybox_cli.main(["--base-url", "http://127.0.0.1:3000/", "--store",
+                          str(tmp_path / "u.db"), "--authorized", "--identity", "user",
+                          "--auth-origin", "http://elsewhere.example:1"])
+    assert "not in scope" in capsys.readouterr().err
+    assert not (tmp_path / "u.db").exists()
+    assert "--auth-origin" in greybox_cli.build_parser().format_help()
+
+
+def test_session_print_takes_auth_origins(apps, monkeypatch, capsys):
+    from fuzzlab.session import cli
+    a, b = apps
+    monkeypatch.setattr(cli, "load_config", lambda: {"scope_hosts": []})
+    monkeypatch.setattr(cli.CredentialStore, "open", classmethod(lambda c, cfg: _creds()))
+    assert cli.main(["print", "--host", "127.0.0.1", "--identity", "user", "--base-url",
+                     a.base, "--auth-origin", b.base + "p"]) == 2
+    assert "bare origin" in capsys.readouterr().out and a.requests == []
+    assert cli.main(["print", "--host", "127.0.0.1", "--identity", "user", "--base-url",
+                     a.base, "--auth-origin", b.base.rstrip("/")]) == 0
+    assert capsys.readouterr().out.startswith("Cookie: sid=")
+
+
+def test_the_builders_hand_auth_origins_to_the_manager(no_config, monkeypatch):
+    from fuzzlab.core import credentials
+    from fuzzlab.tools.authhttp import make_session_manager
+    from fuzzlab.tools.probesender import make_probe_sender
+    monkeypatch.setattr(credentials.CredentialStore, "open",
+                        classmethod(lambda c, cfg: _creds()))
+    sso = ["http://127.0.0.1:3001"]
+    assert make_session_manager("http://127.0.0.1:3000/", auth_origins=sso) \
+        ._auth_origins == set(sso)
+    assert make_probe_sender("http://127.0.0.1:3000/", "user", auth_origins=sso) \
+        ._manager._auth_origins == set(sso)
+
+
+def test_adopt_adds_the_operators_auth_origins():
+    from fuzzlab.proxy.session_capture import SessionCapture
+    mgr = SessionManager(None, scope_hosts=[], auth_origins=["http://127.0.0.1:3001"])
+    cap = SessionCapture("127.0.0.1", "user")
+    cap.observe_response(_LOGIN_RESP, url="http://127.0.0.1:8080/login")
+    assert cap.adopt_into(mgr).origins == frozenset(
+        {"http://127.0.0.1:8080", "http://127.0.0.1:3001"})
+
+
+# --- R7: what authorize treats as carrying the session -------------------------------
+def test_a_retarget_carrying_an_edited_session_value_is_refused(apps):
+    """R7 (review A-S1): containment, not equality: a plugin that appends to the cookie
+    (``sid=<v>'OR1``) and retargets to another port still carries the session."""
+    a, b = apps
+    mgr = _mgr()
+    state = mgr.ensure("127.0.0.1", "user", a.base, operator=True)
+    sid = state.cookies["sid"]
+
+    class Edit:
+        def on_request(self, request):
+            request.url = b.base + "x"
+            request.headers["Cookie"] = f"sid={sid}'OR1"
+            return request
+
+        def on_response(self, request, response):
+            pass
+    with pytest.raises(SessionAuthError, match="not one of the session's"):
+        _get(_client(mgr, plugins=Edit()), a.base + "x")
+    assert b.requests == []
+
+
+# --- R9: the https floor before the origin rule ---------------------------------------
+def test_an_https_session_refuses_plain_http_even_on_another_port():
+    """R9 (review A-N1): an https-only session's plain-http request to another port of
+    its host -- which would only go anonymously -- is still refused loudly (BUG-0098's
+    floor runs first): fails closed, never silently sent."""
+    mgr = SessionManager(None, scope_hosts=["lab.example"])
+    mgr._state[("lab.example", "user")] = SessionState(
+        "lab.example", "user", kind="cookie", cookies={"s": "SECRET-0123456789"},
+        valid=True, secure_only=True, origins=origin_scope("https://lab.example/"))
+    req = Request("GET", "http://lab.example:8080/x", identity="user")
+    with pytest.raises(SessionAuthError, match="plain http"):
+        mgr.prepare(req, "user")
+    assert "Cookie" not in req.headers

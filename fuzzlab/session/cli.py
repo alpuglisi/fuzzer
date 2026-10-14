@@ -41,6 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--base-url", required=True,
                     help="the app's URL; the session is printed only for one of its own "
                          "origins (FR-SESS-20)")
+    from fuzzlab.session.manager import AUTH_ORIGIN_HELP
+    pr.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
+                    help=AUTH_ORIGIN_HELP)
     return parser
 
 
@@ -60,7 +63,13 @@ def main(argv: list[str]) -> int:
         scope = list(cfg.get("scope_hosts", []))
         if args.host not in scope:
             scope.append(args.host)
-        mgr = SessionManager(store, scope_hosts=scope)
+        from fuzzlab.session.manager import parse_auth_origins
+        try:
+            auth_origins = parse_auth_origins(args.auth_origin, scope)
+        except ValueError as exc:
+            print(f"usage error: {exc}")
+            return 2
+        mgr = SessionManager(store, scope_hosts=scope, auth_origins=auth_origins)
         try:
             # every header the session sends: a browser login has a bearer AND the
             # cookie its app set (BUG-0132), and a server-rendered page reads the cookie

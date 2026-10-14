@@ -91,6 +91,31 @@ Newest first.
   SPA capture, forms phase 4, and the new `tests/test_session_origin_scope.py` with 40
   tests): **1421 passed, 2 xfailed, 0 skipped** with `FUZZLAB_REQUIRE_BROWSER=1`. The
   full suite is the coordinator's run.
+- Review round 1 of 0046b77 (reviewers A and B, AGREE-with-changes; reconciled fix list
+  R1-R9, D40; a follow-up commit on the same branch, 2026-10-14):
+  - **R3 (A-M3):** `_credential_destination_ok` now checks `_login_anchors` (the base
+    origin, its https upgrade on the same host at the default or the same port,
+    `auth_origins`); the in-scope-host and any-port-upgrade clauses are gone (they also
+    widened O1's origins). `_verify_authenticated` passes `session_origins`. A refused
+    post-login redirect warns. Supersedes this entry's "login handshake residual".
+  - **R5 (D-a):** `parse_auth_origins` / `AUTH_ORIGIN_HELP`; `--auth-origin` on `session
+    print` (and crawl, auto, greybox-run: CC-CRAWL-0026, CC-FUZZ-0080);
+    `tools/authhttp.py` threads `auth_origins` through `_build_parts`,
+    `make_session_manager`, `make_auth_with_isolation` (`scope_hosts_for`); every advice
+    names the flag; `adopt` unions the manager's `auth_origins` (A-N2).
+  - **R6 (B-S1, A-S3):** `prepare` records `request.session_decision`; `session_note`
+    is removed (it recomputed after the send).
+  - **R7 (A-S1):** `_carries` by containment of each secret value.
+  - **R8/R9:** BUG-0134's appended review section; FR-SESS-20 states the https floor on
+    other-port http sends.
+  - Mutation checks (each reverted temporarily, restored): R3a (the in-scope any-port
+    clause restored) fails 5 tests, including the AST guard; R3b (`_verify_authenticated`
+    without `session_origins`) fails its test; R4 (guard without see-through, name
+    taint or membership) fails 5 synthetic offenders. R1/R2: see CC-CRAWL-0026.
+  - Effectiveness (review round 1): the related suites (as in this entry's
+    effectiveness, plus `test_auto_cli_side_effects.py`; `tests/test_session_origin_scope.py`
+    now has 69 tests): **1464 passed, 2 xfailed, 0 skipped** with
+    `FUZZLAB_REQUIRE_BROWSER=1`. The full suite is the coordinator's run.
 
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:

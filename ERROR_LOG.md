@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — BUG-0134's first fix still leaked in the browser and the login (fixed in review round 1, BUG-0134/PA-0134)
+- **Symptom:** reviewer A, live in real Chromium: a redirected navigation landing on another port was answered under A's URL, so B's script read A's `document.cookie` / `localStorage`; `route.fetch` stored B's `Set-Cookie` in the shared jar (replacing A's `sid`); the login still accepted an in-scope host on any port (and an https upgrade to any port).
+- **Root cause:** the first fix withheld request headers only, while the browser shares a jar and storage with every document it loads; the login's anchor kept FR-SESS-12's host-level clause.
+- **Remediation:** other-origin documents and WebSockets aborted; other-origin subresources fetched through a cookie-less request context with `Set-Cookie` stripped; login anchors are origins (`--auth-origin` added). See BUG-0134's "Review round 1" section.
+- **Status:** Fixed (real Chromium and real loopback servers; mutation-checked)
+
 ## 2026-10-14 — Session manager: a session was sent to every port of its host (fixed, BUG-0134/PA-0134)
 - **Symptom:** on a loopback lab, Juice Shop's session cookie and bearer (`127.0.0.1:3000`) were attached to requests to bWAPP (`:8090`) and any other port of `127.0.0.1` the crawl or a probe reached; a request there could log in there with the host's credential; another app's login page logged the session out; greybox and an any-port browser crawl did the same (BUG-0132 review, reviewer A S2).
 - **Root cause:** the session's send scope was its storage key's host, decided by hostname comparisons at each carrier (`prepare`, `ensure`, `authorize`, `observe`, `_navigate(session_host=)`, `header_scope_for`, greybox, the breakers' listeners, `is_auth_endpoint`), kept as a "stated exception" after PA-0123 made scope an origin.

@@ -20,6 +20,9 @@ Newest first.
   - [x] FR-PROXY-9 amended in place — done
 - Effectiveness (assessed 2026-10-14): the capture tests pass; the prepare mutation
   (CC-SESS-0023) also fails the adopted-capture test.
+- Review round 1 (2026-10-14; R5, A-N2): `SessionManager.adopt` unions the manager's
+  `auth_origins` into an adopted capture's origins
+  (`tests/test_session_origin_scope.py::test_adopt_adds_the_operators_auth_origins`).
 
 ### CC-PROXY-0022 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under

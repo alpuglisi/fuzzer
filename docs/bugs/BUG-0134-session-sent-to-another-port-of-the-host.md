@@ -228,3 +228,90 @@ for):
 | `tools/browserexec` (M6) | operator storage headers, no session | not affected |
 | `labgen/*_oracle.py`, `labgen/identity_session.py` | a third-party tool's cookie for the one URL it is run against | not this class (no session manager state) |
 | `session/browserlogin.filter_storage_state` | jar cookies by host | **kept**: scope filter of what is adopted; where it is sent is O8 |
+
+## Review round 1 (added in review, 2026-10-14)
+Reviewers A and B (AGREE-with-changes; reviewer A confirmed two leaks live in real
+Chromium). The reconciled round-2 fix list R1–R9 is built in the follow-up commit
+(CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023 review amendments). This
+section supersedes the rows and the analysis above where they disagree.
+
+### What the first fix still let through (added in review)
+- **A-M1, cross-origin documents.** The first fix answered a redirected navigation that
+  landed on another origin with the landing response itself, so B's page ran **under
+  A's URL**: its script read A's `document.cookie` and `localStorage` and could send
+  them to a relative URL (that is, to A, logged in), and its relative links and forms
+  were filed under A. More generally, any document of another origin loaded in the
+  authenticated context sees the port-agnostic jar. **Fixed (R1):** in an
+  authenticated context every document request (navigation, top-level or frame) and
+  every redirect landing on an in-scope origin outside the session's is aborted, and
+  so is every such WebSocket; the crawl records the URL as skipped and extracts
+  nothing (no static fallback).
+- **A-M2, the shared jar is written.** `route.fetch` and the context's request client
+  store the answer's `Set-Cookie` in the context jar, so B's `sid=FROM_B` replaced A's
+  cookie, and the empty-`Cookie` trick only covered sending. **Fixed (R2):** withheld
+  subresource fetches (the request and every hop) go through one dedicated cookie-less
+  `playwright.request.new_context()` per guard (no storage; replaced once it holds a
+  cookie) and are fulfilled with `Set-Cookie` removed.
+- **A-M3, the login handshake.** `_credential_destination_ok` admitted an in-scope host
+  on **any** port and an https upgrade to **any** port, so a login could send the
+  password, the login fetcher's jar and a Basic header to another app, and O1 then
+  put that origin into the session's origins. **Fixed (R3):** the login's anchors are
+  the base origin, its https upgrade on the same host at the default or the same port,
+  and `auth_origins`; `_verify_authenticated` carries the header only to the session's
+  origins; a refused post-login redirect warns. Every refusal names `--auth-origin`
+  (R5).
+- **A-M4, the guard.** It missed `.lower()`, aliased names and `in`. **Fixed (R4).**
+- **A-S1** `_carries` compared whole values (an appended `'OR1` escaped it): now by
+  containment (R7). **B-S1 / A-S3** the decision is recorded on the request by
+  `prepare` (R6), never recomputed after the send.
+
+### Added sweep rows (added in review)
+| Site | What it decided | Disposition |
+| --- | --- | --- |
+| `navguard` route, documents and redirect landings on another origin | loaded (first fix: the landing answered under the first URL) | **fixed** (R1): aborted; the crawl skips them, extracts nothing, no static fallback |
+| `navguard` route, `route.fetch` / `context.request` for a withheld request | sent with an empty Cookie, but the answer's `Set-Cookie` written into the shared jar | **fixed** (R2): one cookie-less request context per guard; `Set-Cookie` stripped |
+| `navguard` WebSockets on another origin (authenticated) | connected by the browser with its jar (a stated residual in the first fix) | **fixed** (R1): never connected, counted |
+| `manager._credential_destination_ok` (scope and https-upgrade clauses) | an in-scope host on any port; an upgrade to any port | **fixed** (R3): origins only (`_login_anchors`) |
+| `manager._verify_authenticated` | the Basic/bearer header on any approved hop | **fixed** (R3): `session_origins` |
+| `manager._post_credentials` | a post-login redirect to another in-scope port was followed with the jar | **fixed** (R3): not followed; a warning names `--auth-origin` |
+| the login handshake residual row above | — | **superseded** by the three rows above |
+| the WebSocket residual row above | — | **superseded** (R1) |
+| static anonymous `requests.Session` jars (spider's static engine, `_isolated_submit`'s static copy, `RequestsProbeSender`, greybox) | port-agnostic jars of **anonymous** cookies | **residual, pinned**: they never hold session material (the probe senders clear theirs before every send; the spider's static session is never given the session) — `tests/test_session_origin_scope.py::test_an_authenticated_crawl_never_hands_the_session_to_another_port` asserts the spider's static jar holds no session value |
+
+### Recurrence review (amended in review)
+**BUG-0081 / PA-0082, BUG-0092 / PA-0093 and BUG-0097 / PA-0098** (credential
+destinations) are the **same root cause** as this bug, not only related: each fixed
+"where may a credential go" with a host-level allowance ("an in-scope host") that the
+session later inherited, and each kept the any-port clause. Together with BUG-0123 /
+PA-0123 the class is: *a secret's destination decided by host where it needed an
+origin*.
+
+### Prior-preventive-action failure analysis (amended in review)
+- **PA-0082 / PA-0093 / PA-0098** each enumerated the destination's allow rules
+  (origin, upgrade, in-scope host, `auth_origins`) and tested deny-before-allow, but
+  never asked whether "in-scope host" was too wide: their tests *asserted* the any-port
+  allowance as correct ("in-scope host, other port" was an allowed-destination case), so
+  the exception was pinned as a feature, not as a residual. PA-0134(2)'s "pin a stated
+  exception's exact extent and re-review it when a PA narrows the class" now covers it;
+  the old allowed cases are inverted in `test_session_credential_destination.py`.
+- **The first fix of this bug** repeated the failure one layer down: it narrowed the
+  request headers but not what the browser does with a document and a shared jar, and
+  its "residual, stated" WebSocket row was again prose. R1/R2 are verified in real
+  Chromium, and every remaining residual is pinned by a test (below).
+
+### Residuals and the tests that pin their extent (added in review)
+- **The key stays `(host, identity)`** (O13): one identity name on two apps of one host
+  is refused, never shared — `test_an_operator_base_on_another_port_is_refused_with_the_remedy`.
+- **The login's https upgrade** on the same host at the default or the same port is a
+  login anchor (not a session origin unless the login page is there) —
+  `test_the_login_anchors_are_origins`,
+  `test_the_post_login_check_keeps_the_header_inside_the_sessions_origins`.
+- **Anonymous static jars** (above) hold no session value —
+  `test_an_authenticated_crawl_never_hands_the_session_to_another_port`.
+- **An https-only session's plain-http request to another port** is refused loudly
+  (BUG-0098's floor runs before the origin rule; it fails closed) —
+  `test_an_https_session_is_never_applied_over_http` (`test_session_transport_binding.py`)
+  and `test_an_https_session_refuses_plain_http_even_on_another_port`.
+- **A plugin retarget** is judged by containment of any secret value, so a short
+  cookie value may refuse an unrelated retarget (fail-safe) —
+  `test_a_retarget_carrying_an_edited_session_value_is_refused`.

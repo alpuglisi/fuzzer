@@ -118,10 +118,12 @@ def test_a_fetcher_that_cannot_refuse_redirects_fails_closed():
 
 def test_the_destination_anchor_is_the_base_url_not_the_page():
     m = _mgr(_Web({}))
-    # same origin as the base, in scope, an upgrade: allowed
+    # same origin as the base, an upgrade: allowed
     assert m._credential_destination_ok("https://lab.example/x", "https://lab.example/")
-    assert m._credential_destination_ok("https://lab.example:9/x", "https://lab.example/")
     assert m._credential_destination_ok("https://lab.example/x", "http://lab.example/")
+    # another port of an in-scope host: refused since FR-SESS-20 (R3, BUG-0134)
+    assert not m._credential_destination_ok("https://lab.example:9/x",
+                                            "https://lab.example/")
     # an off-scope origin is never allowed, whatever page it came from
     assert not m._credential_destination_ok("https://attacker.example/c",
                                             "https://lab.example/")

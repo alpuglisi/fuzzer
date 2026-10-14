@@ -85,6 +85,8 @@ rewards) derives from it.
   `Probe.session` is `"anonymous (out of origin)"`, the attempt's features carry
   `session`, and the run counts it (`summary["session_out_of_origin"]`, the
   `greybox_session_out_of_origin` metric when non-zero, the CLI summary).
+  `greybox-run --auth-origin ORIGIN` (repeatable; bare, in scope) hands the session
+  manager the operator's auth origins (FR-SESS-20, R5).
 - **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
   to `core/store.py`'s `metric_series` table (component #2, CORE) once per
   attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
@@ -1735,11 +1737,14 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     `isolated_copy_logins()` is public (lane A's header breaker reads it).
   - **Out-of-origin sends** *(CC-FUZZ-0080, FR-SESS-20, BUG-0134).* A send the session
     manager made without the session because its origin is not one of the session's
-    (`SessionManager.session_note`) comes back with `Probe.session = "anonymous (out of
-    origin)"`; the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
+    comes back with `Probe.session = "anonymous (out of origin)"`, copied from the
+    decision `prepare` recorded on the request (`request.session_decision`, review
+    round 1 R6; never recomputed); the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
     such note on the verdict's `evidence["session"]` (confirming or inconclusive);
     `SeamProbeSender.session_out_of_origin` (the run's manager and every copy) becomes
-    `metrics["session_out_of_origin"]`, which `fuzzlab auto` prints.
+    `metrics["session_out_of_origin"]`, which `fuzzlab auto` prints. `fuzzlab auto
+    --auth-origin ORIGIN` (repeatable; bare, in scope; a usage error before any side
+    effect) goes to the run's session manager (FR-SESS-20, R5).
   - **Accepted false positives** (a real login form excluded: a missed finding, never a
     safety risk): Rails `/sessions/new`, Devise `/users/sign_in`, `/admin/login`,
     `/account/login`, `/my-account`, a login button valued `Save`, and bWAPP's
