@@ -547,14 +547,21 @@ class SqliTimingStrategy(ConfirmationStrategy):
 _HTML_TYPES = ("text/html", "application/xhtml+xml")
 
 
+def _header_value(probe, name: str) -> str:
+    return next((v for k, v in (probe.headers or {}).items() if k.lower() == name), "")
+
+
 def _renders_as_html(probe) -> bool:
     """Would a browser render this response as HTML? A ``text/html`` or
-    ``application/xhtml+xml`` content type, or none at all (a browser may sniff one).
+    ``application/xhtml+xml`` content type, or none at all (a browser may sniff one),
+    and not served as a download (``Content-Disposition: attachment``; reviewer B).
     A JSON, plain-text or other typed body never executes, however its text reads
-    (BUG-0127: Juice Shop's ``application/json`` error echoed a tag)."""
-    ctype = next((v for k, v in (probe.headers or {}).items()
-                  if k.lower() == "content-type"), "")
-    main = ctype.split(";", 1)[0].strip().lower()
+    (BUG-0127: Juice Shop's ``application/json`` error echoed a tag). Stated limits:
+    script-capable XML / SVG types are not rendered here (false negatives); an
+    untyped ``nosniff`` response is still treated as rendered."""
+    if _header_value(probe, "content-disposition").strip().lower().startswith("attachment"):
+        return False
+    main = _header_value(probe, "content-type").split(";", 1)[0].strip().lower()
     return main == "" or main in _HTML_TYPES
 
 
@@ -2042,12 +2049,12 @@ class _BrowserXssStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         if self._executor is None:
-            if candidate.location == "fragment":
-                # only a browser can place a fragment payload: without one this point
-                # was never tested, so it must not read as a negative (forms phase 3
-                # integration; inconclusive `unplaceable`, FR-FUZZ-47)
-                raise UnplaceableLocation("a fragment point is placed by the browser only")
-            return None                       # no browser available -> cannot confirm
+            # no browser: this mechanism observed nothing, at any location, so it gives
+            # no verdict -- never a negative (CC-FUZZ-0070; reviewer A: not only for a
+            # fragment point). Other mechanisms still decide the candidate.
+            raise UnplaceableLocation("no browser attached: browser XSS not observed"
+                                      if candidate.location != "fragment" else
+                                      "a fragment point is placed by the browser only")
         for payload in _xss_exec_payloads((token := _token())):
             obs = self._observe(candidate, payload, token)
             if obs.executed:
@@ -2071,7 +2078,8 @@ class DomXssStrategy(_BrowserXssStrategy):
 
     def _observe(self, candidate, payload, token):
         if candidate.location not in self._PLACEABLE:     # refuse, never relocate
-            return ExecObservation(False)
+            raise UnplaceableLocation(f"DOM XSS places query or fragment points only, "
+                                      f"not {candidate.location!r}")
         return self._executor.run(
             ExecRequest(url=candidate.url, param=candidate.param, value=payload,
                         location=candidate.location), token)
@@ -2083,8 +2091,8 @@ class StoredXssStrategy(_BrowserXssStrategy):
     mechanism = "browser-execution"
 
     def _observe(self, candidate, payload, token):
-        if not candidate.store_url:
-            return ExecObservation(False)     # need the store endpoint (source_url)
+        if not candidate.store_url:            # need the store endpoint (source_url)
+            raise UnplaceableLocation("stored XSS needs the candidate's store URL")
         store = StoreStep(url=candidate.store_url, param=candidate.store_param or candidate.param,
                           value=payload, method=candidate.store_method,
                           location=candidate.store_location)

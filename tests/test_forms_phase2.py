@@ -1240,6 +1240,7 @@ def test_greybox_places_header_probes_in_headers():
 
 
 def test_dom_xss_never_relocates_a_body_or_header_payload():
+    from fuzzlab.oracle.probe import UnplaceableLocation
     from fuzzlab.oracle.strategies import DomXssStrategy
     runs = []
 
@@ -1253,7 +1254,9 @@ def test_dom_xss_never_relocates_a_body_or_header_payload():
         cand = Candidate(url="http://h/a.php", param="p", method="POST", location=location,
                          category="xss")
         assert not strategy.applies(cand)
-        assert strategy.confirm(cand, _App(lambda r: _ok())) is None
+        # refused, never relocated: no verdict (reviewer A), and nothing ever loaded
+        with pytest.raises(UnplaceableLocation):
+            strategy.confirm(cand, _App(lambda r: _ok()))
     assert runs == []
     assert strategy.applies(Candidate(url="http://h/a.php", param="p", category="xss"))
 

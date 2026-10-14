@@ -3,6 +3,8 @@
 The BrowserExecutor is injected and faked, so these run without a real browser.
 """
 
+import pytest
+
 from fuzzlab.core.store import Store
 from fuzzlab.labels import contract
 from fuzzlab.oracle import Candidate, Oracle
@@ -34,8 +36,10 @@ def test_dom_xss_not_confirmed_when_page_escapes():
 
 
 def test_dom_xss_noop_without_a_browser():
-    # No executor injected -> cannot confirm (stays fail-closed), no crash.
-    assert DomXssStrategy(None).confirm(_dom_candidate(), sender=None) is None
+    # No executor injected -> no verdict (never a negative; reviewer A), no crash.
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    with pytest.raises(UnplaceableLocation, match="no browser"):
+        DomXssStrategy(None).confirm(_dom_candidate(), sender=None)
 
 
 def test_dom_xss_places_payload_in_fragment():
@@ -68,9 +72,11 @@ def test_stored_xss_stores_then_observes():
 
 
 def test_stored_xss_needs_store_endpoint():
-    # Without store_url there is nothing to plant -> not confirmed.
+    # Without store_url there is nothing to plant -> no verdict (reviewer A).
+    from fuzzlab.oracle.probe import UnplaceableLocation
     cand = Candidate(url="http://h/profile.php", param="bio", category="xss")
-    assert StoredXssStrategy(FakeBrowserExecutor()).confirm(cand, sender=None) is None
+    with pytest.raises(UnplaceableLocation, match="store URL"):
+        StoredXssStrategy(FakeBrowserExecutor()).confirm(cand, sender=None)
 
 
 class _NoReflect:

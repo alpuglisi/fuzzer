@@ -757,6 +757,9 @@ def _fake_playwright(monkeypatch) -> list:
         def add_init_script(self, s):
             pass
 
+        def expose_binding(self, name, fn):          # the sentinel (reviewers A, B)
+            pass
+
         def route(self, pattern, handler):
             pass
 

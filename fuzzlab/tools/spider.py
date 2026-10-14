@@ -228,6 +228,11 @@ class StorageManager:
         self.conn.close()
 
 
+def _covered(exc) -> bool:
+    """Did a click fail because another element covers the target (an overlay)?"""
+    return "intercepts pointer events" in str(exc)
+
+
 class LocalSpider:
     """Crawls a local site, optionally rendering JavaScript with a headless browser."""
 
@@ -351,7 +356,7 @@ class LocalSpider:
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "deletes_blocked", "forms_submitted",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
-            "submissions_over_cap", "clicks_dispatched"), 0)
+            "submissions_over_cap", "clicks_dispatched", "forms_label_changed"), 0)
 
     @staticmethod
     def _start_dir(url):
@@ -837,7 +842,13 @@ class LocalSpider:
         self._capture_source, self._capture_page = "submit", page_url
         self._delete_ok_for = context if explicit else None
         try:
-            how = self._click_vetted(page, selector)
+            how = self._click_vetted(page, selector, [
+                form.get("button") or "", form.get("button_aria") or "",
+                form.get("button_icons") or ""])
+            if how is None:
+                logging.info(f"SPA form on {page_url} not clicked: its button's labels "
+                             f"changed after the gate vetted them")
+                return False
             self.spa_counts["forms_submitted"] += 1
             logging.info(f"submitted the SPA form {form.get('button')!r} on {page_url}"
                          + (" (click dispatched: the button was covered)"
@@ -853,25 +864,39 @@ class LocalSpider:
             self._capture_source, self._capture_page = "passive", None
             self._delete_ok_for = None
 
-    def _click_vetted(self, page, selector):
+    def _click_vetted(self, page, selector, vetted):
         """Click the button the gate already vetted, exactly once (live-run fix). A
-        trial click (actionability only, nothing is clicked) comes first. If something
-        covers the button -- a first-visit welcome dialog, a cookie bar intercepting
-        pointer events -- ``Escape`` is pressed once and the trial repeated; if the button
-        is still covered, its own ``click()`` is run on the element (``clicks_dispatched``).
-        An overlay's own buttons are never clicked: their labels were never vetted.
-        Returns ``"clicked"`` or ``"dispatched"``."""
+        trial click (actionability only, nothing is clicked) comes first. Only if
+        something **covers** the button (Playwright: "intercepts pointer events") -- a
+        first-visit welcome dialog, a cookie bar -- is ``Escape`` pressed once and the
+        trial repeated; if it is still covered, its own ``click()`` is run on the element
+        (``clicks_dispatched``). A hidden, detached or never-actionable button raises
+        (not submittable): a user could not click it either. Right before the click the
+        button's labels are read again and must equal ``vetted`` (`spa.LABELS_JS`; an app
+        may re-render after Escape and reuse the marked node); otherwise nothing is
+        clicked (``forms_label_changed``). An overlay's own buttons are never clicked.
+        Returns ``"clicked"``, ``"dispatched"`` or None (labels changed)."""
         probe = min(self.timeout_ms, 5000)
+        dispatch = False
         try:
             page.click(selector, trial=True, timeout=probe)
-        except PlaywrightError:
+        except PlaywrightError as exc:
+            if not _covered(exc):
+                raise
             page.keyboard.press("Escape")
             try:
                 page.click(selector, trial=True, timeout=probe)
-            except PlaywrightError:
-                page.eval_on_selector(selector, "el => el.click()")
-                self.spa_counts["clicks_dispatched"] += 1
-                return "dispatched"
+            except PlaywrightError as again:
+                if not _covered(again):
+                    raise
+                dispatch = True
+        if list(page.eval_on_selector(selector, spa.LABELS_JS)) != list(vetted):
+            self.spa_counts["forms_label_changed"] += 1
+            return None
+        if dispatch:
+            page.eval_on_selector(selector, "el => el.click()")
+            self.spa_counts["clicks_dispatched"] += 1
+            return "dispatched"
         page.click(selector, timeout=self.timeout_ms)
         return "clicked"
 

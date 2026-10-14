@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3 review round; BUG-0128)
+- **Why:** reviewers A and B reviewed the phase 3 integration. B's must-fix was a gate
+  bypass: stripping `aria-hidden` text let a "Delete" button pass. A found browser XSS
+  still reading as a negative without a browser. A new navigation test exposed a
+  teardown hang shared by every browser user.
+- **What:**
+  - the SPA button gate removes only icon ligatures, refuses destructive glyphs,
+    dispatches only covered buttons, and re-reads labels right before the click
+    (CC-CRAWL-0019);
+  - the browser mechanisms give no verdict whenever they observe nothing; the driver
+    start is contained, with one launch retry; hits are recorded through a binding;
+    attachment responses are not rendered (CC-FUZZ-0073);
+  - BUG-0127's recurrence of BUG-0093 (PA-0094) is recorded;
+  - browser teardown closes pages before unrouting (BUG-0128, PA-0128,
+    CC-CRAWL-0020).
+
 ## 2026-10-14 (Juice Shop live run: BUG-0126, BUG-0127)
 - **Why:** the first live `fuzzlab auto --browser` run on Juice Shop aborted at the first
   browser check, missed the `#/search?q` DOM XSS, and confirmed a "reflected XSS" in a

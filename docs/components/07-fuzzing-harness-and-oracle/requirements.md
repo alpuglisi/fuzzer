@@ -1167,15 +1167,26 @@ rewards) derives from it.
 - **FR-FUZZ-48** *(the M6 browser executor on a real browser; `CC-FUZZ-0071`,
   2026-10-14, BUG-0126).* `PlaywrightBrowserExecutor` launches with the one Chromium
   launch configuration (`navguard.chromium_launch_kwargs`: the operator's
-  `PLAYWRIGHT_CHROMIUM_EXECUTABLE`, scoped args). A browser that cannot start is no
-  verdict from the browser mechanisms (`UnplaceableLocation`), remembered for the run:
-  never a crash, never a negative; other mechanisms still decide. After `load` the
-  sentinel is polled every 100 ms for up to `SETTLE_MS` (4 s), so a sink that a
-  single-page app renders after its own API calls is seen; a negative costs the full
-  window per payload.
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE`, scoped args). A browser or Playwright driver that
+  cannot start is no verdict from the browser mechanisms (`UnplaceableLocation`); after
+  `MAX_LAUNCH_FAILURES` (2) in a row it is remembered for the run: never a crash, never
+  a negative; other mechanisms still decide. The sentinel is a context binding, so a
+  hit is kept when the page navigates afterwards. After `load` the executor waits up
+  to `SETTLE_MS` (4 s), ending on the hit, so a sink that a single-page app renders
+  after its own API calls is seen; a page that closes under the wait is "not yet",
+  never an error. **Cost:** a negative waits the full window per payload, about 16 s
+  for an unconfirmed DOM candidate (4 payloads, a browser launched per probe); stated,
+  with one browser per candidate a possible later saving (CC-FUZZ-0073, reviewers A
+  and B). Without a browser the DOM and stored XSS strategies give no verdict at **any**
+  location, and an unplaceable DOM location or a stored candidate with no store URL is
+  no verdict too (CC-FUZZ-0073).
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
-    `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`
+    `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,
+    `tests/test_browser_scope.py::test_a_driver_that_cannot_start_is_no_verdict_too`,
+    `tests/test_browser_scope.py::test_browser_xss_without_a_browser_is_no_verdict_at_any_location`,
+    `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
+    `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -1358,9 +1369,12 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     `plaintext`, `template`). RCDATA is broken out of by its closing tag.
   - **Document type** *(amended in place, `CC-FUZZ-0072`, 2026-10-14, BUG-0127)*: a
     break-out confirms only in a response a browser renders as HTML (`text/html`,
-    `application/xhtml+xml`, or no Content-Type); a JSON, text or script echo never
+    `application/xhtml+xml`, or no Content-Type) and not served as a download
+    (`Content-Disposition: attachment`, CC-FUZZ-0073); a JSON, text or script echo never
     does (`tests/test_oracle_xss_structural.py::test_a_reflection_confirms_only_in_a_response_rendered_as_html`).
-    Stated false negative: script-capable `text/xml` / `image/svg+xml` responses.
+    Stated false negatives: script-capable `text/xml` / `application/xml` /
+    `image/svg+xml` responses. An untyped `nosniff` response is still treated as
+    rendered.
 
   Verified against the four lab XSS sink templates, each vulnerable and as its secure
   twin.

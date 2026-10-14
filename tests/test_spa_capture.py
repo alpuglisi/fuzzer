@@ -386,6 +386,20 @@ def test_the_button_is_refused_on_its_text_or_its_aria_label(label, aria, refuse
     assert (why is None) if refused is None else (refused in (why or "")), why
 
 
+@pytest.mark.parametrize("icons,refused", [
+    ("exit_to_app", False),                 # Juice Shop's login icon: not a verdict
+    ("delete", True), ("delete_forever", True), ("logout", True),
+    ("person search", False), ("", False),
+])
+def test_a_destructive_glyph_refuses_the_button_whatever_its_text(icons, refused):
+    """Reviewer B: icon ligatures are removed from the text, so a destructive glyph is
+    judged on its own (``<button><mat-icon>delete</mat-icon> Item 3</button>``)."""
+    form = _form(CONTACT["controls"], "Item 3")
+    form["button_icons"] = icons
+    why = spa.form_refusal(form, "contact", named=None) or ""
+    assert ("destructive button icon" in why) is refused, why
+
+
 def test_fillers_are_ours_and_a_password_never_a_real_one():
     from fuzzlab.tools.store_adapter import _FILLERS, _TEXT_FILLER, is_filler
     assert spa.filler("text") == _TEXT_FILLER and spa.filler("email") == _FILLERS["email"]
@@ -639,10 +653,16 @@ def test_icon_text_never_decides_a_button_label(monkeypatch, tmp_path):
         icons.close()
     clicked = {r[1] for r in icons.seen("POST", "/api/clicked/")}
     assert clicked == {"/api/clicked/signin", "/api/clicked/find"}
-    assert sp.spa_counts["forms_refused"] == 4    # account, leave, basket, icononly
+    # account, leave, basket, icononly; hidden, hidden2 (aria-hidden text is judged),
+    # rowdel (a destructive glyph) -- reviewer B
+    assert sp.spa_counts["forms_refused"] == 7
+    # visible to layout but never actionable and not covered: never dispatched
+    assert sp.spa_counts["forms_not_submittable"] >= 1
+    assert sp.spa_counts["clicks_dispatched"] == 0
     # the submission signature uses the cleaned label too
     labels = {json.loads(s)[1] for s in sp._submitted_sigs}
-    assert {"Log in", "Search", "Remove", "delete"} <= labels
+    assert {"Log in", "Search", "Remove", "delete", "Delete", "Delete item",
+            "Item 3"} <= labels
     assert not any("exit_to_app" in lab for lab in labels)
 
 
@@ -665,6 +685,10 @@ def test_a_covered_button_is_still_clicked_exactly_once(monkeypatch, tmp_path):
     assert "/api/overlay-dismissed" not in posts             # never the overlay's button
     assert sp.spa_counts["clicks_dispatched"] == 1
     assert sp.spa_counts["forms_submitted"] == 2 and sp.spa_counts["forms_refused"] == 1
+    # the labels are read again right before the click: a re-rendered node is not
+    # clicked (reviewer B)
+    assert "/api/submit/swap" not in posts
+    assert sp.spa_counts["forms_label_changed"] == 1
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
     assert stats["clicks_dispatched"] == 1
 

@@ -239,7 +239,8 @@ class HistorySpa(_Lab):
 
 _ICON_JS = r"""
 const routes = [{path:'signin'}, {path:'account'}, {path:'leave'}, {path:'basket'},
-                {path:'icononly'}, {path:'find'}];
+                {path:'icononly'}, {path:'find'}, {path:'hidden'}, {path:'hidden2'},
+                {path:'rowdel'}, {path:'invisible'}];
 const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
   'application/json'}, body: JSON.stringify(body)}).catch(() => {});
 const views = {
@@ -260,6 +261,16 @@ const views = {
   'icononly': "<div><input name='x'><button id='b'><mat-icon>delete</mat-icon></button></div>",
   // a Font Awesome icon and ordinary text: submitted
   'find': "<div><input name='y'><button id='b'><i class='fa fa-trash'></i> Search</button></div>",
+  // reviewer B: aria-hidden hides real text, it is not an icon -- both refused
+  'hidden': "<div><input name='h'><button id='b' aria-label='Item 3'>" +
+    "<span aria-hidden='true'>Delete</span></button></div>",
+  'hidden2': "<div><input name='h2'><button id='b'><span aria-hidden='true'>Delete</span>" +
+    " item</button></div>",
+  // a destructive glyph with neutral text: refused on the icon (fail closed)
+  'rowdel': "<div><input name='h3'><button id='b'><mat-icon>delete</mat-icon> Item 3" +
+    "</button></div>",
+  // shown but never actionable (not covered): not submittable, never dispatched
+  'invisible': "<div><input name='v'><button id='b' style='visibility:hidden'>Go</button></div>",
 };
 function render() {
   const name = location.hash.replace(/^#!?\/?/, '');
@@ -279,7 +290,7 @@ class IconSpa(_Lab):
 
 
 _OVERLAY_JS = r"""
-const routes = [{path:'signin'}, {path:'signin-stuck'}, {path:'danger'}];
+const routes = [{path:'signin'}, {path:'signin-stuck'}, {path:'danger'}, {path:'swap'}];
 const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
   'application/json'}, body: JSON.stringify(body)}).catch(() => {});
 const login = "<div class='lf'><input id='email' type='text'>" +
@@ -290,6 +301,8 @@ const views = {
   // the overlay ignores Escape: the dispatch path (another label: its own signature)
   'signin-stuck': login.replace('>Log in<', '>Sign in<'),
   'danger': "<div><input name='reason'><button id='b'>Delete account</button></div>",
+  // reviewer B: the app re-renders on Escape and the vetted node now reads otherwise
+  'swap': "<div><input name='topic'><button id='b'>Go</button></div>",
 };
 function render() {
   const name = location.hash.replace(/^#!?\/?/, '');
@@ -308,6 +321,12 @@ function render() {
   document.getElementById('dismiss').onclick = () => post('/api/overlay-dismissed', {});
   if (name !== 'signin-stuck')
     document.addEventListener('keydown', e => { if (e.key === 'Escape') ov.remove(); });
+  if (name === 'swap')
+    document.addEventListener('keydown', e => {
+      const x = document.getElementById('b');
+      if (e.key === 'Escape' && x && location.hash.endsWith('swap'))
+        x.textContent = 'Delete everything';
+    });
 }
 window.addEventListener('hashchange', () => {
   const old = document.getElementById('overlay'); if (old) old.remove(); render(); });

@@ -540,6 +540,9 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
         def add_init_script(self, s):
             pass
 
+        def expose_binding(self, name, fn):          # the sentinel (reviewers A, B)
+            pass
+
         def route(self, pattern, handler):
             routes.append((pattern, handler))
 

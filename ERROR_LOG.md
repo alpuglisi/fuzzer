@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Crawler/auditor/fuzzer: browser teardown hung while a page navigated (fixed, BUG-0128/PA-0128)
+- **Symptom:** a real-browser M6 test whose page navigates right after the payload fires hung in about 1 run in 9; a call trace showed `BrowserContext.unroute_all` never returning.
+- **Root cause:** `navguard.release` unrouted before the context's pages were closed, so a navigation's paused requests were still in flight and the driver never answered the interception change. All browser teardowns use `release`.
+- **Remediation:** `release` closes every page first, then unroutes. 80 runs with no hang (was 1 in 9). CC-CRAWL-0020. `docs/bugs/BUG-0128-browser-teardown-hangs-while-a-page-navigates.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Fuzzer: reflected XSS confirmed in a JSON response (fixed, BUG-0127/PA-0127)
 - **Symptom:** the live Juice Shop run confirmed `xss-reflected` on `/api/Challenges/?sort=`, whose `application/json` error echoes the value; no browser runs it.
 - **Root cause:** `ReflectedXssStrategy` parsed every response as HTML; the content type was an unstated precondition no fixture broke. The open-redirect meta-refresh check had the same gap.

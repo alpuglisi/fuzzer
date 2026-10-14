@@ -289,6 +289,7 @@ def test_the_audits_regex_reflection_never_confirms():
     ("text/html; charset=utf-8", True),
     ("application/xhtml+xml", True),
     (None, True),                                   # no type: a browser may sniff HTML
+    ("text/html; download", False),                 # served as an attachment (reviewer B)
 ])
 def test_a_reflection_confirms_only_in_a_response_rendered_as_html(ctype, confirmed):
     from fuzzlab.oracle.probe import Candidate, Probe
@@ -296,7 +297,9 @@ def test_a_reflection_confirms_only_in_a_response_rendered_as_html(ctype, confir
 
     class Echo:
         def send(self, url, param, value, timing=False, **kw):
-            headers = {"Content-Type": ctype} if ctype else {}
+            headers = {"Content-Type": ctype.replace("; download", "")} if ctype else {}
+            if ctype and ctype.endswith("; download"):
+                headers["Content-Disposition"] = 'attachment; filename="r.html"'
             return Probe(400, '{"error": "unknown column ' + value + '"}' if ctype and
                          "json" in ctype else "<html><body>" + value + "</body></html>",
                          headers=headers)

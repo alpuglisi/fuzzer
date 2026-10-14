@@ -270,10 +270,11 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
 
     ``form``: ``{"controls": [(name, kind)], "button": label, "button_aria": label,
     "action": url | None, "autocomplete": [..]}`` as `FORMS_JS` describes it --
-    ``button`` is the button's text with icon elements removed (``mat-icon``,
-    ``.material-icons``, ``material-symbols``, ``aria-hidden``, Font Awesome, ``svg``;
-    an icon-only button with no aria-label keeps its raw text), ``button_aria`` its
-    ``aria-label`` or ``title``; the button is refused when either is. ``named``: the routes the
+    ``button`` is the button's text with icon-ligature elements removed (``mat-icon``,
+    ``.material-icons``, ``material-symbols`` only, `_LABELS_FN`; an icon-only button
+    with no aria-label keeps its raw text), ``button_aria`` its ``aria-label`` or
+    ``title``; the button is refused when either is, or when ``button_icons`` names a
+    `DESTRUCTIVE_GLYPHS` glyph. ``named``: the routes the
     operator named (None or empty: every route). Refused: a route not named; a
     destructive, settings-like or transaction route, button label, action or control
     name; a form with ``<input type=file>``; a credential-change form
@@ -285,6 +286,10 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
         return f"route {route!r} not named by the operator"
     label = form.get("button") or ""
     aria = form.get("button_aria") or ""
+    glyph = next((g for g in (form.get("button_icons") or "").lower().split()
+                  if g in DESTRUCTIVE_GLYPHS), None)
+    if glyph:
+        return f"destructive button icon ({glyph!r})"
     # the button is refused when EITHER its visible text (icons removed) or its
     # aria-label / title is destructive, settings-like or a transaction (live-run fix)
     for where, text in (("route", "/" + normalise_route(route)), ("button", label),
@@ -340,10 +345,43 @@ def sensitive_control(name: str) -> bool:
     return is_sensitive_name(name)
 
 
+#: A button's labels as the gate judges them: ``[text, aria, icons]`` (live-run fix,
+#: reviewer B). ``text`` is the button's text with **icon-ligature** elements removed
+#: (``mat-icon``, ``.material-icons``, ``material-symbols``: their text is a glyph name,
+#: Juice Shop's ``exit_to_app``); nothing else is removed -- ``aria-hidden`` hides real
+#: text from assistive technology and is not an icon. An icon-only button with no
+#: aria-label keeps its raw text (fail closed). ``aria`` is ``aria-label`` or ``title``;
+#: ``icons`` the ligature names, judged against `DESTRUCTIVE_GLYPHS`.
+_LABELS_FN = r"""
+  const ICONS = 'mat-icon, .material-icons, [class*="material-symbols"]';
+  const squash = t => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  const buttonLabels = b => {
+    const aria = squash(b.getAttribute('aria-label') || b.getAttribute('title'));
+    if (b.tagName.toLowerCase() === 'input') return [squash(b.value), aria, ''];
+    const clone = b.cloneNode(true);
+    const icons = [...clone.querySelectorAll(ICONS)];
+    const glyphs = squash(icons.map(e => e.textContent).join(' '));
+    icons.forEach(e => e.remove());
+    const text = squash(clone.textContent);
+    return [text || (aria ? '' : squash(b.textContent)), aria, glyphs];
+  };
+"""
+
+#: ``el => [text, aria, icons]`` for one element: re-read right before a click, which
+#: must find the labels the gate vetted (an app may re-render and reuse the node).
+LABELS_JS = "el => {" + _LABELS_FN + "  return buttonLabels(el);\n}"
+
+#: Material glyph names whose button acts destructively whatever its text says
+#: (``<button><mat-icon>delete</mat-icon> Item 3</button>``): refused (fail closed).
+DESTRUCTIVE_GLYPHS = frozenset({
+    "delete", "delete_forever", "delete_outline", "delete_sweep", "logout",
+    "remove_circle", "remove_circle_outline", "remove_shopping_cart", "person_remove",
+    "power_settings_new", "no_accounts"})
+
 #: Finds the rendered page's forms and form-like containers (inputs with exactly one
 #: button), marks each control and button with ``data-fuzzlab-id`` and describes them.
 FORMS_JS = r"""
-(maxForms) => {
+(maxForms) => {""" + _LABELS_FN + r"""
   const BTN = 'button, input[type=submit], input[type=button], input[type=image]';
   const kindOf = el => {
     const tag = el.tagName.toLowerCase();
@@ -353,21 +391,6 @@ FORMS_JS = r"""
   const typed = el => !['hidden', 'submit', 'button', 'reset', 'image'].includes(kindOf(el));
   const shown = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const buttonOk = b => shown(b) && (b.getAttribute('type') || 'submit').toLowerCase() !== 'reset';
-  // live Juice Shop run: <button aria-label="Login"><mat-icon>exit_to_app</mat-icon> Log in
-  // </button> read as "exit_to_app Log in" (destructive "exit"). The label judged is the
-  // text with icon elements removed, plus aria-label / title; an icon-only button with
-  // neither keeps its raw text (fail closed: <button><mat-icon>delete</mat-icon></button>).
-  const ICONS = 'mat-icon, .material-icons, [class*="material-symbols"], ' +
-    '[aria-hidden="true"], i.fa, [class*="fa-"], svg';
-  const squash = t => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100);
-  const buttonLabels = b => {
-    const aria = squash(b.getAttribute('aria-label') || b.getAttribute('title'));
-    if (b.tagName.toLowerCase() === 'input') return [squash(b.value), aria];
-    const clone = b.cloneNode(true);
-    clone.querySelectorAll(ICONS).forEach(e => e.remove());
-    const text = squash(clone.textContent);
-    return [text || (aria ? '' : squash(b.textContent)), aria];
-  };
   const containers = [];
   for (const f of document.querySelectorAll('form')) containers.push(f);
   for (const b of document.querySelectorAll(BTN)) {
@@ -398,16 +421,16 @@ FORMS_JS = r"""
       ids.push(id);
       autocomplete.push(el.getAttribute('autocomplete') || '');
     });
-    let button = null, label = '', aria = '';
+    let button = null, label = '', aria = '', glyphs = '';
     if (submit) {
       button = `r${run}f${fi}b`;
       submit.setAttribute('data-fuzzlab-id', button);
-      [label, aria] = buttonLabels(submit);
+      [label, aria, glyphs] = buttonLabels(submit);
     }
     const action = c.tagName.toLowerCase() === 'form' && c.getAttribute('action')
       ? c.action : null;
     out.push({controls, ids, autocomplete, button: label, button_aria: aria,
-              button_id: button, action});
+              button_icons: glyphs, button_id: button, action});
   });
   return out;
 }

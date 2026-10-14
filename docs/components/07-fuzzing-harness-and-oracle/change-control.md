@@ -22,6 +22,61 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0073 — Forms phase 3 review: browser mechanisms give no verdict when they observe nothing; executor robustness (reviewers A, B) (2026-10-14)
+- Change:
+  - `oracle/strategies.py`:
+    - `_BrowserXssStrategy.confirm` raises `UnplaceableLocation` with no executor at
+      **any** location (it returned None, a negative, except on fragment points);
+    - `DomXssStrategy._observe` raises for a location it does not place, and
+      `StoredXssStrategy._observe` for a candidate with no store URL (both returned
+      `ExecObservation(False)`, a negative) (reviewer A, S1);
+    - `_renders_as_html` also refuses `Content-Disposition: attachment` (reviewer B,
+      nit 5; BUG-0127).
+  - `tools/browserexec.py`:
+    - the Playwright driver's start is inside the same containment as the launch
+      (reviewer A, S2);
+    - a launch failure is remembered only after `MAX_LAUNCH_FAILURES` (2) in a row
+      (reviewer A, N2);
+    - the sentinel is a context binding (`expose_binding`) recording into a
+      per-probe set, so a hit before a navigation is kept (reviewer B, 3);
+    - the wait pumps events and treats a page that went away as "not yet", never an
+      error (reviewer A, S3);
+    - the init script and `page.evaluate` polling are gone.
+- Impact:
+  - FR-FUZZ-48 and FR-FUZZ-39 amended in place.
+  - `oracle_unplaceable` (inconclusive, `unplaceable`) **rises** in runs without a
+    browser or without greybox sources, for xss and greybox-only categories. This is
+    accounting, not a sender regression: such points were wrongly recorded as checked
+    negatives before (reviewer B, 4; CC-FUZZ-0070).
+  - Query points are still placed by M5, so their verdicts are unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests:
+    - `tests/test_browser_scope.py::test_a_driver_that_cannot_start_is_no_verdict_too`,
+      `::test_browser_xss_without_a_browser_is_no_verdict_at_any_location`,
+      `::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
+      `::test_a_hit_before_the_page_navigates_is_kept` (real Chromium);
+    - `::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`
+      (now two launches);
+    - `tests/test_oracle_browser.py::test_dom_xss_noop_without_a_browser`,
+      `::test_stored_xss_needs_store_endpoint` and
+      `tests/test_forms_phase2.py::test_dom_xss_never_relocates_a_body_or_header_payload`
+      now expect `UnplaceableLocation`;
+    - an attachment case in `tests/test_oracle_xss_structural.py`;
+    - fake contexts gain `expose_binding`
+    — done
+  - [x] mutation check: 4 of 5 killed (no-executor None, store-URL negative, driver
+    unwrapped, no retry). **Survivor, stated:** a per-document hit record (hits cleared
+    on `framenavigated`) still passes the navigation test, 10 of 10 runs, even with
+    the page navigating the instant the payload runs. The navigation is routed through
+    the Python guard, and that round trip lets the wait see the hit before the new
+    document commits. The binding keeps hits across documents by construction; the test
+    proves the reviewer A property (a navigation under the wait never raises and the
+    verdict stands), not that a per-document record would lose a hit — done
+- Review: reviewers A and B, review round of the forms phase 3 integration.
+- Effectiveness (assessed 2026-10-14): verified offline on real Chromium.
+
 ### CC-FUZZ-0072 — Markup signals confirm only in a response rendered as HTML (BUG-0127) (2026-10-14)
 - Change:
   - `oracle/strategies.py`: `_renders_as_html(probe)` (`text/html`,

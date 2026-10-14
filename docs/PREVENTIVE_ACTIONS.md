@@ -1548,12 +1548,25 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A browser that cannot start is "no verdict"** (`UnplaceableLocation`), remembered
      for the run: never a crash, never a negative. (from BUG-0126)
 
-- **PA-0127** — Strengthens the BUG-0072 rule (observe the context, never assume it)
-  and `PA-0035`, after BUG-0127: a reflection in Juice Shop's `application/json` error
-  confirmed reflected XSS.
+- **PA-0127** — Strengthens `PA-0094` and `PA-0084`(2) (a recurrence of BUG-0093's
+  root cause one layer out), and the BUG-0072 rule, after BUG-0127: a reflection in
+  Juice Shop's `application/json` error confirmed reflected XSS. PA-0094 judged
+  containers inside a document; the response itself is the outermost container.
   1. **A confirmer states every precondition of its signal and checks each on the
      observed response.** A markup signal (an injected element, attribute or script
-     state; a meta refresh) counts only in a response a browser renders as HTML
-     (`oracle/strategies._renders_as_html`).
+     state; a meta refresh) counts only in a response a browser renders as HTML: its
+     content type, and not served as a download (`oracle/strategies._renders_as_html`).
   2. **Its tests include a response that breaks each precondition** (for a markup
-     signal: a JSON, plain-text and script echo of the same payload). (from BUG-0127)
+     signal: a JSON, plain-text, script and attachment echo of the same payload),
+     alongside PA-0084(2)'s per-context fixtures. (from BUG-0127)
+
+- **PA-0128** — Strengthens and generalises `PA-0012`, after BUG-0128: browser teardown
+  (`navguard.release`) unrouted while a page was still navigating, and the driver
+  sometimes never answered. PA-0012 named one API (`asyncio.Server.wait_closed`); the
+  principle applies to every layer.
+  1. **A teardown stops its sources of in-flight work first** (connections, pages,
+     child tasks) **and only then makes a call that may wait on that work.** Where
+     the wait cannot be bounded (a sync Playwright call), quiescing first is mandatory.
+  2. **A teardown has a test that starts it with work still in flight**, and a race
+     that shows up intermittently is measured over enough runs to tell (here 80)
+     before it is called fixed. (from BUG-0128)

@@ -3,6 +3,55 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0020 — Browser teardown closes pages before unrouting (BUG-0128) (2026-10-14)
+- Change: `tools/navguard.release(context)` closes every page of the context first
+  (each failure ignored), then calls `unroute_all(behavior="ignoreErrors")`. Before,
+  it unrouted while pages could still be navigating, and the driver sometimes never
+  answered (the sync call hung). All browser teardowns use `release`: the spider (crawl
+  and anonymous submission contexts), the fetcher and the M6 executor.
+- Impact: FR-CRAWL-11 amended in place. No behaviour change besides teardown order.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting`
+    (the reverted order fails); `::test_a_hit_before_the_page_navigates_is_kept` (the
+    real-browser reproduction) — done
+  - [x] BUG-0128, PA-0128, ERROR_LOG — done
+- Review: with the forms phase 3 review-round commit, reviewers A and B.
+- Effectiveness (assessed 2026-10-14): 80 runs with no hang (was 1 in 9).
+
+### CC-CRAWL-0019 — Forms phase 3 review: button labels and the vetted click (reviewer B) (2026-10-14)
+- Change:
+  - `tools/spa.py`: the button labels the gate judges come from one JS function
+    (`_LABELS_FN`) used by `FORMS_JS` and by the new `LABELS_JS`. It removes only
+    icon-**ligature** elements (`mat-icon`, `.material-icons`, `material-symbols`):
+    `aria-hidden`, `[class*="fa-"]` and `svg` are no longer stripped. **Must-fix:**
+    `<button aria-label="Item 3"><span aria-hidden="true">Delete</span></button>`
+    passed the gate as `""` / `"Item 3"`. Ligature names are returned as
+    `button_icons`, and `form_refusal` refuses a button whose icon is in
+    `DESTRUCTIVE_GLYPHS` (`delete`, `logout`, …) whatever its text says.
+  - `tools/spider.py` `_click_vetted(page, selector, vetted)`: dispatch only when the
+    trial click failed because the button is **covered** ("intercepts pointer
+    events"); a hidden, detached or never-actionable button raises (not submittable).
+    Right before the real or dispatched click the labels are read again
+    (`spa.LABELS_JS`) and must equal the vetted ones, else nothing is clicked
+    (`forms_label_changed`, a new crawl count).
+- Impact: FR-CRAWL-13 amended in place. Lane S's live-run fixes (70c2aca, cb59111)
+  were unpushed, so no shipped crawl is affected. Juice Shop's login
+  (`<mat-icon>exit_to_app</mat-icon> Log in`) is still submitted.
+- Risk: low (refuses more, never less).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_spa_capture.py::test_icon_text_never_decides_a_button_label`
+    (adds aria-hidden "Delete" twice, a `delete` glyph with neutral text, and an
+    invisible button), `::test_a_covered_button_is_still_clicked_exactly_once` (adds a
+    node re-rendered on Escape), `::test_a_destructive_glyph_refuses_the_button_whatever_its_text`
+    — done
+  - [x] mutation check: 4 of 4 killed (aria-hidden stripped again, glyph check off,
+    label re-check off, dispatch when not covered) — done
+- Review: reviewer B's must-fix 1 and should-fix 2; to be confirmed by A and B.
+- Effectiveness (assessed 2026-10-14): verified offline on real Chromium.
+
 ### CC-CRAWL-0018 — One Chromium launch configuration (BUG-0126) (2026-10-14)
 - Change:
   - `tools/navguard.py`: `chromium_launch_kwargs(args, *, headless=True)`, the one

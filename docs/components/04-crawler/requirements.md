@@ -71,7 +71,9 @@ fuzzer.
   predicate alone, checked before every fetch; Chromium's own traffic is confined by
   the launch arguments. Every Chromium launch (crawler, auditor, M6 executor) takes its
   whole configuration from `navguard.chromium_launch_kwargs` (CC-CRAWL-0018, BUG-0126),
-  guarded at every `chromium.launch`. Stated residuals (BUG-0123): a redirected GET navigation's
+  guarded at every `chromium.launch`. Every teardown goes through `navguard.release`,
+  which closes the context's pages before unrouting, so nothing is in flight
+  (CC-CRAWL-0020, BUG-0128). Stated residuals (BUG-0123): a redirected GET navigation's
   landing page is requested twice, the second time unrouted (scope still enforced by
   the resolver rules, destructive tokens not re-checked on any new hops); a 307/308
   navigation keeps its first URL as `page.url`; walked hops carry the context's headers,
@@ -142,17 +144,23 @@ fuzzer.
     once, so the app sends its real request, which passive capture records with
     `source = 'submit'`. A covered button (a first-visit dialog or cookie bar
     intercepting pointer events) gets `Escape` once, then its own `click()` on the
-    element (`clicks_dispatched`); an overlay's own buttons are never clicked. One
+    element (`clicks_dispatched`); an overlay's own buttons are never clicked. Only a
+    *covered* button is dispatched: a hidden, detached or never-actionable one is not
+    submittable. Right before the click the button's labels are read again and must
+    equal the vetted ones, else nothing is clicked (`forms_label_changed`;
+    CC-CRAWL-0019, reviewer B). One
     submission per form signature (controls and button
     label); at most `spa.MAX_SUBMISSIONS` (50) per crawl, the rest counted and reported.
     The submission's requests pass the same scope, destructive and DELETE guard.
   - **Refused** (`spa.form_refusal`, the one gate): a route not named when routes are
     named (whole-route comparison); a destructive, settings-like (`formnav.settings_word`)
     or transaction (`core.urls.transaction_reason`) route, button label or action -- a
-    button is judged on its text with icon elements' text removed (`mat-icon`, Material
-    and Font Awesome icons, `aria-hidden`, `svg`; an icon-only button with no
-    aria-label keeps its raw text) **and** on its `aria-label` / `title`, refused when
-    either is; a
+    button is judged on its text with only icon-**ligature** elements' text removed
+    (`mat-icon`, `.material-icons`, `material-symbols`: a glyph name; never
+    `aria-hidden` text, which is real text; an icon-only button with no aria-label
+    keeps its raw text) **and** on its `aria-label` / `title`, refused when either is,
+    and refused when a ligature names a destructive glyph (`spa.DESTRUCTIVE_GLYPHS`:
+    `delete`, `logout`, …; CC-CRAWL-0019); a
     destructive or settings-like control name; a form with `<input type=file>` (a stated
     gap); a credential-change form (`store_adapter.credential_change_reason`); a form
     whose only typed input is a one-time code (2FA/TOTP).

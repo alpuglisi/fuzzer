@@ -355,6 +355,9 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
         def add_init_script(self, s):
             pass
 
+        def expose_binding(self, name, fn):          # the sentinel (reviewers A, B)
+            pass
+
         def route(self, pattern, handler):
             seen["routes"].append(handler)
 
@@ -800,7 +803,8 @@ def test_the_m6_executor_uses_the_configured_chromium(monkeypatch):
 
 def test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative(monkeypatch):
     """BUG-0126: `fuzzlab auto --browser` aborted the whole run when Chromium could not
-    launch. Now the browser mechanisms give no verdict, remembered for the run, and the
+    launch. Now the browser mechanisms give no verdict -- after one retry remembered for
+    the run (reviewer A: a single transient failure does not silence M6) -- and the
     point is decided by the others or left inconclusive."""
     import sys
     import types
@@ -831,7 +835,7 @@ def test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative(mon
     for _ in range(3):
         with pytest.raises(UnplaceableLocation, match="browser unavailable"):
             executor.run(request, "tok")
-    assert len(launches) == 1                              # remembered, not retried
+    assert len(launches) == 2                    # one retry, then remembered for the run
     strategy = DomXssStrategy(executor)
     cand = Candidate(url="http://127.0.0.1:3000/", param="q", category="xss")
     with pytest.raises(UnplaceableLocation):
@@ -898,3 +902,148 @@ def test_the_m6_executor_sees_a_sink_that_fires_after_load(monkeypatch):
         assert run("/", early) is False
     finally:
         server.shutdown()
+
+
+def test_a_driver_that_cannot_start_is_no_verdict_too(monkeypatch):
+    """Reviewer A: the Playwright driver itself failing to start (missing, or its node
+    runtime killed) is the same as no browser -- never a crash of the run."""
+    import sys
+    import types
+
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+
+    class PW:
+        def __enter__(self):
+            raise RuntimeError("Playwright driver not found")
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("playwright.sync_api")
+    fake.sync_playwright = PW
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    with pytest.raises(UnplaceableLocation, match="driver not found"):
+        PlaywrightBrowserExecutor().run(
+            ExecRequest(url="http://127.0.0.1:3000/", param="q", value="x"), "tok")
+
+
+@pytest.mark.parametrize("location", ["query", "body", "json", "fragment"])
+def test_browser_xss_without_a_browser_is_no_verdict_at_any_location(location):
+    """Reviewer A (CC-FUZZ-0070 applied fully): with no executor the browser strategies
+    observed nothing, so they never return a negative -- for any location."""
+    import types
+
+    from fuzzlab.oracle.probe import Candidate, Probe, UnplaceableLocation
+    from fuzzlab.oracle.strategies import DomXssStrategy, StoredXssStrategy
+    sender = types.SimpleNamespace(send=lambda *a, **k: Probe(200, ""))
+    cand = Candidate(url="http://127.0.0.1:3000/", param="q", category="xss",
+                     location=location)
+    for strategy in (DomXssStrategy(), StoredXssStrategy()):
+        with pytest.raises(UnplaceableLocation):
+            strategy.confirm(cand, sender)
+
+
+def test_browser_xss_that_cannot_place_its_probe_is_no_verdict():
+    """Reviewer A: a DOM probe on a body point, or a stored probe with no store URL, is
+    not placed -- no verdict, never ``ExecObservation(False)`` read as a negative."""
+    import types
+
+    from fuzzlab.oracle.browser import ExecObservation
+    from fuzzlab.oracle.probe import Candidate, Probe, UnplaceableLocation
+    from fuzzlab.oracle.strategies import DomXssStrategy, StoredXssStrategy
+    ran = []
+    executor = types.SimpleNamespace(run=lambda req, tok: ran.append(req) or
+                                     ExecObservation(False))
+    sender = types.SimpleNamespace(send=lambda *a, **k: Probe(200, ""))
+    with pytest.raises(UnplaceableLocation):
+        DomXssStrategy(executor)._observe(
+            Candidate(url="http://127.0.0.1:3000/", param="q", category="xss",
+                      location="body"), "<p>", "tok")
+    with pytest.raises(UnplaceableLocation, match="store URL"):
+        StoredXssStrategy(executor).confirm(
+            Candidate(url="http://127.0.0.1:3000/", param="q", category="xss"), sender)
+    assert ran == []                                   # nothing was ever loaded
+
+
+_NAVIGATES = ("<html><body><div id=out></div><script>"
+              "setTimeout(function(){"           # renders late, then navigates at once
+              "var m=location.search.match(/[?&]q=([^&]*)/);"
+              "if(m){document.getElementById('out').innerHTML="
+              "decodeURIComponent(m[1].replace(/\\+/g,' '));}"
+              "},800);"
+              # the moment the payload's image errors -- just after its own handler ran
+              # -- the app navigates away, before any per-document record could be read
+              "window.addEventListener('error',function(){"
+              "setTimeout(function(){location.href='/next';},0);},true);"
+              "</script></body></html>")
+
+
+def test_a_hit_before_the_page_navigates_is_kept(monkeypatch):
+    """Reviewers A and B: the payload fires late (800 ms after load) and the app
+    navigates the instant it ran. The probe returns its verdict and never raises; the
+    hit is recorded through the context's binding, kept across documents by
+    construction (a routed navigation's round trip means a per-document record would
+    usually survive this fixture too -- CC-FUZZ-0073 states that)."""
+    from tests._browser import skip_or_fail
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    from fuzzlab.oracle.strategies import _xss_exec_payloads
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    _chromium_or_skip(monkeypatch)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            body = (_NAVIGATES if not self.path.startswith("/next") else
+                    "<html><body>next</body></html>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    try:
+        executor = PlaywrightBrowserExecutor(timeout_ms=10000)
+        try:
+            fired = executor.run(ExecRequest(url=base, param="q",
+                                             value=_xss_exec_payloads("tok2")[0]), "tok2")
+            quiet = executor.run(ExecRequest(url=base, param="q", value="plain"), "tok3")
+        except UnplaceableLocation as exc:
+            skip_or_fail(f"chromium could not launch: {exc}")
+        assert fired.executed is True and quiet.executed is False
+    finally:
+        server.shutdown()
+
+
+def test_release_closes_every_page_before_unrouting():
+    """BUG-0128: ``unroute_all`` while a page was navigating could leave the driver never
+    answering (the M6 executor hung ~1 run in 9 when the app navigated during the
+    settle wait). Teardown closes the context's pages first, so nothing is in flight,
+    and a page that fails to close never stops the rest."""
+    from fuzzlab.tools.navguard import release
+    calls = []
+
+    class Page:
+        def __init__(self, name, fails=False):
+            self.name, self.fails = name, fails
+
+        def close(self):
+            calls.append(("close", self.name))
+            if self.fails:
+                raise RuntimeError("Target closed")
+
+    class Context:
+        pages = [Page("a", fails=True), Page("b")]
+
+        def unroute_all(self, behavior=None):
+            calls.append(("unroute_all", behavior))
+
+    release(Context())
+    assert calls == [("close", "a"), ("close", "b"), ("unroute_all", "ignoreErrors")]

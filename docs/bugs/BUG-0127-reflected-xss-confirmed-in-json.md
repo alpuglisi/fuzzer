@@ -44,15 +44,26 @@ rendered as HTML) that the code never checked, and no fixture violated it.
   when the break-out's structural check passes **and** the response renders as HTML.
 - Sweep instance fixed: `OpenRedirectStrategy` read a meta refresh in any body; it now
   reads one only in such a response (a `Location` header is unaffected).
+- In review (reviewer B): a `Content-Disposition: attachment` response is not rendered
+  either (CC-FUZZ-0073).
 - Tests: `tests/test_oracle_xss_structural.py::test_a_reflection_confirms_only_in_a_response_rendered_as_html`
-  (JSON, text, script: no; HTML, XHTML, none: yes);
+  (JSON, text, script, attachment: no; HTML, XHTML, none: yes);
   `tests/test_open_redirect_seed.py::test_a_meta_refresh_in_a_non_html_response_never_confirms`.
   Both fail with the gates removed (mutation check: 4 failures).
 
 ## Recurrence review
-- **BUG-0083 / BUG-0093 / BUG-0102** (M5 structural confirmation): each tightened what
-  counts as execution *inside* an HTML document; none asked whether the response is one.
-  Same component, different root cause (parse rules, not the document type).
+- **BUG-0093 / PA-0094 — a recurrence of the same root cause.** BUG-0093 confirmed XSS
+  in an inert container: a reflection inside a JSON / ld+json / `<template>` / `src`
+  script. PA-0094 made "the container's executability under the platform's own rules"
+  part of the structural evidence. BUG-0127 is the same root cause one layer out: the
+  outermost container, the response itself, was not judged by the platform's rules
+  (its content type and disposition). *(Added in review: reviewer A's N3 pointed to
+  PA-0084(2); this recurrence was found while answering it.)*
+- **BUG-0083 / PA-0084** (M5 structural confirmation): PA-0084(2) required a
+  true-positive and an escaped-reflection false-positive fixture per context, but no
+  fixture per response type.
+- **BUG-0102** (regex versus division): parse rules inside a document; different root
+  cause.
 - **BUG-0072** (one confirmation per key; the context always observed): the strategy
   was told to observe the context rather than trust the auditor's label; the content
   type is part of that context and was not observed. Same family: a precondition of
@@ -60,15 +71,21 @@ rendered as HTML) that the code never checked, and no fixture violated it.
 - No earlier bug confirmed a finding from a non-HTML response.
 
 ## Prior-preventive-action failure analysis
-PA-0035 ("probe the real operation") and the BUG-0072 rule (observe, never assume, the
-context) were applied to the reflection's *position* in the document, but not to the
-document type: the rule was too narrow (it named the sink context, not the response).
+- **PA-0094 (BUG-0093) did not prevent this: too narrow.** It named containers
+  *inside* a document (script type, `src`, `nomodule`, inert ancestors) and its fixture
+  rule ("structure matches but the container is inert") was applied to elements only.
+  The response is the first container a browser judges, and no fixture made it inert.
+- **PA-0084(2) (BUG-0083): too narrow.** One false-positive fixture per *context*
+  (text, attribute, script), none per *response type*.
+- PA-0035 ("probe the real operation") and the BUG-0072 rule (observe, never assume,
+  the context) were applied to the reflection's position, not to the document type.
 
 ## Preventive action
-**PA-0127** (strengthens the BUG-0072 rule and PA-0035): a confirmer states every
-precondition of its signal — here, that a browser renders the response as HTML — and
-checks it on the observed response; a test feeds it a response that breaks each
-precondition (a JSON, text or script echo for a markup signal).
+**PA-0127** (strengthens PA-0094 and PA-0084(2), and the BUG-0072 rule): a confirmer
+states every precondition of its signal — for a markup signal, that a browser renders
+the response as HTML (content type, not a download), the outermost of PA-0094's
+containers — and checks it on the observed response; a test feeds it a response that
+breaks each precondition (a JSON, text, script and attachment echo).
 
 ## PA-0002 sweep
 | Site | Content-type sensitive? | Disposition |
@@ -84,6 +101,7 @@ precondition (a JSON, text or script echo for a markup signal).
 
 ## Residuals
 - A response with no Content-Type still confirms (a browser may sniff HTML). A
-  `nosniff` response without a type would not render; not handled (rare; stated).
-- `text/xml` and `image/svg+xml` can run script in a browser and are not confirmed by
-  M5 (false negatives, stated; the M6 browser path decides them when available).
+  `nosniff` response without a type may not render; not handled (rare; stated).
+- `text/xml`, `application/xml` and `image/svg+xml` can run script in a browser and
+  are not confirmed by M5 (false negatives, stated; the M6 browser path decides them
+  when available).

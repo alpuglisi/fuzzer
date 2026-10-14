@@ -52,8 +52,9 @@ class PlaywrightBrowserExecutor:
         self._headless = headless
         self._timeout = timeout_ms
         self._headers = storage_headers or {}
-        #: why this run has no browser (BUG-0126), once a launch has failed
+        #: why this run has no browser (BUG-0126), once launches have failed
         self._unavailable: str | None = None
+        self._failures = 0                             # launch failures in a row
 
     #: How long a loaded page may take to fire the sentinel: a single-page app renders
     #: after its own API calls, well after ``load`` (BUG-0126: 300 ms missed Juice Shop's
@@ -61,15 +62,18 @@ class PlaywrightBrowserExecutor:
     SETTLE_MS = 4000
     _POLL_MS = 100
 
-    def _wait_for_token(self, page, token: str) -> bool:
+    def _wait_for_token(self, page, hits: set, token: str) -> bool:
+        """Wait up to `SETTLE_MS` for ``token`` in ``hits``, which the context's
+        sentinel binding fills from any document of the page -- a hit before a
+        navigation is kept (reviewers A and B). Waiting pumps Playwright's events; a page
+        that closes or navigates under the wait is "not yet", never an error."""
         deadline = time.monotonic() + self.SETTLE_MS / 1000
-        while True:
-            hits = page.evaluate("window.__fzlbHits||[]")
-            if token in (hits or []):
-                return True
-            if time.monotonic() >= deadline:
-                return False
-            page.wait_for_timeout(self._POLL_MS)
+        while token not in hits and time.monotonic() < deadline:
+            try:
+                page.wait_for_timeout(self._POLL_MS)
+            except Exception:  # noqa: BLE001 - the page or context went away: no more hits
+                break
+        return token in hits
 
     def run(self, request: ExecRequest, token: str) -> ExecObservation:
         # refuse, never relocate (BUG-0115, PA-0115): checked before any browser starts
@@ -80,8 +84,6 @@ class PlaywrightBrowserExecutor:
                                                  f"{request.store.location!r}")
         from playwright.sync_api import sync_playwright
 
-        init = (f"window.{SENTINEL}=window.{SENTINEL}||function(t){{"
-                f"(window.__fzlbHits=window.__fzlbHits||[]).push(t);}};")
         from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
         from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
                                             chromium_launch_kwargs, guard_page, release)
@@ -94,21 +96,24 @@ class PlaywrightBrowserExecutor:
             raise UnplaceableLocation(self._unavailable)
         launch = chromium_launch_kwargs(browser_launch_args(scope_urls),
                                         headless=self._headless)       # BUG-0126
-        with sync_playwright() as pw:
+        try:
+            manager = sync_playwright()
+            pw = manager.__enter__()                   # the driver itself may not start
+        except Exception as exc:  # noqa: BLE001 - reviewer A: a driver that cannot start
+            self._launch_failed(exc)                   # is the same as no browser
+        try:
             try:
                 browser = pw.chromium.launch(**launch)
             except Exception as exc:  # noqa: BLE001 - any launch failure: no browser here
-                # BUG-0126: a browser that cannot start is "no verdict" from the browser
-                # mechanisms (never a negative), remembered so later probes do not retry
-                self._unavailable = ("browser unavailable: "
-                                     f"{str(exc).splitlines()[0][:160]}")
-                logging.warning(f"M6 browser execution disabled for this run: "
-                                f"{self._unavailable}")
-                raise UnplaceableLocation(self._unavailable) from None
+                self._launch_failed(exc)
+            self._failures = 0
             context = None
             try:
                 context = browser.new_context(service_workers="block")   # BUG-0111
-                context.add_init_script(init)
+                hits: set = set()
+                # the sentinel is a binding: every document of the page calls back here,
+                # so a hit survives the page navigating afterwards (reviewer B)
+                context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
                 if self._headers:
                     context.set_extra_http_headers(self._headers)
                 page = context.new_page()
@@ -118,8 +123,7 @@ class PlaywrightBrowserExecutor:
                 if request.store is not None:
                     allowed.add(url_key(request.store.url))
                 guard_page(context, allow=frozenset(allowed), in_scope=in_scope)
-                page.on("dialog", lambda d: (page.evaluate(
-                    f"window.{SENTINEL}('{token}')"), d.dismiss()))
+                page.on("dialog", lambda d: (hits.add(token), d.dismiss()))
 
                 if request.store is not None:                 # stored XSS: plant first
                     s = request.store
@@ -137,10 +141,28 @@ class PlaywrightBrowserExecutor:
                     target = (_with_fragment if request.location == "fragment"
                               else _with_query)(request.url, request.param, request.value)
                 page.goto(target, wait_until="load", timeout=self._timeout)
-                fired = self._wait_for_token(page, token)     # BUG-0126: async sinks
+                fired = self._wait_for_token(page, hits, token)   # BUG-0126: async sinks
                 return ExecObservation(executed=fired,
                                        detail="playwright" if fired else "")
             finally:
                 if context is not None:
                     release(context)
                 browser.close()
+        finally:
+            manager.__exit__(None, None, None)
+
+    #: Launch failures in a row before the browser mechanisms are off for the run: one
+    #: transient failure (memory pressure) does not silence M6 (reviewer A).
+    MAX_LAUNCH_FAILURES = 2
+
+    def _launch_failed(self, exc):
+        """BUG-0126: a browser (or driver) that cannot start is "no verdict" from the
+        browser mechanisms, never a negative and never a crash. After
+        `MAX_LAUNCH_FAILURES` in a row it is remembered for the run, so later probes do
+        not retry; the reason reaches every such candidate's inconclusive record."""
+        why = f"browser unavailable: {str(exc).splitlines()[0][:160] if str(exc) else exc!r}"
+        self._failures += 1
+        if self._failures >= self.MAX_LAUNCH_FAILURES:
+            self._unavailable = why
+            logging.warning(f"M6 browser execution disabled for this run: {why}")
+        raise UnplaceableLocation(why) from None
