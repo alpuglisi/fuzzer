@@ -24,8 +24,11 @@ changed, and the reason. Reference the commit hash where useful.
     settings-word set; the spider records what a picker did) (CC-FUZZ-0063,
     CC-CRAWL-0014);
   - BUG-0115 / PA-0115: a probe is never relocated to another location (greybox header
-    placement, DOM XSS); `rules_fired` drift noted (CC-ML-0027).
-- **Result:** offline tests and a 40/40 mutation check; live bWAPP verification is the
+    placement, DOM XSS, the fingerprint probe); `rules_fired` drift noted (CC-ML-0027);
+  - code-review follow-up: network-shaped defaults (host:port, `//host`, any scheme,
+    host/path, long URLs) are sent as loopback; a late breaker trip and invalid plugin
+    rules are reported; the breaker checks the target host.
+- **Result:** offline tests and a 52/52 mutation check; live bWAPP verification is the
   operator's next run (expected: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37,
   #43, #44, #48).
 

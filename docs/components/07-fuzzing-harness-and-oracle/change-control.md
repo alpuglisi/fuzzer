@@ -62,6 +62,17 @@ note of the same date.
     to query/fragment points and never relocates; the browser executor refuses an
     unplaceable observe or store location before starting a browser. The probe senders'
     unknown-location fallback is pinned by a strict xfail (not fixed).
+  - **Follow-up (code review of 97fe402, reviewers A and B):**
+    - header-point URLs are tested to carry loopback for host/url link values (their
+      neutralisation was untested); identifier-like values there are **blanked**, as
+      agreed in deviation 1 (v2 had said "dropped");
+    - a breaker trip with no later header probe is still reported
+      (`pipeline._header_stop_reason` reads it through the wrappers);
+    - `invalid_plugin_rules` reaches `metrics`, `run_metrics` and the summary;
+    - the fingerprint probe goes through the first query (else form-body) point with
+      its method and siblings, never a header point (BUG-0115 instance 6; clears
+      deviation 3);
+    - `_on_logout` trips only for the run's target host (the operator's base URL's).
   - **Supersedes** CC-FUZZ-0062's binding where FR-FUZZ-42's "Siblings" clause was
     amended (link queries; neutral host values; blank identifiers) and its "never a POST
     selector" rule.
@@ -71,7 +82,9 @@ note of the same date.
     Ground-truth runs gain no candidate (tested per real contract); their evaluation
     rows grow by the four new rules (`R-SQLI-HEADER`/`R-XSS-HEADER` within sqli/xss
     plans): the four `tests/data/auto_summary/*` goldens' "negatives" were re-derived,
-    not regenerated (PA-0073(3)): 41→87 and 2→48, i.e. +2 rules × 23 points.
+    not regenerated (PA-0073(3)): 41→87 and 2→48, i.e. +2 rules × 23 points. These
+    are origin-gated rules that cannot apply to ground-truth points; they are rule
+    negatives in `evaluation`, not training rows.
   - **Changed existing tests** (requirement changes, not silent edits): the POST-picker
     case of `test_unsafe_forms_are_never_imported` now expects a settings-named picker
     (FR-FUZZ-42 superseded); `test_evaluate_category_filter_scopes_rules` derives its
@@ -80,14 +93,14 @@ note of the same date.
   - **ML:** `rules_fired` drifts on crawl runs (CC-ML-0027).
   - **Residuals:** header-logging pages grow the lab DB per probe; state-changing
     plain visits repeat per header probe; a site-wide picker is probed at one action;
-    an identifier-like sibling is sent blank (a gate needing it does not confirm); the
-    pipeline's fingerprint probe has no siblings (as before); the web page shows breaker
-    stops as "pending" without the reason (lane C rewords that text).
+    an identifier-like sibling is sent blank (a gate needing it does not confirm); an
+    e-mail default is sent as is (may trigger mail); the web page shows breaker stops as
+    "pending" without the reason (lane C rewords that text).
 - Risk: medium (more traffic and real submissions), within the gates above; header
   points are opt-in and budget-checked.
 - Deliverables:
   - [x] code — done
-  - [x] tests (`tests/test_forms_phase2.py`, 237 passed + 1 skipped joint test until
+  - [x] tests (`tests/test_forms_phase2.py`, 260 passed + 1 skipped joint test until
     lane B merges; `tests/test_sender_conformance.py`, 9 passed + 2 strict xfail) — done
   - [x] FR-FUZZ-43; FR-FUZZ-42 amended in place; NFR-FUZZ-safe `Enforced by:` — done
   - [x] BUG-0115 / PA-0115 / ERROR_LOG — done
@@ -95,7 +108,8 @@ note of the same date.
   deviations (`.invalid` filler exempt from neutral values; header representative
   queries from link-set rows only).
 - Effectiveness: verified offline (the tests above; mutation check 40/40 killed over
-  the new logic). Live bWAPP verification (`[design]`, PA-0015): crawl from
+  the new logic at 97fe402, 52/52 after the review follow-up, whose dead `url` branch
+  in `neutral_value` was removed when its mutant proved equivalent). Live bWAPP verification (`[design]`, PA-0015): crawl from
   `portal.php` with `--follow-selector-forms bug`, then `auto --points crawl --identity
   … --header-points User-Agent,Referer,bWAPP` with `budget_total` raised; expected new
   confirmations: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37, #43, #44, #48.

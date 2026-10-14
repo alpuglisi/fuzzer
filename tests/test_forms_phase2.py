@@ -393,6 +393,15 @@ def test_a_single_name_link_gives_a_header_query_but_no_binding(tmp_path):
     assert all(p.base_entries is None for p in pts)
 
 
+def test_a_header_point_url_never_carries_the_apps_own_host(tmp_path):
+    store, run, _c = _import(tmp_path, pages=[
+        "http://h/app/n.php?h=www.example.com&u=http%3A%2F%2Fevil.example%2Fx&q=1"])
+    with store:
+        (pt,) = header_points_from_store(store, run, "http://h/app/", ["User-Agent"])
+    assert pt.url == ("http://h/app/n.php?h=127.0.0.1&u=http%3A%2F%2F127.0.0.1%2F&q=1")
+    assert "example" not in pt.url
+
+
 def _rules_without(*ids):
     return [r for r in load_rules() if r.id not in ids]
 
@@ -739,6 +748,29 @@ def test_the_logout_listener_never_raises_and_the_probe_response_is_kept():
     assert probe.text == LOGIN_HTML and sender.header_stop_reason
 
 
+def test_a_trip_on_the_last_header_probe_is_still_reported(tmp_path):
+    """Reviewer A: a trip that raises nothing (no header probe follows) still reaches
+    `metrics["header_breaker"]`."""
+    site, sender = _ua_bound_sender()
+    store, run, _c = _import(tmp_path, pages=["http://localhost/only.php"])
+    with store:
+        result = run_auto(base_url="http://localhost/", store=store, run_id=run,
+                          sender=sender, mode="manual", selected_categories=["xss"],
+                          points_source="crawl", header_names=["User-Agent"])
+    assert result.metrics["header_breaker"].startswith("session bound to a probed header")
+    assert len([r for r in site.requests if "User-Agent" in r[1]]) == 1
+
+
+def test_a_logout_on_another_host_does_not_trip():
+    site, sender = _ua_bound_sender()
+    sender.send("http://localhost/a.php", "id", "1")
+    sender._current = ("header", "User-Agent", "http://localhost/a.php")
+    sender._on_logout("elsewhere.example", "admin")
+    assert sender.header_stop_reason is None
+    sender._on_logout("localhost", "admin")
+    assert sender.header_stop_reason
+
+
 def test_the_breaker_exception_passes_through_every_wrapper():
     from fuzzlab.harness.auto import _CountingSender
     from fuzzlab.oracle.oracle import _CostCounter, _FormBoundSender
@@ -797,6 +829,24 @@ def test_isolated_copy_logins_never_trip_the_header_breaker():
 ])
 def test_value_shape_table(value, shape):
     assert vs.value_shape(value) == shape
+
+
+@pytest.mark.parametrize("value,sent", [
+    ("www.nsa.gov", vs.SAFE_HOST), ("10.0.0.1", vs.SAFE_HOST),
+    ("10.0.0.1:8080", vs.SAFE_HOST), ("www.example.com:8080", vs.SAFE_HOST),
+    ("[::1]:8080", vs.SAFE_HOST),
+    ("//itsecgames.blogspot.com/", vs.SAFE_URL), ("gopher://h/_x", vs.SAFE_URL),
+    ("dict://host:11211/", vs.SAFE_URL), ("www.example.com/page", vs.SAFE_URL),
+    ("www.example.com:8080/x", vs.SAFE_URL), ("http://a/" + "x" * 3000, vs.SAFE_URL),
+    ("http://itsecgames.blogspot.com", vs.SAFE_URL),
+    # unchanged: not a network location
+    ("lang_en.php", "lang_en.php"), ("docs/x.pdf", "docs/x.pdf"), ("text/html", "text/html"),
+    ("12:00", "12:00"), ("2020-01-01T00:00", "2020-01-01T00:00"), ("fuzzlab", "fuzzlab"),
+    # stated residual (reviewer B): an e-mail default is sent as is
+    ("user@mail.example.com", "user@mail.example.com"),
+])
+def test_neutral_value_errs_toward_loopback(value, sent):
+    assert vs.neutral_value(value) == sent
 
 
 @pytest.mark.parametrize("value", [None, b"www.nsa.gov", 1, 1e400, float("nan"), True,
@@ -910,7 +960,7 @@ def test_unknown_when_keys_and_values_are_rejected(tmp_path, when, why):
         validate_rule(rule)                                    # the bundled file loads
 
 
-def test_an_invalid_plugin_rule_is_left_out_and_counted(tmp_path):
+def test_an_invalid_plugin_rule_is_left_out_and_counted(tmp_path, capsys):
     from fuzzlab.plugins import PluginManager
 
     class RulePlugin:
@@ -926,6 +976,22 @@ def test_an_invalid_plugin_rule_is_left_out_and_counted(tmp_path):
         counts = evaluate([InjectionPoint("http://h/p.php", "id")], store, run, rules=[],
                           plugins=PluginManager(plugins=[RulePlugin()]))
     assert counts["candidate"] == 1 and counts["invalid_plugin_rules"] == 2
+    # ... and it reaches the run's metrics, its run_metrics row and the summary
+    from fuzzlab.core.runmode import resolve_run
+    from fuzzlab.harness import auto_cli
+    from fuzzlab.harness.pipeline import run_pipeline
+    with Store(tmp_path / "v.db") as store:
+        run = store.start_run("auto", "h")
+        plan = resolve_run("manual", selected_categories=["xss"], all_categories=["xss"])
+        result = run_pipeline([InjectionPoint("http://h/p.php", "id")], store, run,
+                              _App(lambda req: _ok()), plan,
+                              plugins=PluginManager(plugins=[RulePlugin()]))
+        row = store.conn.execute("SELECT value FROM run_metrics WHERE run_id=? AND "
+                                 "key='pipeline_invalid_plugin_rules'", (run,)).fetchone()
+    assert result.metrics["invalid_plugin_rules"] == 2 and row["value"] == 2.0
+    args = auto_cli.build_parser().parse_args(["--base-url", "http://h/", "--store", "x"])
+    auto_cli._print_summary(args, {}, result)
+    assert "plugin rules left out (invalid): 2" in capsys.readouterr().out
 
 
 def _shell_app(lookups):
@@ -1204,3 +1270,32 @@ def test_no_ground_truth_dom_point_has_another_location():
         for gp in contract.load(str(gt)).points:
             dom = gp.client_only or (gp.rendering or "") == "js" or gp.location == "fragment"
             assert not dom or gp.location in ("query", "fragment"), (gt.name, gp)
+
+
+def test_the_fingerprint_probe_goes_where_its_point_says():
+    """BUG-0115 sweep, instance 6: the pipeline's baseline probe used to send any first
+    point's parameter as a GET query (a header or POST field included)."""
+    from fuzzlab.core.runmode import resolve_run
+    from fuzzlab.harness.pipeline import run_pipeline
+    header = InjectionPoint("http://h/a.php", "User-Agent", location="header", origin="crawl")
+    body = InjectionPoint("http://h/b.php", "title", method="POST", location="body",
+                          base_entries=(("title", "x"), ("form", "submit")))
+    query = InjectionPoint("http://h/c.php", "id", base_entries=(("id", "7"), ("cat", "2")))
+    plan = resolve_run("manual", selected_categories=["open-redirect"],
+                       all_categories=["open-redirect"])        # no candidate fires
+    for points, first in (([header, body, query], ("query", {"id": "1", "cat": "2"})),
+                          ([header, body], ("body", {"title": "1", "form": "submit"}))):
+        app = _App(lambda req: _ok())
+        with Store(":memory:") as store:
+            run = store.start_run("auto", "h")
+            run_pipeline(points, store, run, app, plan)
+            assert store.conn.execute("SELECT COUNT(*) c FROM target").fetchone()["c"] == 1
+        req = app.requests[0]
+        got = req["query"] if first[0] == "query" else req["body"]
+        assert (req["location"], got) == first
+    app = _App(lambda req: _ok())
+    with Store(":memory:") as store:
+        run = store.start_run("auto", "h")
+        run_pipeline([header], store, run, app, plan)
+        assert store.conn.execute("SELECT COUNT(*) c FROM target").fetchone()["c"] == 0
+    assert app.requests == []                       # never fingerprinted through a header

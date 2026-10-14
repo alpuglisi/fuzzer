@@ -21,7 +21,7 @@ Format per entry:
 ## 2026-10-14 — Fuzzer: a probe meant for one location was sent at another (fixed, BUG-0115/PA-0115)
 - **Symptom:** found in design (forms phase 2): greybox sent ground-truth header payloads as query parameters; with `--browser`, DOM XSS loaded POST-body (and would load header) payloads as URL query parameters, so a hit would be recorded against the wrong input.
 - **Root cause:** each component that builds its own request fell through to "query" for a location it did not handle; the seam conformance checks covered signatures, not placement.
-- **Remediation:** greybox header branch and `UnplaceableLocation`; DOM XSS only for query/fragment points; the browser executor refuses unplaceable locations; a placement conformance check by discovery. The probe senders' unknown-location fallback is pinned by a strict xfail (needs a scored ground-truth run). CC-FUZZ-0063. `docs/bugs/BUG-0115-probe-location-relocated.md`.
+- **Remediation:** greybox header branch and `UnplaceableLocation`; DOM XSS only for query/fragment points; the browser executor refuses unplaceable locations; the pipeline's fingerprint probe goes through a query (else body) point with its siblings, never a header point (review follow-up); a placement conformance check by discovery. The probe senders' unknown-location fallback is pinned by a strict xfail (needs a scored ground-truth run). CC-FUZZ-0063. `docs/bugs/BUG-0115-probe-location-relocated.md`.
 - **Status:** Fixed (one instance pinned, flagged)
 
 ## 2026-10-13 — Crawler/fuzzer: the destructive-URL rule missed `update` / `insert` (fixed, BUG-0114/PA-0114)

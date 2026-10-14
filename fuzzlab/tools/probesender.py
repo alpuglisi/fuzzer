@@ -65,11 +65,24 @@ class SeamProbeSender(_ExplicitAllowance):
         # lane B's API, wired at merge; absent, no isolated copies exist (0)
         return int(getattr(self, "isolated_copy_logins", lambda: 0)())
 
+    def _target_host(self, urlsplit) -> str | None:
+        """The run's target host: the operator's base URL's, else the host of the
+        main send in progress or last made."""
+        if self._base_url:
+            return urlsplit(self._base_url).hostname
+        for seen in (self._current, self._last_main_was_header):
+            if seen is not None:
+                return urlsplit(seen[-1]).hostname
+        return None
+
     def _on_logout(self, host: str, identity: str) -> None:
         """Told by the main manager inside the send that observed a logout. Records
         only; never raises, so that probe's response is kept."""
         if self.header_stop_reason is not None or identity != self._identity:
             return
+        from urllib.parse import urlsplit
+        if host != self._target_host(urlsplit):
+            return                                   # not the run's target (reviewers)
         current = self._current
         if current is not None and current[0] == "header":
             culprit = (current[1], current[2])
@@ -79,7 +92,6 @@ class SeamProbeSender(_ExplicitAllowance):
             return                                   # not after a header probe
         if self._copy_logins() > self._copies_at_header:
             return                                   # an isolated copy login since then
-        from urllib.parse import urlsplit
         self.header_stop_reason = (f"session bound to a probed header ({culprit[0]} on "
                                    f"{urlsplit(culprit[1]).path or '/'})")
 

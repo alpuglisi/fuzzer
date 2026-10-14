@@ -493,6 +493,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
               f"{pages} page(s))")
     if m.get("header_breaker"):
         print(f"  header probing stopped: {m['header_breaker']}")
+    if m.get("invalid_plugin_rules"):
+        print(f"  plugin rules left out (invalid): {m['invalid_plugin_rules']}")
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
         print(f"  not fuzzed ({len(skipped)} crawl point(s): destructive URL, credential, "

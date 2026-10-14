@@ -65,6 +65,7 @@ CC-FUZZ-0063:
 | 2 | `oracle/strategies.py` `DomXssStrategy` | fixed |
 | 3 | `tools/browserexec.py` store step (and observe location) | fixed |
 | 4 | `tools/probesender.py` Seam/Requests final branch (e.g. `fragment` → query) | **pinned, not fixed**: `tests/test_sender_conformance.py::test_senders_refuse_an_unplaceable_location` is `xfail(strict=True)`. Refusing there can change scored ground-truth results (R-XSS-REFLECT allows `fragment`), which needs a live, scored multitarget run (PA-0042/0047) that this offline lane cannot do. Flagged to the orchestrator. |
+| 6 | `harness/pipeline.run_pipeline` fingerprint probe: `sender.send(points[0].url, points[0].param, "1")` sent any first point's parameter as a GET query (a header or POST field included), without siblings | fixed in the review follow-up: the first query (else form-body) point, at its own method and with its siblings; never a header point. `tests/test_forms_phase2.py::test_the_fingerprint_probe_goes_where_its_point_says` (found by reviewer A) |
 | 5 | `harness/auto.points_from_ground_truth` DOM rewrite | unreachable today (no ground-truth DOM point has another location); pinned by `tests/test_forms_phase2.py::test_no_ground_truth_dom_point_has_another_location` (PA-0054(3)) |
 | — | `tools/blind_sqli_fuzzer.py` senders | cleared: query-only by design (the operator's `--url` query parameter); no location argument exists, so nothing can be relocated (PA-0067(1): reader scope named) |
 

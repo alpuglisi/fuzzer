@@ -14,6 +14,12 @@ Newest first.
     it (`invalid_plugin_rules`), never fatal.
   - Rules: `R-SQLI-HEADER`, `R-XSS-HEADER` (crawl header points),
     `R-COMMAND-INJECTION-VALUE`, `R-FILE-INCLUSION-VALUE` (appended last).
+- Follow-up (code review of 97fe402, reviewer B R3): `neutral_value` now errs toward
+  loopback — any `://` value (any scheme, any length) or `//`-prefixed value →
+  `SAFE_URL`; a host or ip with a port → `SAFE_HOST`, with a path → `SAFE_URL`. Before,
+  `10.0.0.1:8080`, `www.example.com:8080`, `//host/`, `gopher://…`, `dict://…`,
+  `www.example.com/page` and a >2048-character URL went out unchanged. E-mail
+  defaults are a stated residual.
 - Impact: crawl points whose default is a host or a file name become command-injection
   or file-inclusion candidates whatever their name; ground-truth candidates are
   unchanged (tested per contract). Accepted false positive: `user.id`, `order.by`

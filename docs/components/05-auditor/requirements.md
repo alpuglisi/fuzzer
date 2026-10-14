@@ -192,9 +192,13 @@ budget where a vulnerability is plausible.
     pass).
   - **Neutral base values.** A point whose example is ip- or hostname-shaped is probed
     from `127.0.0.1` (the command-injection base value and payload prefix, built under
-    CC-FUZZ-0063), and an ip-, hostname- or url-shaped sibling default is sent as
-    loopback (`127.0.0.1`, `http://127.0.0.1/`). The fuzzer never sends a host name
-    taken from the app's own defaults.
+    CC-FUZZ-0063). `value_shape.neutral_value` errs toward loopback for siblings and
+    header-point queries: any value with `://` (any scheme, any length) or starting
+    with `//` → `http://127.0.0.1/`; an ip or host name, also with a port →
+    `127.0.0.1`, and with a path after it → `http://127.0.0.1/`. Our own fillers (exact
+    match) are sent as they are. The fuzzer never sends a host name taken from the app's
+    own defaults. Stated residual: an e-mail default (`user@mail.example.com`) is sent
+    as is and may trigger mail.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

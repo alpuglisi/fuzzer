@@ -133,13 +133,38 @@ def value_shape(value) -> str | None:
         return None
 
 
+def _host_prefix(value: str) -> tuple[str, str]:
+    """``(prefix, rest)`` split at the first ``/`` or ``:`` (an IPv6 literal in
+    brackets is kept whole)."""
+    if value.startswith("[") and "]" in value:
+        end = value.index("]") + 1
+        return value[:end], value[end:]
+    cuts = [i for i in (value.find("/"), value.find(":")) if i > 0]
+    if not cuts:
+        return value, ""
+    return value[:min(cuts)], value[min(cuts):]
+
+
 def neutral_value(value):
-    """``value``, or loopback in its place when it is ip-, host- or url-shaped: what the
-    fuzzer sends instead of a default the app supplied (FR-AUD-20). A caller exempts
-    its own fillers first (``store_adapter.is_filler``: they never resolve at all)."""
-    shape = value_shape(value)
-    if shape in ("ip", "hostname"):
-        return SAFE_HOST
-    if shape == "url":
+    """``value``, or loopback in its place when it names a network location: what the
+    fuzzer sends instead of a default the app supplied (FR-AUD-20). It errs toward
+    loopback (reviewer B, R3):
+
+    * anything with ``://`` (any scheme, any length) or starting with ``//`` →
+      :data:`SAFE_URL`;
+    * an ip or host name → :data:`SAFE_HOST`, also with a port (``host:8080``); with a
+      path after it (``host/page``, ``host:8080/x``) → :data:`SAFE_URL`.
+
+    A caller exempts its own fillers first (``store_adapter.is_filler``: they never
+    resolve at all). Stated residual: an e-mail default (``user@mail.example.com``) is
+    sent as is and may trigger mail."""
+    if not isinstance(value, str):
+        return value
+    if "://" in value or value.startswith("//"):
         return SAFE_URL
+    if value_shape(value) in ("ip", "hostname"):     # a url-shaped value has '://' above
+        return SAFE_HOST
+    prefix, rest = _host_prefix(value)
+    if rest and value_shape(prefix) in ("ip", "hostname"):
+        return SAFE_URL if "/" in rest else SAFE_HOST
     return value

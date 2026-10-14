@@ -1110,7 +1110,7 @@ rewards) derives from it.
   - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`, `tests/test_forms_phase1.py::test_credential_parameters_from_links_are_never_fuzzed`, `tests/test_forms_phase1.py::test_object_selecting_hidden_fields_and_csrf_are_pinned_not_fuzzed`
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
-  - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
+  - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`, `tests/test_forms_phase2.py::test_a_header_point_url_never_carries_the_apps_own_host`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.)
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
@@ -1356,7 +1356,8 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **Header points** (`fuzzlab auto --header-points [NAMES]`, crawl points only, **off
     by default**; alone: User-Agent, Referer). One point per crawled 2xx GET page and
     name, after every other point. The URL carries the page's representative query
-    (its first link set only). Names pass `core.http.header_point_refusal` (framing,
+    (its first link set only): identifier-like and sensitive values **blanked** (sent
+    `""`, as in the link set; not left out), ip/host/url values sent as loopback. Names pass `core.http.header_point_refusal` (framing,
     routing, method-override and credential headers refused) at the CLI, before the
     store is opened, and again at every sender's header branch
     (`check_send_header`; ground-truth points are explicit). With an identity, header
@@ -1375,9 +1376,19 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     first crawled).
   - **Never relocated** (BUG-0115, PA-0115). A sender or executor that cannot place a
     payload at the point's location refuses; greybox places header probes in headers;
-    DOM XSS applies only to query/fragment points. The probe senders' unknown-location
+    DOM XSS applies only to query/fragment points; the pipeline's fingerprint probe goes
+    through the first query (else form-body) point at its own method with its
+    siblings, never a header point. The probe senders' unknown-location
     fallback is pinned by a strict xfail (not fixed; needs a scored ground-truth run).
+  - **Reporting.** A breaker trip is reported in `metrics["header_breaker"]` even when no
+    later header probe raises; invalid plugin rules are counted in
+    `metrics["invalid_plugin_rules"]` / `run_metrics` and printed by `fuzzlab auto`.
+  - **Ground-truth evaluation rows.** The 4 `tests/data/auto_summary` goldens' extra
+    negatives (+46 = 2 × 23 points) come from the origin-gated header rules evaluating
+    on ground-truth points, where they can never apply; they are rule negatives in
+    `evaluation`, not training rows (candidates are unchanged).
   - **Residuals:** pages that log a header grow the lab DB per probe; a page that
     changes state on a plain visit is visited once per header probe; a site-wide
     picker routed to different per-page handlers is probed at one page; an
-    identifier-like sibling is sent blank, so a gate needing it does not confirm.
+    identifier-like sibling is sent blank, so a gate needing it does not confirm; an
+    e-mail default is sent as is (it may trigger mail).
