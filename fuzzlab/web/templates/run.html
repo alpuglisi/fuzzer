@@ -88,8 +88,9 @@
     unrecorded {{ os.unrecorded }}{% endif %}{% if os.pending %} &middot;
     pending {{ os.pending }} (not reached: run interrupted, or stopped by a safety
     breaker){% endif %}{% if os.inconclusive %} &middot;
-    inconclusive {{ os.inconclusive }} (a cost cap stopped a check that had
-    started){% endif %}</p>
+    inconclusive {{ os.inconclusive }} (could not be decided: a cost cap stopped a
+    started check, or no mechanism could place the point{% if detail.oracle_inconclusive_by %}:
+    {% for mech, n in detail.oracle_inconclusive_by %}<span data-field="inconclusive-{{ mech }}">{{ mech }} {{ n }}</span>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}){% endif %}</p>
   {% if os.skipped_budget or os.no_confirmer or os.pending or os.inconclusive %}
   <p class="muted">Skipped, pending and no-confirmer candidates were never checked by the oracle,
     and inconclusive ones were not decided: they are unlabelled (never training data) and

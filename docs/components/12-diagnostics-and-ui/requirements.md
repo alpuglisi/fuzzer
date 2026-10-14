@@ -420,7 +420,11 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   These are plain per-run store reads, so they work without the ML package.
   - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded counts,
     plus pending (not reached: run interrupted, or stopped by a safety breaker) and
-    inconclusive (a cost cap stopped a check that had started; CC-UI-0052).
+    inconclusive (could not be decided: a cost cap stopped a started check, or no
+    mechanism could place the point; CC-UI-0052, widened by CC-FUZZ-0068), followed by
+    the mechanism and count of each kind (`unplaceable`, or the capped mechanism such as
+    `boolean-differential`) from the pipeline's `pipeline_oracle_inconclusive_<mechanism>`
+    run metrics (`web.results.inconclusive_by`; none for runs recorded before it).
   - **Anomaly flags:** the stored top flagged candidates (`core.anomaly_flags`), with the
     run's own `anomaly_flagged` and the anomaly stage's config as provenance. The flags
     are the last fit's values for that run. *(CC-UI-0044:)* the card also shows

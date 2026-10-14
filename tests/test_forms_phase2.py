@@ -776,17 +776,29 @@ def test_a_logout_on_another_host_does_not_trip():
 
 
 def test_the_breaker_exception_passes_through_every_wrapper():
-    from fuzzlab.harness.auto import _CountingSender
+    from fuzzlab.harness.auto import _CountingSender, _FragmentGuard
+    from fuzzlab.harness.pipeline import _header_stop_reason
     from fuzzlab.oracle.oracle import _CostCounter, _FormBoundSender
 
     class Stopped:
+        header_stop_reason = None
+
         def send(self, *a, **k):
             raise HeaderPointsStopped("stop")
     cand = Candidate(url="http://h/x", param="p", base_entries=(("p", ""),))
+    # _FragmentGuard: forms phase 3's crawl-run wrapper (CC-FUZZ-0068, reviewer A J3)
     for wrapper in (_CountingSender(Stopped()), _CostCounter(Stopped()),
-                    _FormBoundSender(Stopped(), cand)):
-        with pytest.raises(HeaderPointsStopped):
+                    _FormBoundSender(Stopped(), cand), _FragmentGuard(Stopped()),
+                    _FragmentGuard(_CountingSender(Stopped()))):
+        with pytest.raises(HeaderPointsStopped) as caught:
             wrapper.send("http://h/x", "User-Agent", "v", location="header")
+        assert str(caught.value) == "stop"                      # unchanged
+    # the pipeline still reads a late trip through every `_inner` (crawl runs now wrap
+    # the counting sender in _FragmentGuard)
+    tripped = Stopped()
+    tripped.header_stop_reason = "session bound to a probed header"
+    assert _header_stop_reason(_FragmentGuard(_CountingSender(tripped))) == \
+        "session bound to a probed header"
 
 
 @pytest.mark.skipif(not hasattr(SeamProbeSender, "isolated_copy_logins"),

@@ -50,6 +50,17 @@ Newest first.
   mutation check: every import refusal, the password, pinning and redaction gates and
   the leaf/depth limits killed — see CC-FUZZ-0068). The live Juice Shop crawl (lane I
   capture) and `fuzzlab auto` run are the remaining check.
+- Review follow-up (2026-10-14; reviewer B item 1): a new closed rule predicate,
+  `location_not_in` (`audit/rules.py`, validated like `location_in`), and
+  `"location_not_in": ["fragment"]` on every server-side rule that had no location
+  filter: R-FILE-INCLUSION, R-COMMAND-INJECTION, R-SPEL-INJECTION, R-SSRF,
+  R-WEAK-TOKEN-ENTROPY, R-PRICE-INTEGRITY, R-CSV-FORMULA-INJECTION and the
+  command-injection, SSRF and file-inclusion value rules. A `fragment` point now draws
+  only client-side categories (xss, open-redirect). A predicate rather than a
+  `location_in` list, so no other location (ground truth also uses `cookie`) can be
+  dropped by omission. Ground truth's one fragment point (`author`) matches none of
+  these rules, so its candidates are unchanged; the `auto_summary` goldens pass.
+  Effectiveness: both mutants (predicate ignored; one rule's exclusion removed) killed.
 
 ### CC-AUD-0034 — URL-valued parameters imply open redirect and SSRF; the redirect seed (BUG-0124) (2026-10-14)
 - Change:

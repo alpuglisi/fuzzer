@@ -43,6 +43,14 @@ Newest first.
 - Effectiveness: verified offline, 2026-10-14 (lane J test run; the DELETE gate,
   the leaf/depth limits and the entry parser are killed mutants — see CC-FUZZ-0068).
   The live Juice Shop run is the remaining check.
+- Review follow-up (2026-10-14; reviewers A J2 and B4):
+  - `core/oracle_status.py`: the `INCONCLUSIVE` comment now reads "could not be
+    decided: a cost cap stopped a started check, or no mechanism could place the
+    point" (value and `UNLABELLED` unchanged); FR-CORE-33 reworded to match.
+  - `core/jsonbody.replace_leaf` raises `JsonPlacementError` for a leaf the captured
+    entries do not have, instead of appending it; an empty entry list still takes the
+    leaf as the whole body. FR-CORE-36 updated.
+  - Effectiveness: both are killed mutants (CC-FUZZ-0068's follow-up).
 
 ### CC-CORE-0045 — One transaction-word rule (forms phase 3, shared prerequisite) (2026-10-14)
 - Change:

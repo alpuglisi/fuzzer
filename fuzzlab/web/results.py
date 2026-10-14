@@ -338,6 +338,26 @@ _PLUGIN_STATUS_TEXT = {None: "unknown", "attached": "attached — run did not fi
 _ERROR_SHOWN = 300
 
 
+_INCONCLUSIVE_PREFIX = "pipeline_oracle_inconclusive_"
+
+
+def inconclusive_by(metrics: dict) -> list[tuple[str, int]]:
+    """``[(mechanism, rows)]`` of a run's inconclusive candidates, by the mechanism that
+    could not decide them (``unplaceable``: no mechanism could place the point,
+    FR-FUZZ-47; else the cost-capped one, e.g. ``boolean-differential``, FR-FUZZ-45),
+    as the pipeline recorded them. Empty for a run recorded before CC-FUZZ-0068."""
+    out = []
+    for key, value in metrics.items():
+        if isinstance(key, str) and key.startswith(_INCONCLUSIVE_PREFIX):
+            try:
+                n = int(value)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if n > 0:
+                out.append((key[len(_INCONCLUSIVE_PREFIX):], n))
+    return sorted(out)
+
+
 def _ml_context(store, run_id: int, metrics: dict) -> dict:
     """The run's ML context for its page (CC-UI-0043, FR-UI-19): what the oracle checked,
     the stored anomaly flags, and the plugins (ML stages included) that were attached —
@@ -376,8 +396,13 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
                           # not reached: the run stopped mid-oracle (BUG-0071), or a
                           # safety breaker stopped those points
                           "pending": counts[PENDING],
-                          # a check started but its cost cap stopped it (FR-FUZZ-45)
+                          # could not be decided: a cost cap stopped a started check
+                          # (FR-FUZZ-45), or no mechanism could place the point
+                          # (FR-FUZZ-47)
                           "inconclusive": counts[INCONCLUSIVE]},
+        # which mechanism left them undecided, from the pipeline's per-mechanism counts
+        # (`pipeline_oracle_inconclusive_<mechanism>`): ``unplaceable`` or the capped one
+        "oracle_inconclusive_by": inconclusive_by(metrics),
         "anomaly": {"top": top_flagged(store, run_id, limit=10),
                     "flagged": metrics.get("anomaly_flagged"),
                     "budget": metrics.get("anomaly_flag_budget"),

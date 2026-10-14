@@ -497,22 +497,23 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
     unsure = getattr(result, "inconclusive", None) or []
-    unplaced = [u for u in unsure if u.get("mechanism") == "unplaceable"]
-    unsure = [u for u in unsure if u.get("mechanism") != "unplaceable"]
-    if unplaced:
-        from fuzzlab.core.urls import to_path
-        print(f"  not placeable ({len(unplaced)} candidate key(s): no mechanism could "
-              f"place the point; unlabelled, PA-0115):")
-        for item in unplaced:
-            print(f"    - {item['location']} {to_path(item['url'])} [{item['param']}]")
     if unsure:
-        from fuzzlab.core.urls import to_path
-        print(f"  inconclusive ({len(unsure)} candidate key(s): a cost cap stopped a "
-              f"check that had started; unlabelled, FR-FUZZ-45):")
+        from fuzzlab.core.urls import to_route_path
+        print(f"  inconclusive ({len(unsure)} candidate key(s) could not be decided: a "
+              f"cost cap stopped a started check, or no mechanism could place the point; "
+              f"unlabelled, FR-FUZZ-45/47):")
         for item in unsure:
-            print(f"    - {item['location']} {to_path(item['url'])} [{item['param']}]: "
-                  f"{item['mechanism']}; not started: "
-                  f"{', '.join(item['families_not_started']) or '-'}")
+            where = (f"    - {item['location']} {to_route_path(item['url'])} "
+                     f"[{item['param']}]: {item['mechanism']}")
+            if item["mechanism"] == "unplaceable":              # FR-FUZZ-47
+                print(f"{where} (no mechanism could place the point: "
+                      f"{item.get('reason') or '-'})")
+            else:                                               # a cost cap, FR-FUZZ-45
+                print(f"{where}; not started: "
+                      f"{', '.join(item['families_not_started']) or '-'}")
+    if m.get("oracle_unplaceable"):                  # only then: goldens unchanged
+        print(f"  unplaceable: {int(m['oracle_unplaceable'])} candidate(s) no mechanism "
+              f"could place (unlabelled, never a negative; PA-0115)")
     if getattr(args, "header_names", None):
         pages, cost = getattr(args, "header_estimate", (0, 0))
         print(f"  header points: {m.get('header_points', 0)} "

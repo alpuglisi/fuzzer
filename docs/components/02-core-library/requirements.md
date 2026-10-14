@@ -141,10 +141,15 @@ plugin registry. It is the layer that makes the store the integration bus.
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, `pending`, `inconclusive`,
   and the `UNLABELLED` set) is defined once in `core/oracle_status.py`.
 - **FR-CORE-33** *(`CC-CORE-0043`, 2026-10-14).*
-  - `inconclusive` is a member of `UNLABELLED`, so a check that could not decide is
-    never a negative label.
+  - `inconclusive` means the candidate **could not be decided: a cost cap stopped it,
+    or no mechanism could place the point** (the second since CC-CORE-0046,
+    FR-FUZZ-47: every applicable mechanism raised `UnplaceableLocation`, mechanism
+    `unplaceable`). It is a member of `UNLABELLED`, so it is never a negative label.
   - The pipeline writes it for every row of a key whose confirmation returned an
-    inconclusive verdict and nothing confirmed (FR-FUZZ-45).
+    inconclusive verdict and nothing confirmed (FR-FUZZ-45). Which meaning applies is
+    the verdict's mechanism, carried in the run's `inconclusive` detail and shown by
+    `fuzzlab auto` and the web run page (`unplaceable` vs the capped mechanism, e.g.
+    `boolean-differential`).
 - **FR-CORE-24** *(atomic migrations; `CC-CORE-0034`, 2026-10-13, BUG-0087).*
   - **Each migration is atomic.** It runs in one `BEGIN IMMEDIATE` transaction,
     statement by statement (`split_statements`), with its version row: `COMMIT`, or
@@ -333,7 +338,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     string keys and integer list indexes. A send rebuilds the whole body from the
     entries (types kept: numbers, bools, null, empty containers) with the leaf set to
     the payload **as a string**. A sender that cannot place it raises
-    `UnplaceableLocation` (PA-0115).
+    `UnplaceableLocation` (PA-0115). A leaf the captured entries do not have is never
+    added to the body (`replace_leaf` refuses); only a send with no entries sends
+    `{leaf: payload}` alone.
   - **Names.** `jsonbody.display_name` joins keys with `.` and writes indexes as
     `[n]`, escaping `\`, `.`, `[` and `]` inside a key with `\`; `parse_name` is its
     exact inverse (byte for byte) and is None for any other text. The parameter name

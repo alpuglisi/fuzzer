@@ -33,6 +33,7 @@ from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
 from fuzzlab.oracle import Candidate, Oracle, category_to_oracle_class
+from fuzzlab.oracle.oracle import UNPLACEABLE
 from fuzzlab.oracle.probe import HeaderPointsStopped
 
 
@@ -220,6 +221,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     confirmed_keys: set[tuple] = set()
     inconclusive_keys: set[tuple] = set()
     inconclusive_detail: list[dict] = []
+    inconclusive_mechanism: dict[tuple, str] = {}        # key -> the undecided mechanism
     # Forms phase 2 (FR-FUZZ-43): once a sender stops header probing (the main session
     # was logged out right after one), every remaining header key is left unconfirmed:
     # its rows keep `pending` (unlabelled) and the reason goes to the metrics.
@@ -241,11 +243,14 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             confirmed_keys.add(key)
         elif unsure is not None:                         # FR-FUZZ-45: never a negative
             inconclusive_keys.add(key)
-            inconclusive_detail.append({
-                "url": candidate.url, "param": candidate.param,
-                "location": candidate.location, "mechanism": unsure.mechanism,
-                "families_not_started": list(
-                    unsure.evidence.get("families_not_started", []))})
+            inconclusive_mechanism[key] = unsure.mechanism
+            item = {"url": candidate.url, "param": candidate.param,
+                    "location": candidate.location, "mechanism": unsure.mechanism,
+                    "families_not_started": list(
+                        unsure.evidence.get("families_not_started", []))}
+            if unsure.mechanism == UNPLACEABLE:          # FR-FUZZ-47: why, no values
+                item["reason"] = str(unsure.evidence.get("reason", ""))[:200]
+            inconclusive_detail.append(item)
 
     def _checked(key) -> str:
         return INCONCLUSIVE if key in inconclusive_keys else CHECKED
@@ -298,14 +303,26 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     rejected = checked_keys - len(confirmed_keys) - len(inconclusive_keys)
     negatives = counts["negative"] + rejected
     statuses = list(status.values())
+    undecided: dict[str, int] = {}                       # mechanism -> inconclusive rows
+    for key, members in keyed.items():
+        if key in inconclusive_mechanism:
+            n = sum(1 for cid, _ev in members if status.get(cid) == INCONCLUSIVE)
+            if n:
+                mech = inconclusive_mechanism[key]
+                undecided[mech] = undecided.get(mech, 0) + n
     metrics = {"candidates": counts["candidate"], "negatives": negatives,
                "rule_negatives": counts["negative"], "oracle_rejected": rejected,
                "oracle_checked": statuses.count(CHECKED),
                "oracle_skipped": statuses.count(SKIPPED_BUDGET),
                "oracle_no_confirmer": statuses.count(NO_CONFIRMER),
                "oracle_inconclusive": statuses.count(INCONCLUSIVE),
+               # of those, rows no mechanism could place (FR-FUZZ-47); the rest were
+               # stopped by a cost cap (FR-FUZZ-45)
+               "oracle_unplaceable": undecided.get(UNPLACEABLE, 0),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}
+    for mech, n in sorted(undecided.items()):            # which mechanism (run page)
+        metrics[f"oracle_inconclusive_{mech}"] = n
     if counts.get("invalid_plugin_rules"):
         metrics["invalid_plugin_rules"] = counts["invalid_plugin_rules"]
     if not breaker:

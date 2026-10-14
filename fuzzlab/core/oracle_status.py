@@ -17,10 +17,14 @@ NO_CONFIRMER = "no_confirmer"        # its category has no oracle confirmer yet
 #: header-point breaker, CC-CORE-0042); the reason is in the run's ``metrics`` /
 #: ``skipped_points``, not in this column.
 PENDING = "pending"
-#: A confirmer started a check but could not decide within its cost cap (an SQLi
-#: family the hard cap kept from starting after an earlier one passed its screen;
-#: CC-CORE-0043, FR-FUZZ-45). Exhaustion follows a passed screen, so these rows are
-#: the likeliest positives on noisy pages: never a negative label.
+#: The candidate could not be decided: a cost cap stopped it, or no mechanism could
+#: place the point. (1) A confirmer started a check but could not decide within its
+#: cost cap (an SQLi family the hard cap kept from starting after an earlier one passed
+#: its screen; CC-CORE-0043, FR-FUZZ-45) -- exhaustion follows a passed screen, so these
+#: rows are the likeliest positives on noisy pages. (2) Every applicable mechanism
+#: refused the point's location (`UnplaceableLocation`; mechanism ``unplaceable``,
+#: CC-CORE-0046, FR-FUZZ-47) -- nothing was checked. Either way, never a negative
+#: label; which one is in the run's ``inconclusive`` detail (its ``mechanism``).
 INCONCLUSIVE = "inconclusive"
 
 #: Statuses whose "no finding" is not a negative — nobody checked, or a check could

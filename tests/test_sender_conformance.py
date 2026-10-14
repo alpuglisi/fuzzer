@@ -121,7 +121,8 @@ def test_the_scan_finds_the_known_implementations():
             ("fuzzlab.oracle.probe", "Sender")} <= names
     wrappers = {(m, c) for m, c, w in _seam_classes() if w}
     assert {("fuzzlab.oracle.oracle", "_CostCounter"),
-            ("fuzzlab.harness.auto", "_CountingSender")} <= wrappers
+            ("fuzzlab.harness.auto", "_CountingSender"),
+            ("fuzzlab.harness.auto", "_FragmentGuard")} <= wrappers   # forms phase 3
 
 
 def test_every_seam_class_accepts_the_full_protocol_signature():

@@ -6,6 +6,9 @@ changes. The predicate is a small, safe condition language:
 
 - ``always``: true
 - ``location_in``: [query, body, ...]
+- ``location_not_in``: [fragment, ...] — the point's location is none of these (forms
+  phase 3: a server-side rule never fires on a ``fragment`` point, whose payload never
+  reaches the server; FR-AUD-22)
 - ``method_in``: [GET, POST]
 - ``sink_context_in``: [html, html-attribute, url-attribute, js]
 - ``name_regex``: a regex matched (case-insensitively) against the parameter name (a
@@ -44,11 +47,12 @@ class Rule:
 
 
 #: Every ``when`` key the predicate language understands.
-WHEN_KEYS = frozenset({"always", "location_in", "method_in", "sink_context_in",
-                       "name_regex", "value_shape_in", "origin_in"})
+WHEN_KEYS = frozenset({"always", "location_in", "location_not_in", "method_in",
+                       "sink_context_in", "name_regex", "value_shape_in", "origin_in"})
 #: Where an injection point can come from (``origin_in``).
 ORIGINS = ("crawl", "ground-truth")
-_LIST_KEYS = ("location_in", "method_in", "sink_context_in", "value_shape_in", "origin_in")
+_LIST_KEYS = ("location_in", "location_not_in", "method_in", "sink_context_in",
+              "value_shape_in", "origin_in")
 
 
 class RuleError(ValueError):
@@ -126,6 +130,8 @@ def matches(rule: Rule, point) -> bool:
     checks: list[bool] = []
     if "location_in" in when:
         checks.append(point.location in when["location_in"])
+    if "location_not_in" in when:
+        checks.append(point.location not in when["location_not_in"])
     if "method_in" in when:
         checks.append(point.method in when["method_in"])
     if "sink_context_in" in when:

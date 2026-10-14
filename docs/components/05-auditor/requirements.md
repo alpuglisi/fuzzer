@@ -271,6 +271,10 @@ budget where a vulnerability is plausible.
     queries read only `urlsplit(url).query`. A `fragment` crawl point is built only with
     a browser (`--browser`, M6), else reported as ground truth's DOM points are; a
     destructive route (`/#/logout`) is never a point.
+  - **Client-side categories only on fragment points.** A `fragment` payload never
+    reaches the server, so every server-side rule carries `location_not_in:
+    ["fragment"]` (a closed predicate beside `location_in`) or a `location_in` without
+    it: a fragment point draws only xss and open-redirect candidates (reviewer B).
   - **Stated gaps:** points are only as good as lane I's capture (no captured request,
     no points; API calls only seen in a bundle are not imported); an object-selector
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;

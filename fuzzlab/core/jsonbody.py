@@ -306,13 +306,18 @@ def normalize_entries(entries) -> list[tuple[tuple, object]]:
 
 
 def replace_leaf(entries, name: str, value) -> list[tuple[tuple, object]]:
-    """A copy of ``entries`` with the leaf ``name`` names set to ``value`` (appended
-    when absent). Raises `JsonPlacementError` for a malformed name."""
+    """A copy of ``entries`` with the leaf ``name`` names set to ``value``. Raises
+    `JsonPlacementError` for a malformed name, and when ``entries`` is a captured body
+    that has no such leaf: a leaf is never added to an app's body, which would send a
+    request the app never made (refuse, never relocate: PA-0115). Only an empty entry
+    list (no captured body) takes the leaf as the whole body."""
     path = parse_name(name)
     if path is None:
         raise JsonPlacementError(f"not a JSON point name: {name!r}")
     out = [(p, value if p == path else v) for p, v in entries]
     if not any(p == path for p, _v in out):
+        if out:
+            raise JsonPlacementError(f"the body has no leaf {name!r}")
         out.append((path, value))
     return out
 
@@ -321,7 +326,8 @@ def body_for(param: str, value: str, entries=None) -> bytes:
     """The body a ``json`` send carries: ``entries`` rebuilt (types kept) with leaf
     ``param`` set to ``value`` as a string -- or, with no entries, ``{param: value}``
     nested along the path. UTF-8, compact. Raises `JsonPlacementError` when the leaf
-    cannot be placed (the sender then refuses, never relocates: PA-0115)."""
+    cannot be placed, including a leaf the entries do not have (the sender then
+    refuses, never relocates: PA-0115)."""
     base = normalize_entries(entries) if entries else []
     body = build(replace_leaf(base, param, str(value)))
     return json.dumps(body, ensure_ascii=False, separators=(",", ":"),

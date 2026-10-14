@@ -79,6 +79,40 @@ note of the same date.
   `name_tokens` already splits the display name at every key boundary, and production
   never writes a `json` parameter with a credential key. The live Juice Shop `fuzzlab
   auto` run (expected: `/rest/user/login` `email` SQLi) is the remaining check.
+- Review follow-up (2026-10-14; reviewer A's J2–J4 and reviewer B's items 1–4, both
+  AGREE with should-fixes; second commit on `p3-lane-j`):
+  - **J2 — two meanings of `inconclusive`:** "could not be decided: a cost cap stopped
+    a started check, or no mechanism could place the point". The pipeline records the
+    undecided mechanism per key, writes `oracle_inconclusive_<mechanism>` row counts
+    and carries an unplaceable item's `reason`. `fuzzlab auto` prints the reworded
+    header, then each item with its mechanism: `unplaceable (no mechanism could place
+    the point: <reason>)`, or the capped mechanism with its families not started. The
+    web run page (`web/results.inconclusive_by`, `templates/run.html`) names each
+    mechanism with its count.
+  - **B2:** `metrics["oracle_unplaceable"]`, the unplaceable subset of
+    `oracle_inconclusive`; `fuzzlab auto` prints it only when non-zero (goldens
+    unchanged).
+  - **J3:** `_FragmentGuard` is in the breaker-passthrough test and the conformance
+    wrapper scan; the pipeline's `_header_stop_reason` is pinned to read through it.
+  - **J4:** `oracle.finding_url` writes a `fragment` finding at `core.urls.
+    to_route_path` (its endpoint's function, PA-0003), so one parameter on two routes
+    gives two findings; every other finding is still at `to_path` (identical for a URL
+    without a hash route, so ground truth is unchanged).
+  - **B3:** an AST guard: no handler catching `ValueError` or broader (or
+    `UnplaceableLocation`) encloses a send in `oracle/strategies.py`; proven on synthetic
+    offenders (PA-0034(2)).
+  - **B4:** a JSON leaf absent from a captured body is refused (`replace_leaf` raises,
+    `UnplaceableLocation` at the sender), never appended; with no entries the leaf is
+    the whole body.
+  - **UI:** `fuzzlab/web/results.py` and `templates/run.html` belong to component 12;
+    no CC-UI number was pre-assigned for this round, so the change is recorded here and
+    FR-UI-19 is updated in place. **Flagged:** assign a CC-UI entry at merge (PA-0031:
+    not improvised).
+  - **Effectiveness (2026-10-14):** `tests/test_json_points.py` 99 passed; the
+    targeted set (24 files incl. it, `FUZZLAB_REQUIRE_LINT=1`) 827 passed, 2 xfailed;
+    `FUZZLAB_REQUIRE_BROWSER=1` `tests/test_web_ml_context.py` 15 passed and
+    `tests/test_web_pages_browser.py` 8 passed. Mutation check: all 12 mutants of this
+    round's gates killed; 46 of 47 over both rounds (the same equivalent survivor).
 
 ### CC-FUZZ-0067 — Open-redirect confirmation passes containment allowlists; host-based (BUG-0124) (2026-10-14)
 - Change:

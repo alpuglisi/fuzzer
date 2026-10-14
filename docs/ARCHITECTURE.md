@@ -1224,7 +1224,10 @@ tracked in the requirements files, not here.
       an HTTP send at `fragment` is refused (`harness.auto._FragmentGuard`) and the M6
       executor places the payload in the route's own query;
     - the oracle takes `UnplaceableLocation` from a mechanism as no verdict; a candidate
-      no mechanism could place is `inconclusive`, never a negative;
+      no mechanism could place is `inconclusive` (mechanism `unplaceable`, counted
+      separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
+      only client-side rules (`location_not_in`), and its finding keeps its route
+      (`oracle.finding_url` → `to_route_path`);
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a

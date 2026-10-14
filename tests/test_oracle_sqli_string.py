@@ -892,6 +892,9 @@ def test_cap_exhaustion_is_inconclusive_never_a_negative(tmp_path, budgeted, cap
         stored = {r["key"]: r["value"] for r in store.conn.execute(
             "SELECT key, value FROM run_metrics WHERE run_id=?", (run_id,))}
         assert stored["pipeline_oracle_inconclusive"] == 2.0
+        # which mechanism (the run page reads it; CC-FUZZ-0068): a cost cap, not placement
+        assert stored["pipeline_oracle_inconclusive_boolean-differential"] == 2.0
+        assert stored["pipeline_oracle_unplaceable"] == 0.0
     # the operator sees it (reviewer A, C1)
     from types import SimpleNamespace
 
@@ -900,8 +903,11 @@ def test_cap_exhaustion_is_inconclusive_never_a_negative(tmp_path, budgeted, cap
     auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
                             None, result)
     out = capsys.readouterr().out
-    assert ("inconclusive (1 candidate key(s): a cost cap stopped a check that had "
-            "started; unlabelled, FR-FUZZ-45):") in out
+    # reworded when "inconclusive" gained its second meaning (CC-FUZZ-0068, J2)
+    assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
+            "started check, or no mechanism could place the point; unlabelled, "
+            "FR-FUZZ-45/47):") in out
+    assert "unplaceable:" not in out                    # printed only when non-zero
     assert ("- query /bWAPP/page.php [title]: boolean-differential; not started: "
             "string-grammar, string-evaluation") in out
 

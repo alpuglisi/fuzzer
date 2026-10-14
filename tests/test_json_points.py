@@ -890,3 +890,217 @@ def test_the_auto_cli_passes_the_json_writes_flag_to_the_import(tmp_path, monkey
                            "--mode", "manual", "--categories", "sql-injection",
                            "--authorized", *flag])
         assert seen["fuzz_json_writes"] is want
+
+
+# =========================================================================================
+# Review follow-ups (reviewers A and B): J2-J4, B1-B4
+# =========================================================================================
+def _unplaceable_fragment_run(tmp_path):
+    """A crawl-style fragment point (an SPA route's ``next``), no browser, open redirect
+    only: its one mechanism is HTTP-only, so the crawl guard refuses it everywhere."""
+    from fuzzlab.core.runmode import RunPlan
+    from fuzzlab.harness.auto import _CountingSender, _FragmentGuard
+    from fuzzlab.harness.pipeline import run_pipeline
+    wire = _JsonWire()
+    point = InjectionPoint(url="http://localhost/#/go", param="next", method="GET",
+                           location="fragment", origin="crawl")
+    plan = RunPlan(mode="manual", categories=["open-redirect"], scored=False,
+                   source="manual")
+    store = Store(tmp_path / "f.db")
+    run = store.start_run("auto", "localhost")
+    sender = RequestsProbeSender(session=wire)
+    result = run_pipeline([point], store, run, _FragmentGuard(_CountingSender(sender)),
+                          plan)
+    return store, run, result, wire
+
+
+def test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative(
+        tmp_path, capsys):
+    """J2 (reviewer A): the status, the CLI line, and the ML dataset's exclusion."""
+    from types import SimpleNamespace
+
+    from fuzzlab.core.oracle_status import INCONCLUSIVE, UNLABELLED
+    from fuzzlab.harness import auto_cli
+    from fuzzlab.ml.dataset import build_dataset
+    store, run, result, wire = _unplaceable_fragment_run(tmp_path)
+    with store:
+        statuses = [r["oracle_status"] for r in store.conn.execute(
+            "SELECT oracle_status FROM candidate WHERE run_id=?", (run,))]
+        stored = {r["key"]: r["value"] for r in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (run,))}
+        assert build_dataset(store, run).ids == []          # never a training label
+    assert statuses and set(statuses) == {INCONCLUSIVE} and INCONCLUSIVE in UNLABELLED
+    assert wire.sent == []                                   # nothing went over HTTP
+    m = result.metrics
+    assert m["oracle_inconclusive"] == len(statuses) == m["oracle_unplaceable"]
+    assert m["oracle_rejected"] == 0                         # never a negative
+    assert stored["pipeline_oracle_unplaceable"] == len(statuses)
+    assert stored["pipeline_oracle_inconclusive_unplaceable"] == len(statuses)
+    (item,) = result.inconclusive
+    assert item["mechanism"] == "unplaceable" and "browser only" in item["reason"]
+    capsys.readouterr()
+    auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
+                            None, result)
+    out = capsys.readouterr().out
+    assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
+            "started check, or no mechanism could place the point; unlabelled, "
+            "FR-FUZZ-45/47):") in out
+    assert ("- fragment /#/go [next]: unplaceable (no mechanism could place the point: "
+            "a fragment point is placed by the browser only)") in out
+    assert "not started" not in out                         # no empty cap detail
+    assert f"unplaceable: {len(statuses)} candidate(s) no mechanism could place" in out
+
+
+def test_the_run_page_names_the_undecided_mechanism(tmp_path):
+    """J2: the web run page shows which kind (`unplaceable` vs a capped mechanism), from
+    what the pipeline wrote."""
+    pytest.importorskip("fastapi")
+    from fuzzlab.core.config import load_config
+    from fuzzlab.web.app import create_app
+    from fuzzlab.web.results import inconclusive_by
+    from tests._webclient import web_client
+    store, run, _result, _w = _unplaceable_fragment_run(tmp_path)
+    with store:
+        metrics = {r["key"]: r["value"] for r in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (run,))}
+    assert inconclusive_by(metrics) == [("unplaceable", 1)]
+    assert inconclusive_by({"pipeline_oracle_inconclusive_boolean-differential": 2.0,
+                            "pipeline_oracle_inconclusive": 2.0, "x": "y"}) == [
+        ("boolean-differential", 2)]
+    cfg = load_config(overrides={"store_path": str(tmp_path / "f.db"),
+                                 "target_base_url": "http://localhost"}, environ={})
+    page = web_client(create_app(cfg)).get(f"/runs/{run}").text
+    text = " ".join(page.split())
+    assert ("inconclusive 1 (could not be decided: a cost cap stopped a started check, "
+            "or no mechanism could place the point:") in text
+    assert 'data-field="inconclusive-unplaceable">unplaceable 1</span>' in text
+
+
+def test_server_side_rules_never_fire_on_a_fragment_point():
+    """B1 (reviewer B): only client-side categories (DOM/reflected XSS, open redirect)
+    on a fragment point; every other rule excludes the location, whatever the name or
+    value shape."""
+    client_side = {"xss", "open-redirect"}
+    rules = load_rules()
+    for rule in rules:
+        if rule.category in client_side:
+            continue
+        excluded = ("fragment" in rule.when.get("location_not_in", ())
+                    or ("location_in" in rule.when
+                        and "fragment" not in rule.when["location_in"]))
+        assert excluded, rule.id
+    for name, shapes in (("url", {"url"}), ("host", {"hostname"}), ("file", {"filename"}),
+                         ("sort", set()), ("price", set()), ("title", set()), ("q", set())):
+        for method in ("GET", "POST"):
+            point = InjectionPoint(url="http://h/#/x", param=name, method=method,
+                                   location="fragment", origin="crawl",
+                                   value_shapes=frozenset(shapes))
+            fired = {r.category for r in rules if matches(r, point)}
+            assert fired <= client_side, (name, fired)
+    # a query point with the same name still gets them (the exclusion is location-only)
+    q = InjectionPoint(url="http://h/x", param="host", location="query", origin="crawl")
+    assert "command-injection" in {r.category for r in rules if matches(r, q)}
+
+
+def test_the_location_not_in_predicate_is_validated():
+    from fuzzlab.audit.rules import Rule, RuleError, validate_rule
+    validate_rule(Rule("ok", "x", "t", {"location_not_in": ["fragment"]}))
+    with pytest.raises(RuleError):
+        validate_rule(Rule("bad", "x", "t", {"location_not_in": "fragment"}))
+
+
+def _masking_handlers(source: str) -> list[int]:
+    """Lines of handlers that catch `UnplaceableLocation` (a `ValueError`) -- bare,
+    `BaseException`, `Exception`, `ValueError`, or the class itself, alone or in a
+    tuple -- around a probe send (`_send`, `send`, `send_correlated`)."""
+    broad = {"BaseException", "Exception", "ValueError", "UnplaceableLocation"}
+
+    def names(node):
+        if node is None:
+            return {"BaseException"}
+        if isinstance(node, ast.Tuple):
+            return {n for e in node.elts for n in names(e)}
+        return {getattr(node, "id", None) or getattr(node, "attr", None)}
+
+    def sends(stmts):
+        return any(isinstance(c, ast.Call)
+                   and (getattr(c.func, "id", None) or getattr(c.func, "attr", None))
+                   in ("_send", "send", "send_correlated")
+                   for s in stmts for c in ast.walk(s))
+    out = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Try) and sends(node.body):
+            out += [h.lineno for h in node.handlers if names(h.type) & broad]
+    return out
+
+
+def test_no_strategy_masks_an_unplaceable_send():
+    """B3 (reviewer B): a strategy that swallowed `UnplaceableLocation` would turn
+    "cannot place" into "not vulnerable"."""
+    src = (ROOT / "fuzzlab/oracle/strategies.py").read_text()
+    assert _masking_handlers(src) == []
+
+
+def test_the_masking_guard_catches_a_synthetic_offender():
+    """PA-0034(2): the guard flags each masking shape, and only those."""
+    tpl = ("class S:\n    def confirm(self, c, sender):\n        try:\n"
+           "            self._send(sender, c, 'v')\n        except {exc}:\n"
+           "            return None\n")
+    for exc, flagged in (("ValueError", True), ("Exception", True),
+                         ("(TypeError, ValueError)", True), ("UnplaceableLocation", True),
+                         ("KeyError", False), ("(TypeError, KeyError)", False)):
+        assert bool(_masking_handlers(tpl.replace("{exc}", exc))) is flagged, exc
+    bare = tpl.replace("except {exc}:", "except:")
+    assert _masking_handlers(bare) == [5]
+    no_send = "try:\n    int('x')\nexcept ValueError:\n    pass\n"
+    assert _masking_handlers(no_send) == []
+
+
+def test_a_leaf_absent_from_a_captured_body_is_refused_never_appended():
+    """B4 (reviewer B): with entries, an unknown leaf raises (UnplaceableLocation at the
+    sender); with none, the leaf is the whole body."""
+    entries = [(("email",), "e"), (("password",), "")]
+    with pytest.raises(jsonbody.JsonPlacementError):
+        jsonbody.replace_leaf(entries, "role", "admin")
+    with pytest.raises(jsonbody.JsonPlacementError):
+        jsonbody.body_for("role", "admin", entries)
+    assert jsonbody.body_for("a.b", "v") == b'{"a":{"b":"v"}}'
+    wire = _JsonWire()
+    with pytest.raises(UnplaceableLocation):
+        RequestsProbeSender(session=wire).send(BASE + "api/x", "role", "admin",
+                                               method="POST", location="json",
+                                               entries=entries)
+    assert wire.sent == []
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    cand = Candidate(url=BASE + "api/x", param="email", method="POST", location="json",
+                     base_entries=tuple((list(p), v) for p, v in entries))
+    with pytest.raises(UnplaceableLocation):
+        _FormBoundSender(RequestsProbeSender(session=wire), cand).send(
+            BASE + "api/x", "role", "admin", method="POST", location="json")
+    assert wire.sent == []
+
+
+def test_the_same_parameter_on_two_routes_gives_two_findings(tmp_path):
+    """J4 (reviewer A): a fragment finding keeps its route (`to_route_path`)."""
+    from fuzzlab.oracle.browser import ExecObservation
+
+    class Fires:
+        def run(self, request, token):
+            return ExecObservation(True, "fake")
+    pages = ["http://localhost/#/search?q=pup", "http://localhost/#/track-result?q=1"]
+    store, run, _c = _import(tmp_path, pages=pages)
+    with store:
+        run_auto(base_url=BASE, store=store, run_id=run,
+                 sender=RequestsProbeSender(session=_JsonWire()), mode="manual",
+                 selected_categories=["xss"], points_source="crawl", browser=Fires())
+        found = sorted((r["url"], r["param"], r["vuln_class"]) for r in store.conn.execute(
+            "SELECT url, param, vuln_class FROM finding WHERE run_id=?", (run,)))
+    assert found == [("/#/search", "q", "xss-dom"), ("/#/track-result", "q", "xss-dom")]
+
+
+def test_a_non_fragment_finding_url_is_unchanged():
+    from fuzzlab.oracle.oracle import finding_url
+    assert finding_url(Candidate(url="http://h/app/p.php?x=1#/a?q=1", param="x")) == \
+        "/app/p.php"
+    assert finding_url(Candidate(url="http://h/app/#/a", param="q",
+                                 location="fragment")) == "/app/#/a"
