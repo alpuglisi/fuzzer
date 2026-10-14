@@ -111,6 +111,11 @@ class SessionManager:
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._failures: dict[tuple[str, str], int] = {}
+        # forms phase 2 (FR-SESS-16): callbacks told when observe() logs a session out
+        self._logout_listeners: list[Callable[[str, str], None]] = []
+        # guards only the valid->invalid check-and-set in observe(), so concurrent
+        # sends tell a listener once per logout; never held across a send or listener
+        self._observe_guard = threading.Lock()
         self._persisted: dict[tuple[str, str], dict] = {}
         if self._store is not None:
             for rec in self._store.all_session_states():
@@ -196,8 +201,22 @@ class SessionManager:
                                 login_url=state.login_url, page_url=request.url,
                                 content_check=state.kind != "basic",
                                 login_fields=state.login_fields):
-            state.valid = False  # next prepare() re-authenticates
+            with self._observe_guard:
+                was_valid = state.valid
+                state.valid = False  # next prepare() re-authenticates
             self._persist(state)
+            if was_valid:
+                # inside the observing send; a listener's error propagates (PA-0106)
+                for listener in list(self._logout_listeners):
+                    listener(host, identity)
+
+    def add_logout_listener(self, listener: Callable[[str, str], None]) -> None:
+        """Call ``listener(host, identity)`` each time `observe` sees a valid session of
+        **this** manager logged out (FR-SESS-16). It runs inside the send that observed
+        the logout, so it must not block on a lock held across that send. Adding the
+        same listener again does nothing."""
+        if listener not in self._logout_listeners:
+            self._logout_listeners.append(listener)
 
     # -- explicit / standalone -------------------------------------------
     def ensure(self, host: str, identity: str, base_url: str, *,

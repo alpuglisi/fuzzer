@@ -266,6 +266,25 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Migration 20** stores a crawled form's entries in `form`, and links its fields
     through `parameter.form_id`.
 
+- **FR-CORE-30** *(forms phase 2; `CC-CORE-0040`, 2026-10-14).*
+  - `core/redaction.looks_like_identifier(value)` is the single test for "this value
+    looks like a secret identifier" (a session id, a one-time or capability token, an
+    API key).
+  - **How it decides:** the value is split on `. : @` and whitespace, and on `/` when
+    it is a URL or an absolute path. It is identifier-like when a piece drawn from
+    `[A-Za-z0-9_-+/=]` either:
+    - has at least 16 characters with a digit or with both cases; or
+    - has 8–15 characters with a letter, a digit and at least 32 Shannon bits;
+
+    and the piece is neither word-shaped (every `_`/`-`/`/`/`+` part a word with at most
+    four trailing digits, or a short number) nor a date.
+  - **Accepted false negatives:** about 0.3% of random tokens, and 0.6% of
+    16-character standard base64.
+  - **Callers pass the raw value:** percent-decoded, not form-decoded.
+  - **Total and linear:** it never raises, and runs in time linear in the value.
+  - **No second definition:** nothing else in `fuzzlab/` defines its own entropy or
+    identifier test.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

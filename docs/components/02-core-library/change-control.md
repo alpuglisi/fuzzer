@@ -3,6 +3,69 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0040 — Shared identifier-like value predicate (`looks_like_identifier`) (2026-10-14)
+- Change:
+  - **`core/redaction.looks_like_identifier(value)`:** one total predicate (PA-0096)
+    for "this value looks like a secret identifier", whatever its parameter is
+    called.
+  - **How it decides:** the value is split on `. : @` and whitespace, and on `/` too
+    when it is a URL or an absolute path (contains `://` or starts with `/`).
+    Elsewhere `/` belongs to standard base64. A piece drawn only from
+    `[A-Za-z0-9_-+/=]` is identifier-like when either rule holds:
+    - **R1:** at least 16 characters, with a digit or with both upper and lower case;
+    - **R2:** 8–15 characters, with a letter and a digit, and a Shannon estimate of at
+      least 32 bits.
+  - **Exemptions:** a matching piece is still exempt when it is
+    - **word-shaped:** every `_`/`-`/`/`/`+` part is a word (lower, Capitalised, ALLCAPS or
+      CamelCase) with at most four trailing digits, or one to four digits, as in
+      `directory_traversal_1` or `ProductDetailsPage`;
+    - **a date:** `2026-10-14` or `2026-10-14T10`.
+  - **Accepted misses:** about 0.3% of random hex, base32 and base64 tokens the rules
+    would otherwise catch (79 of 29,471 measured), 0.6% of 16-character standard base64
+    tokens (58 of 10,000), and almost none at 24 or more characters.
+  - **Raw query text:** splitting word parts on `+` keeps raw multi-word text
+    (`The+Fellowship+of+the+Ring`) from counting as an identifier.
+  - **Linear time:** the word pattern has no nested quantifier over the same
+    characters. The first version's `(?:[A-Z]?[a-z]+)+` backtracked exponentially on a
+    long word followed by `=` (caught at review; never committed). A sweep of
+    `fuzzlab/` for nested quantifiers found only deliberate ReDoS payloads in
+    `oracle/strategies.py` and labgen, plus the delimiter-separated `livefilter._RULE_ID`
+    and `redaction._FORM_SHAPE`, which are safe.
+  - **Caller contract:** pass the raw value (percent-decoded, not form-decoded),
+    because form decoding turns base64's `+` into a space.
+  - **Partial claim:** a URL whose path has a random-looking piece (`/a/c123456789`)
+    is identifier-like by R2.
+  - **Why:** forms phase 2 lanes A (redacting tokens in link sets and header-point
+    URLs) and B (cookie-value distinctness) need the same convention; one definition
+    keeps them from drifting apart (PA-0003, PA-0021).
+- Impact:
+  - **New API, no callers yet:** lanes A and B import it; their own CC entries
+    record the behaviour.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_identifier_predicate.py`): the table (bWAPP names and
+        values, the importer's fillers, word-shaped names, paths, standard base64 with
+        `/`), totality extremes (PA-0096), linear time on 1 MB and near-miss values
+        (PA-0095; shown to hang on the backtracking pattern first), and a
+        defined-once check — done
+  - [x] mutation check: 14/14 mutants killed (thresholds, exemptions, splits,
+        totality; with CC-SESS-0017's listener) — done
+  - [x] FR-CORE-30 — done
+- Review:
+  - **Specs:** reviewer A and reviewer B each specified a version; both misfired on
+    ordinary values (fillers, `lang_en.php`, long text).
+  - **Unified spec:** proposed by the orchestrator. Reviewer A required a split on
+    `/` and `@` as well, so URLs with digits in the path are not identifiers.
+    Reviewer B required the word-shaped and date exemptions (names like
+    `directory_traversal_1.php` matched R1) and the extremes in the table test.
+  - **Second round:** both reviewers found the backtracking word pattern. Reviewer B
+    found that the unconditional `/` split missed 10% of 16-character standard
+    base64. Both are fixed as above.
+  - **Third round:** reviewer A AGREED, after the `+` word split. Reviewer B
+    AGREED on the same state; their should-fix (an atomic "once" in the logout
+    listener) is recorded under CC-SESS-0017.
+
 ### CC-CORE-0039 — Form records and classification; migration 20 (`form`); `update`/`insert` deny tokens (BUG-0114); anti-CSRF names redacted (2026-10-13)
 - Change:
   - **`core/forms.py`:** `control_kind`, `controls`, `is_selector_form`, `form_method`,

@@ -108,6 +108,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-16 (logout listeners, CC-SESS-0017)**
+  - `add_logout_listener(fn)` registers `fn(host, identity)`. `observe` calls it once
+    each time it marks a valid session of this manager logged out; the check-and-set
+    is atomic, so concurrent sends seeing one logout tell it once.
+  - It runs inside the observing send, after the state is invalid, and its errors
+    propagate. Adding the same listener twice is a no-op.
 - **FR-SESS-15 (the discovery base is the operator's URL, CC-SESS-0016, BUG-0113)**
   - **Operator bases.** `ensure(..., operator=True)` is called by every operator entry
     point with the operator's own URL, path kept. It is remembered per

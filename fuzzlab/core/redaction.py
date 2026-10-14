@@ -34,6 +34,7 @@ names ``codes`` / ``pins``, and ``session_count``.
 from __future__ import annotations
 
 import json
+import math
 import re
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
@@ -80,6 +81,98 @@ def is_sensitive_name(name: str) -> bool:
     if "key" in tokens:
         return len(tokens) == 1 or any(t in _KEY_QUALIFIERS for t in tokens)
     return tokens == ["code"]                     # an OAuth code, only as the whole name
+
+
+# --- identifier-like values (forms phase 2; reviewers A/B, PA-0003) ----------------
+
+#: Pieces of a value are separated by these (hosts, schemes, e-mail, JWT dots, words).
+_PIECE_SPLIT = re.compile(r"[.:@\s]")
+#: ... and of a URL or absolute path, by ``/`` too. Elsewhere ``/`` stays in the
+#: alphabet: standard base64 uses it (reviewer B).
+_URL_PIECE_SPLIT = re.compile(r"[.:@/\s]")
+_ID_ALPHABET = re.compile(r"[A-Za-z0-9_\-+/=]+")
+#: A piece this long from the identifier alphabet is identifier-like (rule R1).
+ID_MIN_LEN = 16
+#: A shorter piece needs this length and Shannon estimate (rule R2).
+ID_SHORT_MIN_LEN = 8
+ID_SHORT_MIN_BITS = 32.0
+#: One ``_``/``-``/``/``/``+`` part of a word-shaped piece: a word (lower, Capitalised,
+#: ALLCAPS or CamelCase) with at most four trailing digits, or one to four digits
+#: alone. Written without nested quantifiers over the same characters, so matching is
+#: linear (PA-0095; ``(?:[A-Z]?[a-z]+)+`` backtracked exponentially, reviewer B).
+_WORD_PART = re.compile(r"(?:[A-Z]+|[a-z]*(?:[A-Z][a-z]+)*)[0-9]{0,4}|[0-9]{1,4}")
+#: A date or date-and-hour piece (``2026-10-14T10`` once a timestamp is split on ``:``).
+_DATE_PIECE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(?:T[0-9]{2})?")
+
+
+def _shannon_bits(piece: str) -> float:
+    """Per-character Shannon entropy of ``piece`` times its length."""
+    n = len(piece)
+    counts: dict[str, int] = {}
+    for ch in piece:
+        counts[ch] = counts.get(ch, 0) + 1
+    return -sum(c / n * math.log2(c / n) for c in counts.values()) * n
+
+
+def _word_shaped(piece: str) -> bool:
+    """Names such as ``directory_traversal_1``, ``owasp_top10_2017_a1``,
+    ``ProductDetailsPage`` and the raw query text ``hello+world+2024``: every
+    ``_``/``-``/``/``/``+`` part is a word or a short number."""
+    parts = [x for x in re.split(r"[_\-/+]", piece) if x]
+    return bool(parts) and all(_WORD_PART.fullmatch(x) for x in parts)
+
+
+def _identifier_piece(piece: str) -> bool:
+    if len(piece) < ID_SHORT_MIN_LEN or not _ID_ALPHABET.fullmatch(piece):
+        return False
+    if _word_shaped(piece) or _DATE_PIECE.fullmatch(piece):
+        return False
+    digit = any(ch.isdigit() for ch in piece)
+    if len(piece) >= ID_MIN_LEN:                  # R1: hex, UUID, base64(url), JWT part
+        return digit or (any(ch.islower() for ch in piece)
+                         and any(ch.isupper() for ch in piece))
+    letter = any(ch.isalpha() for ch in piece)    # R2: a short random token
+    return digit and letter and _shannon_bits(piece) >= ID_SHORT_MIN_BITS
+
+
+def looks_like_identifier(value) -> bool:
+    """True when ``value`` looks like a secret identifier: a session id, a one-time or
+    capability token, an API key — whatever its parameter is called.
+
+    The value is split on ``. : @`` and whitespace, and also on ``/`` when it is a URL
+    or an absolute path (it contains ``://`` or starts with ``/``); elsewhere ``/``
+    belongs to standard base64. It is identifier-like when any piece, drawn only from
+    ``[A-Za-z0-9_-+/=]``, is
+
+    * **R1** at least 16 characters with a digit, or with both upper and lower case
+      (hex ids, UUIDs, base64/base64url secrets, JWT segments); or
+    * **R2** 8–15 characters with a letter and a digit and a Shannon estimate of at
+      least 32 bits (a short random token).
+
+    and the piece is not **word-shaped** (every ``_``/``-``/``/``/``+`` part a word —
+    lower, Capitalised, ALLCAPS or CamelCase — with at most four trailing digits, or
+    one to four digits) nor a date (``2026-10-14`` / ``2026-10-14T10``).
+
+    Ordinary words (raw ``hello+world+2024`` too), names such as
+    ``directory_traversal_1``, host names, file names, paths, e-mail addresses,
+    timestamps and the importer's fillers are not. Accepted misses: a short or
+    low-entropy token; an all-one-case base64 token with no digit; a random token that
+    happens to be word-shaped (about 0.3% of random 8–32 character hex, base32 and
+    base64 tokens; 0.6% of 16-character standard base64). Accepted false positive
+    (fails closed): a long alphanumeric code that is not word-shaped. Total: a
+    non-string is False, and it never raises; linear in the value's length.
+
+    Callers pass the **raw** value: percent-decoded, not form-decoded. Form decoding
+    turns base64's ``+`` into a space, which splits the token into short pieces.
+    """
+    try:
+        if not isinstance(value, str):
+            return False
+        url = value.startswith("/") or "://" in value
+        split = _URL_PIECE_SPLIT if url else _PIECE_SPLIT
+        return any(_identifier_piece(p) for p in split.split(value))
+    except Exception:                             # total (PA-0096): never raises
+        return False
 
 
 # --- the storage boundary (BUG-0099 / BUG-0100) ------------------------------------

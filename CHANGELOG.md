@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Shared groundwork for forms phase 2; CC-CORE-0040, CC-SESS-0017)
+- **What:**
+  - added `core.redaction.looks_like_identifier`, one total, linear-time test for
+    whether a value looks like a secret token (a hex id, UUID, base64 or JWT segment,
+    or a short random alphanumeric), with ordinary names, paths and dates exempt;
+  - added `SessionManager.add_logout_listener`, so a breaker can react when a send
+    logs the session out.
+- **Why:** forms phase 2 lane A (redacting tokens in link sets and header URLs) and
+  lane B (whether two login sessions really differ) need the same rule. A single
+  definition keeps them from drifting apart (PA-0003). Both lanes' breakers need the
+  logout signal, and counting logins would also count lane B's copies.
+
 ## 2026-10-13 (Forms phase 1: navigate an app as shipped, fuzz its forms with their siblings; BUG-0114)
 - **Why:** the operator asked that fuzzlab navigate bWAPP as shipped and find its
   vulnerabilities in our categories, without seeding. bWAPP's pages are reachable only

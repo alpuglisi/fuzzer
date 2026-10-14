@@ -3,6 +3,43 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0017 — Logout listeners (`add_logout_listener`) for forms phase 2's breakers (2026-10-14)
+- Change:
+  - **`SessionManager.add_logout_listener(listener)`.**
+    - **When it fires:** `observe` calls `listener(host, identity)` when it sees a
+      *valid* session of this manager logged out.
+    - **Where it runs:** after the state is marked invalid, inside the send that
+      observed the logout.
+    - **Errors:** a listener's error propagates (PA-0106).
+    - **Registration:** adding the same listener again does nothing.
+    - **Once per logout:** the valid→invalid check-and-set runs under a small guard
+      lock, released before `_persist` and the listeners. Concurrent sends that see
+      the same logout therefore tell a listener once.
+  - **Why:**
+    - forms phase 2 lane A stops header probing when a probed header logs the session
+      out;
+    - lane B stops session isolation when a copy's login logs the main session out.
+  - **Why not count logins:** reviewers A and B found that counting logins through
+    the shared fetch factory also counts lane B's copy logins.
+- Impact:
+  - **New API, no callers yet.**
+  - **Behaviour:** with no listener, `observe` behaves as before.
+  - **Scope:** an isolated copy is its own manager, so its logouts never reach the main
+    manager's listeners.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_logout_listener.py`): told once per logout with host and
+        identity, deduplicated, not told for another manager, errors propagate after
+        the state is invalid, 8 concurrent observers tell it once — done
+  - [x] FR-SESS-16 — done
+- Review:
+  - **Origin:** reviewers A and B (lane B's v2.1/v2.2 hook; lane A v2 must-fix M1).
+    The hook was moved into the shared commit so both lanes build on it.
+  - **Shared-commit gate:** AGREED by A and B.
+  - **B's should-fix, adopted:** the "once" claim needed an atomic check-and-set,
+    since `observe` holds no per-key lock.
+
 ### CC-SESS-0016 — Discovery base is the operator's URL, never its origin (BUG-0113) (2026-10-13)
 - Change:
   - `ensure(host, identity, base_url, *, operator=False)`. An operator base is
