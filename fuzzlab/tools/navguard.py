@@ -41,7 +41,9 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        on_abort: Callable[[str, str], None] | None = None, *,
                        in_scope: Callable[[str], bool],
                        on_out_of_scope: Callable[[str], None] | None = None,
-                       api=None):
+                       api=None,
+                       method_refusal: Callable[[str, str], str | None] | None = None,
+                       observe: Callable[[object, object], None] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -51,7 +53,15 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     checked like the first, and the request aborted at the first refused hop. A
     redirected navigation is answered with one redirect to its checked landing URL
     (so ``page.url`` and relative links stay right; the browser requests that page a
-    second time), any other request with the landing response itself."""
+    second time), any other request with the landing response itself.
+
+    ``method_refusal(method, url)`` (forms phase 3, FR-CRAWL-12): a reason aborts the
+    first request whatever ``allow`` says (the crawler refuses a browser-initiated
+    DELETE); ``on_abort`` is told. ``observe(request, response)`` is called with each
+    request that was sent and its final response, before it is answered (the crawler
+    reads already-loaded script bodies and captures request bodies there, FR-CRAWL-13);
+    it is contained: a failing observer is logged and never changes the answer
+    (PA-0086(2))."""
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -75,6 +85,14 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             route.continue_()
             return
         if refused(url):
+            route.abort()
+            return
+        why = method_refusal(req.method.upper(), url) if method_refusal else None
+        if why is not None:
+            logging.info(f"blocked browser {req.method.upper()} {url.split('?', 1)[0]} "
+                         f"({why})")
+            if on_abort is not None:
+                on_abort(url, why)
             route.abort()
             return
         try:
@@ -107,6 +125,12 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                          f"({str(exc).splitlines()[0][:80]})")
             route.abort()
             return
+        if observe is not None:
+            try:
+                observe(req, final)
+            except Exception as exc:  # noqa: BLE001 - an observer never breaks a request
+                logging.info(f"request observer failed on {url.split('?', 1)[0]} "
+                             f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})")
         if final is first:
             route.fulfill(response=first)
         elif req.is_navigation_request() and method in ("GET", "HEAD"):
@@ -150,13 +174,17 @@ def make_ws_handler(in_scope: Callable[[str], bool],
 def guard_page(target, allow: frozenset[str] = frozenset(),
                on_abort: Callable[[str, str], None] | None = None, *,
                in_scope: Callable[[str], bool],
-               on_out_of_scope: Callable[[str], None] | None = None) -> None:
+               on_out_of_scope: Callable[[str], None] | None = None,
+               method_refusal: Callable[[str, str], str | None] | None = None,
+               observe: Callable[[object, object], None] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
-    (BUG-0123)."""
+    (BUG-0123). ``method_refusal`` and ``observe``: see `make_route_handler`."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
-                                            on_out_of_scope=on_out_of_scope, api=api))
+                                            on_out_of_scope=on_out_of_scope, api=api,
+                                            method_refusal=method_refusal,
+                                            observe=observe))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "

@@ -324,6 +324,21 @@ plugin registry. It is the layer that makes the store the integration bus.
   path, query and SPA fragment, a route path or a button label (tokenised like
   `destructive_reason`, plural folded). Such a page may be visited; its form is never
   submitted by the crawler and a captured request to it is never imported for fuzzing.
+- **FR-CORE-37** *(captured requests; `CC-CORE-0047`, 2026-10-14, forms phase 3).*
+  `core/redaction` is the one boundary for what the crawler stores of the app's own
+  requests (FR-CRAWL-13) and of a SPA route's URL (FR-CRAWL-12):
+  - `redact_captured_body(body, content_type)` returns `(value, None)` or `(None,
+    reason)`. Only a JSON object or array, or a form-encoded body (an object, the last
+    value of a repeated name winning), at most `CAPTURE_MAX_BYTES` (64 KiB) and
+    `CAPTURE_MAX_DEPTH` (8) deep, is recorded, and only if `redact_body` (fail closed)
+    would not omit it. A sensitively named key's value (`is_sensitive_name`) is blanked
+    whatever its shape, and an identifier-like string (`looks_like_identifier`; a form
+    value judged raw) too: a string becomes `""`, a number or boolean `null`, a
+    container empty. Total (never raises).
+  - `redact_url_identifiers(url)`: `redact_url`, then identifier-like query values
+    blanked to `name=`, and a SPA-route fragment's query redacted the same way.
+  - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
+    is not a route is left alone), for the crawler's stored route URLs.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
@@ -338,6 +353,7 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **NFR-CORE-secrets** Secrets are referenced, never stored in the store or
   config; redaction on write.
   - Enforced by: the credential store and the storage-redaction boundary — `tests/test_credentials.py::test_set_get_delete_per_host`, `tests/test_storage_redaction.py::test_the_http_client_records_no_secret`, `tests/test_storage_redaction.py::test_every_traffic_producer_goes_through_the_redaction_boundary`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_redaction.py::test_logs_use_the_same_predicate`
+  - Enforced by (the crawler's captured requests and SPA route URLs, CC-CORE-0047): `redact_captured_body` / `redact_url_identifiers` / `redact_spa_fragment`, called at the spider's one write site — `tests/test_storage_redaction.py::test_the_guard_catches_a_synthetic_capture_producer`, `tests/test_storage_redaction.py::test_the_spiders_capture_writer_is_seen_by_the_guard`, `tests/test_spa_capture.py::test_a_sensitive_name_blanks_its_whole_value_keeping_the_type`, `tests/test_spa_capture.py::test_record_request_stores_no_secret_and_no_identifier`, `tests/test_spa_capture.py::test_a_spa_fragments_query_passes_the_boundary_too`, `tests/test_spa_capture.py::test_a_password_form_is_submitted_only_in_a_fresh_unauthenticated_context`
   - Not yet enforced: config accepts secret values unchecked; `repeater_tab.raw_request` and `run_plugin.config` are stored unredacted; `session_state.login_url` is not passed through `redact_url`. (BUG-0111 sweep; reported to the operator.)
 - **NFR-CORE-no-bypass** No tool constructs HTTP or session state outside core.
   - Not yet enforced: the spider, the auditor, the standalone fuzzer, `RequestsProbeSender`, the greybox sender and the login fetcher build their own `requests.Session`, and the proxy uses sockets; there is no guard test. The destructive-URL gate (BUG-0111/0112) is enforced at each of them instead. (BUG-0111 sweep; reported to the operator.)

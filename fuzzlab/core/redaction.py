@@ -351,3 +351,140 @@ def redact_body(body: bytes, content_type: str) -> bytes:
             return body
         return redact_json_body(body)
     return body
+
+
+# --- the crawler's captured requests (forms phase 3, FR-CRAWL-13, CC-CORE-0047) ------
+
+#: A captured request body larger than this is not recorded.
+CAPTURE_MAX_BYTES = 64 * 1024
+#: ... nor one whose JSON nests deeper than this many containers.
+CAPTURE_MAX_DEPTH = 8
+
+
+def _redact_query_identifiers(query: str) -> str:
+    """`redact_query`, then each value that `looks_like_identifier` (judged on its raw,
+    percent-decoded form) blanked to ``name=``."""
+    from urllib.parse import unquote
+    out = []
+    for part in redact_query(query).split("&"):
+        name, eq, raw = part.partition("=")
+        out.append(f"{name}=" if eq and looks_like_identifier(unquote(raw)) else part)
+    return "&".join(out)
+
+
+def redact_spa_fragment(url: str) -> str:
+    """``url`` with the query of a SPA-route fragment (``#/reset?token=...``,
+    ``#!/x?id=...``) redacted like a URL query: sensitive names replaced, identifier-like
+    values blanked. A fragment that is not a route (``#top``) is left alone. The crawler
+    keeps such fragments as pages (FR-CRAWL-12), so they pass this boundary."""
+    head, sep, frag = (url or "").partition("#")
+    if not sep or not (frag.startswith("/") or frag.startswith("!/")) or "?" not in frag:
+        return url
+    route, _q, query = frag.partition("?")
+    new = _redact_query_identifiers(query)
+    return url if new == query else f"{head}#{route}?{new}"
+
+
+def redact_url_identifiers(url: str) -> str:
+    """`redact_url`, then each query value that `looks_like_identifier` (given its raw,
+    percent-decoded value) blanked to ``name=``, and a SPA-route fragment's query
+    redacted the same way (`redact_spa_fragment`): how the crawler stores an XHR URL and
+    a captured request's URLs (FR-CRAWL-12/13). Total; a URL with neither is returned
+    unchanged."""
+    url = redact_spa_fragment(redact_url(url))
+    if "?" not in (url or "").split("#", 1)[0]:
+        return url
+    parts = urlsplit(url)
+    new = _redact_query_identifiers(parts.query)
+    return url if new == parts.query else urlunsplit(parts._replace(query=new))
+
+
+def _blank(value):
+    """A blanked value keeps its declared type: ``""`` for a string, ``null`` for a
+    number or a boolean, an empty container for a container (its whole subtree goes,
+    PA-0091(2))."""
+    if isinstance(value, str):
+        return ""
+    if isinstance(value, dict):
+        return {}
+    if isinstance(value, list):
+        return []
+    return None
+
+
+def _blank_tree(value):
+    """``value`` with every sensitively named key's value and every identifier-like
+    string blanked (called on a tree at most `CAPTURE_MAX_DEPTH` deep)."""
+    if isinstance(value, dict):
+        return {k: (_blank(v) if is_sensitive_name(str(k)) else _blank_tree(v))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [_blank_tree(v) for v in value]
+    if isinstance(value, str) and looks_like_identifier(value):
+        return ""
+    return value
+
+
+def _container_depth_ok(doc, limit: int) -> bool:
+    stack = [(doc, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, (dict, list)):
+            if depth > limit:
+                return False
+            children = node.values() if isinstance(node, dict) else node
+            stack.extend((c, depth + 1) for c in children if isinstance(c, (dict, list)))
+    return True
+
+
+def _reject_constant(name):
+    raise ValueError(f"non-standard JSON constant {name}")
+
+
+def redact_captured_body(body: bytes, content_type: str):
+    """A request body the crawler captured, as the JSON value it may store, or why not:
+    ``(value, None)`` or ``(None, reason)`` (FR-CRAWL-13, the one boundary for it).
+
+    Only a JSON object or array, or a form-encoded body (an object of name -> value,
+    the last value of a repeated name winning), is recorded, at most
+    `CAPTURE_MAX_BYTES` and `CAPTURE_MAX_DEPTH` deep. It first passes `redact_body` (the
+    storage boundary, fail closed): a body that boundary would omit is not recorded.
+    Then every sensitively named key's value (`is_sensitive_name`; passwords, tokens,
+    sessions) is blanked whatever its shape, and every identifier-like string value
+    (`looks_like_identifier`, a form value judged on its raw, percent-decoded form) is
+    blanked: a string becomes ``""``, a number or boolean ``null``, a container empty.
+    Total: it never raises."""
+    from urllib.parse import unquote
+    try:
+        if not body:
+            return None, "empty body"
+        if len(body) > CAPTURE_MAX_BYTES:
+            return None, "body too large"
+        kind = body_kind(body, content_type)
+        if kind not in ("json", "json?", "form"):
+            return None, "not a JSON or form-encoded body"
+        if redact_body(body, content_type).startswith(b"__BODY_OMITTED__"):
+            return None, "body the storage boundary omits"
+        if kind == "form":
+            doc = {}
+            for part in body.decode("latin-1").split("&"):
+                if not part:
+                    continue
+                name, _eq, raw = part.partition("=")
+                key = unquote_plus(name)
+                if is_sensitive_name(key) or looks_like_identifier(unquote(raw)):
+                    doc[key] = ""
+                else:
+                    doc[key] = unquote_plus(raw)
+            return (doc, None) if doc else (None, "empty body")
+        try:
+            doc = json.loads(body.decode("utf-8"), parse_constant=_reject_constant)
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            return None, "unparseable JSON"
+        if not isinstance(doc, (dict, list)):
+            return None, "a JSON body that is not an object or array"
+        if not _container_depth_ok(doc, CAPTURE_MAX_DEPTH):
+            return None, "body nested too deep"
+        return _blank_tree(doc), None
+    except Exception:                       # total (PA-0096): never raises, never stores
+        return None, "redaction failed"

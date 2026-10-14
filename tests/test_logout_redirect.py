@@ -112,6 +112,7 @@ _SCOPE = ["fuzzlab/session/manager.py", "fuzzlab/session/detect.py",
           "fuzzlab/tools/probesender.py", "fuzzlab/tools/authhttp.py",
           "fuzzlab/tools/browserauth.py", "fuzzlab/tools/formnav.py",
           "fuzzlab/tools/navguard.py", "fuzzlab/tools/spider.py",
+          "fuzzlab/tools/spa.py",       # SPA form submission: password forms (CC-CRAWL-0017)
           "fuzzlab/tools/store_adapter.py", "fuzzlab/harness/auto.py",
           "fuzzlab/core/urls.py"]
 #: Membership in a mapping by an exact key is not a substring test.
