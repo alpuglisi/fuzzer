@@ -22,6 +22,9 @@ changed, and the reason. Reference the commit hash where useful.
   destructive word after it, because those texts were judged by embedding them in a URL;
   texts now have their own rule (`core.urls.text_destructive_reason`) and an AST guard
   forbids the embedding (PA-0131).
+- **BUG-0131 follow-up:** point selection (`harness.auto`) also judges a SPA route's
+  fragment as a text, so `/#/a#/logout` is never fuzzed. The sweep's one residual is
+  closed and PA-0131's AST guard has no exception left (CC-FUZZ-0077).
 
 ## 2026-10-14 (SPA login detection: FR-SESS-19, FR-CRAWL-14)
 - **Review round 1 (reviewers A and B):** an abandoned browser login is cancelled at

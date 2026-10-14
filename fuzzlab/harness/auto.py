@@ -208,12 +208,18 @@ def _json_base_entries(raw):
 
 def _crawl_url_refusal(url: str) -> str | None:
     """Why a crawl point's URL is never fuzzed: a destructive URL, or a destructive
-    SPA hash route (``/#/logout``), which `destructive_reason` alone does not read."""
-    from fuzzlab.core.urls import destructive_reason, spa_route
+    SPA hash route (``/#/logout``), which `destructive_reason` alone does not read. The
+    route's fragment (its path and query) is judged as a whole **text**
+    (`core.urls.text_destructive_reason`), never re-joined into a URL, so a second
+    ``#`` inside it hides nothing (``/#/a#/logout``; BUG-0131, CC-FUZZ-0077)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.urls import (destructive_reason, is_spa_route_fragment,
+                                   text_destructive_reason)
     reason = destructive_reason(url)
-    route = spa_route(url)
-    if reason is None and route is not None:
-        reason = destructive_reason(route[0] + ("?" + route[1] if route[1] else ""))
+    fragment = urlsplit(url or "").fragment
+    if reason is None and is_spa_route_fragment(fragment):
+        reason = text_destructive_reason(fragment)
     return reason
 
 

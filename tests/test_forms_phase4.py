@@ -725,14 +725,9 @@ def test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals(
 # PA-0131 guard: a text is never judged by embedding it in a URL (BUG-0131)
 # =====================================================================================
 _URL_RULES = {"destructive_reason", "route_destructive_reason", "_url_tokens"}
-#: Calls that build a URL from URL parts on purpose, with the reason.
-_ALLOWED_EMBEDDINGS = {
-    # a SPA route's own path and query, re-joined (URL parts, not a text); a second
-    # '#' inside a fragment is the app's own fragment (Angular, Vue), not the route --
-    # BUG-0131's PA-0002 sweep records it as a residual (a FUZZ change, not made here)
-    ("fuzzlab/harness/auto.py",
-     "destructive_reason(route[0] + ('?' + route[1] if route[1] else ''))"),
-}
+#: Calls that build a URL from URL parts on purpose, with the reason. Empty since
+#: CC-FUZZ-0077 converted `harness.auto._crawl_url_refusal`: no exception.
+_ALLOWED_EMBEDDINGS: set = set()
 
 
 def _embedded_text_offenders(source: str) -> list[str]:
@@ -761,7 +756,7 @@ def test_no_text_is_judged_through_a_url():
         rel = str(path.relative_to(root))
         found |= {(rel, call) for call in _embedded_text_offenders(path.read_text())}
     assert found - _ALLOWED_EMBEDDINGS == set()
-    assert _ALLOWED_EMBEDDINGS <= found               # the allowance is not stale
+    assert _ALLOWED_EMBEDDINGS <= found               # an allowance is never stale
 
 
 def test_the_text_guard_catches_synthetic_offenders():

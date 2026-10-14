@@ -128,3 +128,26 @@ embedding.
 - other text gates (`transaction_reason`, `formnav.settings_word`,
   `browserlogin._account_hit`, `is_sensitive_name`) tokenise texts directly: not
   instances.
+
+## Follow-up (2026-10-14, CC-FUZZ-0077): the recorded residual is fixed
+The orchestrator assigned CC-FUZZ-0077 for the one instance the sweep had left.
+
+**Corrective action, added:** `harness.auto._crawl_url_refusal` no longer re-joins a SPA
+route's path and query into a URL (`destructive_reason(route[0] + "?" + route[1])`,
+which read only what preceded a second `#`). It judges the route's whole fragment as a
+text, `core.urls.text_destructive_reason(fragment)`, after the URL rule. A fragment's
+path and query give the same tokens either way, so nothing else changes. A crawl point
+on `/#/a#/logout`, `/#/a?next=1#delete` or `/#!/x#/sign-out?y=1` is now left out and
+reported. Tests:
+`tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`
+and `::test_a_destructive_route_behind_a_second_hash_is_never_a_point` (through
+`injection_points_from_store`). Mutation check: restoring the re-join fails both tests,
+and the AST guard as well.
+
+**PA-0131's guard now has no exceptions:** `_ALLOWED_EMBEDDINGS` in
+`tests/test_forms_phase4.py` is empty, and `test_no_text_is_judged_through_a_url` fails
+on any URL-rule call over `fuzzlab/` whose argument is built with a `?`.
+
+**Sweep, updated:** every instance found is fixed. The four text gates and
+`spa.route_destructive_reason` were fixed in CC-CORE-0052, CC-CRAWL-0024 and CC-AUD-0039.
+`harness.auto._crawl_url_refusal` is fixed in CC-FUZZ-0077. There is no residual.

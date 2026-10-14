@@ -690,6 +690,28 @@ def test_a_destructive_spa_route_is_never_a_point(tmp_path):
     assert skipped and "destructive" in skipped[0][3]
 
 
+@pytest.mark.parametrize("url", ["http://localhost/#/a#/logout",
+                                 "http://localhost/#/a?next=1#delete",
+                                 "http://localhost/#!/x#/sign-out?y=1"])
+def test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection(url):
+    """BUG-0131 / CC-FUZZ-0077: the route's fragment is judged as a whole text; the
+    old re-join (``route[0] + "?" + route[1]``) read only what preceded the second
+    ``#``."""
+    from fuzzlab.harness.auto import _crawl_url_refusal
+    assert _crawl_url_refusal(url)
+    assert _crawl_url_refusal("http://localhost/#/search?q=apple") is None
+    assert _crawl_url_refusal("http://localhost/#/a#top") is None
+
+
+def test_a_destructive_route_behind_a_second_hash_is_never_a_point(tmp_path):
+    store, run, _c = _import(tmp_path, pages=["http://localhost/#/a#/logout?next=x"])
+    with store:
+        skipped: list = []
+        points = injection_points_from_store(store, run, BASE, skipped=skipped,
+                                             browser_available=True)
+    assert points == [] and skipped and "destructive" in skipped[0][3]
+
+
 def test_route_helpers():
     assert spa_route("http://h/#/search?q=x") == ("/search", "q=x")
     assert spa_route("http://h/#!/a") == ("!/a", "")

@@ -22,6 +22,39 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0077 — Point selection judges a SPA route's fragment as a text (BUG-0131 sweep) (2026-10-14)
+- Change: `harness/auto._crawl_url_refusal` (point selection, FR-FUZZ-40) judged a SPA
+  hash route by re-joining its path and query into a URL:
+  `destructive_reason(route[0] + "?" + route[1])`. A second `#` inside the fragment
+  therefore hid what followed it (`/#/a#/logout`). It now runs `destructive_reason(url)`
+  and, for a SPA-route fragment (`core.urls.is_spa_route_fragment`),
+  `core.urls.text_destructive_reason(fragment)` over the whole fragment. A fragment's
+  path and query give the same tokens as before, so only the hidden-text case changes.
+  PA-0131's AST guard (`tests/test_forms_phase4.py`) loses its last listed exception
+  (`_ALLOWED_EMBEDDINGS` is now empty). This was the one residual recorded in BUG-0131's
+  sweep; the orchestrator assigned this number for it.
+- Impact (other components / project): CORE (uses `text_destructive_reason`,
+  CC-CORE-0052). Crawl-sourced `fuzzlab auto` and `greybox-run` leave out more points
+  (those whose route hides a destructive word behind a second `#`) and report them as
+  destructive. No interface or store change.
+- Risk (level; mitigation or accepted-risk justification): low. The change only adds
+  refusals, and for fragments without a second `#` it is equivalent to the old rule
+  (`test_a_destructive_spa_route_is_never_a_point` and the rest of
+  `tests/test_json_points.py` are unchanged and pass).
+- Deliverables:
+  - [x] code: `fuzzlab/harness/auto.py` — done
+  - [x] tests: `tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`
+    (three `#`-hidden routes refused, an ordinary route and a non-route `#top` not),
+    `::test_a_destructive_route_behind_a_second_hash_is_never_a_point` (through
+    `injection_points_from_store`); `tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`
+    with no exception — done
+  - [x] mutation check: restoring the re-join fails the four new test cases and the
+    guard — done
+  - [x] FR-FUZZ-40 text and NFR-FUZZ-safe trace; BUG-0131 follow-up; ERROR_LOG
+    follow-up — done
+- Effectiveness (assessed 2026-10-14): the `#`-hidden routes are refused, the guard
+  passes with no exception, and the suite is green. Effective.
+
 ### CC-FUZZ-0076 — The M6 executor's storage headers go through its route only (FR-CRAWL-14 sweep) (2026-10-14)
 - Change: `tools/browserexec.py` `PlaywrightBrowserExecutor.run` passes
   `storage_headers` to `guard_page(headers=...)` (added by the route to in-scope

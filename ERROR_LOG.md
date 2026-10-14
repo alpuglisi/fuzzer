@@ -22,7 +22,8 @@ Format per entry:
 - **Symptom:** while building forms phase 4's label gate: `spa.form_refusal` let a button labelled `#1 Delete` through (plain `Delete` was refused); `store_adapter.entries_refusal`, `formnav.option_refusal` and control names behaved the same.
 - **Root cause:** each gate judged a text by embedding it in a URL (`destructive_reason("/?x=" + text)`); `urlsplit` moves everything after `#` into the fragment, which the URL rule never reads. Tests used only texts without URL-structural characters.
 - **Remediation:** `core.urls.text_destructive_reason` (the same tokens over the whole text); the four sites use it; SPA fragments are also judged as texts; an AST guard forbids splicing a text into a URL for a URL rule. CC-CORE-0052, CC-CRAWL-0024, CC-AUD-0039. `docs/bugs/BUG-0131-a-hash-in-a-label-hid-the-destructive-word.md`.
-- **Status:** Fixed (one recorded residual: `harness.auto._crawl_url_refusal` re-joins a route's own path and query; a FUZZ change not made in this lane)
+- **Status:** Fixed
+- **Follow-up (same day):** the one residual of the sweep, `harness.auto._crawl_url_refusal` (it re-joined a SPA route's path and query into a URL), now judges the fragment as a text too; PA-0131's AST guard has no exception left. CC-FUZZ-0077.
 
 ## 2026-10-14 — Lab servers launched by harnesses/tests not pinned to loopback (fixed, BUG-0130/PA-0130)
 - **Symptom:** the integration full suite (p3-int + bug-0125 at 83650d6) failed `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`: it read the five harnesses' `procutil.start_server` calls (and `run_bounded`'s) as `asyncio.start_server`. Checking what those launched servers bind found real exposure: Spring Boot (harness + 4 tests) started with `--server.port` only, i.e. on 0.0.0.0; Go and Node servers took `HOST` from the inherited environment.
