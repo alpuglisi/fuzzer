@@ -205,6 +205,13 @@ fuzzer.
     re-adopted, and `verify_live` still has to pass (review round 1, B-S3).
   - Residual: the adopted localStorage is not refreshed after a re-login during the
     crawl (stateless JWTs stay valid; a revoked one is caught by the session check).
+  - Residuals (review round 1, reviewer B):
+    - a rotation lasts only as long as the manager's token: `verify_live` still probes
+      with the manager's original token, so once that expires the crawl stops submitting
+      (fails closed);
+    - a logout that installs a fresh anonymous identifier-like token reads as a rotation;
+      if `verify_live` with the manager's token still passes, the crawl believes the
+      browser is authenticated (a coverage cost, never a safety one).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
