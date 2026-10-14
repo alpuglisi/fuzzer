@@ -48,6 +48,7 @@ def test_every_shape_has_a_row_and_the_rules_match_the_table():
     ("ftp://h.example/file", None),                                      # http(s) only
     ("file:///etc/passwd", None),
     ("https://idp.example/cb/9f86d081884c7d659a2feaa0c55ad015", None),  # a path token
+    ("https://9f86d081884c7d65.ngrok.io/hook", None),                 # a host token
     ("https://explorer.example/address/1AbKfgvw9psQ41NbLi8kufDQTezwG8DRZm", None),
     ("//github.com/x", None),                     # protocol-relative: a stated gap
     ("robots.txt", None),
@@ -113,6 +114,7 @@ def test_no_seed_means_one_probe_only():
     (lambda v: "data:text/html," + v, False),
     (lambda v: v.replace("/cb", "/other"), False),
     (lambda v: v.replace("/cb", "/cb/"), True),                  # normalised by the app
+    (lambda v: v.replace(".example/", ".example./"), True),      # trailing-dot host
     (lambda v: "https://other.example/cb", False),              # /cb, not our host
     (lambda v: v.replace("https://", "ftp://"), False),         # our host, not http(s)
 ])

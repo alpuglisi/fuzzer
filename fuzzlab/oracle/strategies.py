@@ -614,7 +614,8 @@ class OpenRedirectStrategy(ConfirmationStrategy):
         except ValueError:
             return False
         return (parts.scheme.lower() in ("http", "https")
-                and (parts.hostname or "") == host and parts.path in ("/cb", "/cb/"))
+                and (parts.hostname or "").rstrip(".") == host
+                and parts.path in ("/cb", "/cb/"))
 
     def _probe(self, sender, candidate, value, host):
         probe = self._send(sender, candidate, value)

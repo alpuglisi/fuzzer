@@ -209,7 +209,7 @@ budget where a vulnerability is plausible.
     `SHAPE_EXCLUSIONS` records the pairs left out with a reason (url → file-inclusion).
   - **The redirect seed.** `value_shape.redirect_seed(example)` is an `http`/`https`
     crawled example sliced from its original text up to its query or fragment, userinfo
-    cut out; `None` for any other scheme and for a path with an identifier-like piece.
+    cut out; `None` for any other scheme and for a host or path with an identifier-like piece.
     `harness/auto` sets it on crawl points; `audit/engine.evaluate` writes it to an
     **open-redirect** candidate's evidence only. An AST guard limits where
     `redirect_seed` is set, carried and read.

@@ -98,5 +98,6 @@ of what it cannot pass.
 ## Residuals
 - A protocol-relative example (`//host/x`, shape `path`) gets no rule and no seed.
 - An allowlist keyed on a query string is not matched (the seed drops the query).
-- A crawled URL with an identifier-like path piece gets no seed (by design).
+- A crawled URL with an identifier-like host or path piece gets no seed (by design;
+  reviewers A and B: a capability subdomain must not reach stored evidence).
 - The reach of the FR-AUD-20 exception (above), accepted by the operator.

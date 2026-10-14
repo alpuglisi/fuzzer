@@ -1106,7 +1106,7 @@ rewards) derives from it.
   send one more, `https://oracle<tok2>.example/cb?fzlb=<seed>`, for an allowlist that
   checks containment (Juice Shop's `/redirect`). A probe confirms when its `Location`
   or meta-refresh target, resolved against the probed URL (scheme-relative included),
-  is `http`/`https` with our token host and path `/cb` (or `/cb/`): the host is the signal, never a
+  is `http`/`https` with our token host (one trailing dot allowed) and path `/cb` (or `/cb/`): the host is the signal, never a
   prefix (PA-0122). Cost: +1 request per seeded candidate whose plain probe failed.
 
 ## 4. Non-functional requirements

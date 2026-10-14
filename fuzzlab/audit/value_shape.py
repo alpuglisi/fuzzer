@@ -165,8 +165,8 @@ def redirect_seed(value):
     (BUG-0124; the stated FR-AUD-20 exception, FR-AUD-21): an ``http``/``https`` example
     sliced from the original text -- its case, explicit port and trailing slash exactly
     as the app wrote them -- up to its query or fragment, with any userinfo cut out.
-    ``None`` for anything else, and for a path with an identifier-like piece (a token in
-    the path never leaves; BUG-0120 class)."""
+    ``None`` for anything else, and for a host or path with an identifier-like piece (a
+    capability subdomain or a path token never leaves; BUG-0120 class)."""
     from urllib.parse import unquote, urlsplit
 
     from fuzzlab.core.redaction import looks_like_identifier
@@ -178,9 +178,9 @@ def redirect_seed(value):
         return None
     if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
         return None
-    if any(piece and looks_like_identifier(unquote(piece))
-           for piece in parts.path.split("/")):
-        return None
+    if looks_like_identifier(parts.hostname) or any(
+            piece and looks_like_identifier(unquote(piece)) for piece in parts.path.split("/")):
+        return None                                  # a token in the host or the path
     cuts = [i for i in (value.find("?"), value.find("#")) if i >= 0]
     seed = value[:min(cuts)] if cuts else value
     scheme_end = seed.index("://") + 3

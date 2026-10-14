@@ -8,7 +8,7 @@ Newest first.
   - `audit/value_shape.py`: `SHAPE_CATEGORIES` (the one shape → categories table) and
     `SHAPE_EXCLUSIONS` (url → file-inclusion, with its reason); `redirect_seed(value)`
     (http/https only, sliced from the original text up to `?`/`#`, userinfo cut, `None`
-    for an identifier-like path piece).
+    for an identifier-like host or path piece).
   - `default_rules.json`: `R-OPEN-REDIRECT-VALUE` and `R-SSRF-VALUE`
     (`value_shape_in: ["url"]`).
   - `audit/engine.py`: `InjectionPoint.redirect_seed`; `evaluate` writes it to the
