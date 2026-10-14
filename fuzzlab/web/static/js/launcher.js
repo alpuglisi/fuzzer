@@ -85,6 +85,7 @@ function initLaunchForms() {
       es.addEventListener("done", (e) => {
         let rc = "";
         try { rc = JSON.parse(e.data).returncode; } catch (_) { /* ignore */ }
+        if (rc === null) rc = "unknown";  // the job's exit status is unknown (BUG-0125)
         output.textContent += `\n[exit ${rc}]`;
         es.close(); stopBtn.disabled = true;
       });

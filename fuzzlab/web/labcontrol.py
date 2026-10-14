@@ -249,6 +249,8 @@ async def fetch_states(timeout: float = 20.0) -> tuple[dict[str, dict[str, str]]
         return {}, f"could not run labctl.sh: {e}"
     if timed_out:
         return {}, f"labctl.sh ps did not answer within {timeout:g}s"
+    if returncode is None:
+        return {}, "labctl.sh ps: exit status unknown (its supervisor was reaped outside fuzzlab)"
     if returncode != 0:
         msg = err.decode(errors="replace").strip() or f"labctl.sh ps exited {returncode}"
         return {}, msg

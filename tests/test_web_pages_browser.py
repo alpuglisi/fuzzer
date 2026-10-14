@@ -289,6 +289,52 @@ def test_ml_tab_shows_an_earlier_trained_models_evaluation(site, tab):
 
 # --- (e) a persisted theme is applied on load --------------------------------
 
+def test_an_unknown_exit_status_renders_as_unknown(site, tab):
+    """BUG-0125 review round 3: the launcher and Lab pages print ``[exit unknown]`` for a
+    ``done`` event whose ``returncode`` is null (a job whose supervisor was reaped
+    outside fuzzlab), never ``[exit null]``. The run and its stream are routed (no job
+    runs, no container is touched)."""
+    page = tab.page
+    sse = 'event: done\ndata: {"returncode": null}\n\n'
+    page.route("**/api/launch/tok-unknown/stream",
+               lambda r: r.fulfill(status=200, headers={"Content-Type": "text/event-stream"},
+                                   body=sse))
+    page.route("**/api/launch",
+               lambda r: r.fulfill(status=200, content_type="application/json",
+                                   body='{"token": "tok-unknown", "argv": []}'))
+    tab.open("/launcher")
+    form = 'form.launch-form[data-command="report"]'
+    page.click('.actlist .act[data-for="report"]')
+    page.locator(f"{form} [data-action='run']").wait_for(state="visible")
+    page.click(f"{form} [data-action='run']")
+    out = page.locator(f"{form} .launch-output")
+    page.wait_for_function("el => el.textContent.includes('[exit')", arg=out.element_handle())
+    assert "[exit unknown]" in out.inner_text()
+
+    page.route("**/api/lab/services",
+               lambda r: r.fulfill(status=200, content_type="application/json",
+                                   body=_lab_services_with_one_stopped()))
+    page.route("**/api/lab/*/start",
+               lambda r: r.fulfill(status=200, content_type="application/json",
+                                   body='{"token": "tok-unknown"}'))
+    tab.open("/lab", ready="#lab-table tbody tr")
+    first = page.locator("#lab-table tbody tr").first
+    first.locator('[data-action="start"]:not([disabled])').wait_for()
+    first.locator('[data-action="start"]').click()
+    lab_out = page.locator("#lab-output")
+    page.wait_for_function("el => el.textContent.includes('[exit')", arg=lab_out.element_handle())
+    assert "[exit unknown]" in lab_out.inner_text()
+    assert tab.problems() == []
+
+
+def _lab_services_with_one_stopped() -> str:
+    import json
+
+    services = [{**s.to_dict(), "state": "exited", "status": "", "container": None,
+                 "running": False} for s in labcontrol.services()]
+    return json.dumps({"services": services, "error": None})
+
+
 def test_persisted_theme_is_applied_on_load(site, tab):
     page = tab.open("/")
     page.evaluate("localStorage.setItem('fl-theme', 'dark')")
