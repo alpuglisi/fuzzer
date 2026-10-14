@@ -237,6 +237,47 @@ class HistorySpa(_Lab):
     history = True
 
 
+_ICON_JS = r"""
+const routes = [{path:'signin'}, {path:'account'}, {path:'leave'}, {path:'basket'},
+                {path:'icononly'}, {path:'find'}];
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
+  'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+const views = {
+  '': '<p>home</p>',
+  // Juice Shop's login button (the live-run false refusal): submitted
+  'signin': "<div><input id='email' type='text'><input id='password' type='password'>" +
+    "<button id='b' aria-label='Login'><mat-icon>exit_to_app</mat-icon> Log in</button></div>",
+  // icon-only, a destructive aria-label: refused
+  'account': "<div><input name='q'><button id='b' aria-label='Log out'>" +
+    "<mat-icon>exit_to_app</mat-icon></button></div>",
+  // icon-only with a neutral icon and a destructive aria-label: refused (on the label)
+  'leave': "<div><input name='q2'><button id='b' aria-label='Sign out'>" +
+    "<mat-icon>person</mat-icon></button></div>",
+  // an icon plus destructive text: refused on "Remove"
+  'basket': "<div><input name='note'><button id='b'><span class='material-icons'>" +
+    "delete</span> Remove</button></div>",
+  // icon-only, no aria-label: judged on its raw text (fail closed)
+  'icononly': "<div><input name='x'><button id='b'><mat-icon>delete</mat-icon></button></div>",
+  // a Font Awesome icon and ordinary text: submitted
+  'find': "<div><input name='y'><button id='b'><i class='fa fa-trash'></i> Search</button></div>",
+};
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  document.getElementById('app').innerHTML = views[name] || '<p>?</p>';
+  const b = document.getElementById('b');
+  if (b) b.onclick = () => post('/api/clicked/' + name, {route: name});
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class IconSpa(_Lab):
+    """Buttons whose labels carry icon ligatures (the live Juice Shop false refusal)."""
+    index = _HASH_INDEX.replace("/main.js", "/icons.js").replace("#/about", "#/find")
+    script = ("/icons.js", _ICON_JS)
+
+
 class Recorder(_Lab):
     """Another loopback service: anything it receives is a scope escape."""
 

@@ -269,8 +269,12 @@ def _words(text: str) -> set[str]:
 def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str | None:
     """Why this SPA form must never be submitted, or None (FR-CRAWL-13).
 
-    ``form``: ``{"controls": [(name, kind)], "button": label, "action": url | None,
-    "autocomplete": [..]}`` as `FORMS_JS` describes it. ``named``: the routes the
+    ``form``: ``{"controls": [(name, kind)], "button": label, "button_aria": label,
+    "action": url | None, "autocomplete": [..]}`` as `FORMS_JS` describes it --
+    ``button`` is the button's text with icon elements removed (``mat-icon``,
+    ``.material-icons``, ``material-symbols``, ``aria-hidden``, Font Awesome, ``svg``;
+    an icon-only button with no aria-label keeps its raw text), ``button_aria`` its
+    ``aria-label`` or ``title``; the button is refused when either is. ``named``: the routes the
     operator named (None or empty: every route). Refused: a route not named; a
     destructive, settings-like or transaction route, button label, action or control
     name; a form with ``<input type=file>``; a credential-change form
@@ -281,8 +285,12 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
     if named and normalise_route(route) not in named:
         return f"route {route!r} not named by the operator"
     label = form.get("button") or ""
-    for where, text in (("route", "/" + normalise_route(route)), ("button", label)):
-        reason = (destructive_reason("/?x=" + text.replace(" ", "+")) if where == "button"
+    aria = form.get("button_aria") or ""
+    # the button is refused when EITHER its visible text (icons removed) or its
+    # aria-label / title is destructive, settings-like or a transaction (live-run fix)
+    for where, text in (("route", "/" + normalise_route(route)), ("button", label),
+                        ("button aria-label", aria)):
+        reason = (destructive_reason("/?x=" + text.replace(" ", "+")) if where != "route"
                   else destructive_reason(text))
         if reason:
             return f"destructive {where} ({reason!r})"
@@ -307,9 +315,11 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
         word = settings_word(name)
         if word:
             return f"settings control {name!r} ({word!r})"
-    # the route stands in for the action path; the button is the submitter
-    shape = {"controls": [(n, k) for n, k in form["controls"]] + [(label, "submit")],
-             "action_url": "/" + normalise_route(route), "entries": [(label, label)]}
+    # the route stands in for the action path; the button (both labels) is the submitter
+    shape = {"controls": [(n, k) for n, k in form["controls"]]
+             + [(label, "submit"), (aria, "submit")],
+             "action_url": "/" + normalise_route(route),
+             "entries": [(label, label), (aria, aria)]}
     reason = credential_change_reason(shape)
     if reason:
         return reason
@@ -344,6 +354,21 @@ FORMS_JS = r"""
   const typed = el => !['hidden', 'submit', 'button', 'reset', 'image'].includes(kindOf(el));
   const shown = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const buttonOk = b => shown(b) && (b.getAttribute('type') || 'submit').toLowerCase() !== 'reset';
+  // live Juice Shop run: <button aria-label="Login"><mat-icon>exit_to_app</mat-icon> Log in
+  // </button> read as "exit_to_app Log in" (destructive "exit"). The label judged is the
+  // text with icon elements removed, plus aria-label / title; an icon-only button with
+  // neither keeps its raw text (fail closed: <button><mat-icon>delete</mat-icon></button>).
+  const ICONS = 'mat-icon, .material-icons, [class*="material-symbols"], ' +
+    '[aria-hidden="true"], i.fa, [class*="fa-"], svg';
+  const squash = t => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  const buttonLabels = b => {
+    const aria = squash(b.getAttribute('aria-label') || b.getAttribute('title'));
+    if (b.tagName.toLowerCase() === 'input') return [squash(b.value), aria];
+    const clone = b.cloneNode(true);
+    clone.querySelectorAll(ICONS).forEach(e => e.remove());
+    const text = squash(clone.textContent);
+    return [text || (aria ? '' : squash(b.textContent)), aria];
+  };
   const containers = [];
   for (const f of document.querySelectorAll('form')) containers.push(f);
   for (const b of document.querySelectorAll(BTN)) {
@@ -374,16 +399,16 @@ FORMS_JS = r"""
       ids.push(id);
       autocomplete.push(el.getAttribute('autocomplete') || '');
     });
-    let button = null, label = '';
+    let button = null, label = '', aria = '';
     if (submit) {
       button = `r${run}f${fi}b`;
       submit.setAttribute('data-fuzzlab-id', button);
-      label = (submit.innerText || submit.value || submit.getAttribute('aria-label') || '')
-        .trim().slice(0, 100);
+      [label, aria] = buttonLabels(submit);
     }
     const action = c.tagName.toLowerCase() === 'form' && c.getAttribute('action')
       ? c.action : null;
-    out.push({controls, ids, autocomplete, button: label, button_id: button, action});
+    out.push({controls, ids, autocomplete, button: label, button_aria: aria,
+              button_id: button, action});
   });
   return out;
 }

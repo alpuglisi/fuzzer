@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3, lane S: live-run fix, icon text in button labels)
+- **Why:** the interim live Juice Shop crawl submitted no form: the login button's
+  Material icon ligature (`exit_to_app`) was read into its label and refused as the
+  destructive word `exit`.
+- **What:** SPA button labels are judged with icon elements' text removed and on their
+  aria-label / title as well (either refuses; an icon-only button keeps its raw text);
+  the submission signature uses the cleaned label. CC-CRAWL-0017, FR-CRAWL-13.
+
 ## 2026-10-14 (Forms phase 3, lane S: code-review fixes)
 - **Why:** the lane S code review (reviewers A and B) found the capture boundary
   depended on the body's encoding, security answers were not secrets, socket.io's

@@ -99,6 +99,32 @@ Newest first.
     counted, the DELETE window's context and single use, stored counts): 46 of 46
     mutants killed. Click and fill timeouts now follow the crawl's per-page timeout
     (the fixed 2–3 s timed out on a loaded host).
+- Live-run fix (2026-10-14; from the orchestrator's interim live Juice Shop crawl with
+  4476e93: 72 pages, 40 SPA routes, 8 forms, the github open redirect blocked,
+  `crawl_stats` stored, but **0 forms submitted**):
+  - Defect (a false refusal): `#/login` was refused as `destructive button ('exit')`.
+    Juice Shop's login button is `<button aria-label="Login"><mat-icon>exit_to_app
+    </mat-icon> Log in</button>`; `FORMS_JS` read the icon's ligature text as part of
+    the label, and `exit` is a destructive token.
+  - Fix (`tools/spa.py`): the label judged is the button's text with icon elements'
+    text removed (`mat-icon`, `.material-icons`, `material-symbols`,
+    `[aria-hidden="true"]`, `i.fa`, `[class*="fa-"]`, `svg`), and its `aria-label` /
+    `title` is judged too (`button_aria`); the button is refused when **either** is
+    destructive, settings-like or a transaction, so a real "Log out" is refused
+    whatever its icon. The submission signature uses the cleaned label. Addition
+    (fail closed, not in the request): an icon-only button with no aria-label or title
+    keeps its raw text, so `<button><mat-icon>delete</mat-icon></button>` is still
+    refused. The aria-label also joins the credential-change submitter check.
+  - Tests: `test_the_button_is_refused_on_its_text_or_its_aria_label`; a real-browser
+    crawl of a new icon fixture (`IconSpa`): Juice Shop's login button and a Font
+    Awesome "Search" button are submitted; `aria-label="Log out"` with an
+    `exit_to_app` icon, `aria-label="Sign out"` with a neutral icon, a
+    `material-icons` "delete" + "Remove" button and an icon-only "delete" button are
+    refused; no signature carries `exit_to_app`. Mutation check on the label cleaning:
+    4 of 4 killed (icon text kept, aria-label not judged, aria-label never read, no
+    raw-text fallback).
+  - Not a defect (stated gap, unchanged): `#/contact` stays "not submittable" -- its
+    button is disabled until the math CAPTCHA and the rating are valid.
 
 ### CC-CRAWL-0016 — SPA routes, canonical page keys, transport noise, the DELETE rule (forms phase 3, lane S: R) (2026-10-14)
 - Change:

@@ -368,6 +368,24 @@ def test_each_refusal(form, route, expect):
     assert expect in (spa.form_refusal(form, route, named=None) or "")
 
 
+@pytest.mark.parametrize("label,aria,refused", [
+    ("Log in", "Login", None),                      # Juice Shop's login, icon text removed
+    ("", "Log out", "destructive button aria-label"),
+    ("Remove", "", "destructive button"),
+    ("Save", "Delete account", "destructive button aria-label"),
+    ("Go", "Change theme", "settings-like button aria-label"),
+    ("Go", "Pay now", "transaction button aria-label"),
+    ("Search", "", None),
+])
+def test_the_button_is_refused_on_its_text_or_its_aria_label(label, aria, refused):
+    """Live Juice Shop run: the gate judges the cleaned text and the aria-label / title;
+    either one refuses."""
+    form = _form(CONTACT["controls"], label)
+    form["button_aria"] = aria
+    why = spa.form_refusal(form, "contact", named=None)
+    assert (why is None) if refused is None else (refused in (why or "")), why
+
+
 def test_fillers_are_ours_and_a_password_never_a_real_one():
     from fuzzlab.tools.store_adapter import _FILLERS, _TEXT_FILLER, is_filler
     assert spa.filler("text") == _TEXT_FILLER and spa.filler("email") == _FILLERS["email"]
@@ -605,6 +623,27 @@ def test_a_named_route_keeps_submitting_while_the_session_holds(lab, tmp_path):
     assert manager.verified >= 1 and sp.spa_submit_stopped is None
     assert spa_lab.seen("POST", "/rest/user/login") == []      # login: not named
     assert spa_lab.seen("PATCH", "/api/profile") == []
+
+
+def test_icon_text_never_decides_a_button_label(monkeypatch, tmp_path):
+    """Live Juice Shop run (4476e93): ``<button aria-label="Login"><mat-icon>exit_to_app
+    </mat-icon> Log in</button>`` was refused as ``destructive button ('exit')``. Icon
+    elements' text is removed, the aria-label is judged too, and an icon-only button
+    with no aria-label keeps its raw text (fail closed)."""
+    from tests._spa_fixture import IconSpa
+    chromium_or_skip(monkeypatch)
+    icons = IconSpa()
+    try:
+        sp, _db = _crawl(icons, tmp_path, submit_spa_forms=[])
+    finally:
+        icons.close()
+    clicked = {r[1] for r in icons.seen("POST", "/api/clicked/")}
+    assert clicked == {"/api/clicked/signin", "/api/clicked/find"}
+    assert sp.spa_counts["forms_refused"] == 4    # account, leave, basket, icononly
+    # the submission signature uses the cleaned label too
+    labels = {json.loads(s)[1] for s in sp._submitted_sigs}
+    assert {"Log in", "Search", "Remove", "delete"} <= labels
+    assert not any("exit_to_app" in lab for lab in labels)
 
 
 def test_submissions_are_capped_and_the_cap_is_reported(lab, tmp_path, monkeypatch):
