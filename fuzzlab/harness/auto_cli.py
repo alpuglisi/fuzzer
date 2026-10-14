@@ -442,6 +442,15 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         rpf = m.get("requests_per_finding")
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
+    unsure = getattr(result, "inconclusive", None) or []
+    if unsure:
+        from fuzzlab.core.urls import to_path
+        print(f"  inconclusive ({len(unsure)} candidate key(s): a cost cap stopped a "
+              f"check that had started; unlabelled, FR-FUZZ-45):")
+        for item in unsure:
+            print(f"    - {item['location']} {to_path(item['url'])} [{item['param']}]: "
+                  f"{item['mechanism']}; not started: "
+                  f"{', '.join(item['families_not_started']) or '-'}")
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
         print(f"  not fuzzed ({len(skipped)} crawl point(s) on a destructive URL, "

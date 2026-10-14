@@ -8,8 +8,14 @@ classes are added as new strategies (and, later, plugin `register_oracle` hooks)
 from __future__ import annotations
 
 import base64
+import html
+import itertools
 import re
 import secrets
+from dataclasses import dataclass
+from fractions import Fraction
+from typing import Callable
+from urllib.parse import quote, quote_plus
 
 from fuzzlab.oracle.baseline import build_baseline
 from fuzzlab.oracle.browser import (
@@ -108,6 +114,73 @@ def _token() -> str:
     return secrets.token_hex(4)
 
 
+def _contains_number(text: str, n: int) -> bool:
+    """``n`` appears in ``text`` as a whole decimal token (``142`` not inside
+    ``31420``) -- the digit-bounded rule every evaluation marker uses."""
+    return re.search(rf"(?<!\d){n}(?!\d)", text or "") is not None
+
+
+# --- the bracketed, replicated response differential (FR-FUZZ-45 (a)) ----------
+#: The screen sends V and D in one of these orders; each later round sends V, D and
+#: a re-sent baseline B in one of the six permutations. Exactly one draw per round,
+#: from these fixed tables (the bound below is computed over exactly these draws).
+_SCREEN_ORDERS = (("V", "D"), ("D", "V"))
+_ROUND_ORDERS = tuple(itertools.permutations(("V", "D", "B")))
+#: Rounds after the screen.
+ENGINE_ROUNDS = 6
+#: Requests one family spends to confirm: B0 + the screen (2) + 3 per later round.
+FAMILY_COST = 3 + 3 * ENGINE_ROUNDS
+#: For any response sequence that does not depend on the probe values (fixed before
+#: the engine's draws) and any comparison predicate: a round passes only when the
+#: one slot whose response is not ``same`` as B0 is the slot the draw gave D, so at
+#: most 1 of 2 screen orders and 2 of 6 round orders pass. P[confirm] <= this.
+ENGINE_BOUND = Fraction(1, 2) * Fraction(1, 3) ** ENGINE_ROUNDS      # = 1/1458
+
+
+def _engine_rng():
+    """The engine's order source (tests monkeypatch it). Tokens never come from it."""
+    return secrets.SystemRandom()
+
+
+def _reflection_forms(value: str) -> set[str]:
+    """``value`` as a page may echo it: raw, HTML-escaped, quote-entity or
+    quote-doubled/backslashed, and URL-encoded."""
+    forms = {value, html.escape(value, quote=True), html.escape(value, quote=False),
+             quote(value), quote_plus(value), quote(value, safe="")}
+    for rep_ in ("&#39;", "&#039;", "&#x27;", "&apos;", "\\'", "''"):
+        forms.add(value.replace("'", rep_))
+        forms.add(html.escape(value, quote=False).replace("'", rep_))
+    forms.discard("")
+    return forms
+
+
+def _strip_forms(text: str, forms: list[str]) -> str:
+    for form in forms:                       # longest first
+        text = text.replace(form, "\x00")
+    return text
+
+
+def _strip_reflections(text: str, values: list[str]) -> str:
+    """``text`` with every reflected form of ``values`` replaced by one placeholder,
+    longest first (so a value never leaves a partial copy of a longer one)."""
+    forms = set()
+    for value in values:
+        forms |= _reflection_forms(value)
+    return _strip_forms(text, sorted(forms, key=len, reverse=True))
+
+
+@dataclass(frozen=True)
+class _Family:
+    """One differential: a base value B, a value V that must look like B, and a
+    value D that must not. ``keep``/``disc`` draw fresh tokens each round."""
+    name: str
+    base: Callable[[], str]
+    keep: Callable[[str], str]          # (base) -> V
+    disc: Callable[[str], str]          # (base) -> D
+    exact: bool                         # True: `_same_page`; False: `_similar` lengths
+    strings: bool                       # a string-literal probe (skipped on raw bodies)
+
+
 class ConfirmationStrategy:
     vuln_class: str = ""
     mechanism: str = ""
@@ -147,6 +220,89 @@ class ConfirmationStrategy:
         return sender.send(candidate.url, candidate.param, value, timing=timing,
                            method=candidate.method, location=candidate.location)
 
+    # --- shared bracketed, replicated differential (FR-FUZZ-45 (a), PA-0117) ----
+    @staticmethod
+    def _similar(a: str, b: str, rel: float = 0.05, absolute: int = 24) -> bool:
+        return abs(len(a) - len(b)) <= max(absolute, rel * max(len(a), len(b), 1))
+
+    def _differential(self, sender: Sender, candidate: Candidate, family: _Family,
+                      rng=None) -> tuple[dict | None, int]:
+        """Run one family: B0, a screen (V and D in a drawn order), then
+        ``ENGINE_ROUNDS`` rounds of (V, D, B) in a drawn permutation, with fresh tokens
+        each round. Confirms only if every V and B is ``same`` as B0, every D is not,
+        and every D is ``same`` as the first D. A round is judged after all of it is
+        sent. Returns (evidence or None, requests sent).
+
+        The bound (``ENGINE_BOUND``, 1/1458) holds over this engine's own draws for
+        any probe-independent response sequence and any predicate; see the constant."""
+        rng = rng if rng is not None else _engine_rng()
+        base = family.base()
+        sent_values: list[str] = [base]
+        responses: dict[str, list[Probe]] = {"B": [], "V": [], "D": []}
+        form_cache: dict[str, set[str]] = {}
+
+        def send(value: str) -> Probe:
+            sent_values.append(value)
+            return self._send(sender, candidate, value)
+
+        def judge():
+            """A comparison for one decision point: every value sent so far (but the
+            bare ``1``) is stripped, in all its reflected forms, from both sides."""
+            if not family.exact:
+                return lambda a, b: self._similar(a.text or "", b.text or "")
+            forms: set[str] = set()
+            for value in sent_values:
+                if value != "1":
+                    if value not in form_cache:
+                        form_cache[value] = _reflection_forms(value)
+                    forms |= form_cache[value]
+            ordered = sorted(forms, key=len, reverse=True)
+            memo: dict[int, str] = {}
+
+            def norm(p: Probe) -> str:
+                if id(p) not in memo:
+                    memo[id(p)] = _strip_forms(p.text or "", ordered)
+                return memo[id(p)]
+            return lambda a, b: a.status == b.status and norm(a) == norm(b)
+
+        b0 = self._send(sender, candidate, base)
+        count = 1
+        order = rng.choice(_SCREEN_ORDERS)
+        got, values = {}, {"V": family.keep(base), "D": family.disc(base)}
+        for slot in order:
+            got[slot] = send(values[slot])
+        count += 2
+        same = judge()
+        if not same(got["V"], b0) or same(got["D"], b0):
+            return None, count
+        d1 = got["D"]
+        responses["V"].append(got["V"])
+        responses["D"].append(d1)
+        for _ in range(ENGINE_ROUNDS):
+            order = rng.choice(_ROUND_ORDERS)
+            got = {}
+            for slot in order:
+                if slot == "B":
+                    got[slot] = self._send(sender, candidate, base)
+                else:
+                    got[slot] = send(family.keep(base) if slot == "V"
+                                     else family.disc(base))
+            count += 3
+            same = judge()
+            if (not same(got["V"], b0) or not same(got["B"], b0)
+                    or same(got["D"], b0) or not same(got["D"], d1)):
+                return None, count
+            for slot in ("B", "V", "D"):
+                responses[slot].append(got[slot])
+        return {"family": family.name, "rounds": 1 + ENGINE_ROUNDS,
+                "base": base, "keep": values["V"], "disc": values["D"],
+                "status": {"base": b0.status, "keep": responses["V"][0].status,
+                           "disc": d1.status},
+                "len": {"base": len(b0.text or ""), "keep": len(responses["V"][0].text or ""),
+                        "disc": len(d1.text or "")},
+                "_d_texts": [p.text or "" for p in responses["D"]],
+                "_b0_text": b0.text or ""}, count
+
     # --- shared rising-delay timing confirmation (M1) ------------------------
     delays = (2, 4)
     baseline_samples = 3
@@ -185,42 +341,196 @@ class ConfirmationStrategy:
         return None
 
 
+def _signature(text: str):
+    """The first SQL error signature in ``text``: (match, dbms) or None."""
+    for rx, dbms in SQL_ERROR_SIGNATURES:
+        match = rx.search(text or "")
+        if match:
+            return match, dbms
+    return None
+
+
+def _sqli_token() -> str:
+    """A quote-free, non-numeric control or base value: ``fz`` + 6 hex. The ``fz``/``q``
+    prefixes never form a SQL literal prefix or introducer (``X''``, ``B''``, ``N''``,
+    ``E''``, ``U&''``, ``_charset''``, ``0x``), so the grammar D is always an
+    identifier followed by a literal: a syntax error."""
+    return "fz" + secrets.token_hex(3)
+
+
+def _q_token() -> str:
+    return "q" + secrets.token_hex(3)
+
+
 class SqliErrorStrategy(ConfirmationStrategy):
+    """M2: a quote makes the database report a syntax error.
+
+    BUG-0117 / PA-0117: a signature counts only when it is **absent** from a benign
+    control of the same point -- a quote-free, non-numeric token (and, for a
+    digit-led probe, ``1`` + that token): a page that always shows ``Warning:
+    mysql_num_rows()``, or a strict-mode INT column that errors on any non-numeric
+    input, is not confirmed. At most 4 probes + 2 controls per candidate."""
     vuln_class = "sqli"
     mechanism = "error-signature"
     category = "sql-injection"
     _probes = ("'", '"', "')", "1'")
+    MAX_REQUESTS = len(_probes) + 2
 
     def confirm(self, candidate, sender):
+        controls: dict[str, bool] = {}               # value -> shows a signature
+        token = _sqli_token()
         for payload in self._probes:
             probe = self._send(sender, candidate, payload)
-            for rx, dbms in SQL_ERROR_SIGNATURES:
-                match = rx.search(probe.text or "")
-                if match:
-                    return Verdict(True, self.vuln_class, self.mechanism,
-                                   {"dbms": dbms, "payload": payload,
-                                    "match": match.group(0)[:120]})
+            found = _signature(probe.text)
+            if found is None:
+                continue
+            needed = [token] + ([f"1{token}"] if payload[:1].isdigit() else [])
+            for value in needed:
+                if value not in controls:
+                    controls[value] = _signature(
+                        self._send(sender, candidate, value).text) is not None
+            if any(controls[v] for v in needed):
+                return None                          # the signature is not the quote's
+            match, dbms = found
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"dbms": dbms, "payload": payload,
+                            "match": match.group(0)[:120], "controls": needed})
         return None
 
 
+def _numeric_family() -> _Family:
+    return _Family("numeric", base=lambda: "1", keep=lambda b: "1 AND 1=1",
+                   disc=lambda b: "1 AND 1=2", exact=False, strings=False)
+
+
+def _grammar_keep(base: str) -> str:
+    t = _q_token()
+    return f"{base}' AND '{t}' LIKE '{t}"
+
+
+def _grammar_disc(base: str) -> str:
+    t = _q_token()
+    return f"{base}' AND '{t}' LIKE {t}'"
+
+
+def _evaluation_disc(base: str) -> str:
+    t = _q_token()
+    u = _q_token()
+    while u == t:
+        u = _q_token()
+    return f"{base}' AND '{u}' LIKE '{t}"
+
+
+#: The families, tried in this fixed order; the first to confirm wins.
+_FAMILIES = (
+    _numeric_family(),
+    _Family("string-grammar", base=_sqli_token, keep=_grammar_keep,
+            disc=_grammar_disc, exact=True, strings=True),
+    _Family("string-evaluation", base=lambda: "1", keep=_grammar_keep,
+            disc=_evaluation_disc, exact=True, strings=True),
+)
+
+
 class SqliBooleanStrategy(ConfirmationStrategy):
+    """M3: a condition the database evaluates changes the page (FR-FUZZ-45 (a)(b)).
+
+    Three families, each run by the bracketed, replicated engine
+    (`ConfirmationStrategy._differential`):
+
+    * ``numeric``: ``1`` / ``1 AND 1=1`` / ``1 AND 1=2``, lengths compared (`_similar`);
+    * ``string-grammar``: ``v`` / ``v' AND 't' LIKE 't`` / ``v' AND 't' LIKE t'`` -- V
+      and D have the same characters, length and quotes; only a SQL string tokenizer
+      tells them apart (D is a syntax error). Needs no matching row;
+    * ``string-evaluation``: ``1`` / ``1' AND 't' LIKE 't`` / ``1' AND 'u' LIKE 't``,
+      for pages that render errors like "not found".
+
+    ``'t' LIKE 't`` works in ``= '…'`` and ``LIKE '%…%'`` contexts alike. Every probe
+    is quote-balanced and AND-only: no comment, ``OR``, ``||``, ``;`` or backslash.
+    In a predicate context V selects the baseline's rows; in a value context
+    (INSERT/UPDATE) V and the evaluation probes are written as a coerced value to the
+    baseline's own row; the grammar D never executes.
+
+    **Bound:** P[confirm] <= ``ENGINE_BOUND`` (1/1458) per family for any
+    probe-independent response sequence, < 3/1458 per candidate.
+
+    **Cost:** a family starts only when ``FAMILY_COST`` (21) requests remain under
+    ``HARD_CAP`` (30); a candidate whose screens all fail costs 9. When the cap stops
+    a later family from starting after an earlier one passed its screen, the verdict
+    is **inconclusive** (unlabelled), never a negative. String families are skipped
+    on a raw whole-body point."""
     vuln_class = "sqli"
     mechanism = "boolean-differential"
     category = "sql-injection"
+    _FAMILIES = _FAMILIES
+    HARD_CAP = 10 * len(_FAMILIES)
+
+    def confirm(self, candidate, sender, rng=None):
+        rng = rng if rng is not None else _engine_rng()
+        spent, exhausted = 0, []
+        for family in self._FAMILIES:
+            if family.strings and candidate.content_type:
+                continue
+            if self.HARD_CAP - spent < FAMILY_COST:
+                exhausted.append(family.name)
+                continue
+            evidence, cost = self._differential(sender, candidate, family, rng=rng)
+            spent += cost
+            if evidence is not None:
+                d_texts, b0_text = evidence.pop("_d_texts"), evidence.pop("_b0_text")
+                evidence["corroboration"] = sorted({
+                    m for text in d_texts
+                    for m in re.findall(r"\bHY000\b|SQLSTATE\[\w+\]", text)
+                    if m not in b0_text})
+                evidence["requests"] = spent
+                return Verdict(True, self.vuln_class, self.mechanism, evidence)
+        if exhausted:
+            return Verdict(False, self.vuln_class, self.mechanism,
+                           {"cap_exhausted": True, "families_not_started": exhausted,
+                            "requests": spent}, inconclusive=True)
+        return None
+
+
+class SqliEvaluationMarkerStrategy(ConfirmationStrategy):
+    """M4 for SQL (FR-FUZZ-45 (c)): ``0'+(SELECT a*b)+'0`` makes the database compute
+    a product that the page then shows (a stored listing, sqli_12's shape).
+
+    Probe 1's product must appear (digit-bounded) and its literal ``a*b`` must not;
+    then probe 2, with a different product that was absent before, must likewise
+    appear in the response to the probe that computed it (temporal attribution,
+    PA-0090). ``(SELECT …)`` is not template, shell or script syntax; a bound or
+    escaped sink stores the literal text. 1 request when unconfirmed, at most 2.
+    Never the ``||`` form (MySQL's ``||`` is OR). Skipped on a raw whole-body point."""
+    vuln_class = "sqli"
+    mechanism = "evaluation-marker"
+    category = "sql-injection"
+    MAX_REQUESTS = 2
 
     @staticmethod
-    def _similar(a: str, b: str, rel: float = 0.05, absolute: int = 24) -> bool:
-        return abs(len(a) - len(b)) <= max(absolute, rel * max(len(a), len(b), 1))
+    def _draw() -> tuple[int, int]:
+        return secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
+
+    @staticmethod
+    def _value(a: int, b: int) -> str:
+        return f"0'+(SELECT {a}*{b})+'0"
 
     def confirm(self, candidate, sender):
-        benign = self._send(sender, candidate, "1")
-        true_p = self._send(sender, candidate, "1 AND 1=1")
-        false_p = self._send(sender, candidate, "1 AND 1=2")
-        # A true condition looks like the benign page; a false condition does not.
-        if self._similar(benign.text, true_p.text) and not self._similar(true_p.text, false_p.text):
+        if candidate.content_type:
+            return None
+        a1, b1 = self._draw()
+        text1 = self._send(sender, candidate, self._value(a1, b1)).text or ""
+        if not _contains_number(text1, a1 * b1) or f"{a1}*{b1}" in text1:
+            return None
+        for _ in range(32):                         # a product absent from response 1
+            a2, b2 = self._draw()
+            if a2 * b2 != a1 * b1 and not _contains_number(text1, a2 * b2):
+                break
+        else:
+            return None                             # a page full of numbers: no attribution
+        text2 = self._send(sender, candidate, self._value(a2, b2)).text or ""
+        if _contains_number(text2, a2 * b2) and f"{a2}*{b2}" not in text2:
             return Verdict(True, self.vuln_class, self.mechanism,
-                           {"len_benign": len(benign.text), "len_true": len(true_p.text),
-                            "len_false": len(false_p.text)})
+                           {"products": [a1 * b1, a2 * b2],
+                            "payloads": [self._value(a1, b1), self._value(a2, b2)]})
         return None
 
 
@@ -311,14 +621,33 @@ class SstiStrategy(ConfirmationStrategy):
     mechanism = "evaluation-marker"
     category = "server-side-template-injection"
 
+    @staticmethod
+    def _draw() -> tuple[int, int]:
+        return secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
+
     def confirm(self, candidate, sender):
-        a, b = secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
-        expr, product = f"{a}*{b}", str(a * b)
-        for payload in _ssti_payloads(expr):
+        """A template's product must appear (digit-bounded) with its literal absent,
+        then the same template with a second, different product must too, and
+        neither response may show the other's product (BUG-0117 sweep: a page full
+        of numbers is not an evaluator). +1 request, only after a match."""
+        a, b = self._draw()
+        expr = f"{a}*{b}"
+        for index, payload in enumerate(_ssti_payloads(expr)):
             text = self._send(sender, candidate, payload).text or ""
-            if product in text and expr not in text:      # evaluated, not just reflected
+            if not _contains_number(text, a * b) or expr in text:
+                continue
+            c, d = self._draw()
+            while c * d == a * b:
+                c, d = self._draw()
+            expr2 = f"{c}*{d}"
+            payload2 = _ssti_payloads(expr2)[index]
+            text2 = self._send(sender, candidate, payload2).text or ""
+            if (_contains_number(text2, c * d) and expr2 not in text2
+                    and not _contains_number(text, c * d)
+                    and not _contains_number(text2, a * b)):
                 return Verdict(True, self.vuln_class, self.mechanism,
-                               {"payload": payload, "product": product})
+                               {"payload": payload, "product": str(a * b),
+                                "cross_check": [payload2, str(c * d)]})
         return None
 
 
@@ -346,12 +675,23 @@ class SpelInjectionStrategy(ConfirmationStrategy):
     category = "spel-injection"
 
     def confirm(self, candidate, sender):
+        """Two independent canaries, each seen (digit-bounded) only in its own response
+        and never reflected (BUG-0117 sweep). +1 request, only after a match."""
         n = secrets.randbelow(900) + 100
         payload = f"T(java.lang.Math).abs(-{n})"
         text = self._send(sender, candidate, payload).text or ""
-        if str(n) in text and payload not in text:         # evaluated, not just reflected
+        if not _contains_number(text, n) or payload in text:
+            return None
+        m = secrets.randbelow(900) + 100
+        while m == n:
+            m = secrets.randbelow(900) + 100
+        payload2 = f"T(java.lang.Math).abs(-{m})"
+        text2 = self._send(sender, candidate, payload2).text or ""
+        if (_contains_number(text2, m) and payload2 not in text2
+                and not _contains_number(text, m) and not _contains_number(text2, n)):
             return Verdict(True, self.vuln_class, self.mechanism,
-                           {"payload": payload, "result": str(n)})
+                           {"payload": payload, "result": str(n),
+                            "cross_check": [payload2, str(m)]})
         return None
 
 
@@ -578,7 +918,7 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
 
     @staticmethod
     def _contains_token(text: str, n: int) -> bool:
-        return re.search(rf"(?<!\d){n}(?!\d)", text) is not None
+        return _contains_number(text, n)
 
     def confirm(self, candidate, sender):
         n1 = self._random_length()
@@ -600,14 +940,21 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
 
 
 class PathTraversalStrategy(ConfirmationStrategy):
-    """M7: a file-content marker (/etc/passwd) appears in the response."""
+    """M7: a file-content marker (/etc/passwd) appears in the response -- and is
+    absent from a control with no traversal (``passwd``), as in
+    `PathTraversalFsPathReadStrategy` (BUG-0117 sweep: a page that always shows
+    ``root:x:0:0:`` is not confirmed). +1 request, only after a match."""
     vuln_class = "file-inclusion"
     mechanism = "file-content-marker"
     category = "file-inclusion"
+    _CONTROL_VALUE = "passwd"
 
     def confirm(self, candidate, sender):
         for payload in _TRAVERSAL_PAYLOADS:
             if _PASSWD_MARKER.search(self._send(sender, candidate, payload).text or ""):
+                control = self._send(sender, candidate, self._CONTROL_VALUE)
+                if _PASSWD_MARKER.search(control.text or ""):
+                    return None                     # shown without traversal
                 return Verdict(True, self.vuln_class, self.mechanism, {"payload": payload})
         return None
 
@@ -1896,7 +2243,8 @@ def default_strategies(browser: BrowserExecutor | None = None,
     xss): with neither ``coverage`` nor ``dbfault`` injected it no-ops, same as the
     others.
     """
-    return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
+    return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliEvaluationMarkerStrategy(),
+            SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(), GoTemplateSstiStrategy(),
             SpelInjectionStrategy(),

@@ -3,6 +3,25 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0052 — Run page: `inconclusive` oracle coverage; `pending` reworded (2026-10-14)
+- Change:
+  - **`web/results._ml_context`:** counts `inconclusive` (CC-CORE-0043) as its own
+    status. Before, an unknown value fell into "unrecorded".
+  - **`run.html`'s oracle-coverage card:**
+    - shows "inconclusive N (a cost cap stopped a check that had started)";
+    - includes it in the card's show condition and in the unlabelled note;
+    - rewords `pending` to "not reached: run interrupted, or stopped by a safety
+      breaker". This covers lane A's header-breaker rows, which stay `pending`.
+- Impact: display only. FR-UI-19 is amended.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_web_ml_context.py`): the counts dict, and the browser page
+        showing the new line with "unrecorded" still separate — done
+  - [x] FR-UI-19 — done
+- Review: reviewer A (web change list for the new status); pre-assigned with lane A's
+  `pending` wording (PA-0031).
+
 ### CC-UI-0051 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-UI-localhost, -read-only, -redacted, -no-auto-run, -control-plane-hardened, naming the enforcing code and the test functions that fail without it

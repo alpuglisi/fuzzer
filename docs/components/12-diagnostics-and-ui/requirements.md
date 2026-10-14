@@ -418,7 +418,9 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
 
 - **FR-UI-19** *(added CC-UI-0043, 2026-10-13)* A run's page shows its ML context.
   These are plain per-run store reads, so they work without the ML package.
-  - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded counts.
+  - **Oracle coverage:** checked / skipped (budget) / no confirmer / unrecorded counts,
+    plus pending (not reached: run interrupted, or stopped by a safety breaker) and
+    inconclusive (a cost cap stopped a check that had started; CC-UI-0052).
   - **Anomaly flags:** the stored top flagged candidates (`core.anomaly_flags`), with the
     run's own `anomaly_flagged` and the anomaly stage's config as provenance. The flags
     are the last fit's values for that run. *(CC-UI-0044:)* the card also shows

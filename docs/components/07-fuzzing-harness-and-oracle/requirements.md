@@ -1109,8 +1109,9 @@ rewards) derives from it.
   excluded from scope; no traffic off localhost.
   - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`, `tests/test_forms_phase1.py::test_credential_parameters_from_links_are_never_fuzzed`, `tests/test_forms_phase1.py::test_object_selecting_hidden_fields_and_csrf_are_pinned_not_fuzzed`
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
+  - Enforced by (oracle SQLi probes are AND-only, quote-balanced and non-destructive; CC-FUZZ-0065): `tests/test_oracle_sqli_string.py::test_every_new_sqli_probe_matches_its_closed_template_exactly`, `tests/test_oracle_sqli_string.py::test_the_grammar_pair_compiles_and_fails_as_designed`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
-  - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.)
+  - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
 - **NFR-FUZZ-dry-run** `fuzzlab fuzz`, `fuzzlab auto`, and `fuzzlab greybox-run`
@@ -1322,6 +1323,61 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   Crawl-sourced points join their stored absolute paths to `--base-url`'s origin, so
   the base may carry the app's path (`.../bWAPP/`). Authenticated senders (`fuzz`,
   `SeamProbeSender`) log in from the operator's URL before the first probe.
+- **FR-FUZZ-45** *(string-context SQLi confirmation; `CC-FUZZ-0065`, 2026-10-14,
+  BUG-0117).*
+  - **(a) The differential engine.**
+    - **Sequence:** B0, a screen of V and D in a drawn order, then 6 rounds of
+      (V, D, B) in a drawn permutation, with fresh tokens each round. There is exactly
+      one draw per round, from fixed tables, and a round is judged after all of it is
+      sent.
+    - **Confirms when:** every V and B is `same` as B0, every D is not, and every D is
+      `same` as the first D.
+    - **Bound:** for any response sequence that does not depend on the probe values,
+      and any comparison predicate, P[confirm] ≤ (1/2)(1/3)^6 = 1/1458 per family, and
+      < 3/1458 per candidate. Expected false confirmations per run are therefore at
+      most candidates × 3/1458.
+    - **Request count:** it does not depend on the drawn order on targets whose
+      responses do not depend on earlier probes.
+  - **(b) `SqliBooleanStrategy`'s families,** in this fixed order:
+    - **numeric:** `1` / `1 AND 1=1` / `1 AND 1=2`, compared by length;
+    - **string-grammar:** `v` / `v' AND 't' LIKE 't` / `v' AND 't' LIKE t'`;
+    - **string-evaluation:** `1` / `1' AND 't' LIKE 't` / `1' AND 'u' LIKE 't`.
+
+    The string families compare status plus the body with reflections stripped.
+    Tokens are `fz`/`q` + 6 hex, never a SQL literal prefix.
+    - **Cost:** the cap is 30, and that is also the reachable maximum. A family
+      starts only with 21 requests left. Screens that all fail cost 9.
+    - **Cap exhaustion:** when the cap stops a family from starting after an earlier
+      one passed its screen, the verdict is **inconclusive**. The candidate becomes
+      `inconclusive` (unlabelled), never a negative. Under the scheduler, the arm gets
+      reward 0 and its real cost.
+    - **Whole-body points:** string families are skipped on raw whole-body points.
+  - **(c) `SqliEvaluationMarkerStrategy`:** `0'+(SELECT a*b)+'0`.
+    - Two products, each shown (digit-bounded) in the response to the probe that
+      computed it, with the literal absent.
+    - At most 2 requests.
+    - Never the `||` form.
+  - **Error signatures (BUG-0117):** count only when absent from the quote-free,
+    non-numeric controls. At most 4 probes + 2 controls.
+  - **Out of scope:**
+    - `HY000` is corroboration only, never a signature;
+    - SQLite `randomblob` timing is rejected, because of memory;
+    - OR and comment-terminated probes are excluded (the existing timing templates
+      are BUG-0118).
+  - **Safety:** every new probe is quote-balanced and AND-only, with no comment, `OR`,
+    `||`, `;` or backslash.
+    - **Predicate contexts:** V selects the baseline's rows.
+    - **Value contexts (INSERT/UPDATE):** V, the evaluation probes and C write a
+      coerced value to the baseline's own row. That is up to 3 rows per screen per
+      family, about 11 on sqli_12, and at most 38 from these strategies. Other
+      strategies on the point also write.
+    - **The grammar D never executes.**
+  - **Limits (false negatives, never FPs):**
+    - LIKE contexts where `%1%` matches differently;
+    - pages reflecting the base `1`;
+    - double-quoted contexts;
+    - pages that change on every request;
+    - a cap exhausted on noise.
 - **FR-FUZZ-42** *(forms as injection points; `CC-FUZZ-0062`, 2026-10-13).*
   - **Points.** Crawled forms become points.
   - **Siblings.** Every probe of a form field sends the form's **browser-default entry

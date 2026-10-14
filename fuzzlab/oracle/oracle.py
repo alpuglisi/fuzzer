@@ -94,6 +94,18 @@ class Oracle:
         self.scheduler = scheduler
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:
+        """The confirming verdict, or None (greybox and other callers)."""
+        return self.confirm_outcome(candidate, sender)[0]
+
+    def confirm_outcome(self, candidate: Candidate,
+                        sender: Sender) -> tuple[Verdict | None, Verdict | None]:
+        """(confirming verdict or None, inconclusive verdict or None).
+
+        A strategy that started a check but could not decide within its cost cap
+        returns ``Verdict(confirmed=False, inconclusive=True)`` (FR-FUZZ-45). It is
+        reported only when nothing confirms; any other non-confirming verdict is
+        ignored, as before. Under a scheduler an inconclusive arm gets reward 0 and
+        its real cost."""
         if candidate.base_entries:                       # a form point: send its siblings
             sender = _FormBoundSender(sender, candidate)
         applicable = [s for s in self.strategies if s.applies(candidate)]
@@ -105,6 +117,7 @@ class Oracle:
         else:
             ctx, ordered = None, applicable
 
+        inconclusive: Verdict | None = None
         for strategy in ordered:
             if self.scheduler is not None:
                 probe = _CostCounter(sender)             # measure this mechanism's cost
@@ -112,6 +125,9 @@ class Oracle:
             else:
                 verdict = strategy.confirm(candidate, sender)
             confirmed = verdict is not None and verdict.confirmed
+            if (not confirmed and verdict is not None and verdict.inconclusive
+                    and inconclusive is None):
+                inconclusive = verdict
             if self.scheduler is not None:               # reward+cost only the tried arms
                 self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
                                       cost=max(1, probe.count))
@@ -122,8 +138,8 @@ class Oracle:
                         "vuln_class": verdict.vuln_class, "url": to_path(candidate.url),
                         "method": candidate.method, "param": candidate.param,
                         "mechanism": verdict.mechanism})
-                return verdict
-        return None
+                return verdict, None
+        return None, inconclusive
 
     def _write_finding(self, candidate: Candidate, verdict: Verdict) -> None:
         if self.store is None or self.run_id is None:

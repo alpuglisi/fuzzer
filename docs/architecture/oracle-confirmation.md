@@ -42,7 +42,7 @@ is the `references/` folder holding that class's payloads.
 
 | Class (ref) | Mechanism(s) | Confirmation detail |
 | --- | --- | --- |
-| `sql-injection` | M1, M2, M3 | rising-delay SLEEP; DB error fingerprint; boolean `1=1`/`1=2` diff |
+| `sql-injection` | M1, M2, M3, M4 | rising-delay SLEEP; DB error fingerprint, absent from a quote-free control; boolean differential on a bracketed, replicated engine: numeric `1=1`/`1=2`, string grammar `'t' LIKE 't` vs `'t' LIKE t'`, string evaluation (FR-FUZZ-45); M4 `0'+(SELECT a*b)+'0` evaluation marker for stored sinks |
 | `nosql-injection` | M3, M2, M1 | operator injection (`[$ne]`, `[$gt]`) boolean diff; driver error; JS `sleep` timing |
 | `ldap-injection` | M3, M2 | `*)(uid=*` boolean diff; LDAP filter error |
 | `xpath-injection` | M3, M2 | boolean node-count diff; XPath error |

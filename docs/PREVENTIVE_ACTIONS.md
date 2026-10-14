@@ -1445,3 +1445,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      against `core.urls.destructive_reason` in a test.
   2. **An endpoint the rule cannot catch is listed with its compensating control, or as
      a stated residual,** never silently. (from BUG-0114)
+
+- **PA-0117** — Strengthens `PA-0084(2)`, `PA-0090` and `PA-0094`, from the mechanisms
+  they were written for to every confirmation strategy, after BUG-0117: the SQLi,
+  file-inclusion, SSTI and SpEL strategies confirmed on a signature the benign page also
+  showed, on one unreplicated sample, or on a number a page already contained.
+  1. **A fixed signature or marker counts only when it is absent from a benign control
+     of the same point.** The control has the probe's type, minus what the probe tests.
+  2. **A response differential counts only when the baseline is shown stable around it
+     and it replicates with fresh tokens.** Its noise bound is stated and tested as
+     stated (PA-0069(1)).
+  3. **Enforced by discovery:** every `default_strategies()` member of a category runs
+     against payload-independent noise (constant, periodic, signature-always) and must
+     not confirm. The guard is proven on synthetic offenders (PA-0034(2)).
+  4. **The PA-0002 sweep covers every strategy with a fixed marker or a single sample,**
+     not only the failing mechanism's own class. (from BUG-0117)

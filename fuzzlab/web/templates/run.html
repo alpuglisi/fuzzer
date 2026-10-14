@@ -79,16 +79,21 @@
 {% endif %}
 
 {% set os = detail.oracle_status %}
-{% if os and (os.checked or os.skipped_budget or os.no_confirmer or os.pending) %}
+{% if os and (os.checked or os.skipped_budget or os.no_confirmer or os.pending
+              or os.inconclusive) %}
 <div class="card" id="run-oracle-status">
   <h2>Oracle coverage</h2>
   <p>Oracle: checked {{ os.checked }} &middot; skipped (budget) {{ os.skipped_budget }}
     &middot; no confirmer {{ os.no_confirmer }}{% if os.unrecorded %} &middot;
     unrecorded {{ os.unrecorded }}{% endif %}{% if os.pending %} &middot;
-    pending {{ os.pending }} (run interrupted before the oracle reached them){% endif %}</p>
-  {% if os.skipped_budget or os.no_confirmer or os.pending %}
-  <p class="muted">Skipped, pending and no-confirmer candidates were never checked by the oracle:
-    they are unlabelled (never training data) and are still scored and ranked.
+    pending {{ os.pending }} (not reached: run interrupted, or stopped by a safety
+    breaker){% endif %}{% if os.inconclusive %} &middot;
+    inconclusive {{ os.inconclusive }} (a cost cap stopped a check that had
+    started){% endif %}</p>
+  {% if os.skipped_budget or os.no_confirmer or os.pending or os.inconclusive %}
+  <p class="muted">Skipped, pending and no-confirmer candidates were never checked by the oracle,
+    and inconclusive ones were not decided: they are unlabelled (never training data) and
+    are still scored and ranked.
     {% if detail.score %}Skipped candidates count as misses in this run's score.{% endif %}</p>
   {% endif %}
 </div>

@@ -17,8 +17,13 @@ from fuzzlab.scheduler.context import is_pooled_context
 
 
 class _SqlError:
-    def send(self, *a, **k):
-        return Probe(200, "You have an error in your SQL syntax")
+    """Errors on a quote only: a page that shows the signature on every request is not
+    confirmed since BUG-0117 (its benign control shows it too)."""
+
+    def send(self, url, param, value, *a, **k):
+        if "'" in value or '"' in value:
+            return Probe(200, "You have an error in your SQL syntax")
+        return Probe(200, "<p>ok</p>")
 
 
 def _trained(backoff: bool) -> ThompsonBandit:
