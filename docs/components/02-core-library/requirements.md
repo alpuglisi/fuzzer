@@ -437,6 +437,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   - A registry of what this process started (`registered()`); `reap_registered()` stops
     every live entry and returns `Leak(argv, pid, age_s, note)` records, dropping a
     record whose pid now names another process.
+  - Stated residual (BUG-0130 confirmation, reviewer A): "exposed" is judged against the
+    owner's own (host) network namespace. A listener in some other pre-existing namespace
+    (a container's, joined with nsenter) would not count as exposed, even though that
+    namespace may be bridged with published ports. Nothing launches servers that way
+    today.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

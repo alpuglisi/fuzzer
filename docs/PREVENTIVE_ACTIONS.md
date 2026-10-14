@@ -1642,3 +1642,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      under `FUZZLAB_REQUIRE_NETNS=1`, and never falls back to a host bind. Detection
      is proven by injecting that namespace as the host's. Enforced by
      `test_no_test_binds_a_wildcard_address_outside_a_private_netns`.
+  Stated limits of the lints (reviewer B, confirmation round): a launcher reached
+  through `importlib.import_module(...)` or bound to a variable first
+  (`f = procutil.start_server; f(...)`) is not seen by the static pin rule. The
+  boot-check lint and the runtime check still cover such a site.
