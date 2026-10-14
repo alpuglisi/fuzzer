@@ -572,6 +572,11 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         return None
 
 
+def _one_trailing_dot_off(host: str) -> str:
+    """``host`` without one trailing dot (a fully qualified spelling), never more."""
+    return host[:-1] if host.endswith(".") else host
+
+
 class OpenRedirectStrategy(ConfirmationStrategy):
     """M9: the parameter controls the redirect target (Location or meta refresh).
 
@@ -614,7 +619,7 @@ class OpenRedirectStrategy(ConfirmationStrategy):
         except ValueError:
             return False
         return (parts.scheme.lower() in ("http", "https")
-                and (parts.hostname or "").rstrip(".") == host
+                and _one_trailing_dot_off(parts.hostname or "") == host
                 and parts.path in ("/cb", "/cb/"))
 
     def _probe(self, sender, candidate, value, host):
