@@ -3,6 +3,139 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0027 — SPA route query-parameter discovery: scan, seeds, the observation probe (FR-CRAWL-17, forms phase 5) (2026-10-14)
+- Change (the agreed design `spa-query-draft.md`, **Revision 2**: reviewer B's
+  Revision 1 and reviewer A's points reconciled into Q1-Q7; that review was this
+  change's pre-change gate). Juice Shop's `#/track-result?id=` renders the order id the
+  server echoes as trusted HTML, but the crawler visited only bare routes, so no
+  fragment point existed and M6 never ran there.
+  - **Q1/Q2, the scan (`tools/spa.py`):** `spa.scan_script(text)` is the crawler's one
+    call per already-loaded same-origin script (`LocalSpider._note_script`): one size cap
+    (`MAX_SCRIPT_BYTES`), `scan_routes` and the new `scan_query_params`. Anchors only
+    `navigate(` (followed by `[`, or a quote for a React literal), `queryParams:`,
+    `queryParams.`, `queryParams[`, `queryParamMap.get(`, `searchParams.get(`,
+    `URLSearchParams(`, `route.query.` (so `$route.query.` too), `query:` (only as a
+    depth-1 key of a `push(` / `replace(` object found at most 200 characters back),
+    `<Link` and `Link,{`. Each anchor kind is found with `str.find` from where the
+    previous window ended (windows never overlap); a window ends at `min(anchor +
+    QUERY_WINDOW (512), the next anchor of the same kind, the end of its call)`, and the
+    call's arguments are read by a bounded walk inside it (strings, brackets, object
+    keys at depth 1); at most `MAX_QUERY_ANCHORS` (2000) anchors per script
+    (`QueryScan.anchor_cap`). Pairs: an all-literal route array (elements joined with
+    `/`) with a literal `queryParams` object; Vue `push({path, query})` (a `name:` route
+    or a non-literal path leaves the names unpaired); React `navigate("/r?a=")`,
+    `<Link to="/r?a=">`, `(Link,{to:"/r?a="})`. A multi-element array with any
+    non-literal element is a dynamic segment: refused (`spa_query_refused[dynamic
+    segment]`), names dropped, no element seeded alone (B7). An empty array or a lone
+    non-literal element names no known route: its names are unpaired. A non-literal
+    `queryParams` value is counted (`non-literal query`); `{}` is nothing. Unpaired
+    names: the member/quoted reads above and a `queryParams:{..}` object outside a
+    `navigate` call. Names (`spa.query_name_ok`): ASCII identifier characters, at most 64,
+    never an Observable/ParamMap member (`QUERY_MEMBERS`) nor a name followed by `(`; a
+    sensitive name (`core.redaction.is_sensitive_name`) is dropped and counted by class
+    only; at most 50 per script (`name cap`).
+  - **Q3, seeds:** `LocalSpider._queue_routes` turns each pair into one crawl URL, queued
+    after the bare routes (B8) with `source = 'spa-query'` (`spa.SEED_SOURCE`):
+    `spa.seed_url` sets every name to the text filler (`spa.query_filler` =
+    `store_adapter`'s, PA-0003), or to `/` for a redirect-ish name (`spa.redirect_name`:
+    a whole token, or the whole name, in `tools.fetcher.REDIRECT_PARAMS`, the one shared
+    open-redirect name set). Gates: `classify_route` (parameterised, destructive, not a
+    route), then `LocalSpider._query_gate`: `spa.query_url_refusal` (`route_destructive_reason`,
+    then `window_request_refusal("GET", url, False)` on the URL **and** on the route
+    fragment's path and query re-rooted on the origin, which a hash URL hides from that
+    rule; A-M1), scope, the visit key. One seed per (route URL, names not yet seeded).
+  - **Q4, the window:** `_window(..., query=)` is the reveal window's variant: it opens
+    with `own_nav = {_nav_key(load URL)}`, `_goto_and_parse` clears it once the load has
+    settled, `_window_refusal` / `_ws_hold` gate the load exactly as for a reveal
+    (non-GET and W2 words aborted, navigations aborted and kept, WebSocket messages
+    held), counting `spa_query_writes_blocked` instead of `reveal_writes_blocked`. The
+    exit decision: **not** `_restore` (its reload would replay the load's own on-load
+    code) but `_leave`: a seed's same-document route change (`location.hash` on load) is
+    kept as a navigation, popups are closed, the page goes to `about:blank` inside the
+    window, then `_quiesce` and the lift; requests aborted while leaving are counted with
+    the rest. A seed's kept navigations are queued through the normal gates (`source =
+    'redirect'`, one level deeper). A seed neither reveals nor submits, and its landing
+    is not marked as a redirect page (`_after_fetch`).
+  - **Q5, the observation probe:** when the queue drains, `_plan_probes` queues one probe
+    load (`spa.PROBE_SOURCE`) per scanned, rendered route not yet probed (at most
+    `MAX_QUERY_PROBE_ROUTES` = 40, `probe route cap`); `_mint_probe` mints **fresh**
+    markers at load time for the unpaired names not yet seeded there (at most
+    `MAX_UNPAIRED_NAMES` = 12, all in one load; `probe name cap` once per name;
+    redirect-ish names carry `/`, no marker, B6) and gates the URL as a seed. Markers
+    (`spa.mint_markers`): `fzq` + two index letters + 8 random letters, all lower case,
+    fixed length (13), so word-shaped and never `looks_like_identifier` (pinned).
+    The load runs in the crawl loop inside its window; right after it the loop's
+    **store suppression** branch reads the page (`_finish_probe`) and `continue`s: no
+    page, link, XHR URL or form is recorded (and a failed probe is not marked visited);
+    `_observe` returns at once and `_on_request` sends the load's requests -- the page's
+    `request` event, which fires before the route decides, so aborted requests and
+    their bodies are included -- to the probe only. `spa.observed_names` attributes only
+    this load's markers, matched with non-alphanumeric boundaries, in the DOM's text
+    nodes, attribute values and control values (`spa.OBSERVE_JS`) and the requests'
+    decoded URLs and bodies; a string carrying another of the load's markers or
+    `<probed name>=` syntax counts for nothing (B5); strings over 8 KiB are not judged.
+    Kept names are seeded as in Q3.
+  - **Q6:** a seed becomes a `fragment` point through the existing
+    `_import_route_query`, and a GET XHR carrying the filler in its query a `query` point
+    through the XHR link set; a marker or filler in a GET path segment gives no point
+    (counted `spa_query_marker_in_path`). No server-side point is claimed from a capture.
+  - **Q7, counts** (`spa_counts`, `crawl_stats`, the summary): `spa_query_pairs`,
+    `spa_query_unpaired`, `spa_query_probe_loads`, `spa_query_kept`,
+    `spa_query_refused` (total; by reason as `spa_query_refused[<reason>]` keys),
+    `spa_query_writes_blocked`, `spa_query_marker_in_path`, `spa_query_anchor_cap`, and
+    `spa_query_seeded` / `spa_query_seeded_fragment`, so the summary shows seeds that are
+    fragment points (confirmable only with `--browser`) apart from history-mode query
+    points (A-S5). `LocalSpider(spa_query=False)` turns the feature off; it is on with
+    SPA routes in the Playwright engine (`--no-spa-routes` turns both off).
+- Impact: crawler only (`tools/spa.py`, `tools/spider.py`); no store schema, importer,
+  navguard or core change. New spider-DB values: `discovered_pages.source =
+  'spa-query'` and the `crawl_stats` names above. `spa.py` now reads the auditor's
+  `tools.fetcher.REDIRECT_PARAMS` (read only). Downstream: more `fragment` points (M6,
+  `--browser`) and, from seeds' GET XHRs and history-mode seeds, more `query` points.
+  More page loads per crawl: one probe per rendered route (40 at most) and one per seed.
+- Risk: medium (the crawl now loads routes with query values and observation markers).
+  Mitigated: every such load is inside the window (no write, navigation or WebSocket
+  message reaches the app's server), gated like a seed, same-origin, with inert
+  letters-only markers or the filler (`/` for a redirect-ish name); probe loads record
+  nothing; residuals below are stated in FR-CRAWL-17.
+- Deliverables:
+  - [x] `spa.scan_script` / `scan_query_params` / `seed_url` / `query_url_refusal` /
+    `redirect_name` / `mint_markers` / `observed_names` / `filler_in_path` /
+    `OBSERVE_JS` — done
+  - [x] spider: `_note_query_scan`, `_queue_seed`, `_query_gate`, `_plan_probes`,
+    `_mint_probe`, `_finish_probe`, `_take_query_navs`, `_leave`, `_window(query=)`, the
+    crawl loop's window and store-suppression branch, summary and `crawl_stats` — done
+  - [x] tests `tests/test_spa_query.py` (49), fixture `tests/_spa_query_fixture.py` — done
+  - [x] FR-CRAWL-17 and NFR-CRAWL-safe tracing in `requirements.md`; ARCHITECTURE.md;
+    CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): `tests/test_spa_query.py` 49 passed, 0 skipped
+  (real Chromium, `FUZZLAB_REQUIRE_BROWSER=1`), including the end-to-end
+  `test_track_result_id_reaches_m6_and_confirms_dom_xss` (crawl -> `/#/track-result`
+  `id` fragment point -> M6 `xss-dom` finding; none with the feature off). Mutation
+  checks, each reverted afterwards: the scan's wiring removed -> 10 tests fail (the
+  end-to-end one included); the window not entered for seeds and probes -> 3 fail
+  (`test_a_seed_load_cannot_write`: the server got 1 POST; the navigation and beacon
+  tests); the store-suppression branch removed -> 3 fail
+  (`test_no_stored_row_carries_a_marker` among them); the marker filter reduced to
+  prefix + index -> 4 fail (the stale-marker unit and browser tests among them). The
+  4 MB adversarial bodies scan in 0.02-0.26 s each (bound 10 s). On Juice Shop's real
+  `main.js` the scan gives pairs `403: error`, `login: redirectUrl`, `track-result:
+  id`, unpaired `q, id, challenge, redirectUrl, error, testDecal, initialMessage`,
+  refused `non-literal query` x2 and `dynamic segment` x1 (`chatbot/conversation`).
+  Related suites, real Chromium, `FUZZLAB_REQUIRE_BROWSER=1`: (a) `test_spa_query`,
+  `test_spa_routes`, `test_spa_capture`, `test_spider_scope`, `test_store_adapter`,
+  `test_json_points`, `test_storage_redaction`, `test_proxy_redaction`,
+  `test_logout_redirect`, `test_requirements_traceability`, `test_lint`
+  (`FUZZLAB_REQUIRE_LINT=1`): 576 passed, 1 failed, 0 skipped -- the failure was the
+  unchanged `scan_routes` timing-ratio test
+  `test_spa_routes.py::test_the_scan_is_linear_on_adversarial_5mb_bodies`, which then
+  passed 5/5 alone, 2/2 after `test_spa_capture` + `test_spa_query` (suite order), and
+  in a full `test_spa_routes.py` re-run (70 passed): flagged as a timing flake;
+  (b) `test_browser_scope`, `test_forms_phase4`, `test_destructive_urls`,
+  `test_forms_phase1`, `test_forms_phase2`, `test_session_browser_login`,
+  `test_browserauth`: 658 passed, 0 skipped. Not verified here: the live Juice Shop crawl
+  and M6 run (the coordinator's live check).
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

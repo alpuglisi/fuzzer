@@ -387,6 +387,74 @@ fuzzer.
     desync or reconnect after a reveal -- a coverage effect, never a safety one (review
     A-N2, B).
 
+- **FR-CRAWL-17 (SPA route query parameters, CC-CRAWL-0027, forms phase 5)** In the
+  Playwright engine, on with SPA routes (`--no-spa-routes` turns both off;
+  `LocalSpider(spa_query=False)` this alone). A route whose view reads a query
+  parameter (Juice Shop's `#/track-result?id=`) is crawled **with** that parameter, so
+  the importer makes it a point:
+  - **The scan (Q1/Q2).** `spa.scan_script` is the one call per already-loaded
+    same-origin script (FR-CRAWL-12's caps): routes and `spa.scan_query_params`.
+    **Paired** (route, names): Angular `navigate([`/r`], {queryParams: {id: t}})` (an
+    all-literal array, elements joined with `/`), Vue `push({path: '/r', query: {..}})` /
+    `replace`, React literals `navigate("/r?a=")`, `<Link to="/r?a=">`,
+    `(Link,{to:"/r?a="})`. **Unpaired** names: `queryParams.x`, `queryParams["x"]`,
+    `queryParamMap.get("x")`, `searchParams.get("x")`, `URLSearchParams(..).get("x")`,
+    `$route.query.x` / `route.query.x`, and a `queryParams: {..}` object outside a
+    `navigate` call; also an empty or lone non-literal route array. Never a bare `get(`
+    or `query`. A multi-element route array with any non-literal element is a dynamic
+    segment: refused, its names dropped, no element seeded alone. A non-literal
+    `queryParams` value is skipped (counted), `{}` is nothing. Names: ASCII identifier
+    characters, at most 64, never an Observable/ParamMap member (`spa.QUERY_MEMBERS`) or
+    a name followed by `(`; at most 50 per script; a sensitive name
+    (`core.redaction.is_sensitive_name`) is dropped and counted by class only. Linear
+    (PA-0095): anchors found with `str.find`, non-overlapping windows ending at
+    `min(anchor + 512, the next anchor of the same kind, the end of the call)` and read
+    only inside those bounds, at most 2000 anchors per script (`spa_query_anchor_cap`).
+  - **Seeds (Q3).** Each paired route gets one crawl URL, queued after the bare routes
+    with `source = 'spa-query'`: `route_url(...)?a=fuzzlab&…` (the text filler), a
+    redirect-ish name (a whole token, or the whole name, in the one shared open-redirect
+    name set, `tools.fetcher.REDIRECT_PARAMS`) set to `/` instead. The seed passes
+    `classify_route`, `route_destructive_reason`, `spa.window_request_refusal` as a GET
+    on the URL and on the route fragment's own path and query, scope and the visit key.
+  - **Every seed and probe load runs inside the reveal window (Q4)** (FR-CRAWL-16's
+    W2/W3: non-GET and W2-word GETs aborted, navigations aborted and queued through the
+    normal gates, WebSocket messages held), its own navigation exempt only until it has
+    settled; it leaves for `about:blank` inside the window (never a reload, which would
+    replay the load's on-load code). A seed neither reveals nor submits. Counted
+    `spa_query_writes_blocked`. M6's own fuzz loads are unchanged (outside this window).
+  - **The observation probe (Q5).** Unpaired names are attached to a route only by
+    observation: once the bare routes are visited, at most 40 rendered routes are loaded
+    once each with all (at most 12) unpaired names, each with a **fresh** marker minted
+    for that load (`fzq` + 10 lower-case letters: word-shaped, never
+    `looks_like_identifier`); a redirect-ish name carries `/`. A name is kept for the
+    route only when **this** load's marker is seen, with non-alphanumeric boundaries,
+    in the rendered DOM (text, attributes, control values) or in a request the load
+    made (its URL or body; aborted ones included), never in a string that also carries
+    another marker or `<name>=` syntax (a URL self-echo), never from the store. Kept
+    names are seeded as above. **A probe load records nothing**: no page, link, XHR URL,
+    form or capture.
+  - **Points (Q6).** A hash-mode seed becomes a `fragment` point (`_import_route_query`):
+    a DOM point, confirmed only with `--browser` (M6). The open-redirect rules
+    (`R-OPEN-REDIRECT`, `R-OPEN-REDIRECT-VALUE`) exclude `fragment`, so these are XSS/DOM
+    points only. A GET XHR a seed's load sends with the filler in its query becomes a
+    `query` point (the XHR link set); a history-mode seed is a `query` point itself.
+  - **Counts (Q7; `crawl_stats`, PA-0110):** `spa_query_pairs`, `spa_query_unpaired`,
+    `spa_query_probe_loads`, `spa_query_kept`, `spa_query_refused` (and by reason,
+    `spa_query_refused[<reason>]`), `spa_query_writes_blocked`,
+    `spa_query_marker_in_path`, `spa_query_anchor_cap`, `spa_query_seeded`,
+    `spa_query_seeded_fragment`; the summary shows fragment seeds (`--browser` only)
+    apart from history-mode ones.
+  - Residuals: a marker or filler in a request's **path** segment gives no point
+    (counted `spa_query_marker_in_path`); fragment points need `--browser`; there is
+    **no open-redirect coverage for fragment names**; a redirect-ish unpaired name is
+    never kept (it carries `/`, no marker); a name the app forwards to its API under the
+    **same** name (`/api?q=<marker>`) is discounted as `<name>=` syntax unless it is
+    also shown in the DOM; requests from popups and WebSocket frames are not observed; a
+    marker the app persists (its own storage, or server-side) can reappear, inert, in a
+    later page's stored text (the probe itself stores nothing); a route not in a route
+    table is probed only if paired; names read through other APIs (a hand-rolled
+    `location.search` parser, `useSearchParams()`) are not seen.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
@@ -426,6 +494,13 @@ fuzzer.
   never clicked, and after a reveal in an authenticated crawl the session is checked
   (FR-CRAWL-15/16).
   - Enforced by (the reveal window, W1-W3): `navguard.make_route_handler(window=)` / `make_ws_handler(hold=)`, `spa.window_request_refusal`, `LocalSpider._window` / `_window_refusal` / `_restore` / `_quiesce` — `tests/test_forms_phase4.py::test_the_window_lets_only_safe_gets_through`, `tests/test_forms_phase4.py::test_the_route_asks_the_window_before_any_fetch_and_keeps_the_page_on_navigation`, `tests/test_forms_phase4.py::test_the_window_is_asked_again_on_every_redirect_hop`, `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`, `tests/test_forms_phase4.py::test_w2_a_reveal_can_only_read`, `tests/test_forms_phase4.py::test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal`, `tests/test_forms_phase4.py::test_w3_a_websocket_message_in_the_window_is_dropped`, `tests/test_forms_phase4.py::test_w1_a_debounced_post_after_close_never_arrives`, `tests/test_forms_phase4.py::test_g1_a_selection_change_post_is_never_sent_before_the_submission`, `tests/test_forms_phase4.py::test_the_lift_covers_exactly_one_click_and_its_settle`, `tests/test_forms_phase4.py::test_a_click_that_raises_never_leaves_the_window_open`, `tests/test_forms_phase4.py::test_the_own_reload_exemption_matches_the_exact_url`, `tests/test_forms_phase4.py::test_a_redirect_after_the_own_reload_is_still_a_navigation`, `tests/test_forms_phase4.py::test_a_failed_close_still_closes_the_windows_popups`
+  *(CC-CRAWL-0027, forms phase 5:)* **a query seed or probe load can only read**: each
+  runs inside the reveal window (no write, navigation or WebSocket message reaches the
+  app; it leaves for `about:blank` inside the window), a destructive, transaction,
+  account-action or credential-bearing seed or probe URL is never loaded, a
+  redirect-ish name carries a same-origin `/`, and a probe load records nothing
+  (FR-CRAWL-17).
+  - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
   - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
   - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_refused`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`
@@ -450,9 +525,11 @@ pipeline.
 
 Spider DB (the spider's own schema, `StorageManager`; no store migration):
 `discovered_pages` (`source` is `link`, `xhr`, `redirect`, `form`, since FR-CRAWL-12
-`spa-route`, or since FR-CRAWL-16 `reveal`; a SPA route page's `url` keeps its `#/…`
-fragment), `discovered_forms`, `selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY,
-value INTEGER)` (the last crawl's SPA and reveal counts, `submit_stopped` and
+`spa-route`, since FR-CRAWL-16 `reveal`, or since FR-CRAWL-17 `spa-query` (a query
+seed); a SPA route page's `url` keeps its `#/…` fragment, a seed's with its query),
+`discovered_forms`, `selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY,
+value INTEGER)` (the last crawl's SPA, reveal and, since FR-CRAWL-17, `spa_query_*`
+counts -- refusals by reason as `spa_query_refused[<reason>]` -- `submit_stopped` and
 `reveals_stopped`), since FR-CRAWL-16 **`revealed_forms`** `(id, page_url, route,
 signature, submitted INTEGER, UNIQUE (route, signature))` — the forms a reveal showed,
 for a later opt-in (`page_url` redacted by `redact_url_identifiers`; never values) —

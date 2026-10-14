@@ -1371,13 +1371,25 @@ tracked in the requirements files, not here.
   dialogs, drawers and interactive cards opened, their links, routes and forms
   collected, gated labels; FR-CRAWL-16, on by default in the Playwright engine,
   `--no-reveal`). After a reveal in an authenticated crawl the session is checked
-  client-side, re-adopted once on a loss, and reveals stop on a second.
-- **Depends on (components):** `core/`, session manager, target lab.
+  client-side, re-adopted once on a loss, and reveals stop on a second. Forms phase 5
+  (CC-CRAWL-0027, FR-CRAWL-17): **route query parameters** -- the same one scan of a
+  loaded script (`spa.scan_script`) also reads query-parameter names, paired with a
+  route (`navigate([..],{queryParams:{..}})`, Vue `push`, React literals) or unpaired
+  (`queryParams.x` and friends); each pair is crawled as a seed URL (`route?a=fuzzlab`,
+  `/` for a redirect-ish name; `source = 'spa-query'`), and unpaired names are attached
+  to a route only when an observation probe -- one load per rendered route with fresh,
+  letters-only markers, recording nothing -- sees this load's marker in the DOM or the
+  load's own requests. Every seed and probe load runs inside the reveal window and
+  leaves for `about:blank` inside it. Seeds become `fragment` points (M6, `--browser`)
+  through the existing importer; a seed's GET XHRs, `query` points.
+- **Depends on (components):** `core/`, session manager, target lab (and, read only,
+  the auditor's open-redirect name set `tools.fetcher.REDIRECT_PARAMS`, FR-CRAWL-17).
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
   from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,
   `discovered_requests`, `revealed_forms` (the forms a reveal showed, route and
   signature, for a later opt-in; forms phase 4), and `crawl_stats`, the last crawl's
-  SPA and reveal counts).
+  SPA, reveal and query-parameter counts (`spa_query_*`, refusals by reason as
+  `spa_query_refused[<reason>]`; FR-CRAWL-17)).
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,

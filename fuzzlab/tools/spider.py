@@ -296,7 +296,7 @@ class LocalSpider:
     def __init__(self, start_url, max_depth=3, db_name="spider_results.db",
                  engine="auto", timeout_ms=10000, resume=False,
                  session_manager=None, identity=None, selector_forms=None,
-                 spa_routes=True, submit_spa_forms=None, reveal=True):
+                 spa_routes=True, submit_spa_forms=None, reveal=True, spa_query=True):
         self.start_url = start_url
         self.max_depth = max_depth
         self.storage = StorageManager(db_name)
@@ -423,7 +423,34 @@ class LocalSpider:
             "reveals_clicked", "reveals_refused", "reveals_over_cap",
             "reveal_writes_blocked", "reveal_ws_dropped", "reveal_navigations_captured",
             "revealed_links", "revealed_forms", "session_losses_after_reveal",
-            "g1_controls_filled", "g1_forms_unsatisfiable"), 0)
+            "g1_controls_filled", "g1_forms_unsatisfiable",
+            # forms phase 5 (FR-CRAWL-17; persisted in crawl_stats, PA-0110)
+            "spa_query_pairs", "spa_query_unpaired", "spa_query_probe_loads",
+            "spa_query_kept", "spa_query_refused", "spa_query_writes_blocked",
+            "spa_query_marker_in_path", "spa_query_anchor_cap", "spa_query_seeded",
+            "spa_query_seeded_fragment"), 0)
+        # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
+        #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
+        self._query_on = self._spa_on and bool(spa_query)
+        #: route -> names read from this page's scripts, seeded by `_queue_routes`
+        self._pending_pairs: dict = {}
+        #: every (route, name) pair and unpaired name the scripts gave (counted once)
+        self._query_pairs_seen: set = set()
+        self._query_unpaired: dict = {}
+        #: visit keys of seeds already queued; route URL -> names seeded on it
+        self._seed_keys: set = set()
+        self._seeded_names: dict = {}
+        #: scanned routes a probe may load (route -> (URL, depth)), and those probed
+        self._probe_routes: dict = {}
+        self._probed: set = set()
+        self._names_over_cap: set = set()
+        #: the probe load in progress (its markers and the requests it made), or None
+        self._probe = None
+        #: navigations a seed's window aborted, queued through the normal gates
+        self._query_navs: list = []
+        #: why seeds, probes or names were refused, by reason (crawl_stats keys
+        #: ``spa_query_refused[<reason>]``)
+        self.spa_query_refused: dict = {}
         # --- forms phase 4: the reveal window (W1-W4) and reveals (FR-CRAWL-16) ---
         #: Reveal navigation: on by default in the Playwright engine (--no-reveal); a
         #: reveal can only read (the window), like following a link.
@@ -582,7 +609,9 @@ class LocalSpider:
         if navigation:
             win["navs"].append(url)
         else:
-            self.spa_counts["reveal_writes_blocked"] += 1
+            # a seed or probe load's window (FR-CRAWL-17, Q4) counts its own
+            self.spa_counts["spa_query_writes_blocked" if win.get("query")
+                            else "reveal_writes_blocked"] += 1
         return why
 
     def _ws_hold(self, context):
@@ -598,27 +627,38 @@ class LocalSpider:
             self._win["aborted"] += 1
 
     @contextlib.contextmanager
-    def _window(self, page, context, page_url):
+    def _window(self, page, context, page_url, *, query=None):
         """The reveal window (W1): opened before the first reveal click or G1
         interaction; on exit the route is closed inside it -- ``Escape``, popups opened
         in it closed, the route reloaded (GET; `_restore`) -- and it is lifted only after
         a final quiet period (`_quiesce`: nothing in flight, then a round trip that
         flushes pending events). Re-entrant: a G1 inside a reveal uses the open window.
         If the close fails, every page the window opened is closed and the route's page
-        is sent to ``about:blank`` (their timers die) before the window is lifted."""
+        is sent to ``about:blank`` (their timers die) before the window is lifted.
+
+        ``query`` (FR-CRAWL-17, Q4): a seed (`spa.SEED_SOURCE`) or probe
+        (`spa.PROBE_SOURCE`) load of ``page_url``. The window opens with ``own_nav`` set
+        to that URL alone (`_goto_and_parse` clears it once the load has settled), and on
+        exit the page **leaves** for ``about:blank`` inside the window (`_leave`) instead
+        of `_restore`'s reload, which would replay the load's own on-load code."""
         if self._win is not None:
             yield self._win
             return
         win = {"context": context, "lifted_for": None, "own_nav": frozenset(),
                "aborted": 0, "navs": [], "restore_aborted": 0,
-               "pages": list(getattr(context, "pages", []) or [])}
+               "pages": list(getattr(context, "pages", []) or []), "query": query}
+        if query:
+            win["own_nav"] = frozenset({_nav_key(page_url)})
         self._win = win
         try:
             yield win
         finally:
             try:
                 win["lifted_for"] = None                  # lifted for one click only
-                self._restore(page, page_url, win)
+                if query:
+                    self._leave(page, page_url, win)
+                else:
+                    self._restore(page, page_url, win)
                 self._quiesce(page)
             except PlaywrightError as exc:
                 logging.info(f"the reveal window could not close {page_url} cleanly "
@@ -630,6 +670,8 @@ class LocalSpider:
                     page.goto("about:blank", timeout=self.timeout_ms)
             finally:
                 self._win = None
+                if query == spa.SEED_SOURCE:
+                    self._query_navs.extend(win["navs"])     # queued, normal gates
 
     def _restore(self, page, page_url, win):
         """Close what a reveal opened, inside the window (W1, G2c): ``Escape`` (never a
@@ -649,6 +691,22 @@ class LocalSpider:
         finally:
             win["own_nav"] = frozenset()
             win["restore_aborted"] += win["aborted"] - before
+
+    def _leave(self, page, page_url, win):
+        """The exit of a seed or probe window (FR-CRAWL-17, Q4): a seed's same-document
+        route change (``location.hash`` set on load) is kept as a navigation to queue;
+        popups opened in the window are closed; the page leaves for ``about:blank``
+        inside the window, so the load's timers die and nothing it scheduled runs after
+        the lift. What the window aborted while leaving is counted with the rest
+        (``spa_query_writes_blocked``)."""
+        win["own_nav"] = frozenset()
+        url = page.url or ""
+        if win.get("query") == spa.SEED_SOURCE and \
+                url.lower().startswith(("http://", "https://")) and \
+                spa.visit_key(url) != spa.visit_key(page_url):
+            win["navs"].append(url)
+        self._close_window_pages(win, page)
+        page.goto("about:blank", timeout=self.timeout_ms)
 
     @staticmethod
     def _close_window_pages(win, page):
@@ -721,6 +779,13 @@ class LocalSpider:
 
     def _on_request(self, request):
         try:
+            if self._probe is not None:
+                # FR-CRAWL-17 (Q5): a probe load's requests -- aborted ones included,
+                # this event comes before the route -- are correlated in memory only
+                body = request.post_data_buffer or b""
+                self._probe["requests"].append(
+                    (request.url, body[:65536].decode("utf-8", "replace")))
+                return
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
         except Exception:
@@ -731,7 +796,10 @@ class LocalSpider:
         """Called by the guard for each request it sent (FR-CRAWL-12/13): a same-origin
         script body is scanned for routes (crawl context only); a fetch/XHR request with a
         body is captured. Nothing is requested here: both come from what the browser
-        already loaded."""
+        already loaded. A probe load (FR-CRAWL-17) is never observed: it records
+        nothing."""
+        if self._probe is not None:
+            return
         rtype = request.resource_type
         if rtype == "script":
             if scripts:
@@ -780,13 +848,17 @@ class LocalSpider:
             self.spa_counts["scripts_too_large"] += 1
             return
         body = response.body()
-        routes = spa.scan_routes(body.decode("utf-8", "replace")) \
+        # one scan of the body for routes and query parameters (FR-CRAWL-17, Q1)
+        found = spa.scan_script(body.decode("utf-8", "replace")) \
             if len(body) <= spa.MAX_SCRIPT_BYTES else None
-        if routes is None:
+        if found is None:
             self.spa_counts["scripts_too_large"] += 1
             return
+        routes, query = found
         self.spa_counts["scripts_scanned"] += 1
         self._pending_routes.extend(routes)
+        if self._query_on:
+            self._note_query_scan(query)
 
     def _stop_browser(self):
         try:
@@ -901,6 +973,8 @@ class LocalSpider:
                 pass
             if same_document:
                 self._settle(self._page)
+            if self._win is not None and self._win.get("query"):
+                self._win["own_nav"] = frozenset()   # the load's own navigation only (Q4)
             title = self._page.title()
             self._last_final_url = self._page.url
             self._last_html = self._page.content()
@@ -925,7 +999,10 @@ class LocalSpider:
         more = []
         final = self._last_final_url
         landing = self._crawl_url(final) if final else None
-        if (landing and spa.visit_key(landing) != spa.visit_key(url)
+        # a seed (FR-CRAWL-17) runs in its window: its landing is queued by `_leave`, and
+        # it neither reveals nor submits (the bare route's visit does)
+        seed = self._win is not None and bool(self._win.get("query"))
+        if (landing and not seed and spa.visit_key(landing) != spa.visit_key(url)
                 and self._in_scope(landing) and not self._destructive(landing)):
             # the landing URL keeps its query (xss_eval.php?date=Date()), redacted
             self.storage.mark_visited(redact_url(landing), status, depth,
@@ -933,9 +1010,10 @@ class LocalSpider:
         if self._spa_on and self.engine == "playwright":
             more += self._queue_routes(final or url, depth)
             if (self._submit_routes is not None and self._last_html is not None
-                    and self._is_spa_page(url)):
+                    and self._is_spa_page(url) and not seed):
                 self._submit_spa_forms(final or url)
-        if self._reveal_on and self._last_html is not None and self._rendered_ok:
+        if self._reveal_on and self._last_html is not None and self._rendered_ok \
+                and not seed:
             # G2 (FR-CRAWL-16): menus, dialogs and drawers, inside the reveal window
             more += self._reveal_page(final or url, depth)
             if self._spa_on:
@@ -978,7 +1056,8 @@ class LocalSpider:
         page's ``<base>`` or the start URL's directory. Parameterised, wildcard and
         destructive routes are skipped and counted."""
         routes, self._pending_routes = self._pending_routes, []
-        if not routes:
+        pairs, self._pending_pairs = self._pending_pairs, {}
+        if not routes and not pairs:
             return []
         frag = spa.spa_fragment(page_url) or ""
         hrefs = []
@@ -1011,11 +1090,163 @@ class LocalSpider:
             target = spa.route_url(page_url, path, hash_mode=hash_mode, hashbang=hashbang,
                                    base=base)
             self._route_keys.add(spa.visit_key(target))
+            if self._query_on:
+                self._probe_routes.setdefault(name, (target, depth + 1))   # Q5
             if depth >= self.max_depth:
                 continue
             if (self._in_scope(target) and not self._destructive(target)
                     and not self.storage.is_visited(target)):
                 more.append((target, depth + 1, 'spa-route'))
+        # FR-CRAWL-17 (Q3): each paired route's seed, queued after the bare routes (B8)
+        for path, names in pairs.items():
+            kind, _reason = spa.classify_route(path)
+            if kind != spa.ROUTE_OK:
+                self._refuse_query({spa.ROUTE_PARAM: "parameterised route",
+                                    spa.ROUTE_DESTRUCTIVE: "destructive route"}.get(
+                                        kind, "not a route"))
+                continue
+            if depth >= self.max_depth:
+                continue
+            target = spa.route_url(page_url, path, hash_mode=hash_mode, hashbang=hashbang,
+                                   base=base)
+            more += self._queue_seed(target, names, depth + 1)
+        return more
+
+    # ----- route query parameters (forms phase 5, FR-CRAWL-17) -----
+    def _note_query_scan(self, scan):
+        """Take one script's `spa.QueryScan`: its pairs wait for `_queue_routes` (which
+        knows the page's routing mode), its unpaired names for the probe; each pair and
+        name is counted once per crawl, refusals by reason."""
+        for route, names in scan.pairs.items():
+            got = self._pending_pairs.setdefault(route, [])
+            for name in names:
+                key = (spa.normalise_route(route), name)
+                if key not in self._query_pairs_seen:
+                    self._query_pairs_seen.add(key)
+                    self.spa_counts["spa_query_pairs"] += 1
+                if name not in got:
+                    got.append(name)
+        for name in scan.unpaired:
+            if name not in self._query_unpaired:
+                self._query_unpaired[name] = None
+                self.spa_counts["spa_query_unpaired"] += 1
+        for reason, n in scan.refused.items():
+            self._refuse_query(reason, n)
+        if scan.anchor_cap:
+            self.spa_counts["spa_query_anchor_cap"] += 1
+
+    def _refuse_query(self, reason, n=1):
+        self.spa_query_refused[reason] = self.spa_query_refused.get(reason, 0) + n
+        self.spa_counts["spa_query_refused"] += n
+
+    def _query_gate(self, url):
+        """Why a seed or probe URL is never loaded, as a counted reason class, or None:
+        `spa.query_url_refusal` (the destructive rule, then the window's own rule as a
+        GET, A-M1) and scope."""
+        why = spa.query_url_refusal(url)
+        if why is not None:
+            logging.info(f"SPA query URL {url.split('?', 1)[0]} not loaded: {why}")
+            return "destructive URL" if why.startswith("destructive") else \
+                "write-window refusal"
+        if not self._in_scope(url):
+            return "out of scope"
+        return None
+
+    def _queue_seed(self, route_url, names, depth):
+        """One seed for ``route_url``: its names not yet seeded there, each set to the
+        filler (``/`` when redirect-ish), through `_query_gate` and the visit key (Q3).
+        Returns the queue entries (at most one)."""
+        done = self._seeded_names.setdefault(spa.visit_key(route_url), set())
+        names = [n for n in names if n not in done]
+        if not names:
+            return []
+        done.update(names)
+        url = spa.seed_url(route_url, names)
+        why = self._query_gate(url)
+        if why is not None:
+            self._refuse_query(why)
+            return []
+        key = spa.visit_key(url)
+        if key in self._seed_keys or self.storage.is_visited(url):
+            return []
+        self._seed_keys.add(key)
+        return [(url, depth, spa.SEED_SOURCE)]
+
+    def _plan_probes(self):
+        """When the queue drains (the bare routes are visited): one probe load per
+        scanned route the crawl rendered and has not probed, at most
+        `spa.MAX_QUERY_PROBE_ROUTES` per crawl (Q5). Nothing without unpaired names."""
+        if not self._query_on or not self._query_unpaired or self._page is None:
+            return []
+        out = []
+        for name, (url, depth) in self._probe_routes.items():
+            if name in self._probed or not self.storage.is_visited(url):
+                continue
+            self._probed.add(name)
+            if len(self._probed) > spa.MAX_QUERY_PROBE_ROUTES:
+                self._refuse_query("probe route cap")
+                continue
+            out.append((url, depth, spa.PROBE_SOURCE))
+        return out
+
+    def _mint_probe(self, route_url):
+        """The probe load for ``route_url`` with **fresh** markers (Q5, B2): every
+        unpaired name not yet seeded there, at most `spa.MAX_UNPAIRED_NAMES`, all in one
+        load, each with its own marker (``/`` for a redirect-ish name, B6), through the
+        seed's gate. None when there is nothing to probe or the URL is refused."""
+        done = self._seeded_names.get(spa.visit_key(route_url), set())
+        names = [n for n in self._query_unpaired if n not in done]
+        if len(names) > spa.MAX_UNPAIRED_NAMES:
+            over = [n for n in names[spa.MAX_UNPAIRED_NAMES:]
+                    if n not in self._names_over_cap]
+            self._names_over_cap.update(over)
+            if over:
+                self._refuse_query("probe name cap", len(over))     # once per name
+            names = names[:spa.MAX_UNPAIRED_NAMES]
+        if not names:
+            return None
+        markers = spa.mint_markers(len(names))
+        values = [spa.query_value(n, m) for n, m in zip(names, markers)]
+        url = spa.query_url(route_url, list(zip(names, values)))
+        why = self._query_gate(url)
+        if why is not None:
+            self._refuse_query(why)
+            return None
+        return {"url": url, "route_url": route_url, "names": names, "requests": [],
+                "markers": {v: n for n, v in zip(names, values) if v != "/"}}
+
+    def _finish_probe(self, probe, depth):
+        """Read what a probe load showed, inside its window, and seed what it kept
+        (Q5): the rendered DOM's strings (`spa.OBSERVE_JS`) and the load's own requests,
+        attributed by `spa.observed_names` to this load's markers only. Nothing is
+        recorded: the correlation stays in memory. Returns the kept pairs' seed."""
+        try:
+            texts = self._page.evaluate(spa.OBSERVE_JS, spa.MARKER_PREFIX)
+        except PlaywrightError as exc:
+            logging.info(f"probe of {probe['route_url']} could not be read "
+                          f"({str(exc).splitlines()[0][:80]})")
+            texts = []
+        kept, in_path = spa.observed_names(texts, probe["requests"], probe["markers"],
+                                           probe["names"])
+        self.spa_counts["spa_query_marker_in_path"] += in_path
+        self.spa_counts["spa_query_kept"] += len(kept)
+        names = [n for n in probe["names"] if n in kept]
+        logging.info(f"SPA query probe of {probe['route_url']}: kept "
+                     f"{', '.join(names) or 'none'} of {len(probe['names'])} name(s)")
+        return self._queue_seed(probe["route_url"], names, depth) if names else []
+
+    def _take_query_navs(self, depth):
+        """The navigations a seed's window aborted or its load made (``location.hash``),
+        through the normal queue gates (scope, destructive, visited, depth)."""
+        navs, self._query_navs = self._query_navs, []
+        more = []
+        if depth >= self.max_depth:
+            return more
+        for href in navs:
+            link = self._crawl_url(href)
+            if (self._in_scope(link) and not self._destructive(link)
+                    and not self.storage.is_visited(link)):
+                more.append((link, depth + 1, "redirect"))
         return more
 
     # ----- SPA form submission (forms phase 3, FR-CRAWL-13) -----
@@ -1791,6 +2022,25 @@ class LocalSpider:
                          f"time(s) after a reveal.")
         if self.reveals_stopped:
             lines.append(f"Reveals stopped: {self.reveals_stopped}.")
+        if c["spa_query_pairs"] or c["spa_query_unpaired"] or c["spa_query_refused"]:
+            hist = c["spa_query_seeded"] - c["spa_query_seeded_fragment"]
+            lines.append(f"SPA query parameters (FR-CRAWL-17): {c['spa_query_pairs']} "
+                         f"(route, name) pair(s) and {c['spa_query_unpaired']} unpaired "
+                         f"name(s) read from scripts; {c['spa_query_probe_loads']} probe "
+                         f"load(s) kept {c['spa_query_kept']} name(s); "
+                         f"{c['spa_query_seeded']} seed page(s) visited: "
+                         f"{c['spa_query_seeded_fragment']} hash route(s) (fragment "
+                         f"points, confirmable only with --browser) and {hist} history "
+                         f"route(s) (query points, confirmable without a browser).")
+        if self.spa_query_refused:
+            why = ", ".join(f"{k} x{v}" for k, v in sorted(self.spa_query_refused.items()))
+            lines.append(f"SPA query parameters refused: {why}.")
+        if c["spa_query_writes_blocked"] or c["spa_query_marker_in_path"] or \
+                c["spa_query_anchor_cap"]:
+            lines.append(f"SPA query loads: {c['spa_query_writes_blocked']} request(s) "
+                         f"blocked by their window; {c['spa_query_marker_in_path']} "
+                         f"marker(s) seen in a request path (no point); the anchor cap "
+                         f"stopped {c['spa_query_anchor_cap']} script scan(s).")
         return lines
 
     def crawl(self):
@@ -1802,18 +2052,47 @@ class LocalSpider:
 
         crawled = 0
         try:
-            while queue:
+            while queue or self._query_on:
+                if not queue:
+                    # FR-CRAWL-17 (Q5): the bare routes are visited; probe them
+                    queue.extend(self._plan_probes())
+                    if not queue:
+                        break
                 current_url, depth, source = queue.pop(0)
+                probe = None
+                if source == spa.PROBE_SOURCE:
+                    # fresh markers for this load only (B2, PA-0090)
+                    probe = self._mint_probe(current_url)
+                    if probe is None:
+                        continue
+                    current_url = probe["url"]
 
                 if depth > self.max_depth or self.storage.is_visited(current_url):
                     continue
 
+                # a seed or probe load runs inside its window (FR-CRAWL-17, Q4)
+                window = contextlib.ExitStack()
                 try:
                     self._current_url = current_url
-                    if self.engine == "playwright":
+                    if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
+                        window.enter_context(self._window(self._page, self._context,
+                                                          current_url, query=source))
+                        self._probe = probe
+                    if probe is not None:
+                        # rendered only: a probe never falls back to a static request
+                        self._xhr_urls = []
+                        status, ct, title, text, raw_links, xhr_links = \
+                            self._goto_and_parse(current_url)
+                    elif self.engine == "playwright":
                         status, ct, title, text, raw_links, xhr_links = self._fetch_rendered(current_url)
                     else:
                         status, ct, title, text, raw_links, xhr_links = self._fetch_static(current_url)
+                    if probe is not None:
+                        # FR-CRAWL-17 (A-M3, B3): a probe load records nothing -- no page,
+                        # no link, no XHR URL, no form -- only what it kept is seeded
+                        self.spa_counts["spa_query_probe_loads"] += 1
+                        queue.extend(self._finish_probe(probe, depth))
+                        continue
 
                     content = (text or "")[:8000]
                     self.storage.mark_visited(
@@ -1822,7 +2101,14 @@ class LocalSpider:
                         source=source,
                     )
                     crawled += 1
-                    if self._spa_on and self._is_spa_page(current_url) \
+                    if source == spa.SEED_SOURCE and self._last_html is not None:
+                        self.spa_counts["spa_query_seeded"] += 1       # rendered (PA-0110)
+                        if spa.spa_fragment(current_url) is not None:
+                            self.spa_counts["spa_query_seeded_fragment"] += 1
+                        # Q6: the filler in a GET path segment gives no point (counted)
+                        self.spa_counts["spa_query_marker_in_path"] += sum(
+                            spa.filler_in_path(h) for h in xhr_links)
+                    elif self._spa_on and self._is_spa_page(current_url) \
                             and self._last_html is not None:
                         self.spa_counts["routes_visited"] += 1     # rendered (PA-0110)
                     queue.extend(self._after_fetch(current_url, status, depth, title,
@@ -1853,7 +2139,14 @@ class LocalSpider:
 
                 except Exception as e:
                     logging.error(f"Failed to process {current_url}: {e}")
-                    self.storage.mark_visited(current_url, 0, depth, source=source)
+                    if probe is None:                    # a probe records nothing
+                        self.storage.mark_visited(current_url, 0, depth, source=source)
+                finally:
+                    try:
+                        window.close()
+                    finally:
+                        self._probe = None
+                    queue.extend(self._take_query_navs(depth))
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")
@@ -1881,6 +2174,8 @@ class LocalSpider:
             for line in self.spa_summary():
                 logging.info(line)
             self.storage.record_stats({**self.spa_counts,
+                                       **{f"spa_query_refused[{k}]": v
+                                          for k, v in self.spa_query_refused.items()},
                                        "submit_stopped": int(bool(self.spa_submit_stopped)),
                                        "reveals_stopped": int(bool(self.reveals_stopped))})
             self.storage.close()

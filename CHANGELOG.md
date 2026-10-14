@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-CRAWL-17: SPA route query parameters are crawled, so `#/track-result?id=` is a point)
+- The crawler now reads query-parameter names from the scripts it already scans and crawls
+  each paired route with them (`#/track-result?id=fuzzlab`), so Juice Shop's
+  reflected-XSS route becomes a fragment point M6 can confirm with `--browser`; names
+  read without a route are attached only when an observation probe (fresh markers,
+  nothing recorded) sees them. Every such load runs inside the reveal window
+  (CC-CRAWL-0027, the reviewed `spa-query` draft, Revision 2).
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),
