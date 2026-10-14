@@ -911,6 +911,7 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     listener.start()
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         base_url = f"http://127.0.0.1:{port}"
 
         netflix_gt = contract.load("lab/ground-truth-netflix-clone")

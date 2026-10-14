@@ -36,6 +36,24 @@ Component code: **LAB**. Entry format and required fields: see
   rule passes over `fuzzlab/` and `tests/` and flags six synthetic offenders; reverting
   the Spring or MeadowMart pin, or the Go `HOST`, fails it (the Go revert also fails the
   real inherited-`HOST` boot test).
+- Follow-up (2026-10-14, same branch: the netns change plus reviews A and B; BUG-0130
+  "Follow-up"):
+  - **Pin rule rewritten (`tests/test_loopback_listeners.py`).** It accepts only
+    pin-shaped tokens: a host flag or `--<host key>=` set to loopback, an exact
+    loopback token, or a host env key set to loopback. A base URL or a docstring is
+    not a pin. Launch detection is alias-proof. Wildcards are flagged in every form:
+    `0.0.0.0`, `::`, `[::]`, `*`, `scheme://*`, `*:port`, an empty host and `0`.
+    18 synthetic offenders and 6 pass cases.
+  - **New netns rule.** No test binds a wildcard except in a launch wrapped by
+    `tests/_netns.private_netns` (`unshare -rn`). 7 offenders and 5 pass cases.
+  - **New boot-check rule.** Every server site calls procutil's
+    `assert_loopback_only` after its launch. The site checks were added to the four
+    Node, four Spring Boot, `go run`, two CircleFeed and no-ML test servers. The five
+    harnesses already had them.
+  - **The rules are lints.** The runtime check (CC-CORE-0051) is authoritative,
+    according to PA-0130 items 4 and 5.
+  - **NFR-LAB-safety** gains a further `Enforced by:` line, edited in place.
+  - **Effectiveness.** See CC-CORE-0051. Mutation: **16/17 killed**; the survivor (dropping `::` from `_WILDCARD_VALUE`) is equivalent: the empty-host alternative followed by `(:.*)` already matches `::`.
 
 ### CC-LAB-0254 — Live-boot harnesses and test servers own their whole process tree (BUG-0125) (2026-10-14)
 - Change:

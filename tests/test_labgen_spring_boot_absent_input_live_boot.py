@@ -151,6 +151,7 @@ def booted_group(request, tmp_path_factory):
             except OSError:
                 assert time.monotonic() < deadline, "app did not boot"
                 time.sleep(0.25)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield label, cells, f"http://127.0.0.1:{port}"
     finally:
         if proc is not None:

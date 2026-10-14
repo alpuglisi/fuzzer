@@ -135,6 +135,12 @@ bind address to framework defaults and the inherited environment.
 - **Not run here:** the Spring Boot (Maven), Node (npm) and Rails/Django (network
   installs) servers. Their pins are checked statically by the pin rule; the stop-time
   runtime check covers them whenever they run (the orchestrator's full suite).
+- **Updated by the follow-up below:** the tests that prove a wildcard listener is
+  caught no longer bind 0.0.0.0 on the build host at all -- they run in a private
+  network namespace (`unshare -rn`), and detection is proven by injecting that
+  namespace as "the host's". Every Spring, Node, Go, PHP and no-ML test server site now
+  also checks its real sockets right after boot (the Spring/Node ones statically only:
+  not booted here). See "Follow-up" for the residuals.
 
 ## Mutation check
 One mutant at a time over its covering tests (`test_procutil.py`,
@@ -197,3 +203,136 @@ listening sockets of its process tree are checked at runtime -- at the stop chok
 for every site, and right after boot in the harnesses -- so an exposed server fails the
 run. Enforced by the static pin rule over `fuzzlab/` and `tests/` and the runtime check,
 each proven on offenders.
+
+## Follow-up: private network namespace, reviews A and B (2026-10-14, same branch)
+Recorded as a further line on CC-CORE-0051 and CC-LAB-0255; PA-0130 gains items 4-5.
+
+**The runtime check is authoritative; the static rules are lints.** The rule is
+"checked after boot, and at stop while live": `procutil.assert_loopback_only` runs
+right after boot, and every stop re-checks while the server still runs. That check
+reads the real sockets, so it decides whether a server is exposed. The static pin,
+boot-check and netns rules in `tests/test_loopback_listeners.py` find common mistakes
+early. They read source, so they cannot see what another program does at runtime,
+and they are never the proof.
+
+- **No host-namespace wildcard bind in the tests.** The tests that prove a 0.0.0.0
+  listener is caught had bound it on the build host itself. They now run that server
+  under `unshare -rn` (`tests/_netns.private_netns`), in a new user and network
+  namespace whose only interface is its own loopback.
+  - Verified first: `procutil.listeners(h)` still sees the socket, because it reads
+    each process's own `/proc/<pid>/net/tcp`, and it reports that namespace's id.
+  - If `unshare -rn` does not work, the test skips; under `FUZZLAB_REQUIRE_NETNS=1` it
+    fails. It never falls back to a host bind.
+  - Detection proof, review B2 option **(b)**: `exposed_listeners(h, host_netns=<the
+    private ns>)` returns the listener, and `assert_loopback_only(h, host_netns=...)`
+    raises. For the stop path, a test monkeypatches `procutil._host_netns` to return
+    that namespace, so `stop_server` raises.
+  - A new guard, `test_no_test_binds_a_wildcard_address_outside_a_private_netns`, scans
+    `tests/`. It covers in-process binds, launches (argv, `env=`, names assigned in the
+    function or the module) and wildcards passed to a same-module helper. It is proven
+    on seven synthetic offenders and five pass cases.
+- **"Exposed" means reachable (B2 / A-S2).** `listeners()` reads one table per distinct
+  `/proc/<pid>/ns/net`. A namespace that cannot be read is read per process, never
+  shared. Each `Listener` carries its `netns`. A listener is exposed only if it is
+  non-loopback **and** in the host's namespace, which is this process's own.
+  `test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed` shows the
+  private-namespace 0.0.0.0 server is listed and passes.
+- **Exposure does not mask a lost server (B1).** Suppose the server had also been stopped
+  without a request: `_stop_core` raises `ExposedAndLost`, which is both a
+  `NonLoopbackListener` and a `ServerLost`, with both facts in its message.
+  - Proven by `test_an_exposed_server_that_was_also_lost_reports_both`, where the stop
+    request is replaced by a bare SIGTERM.
+  - The launcher's shutdown handles it as an exposure: it is reported on the job's
+    stream, not swallowed as "lost".
+- **The stop's check is total (A-M1, must-fix).** In bac21f6, an exception from the
+  check (`exposed_listeners`) escaped `_stop_core` before `request_stop`, so the
+  stop, sweep and collect never ran. That was the same class of defect as BUG-0125: a
+  cleanup aborted halfway leaves the tree running.
+  - Now anything the check raises is recorded. The stop, sweep and `_collect_locked`
+    always run, and only then does the stop raise `ListenerCheckFailed`.
+    `reap_registered` records it on the leak, and the launcher reports it on the job's
+    stream.
+  - `_parse_tcp_table` skips an unparseable row instead of raising, and
+    `_listen_table` treats a `PermissionError` like a missing table.
+  - Proven by `test_a_failing_listener_check_never_aborts_the_stop`. It uses a real
+    loopback server, and `_listen_table` is patched to raise. Nothing of the tree is
+    left: `raw_members("sid", ...)` is empty and the handle is unregistered. It still
+    raises.
+  - The decoding test adds two unparseable LISTEN rows.
+- **The pin rule is pin-shaped (B3), and it catches more wildcard forms (A-S1).**
+  - **What counts as a pin.** Only these count:
+    - a loopback host after a host flag (`-S`, `-b`, `--bind`, `--host`, `--listen`,
+      `runserver`, ...);
+    - `--server.address=` or another `--<host key>=` set to loopback;
+    - a token that is exactly a loopback host;
+    - a host env key (`HOST`, `BIND`, `ADDRESS`, ...) set to loopback.
+  - **What does not count.** A base URL in some other variable is not a pin. Only
+    list, tuple and dict literals are read, and helper docstrings are skipped, so a
+    docstring is never a pin.
+  - **How launches are found.** Detection is alias-proof: `procutil.x`, `pu.x`
+    (`from fuzzlab import procutil as pu`), `fuzzlab.procutil.x`, and
+    `from fuzzlab.procutil import start_server as ss`.
+  - **Wildcards.** These are flagged even when a pin appears elsewhere: `0.0.0.0`,
+    `::`, `[::]`, `*`, `tcp://*:3000`, `--bind *`, `*:8080`, an empty `HOST=""`, and
+    `HOST=0`.
+  - **Offenders.** There are 18 synthetic offenders, at least one per reviewer case, and six
+    pinned forms that pass.
+- **Every server site checks right after boot (review A).**
+  - The five harnesses already did, and a source test covers them.
+  - The test server sites now do too: the four Node sites (`_meadowmart_app`,
+    `node_bff_app`, `node_bff_multitarget`, `category1`), the four Spring sites, the
+    `go run` program, both CircleFeed servers and the no-ML child.
+  - A new lint, `test_every_server_site_checks_loopback_right_after_boot`, requires
+    every `start_server`/`astart_server` call (alias-proof) to be followed in its
+    function by procutil's `assert_loopback_only`. The non-server allowlist is the
+    same as the pin rule's.
+- **Nits.**
+  - The `run_bounded` docstring says a timed-out exposed tool raises
+    `NonLoopbackListener` instead of `TimeoutExpired`.
+  - `assert_loopback_only`'s docstring states the rule.
+  - The launcher's exposure report notes that a job's argv carries no secrets (D12).
+
+### Residual risks (what this does not cover)
+- **UDP is not checked.** Only TCP LISTEN sockets are read, and no lab server serves
+  UDP.
+- **A brief wildcard bind during boot.** A server that briefly binds a wildcard while
+  booting and later rebinds to loopback is caught only if a check runs at that moment.
+  The checks run after boot and at stop.
+- **Static lints only for some sites.** The Spring Boot, Node, Rails and Django server
+  sites were not booted here (Maven, npm and network installs; no network). Their new
+  boot checks and pins are verified by the lints and by parsing only. The runtime check
+  covers them whenever they run.
+- **IPv6.** There is no `/proc/net/tcp6` in this sandbox, so IPv6 decoding is tested on
+  synthetic rows only.
+- **Platform.** `unshare -rn` needs unprivileged user namespaces. Where they are
+  disabled, the exposure tests skip (or fail under `FUZZLAB_REQUIRE_NETNS=1`). They
+  never run exposed.
+
+### Mutation check (follow-up)
+One mutant at a time, each over its covering test file, under `FUZZLAB_REQUIRE_NETNS=1`:
+**25/26 killed**.
+- **Runtime: 9/9.**
+  - **B1.** `ExposedAndLost` never raised, and `ExposedAndLost` not a `ServerLost`.
+  - **B2.** A private-namespace wildcard counted as exposed; the table read from this
+    process's namespace instead of the listener's; the injected `host_netns` ignored;
+    `Listener.netns` not recorded.
+  - **A-M1.** The check's exception aborts the stop; a recorded failure never raised;
+    an unparseable row raises.
+- **Lints: 16/17.**
+  - **B3.** Any loopback substring in the call counts as a pin (B3a); any loopback
+    substring in a helper, docstrings included, counts as a pin (B3b); an imported
+    launcher alias not followed (B3c); a module alias not followed (B3d).
+  - **A-S1.** `*`, `0`, the empty host, `scheme://*` and `*:port` not treated as
+    wildcards.
+  - **Netns rule.** Every launch counts as wrapped; in-process binds not checked; a
+    wildcard passed to a helper not followed.
+  - **Boot-check rule.** A check before the launch counts; the MeadowMart Node site,
+    a Spring site or the Rails harness skips its check.
+  - **Survivor (equivalent).** Dropping `::` from `_WILDCARD_VALUE` changes nothing:
+    the empty-host alternative followed by `(:.*)` already matches `::`. An env-only
+    `HOST='::'` offender was added anyway.
+- **Not run on purpose.** A mutant that made `private_netns` fall back to a plain host
+  launch would itself bind 0.0.0.0 on the host. The netns runtime tests would kill it
+  (they assert the listener's namespace differs from the host's), but it was not run.
+
+Final targeted offline run (one pytest process, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`, `FUZZLAB_REQUIRE_BROWSER=1`, including `test_procutil.py`, `test_loopback_listeners.py`, `test_lint.py`, `test_requirements_traceability.py`): **377 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by design).

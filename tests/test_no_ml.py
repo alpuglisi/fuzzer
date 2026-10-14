@@ -177,6 +177,7 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
                 break
             except OSError:
                 time.sleep(0.1)
+        procutil.assert_loopback_only(server_handle)  # BUG-0130: checked after boot
         with sync_playwright() as pw:
             browser = launch_browser_or_skip(pw)
             try:

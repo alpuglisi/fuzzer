@@ -1157,6 +1157,19 @@ tracked in the requirements files, not here.
   tools (composer, npm, go, mvn, bundle and the corpus sync's VCS client) so a timeout
   stops the whole tree. Enforced by an AST guard (`tests/test_procutil_guard.py`) and
   the session-end safety net (Cross-cutting concerns, Testing).
+  **Loopback on the real sockets** (CC-CORE-0051, CC-LAB-0255, BUG-0130):
+  `procutil.listeners` reads the tree's TCP LISTEN sockets from each process's own
+  `/proc/<pid>/net/tcp{,6}` (one read per network namespace). A listener is exposed
+  only if its address is not loopback and it sits in the host's network namespace.
+  The rule is "checked after boot, and at stop while live". Every server site calls
+  `assert_loopback_only` right after boot, and every stop re-checks while the server
+  still runs. That check never aborts the stop: `NonLoopbackListener`,
+  `ExposedAndLost` or `ListenerCheckFailed` is raised only after the tree has been
+  stopped and collected. This runtime check is authoritative. The static pin, boot-check
+  and netns rules in `tests/test_loopback_listeners.py` are lints. Tests that must
+  bind a wildcard address do so only in a private network namespace
+  (`tests/_netns.py`, `unshare -rn`). `FUZZLAB_REQUIRE_NETNS=1` turns a missing
+  namespace into a failure.
 - **Shared safety helpers** `[built]` (CC-CORE-0034, FR-CORE-25):
   - `core/net.py`: the one loopback listener gate, enforced at every listener by an
     AST guard test;

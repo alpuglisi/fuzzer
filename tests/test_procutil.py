@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from fuzzlab import procutil
+from tests._netns import private_netns
 from tests._procs import raw_members
 
 REPO = Path(__file__).resolve().parent.parent
@@ -720,26 +721,91 @@ LISTENING_PROGRAM = textwrap.dedent("""
 
 
 def _listening_server(host: str, where: str = "self") -> tuple[procutil.ServerHandle, int]:
+    """A loopback listener, in this (the host's) network namespace."""
+    assert host in ("127.0.0.1", "::1"), "a wildcard bind goes through _exposed_listening_server"
     h = procutil.start_server([sys.executable, "-c", LISTENING_PROGRAM, host, where],
                               stdout=subprocess.PIPE, text=True)
     return h, int(h.proc.stdout.readline())
 
 
+def _exposed_listening_server(host: str, where: str = "self") -> tuple[procutil.ServerHandle, int]:
+    """A deliberately wildcard-bound listener -- always inside a private network
+    namespace (``unshare -rn``: its only interface is its own loopback), never the
+    host's, so nothing is exposed while the check is proven."""
+    h = procutil.start_server(private_netns([sys.executable, "-c", LISTENING_PROGRAM, host, where]),
+                              stdout=subprocess.PIPE, text=True)
+    return h, int(h.proc.stdout.readline())
+
+
+def _treat_as_host(monkeypatch, netns: str) -> None:
+    """Detection proof without a real host-namespace wildcard bind (review B2, option
+    (b)): the private namespace the test server runs in is injected as "the host's"."""
+    monkeypatch.setattr(procutil, "_host_netns", lambda: netns)
+
+
 @pytest.mark.parametrize("where", ["self", "fork"])
-def test_a_server_listening_beyond_loopback_is_caught(where: str) -> None:
+def test_a_server_listening_beyond_loopback_is_caught(where: str, monkeypatch) -> None:
     """BUG-0130 (PA-0035: probe the real sockets): a server tree that listens on all
     interfaces -- itself or a process it forked -- is caught by the listener check and
-    by stop_server, which stops the tree first and then raises."""
-    h, port = _listening_server("0.0.0.0", where)
+    by stop_server, which stops the tree first and then raises. The server runs in a
+    private network namespace; that namespace is injected as the host's."""
+    h, port = _exposed_listening_server("0.0.0.0", where)
     tree = _tree(h)
     found = procutil.listeners(h)
     assert [(lst.address, lst.port) for lst in found] == [("0.0.0.0", port)]
     assert found[0].pid != h.pid and not found[0].is_loopback()
+    ns = found[0].netns  # seen through the process's own /proc/<pid>/net/tcp
+    assert ns and ns != os.readlink("/proc/self/ns/net")
+    assert procutil.exposed_listeners(h, host_netns=ns) == found
     with pytest.raises(procutil.NonLoopbackListener, match=f"0.0.0.0:{port}"):
-        procutil.assert_loopback_only(h)
+        procutil.assert_loopback_only(h, host_netns=ns)
+    _treat_as_host(monkeypatch, ns)
     with pytest.raises(procutil.NonLoopbackListener, match="stopped now"):
         procutil.stop_server(h)
     assert [pid for pid, start in tree if _alive(pid, start)] == []
+    assert h not in procutil.registered()
+
+
+def test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed() -> None:
+    """Review B2 / A-S2: exposed means reachable -- a non-loopback listener in the
+    host's network namespace. One in a private namespace is listed with its namespace
+    and passes the check."""
+    h, port = _exposed_listening_server("0.0.0.0")
+    found = procutil.listeners(h)
+    assert [(lst.address, lst.port) for lst in found] == [("0.0.0.0", port)]
+    assert found[0].netns != os.readlink("/proc/self/ns/net")
+    assert procutil.exposed_listeners(h) == []
+    assert procutil.assert_loopback_only(h) == found
+    assert procutil.stop_server(h) == "stop"
+
+
+def test_an_exposed_server_that_was_also_lost_reports_both(monkeypatch) -> None:
+    """Review B1: exposure must not mask an unrequested stop. The stop request is
+    replaced by a bare SIGTERM (an external signal arriving then)."""
+    h, port = _exposed_listening_server("0.0.0.0")
+    _treat_as_host(monkeypatch, procutil.listeners(h)[0].netns)
+    monkeypatch.setattr(procutil, "request_stop", lambda hh: procutil._send(hh, signal.SIGTERM))
+    with pytest.raises(procutil.ExposedAndLost) as info:
+        procutil.stop_server(h)
+    assert isinstance(info.value, procutil.ServerLost)
+    assert isinstance(info.value, procutil.NonLoopbackListener)
+    assert f"0.0.0.0:{port}" in str(info.value) and "without a stop request" in str(info.value)
+
+
+def test_a_failing_listener_check_never_aborts_the_stop(monkeypatch) -> None:
+    """Review A-M1: whatever the listener check raises, the stop, sweep and collect
+    still run; the failure is raised afterwards."""
+    h, port = _listening_server("127.0.0.1")  # it holds a socket, so the table is read
+    tree = _tree(h)
+
+    def broken(pid):
+        raise RuntimeError("unexpected /proc row")
+
+    monkeypatch.setattr(procutil, "_listen_table", broken)
+    with pytest.raises(procutil.ListenerCheckFailed, match="unexpected /proc row"):
+        procutil.stop_server(h)
+    assert [pid for pid, start in tree if _alive(pid, start)] == []
+    assert raw_members("sid", h.pid, h.start_time) == []
     assert h not in procutil.registered()
 
 
@@ -750,8 +816,9 @@ def test_a_loopback_only_server_passes() -> None:
     assert procutil.stop_server(h) == "stop"
 
 
-def test_the_safety_net_reports_an_exposed_server() -> None:
-    h, port = _listening_server("0.0.0.0")
+def test_the_safety_net_reports_an_exposed_server(monkeypatch) -> None:
+    h, port = _exposed_listening_server("0.0.0.0")
+    _treat_as_host(monkeypatch, procutil.listeners(h)[0].netns)
     leaks = procutil.reap_registered()
     assert [leak.pid for leak in leaks] == [h.pid]
     assert f"0.0.0.0:{port}" in leaks[0].note
@@ -771,7 +838,10 @@ def test_proc_net_tcp_decoding_covers_ipv4_and_ipv6() -> None:
     table = procutil._parse_tcp_table(
         "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
         "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 111 1\n"
-        "   1: 0201A8C0:C350 0101A8C0:0050 01 00000000:00000000 00:00000000 00000000     0        0 222 1\n")
+        "   1: 0201A8C0:C350 0101A8C0:0050 01 00000000:00000000 00:00000000 00000000     0        0 222 1\n"
+        # unparseable LISTEN rows are skipped, never raised (review A-M1)
+        "   2: ZZZZ:XYZ 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 333 1\n"
+        "   3: 0100007F:1F91 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 nan 1\n")
     assert table == {111: ("127.0.0.1", 8080)}
     loop = procutil.Listener(pid=1, address="::ffff:127.0.0.1", port=1)
     assert loop.is_loopback()

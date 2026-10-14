@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0130 follow-up: exposure tests in a private netns; the stop's listener check is total)
+- **Why:** the tests that prove a wildcard listener is caught bound 0.0.0.0 on the host
+  itself; review found a listener-check exception could abort a stop (A-M1), exposure
+  masked a lost server (B1), a private-namespace listener counted as exposed (B2), and the
+  static pin rule accepted any loopback-looking string and missed aliases and wildcard
+  forms (B3, A-S1).
+- **What:** exposed test servers run under `unshare -rn` (`tests/_netns.py`, never a host
+  fallback) with a guard against any other wildcard bind; exposure means non-loopback in
+  the host's network namespace; `ExposedAndLost`, `ListenerCheckFailed` (stop always
+  completes first); pin-shaped, alias-proof pin rule; every server site checks loopback
+  right after boot; the runtime check is authoritative, the source rules are lints
+  (PA-0130 items 4-5). CC-CORE-0051, CC-LAB-0255.
+
 ## 2026-10-14 (BUG-0130: every launched lab server binds loopback, checked on its real sockets)
 - **Why:** Spring Boot test servers listened on 0.0.0.0 (port flag only) and Go/Node
   servers took their bind host from the inherited environment; the loopback rule

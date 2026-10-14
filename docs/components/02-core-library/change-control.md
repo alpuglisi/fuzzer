@@ -34,6 +34,34 @@ Newest first.
   Mutation (BUG-0130, runtime check and static rule): **15/16 killed**; the survivor
   drops the explicit IPv4-mapped branch, which Python 3.13's `ipaddress` already
   treats as loopback (equivalent here; kept for 3.11/3.12, which the project supports).
+- Follow-up (2026-10-14, same branch: the netns change plus reviews A and B; BUG-0130
+  "Follow-up"):
+  - **Per-namespace reads.** `listeners()` reads one table per distinct
+    `/proc/<pid>/ns/net`. A namespace that cannot be read is read per process. Each
+    `Listener` gains `netns`.
+  - **Exposed means host namespace.** A listener counts as exposed only if it is
+    non-loopback and in the host's namespace (`_host_netns`, or the injected
+    `host_netns=`). A wildcard listener in a private `unshare -rn` namespace is listed
+    but not exposed.
+  - **New exceptions.** `ExposedAndLost` (both a `NonLoopbackListener` and a
+    `ServerLost`; review B1) and `ListenerCheckFailed`.
+  - **Total stop check (review A-M1).** `_stop_core`'s check is total: any exception
+    is recorded, the stop, sweep and collect always run, and the error is raised
+    afterwards. `_parse_tcp_table` skips unparseable rows. `reap_registered` records
+    both new exceptions on the leak.
+  - **Docstrings and launcher.** The `run_bounded` docstring is corrected
+    (`NonLoopbackListener` instead of `TimeoutExpired`). `assert_loopback_only` states
+    "checked after boot, and at stop while live". In the launcher, `shutdown` reports
+    an exposure ahead of a lost server, and `_enforce_stop` reports any
+    `ProcUtilError`.
+  - **Tests.** The deliberately exposed test servers now run in a private network
+    namespace (`tests/_netns.py`), so nothing binds a wildcard on the host. FR-CORE-38
+    is edited in place.
+  - **New tests.**
+    `tests/test_procutil.py::test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed`,
+    `::test_an_exposed_server_that_was_also_lost_reports_both`,
+    `::test_a_failing_listener_check_never_aborts_the_stop`.
+  - **Effectiveness.** Final targeted offline run (one pytest process, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`, `FUZZLAB_REQUIRE_BROWSER=1`, including `test_procutil.py`, `test_loopback_listeners.py`, `test_lint.py`, `test_requirements_traceability.py`): **377 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by design). Mutation: **9/9 killed** (B1 x2, B2 x4, A-M1 x3; BUG-0130 "Follow-up").
 
 ### CC-CORE-0050 — BUG-0125 review fixes: an id is trusted only while its leader pid is held (2026-10-14)
 - Change (`fuzzlab/procutil.py`, on top of CC-CORE-0048; reviewer A's must-fixes, B's

@@ -140,6 +140,7 @@ def live_base_url(app_dir: Path, tmp_path_factory: pytest.TempPathFactory):
     proc = server.proc
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:
         procutil.stop_server(server)

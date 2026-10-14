@@ -1519,6 +1519,7 @@ func main() {
             assert addr_line, "go program produced no listen-address line"
             host, port_s = addr_line.rsplit(":", 1)
             port = int(port_s)
+            procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
             with _socket.create_connection((host or "127.0.0.1", port), timeout=10.0) as conn:
                 request = (
                     "GET /normal?destination=%2Fok%0d%0aX-Injected%3A%20evil "

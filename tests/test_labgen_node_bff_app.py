@@ -216,6 +216,7 @@ def live_app(npm_installed: Path):
     proc = server.proc
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield port
     finally:
         procutil.stop_server(server)

@@ -116,6 +116,7 @@ def boot(root: Path) -> Iterator[str]:
                 if time.monotonic() > deadline or proc.poll() is not None:
                     raise AssertionError(f"node app.js never listened on {port}") from None
                 time.sleep(0.1)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:
         procutil.stop_server(server)

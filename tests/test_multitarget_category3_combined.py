@@ -136,6 +136,7 @@ def trackernest_base_url(trackernest_app_dir: Path):
     proc = server.proc
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:
         procutil.stop_server(server)

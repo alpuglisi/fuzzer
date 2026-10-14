@@ -1580,3 +1580,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      (`tests/test_loopback_listeners.py::test_every_server_launched_through_procutil_pins_loopback`)
      and the listener guard (now over tests/ too), each proven on synthetic offenders
      (PA-0034(2)); a process launcher is not mistaken for a listener. (from BUG-0130)
+  4. **The runtime check is authoritative; the source rules are lints** (BUG-0130
+     follow-up). The rule is "checked after boot, and at stop while live". Every server
+     site calls `procutil.assert_loopback_only` right after boot, and every stop
+     re-checks while the server still runs. The static pin, boot-check and netns rules
+     catch common mistakes early, but they can miss what another program does at
+     runtime. They are never the proof that a server is not exposed.
+     "Exposed" means a non-loopback listener in the **host's** network namespace.
+     The stop's check is total: if the check itself fails, the stop still runs in
+     full and the failure is raised afterwards (`ListenerCheckFailed`). A check
+     never aborts a cleanup.
+  5. **A test that must bind a wildcard address does it only in a private network
+     namespace** (`tests/_netns.private_netns`: `unshare -rn`). It skips, or fails
+     under `FUZZLAB_REQUIRE_NETNS=1`, and never falls back to a host bind. Detection
+     is proven by injecting that namespace as the host's. Enforced by
+     `test_no_test_binds_a_wildcard_address_outside_a_private_netns`.

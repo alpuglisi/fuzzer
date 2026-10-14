@@ -188,6 +188,9 @@ class Runner:
             run.stopping = True
             # BUG-0130: a job's tree must never listen beyond loopback; checked while it
             # still runs, reported on its stream (the tools gate their own listeners).
+            # (The report names pid and address only; the job's argv carries no secrets
+            # (D12: credentials live in the keyring) -- revisit if a secret-bearing flag
+            # is ever added.)
             for lst in procutil.exposed_listeners(run.handle):
                 run.queue.put_nowait(("output", f"[fuzzlab] exposed beyond loopback: {lst.describe()}"))
             procutil.request_stop(run.handle)
@@ -212,9 +215,11 @@ class Runner:
             if run.handle is not None and not run.finished:
                 try:
                     await procutil.astop_server(run.handle)
+                except procutil.NonLoopbackListener as exc:  # BUG-0130 (ExposedAndLost too)
+                    await run.queue.put(("output", f"[fuzzlab] {exc}"))
                 except procutil.ServerLost:
                     pass  # already stopped without a request; reported on its stream
-                except procutil.NonLoopbackListener as exc:  # BUG-0130: loud, on its stream
+                except procutil.ProcUtilError as exc:  # e.g. ListenerCheckFailed: loud
                     await run.queue.put(("output", f"[fuzzlab] {exc}"))
 
     def known(self, token: str) -> bool:

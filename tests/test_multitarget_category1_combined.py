@@ -126,6 +126,7 @@ def _boot_meadowmart(tmp_path_factory: pytest.TempPathFactory):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     _wait_until_listening(port)
+    procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
     return server, f"http://127.0.0.1:{port}"
 
 

@@ -185,6 +185,7 @@ class _RawSocketResponder:
                 raise RuntimeError(f"raw socket responder ({mode}) exited early: {self._proc.stderr.read()}")
             line = self._proc.stdout.readline()
         assert line.strip() == "READY", f"raw socket responder ({mode}) never signalled readiness"
+        procutil.assert_loopback_only(self._server)  # BUG-0130: checked after boot
 
     def raw_request(self, next_value_wire: str, timeout: float = 10.0) -> bytes:
         with socket_module.create_connection(("127.0.0.1", self.port), timeout=timeout) as sock:
@@ -289,6 +290,7 @@ def test_the_generated_controllers_own_header_call_cannot_be_spliced_through_a_r
             except OSError:
                 time.sleep(0.1)
         assert connected, "php -S never started listening"
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
 
         with socket_module.create_connection(("127.0.0.1", port), timeout=10) as sock:
             req = (
