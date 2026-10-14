@@ -14,8 +14,11 @@ from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
-from fuzzlab.core.urls import check_send_url, to_path, url_key
-from fuzzlab.oracle.probe import HeaderPointsStopped, Probe, UnplaceableLocation
+from fuzzlab.core.urls import (DestructiveUrlRefused, canonical_origin, check_send_url,
+                               to_path, transaction_reason, url_key)
+from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
+                                  PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
+                                  Probe, UnplaceableLocation)
 from fuzzlab.tools.authhttp import with_query, with_query_param
 
 
@@ -30,6 +33,102 @@ def _json_body(param: str, value: str, entries, content_type=None) -> bytes:
         return body_for(param, value, entries)
     except JsonPlacementError as exc:
         raise UnplaceableLocation(f"cannot place JSON leaf {param!r}: {exc}") from exc
+
+
+def _skipped(reason: str) -> str:
+    return f"skipped: {reason}"
+
+
+#: The browser redirect behaviour a PRG follow-up emulates (FR-FUZZ-49), rule by rule
+#: (PA-0111), each with the spec step it follows or the deliberate divergence it is.
+#: Fetch = WHATWG Fetch, "HTTP-redirect fetch"; every rule has a fixture in
+#: ``tests/test_prg_observation.py`` (a guard fails on one without).
+PRG_RULES: dict[str, str] = {
+    "303-becomes-get": "Fetch HTTP-redirect fetch step 12 (RFC 9110 §15.4.4): a 303 "
+                       "after a non-GET/HEAD request is followed with GET and no body",
+    "301-302-post-becomes-get": "Fetch step 12 (RFC 9110 §15.4.2/§15.4.3 note): a 301 "
+                                "or 302 after POST is followed with GET and no body",
+    "get-redirect-stays-get": "Fetch step 12: a redirect after GET is followed with GET",
+    "307-308-keep-the-body": "RFC 9110 §15.4.8/§15.4.9 (Fetch step 12 does not apply): "
+                             "a 307/308 re-sends the method and body, so it is followed "
+                             "only after a GET; after any other method it is never "
+                             "followed (no probe body is re-sent)",
+    "location-relative": "Fetch 'location URL' step 3: Location is parsed relative to "
+                         "the request's URL",
+    "location-fragment-not-sent": "Fetch 'location URL' step 4 / URL serializer with "
+                                  "exclude-fragment: a fragment is never sent",
+    "no-location-no-redirect": "Fetch 'location URL' step 2: a redirect status without "
+                               "Location is the final response (no observation)",
+    "no-body-no-payload": "Fetch step 12: the request body and its body headers are "
+                          "removed; the follow-up carries no payload parameter either",
+    "one-hop": "divergence (Fetch step 5 allows 20 redirects): one hop; a redirect in "
+               "the follow-up's response is no observation",
+    "same-origin-only": "divergence (a browser follows any origin): only the probed "
+                        "URL's own origin, through every send gate",
+    "no-response-cookie-adopted": "divergence (a browser stores a 3xx's Set-Cookie "
+                                  "before following): the follow-up carries the route's "
+                                  "own session state only, as every probe does (the "
+                                  "seam adopts no response cookie; anonymous stays "
+                                  "anonymous, BUG-0112)",
+}
+
+
+def prg_target(probe: Probe, url: str, method: str,
+               explicit: frozenset[str] = frozenset()) -> tuple[str | None, str | None]:
+    """The PRG follow-up a probe's response calls for (FR-FUZZ-49): ``(target, None)``
+    to follow, ``(None, None)`` when the response is not a PRG redirect at all, or
+    ``(None, "skipped: <reason>")`` when it is one but a gate refuses the target. The
+    one rule both probe senders apply (PA-0003); each adds its own session gates
+    (auth endpoints, isolation, the header breaker).
+
+    A PRG redirect is `PRG_ANY_METHOD` after any method, or `PRG_GET_ONLY` after a GET
+    only. Its target (``Location`` resolved against the probed URL, fragment dropped)
+    must be the probed URL's own origin (`canonical_origin`), pass `check_send_url` as a
+    GET, and be neither a transaction (`transaction_reason`), an account endpoint
+    (`account_endpoint_reason`) nor a login page (`redirect_is_logout`, BUG-0122; that
+    redirect is the session's own logout handling)."""
+    from urllib.parse import urldefrag, urljoin
+
+    from fuzzlab.session.browserlogin import account_endpoint_reason
+    from fuzzlab.session.detect import redirect_is_logout
+    status = probe.status
+    if status not in REDIRECT_STATUSES:
+        return None, None
+    if status not in PRG_ANY_METHOD:
+        if not (status in PRG_GET_ONLY and method.upper() == "GET"):
+            return None, _skipped(f"a {status} after {method.upper()} re-sends its body")
+    location = next((v for k, v in (probe.headers or {}).items()
+                     if k.lower() == "location"), "").strip()
+    if not location:
+        return None, _skipped("no Location")
+    try:
+        target = urldefrag(urljoin(url, location))[0]
+    except ValueError:
+        return None, _skipped("unparsable Location")
+    origin = canonical_origin(target)
+    if origin is None or origin != canonical_origin(url) or \
+            not target.lower().startswith(("http://", "https://")):
+        return None, _skipped("another origin")
+    try:
+        check_send_url(target, explicit, method="GET")
+    except DestructiveUrlRefused:
+        return None, _skipped("destructive target")
+    if transaction_reason(target) is not None:
+        return None, _skipped("transaction target")
+    if account_endpoint_reason(target) is not None:
+        return None, _skipped("account target")
+    if redirect_is_logout(location, url, None):
+        return None, _skipped("login page")
+    return target, None
+
+
+def _observation(followed: Probe, target: str) -> tuple[Probe | None, str]:
+    """A sent follow-up's outcome: itself (its ``url`` set), or no observation when it
+    was answered with another redirect (one hop only)."""
+    if followed.status in REDIRECT_STATUSES:
+        return None, PRG_UNOBSERVED
+    followed.url = target
+    return followed, PRG_OBSERVED
 
 
 class _ExplicitAllowance:
@@ -365,10 +464,12 @@ class SeamProbeSender(_ExplicitAllowance):
             return "anonymous"
         return self._identity
 
+    #: Makes PRG follow-ups (FR-FUZZ-49).
+    prg_capable = True
+
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None) -> Probe:
-        from fuzzlab.session.manager import IsolatedLoginFailed
+             content_type: str | None = None, entries=None, prg: bool = False) -> Probe:
         # every gate before any routing: a stopped or refused header probe never causes
         # an isolated copy login (reviewers A/B, forms phase 2 merge)
         if location == "header" and self.header_stop_reason is not None:
@@ -385,15 +486,32 @@ class SeamProbeSender(_ExplicitAllowance):
         client, copy = self._client, None
         if identity != "anonymous" and url_key(url) in self._isolated_keys:
             client, identity, copy = self._route_isolated(url)  # FR-FUZZ-44
+
+        def send_on(on_client, on_identity):
+            return self._send_on(on_client, on_identity, url, param, value, timing,
+                                 method, location, content_type, entries)
         if copy is None:
-            return self._send_on(client, identity, url, param, value, timing, method,
-                                 location, content_type, entries)
+            probe = send_on(client, identity)
+        else:
+            probe = self._on_copy(copy, url, send_on)
+            if probe is None:                  # the copy could not re-log in: anonymous
+                with self._iso_lock:
+                    self._counts["anonymous_sends"] += 1
+                client, identity, copy = self._client, "anonymous", None
+                probe = send_on(client, identity)
+        if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
+            self._follow(probe, client, identity, copy, url, param, method, location)
+        return probe
+
+    def _on_copy(self, copy, url, send_on):
+        """``send_on(client, label)`` on ``copy`` (the isolated session of ``url``'s
+        path), or None when the copy could not re-log in: it is then released and the
+        path's later sends go anonymous (FR-FUZZ-44). A re-login is verified."""
+        from fuzzlab.session.manager import IsolatedLoginFailed, LoginCapReached
         before = copy.manager.login_attempts()
         try:
-            probe = self._send_on(client, identity, url, param, value, timing, method,
-                                  location, content_type, entries)
-        except IsolatedLoginFailed as exc:   # the copy could not re-log in: anonymous
-            from fuzzlab.session.manager import LoginCapReached
+            probe = send_on(copy.client, copy.label)
+        except IsolatedLoginFailed as exc:
             key = url_key(url)
             self._manager.release_copy(copy.manager)
             with self._iso_lock:
@@ -401,12 +519,51 @@ class SeamProbeSender(_ExplicitAllowance):
                 self._fail_locked(key, exc.reason)   # fixed text, never a URL
                 if not isinstance(exc, LoginCapReached):
                     self._count_failed_login_locked()
-                self._counts["anonymous_sends"] += 1
-            return self._send_on(self._client, "anonymous", url, param, value, timing,
-                                 method, location, content_type, entries)
+            return None
         if copy.manager.login_attempts() > before:     # the copy re-logged in
             self._verify_main(url, first_only=False)
         return probe
+
+    # -- post/redirect/get observation (FR-FUZZ-49) -------------------------------
+    def _prg_session_gate(self, target: str, identity: str, copy,
+                          location: str) -> str | None:
+        """This sender's own gates on a follow-up target, after `prg_target`'s: never
+        an auth endpoint, never once the header breaker stopped a header probe's run,
+        and never an isolated path from the run's session (FR-FUZZ-44)."""
+        if self._manager is not None and self._manager.is_auth_endpoint(target):
+            return _skipped("auth endpoint")
+        if location == "header" and self.header_stop_reason is not None:
+            return _skipped("header breaker")
+        if copy is None and identity != "anonymous" and \
+                url_key(target) in self._isolated_keys:
+            return _skipped("isolated path")
+        return None
+
+    def _follow(self, probe: Probe, client, identity: str, copy, url: str, param: str,
+                method: str, location: str) -> None:
+        """One plain GET of the probe's PRG target, on the probe's own route (the run's
+        session, the path's isolated copy, or anonymous), through the client (budget,
+        scope, session observe) and the header breaker as part of the probe; attached
+        as ``probe.followed`` (FR-FUZZ-49, P3/P4)."""
+        from fuzzlab.core.http import Request
+        target, why = prg_target(probe, url, method, self._explicit)
+        if target is not None:
+            why = self._prg_session_gate(target, identity, copy, location)
+        if target is None or why is not None:
+            probe.prg = why
+            return
+
+        def dispatch(on_client, on_identity):
+            req = Request("GET", target, identity=on_identity, component="oracle")
+            return self._dispatch(on_client, on_identity, req, location, param, url)
+        if copy is None:
+            followed = dispatch(client, identity)
+        else:
+            followed = self._on_copy(copy, url, dispatch)
+            if followed is None:
+                probe.prg = _skipped("isolated session lost")
+                return
+        probe.followed, probe.prg = _observation(followed, target)
 
     def _send_on(self, client, identity, url, param, value, timing, method, location,
                  content_type, entries) -> Probe:
@@ -455,6 +612,12 @@ class SeamProbeSender(_ExplicitAllowance):
         else:
             req = Request(method.upper(), with_query_param(url, param, value),
                           identity=identity, timing=timing, component="oracle")
+        return self._dispatch(client, identity, req, location, param, url)
+
+    def _dispatch(self, client, identity, req, location, param, url) -> Probe:
+        """Send ``req`` for the probe of ``(location, param, url)``: the header
+        breaker's bookkeeping attributes what it observes to that probe (a PRG
+        follow-up is part of its probe, FR-FUZZ-49)."""
         main = identity != "anonymous" and identity == self._identity
         if main and location == "header":
             self._copies_at_header = self._copy_logins()
@@ -499,10 +662,12 @@ class RequestsProbeSender(_ExplicitAllowance):
         self._session = session
         self._timeout = timeout
 
+    #: Makes PRG follow-ups (FR-FUZZ-49), anonymously like every send.
+    prg_capable = True
+
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None) -> Probe:
-        import requests
+             content_type: str | None = None, entries=None, prg: bool = False) -> Probe:
         # `allow_redirects=False` (BUG-0039, strengthened by BUG-0044/PA-0046
         # to cover every sender, not just this one): a confirmation strategy
         # that reads the raw `Location` header (e.g. `OpenRedirectStrategy`)
@@ -555,13 +720,39 @@ class RequestsProbeSender(_ExplicitAllowance):
             kwargs["data"] = {param: value}          # form-encoded body
         else:
             kwargs["params"] = {param: value}        # query string
+        probe = self._request(method.upper(), url, kwargs)
+        if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
+            self._follow(probe, url, method)
+        return probe
+
+    def _request(self, method: str, url: str, kwargs: dict) -> Probe:
+        import requests
         start = time.perf_counter()
         try:
-            r = self._session.request(method.upper(), url, **kwargs)
+            r = self._session.request(method, url, **kwargs)
             return Probe(status=r.status_code, text=r.text,
                          elapsed=time.perf_counter() - start, headers=dict(r.headers))
         except requests.Timeout:
             return Probe(status=0, text="", elapsed=float(self._timeout))
+
+    def _follow(self, probe: Probe, url: str, method: str) -> None:
+        """One plain GET of the probe's PRG target (`prg_target`), anonymous like the
+        probe: the jar is cleared first (BUG-0112), no redirect is followed."""
+        target, why = prg_target(probe, url, method, self._explicit)
+        if target is None:
+            probe.prg = why
+            return
+        if url_key(target) in self._isolated_keys:
+            self._isolated_sends += 1
+        jar = getattr(self._session, "cookies", None)
+        if jar is not None:
+            jar.clear()
+        followed = self._request("GET", target, {"timeout": self._timeout,
+                                                 "allow_redirects": False})
+        if followed.status == 0:               # timed out: no observation
+            probe.prg = PRG_UNOBSERVED
+            return
+        probe.followed, probe.prg = _observation(followed, target)
 
 
 def make_probe_sender(target_url: str, identity: str | None = None,

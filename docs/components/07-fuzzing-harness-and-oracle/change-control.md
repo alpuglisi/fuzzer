@@ -22,6 +22,142 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
+- Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
+  literal sat in the edit field (`<input value="#{728*889}">`) and its rule was
+  `expr in text`. `oracle/context.split_form_control_values` splits the parsed page into
+  form-control values (input `value`, textarea content, a selected option's text and
+  value) and the rest; `strategies._echo` / `_echoed_outside_form_controls` /
+  `_evaluated` refuse when the literal is echoed outside form controls (parsed, so
+  entity-encoded too, or a raw occurrence no control accounts for) and, when it is only in
+  form controls, require the number outside every form control. No literal in the page:
+  the old rule exactly. Applied to `SstiStrategy`, `SpelInjectionStrategy`,
+  `SqliEvaluationMarkerStrategy` (both samples) and `GoTemplateSstiStrategy`. The
+  BUG-0117 second sample and FR-FUZZ-49's P5 attribution are unchanged. The rationale
+  kept: "evaluated, not just reflected" (M4 since 12ce859; SpEL's literal holds its own
+  canary).
+- Impact (other components / project): none outside FUZZ; no interface or store change.
+  More M4/SpEL/SQL-evaluation confirmations on edit-form pages (the intended effect);
+  the Go marker now also refuses an HTML-escaped text echo it used to accept.
+- Risk (level; mitigation or accepted-risk justification): medium (a confirmer relaxed).
+  Mitigated: the relaxation is limited to form-control values by parsed role; the number
+  must be outside them; the second-sample causality check still decides; every
+  reflection shape the rule exists for is a fixture that must refuse, for all four
+  strategies; mutation-checked both ways; the scored live-boot multitarget tests that
+  carry SSTI/SpEL ground truth are re-run (Effectiveness).
+- Deliverables:
+  - [x] code: `fuzzlab/oracle/context.py`, `fuzzlab/oracle/strategies.py` — done
+  - [x] tests: `tests/test_evaluation_marker_echo.py` (4 strategies × 10 page shapes, the
+    PRG edit form, the second sample, the split, the old answer, the PA-0133 guard and its
+    synthetic offenders); `tests/test_prg_observation.py`'s `editform` fixture — done
+  - [x] mutation checks — done (see Effectiveness)
+  - [x] BUG-0133, PA-0133, ERROR_LOG, FR-FUZZ-4 (in place), CHANGELOG — done
+  - [ ] on-host: Juice Shop `/profile` username SSTI confirms — todo (coordinator)
+- Effectiveness (assessed 2026-10-14, offline; on-host pending): the targeted run (34 files: the BUG-0133 and PRG
+  tests, the oracle/sender/session/forms/JSON/destructive suites, the request-count and
+  golden tests, `test_oracle_vectors`, lint, traceability, loopback) is 1169 passed, 2
+  xfailed (the existing BUG-0115 strict xfails), 0 skipped, with
+  `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`. Live-boot tests carrying SSTI/SpEL/Go-template
+  ground truth are unchanged: category 4 multitarget + `test_labgen_go_live_boot` +
+  trackernest + category 5, 32 passed; SpEL live boot + SpEL + Netflix template preview +
+  category 1 and 3 combined, 17 passed. Mutations: the old rule (`expr in text`) fails
+  the 9 edit-form cases and the PRG edit form (BUG-0133 reproduced) and accepts Go's
+  number-only-in-control page; any echo allowed fails 17 reflection cases; the number
+  anywhere fails 5; a raw-only literal check fails Go's 3 escaped-echo cases; any option
+  as a control fails the split test.
+
+### CC-FUZZ-0078 — Post/redirect/get observation for the server-side confirmers (FR-FUZZ-49) (2026-10-14)
+- Change: builds the reviewed design's Revision 2 (P1-P9; reviewers A and B agreed,
+  coordinator-assigned number). Live evidence: Juice Shop answers `POST /profile
+  username=#{11*13}` with `302 /profile` and no `143`; `GET /profile` shows `143`, and the
+  confirmers read only the probe's own response.
+  - `oracle/probe.py`: `Probe.followed` (a separate whole `Probe`), `Probe.prg`
+    (`observed` / `unobserved` / `skipped: <reason>`), `Probe.url`,
+    `Probe.follow_up_sends`; the trigger sets (`PRG_ANY_METHOD` 301/302/303,
+    `PRG_GET_ONLY` 307/308); the `Sender.send` protocol gains `prg: bool = False` and
+    `prg_capable`, with `accepts_prg`.
+  - `tools/probesender.py`: `prg_target` (the one rule: trigger, `Location` resolved,
+    same origin, `check_send_url`, `transaction_reason`, `account_endpoint_reason`,
+    `redirect_is_logout`) and `PRG_RULES` (each emulated redirect rule with its Fetch /
+    RFC 9110 step, PA-0111). `SeamProbeSender` follows on the probe's own route (the
+    run's session, the path's isolated copy through the shared `_on_copy`, or
+    anonymous) with its own gates (`_prg_session_gate`: auth endpoint, header breaker,
+    isolated path from the main session) and dispatches through `_dispatch`, so the
+    header breaker attributes what the follow-up observes to its probe.
+    `RequestsProbeSender` follows anonymously (jar cleared). Neither follows on a timing
+    send.
+  - `oracle/oracle.py`: `_PrgRun` sets `prg=True` on every send of an opt-in strategy's
+    run (P1); `Oracle.prg_counts`; P9's restore (`_restore`, `_restore_value`);
+    `_CostCounter` and `_FormBoundSender` forward `prg` (no sibling binding into the
+    follow-up) and delegate `prg_capable`; `_CostCounter` counts follow-ups.
+  - `harness/auto.py`: `_CountingSender` (counts follow-ups in `requests`) and
+    `_FragmentGuard` forward `prg` and delegate `prg_capable`. `harness/pipeline.py`
+    reports the non-zero `prg_*` counters; `harness/auto_cli.py` prints them on one line
+    when non-zero.
+  - `oracle/strategies.py`: `ConfirmationStrategy.prg` (default False) and
+    `_observed`; opted in: `SqliErrorStrategy` (controls observed alike, a rejected
+    control refuses, `second_order`), `ReflectedXssStrategy` (P6: `xss-stored`,
+    `observation: "prg"`), `SstiStrategy` and `SpelInjectionStrategy` (product / canary 1
+    absent from follow-up 2), `GoTemplateSstiStrategy` (the M4b marker; read as
+    observed), `PathTraversalStrategy` and `PathTraversalFsPathReadStrategy` (control
+    observed alike).
+- Impact (other components / project): the `Sender` seam's contract widens (a new
+  optional argument, a capability declaration, new optional `Probe` fields); every
+  implementation and wrapper in `fuzzlab/` is updated and the conformance guard checks
+  the argument, its forwarding and the capability delegation. No other component's code
+  changes: SESS's `is_auth_endpoint`, `observe` and `detect.redirect_is_logout`, AUD's
+  nothing, CORE's `check_send_url` / `transaction_reason` / `canonical_origin` and
+  `store_adapter.LADDER_TEXT` are used as they are. Runs against a PRG app send one more
+  GET per PRG probe plus one restore per candidate (counted in `requests`, budgeted).
+  Findings: a reflection seen only after a redirect is now recorded `xss-stored` (a new
+  finding where none was before). No store, migration or ground-truth change.
+- Risk (level; mitigation or accepted-risk justification): medium. New traffic: a GET
+  to an app-supplied URL. Mitigated by gating it like a probe (same origin, every send
+  gate, the probe's own route, never an isolated path from the run's session, one hop,
+  never a timing send), each gate pinned by a test that counts what reached the app.
+  New evidence channel: false positives from a page that always shows a signal or keeps
+  an earlier value; mitigated by like-with-like controls (P1/P5), attribution, a noise
+  guard over every opt-in strategy with a synthetic offender (PA-0117(3), PA-0129), and
+  BUG-0127's HTML check on the same response (P4). Scoring: a run with no PRG redirect
+  is unchanged (golden summary asserted with a PRG-capable sender); live scored
+  multitarget runs (PA-0042/0047) are in the Effectiveness section. Accepted residuals
+  are listed in FR-FUZZ-49.
+- Deliverables:
+  - [x] code as above — done
+  - [x] tests: `tests/test_prg_observation.py` (Revision 2's list but the live Juice Shop
+    check, which the coordinator runs on-host; the PA-0111 rule fixtures, the noise
+    guard and its synthetic offenders); `tests/test_sender_conformance.py` (the `prg`
+    argument, its forwarding, capability delegation, PRG placement, and each concrete
+    sender's real follow-up path, PA-0035) — done
+  - [x] mutation checks (P1, P3 route and isolated skip, P4 splice, P5 M2 control and
+    M4 product 1, P6, P7 sender and opt-in) — done, each caught
+  - [x] FR-FUZZ-49, NFR-FUZZ-safe clause and trace, NFR-FUZZ-response-fidelity note,
+    ARCHITECTURE, CHANGELOG — done
+  - [ ] on-host: `fuzzlab auto --identity juice-user` confirms the `/profile` username
+    SSTI — todo (coordinator)
+- Effectiveness (assessed 2026-10-14, offline; on-host pending): the targeted run (33
+  files: the touched tests, the oracle/sender/session/forms/JSON/destructive suites, the
+  request-count and golden tests, lint, traceability, loopback) is 1090 passed, 2 xfailed
+  (the existing BUG-0115 strict xfails), 0 skipped, with `FUZZLAB_REQUIRE_BROWSER/LINT/
+  NETNS=1`; `tests/test_prg_observation.py` alone 53 passed. The scored multitarget
+  live-boot tests (PA-0042/0047; `RequestsProbeSender`, now PRG-capable) are unchanged:
+  php_laravel booking + huddlehub 4 passed, node_bff + ruby_rails forgecart + category 1
+  and 5 combined 6 passed, category 3 combined + spring_boot expedia + trackernest +
+  category 4 7 passed. Each mutation in the deliverables is caught by at least one test.
+  The live Juice Shop `/profile` SSTI check is the coordinator's.
+- Follow-up (review of 991f0af; coordinator, reviewers A and B), a second commit:
+  - P6 refined (coordinator): `xss-stored` only when the follow-up's URL carries neither
+    the payload nor its token in any reflected form (`strategies._rode_the_redirect`);
+    otherwise `xss-reflected`, `observation: "prg-redirect"`.
+  - The P9 restore is total (B must-fix 1, A S1): a restore send that raises is
+    contained, counted `prg_restore_failed`, logged with the host and error class only;
+    the outcome is returned unchanged; an interrupt propagates. A containment boundary
+    under PA-0086, reported, not a silent PA-0106 swallow.
+  - B's nit: a direct `accepts_prg` assertion on the chains `run_auto` builds; A's N1:
+    two restore residuals in FR-FUZZ-49.
+  - Mutation checks: never / always "rode the redirect", raw-only and no-JSON encodings,
+    restore not contained / interrupts contained / failure not counted: each caught.
+
 ### CC-FUZZ-0077 — Point selection judges a SPA route's fragment as a text (BUG-0131 sweep) (2026-10-14)
 - Change: `harness/auto._crawl_url_refusal` (point selection, FR-FUZZ-40) judged a SPA
   hash route by re-joining its path and query into a URL:

@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0133: an edit form's echo no longer hides an evaluated SSTI)
+- **Why:** live on Juice Shop, `/profile` showed the evaluated product while its edit field
+  echoed `#{728*889}`; M4's `expr in text` rule read that echo as a reflection and refused.
+- **What:** the evaluation markers (SSTI, SpEL, the SQL and Go markers) judge their
+  literal's echo on the parsed page: only an echo outside form controls disqualifies, and
+  the number must then appear outside them; the Go marker also stops accepting an
+  HTML-escaped echo (CC-FUZZ-0079, PA-0133).
+
+## 2026-10-14 (FR-FUZZ-49 review: PRG classification refined, the restore made total)
+- A reflection seen only after a redirect is `xss-stored` unless the redirect target
+  carries the payload (then `xss-reflected`, `prg-redirect`); a restore send that raises
+  no longer escapes a decided outcome (counted `prg_restore_failed`). Review of 991f0af
+  by the coordinator and reviewers A and B (CC-FUZZ-0078).
+
+## 2026-10-14 (FR-FUZZ-49: post/redirect/get observation for the server-side confirmers)
+- **Why:** Juice Shop answers `POST /profile username=#{11*13}` with `302 /profile` and no
+  `143`; only `GET /profile` shows it. The confirmers read the probe's own response and
+  probes never follow redirects, so a POST/redirect/GET app's SSTI, reflected XSS or SQL
+  error was never confirmed.
+- **What:** an opt-in strategy's whole run (M4 SSTI/SpEL, M5, M2, the passwd markers)
+  asks its sender for PRG observation; the sender makes one plain GET of a same-origin
+  redirect target that passes every send gate, on the probe's own session route, and
+  attaches it as the separate `probe.followed`; the raw 3xx stays the probe. Controls are
+  observed alike, follow-ups are counted in `requests` and the budget, a reflection seen
+  only after the redirect is `xss-stored`, and a benign restore follows a candidate's PRG
+  run. Timing and differential engines never follow (CC-FUZZ-0078).
+
 ## 2026-10-14 (BUG-0132: a browser login's senders now carry the cookie its app set)
 - **Why:** after a browser login on Juice Shop the requests-based senders sent only the
   bearer from the login response; the `token` cookie the app's JS sets was never seen,

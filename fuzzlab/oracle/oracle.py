@@ -14,7 +14,8 @@ import json
 from fuzzlab.core import jsonbody
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, to_route_path, url_key
-from fuzzlab.oracle.probe import Candidate, Sender, UnplaceableLocation, Verdict
+from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, Probe, Sender,
+                                  UnplaceableLocation, Verdict, accepts_prg)
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
 
@@ -41,23 +42,35 @@ class _CostCounter:
         self._inner = inner
         self.count = 0
 
+    @property
+    def prg_capable(self) -> bool:
+        return accepts_prg(self._inner)
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None):
+             content_type: str | None = None, entries=None, prg: bool = False):
         # the full `Sender` signature, forwarded exactly like `harness.auto`'s
         # `_CountingSender` (BUG-0071: a JSON-body / upload / XXE probe crashed `--bandit`)
         self.count += 1
-        if entries is not None:
-            return self._inner.send(url, param, value, timing=timing, method=method,
-                                    location=location, entries=entries)
-        if method == "GET" and location == "query":
-            return self._inner.send(url, param, value, timing=timing)
-        if content_type:
-            return self._inner.send(url, param, value, timing=timing,
-                                    method=method, location=location,
-                                    content_type=content_type)
-        return self._inner.send(url, param, value, timing=timing,
-                                method=method, location=location)
+        if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
+            probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                     location=location, content_type=content_type,
+                                     entries=entries, prg=True)
+        elif entries is not None:
+            probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                     location=location, entries=entries)
+        elif method == "GET" and location == "query":
+            probe = self._inner.send(url, param, value, timing=timing)
+        elif content_type:
+            probe = self._inner.send(url, param, value, timing=timing,
+                                     method=method, location=location,
+                                     content_type=content_type)
+        else:
+            probe = self._inner.send(url, param, value, timing=timing,
+                                     method=method, location=location)
+        if isinstance(probe, Probe):
+            self.count += probe.follow_up_sends     # a PRG follow-up is its cost too
+        return probe
 
 
 class _FormBoundSender:
@@ -86,9 +99,13 @@ class _FormBoundSender:
         else:
             self._base = FormEntries(tuple(e) for e in candidate.base_entries)
 
+    @property
+    def prg_capable(self) -> bool:
+        return accepts_prg(self._inner)
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None):
+             content_type: str | None = None, entries=None, prg: bool = False):
         own = (entries is None and not content_type
                and (url_key(url), method.upper(), location) == self._key)
         if own and location == jsonbody.LOCATION:
@@ -101,6 +118,12 @@ class _FormBoundSender:
                     from exc
         elif own and location in ("query", "body"):
             entries = self._base.replace(param, value)
+        if prg:
+            # FR-FUZZ-49: the sender's PRG follow-up is a plain GET it builds itself, so
+            # no sibling is ever bound into it (P3)
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, content_type=content_type,
+                                    entries=entries, prg=True)
         if entries is not None:
             return self._inner.send(url, param, value, timing=timing, method=method,
                                     location=location, entries=entries)
@@ -111,6 +134,60 @@ class _FormBoundSender:
             return self._inner.send(url, param, value, timing=timing)
         return self._inner.send(url, param, value, timing=timing, method=method,
                                 location=location)
+
+
+#: The run's PRG counters (FR-FUZZ-49), reported in the pipeline's metrics when non-zero:
+#: follow-ups after a POST-family probe, after a GET probe, follow-ups that gave no
+#: observation (another redirect, a timeout), the benign restores sent (P9), and the
+#: restores whose send raised (contained, reviewers A S1 / B must-fix 1).
+PRG_COUNTERS = ("prg_follow_ups", "prg_follow_ups_get", "prg_unobserved", "prg_restores",
+                "prg_restore_failed")
+
+
+class _PrgRun:
+    """One opt-in strategy's run on a candidate (FR-FUZZ-49, P1): **every** send of the
+    run -- probes, controls, baselines, second samples -- asks the sender for a PRG
+    observation, so a strategy compares like with like (BUG-0117). It sets the
+    property; the sender does the follow-up. Counts what the sender did."""
+
+    def __init__(self, inner: Sender, counts: dict[str, int]):
+        self._inner = inner
+        self._counts = counts
+
+    @property
+    def prg_capable(self) -> bool:
+        return accepts_prg(self._inner)
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None, entries=None, prg: bool = False):
+        probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                 location=location, content_type=content_type,
+                                 entries=entries, prg=True)
+        if isinstance(probe, Probe) and probe.follow_up_sends:
+            key = "prg_follow_ups_get" if method.upper() == "GET" else "prg_follow_ups"
+            self._counts[key] += probe.follow_up_sends
+            if probe.prg == PRG_UNOBSERVED:
+                self._counts["prg_unobserved"] += 1
+        return probe
+
+
+def _restore_value(candidate: Candidate) -> str:
+    """The benign value a PRG restore sends (P9): the form's own default for the field
+    when it is a string, else the importer's text filler."""
+    from fuzzlab.tools.store_adapter import LADDER_TEXT
+    default = None
+    if candidate.base_entries and candidate.location == jsonbody.LOCATION:
+        path = jsonbody.parse_name(candidate.param)
+        try:
+            leaves = jsonbody.normalize_entries(candidate.base_entries)
+        except jsonbody.JsonPlacementError:
+            leaves = []
+        default = next((v for p, v in leaves if tuple(p) == path), None)
+    elif candidate.base_entries:
+        default = FormEntries(tuple(e) for e in candidate.base_entries).get(
+            candidate.param)
+    return default if isinstance(default, str) and default else LADDER_TEXT
 
 
 class Oracle:
@@ -130,6 +207,8 @@ class Oracle:
         # T4.3): the productive mechanism is tried first, so a confirmation short-
         # circuits the expensive ones (fewer probes). None -> fixed cheapest-first order.
         self.scheduler = scheduler
+        #: FR-FUZZ-49: what PRG observation cost this oracle's run (`PRG_COUNTERS`)
+        self.prg_counts: dict[str, int] = dict.fromkeys(PRG_COUNTERS, 0)
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:
         """The confirming verdict, or None (greybox and other callers)."""
@@ -146,6 +225,48 @@ class Oracle:
         its real cost."""
         if candidate.base_entries:                       # a form point: send its siblings
             sender = _FormBoundSender(sender, candidate)
+        counts = dict.fromkeys(PRG_COUNTERS, 0)
+        try:
+            outcome = self._confirm_outcome(candidate, sender, counts)
+            if counts["prg_follow_ups"]:
+                self._restore(candidate, sender, counts)
+        finally:
+            for key, n in counts.items():
+                self.prg_counts[key] += n
+        return outcome
+
+    @staticmethod
+    def _restore(candidate: Candidate, sender: Sender, counts: dict[str, int]) -> None:
+        """P9 (FR-FUZZ-49), best effort: after a candidate's PRG run made a follow-up
+        after a POST-family probe, one benign send of the form's own default (or the
+        filler) at the point leaves the page without the last payload. Not for a raw
+        whole body (it has no field default) or a header point; no PRG asked.
+
+        Total (reviewers A S1 / B must-fix 1): the verdict is already decided (and a
+        finding may be written), so a restore send that raises never changes it. The
+        failure is a per-unit containment boundary (PA-0086): counted
+        (``prg_restore_failed``) and logged with the host and the error's class only,
+        never swallowed silently; ``BaseException`` (an interrupt) still propagates."""
+        if candidate.content_type or candidate.location not in (
+                "query", "body", jsonbody.LOCATION):
+            return
+        try:
+            ConfirmationStrategy._send(sender, candidate, _restore_value(candidate))
+        except Exception as exc:                     # noqa: BLE001 - containment boundary
+            counts["prg_restore_failed"] += 1
+            from urllib.parse import urlsplit
+
+            from fuzzlab.core.obs import get_logger
+            get_logger("oracle").warning(
+                "post/redirect/get restore failed",
+                extra={"host": urlsplit(candidate.url).hostname or "",
+                       "error": type(exc).__name__})
+            return
+        counts["prg_restores"] += 1
+
+    def _confirm_outcome(self, candidate: Candidate, sender: Sender,
+                         counts: dict[str, int]) -> tuple[Verdict | None, Verdict | None]:
+        prg_ok = accepts_prg(sender)
         applicable = [s for s in self.strategies if s.applies(candidate)]
         if self.scheduler is not None and applicable:
             ctx = context_for(candidate.category or candidate.vuln_class,
@@ -158,12 +279,16 @@ class Oracle:
         inconclusive: Verdict | None = None
         placed, unplaceable = False, None
         for strategy in ordered:
+            # FR-FUZZ-49 (P1): PRG observation is a property of an opt-in strategy's
+            # whole run, set here once, never per send by the strategy
+            opted = getattr(strategy, "prg", False) is True   # a plugin may lack it
+            run = _PrgRun(sender, counts) if opted and prg_ok else sender
             try:
                 if self.scheduler is not None:
-                    probe = _CostCounter(sender)         # measure this mechanism's cost
+                    probe = _CostCounter(run)            # measure this mechanism's cost
                     verdict = strategy.confirm(candidate, probe)
                 else:
-                    verdict = strategy.confirm(candidate, sender)
+                    verdict = strategy.confirm(candidate, run)
             except UnplaceableLocation as exc:
                 # this mechanism cannot place the point (PA-0115): no verdict from it,
                 # and no reward or cost for its arm; the others still run

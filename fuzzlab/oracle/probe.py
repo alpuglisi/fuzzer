@@ -6,13 +6,47 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+#: Post/redirect/get observation (FR-FUZZ-49): a response with one of these statuses,
+#: after any method, gets one follow-up GET of its ``Location`` when the strategy run
+#: asked for it (``prg=True``) ...
+PRG_ANY_METHOD = frozenset({301, 302, 303})
+#: ... and one of these only after a GET: a browser re-sends a POST body on 307/308, so
+#: a POST answered with one is never followed (no PRG observation; a stated residual).
+PRG_GET_ONLY = frozenset({307, 308})
+#: Every redirect status: a follow-up answered with one is no observation (one hop).
+REDIRECT_STATUSES = PRG_ANY_METHOD | PRG_GET_ONLY
+#: ``Probe.prg`` values for a follow-up that was sent: it gave an observation, or it
+#: did not (a second redirect, a timeout). Any other non-None value is the reason a
+#: PRG redirect was not followed (``"skipped: <reason>"``).
+PRG_OBSERVED = "observed"
+PRG_UNOBSERVED = "unobserved"
+
+
 @dataclass
 class Probe:
-    """One response the oracle observed while confirming."""
+    """One response the oracle observed while confirming.
+
+    ``followed`` (FR-FUZZ-49) is a **separate, whole** response: the one follow-up GET
+    of this probe's redirect target that the sender made because the strategy run asked
+    for PRG observation (``status``, ``headers``, ``text`` and its ``url``). This
+    probe's own fields always stay the raw response (a 3xx and its ``Location``), which
+    open-redirect, header-injection and timing read. ``prg`` says what happened:
+    ``None`` (not asked, or not a PRG redirect), `PRG_OBSERVED`, `PRG_UNOBSERVED` (a
+    follow-up was sent, but answered with another redirect or timed out), or
+    ``"skipped: <reason>"`` (a gate refused the follow-up; nothing was sent)."""
     status: int
     text: str
     elapsed: float = 0.0                       # seconds
     headers: dict[str, str] = field(default_factory=dict)
+    followed: Probe | None = field(default=None, repr=False)
+    prg: str | None = None
+    url: str | None = None                     # set on a follow-up: the URL it fetched
+
+    @property
+    def follow_up_sends(self) -> int:
+        """Requests the sender made for this probe beyond the probe itself (0 or 1):
+        counted in the run's ``requests`` and a strategy's cost (FR-FUZZ-49, P8)."""
+        return 1 if self.prg in (PRG_OBSERVED, PRG_UNOBSERVED) else 0
 
 
 @dataclass
@@ -84,11 +118,32 @@ class Sender:
     keeps the existing form-encoded behavior (CC-FUZZ-0032/FR-FUZZ-19).
     """
 
+    #: Whether this sender (through every wrapper) can make PRG follow-ups: real
+    #: senders set it True, a wrapper reports its inner sender's (`accepts_prg`). The
+    #: oracle asks for PRG observation only from a sender that says so.
+    prg_capable = False
+
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None,
-             entries=None) -> Probe:  # pragma: no cover - interface
+             entries=None, prg: bool = False) -> Probe:  # pragma: no cover - interface
         """``entries`` (a form's full entry list, ``param`` already set to ``value``)
         is sent as the whole query string or urlencoded body instead of ``{param:
-        value}`` alone (forms phase 1)."""
+        value}`` alone (forms phase 1).
+
+        ``prg`` (FR-FUZZ-49) asks for post/redirect/get observation: when the response
+        is a PRG redirect (`PRG_ANY_METHOD`, or `PRG_GET_ONLY` after a GET) whose
+        target passes every send gate (same origin, `check_send_url`, transaction,
+        account and login checks, auth endpoints, isolation, the header breaker), the
+        sender makes one plain GET of it on the **same session route** as the probe
+        (the run's session, the path's isolated copy, or anonymous) and attaches it as
+        ``probe.followed``. Never on a timing send. A wrapper forwards it only when
+        True, so a test double without it keeps working."""
         raise NotImplementedError
+
+
+def accepts_prg(sender) -> bool:
+    """Can ``sender`` make PRG follow-ups (FR-FUZZ-49)? Its own ``prg_capable``
+    declaration, which a wrapper delegates to its inner sender. A sender that does not
+    declare it (a test double, an older wrapper) never gets ``prg``."""
+    return getattr(sender, "prg_capable", False) is True
