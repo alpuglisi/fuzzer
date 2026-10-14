@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0123: every browser request confined to the target origin)
+- **Why:** the first Juice Shop crawl's browser followed the app's open redirect to
+  github.com, and two earlier bWAPP crawls rendered a public blog the same way. Scope
+  was enforced at the link queue only; the browser guard checked destructive URLs only
+  and never saw a redirect's later hops.
+- **What:** one origin predicate (`core.urls.in_origin_scope`); `navguard.guard_page`
+  now requires `in_scope`, routes the whole context and WebSockets, and walks redirect
+  chains hop by hop; every launch takes `browser_launch_args` (no proxy, resolver rules
+  per `host:port`); API-request clients are scope-checked with `max_redirects=0`; a
+  loopback crawl is scoped to its exact origin. An AST guard and real-browser tests
+  (a second loopback port, an off-host address) enforce it. The sweep fixed two
+  non-browser senders that followed redirects unchecked: the session's post-login
+  chain and the labgen identifier-SQLi oracle's runner. BUG-0123, PA-0123,
+  CC-CORE-0044, CC-CRAWL-0015, CC-AUD-0033, CC-FUZZ-0066, CC-SESS-0020, CC-LAB-0253.
+
 ## 2026-10-14 (Forms phase 2, lane A: link siblings, header points, value-shape rules, POST selectors; BUG-0115)
 - **Why:** the operator wants bWAPP's vulnerabilities found as the lab ships. After
   phase 1, the remaining gaps in this lane were sinks gated on a link's other query

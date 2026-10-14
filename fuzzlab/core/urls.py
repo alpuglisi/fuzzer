@@ -136,6 +136,28 @@ def destructive_reason(url: str) -> str | None:
     return None
 
 
+def origin_scope(*urls: str | None) -> frozenset[str]:
+    """The canonical origins (scheme, host, port) of ``urls`` -- what a browser may
+    reach (BUG-0123). Loopback aliases on the same port are one origin, by
+    `canonical_origin`."""
+    return frozenset(o for o in (canonical_origin(u) for u in urls if u) if o is not None)
+
+
+def in_origin_scope(url: str, origins: frozenset[str]) -> bool:
+    """Whether ``url``'s canonical origin is one of ``origins``: the one browser-scope
+    predicate (PA-0003, PA-0123). ``ws``/``wss`` compare as ``http``/``https``."""
+    text = url or ""
+    low = text[:6].lower()
+    if low.startswith("ws://"):
+        text = "http://" + text[5:]
+    elif low.startswith("wss://"):
+        text = "https://" + text[6:]
+    if "://" not in text:
+        return False                                  # no network origin at all
+    origin = canonical_origin(text)
+    return origin is not None and origin in origins
+
+
 def url_key(url: str) -> str:
     """``canonical_origin`` plus path: how an explicit allowance names a URL."""
     return f"{canonical_origin(url) or ''}{urlsplit(url or '').path or '/'}"

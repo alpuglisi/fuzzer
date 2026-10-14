@@ -311,6 +311,13 @@ plugin registry. It is the layer that makes the store the integration bus.
     the importer and the point builder.
   - **`oracle_status`:** `pending` also covers rows a safety breaker stopped before
     the oracle reached them; the reason is in the run's metrics.
+- **FR-CORE-34** *(origin scope; `CC-CORE-0044`, 2026-10-14, BUG-0123).*
+  `core/urls.origin_scope(*urls)` and `in_origin_scope(url, origins)` are the one
+  predicate for "may a browser or API-request client reach this URL": canonical
+  scheme, host and port (`canonical_origin`; loopback aliases on one port are one
+  origin, other 127/8 addresses distinct), `ws`/`wss` compared as `http`/`https`, and a
+  URL without `://` never in scope. **Users:** the spider, the auditor's fetcher, the
+  M6 browser executor and `tools/navguard`.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

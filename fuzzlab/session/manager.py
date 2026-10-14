@@ -671,14 +671,21 @@ class SessionManager:
         """POST the credentials without letting the HTTP client follow redirects: a 307 /
         308 re-sends the body (the credentials) to wherever ``Location`` says. A 301 /
         302 / 303 becomes a body-less GET, followed only to an allowed origin over an
-        allowed transport (the same deny-first predicate)."""
+        allowed transport (the same deny-first predicate), walked by hand like discovery:
+        every later hop is checked before it is fetched, destructive URLs included
+        (BUG-0123). A refused hop leaves the POST's own response to be judged."""
         resp = _post_no_redirects(fetcher, url, data)
         location = {k.lower(): v for k, v in resp.headers.items()}.get("location")
         if resp.status in (301, 302, 303) and location:
             nxt = urljoin(url, location)
             floor = floor_https or urlparse(url).scheme.lower() == "https"
             if self._credential_destination_ok(nxt, base_url, floor_https=floor):
-                return fetcher.get(nxt)
+                try:
+                    landed, _page, _floor = self._navigate(fetcher, nxt, base_url, floor)
+                    return landed
+                except SessionAuthError as exc:
+                    if self._log:
+                        self._log.info(f"post-login redirect not followed: {exc}")
         return resp                          # 307/308 never followed: judged as is
 
     def _basic_login(self, fetcher: Fetcher, host: str, identity: str, base_url: str,

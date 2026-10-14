@@ -3,6 +3,59 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0015 — The crawler's browser is confined to the crawl scope; a loopback crawl to its origin (BUG-0123) (2026-10-14)
+- Change:
+  - `tools/navguard.py` (shared with the auditor and M6, owned here):
+    - `guard_page(target, allow, on_abort, *, in_scope, on_out_of_scope)`: `in_scope` is
+      required. It routes the context (popups included) and WebSockets
+      (`make_ws_handler`: an out-of-scope socket is never connected; `ws.close()` in a
+      sync handler deadlocks, seen live).
+    - `make_route_handler(..., in_scope, on_out_of_scope, api)`: scope first, then the
+      destructive rule (`allow` lifts only the latter). An allowed request is fetched
+      with `route.fetch(max_redirects=0)`; a redirect chain is walked through `api`
+      (the context's request client), each hop checked, at most `MAX_REDIRECTS`, with
+      301/302/303 turning a POST into a GET and 307/308 keeping it. A redirected
+      navigation is fulfilled with one redirect to the checked landing URL (`page.url`
+      and relative links stay right; the landing page is requested twice); another
+      request with the landing response. No `api`, a failed fetch or too many hops:
+      abort.
+    - `browser_launch_args(scope_urls, *, any_port_hosts=())`: `--no-proxy-server`,
+      `--host-resolver-rules` (`MAP host:port host:port` per scope origin, the three
+      loopback spellings for a loopback one, `EXCLUDE host` for `any_port_hosts`, then
+      `MAP * ~NOTFOUND`), and background networking, sync, component update, domain
+      reliability, pings, DNS prefetch and network prediction off.
+    - `checked_api_request(in_scope, url)` raises `PermissionError`; `release(context)`
+      unroutes with `ignoreErrors` before close.
+  - `tools/spider.py`:
+    - `_in_scope`: a loopback start is scoped to its exact origin (`in_origin_scope`);
+      an external start keeps BUG-0050's host rule. It is the one predicate for the
+      queue, static redirect hops, the browser route and `_isolated_submit`.
+    - `_start_browser`: scoped launch args (origin for loopback, host for external),
+      `new_context(service_workers="block")`, a context guard, then `new_page`.
+      Out-of-scope requests are counted by host in `skipped_out_of_scope` and
+      summarised at the end of the crawl.
+    - `_isolated_submit` calls `checked_api_request` first.
+  - PA-0002 sweep: see BUG-0123.
+- Impact: FR-CRAWL-11 (new); NFR-CRAWL-safe gains its scope clause, traced per layer.
+  BUG-0050's loopback rule narrows: `127.0.0.1:9999` is no longer in scope of a crawl
+  started on `127.0.0.1:8080` (`tests/test_spider_scope.py` updated). Every allowed
+  browser request now goes through Playwright's fetch (slower; bodies buffered in the
+  driver).
+- Risk: medium. A site that depends on cross-origin resources renders differently (by
+  design). A redirected navigation costs one extra request for its landing page.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py` (handlers, redirect chains, launch args,
+    the spider's API client, real-browser crawl/auditor/launch-arg tests against a
+    second loopback port and an off-host address, the AST guard and its offenders);
+    `tests/test_spider_scope.py`, `tests/test_destructive_urls.py` updated — done
+  - [x] FR-CRAWL-11; NFR-CRAWL-safe — done
+- Review: design agreed by reviewers A and B (consolidated requirements); the
+  implementation's deviations (redirect walking, port-aware resolver rules, sockets
+  never connected, the fetcher's lazy launch) sent back for code review (PA-0093(2)).
+- Effectiveness: verified offline with a real Chromium (zero connections to the second
+  port); the Juice Shop re-crawl is the live check.
+
 ### CC-CRAWL-0014 — Shared, extended settings words; the spider records what a picker did (forms phase 2, lane A) (2026-10-14)
 - Change:
   - `formnav.settings_word` (public, replaces `_settings_word`) is shared by navigation

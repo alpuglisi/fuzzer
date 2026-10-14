@@ -207,6 +207,10 @@ budget where a vulnerability is plausible.
   identities (no duplicate churn).
 - **NFR-AUD-safe** Probing uses non-destructive canaries only; destructive checks
   are gated off by default.
+  - Clause (scope; CC-AUD-0033, BUG-0123): the rendered fetcher's browser reaches only
+    the origin of the page being fetched and the auth base's: a context-wide route
+    (redirect chains walked) and launch arguments that resolve nothing else.
+  - Enforced by (scope): `ContentFetcher._start_browser` / `fetch`, `navguard` — `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
   - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
   - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)
 - **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).

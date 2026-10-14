@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Crawler/auditor/M6 browser: requests left the target origin (fixed, BUG-0123/PA-0123)
+- **Symptom:** the first Juice Shop crawl's browser followed `/redirect?to=https://github.com/...` and rendered github.com; the forms phase 1/2 bWAPP crawls likewise rendered `itsecgames.blogspot.com` through `http_response_splitting.php?url=`. No cookie or credential left the lab.
+- **Root cause:** scope was enforced at the link queue only; `navguard.guard_page` checked destructive URLs only, Playwright never routes a redirect's later hops, launches did not confine name resolution, API-request clients were unchecked, and a loopback start admitted every loopback port.
+- **Remediation:** one origin predicate (`core.urls.in_origin_scope`); a context-wide route that checks scope then destructive tokens and walks redirect chains hop by hop; WebSocket routing; `browser_launch_args` (no proxy, resolver rules per `host:port`, background networking off); scope-checked API requests with `max_redirects=0`; a loopback crawl scoped to its exact origin. AST guard plus real-browser tests. The sweep fixed the session's post-login redirect chain and the labgen identifier-SQLi runner (both followed redirects unchecked). CC-CORE-0044, CC-CRAWL-0015, CC-AUD-0033, CC-FUZZ-0066, CC-SESS-0020, CC-LAB-0253. `docs/bugs/BUG-0123-browser-left-the-target-origin.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Session: any redirect containing "login" read as a logout (fixed, BUG-0122/PA-0122)
 - **Symptom:** in the live bWAPP phase 2 run, `ba_insecure_login.php` → `302 ba_insecure_login_1.php` re-logged the run in, and the header breaker falsely stopped header probing ("session bound to a probed header").
 - **Root cause:** `detect_logout`'s redirect rule was a substring test. PA-0022 (anchor keyword heuristics) was never enforced on session detection, and its `\b` remedy is too weak for URLs.

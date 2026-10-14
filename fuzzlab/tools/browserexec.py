@@ -49,8 +49,18 @@ class PlaywrightBrowserExecutor:
 
         init = (f"window.{SENTINEL}=window.{SENTINEL}||function(t){{"
                 f"(window.__fzlbHits=window.__fzlbHits||[]).push(t);}};")
+        from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
+        from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
+                                            guard_page, release)
+        # The browser reaches only the observe and store origins (BUG-0123).
+        scope_urls = [request.url] + ([request.store.url] if request.store else [])
+        origins = origin_scope(*scope_urls)
+        def in_scope(url):
+            return in_origin_scope(url, origins)
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self._headless)
+            browser = pw.chromium.launch(headless=self._headless,
+                                         args=browser_launch_args(scope_urls))
+            context = None
             try:
                 context = browser.new_context(service_workers="block")   # BUG-0111
                 context.add_init_script(init)
@@ -59,19 +69,20 @@ class PlaywrightBrowserExecutor:
                 page = context.new_page()
                 # Abort destructive subresources/redirects; the navigation targets
                 # themselves are the explicit (ground-truth) points (BUG-0111).
-                from fuzzlab.core.urls import url_key
-                from fuzzlab.tools.navguard import guard_page
                 allowed = {url_key(request.url)}
                 if request.store is not None:
                     allowed.add(url_key(request.store.url))
-                guard_page(context, allow=frozenset(allowed))
+                guard_page(context, allow=frozenset(allowed), in_scope=in_scope)
                 page.on("dialog", lambda d: (page.evaluate(
                     f"window.{SENTINEL}('{token}')"), d.dismiss()))
 
                 if request.store is not None:                 # stored XSS: plant first
                     s = request.store
                     if s.location == "body":
-                        context.request.post(s.url, form={s.param: s.value})
+                        # API requests bypass `route`: scope-check, never redirect
+                        checked_api_request(in_scope, s.url)
+                        context.request.post(s.url, form={s.param: s.value},
+                                             max_redirects=0)
                     else:
                         page.goto(_with_query(s.url, s.param, s.value),
                                   wait_until="load", timeout=self._timeout)
@@ -87,4 +98,6 @@ class PlaywrightBrowserExecutor:
                 return ExecObservation(executed=fired,
                                        detail="playwright" if fired else "")
             finally:
+                if context is not None:
+                    release(context)
                 browser.close()

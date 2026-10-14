@@ -1492,3 +1492,27 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Each such rule is checked against the lab's own vocabulary** (the target app's
      page and field names, PA-0022's check made concrete), and that check is a test.
      (from BUG-0122)
+
+- **PA-0123** — Strengthens `PA-0112` and `PA-0002` (related: BUG-0050, BUG-0111),
+  after BUG-0123: the crawler's browser followed an open redirect to github.com (and,
+  in two bWAPP crawls, to a public blog). Scope was enforced at the link queue only,
+  the browser guard checked destructive URLs only, Playwright never routes a
+  redirect's later hops, and PA-0112 traced NFRs, not each clause per sending layer.
+  1. **Every outbound path is scope-checked where the request is made**, not where its
+     URL was chosen: browser navigations, redirect hops, subresources, popups,
+     WebSockets, and API-request clients (`context.request.*`,
+     `pw.request.new_context().fetch`, which also pass `max_redirects=0`).
+  2. **Scope is an origin** (scheme, host, port) decided by the one predicate
+     (`core.urls.in_origin_scope`). A host-only scope is a stated exception
+     (BUG-0050's external crawl), never a default; another loopback port is another
+     service.
+  3. **A browser is confined at two layers:** the route (the whole context, redirect
+     chains walked hop by hop, `in_scope` required, `allow` never lifting scope) and the
+     network (`navguard.browser_launch_args`: no proxy, resolver rules per
+     `host:port`). Both are enforced by an AST guard over every launch, guard and
+     API-request site, proven on synthetic offenders, and by real-browser tests that
+     reach for another port and an off-host address and fail, never skip, under
+     `FUZZLAB_REQUIRE_BROWSER=1`.
+  4. **Each clause of a safety NFR is traced on its own, per sending layer** (queue,
+     static redirects, browser, API requests). A clause traced at one layer is not
+     traced at the others. (from BUG-0123)

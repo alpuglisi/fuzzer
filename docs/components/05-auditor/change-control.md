@@ -3,6 +3,28 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0033 — The auditor's rendered fetcher is confined to the page's origin (BUG-0123) (2026-10-14)
+- Change:
+  - `tools/fetcher.py` `ContentFetcher`: the browser starts on the first `fetch`
+    (`_start_browser(first_url)`), launched with `browser_launch_args([first_url,
+    auth_base_url])` (resolver rules confine it to those origins), on a
+    `service_workers="block"` context guarded by `guard_page(context,
+    in_scope=self._in_scope)`. Each `fetch(url)` sets the scope to the origins of `url`
+    and `auth_base_url` (CC-CRAWL-0015's handler walks redirect chains within them). A
+    launch failure still raises, as before. Out-of-scope requests are counted by host
+    (`skipped_out_of_scope`); `release(context)` before close.
+- Impact: NFR-AUD-safe gains the browser scope clause. A page on another origin than
+  the first fetched cannot load in the browser (its resolver rules); it falls back to
+  the static fetch, which is same-origin by hand.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`
+    and the AST guard — done
+  - [x] NFR-AUD-safe — done
+- Review: with CC-CRAWL-0015.
+- Effectiveness: verified offline with a real Chromium.
+
 ### CC-AUD-0032 — Value-shape and header rules; rules validated on load (forms phase 2, lane A) (2026-10-14)
 - Change:
   - `audit/value_shape.py`: `value_shape` (url, ip, filename, path, hostname; total,

@@ -3,6 +3,26 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0253 — The identifier-SQLi oracle's runner stays on its target origin (BUG-0123 sweep) (2026-10-14)
+- Change:
+  - `labgen/identifier_sqli_oracle.py`: `default_http_runner` sends with
+    `allow_redirects=False` and follows at most `_MAX_REDIRECTS` redirects by hand,
+    only within the probed URL's own origin (`_origin`: scheme, host, port); an
+    off-origin `Location` is not followed and the redirect response is classified.
+    `_build_url` raises `ValueError` when `endpoint_path` (an absolute URL) would
+    leave the target's origin, which `assert_loopback` had checked.
+- Impact: NFR-LAB-safety. Verdicts on same-origin redirects are unchanged; an
+  off-origin redirect now reads as that redirect (fail-closed by `_classify`).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_redirect_scope_sweep.py::test_the_oracle_runner_never_follows_a_redirect_off_its_origin`,
+    `::test_an_absolute_endpoint_path_cannot_replace_the_checked_base`; the existing
+    oracle and integration tests pass — done
+  - [x] NFR-LAB-safety traced — done
+- Review: with CC-CRAWL-0015 (found by the BUG-0123 PA-0002 sweep).
+- Effectiveness: verified offline against two loopback servers.
+
 ### CC-LAB-0252 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-LAB-safety, NFR-LAB-no-secret-leak, naming the enforcing code and the test functions that fail without it

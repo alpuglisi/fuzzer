@@ -1160,7 +1160,16 @@ tracked in the requirements files, not here.
   - `core/urls.destructive_reason` / `check_send_url`: the one destructive-URL rule
     (CC-CORE-0038, BUG-0111/0112). The crawler and auditor never queue, follow or
     browser-request such a URL (`tools/navguard.py`: hand-followed redirects and a
-    Playwright route guard). Every probe sender refuses one unless it was explicitly
+    Playwright route guard).
+  - `core/urls.in_origin_scope` / `origin_scope`: the one origin-scope predicate
+    (CC-CORE-0044, BUG-0123). Every browser we launch (spider, auditor fetcher, M6
+    executor) is confined to its scope origins at two layers, both in
+    `tools/navguard.py`: a context-wide route that checks scope, then destructive
+    tokens, and walks redirect chains hop by hop (Playwright never routes later hops),
+    with WebSockets routed; and `browser_launch_args` (no proxy, resolver rules per
+    `host:port`, background networking off). API-request clients are scope-checked
+    and never redirect. An AST guard covers every launch, guard and API-request site.
+    A loopback crawl is scoped to its exact origin. Every probe sender refuses one unless it was explicitly
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;
   - **Forms (phase 1, CC-CRAWL-0013 / CC-FUZZ-0062 / CC-CORE-0039):**

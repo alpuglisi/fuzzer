@@ -133,7 +133,7 @@ import dataclasses
 import time
 from enum import Enum
 from typing import Callable, Mapping, MutableMapping, Optional
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode, urljoin, urlsplit
 
 from .oracle_wrapper import assert_loopback
 
@@ -275,7 +275,21 @@ def default_http_runner(
         all_headers.setdefault("Cookie", cookie)
     start = time.monotonic()
     try:
-        resp = requests.get(url, headers=all_headers, timeout=timeout_s)
+        # Redirects are followed by hand, and only within the probed URL's own origin:
+        # `requests` would follow one anywhere, off the loopback lab (BUG-0123).
+        resp = requests.get(url, headers=all_headers, timeout=timeout_s,
+                            allow_redirects=False)
+        current = url
+        for _ in range(_MAX_REDIRECTS):
+            location = resp.headers.get("Location")
+            if resp.status_code not in (301, 302, 303, 307, 308) or not location:
+                break
+            nxt = urljoin(current, location)
+            if _origin(nxt) != _origin(url):
+                break                                   # judged on the redirect itself
+            current = nxt
+            resp = requests.get(current, headers=all_headers, timeout=timeout_s,
+                                allow_redirects=False)
         return HttpProbeResult(
             url=url,
             status_code=resp.status_code,
@@ -380,11 +394,26 @@ def _resolve_session(request: IdentifierSqliOracleRequest) -> tuple:
     return cookie, headers
 
 
+#: Same-origin redirects the real runner follows by hand.
+_MAX_REDIRECTS = 5
+
+
+def _origin(url: str) -> tuple:
+    """(scheme, host, port) with the default port explicit: the runner's scope."""
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    return scheme, (parts.hostname or "").lower(), \
+        parts.port or {"http": 80, "https": 443}.get(scheme)
+
+
 def _build_url(request: IdentifierSqliOracleRequest, param_value: str) -> str:
     query = dict(request.base_query_params)
     query[request.param_name] = param_value
     base = request.target_base_url.rstrip("/") + "/"
     url = urljoin(base, request.endpoint_path.lstrip("/"))
+    if _origin(url) != _origin(base):           # an absolute endpoint_path (BUG-0123)
+        raise ValueError(f"endpoint {request.endpoint_path!r} leaves the target's "
+                         f"origin {request.target_base_url!r}")
     return f"{url}?{urlencode(query)}"
 
 

@@ -11,7 +11,8 @@ from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
 from fuzzlab.core.forms import default_value
-from fuzzlab.core.urls import canonical_origin, destructive_reason
+from fuzzlab.core.urls import (canonical_origin, destructive_reason, in_origin_scope,
+                               origin_scope)
 from fuzzlab.tools import paths
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -321,34 +322,55 @@ class ContentFetcher:
 
         self._pw = None
         self._browser = None
+        self._context = None
         self._page = None
         self._xhr_urls = []
+        # BUG-0123: the browser reaches only the origin of the URL being fetched and
+        # the auth base's.
+        self._scope_origins = origin_scope(auth_base_url)
+        self.skipped_out_of_scope: dict[str, int] = {}
+
+    def _in_scope(self, url):
+        return in_origin_scope(url, self._scope_origins)
+
+    def _note_out_of_scope(self, url):
+        host = urlparse(url).hostname or "?"
+        self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
 
     def __enter__(self):
-        if self.engine == "playwright":
-            self._pw = sync_playwright().start()
-            launch_kwargs = {
-                "headless": True,
-                "args": ["--no-sandbox", "--disable-dev-shm-usage"],
-            }
-            exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-            if exe:
-                launch_kwargs["executable_path"] = exe
-            self._browser = self._pw.chromium.launch(**launch_kwargs)
-            # service workers would fetch outside page.route (BUG-0111)
-            self._page = self._browser.new_page(service_workers="block")
-            from fuzzlab.tools.navguard import guard_page
-            guard_page(self._page)                  # NFR-CRAWL-safe (BUG-0111)
-            self._page.on("request", self._on_request)
-            if self._session_manager and self._identity and self._auth_base_url:
-                from fuzzlab.tools import browserauth
-                cookies, headers = browserauth.playwright_auth(
-                    self._session_manager, self._identity, self._auth_base_url)
-                browserauth.apply_to_context(self._page.context, cookies, headers)
-                logging.info(f"Auditor authenticated as {self._identity} "
-                             f"({len(cookies)} cookie(s))")
+        # The browser starts on the first fetch: its resolver rules name the hosts it
+        # may resolve at all, which fetch() is the first to know (BUG-0123).
         logging.info(f"Auditor engine: {self.engine}")
         return self
+
+    def _start_browser(self, first_url):
+        from fuzzlab.tools.navguard import browser_launch_args, guard_page
+        self._pw = sync_playwright().start()
+        launch_kwargs = {
+            "headless": True,
+            # resolve no host but the target's and the auth base's (BUG-0123)
+            "args": browser_launch_args([first_url, self._auth_base_url]),
+        }
+        exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+        if exe:
+            launch_kwargs["executable_path"] = exe
+        self._browser = self._pw.chromium.launch(**launch_kwargs)
+        # service workers would fetch outside page.route (BUG-0111)
+        context = self._browser.new_context(service_workers="block")
+        # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is
+        # confined to the origin being fetched (and the auth base's)
+        guard_page(context, in_scope=self._in_scope,
+                   on_out_of_scope=self._note_out_of_scope)
+        self._context = context
+        self._page = context.new_page()
+        self._page.on("request", self._on_request)
+        if self._session_manager and self._identity and self._auth_base_url:
+            from fuzzlab.tools import browserauth
+            cookies, headers = browserauth.playwright_auth(
+                self._session_manager, self._identity, self._auth_base_url)
+            browserauth.apply_to_context(self._page.context, cookies, headers)
+            logging.info(f"Auditor authenticated as {self._identity} "
+                         f"({len(cookies)} cookie(s))")
 
     def _on_request(self, request):
         try:
@@ -358,8 +380,11 @@ class ContentFetcher:
             pass
 
     def __exit__(self, exc_type, exc, tb):
-        if self.engine == "playwright":
+        if self._pw is not None:
             try:
+                if self._context is not None:
+                    from fuzzlab.tools.navguard import release
+                    release(self._context)
                 if self._browser:
                     self._browser.close()
             finally:
@@ -374,6 +399,9 @@ class ContentFetcher:
         rendering (always empty for the static engine)."""
         if self.engine == "playwright":
             self._xhr_urls = []
+            self._scope_origins = origin_scope(url, self._auth_base_url)   # BUG-0123
+            if self._pw is None:
+                self._start_browser(url)        # a launch failure is an error, as before
             try:
                 response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
                 status = response.status if response else 0

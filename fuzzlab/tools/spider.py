@@ -7,7 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
-from fuzzlab.core.urls import destructive_reason, url_key
+from fuzzlab.core.urls import destructive_reason, in_origin_scope, origin_scope, url_key
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -163,8 +163,13 @@ class LocalSpider:
         # The login is discovered from the start URL itself, never its bare origin: the
         # app may live under a path (/bWAPP/), BUG-0113.
         self._auth_base_url = start_url
-        # Link-following scope: the start URL's own host (see _in_scope).
+        # Link-following scope: the start URL's own host (see _in_scope); for a
+        # loopback start, its exact origin (BUG-0123). The browser and every API request
+        # use the same predicate.
         self._scope_host = self._norm_host(start_url)
+        self._scope_origins = origin_scope(start_url)
+        #: out-of-scope requests the browser aborted, by host (BUG-0123)
+        self.skipped_out_of_scope: dict[str, int] = {}
 
         # A crawl normally rebuilds the whole map. Without this, a second run
         # against an existing database finds every URL already "visited" and
@@ -205,6 +210,7 @@ class LocalSpider:
         # Playwright handles (created lazily in crawl()).
         self._pw = None
         self._browser = None
+        self._context = None
         self._page = None
         # URLs requested by JavaScript (fetch/XHR) during the current navigation.
         self._xhr_urls = []
@@ -237,10 +243,16 @@ class LocalSpider:
         self._pw = sync_playwright().start()
         # --no-sandbox / --disable-dev-shm-usage keep Chromium happy in
         # containers and when running as root.
-        launch_kwargs = {
-            "headless": True,
-            "args": ["--no-sandbox", "--disable-dev-shm-usage"],
-        }
+        # Scope-confined launch (BUG-0123): no proxy, nothing resolvable outside the
+        # crawl scope (the start origin; for an external start, its host on any port,
+        # BUG-0050), no background networking (see browser_launch_args).
+        from fuzzlab.tools.navguard import browser_launch_args, guard_page
+        if self._scope_host in self._LOOPBACK:
+            args = browser_launch_args([self.start_url])
+        else:
+            args = browser_launch_args([], any_port_hosts=[self._scope_host,
+                                                           f"www.{self._scope_host}"])
+        launch_kwargs = {"headless": True, "args": args}
         # Optional override: point at a specific Chromium binary (useful when the
         # managed browser version does not match, e.g. a pre-installed browser).
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
@@ -248,10 +260,13 @@ class LocalSpider:
             launch_kwargs["executable_path"] = exe
         self._browser = self._pw.chromium.launch(**launch_kwargs)
         # service workers would fetch outside page.route (BUG-0111)
-        self._page = self._browser.new_page(service_workers="block")
-        from fuzzlab.tools.navguard import guard_page
-        guard_page(self._page, allow=self._allow,
-                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason))
+        context = self._browser.new_context(service_workers="block")
+        # guard the context, not the page, so popups are confined too (BUG-0123)
+        guard_page(context, allow=self._allow,
+                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
+                   in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope)
+        self._context = context
+        self._page = context.new_page()
         if self._session_manager and self._identity:
             from fuzzlab.tools import browserauth
             cookies, headers = browserauth.playwright_auth(
@@ -274,6 +289,9 @@ class LocalSpider:
 
     def _stop_browser(self):
         try:
+            if self._context is not None:
+                from fuzzlab.tools.navguard import release
+                release(self._context)
             if self._browser:
                 self._browser.close()
         finally:
@@ -303,15 +321,25 @@ class LocalSpider:
         the safety intent of the former localhost-only guard) and lets it
         actually crawl whatever authorized host it was started on, loopback lab
         or otherwise (previously it silently dropped every non-loopback link, so
-        a real target yielded zero followed links). Loopback aliases are one
-        host (see ``_LOOPBACK``); ``www.`` is normalised on both sides.
+        a real target yielded zero followed links). ``www.`` is normalised on both
+        sides. A **loopback** start is scoped to its exact origin (BUG-0123): loopback
+        aliases on the same port are one origin, another port is another service.
+        This one predicate gates the link queue, redirects, the browser's every
+        request (``guard_page``) and the API-request client.
         """
+        if self._scope_host in self._LOOPBACK:
+            # A loopback start is one service: its exact origin (scheme, host, port),
+            # aliases folded by canonical_origin. Another loopback port is another
+            # service the operator did not name (BUG-0123).
+            return in_origin_scope(url, self._scope_origins)
         host = self._norm_host(url)
         if not host:
             return False
-        if self._scope_host in self._LOOPBACK:
-            return host in self._LOOPBACK
         return host == self._scope_host
+
+    def _note_out_of_scope(self, url):
+        host = urlparse(url).hostname or "?"
+        self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
 
     # ----- fetchers -----
     def _fetch_static(self, url):
@@ -416,6 +444,8 @@ class LocalSpider:
         back (reviewers A2/B-M1). Returns ``(status, headers)``."""
         from urllib.parse import urlencode
         pairs = list(entries)
+        from fuzzlab.tools.navguard import checked_api_request
+        checked_api_request(self._in_scope, action_url)          # BUG-0123
         if self.engine == "playwright" and self._pw is not None:
             ctx = self._pw.request.new_context(
                 storage_state=self._page.context.storage_state(),
@@ -520,6 +550,11 @@ class LocalSpider:
             if self.skipped_destructive:
                 logging.info(f"Skipped {len(self.skipped_destructive)} destructive "
                              f"URL(s) (NFR-CRAWL-safe).")
+            if self.skipped_out_of_scope:
+                hosts = ", ".join(f"{h} x{n}" for h, n in
+                                  sorted(self.skipped_out_of_scope.items()))
+                logging.info(f"Blocked {sum(self.skipped_out_of_scope.values())} "
+                             f"out-of-scope browser request(s): {hosts} (BUG-0123).")
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 

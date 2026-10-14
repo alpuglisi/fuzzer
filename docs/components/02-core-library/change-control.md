@@ -3,6 +3,23 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0044 — One origin-scope predicate (BUG-0123) (2026-10-14)
+- Change:
+  - `core/urls.py`: `origin_scope(*urls)` (the canonical origins of the non-empty
+    URLs) and `in_origin_scope(url, origins)` (`ws`/`wss` compared as `http`/`https`; a
+    URL with no `://` is never in scope). Both build on `canonical_origin`, so loopback
+    aliases on one port are one origin and other 127/8 addresses stay distinct.
+- Impact: FR-CORE-34 (new). Used by the spider, the auditor's fetcher, the M6 executor
+  and `navguard`.
+- Risk: low (new functions).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_origin_scope_is_scheme_host_and_port`,
+    `test_origin_scope_ignores_empty_inputs` — done
+  - [x] FR-CORE-34 — done
+- Review: with CC-CRAWL-0015.
+- Effectiveness: verified offline.
+
 ### CC-CORE-0042 — Link sets in `form`; one header-point name rule; credential-name predicate (forms phase 2, lane A) (2026-10-14)
 - Change:
   - `core/forms.py`: `LINK_SET_ENCTYPE` (NULL), `is_link_set(row)`,

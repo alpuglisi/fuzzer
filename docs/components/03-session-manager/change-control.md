@@ -3,6 +3,27 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0020 — The post-login redirect chain is walked by hand, every hop checked (BUG-0123 sweep) (2026-10-14)
+- Change:
+  - `session/manager.py` `_post_credentials`: after a 301/302/303 whose first
+    `Location` passes `_credential_destination_ok`, the chain is walked by
+    `_navigate` (no automatic redirects, at most `MAX_LOGIN_HOPS`, each hop checked by
+    `_navigation_ok` before it is fetched: destination and destructive URLs). It
+    called `fetcher.get(nxt)`, whose default followed every later hop unchecked. A
+    refused hop is logged and the POST's own response is judged, as for 307/308.
+- Impact: FR-SESS-12's "followed by hand" now holds for every hop. A login whose
+  landing chain leaves scope is judged on the POST response alone. Host scope stays
+  host-level (FR-SESS-12/13): another port on an in-scope host is allowed.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_redirect_scope_sweep.py` (chain walked hop by hop, an
+    off-scope later hop and a destructive landing never fetched; each kills the
+    reverted fix) — done
+  - [x] FR-SESS-12 amended — done
+- Review: with CC-CRAWL-0015 (found by the BUG-0123 PA-0002 sweep).
+- Effectiveness: verified offline.
+
 ### CC-SESS-0019 — A redirect is a logout only to an anchored login URL (BUG-0122) (2026-10-14)
 - Change:
   - **`detect.redirect_is_logout(location, page_url, login_url)`** replaces

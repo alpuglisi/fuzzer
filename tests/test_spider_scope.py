@@ -5,7 +5,8 @@ followable hosts, so pointed at any authorized *external* host it silently
 dropped every discovered link and followed none. Scope is now the start URL's
 own host: same-host links are followed, off-host links (third-party domains,
 other subdomains) are not, and loopback aliases still count as one host so the
-lab keeps working. These tests pin that decision.
+lab keeps working -- on the start URL's own port only (BUG-0123: another loopback
+port is another service). These tests pin that decision.
 """
 
 import tempfile
@@ -62,11 +63,15 @@ def test_external_host_was_the_bug_all_links_would_have_been_dropped():
 
 @pytest.mark.parametrize("link,expected", [
     ("http://localhost:8080/x", True),      # loopback alias of the start host
-    ("http://127.0.0.1:9999/y", True),      # same, different port
-    ("http://[::1]/z", True),               # ipv6 loopback
+    ("http://[::1]:8080/z", True),          # ipv6 loopback, same port
+    ("http://127.0.0.1:9999/y", False),     # another loopback port: another service (BUG-0123)
+    ("http://[::1]/z", False),              # ipv6 loopback, port 80: another service
+    ("https://127.0.0.1:8080/y", False),    # another scheme
+    ("http://127.0.0.2:8080/y", False),     # another 127/8 address
     ("https://example.com/", False),        # off to the open web
 ])
 def test_loopback_start_treats_aliases_as_one_host(link, expected):
+    """A loopback start's scope is its exact origin, aliases folded (BUG-0123)."""
     sp, db = _spider("http://127.0.0.1:8080/")
     try:
         assert sp._in_scope(link) is expected

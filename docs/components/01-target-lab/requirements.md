@@ -6274,6 +6274,7 @@ lane) can submit a payload as
   default; no outbound route.
   - Enforced by (bound to localhost): `lab/compose.yaml` loopback-only port bindings — `tests/test_lab_compose_network_isolation.py::test_every_port_binding_is_loopback_only`, `tests/test_lab_downgrade.py::test_frontend_is_loopback_only`, `tests/test_web_lab.py::test_every_published_port_binds_loopback_only`
   - Enforced by (dual-use services default off): compose profiles — `tests/test_lab_downgrade.py::test_frontend_is_gated_off_by_a_profile`, `tests/test_web_lab.py::test_profiled_services_carry_their_compose_profile`
+  - Enforced by (the identifier-SQLi oracle stays on its loopback target; CC-LAB-0253, BUG-0123): `default_http_runner` same-origin redirects only, `_build_url` origin check — `tests/test_redirect_scope_sweep.py::test_the_oracle_runner_never_follows_a_redirect_off_its_origin`, `tests/test_redirect_scope_sweep.py::test_an_absolute_endpoint_path_cannot_replace_the_checked_base`
   - Not yet enforced: **no outbound route** — the app networks are ordinary bridges with egress, and the lab has real outbound sinks (SSRF, webhooks); it needs an internal backend network or a host firewall. There is no lab-level "destructive class" beyond profiles. (BUG-0111 sweep, 2026-10-13; reported to the operator.)
 - **NFR-LAB-no-leak** No vulnerability class name in any URL, filename, or
   parameter a tool can see.

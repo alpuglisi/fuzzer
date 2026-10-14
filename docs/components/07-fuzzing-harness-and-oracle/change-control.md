@@ -22,6 +22,27 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0066 — The M6 browser executor is confined to its observe and store origins (BUG-0123) (2026-10-14)
+- Change:
+  - `tools/browserexec.py` `PlaywrightBrowserExecutor.run`: the scope is
+    `origin_scope(request.url, store.url)`. Chromium is launched with
+    `browser_launch_args` of those URLs, the context is guarded with `in_scope`
+    (redirect chains walked, WebSockets routed), and a body-located stored plant calls
+    `checked_api_request` and posts with `max_redirects=0` (it followed redirects).
+    `release(context)` before close.
+- Impact: NFR-FUZZ-safe: the browser part of "no traffic off localhost" is enforced
+  (the senders' part stays as recorded). A DOM-XSS sink that loads a cross-origin
+  script cannot fire.
+- Risk: low; the executor runs on-host only.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_the_m6_browser_is_launched_scoped_and_plants_without_redirects`,
+    the AST guard — done
+  - [x] NFR-FUZZ-safe — done
+- Review: with CC-CRAWL-0015.
+- Effectiveness: verified offline with a fake Playwright; the on-host `--browser` run is
+  the live check.
+
 ### CC-FUZZ-0063 — Link siblings, header points with a session breaker, POST selectors, neutral host values; BUG-0115 (forms phase 2, lane A) (2026-10-14)
 - Change:
   - **Link siblings (`store_adapter`):** every query-bearing crawled URL's query becomes

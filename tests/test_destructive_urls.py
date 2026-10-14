@@ -126,12 +126,23 @@ def test_the_start_url_is_the_operators_own_and_is_fetched(tmp_path):
 
 
 class _Route:
+    """A fake Playwright route whose fetch answers 200: an allowed request is fetched
+    by the guard and fulfilled (BUG-0123), shown here as "continue"."""
     def __init__(self, url):
         class Req:
-            pass
+            method = "GET"
+            headers: dict = {}
+            post_data_buffer = None
+
+            def is_navigation_request(self):
+                return False
         self.request = Req()
         self.request.url = url
         self.outcome = None
+
+    def fetch(self, max_redirects=None):
+        assert max_redirects == 0
+        return type("Resp", (), {"status": 200, "headers": {}})()
 
     def abort(self):
         self.outcome = "abort"
@@ -139,11 +150,15 @@ class _Route:
     def continue_(self):
         self.outcome = "continue"
 
+    def fulfill(self, response=None, **kw):
+        self.outcome = "continue"
+
 
 def test_the_browser_route_aborts_destructive_requests_only():
     aborted = []
     handler = make_route_handler(frozenset({url_key("http://h/setup.php")}),
-                                 on_abort=lambda u, r: aborted.append(u))
+                                 on_abort=lambda u, r: aborted.append(u),
+                                 in_scope=lambda u: True)
     for url, outcome in [("http://h/logout.php", "abort"), ("http://h/a.php", "continue"),
                          ("http://h/setup.php", "continue")]:
         route = _Route(url)

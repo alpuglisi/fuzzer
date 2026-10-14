@@ -1,46 +1,202 @@
-"""Browser-side destructive-URL guard (NFR-CRAWL-safe / NFR-FUZZ-safe, BUG-0111).
+"""Browser-side scope and destructive-URL guard (NFR-CRAWL/FUZZ/AUD-safe; BUG-0111,
+BUG-0123).
 
 A headless browser sends requests no link queue controls: redirects, page scripts'
-``fetch``/XHR, ``<img>``/``<iframe>`` subresources, meta refreshes. ``guard_page``
-installs a route on the page (or context) that aborts every request whose URL
-``core.urls.destructive_reason`` flags, before it leaves the browser, unless that exact
-URL (by ``url_key``) is in ``allow`` — the operator's explicit input.
+``fetch``/XHR, ``<img>``/``<iframe>`` subresources, popups, WebSockets, preconnects.
+Every one is confined at two layers, each checked where the request is made (PA-0123):
+
+* **the route** -- ``guard_page`` routes the whole browser *context* (popups included):
+  a request outside the scope origins (``core.urls.in_origin_scope``) or one
+  ``core.urls.destructive_reason`` flags is aborted before it leaves the browser,
+  unless, for the destructive rule only, that exact URL (by ``url_key``) is in
+  ``allow`` -- the operator's explicit input, which never lifts scope. Playwright never
+  routes a redirect's later hops, so the handler fetches each request itself without
+  following redirects and walks the chain, every hop checked the same way (below);
+* **the network** -- every launch takes ``browser_launch_args``: no proxy, and no
+  ``host:port`` resolvable outside scope (IP literals included), which also confines
+  what a route never sees (preconnect, DNS prefetch, a re-requested landing page).
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
-requests bypass ``page.route``. WebSockets are not routed (they would need
-``route_web_socket``); none of our targets' destructive actions use one, a stated gap.
+requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Callable
+from urllib.parse import urljoin, urlsplit
 
-from fuzzlab.core.urls import destructive_reason, url_key
+from fuzzlab.core.urls import canonical_origin, destructive_reason, url_key
+
+#: Not network requests: never scope-checked.
+_LOCAL_SCHEMES = ("data:", "blob:", "about:")
+_REDIRECTS = (301, 302, 303, 307, 308)
 
 
 def make_route_handler(allow: frozenset[str] = frozenset(),
-                       on_abort: Callable[[str, str], None] | None = None):
-    """The route handler ``guard_page`` installs (split out so it is testable)."""
-    def handler(route, request=None) -> None:
-        req = request if request is not None else route.request
-        url = req.url
+                       on_abort: Callable[[str, str], None] | None = None, *,
+                       in_scope: Callable[[str], bool],
+                       on_out_of_scope: Callable[[str], None] | None = None,
+                       api=None):
+    """The route handler ``guard_page`` installs (split out so it is testable).
+
+    Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
+    says. Then the destructive check (BUG-0111), which ``allow`` may lift. An allowed
+    request is fetched here with ``max_redirects=0``; a redirect chain is walked hop by
+    hop through ``api`` (the context's request client, sharing its cookies), each hop
+    checked like the first, and the request aborted at the first refused hop. A
+    redirected navigation is answered with one redirect to its checked landing URL
+    (so ``page.url`` and relative links stay right; the browser requests that page a
+    second time), any other request with the landing response itself."""
+    def refused(url: str) -> bool:
+        if not in_scope(url):
+            logging.info(f"blocked out-of-scope browser request to "
+                         f"{urlsplit(url).hostname or url[:40]!r}")
+            if on_out_of_scope is not None:
+                on_out_of_scope(url)
+            return True
         reason = destructive_reason(url)
         if reason is not None and url_key(url) not in allow:
             logging.info(f"blocked destructive browser request {url.split('?', 1)[0]} "
                          f"({reason!r})")
             if on_abort is not None:
                 on_abort(url, reason)
+            return True
+        return False
+
+    def handler(route, request=None) -> None:
+        req = request if request is not None else route.request
+        url = req.url
+        if url.lower().startswith(_LOCAL_SCHEMES):
+            route.continue_()
+            return
+        if refused(url):
             route.abort()
             return
-        route.continue_()
+        try:
+            first = route.fetch(max_redirects=0)
+            final, final_url, method = first, url, req.method.upper()
+            for _ in range(MAX_REDIRECTS + 1):
+                location = final.headers.get("location")
+                if final.status not in _REDIRECTS or not location:
+                    break
+                nxt = urljoin(final_url, location)
+                if api is None or refused(nxt):
+                    route.abort()
+                    return
+                if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
+                    method = "GET"                          # as a browser does
+                keep_body = method not in ("GET", "HEAD")
+                final = api.fetch(nxt, method=method, max_redirects=0,
+                                  data=req.post_data_buffer if keep_body else None,
+                                  headers={"content-type": req.headers.get("content-type",
+                                                                           "")}
+                                  if keep_body else None)
+                final_url = nxt
+            else:
+                logging.info(f"blocked a browser redirect chain over {MAX_REDIRECTS} "
+                             f"hops from {url.split('?', 1)[0]}")
+                route.abort()
+                return
+        except Exception as exc:  # noqa: BLE001 - an unfetchable request is aborted
+            logging.info(f"browser request {url.split('?', 1)[0]} failed "
+                         f"({str(exc).splitlines()[0][:80]})")
+            route.abort()
+            return
+        if final is first:
+            route.fulfill(response=first)
+        elif req.is_navigation_request():
+            status = 307 if method not in ("GET", "HEAD") else (
+                303 if req.method.upper() not in ("GET", "HEAD") else 302)
+            route.fulfill(status=status, headers={"location": final_url})
+        else:
+            route.fulfill(response=final)
+    return handler
+
+
+def release(target) -> None:
+    """Before closing a guarded context: let in-flight route handlers fail silently
+    instead of logging ``TargetClosedError`` futures at teardown."""
+    try:
+        target.unroute_all(behavior="ignoreErrors")
+    except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
+        pass
+
+
+def make_ws_handler(in_scope: Callable[[str], bool],
+                    on_out_of_scope: Callable[[str], None] | None = None):
+    """WebSockets are routed separately from HTTP: an in-scope socket is connected
+    through; an out-of-scope one is **never connected** -- Playwright then serves it as
+    a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
+    a sync handler it deadlocks the dispatcher (seen live)."""
+    def handler(ws) -> None:
+        if in_scope(ws.url):
+            ws.connect_to_server()
+            return
+        logging.info(f"blocked out-of-scope WebSocket to "
+                     f"{urlsplit(ws.url).hostname or ws.url[:40]!r}")
+        if on_out_of_scope is not None:
+            on_out_of_scope(ws.url)
     return handler
 
 
 def guard_page(target, allow: frozenset[str] = frozenset(),
-               on_abort: Callable[[str, str], None] | None = None) -> None:
-    """Abort destructive requests from a Playwright ``Page`` or ``BrowserContext``."""
-    target.route("**/*", make_route_handler(allow, on_abort))
+               on_abort: Callable[[str, str], None] | None = None, *,
+               in_scope: Callable[[str], bool],
+               on_out_of_scope: Callable[[str], None] | None = None) -> None:
+    """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
+    too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
+    (BUG-0123)."""
+    api = getattr(target, "request", None)
+    target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
+                                            on_out_of_scope=on_out_of_scope, api=api))
+    route_ws = getattr(target, "route_web_socket", None)
+    if route_ws is None:                            # an old Playwright: say so, loudly
+        logging.warning("this Playwright cannot route WebSockets; the resolver rules "
+                        "of browser_launch_args still confine them (BUG-0123)")
+        return
+    route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope))
+
+
+_LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")
+
+
+def browser_launch_args(scope_urls, *, any_port_hosts=()) -> list[str]:
+    """Chromium arguments for every launch we make (BUG-0123): no proxy, nothing
+    resolvable outside scope, and no background networking.
+
+    ``--host-resolver-rules`` maps each scope ``host:port`` to itself and every other
+    name to ``~NOTFOUND``. Chromium applies the rules to IP literals and matches them on
+    ``host:port`` (default ports included), so ``203.0.113.9``, ``127.0.0.2`` or another
+    port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). This
+    confines what a route cannot see -- a preconnect, a DNS prefetch, a landing page the
+    browser re-requests. A loopback origin admits all three loopback spellings on its
+    port. ``any_port_hosts`` are hosts admitted on every port (the crawler's
+    host-scoped external target, BUG-0050)."""
+    rules = []
+    for url in scope_urls:
+        origin = canonical_origin(url) if url else None
+        if origin is None:
+            continue
+        host, port = origin.split("://", 1)[1].rsplit(":", 1)
+        spellings = _LOOPBACK_SPELLINGS if host == "127.0.0.1" else (host,)
+        rules += [f"MAP {h}:{port} {h}:{port}" for h in spellings]
+    rules += [f"EXCLUDE {h.lower()}" for h in any_port_hosts if h]
+    rules = list(dict.fromkeys(rules)) + ["MAP * ~NOTFOUND"]
+    return ["--no-sandbox", "--disable-dev-shm-usage", "--no-proxy-server",
+            f"--host-resolver-rules={', '.join(rules)}", "--disable-background-networking",
+            "--disable-component-update", "--disable-sync", "--disable-domain-reliability",
+            "--no-pings", "--dns-prefetch-disable", "--disable-features=NetworkPrediction",
+            "--no-default-browser-check", "--metrics-recording-only"]
+
+
+def checked_api_request(in_scope: Callable[[str], bool], url: str) -> None:
+    """Before a Playwright API-request call (``context.request.*``,
+    ``pw.request.new_context().fetch``), which `route` never sees: refuse an
+    out-of-scope URL. Callers pass ``max_redirects=0`` too."""
+    if not in_scope(url):
+        raise PermissionError(f"refusing an out-of-scope request to "
+                              f"{urlsplit(url).hostname!r} (BUG-0123)")
 
 
 #: Redirects a static fetch follows by hand (each hop checked first).
@@ -52,7 +208,6 @@ def get_checked(session, url: str, timeout: float, may_follow: Callable[[str], b
     only if ``may_follow(next_url)`` allows it (scope, and no destructive token). A
     refused hop is not followed; the redirect response itself is returned (BUG-0111).
     """
-    from urllib.parse import urljoin
     resp = None
     for _ in range(MAX_REDIRECTS + 1):
         resp = session.get(url, timeout=timeout, allow_redirects=False)

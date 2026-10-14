@@ -83,7 +83,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `SessionManager(auth_origins=[...])`. Anything else fails loudly, naming the
     option.
   - **No automatic redirects.** The credential POST never follows them. 301/302/303
-    are followed by hand as a GET, only to an allowed origin; 307/308 never.
+    are followed by hand as a GET, only to an allowed origin; 307/308 never. *(CC-SESS-0020,
+    BUG-0123:)* every later hop of that chain is walked the same way, each checked by
+    the navigation predicate (destination and destructive URLs) before it is fetched;
+    a refused hop leaves the POST's own response to be judged.
   - **HTTP Basic.** A base URL answering `401` + `WWW-Authenticate: Basic` (no form)
     authenticates with the Basic header, sent only to that in-scope base URL.
 - **FR-SESS-13 (session transport binding, CC-SESS-0013, BUG-0097/0098)**
