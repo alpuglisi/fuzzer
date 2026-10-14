@@ -3,6 +3,30 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0036 — Forms phase 3 integration: locations a closed set; open redirect off fragment points (2026-10-14)
+- Change:
+  - `audit/rules.py`: `LOCATIONS` (query, body, header, cookie, json, fragment, path:
+    the ground truth's schemas plus `json`); `validate_rule` checks `location_in` and
+    `location_not_in` against it, as `value_shape_in` / `origin_in` are (reviewer A,
+    lane J re-review: a typo such as `"fragmnet"` would silently widen a rule).
+  - `default_rules.json`: `R-OPEN-REDIRECT` and `R-OPEN-REDIRECT-VALUE` gain
+    `location_not_in: ["fragment"]` (reviewer B, lane J re-review; decision D16, equal
+    flexibility, the reviewer's recommendation): no browser open-redirect mechanism
+    exists, so such a candidate could only ever be inconclusive.
+  - `tools/store_adapter.redact_leaf` delegates to `core.redaction.redact_leaf` (the one
+    leaf rule, CC-CORE-0049).
+- Impact: FR-AUD-22 amended (fragment points draw xss candidates only). Rule loading
+  rejects an unknown location.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_json_points.py::test_an_unknown_location_is_a_rule_error`,
+    `::test_open_redirect_rules_never_fire_on_a_fragment_point`,
+    `::test_one_leaf_rule_serves_capture_and_import` — done
+  - [x] FR-AUD-22 — done
+- Review: reviewers A and B (lane J re-reviews); integration commit.
+- Effectiveness: verified offline.
+
 ### CC-AUD-0035 — Captured JSON requests become points; rules on JSON leaves; SPA route queries are fragment points (forms phase 3, lane J) (2026-10-14)
 - Change:
   - `tools/store_adapter.py`: `import_spider(..., fuzz_json_writes=False)` reads the

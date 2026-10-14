@@ -22,6 +22,28 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0070 — Forms phase 3 integration: a mechanism that observes nothing never makes a point read as tested (2026-10-14)
+- Change:
+  - `oracle/strategies.py`: `GreyboxConfirmationStrategy.confirm` raises
+    `UnplaceableLocation` (no verdict from this mechanism) when no coverage or DB-fault
+    source is attached, or the sender cannot mint a correlation id; it returned None,
+    which the oracle (lane J's placement accounting) counted as a placed, negative check.
+    `_BrowserXssStrategy.confirm` (DOM and stored XSS) raises it for a `fragment` point
+    when no browser is attached (only a browser can place one).
+  - Found while merging: a browserless xss fragment point was recorded `checked` and
+    rejected (a negative training label) instead of `inconclusive` (`unplaceable`).
+    Before lane J the oracle had no placement accounting, so no shipped run is affected.
+- Impact: FR-FUZZ-47 (a point no mechanism could observe stays unlabelled). Query and
+  body points are unchanged: other mechanisms still place them.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_json_points.py::test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative`
+    (now xss without a browser), `tests/test_oracle_greybox.py::test_noops_without_any_source`,
+    `::test_noops_without_a_correlating_sender` (now expect `UnplaceableLocation`) — done
+- Review: integration commit; to be confirmed by reviewers A and B with the merge.
+- Effectiveness: verified offline.
+
 ### CC-FUZZ-0068 — JSON body points: senders, oracle binding, executor placement (forms phase 3, lane J) (2026-10-14)
 - Change:
   - `tools/probesender.py`: `SeamProbeSender` and `RequestsProbeSender` get a `json`

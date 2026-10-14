@@ -274,7 +274,11 @@ budget where a vulnerability is plausible.
   - **Client-side categories only on fragment points.** A `fragment` payload never
     reaches the server, so every server-side rule carries `location_not_in:
     ["fragment"]` (a closed predicate beside `location_in`) or a `location_in` without
-    it: a fragment point draws only xss and open-redirect candidates (reviewer B).
+    it: a fragment point draws only xss candidates (reviewer B). *(Integration,
+    CC-AUD-0036:)* both open-redirect rules carry `location_not_in: ["fragment"]` too:
+    the only confirmer is the HTTP `OpenRedirectStrategy`, so a fragment candidate could
+    never be decided. `location_in` / `location_not_in` values are a closed set
+    (`audit.rules.LOCATIONS`); an unknown location is a `RuleError`.
   - **Stated gaps:** points are only as good as lane I's capture (no captured request,
     no points; API calls only seen in a bundle are not imported); an object-selector
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;

@@ -3,6 +3,19 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
+- Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
+  candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could
+  place the point), from the production-written metrics. Built in lane J (recorded
+  there under CC-FUZZ-0068); this entry gives the UI component its own record at merge.
+- Impact: FR-UI-19 (updated in place by lane J).
+- Risk: low.
+- Deliverables:
+  - [x] code and template — done (lane J, 45a74b4)
+  - [x] tests: `tests/test_web_ml_context.py`, `tests/test_web_pages_browser.py` — done
+- Review: reviewers A and B (lane J re-reviews).
+- Effectiveness: verified offline.
+
 ### CC-UI-0052 — Run page: `inconclusive` oracle coverage; `pending` reworded (2026-10-14)
 - Change:
   - **`web/results._ml_context`:** counts `inconclusive` (CC-CORE-0043) as its own

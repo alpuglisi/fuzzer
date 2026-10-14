@@ -72,9 +72,12 @@ def _spider_db(path, requests=(), pages=(), forms=()):
     for f in forms:
         sm.record_form(f)
     sm.close()
-    if requests is None:
-        return
     db = sqlite3.connect(path)
+    if requests is None:                 # an old spider DB: lane S's table did not exist
+        db.execute("DROP TABLE IF EXISTS discovered_requests")
+        db.commit()
+        db.close()
+        return
     db.execute(REQUESTS_DDL)
     for i, r in enumerate(requests):
         db.execute("INSERT INTO discovered_requests (page_url, method, url, content_type, "
@@ -896,15 +899,16 @@ def test_the_auto_cli_passes_the_json_writes_flag_to_the_import(tmp_path, monkey
 # Review follow-ups (reviewers A and B): J2-J4, B1-B4
 # =========================================================================================
 def _unplaceable_fragment_run(tmp_path):
-    """A crawl-style fragment point (an SPA route's ``next``), no browser, open redirect
-    only: its one mechanism is HTTP-only, so the crawl guard refuses it everywhere."""
+    """A crawl-style fragment point (an SPA route's ``next``), no browser, xss only (the
+    one category a fragment point draws, CC-AUD-0036): without a browser every mechanism
+    is HTTP-only, so the crawl guard refuses it everywhere."""
     from fuzzlab.core.runmode import RunPlan
     from fuzzlab.harness.auto import _CountingSender, _FragmentGuard
     from fuzzlab.harness.pipeline import run_pipeline
     wire = _JsonWire()
     point = InjectionPoint(url="http://localhost/#/go", param="next", method="GET",
                            location="fragment", origin="crawl")
-    plan = RunPlan(mode="manual", categories=["open-redirect"], scored=False,
+    plan = RunPlan(mode="manual", categories=["xss"], scored=False,
                    source="manual")
     store = Store(tmp_path / "f.db")
     run = store.start_run("auto", "localhost")
@@ -980,7 +984,7 @@ def test_server_side_rules_never_fire_on_a_fragment_point():
     """B1 (reviewer B): only client-side categories (DOM/reflected XSS, open redirect)
     on a fragment point; every other rule excludes the location, whatever the name or
     value shape."""
-    client_side = {"xss", "open-redirect"}
+    client_side = {"xss"}                    # open redirect too is off fragments (CC-AUD-0036)
     rules = load_rules()
     for rule in rules:
         if rule.category in client_side:
@@ -1104,3 +1108,59 @@ def test_a_non_fragment_finding_url_is_unchanged():
         "/app/p.php"
     assert finding_url(Candidate(url="http://h/app/#/a", param="q",
                                  location="fragment")) == "/app/#/a"
+
+
+# --- forms phase 3 merge: one SPA-route definition and one leaf rule (PA-0003) ---------
+@pytest.mark.parametrize("url,is_route", [
+    ("http://h/#/search?q=x", True), ("http://h/#!/x", True), ("http://h/#top", False),
+    ("http://h/#", False), ("http://h/", False), ("http://h/#//cdn", True),
+])
+def test_one_spa_route_definition_serves_every_lane(url, is_route):
+    from fuzzlab.core.redaction import redact_spa_fragment
+    from fuzzlab.core.urls import spa_route
+    from fuzzlab.tools.spa import spa_fragment
+    assert (spa_route(url) is not None) is is_route
+    assert (spa_fragment(url) is not None) is is_route
+    secret = url.split("#")[0] + "#/r?token=9f86d081884c7d659a2feaa0c55ad015"
+    assert "9f86d081884c7d659a2feaa0c55ad015" not in redact_spa_fragment(secret)
+
+
+def test_one_leaf_rule_serves_capture_and_import():
+    from fuzzlab.core.redaction import redact_captured_body, redact_leaf
+    from fuzzlab.tools.store_adapter import redact_leaf as importer_leaf
+    cases = [(["cardNum"], 4716190207394368), (["quantity"], 3), (["password"], "x"),
+             (["t"], "9f86d081884c7d659a2feaa0c55ad015"), (["ok"], True), (["n"], 1.5)]
+    for segs, value in cases:
+        assert importer_leaf(segs, value) == redact_leaf(segs, value)
+        body = json.dumps({segs[0]: value}).encode()
+        captured, _why = redact_captured_body(body, "application/json")
+        assert captured[segs[0]] == redact_leaf(segs, value), segs
+
+
+def test_an_unknown_location_is_a_rule_error():
+    from fuzzlab.audit.rules import Rule, RuleError, validate_rule
+    for key in ("location_in", "location_not_in"):
+        with pytest.raises(RuleError, match="unknown value"):
+            validate_rule(Rule(id="R-X", category="sql-injection", transaction_type="x",
+                               when={key: ["fragmnet"]}))
+
+
+def test_open_redirect_rules_never_fire_on_a_fragment_point():
+    from fuzzlab.audit import load_rules
+    for rule in load_rules():
+        if rule.category == "open-redirect":
+            assert "fragment" in rule.when.get("location_not_in", []), rule.id
+
+
+def test_the_crawlers_table_is_the_contract_the_importer_reads(tmp_path):
+    """Forms phase 3 integration: lane S writes `discovered_requests`, lane J reads it;
+    the columns are the agreed contract on both sides."""
+    from fuzzlab.tools.spider import StorageManager
+    sm = StorageManager(str(tmp_path / "s.db"))
+    sm.reset()
+    sm.close()
+    db = sqlite3.connect(tmp_path / "s.db")
+    cols = [r[1] for r in db.execute("PRAGMA table_info(discovered_requests)")]
+    db.close()
+    assert cols == ["id", "page_url", "method", "url", "content_type", "body_json",
+                    "source", "signature"]

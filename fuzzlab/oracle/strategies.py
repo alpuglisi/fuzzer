@@ -31,7 +31,7 @@ from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import locate_reflection, xss_breakouts
 from fuzzlab.oracle.oob import OobListener
-from fuzzlab.oracle.probe import Candidate, Probe, Sender, Verdict
+from fuzzlab.oracle.probe import Candidate, Probe, Sender, UnplaceableLocation, Verdict
 
 # --- error signatures (M2) ---------------------------------------------------
 SQL_ERROR_SIGNATURES = [
@@ -1973,11 +1973,15 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
         return candidate.category in self._CATEGORIES
 
     def confirm(self, candidate, sender):
+        # Nothing to observe with is not an observation: such a run must never make the
+        # point read as tested (forms phase 3 integration: an untested fragment point
+        # was recorded as a negative). The oracle takes this as "no verdict from this
+        # mechanism"; other mechanisms still decide.
         if self._coverage is None and self._dbfault is None:
-            return None                                    # no source injected -> no-op
+            raise UnplaceableLocation("greybox: no coverage or DB-fault source attached")
         send_correlated = getattr(sender, "send_correlated", None)
         if send_correlated is None:
-            return None                                    # sender can't mint a correlation id
+            raise UnplaceableLocation("greybox: the sender cannot mint a correlation id")
         vuln_class = candidate.vuln_class or category_to_oracle_class(candidate.category)
         if not vuln_class:
             return None
@@ -2021,6 +2025,11 @@ class _BrowserXssStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         if self._executor is None:
+            if candidate.location == "fragment":
+                # only a browser can place a fragment payload: without one this point
+                # was never tested, so it must not read as a negative (forms phase 3
+                # integration; inconclusive `unplaceable`, FR-FUZZ-47)
+                raise UnplaceableLocation("a fragment point is placed by the browser only")
             return None                       # no browser available -> cannot confirm
         for payload in _xss_exec_payloads((token := _token())):
             obs = self._observe(candidate, payload, token)

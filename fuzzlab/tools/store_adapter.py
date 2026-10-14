@@ -468,10 +468,8 @@ def redact_leaf(segments, value):
     other type ``null``) when any key of its path is sensitive or its value looks like
     an identifier, else ``value``. The JSON counterpart of `redact_sibling` (PA-0100,
     FR-AUD-22)."""
-    from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
-    if any(is_sensitive_name(s) for s in segments) or looks_like_identifier(value):
-        return "" if isinstance(value, str) else None
-    return value
+    from fuzzlab.core.redaction import redact_leaf as _one_leaf_rule
+    return _one_leaf_rule(segments, value)      # forms phase 3 merge: one rule (PA-0003)
 
 
 def _captured_leaves(kind: str, body):

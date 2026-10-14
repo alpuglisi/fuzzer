@@ -203,13 +203,23 @@ def url_key(url: str) -> str:
     return f"{canonical_origin(url) or ''}{urlsplit(url or '').path or '/'}"
 
 
+#: A URL fragment starting with one of these names a single-page app's route (``#/x``,
+#: hashbang ``#!/x``): the one definition (forms phase 3 merge, PA-0003).
+SPA_ROUTE_PREFIXES = ("/", "!/")
+
+
+def is_spa_route_fragment(fragment: str | None) -> bool:
+    """Is ``fragment`` (without its ``#``) a single-page app's route?"""
+    return bool(fragment) and fragment.startswith(SPA_ROUTE_PREFIXES)
+
+
 def spa_route(url: str | None) -> tuple[str, str] | None:
     """``(route path, route query)`` of a URL whose fragment is a single-page app's hash
     route (``/#/search?q=x`` -> ``("/search", "q=x")``; ``#!/x`` too), or None for any
     other fragment or none (forms phase 3, FR-CORE-36). A route's query is read by the
     app in the browser and never reaches the server."""
     fragment = urlsplit(url or "").fragment
-    if not fragment.startswith(("/", "!/")):
+    if not is_spa_route_fragment(fragment):
         return None
     path, _sep, query = fragment.partition("?")
     return path, query

@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3 integration: lanes S and J merged)
+- **Why:** the two lanes each decided "SPA route fragment" and "redact a body leaf" on
+  their own, and lane J's leaf rule missed numbers; a rule location typo could widen a
+  rule silently; open-redirect candidates on fragment points could never be decided.
+- **What:** one leaf rule (`core.redaction.redact_leaf`) and one SPA-route definition
+  (`core.urls.is_spa_route_fragment`) serve both lanes (CC-CORE-0049); rule locations
+  are a closed set and open redirect is off fragment points (CC-AUD-0036); the run
+  page's inconclusive breakdown gets its UI record (CC-UI-0054). A mechanism that
+  observes nothing (greybox without a source; browser XSS without a browser on a
+  fragment point) is now "no verdict", so an untested point never reads as a negative
+  (CC-FUZZ-0070, found while merging).
+
 ## 2026-10-14 (Forms phase 3, lane J: review follow-ups)
 - **Why:** reviewers A and B agreed lane J with should-fixes: `inconclusive` had
   gained a second meaning silently, fragment points drew server-side candidates that

@@ -8,6 +8,8 @@ work (docs/ON_HOST_TASKS.md)."""
 
 from __future__ import annotations
 
+import pytest
+
 from fuzzlab.greybox.coverage import InMemoryCoverageSource
 from fuzzlab.greybox.dbfault import DbFault, InMemoryDbFaultSource
 from fuzzlab.oracle import Candidate
@@ -65,9 +67,13 @@ def test_applies_scoped_to_sql_injection_and_xss_only():
 # --- fail-closed no-ops --------------------------------------------------------
 
 def test_noops_without_any_source():
+    """No source: nothing is observed, so the point is never made to read as tested
+    (forms phase 3 integration): the oracle gets "no verdict from this mechanism"."""
+    from fuzzlab.oracle.probe import UnplaceableLocation
     strategy = GreyboxConfirmationStrategy(coverage=None, dbfault=None)
     sender = _CorrelatingSender()
-    assert strategy.confirm(_sqli_cand(), sender) is None
+    with pytest.raises(UnplaceableLocation, match="no coverage"):
+        strategy.confirm(_sqli_cand(), sender)
     assert sender.correlated_calls == []          # never even tries to correlate
 
 
@@ -76,8 +82,10 @@ def test_noops_without_a_correlating_sender():
     probe to a request id -> no-op, fail-closed, never a guess."""
     coverage = InMemoryCoverageSource({"req-1": {"/var/www/html/login.php": [1]}})
     dbfault = InMemoryDbFaultSource({"req-1": DbFault(True)})
+    from fuzzlab.oracle.probe import UnplaceableLocation
     strategy = GreyboxConfirmationStrategy(coverage, dbfault)
-    assert strategy.confirm(_sqli_cand(), _PlainSender()) is None
+    with pytest.raises(UnplaceableLocation, match="correlation id"):
+        strategy.confirm(_sqli_cand(), _PlainSender())
 
 
 # --- sqli: needs sink covered AND a db fault -----------------------------------

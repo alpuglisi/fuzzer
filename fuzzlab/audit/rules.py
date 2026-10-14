@@ -51,6 +51,10 @@ WHEN_KEYS = frozenset({"always", "location_in", "location_not_in", "method_in",
                        "sink_context_in", "name_regex", "value_shape_in", "origin_in"})
 #: Where an injection point can come from (``origin_in``).
 ORIGINS = ("crawl", "ground-truth")
+#: Every location a point can have (``location_in`` / ``location_not_in``): the ground
+#: truth's (`labels.schema.json`, `manifest.schema.json`) and the crawler's ``json``
+#: (forms phase 3 merge, reviewer A: a typo must never silently widen a rule).
+LOCATIONS = ("query", "body", "header", "cookie", "json", "fragment", "path")
 _LIST_KEYS = ("location_in", "location_not_in", "method_in", "sink_context_in",
               "value_shape_in", "origin_in")
 
@@ -62,7 +66,8 @@ class RuleError(ValueError):
 def validate_rule(rule) -> None:
     """Raise `RuleError` unless ``rule`` is a `Rule` whose ``when`` uses only known
     keys, list values of strings, closed-set members for ``value_shape_in`` /
-    ``origin_in``, and a ``name_regex`` that compiles."""
+    ``origin_in`` / ``location_in`` / ``location_not_in``, and a ``name_regex`` that
+    compiles."""
     from fuzzlab.audit.value_shape import SHAPES
     if not isinstance(rule, Rule):
         raise RuleError(f"not a Rule: {type(rule).__name__}")
@@ -76,7 +81,8 @@ def validate_rule(rule) -> None:
         if key in when and not (isinstance(when[key], list)
                                 and all(isinstance(v, str) for v in when[key])):
             raise RuleError(f"{rule.id}: {key} must be a list of strings")
-    for key, allowed in (("value_shape_in", SHAPES), ("origin_in", ORIGINS)):
+    for key, allowed in (("value_shape_in", SHAPES), ("origin_in", ORIGINS),
+                         ("location_in", LOCATIONS), ("location_not_in", LOCATIONS)):
         bad = sorted(set(when.get(key, [])) - set(allowed))
         if bad:
             raise RuleError(f"{rule.id}: {key} has unknown value(s) {bad}")

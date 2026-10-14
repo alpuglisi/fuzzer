@@ -3,6 +3,27 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0049 — Forms phase 3 integration: one leaf rule, one SPA-route definition (2026-10-14)
+- Change:
+  - `core/redaction.py`: `is_identifier_value` (a string by `looks_like_identifier`, a
+    non-bool number by its text) and `redact_leaf(segments, value)` (blank by type when a
+    key segment is sensitive or the value is identifier-like): the one leaf rule.
+    Lane S's `_blank_tree` and lane J's importer (`store_adapter.redact_leaf`, now a
+    delegate) both use it; lane J's version had missed numbers (reviewer A, J1).
+  - `core/urls.py`: `SPA_ROUTE_PREFIXES` and `is_spa_route_fragment`, the one definition
+    of "this fragment is a SPA route"; `core.urls.spa_route` (lane J),
+    `tools/spa.spa_fragment` (lane S) and `core.redaction.redact_spa_fragment` (lane S)
+    use it (reviewers A and B, J5; PA-0003).
+- Impact: FR-CORE-36 / FR-CORE-37 unchanged in behaviour except that a JSON leaf whose
+  number looks like an identifier is now blanked at import too.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_json_points.py::test_one_spa_route_definition_serves_every_lane`,
+    `::test_one_leaf_rule_serves_capture_and_import` — done
+- Review: reviewers A and B asked for both at merge (lane J reviews J1, J5).
+- Effectiveness: verified offline.
+
 ### CC-CORE-0047 — The redaction boundary for the crawler's captured requests and SPA route URLs (forms phase 3, lane S) (2026-10-14)
 - Change:
   - `core/redaction.py`: `CAPTURE_MAX_BYTES` (64 KiB), `CAPTURE_MAX_DEPTH` (8),

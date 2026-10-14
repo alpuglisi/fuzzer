@@ -168,10 +168,9 @@ def route_url(page_url: str, path: str, *, hash_mode: bool, hashbang: bool = Fal
 # --- SPA fragments and visit keys -----------------------------------------------------
 def spa_fragment(url: str) -> str | None:
     """The fragment of ``url`` when it names a SPA route (starts with ``/`` or ``!/``)."""
+    from fuzzlab.core.urls import is_spa_route_fragment    # the one definition (PA-0003)
     _head, sep, frag = (url or "").partition("#")
-    if sep and (frag.startswith("/") or frag.startswith("!/")):
-        return frag
-    return None
+    return frag if sep and is_spa_route_fragment(frag) else None
 
 
 def crawl_url(url: str, keep_spa: bool) -> str:

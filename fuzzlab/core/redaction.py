@@ -389,7 +389,8 @@ def redact_spa_fragment(url: str) -> str:
     values blanked. A fragment that is not a route (``#top``) is left alone. The crawler
     keeps such fragments as pages (FR-CRAWL-12), so they pass this boundary."""
     head, sep, frag = (url or "").partition("#")
-    if not sep or not (frag.startswith("/") or frag.startswith("!/")) or "?" not in frag:
+    from fuzzlab.core.urls import is_spa_route_fragment    # the one definition (PA-0003)
+    if not sep or not is_spa_route_fragment(frag) or "?" not in frag:
         return url
     route, _q, query = frag.partition("?")
     new = _redact_query_identifiers(query)
@@ -450,6 +451,26 @@ def _identifier_number(value) -> bool:
             and looks_like_identifier(str(value)))
 
 
+def is_identifier_value(value) -> bool:
+    """A leaf value that looks like an identifier: a string by `looks_like_identifier`,
+    a non-bool number by its text (`_identifier_number`). The one value rule for stored
+    request leaves (forms phase 3 merge, reviewer A J1, PA-0003)."""
+    if isinstance(value, str):
+        return looks_like_identifier(value)
+    return _identifier_number(value)
+
+
+def redact_leaf(segments, value):
+    """A request body leaf as it may be stored and replayed: blanked by type (`_blank`)
+    when any key segment of its path is sensitive or its value `is_identifier_value`,
+    else ``value``. The one leaf rule: the crawler's capture (`_blank_tree`) and the
+    importer's JSON producer (`store_adapter`) both use it (PA-0003)."""
+    if any(isinstance(s, str) and is_sensitive_name(s) for s in segments) \
+            or is_identifier_value(value):
+        return _blank(value)
+    return value
+
+
 def _blank_tree(value, namer: _KeyNamer):
     """``value`` with every sensitively named key's value, every identifier-like string
     or number blanked, and every identifier-like key replaced (its value blanked)
@@ -468,11 +489,7 @@ def _blank_tree(value, namer: _KeyNamer):
         return out
     if isinstance(value, list):
         return [_blank_tree(v, namer) for v in value]
-    if isinstance(value, str) and looks_like_identifier(value):
-        return ""
-    if _identifier_number(value):
-        return None
-    return value
+    return redact_leaf((), value)               # the one leaf rule (sensitive keys above)
 
 
 def _container_depth_ok(doc, limit: int) -> bool:
