@@ -777,7 +777,8 @@ def test_the_listener_is_registered_early_once_and_inert_until_a_copy_is_live():
     sender.isolate([BASE + "sqli_3.php"])
     _probe_form(sender)                       # registers, but the copy login fails
     _probe_form(sender)
-    assert mgr._logout_listeners == [sender._on_main_logout]   # registered once
+    # registered once (the header breaker's own listener is registered too, FR-FUZZ-43)
+    assert mgr._logout_listeners.count(sender._on_main_logout) == 1
     sender._on_main_logout("localhost", "admin")               # no live copy: inert
     assert sender.isolation_report()["breaker"] is None
 
@@ -875,7 +876,9 @@ def test_a_fingerprint_login_is_counted(tmp_path):
     assert report["first_copy_login_send"] == 1           # the pipeline's baseline send
     assert report["logins"] == 1 and report["verifications"] == 1
     first = next(r for r in app.requests if r[1] == "/app/sqli_3.php")
-    assert first[0] == "GET" and first[2] == app.issued[1]
+    # the baseline goes at the form point's own method and location (BUG-0115 sweep,
+    # instance 6): sqli_3 is a POST login form, its only points are body points
+    assert first[0] == "POST" and first[2] == app.issued[1]
 
 
 def test_verify_live_carries_the_session_cookie_and_marks_a_dead_session(tmp_path):

@@ -4,6 +4,34 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 2, lane A: link siblings, header points, value-shape rules, POST selectors; BUG-0115)
+- **Why:** the operator wants bWAPP's vulnerabilities found as the lab ships. After
+  phase 1, the remaining gaps in this lane were sinks gated on a link's other query
+  parameters (iframei), request-header sinks (User-Agent, Referer), parameters whose
+  names miss the rules but whose values show the sink (a host name, a file name), and
+  POST select forms.
+- **What:**
+  - a crawled link's query is bound as siblings, with tokens and secrets sent blank
+    (CC-FUZZ-0063, CC-CORE-0042);
+  - `fuzzlab auto --header-points [NAMES]` (off by default) probes request headers of
+    each crawled page, behind one header-name rule, a pre-store budget check and a
+    breaker that stops header probing when it logs the session out (CC-FUZZ-0063,
+    CC-CORE-0042);
+  - value-shape rules: a host-name default is a command-injection candidate and a
+    file-name default a file-inclusion candidate, and the app's own hosts are sent as
+    loopback (CC-AUD-0032);
+  - POST selector forms are fuzzed unless settings-like (a shared, extended
+    settings-word set; the spider records what a picker did) (CC-FUZZ-0063,
+    CC-CRAWL-0014);
+  - BUG-0115 / PA-0115: a probe is never relocated to another location (greybox header
+    placement, DOM XSS, the fingerprint probe); `rules_fired` drift noted (CC-ML-0027);
+  - code-review follow-up: network-shaped defaults (host:port, `//host`, any scheme,
+    host/path, long URLs) are sent as loopback; a late breaker trip and invalid plugin
+    rules are reported; the breaker checks the target host.
+- **Result:** offline tests and a 52/52 mutation check; live bWAPP verification is the
+  operator's next run (expected: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37,
+  #43, #44, #48).
+
 ## 2026-10-14 (String-context SQLi confirmation; probes must cause their evidence; BUG-0117)
 - **Why:**
   - bWAPP's SQLite pages (sqli_11, sqli_14, sqli_12) and its masked-blind MySQL page

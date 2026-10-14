@@ -33,6 +33,7 @@ from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
 from fuzzlab.oracle import Candidate, Oracle, category_to_oracle_class
+from fuzzlab.oracle.probe import HeaderPointsStopped
 
 
 @dataclass
@@ -73,7 +74,42 @@ def _candidate_of(ev: dict) -> Candidate:
                      store_url=ev.get("store_url"), store_param=ev.get("store_param"),
                      content_type=ev.get("body_content_type"),
                      base_entries=(tuple(tuple(e) for e in ev["entries"])
-                                   if ev.get("entries") else None))
+                                   if ev.get("entries") else None),
+                     base_value=ev.get("base_value"))
+
+
+def _fingerprint_point(points: list[InjectionPoint]) -> InjectionPoint | None:
+    """The point the baseline probe goes through: the first query point, else the
+    first form-encoded body point; never a header, fragment or raw-body point."""
+    for location in ("query", "body"):
+        for p in points:
+            if p.location == location and not p.body_content_type:
+                return p
+    return None
+
+
+def _baseline(sender, point: InjectionPoint):
+    """Send ``1`` at ``point``'s own location and method, with its siblings."""
+    from fuzzlab.core.forms import FormEntries
+    if point.base_entries:
+        entries = FormEntries(tuple(e) for e in point.base_entries).replace(point.param, "1")
+        return sender.send(point.url, point.param, "1", method=point.method,
+                           location=point.location, entries=entries)
+    if point.method == "GET" and point.location == "query":
+        return sender.send(point.url, point.param, "1")
+    return sender.send(point.url, point.param, "1", method=point.method,
+                       location=point.location)
+
+
+def _header_stop_reason(sender) -> str | None:
+    """A breaker reason a sender (or the sender it wraps) recorded, if any."""
+    seen = 0
+    while sender is not None and seen < 10:
+        reason = getattr(sender, "header_stop_reason", None)
+        if isinstance(reason, str) and reason:
+            return reason
+        sender, seen = getattr(sender, "_inner", None), seen + 1
+    return None
 
 
 def _confirmation_key(ev: dict) -> tuple:
@@ -97,17 +133,27 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     if pages_html:
         points = _dedup(points, pages_html)
 
-    # Fingerprint from a baseline probe and record the target row (T2.5).
-    if points:
-        probe = sender.send(points[0].url, points[0].param, "1")
+    # Fingerprint from a baseline probe and record the target row (T2.5). The probe
+    # goes where its point says, siblings included (BUG-0115: it used to send any
+    # point's parameter as a GET query); never through a header point.
+    fp_point = _fingerprint_point(points)
+    if fp_point is not None:
+        probe = _baseline(sender, fp_point)
         fp = fingerprint(probe.headers, probe.text)
-        origin = urlparse(points[0].url)
+        origin = urlparse(fp_point.url)
         store.conn.execute(
             "INSERT INTO target (run_id, base_url, dbms, framework, waf, fingerprint) "
             "VALUES (?,?,?,?,?,?)",
             (run_id, f"{origin.scheme}://{origin.netloc}", fp.dbms, fp.framework,
              fp.waf, json.dumps(fp.as_dict())),
         )
+        store.conn.commit()
+    elif points:
+        # no point a baseline may go through (header points only): still one target row,
+        # unprobed -- ML's same-target training and holdout origins key on it (BUG-0104)
+        origin = urlparse(points[0].url)
+        store.conn.execute("INSERT INTO target (run_id, base_url) VALUES (?,?)",
+                           (run_id, f"{origin.scheme}://{origin.netloc}"))
         store.conn.commit()
 
     # Audit: rules-as-data, scoped to the plan's categories (T2.3 / D14 / D15).
@@ -173,10 +219,23 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     confirmed_keys: set[tuple] = set()
     inconclusive_keys: set[tuple] = set()
     inconclusive_detail: list[dict] = []
+    # Forms phase 2 (FR-FUZZ-43): once a sender stops header probing (the main session
+    # was logged out right after one), every remaining header key is left unconfirmed:
+    # its rows keep `pending` (unlabelled) and the reason goes to the metrics.
+    stopped_keys: set[tuple] = set()
+    breaker: list[str] = []
 
-    def _confirm(key, ev) -> None:
+    def _confirm(key: tuple, ev: dict) -> None:
+        if breaker and ev.get("location") == "header":
+            stopped_keys.add(key)
+            return
         candidate = _candidate_of(ev)
-        verdict, unsure = oracle.confirm_outcome(candidate, sender)
+        try:
+            verdict, unsure = oracle.confirm_outcome(candidate, sender)
+        except HeaderPointsStopped as exc:
+            breaker.append(str(exc))
+            stopped_keys.add(key)
+            return
         if verdict is not None:
             confirmed_keys.add(key)
         elif unsure is not None:                         # FR-FUZZ-45: never a negative
@@ -201,14 +260,18 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                 if key not in confirmed_or_tried:
                     confirmed_or_tried.add(key)
                     _confirm(key, ev)
-                status[cid] = _checked(key)
+                if key not in stopped_keys:
+                    status[cid] = _checked(key)
         else:
             chosen = set(selected)
             for key in selected:                             # one confirmation per key
                 _confirm(key, keyed[key][0][1])
-                for cid, _ev in keyed[key]:
-                    status[cid] = _checked(key)
+                if key not in stopped_keys:
+                    for cid, _ev in keyed[key]:
+                        status[cid] = _checked(key)
             for key, members in keyed.items():
+                if key in stopped_keys:
+                    continue
                 for cid, _ev in members:
                     status[cid] = _checked(key) if key in chosen else SKIPPED_BUDGET
     finally:
@@ -217,7 +280,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         store.conn.executemany("UPDATE candidate SET oracle_status=? WHERE id=?",
                                [(st, cid) for cid, st in status.items()])
         store.conn.commit()
-    checked_keys = len(keyed) if selected is None else len(selected)
+    checked_keys = (len(keyed) if selected is None else len(selected)) - len(stopped_keys)
 
     findings = store.conn.execute(
         "SELECT COUNT(*) c FROM finding WHERE run_id=?", (run_id,)).fetchone()["c"]
@@ -242,6 +305,19 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                "oracle_inconclusive": statuses.count(INCONCLUSIVE),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}
+    if counts.get("invalid_plugin_rules"):
+        metrics["invalid_plugin_rules"] = counts["invalid_plugin_rules"]
+    if not breaker:
+        # a trip on the last header probe (or the main send after it) raises nothing:
+        # read the reason the sender recorded (reviewer A)
+        late = _header_stop_reason(sender)
+        if late:
+            metrics["header_breaker"] = late
+    if breaker:
+        # one entry per header point left unconfirmed, for `skipped_points`
+        metrics["header_breaker"] = breaker[0]
+        metrics["header_breaker_skipped"] = sorted(
+            {(urlparse(k[0]).path or "/", k[2], k[1], breaker[0]) for k in stopped_keys})
     if budget is not None:
         used = budget.used()
         metrics["requests"] = used

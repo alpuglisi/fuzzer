@@ -1120,6 +1120,7 @@ rewards) derives from it.
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
   - Enforced by (oracle SQLi probes are AND-only, quote-balanced and non-destructive; CC-FUZZ-0065): `tests/test_oracle_sqli_string.py::test_every_new_sqli_probe_matches_its_closed_template_exactly`, `tests/test_oracle_sqli_string.py::test_the_grammar_pair_compiles_and_fails_as_designed`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
+  - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`, `tests/test_forms_phase2.py::test_a_header_point_url_never_carries_the_apps_own_host`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
@@ -1389,20 +1390,74 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     - a cap exhausted on noise.
 - **FR-FUZZ-42** *(forms as injection points; `CC-FUZZ-0062`, 2026-10-13).*
   - **Points.** Crawled forms become points.
-  - **Siblings.** Every probe of a form field sends the form's **browser-default entry
-    list, with empty free-text fields filled as a user would type them**. The URL and
-    e-mail fillers use never-resolving `.invalid` names. The spider record keeps the
-    raw defaults, and `Oracle.confirm` binds the entries.
+  - **Siblings** *(amended in place by FR-FUZZ-43, `CC-FUZZ-0063`, 2026-10-14; it
+    supersedes CC-FUZZ-0062's binding in these respects).* Every probe of a form field
+    sends the form's **browser-default entry list, with empty free-text fields filled
+    as a user would type them** — or, for a crawled link's parameter, **that link's
+    query**. The URL and e-mail fillers use never-resolving `.invalid` names and are
+    sent as they are. An ip-, host- or url-shaped default is sent as loopback
+    (`127.0.0.1`, `http://127.0.0.1/`; FR-AUD-20). A sensitive-named or
+    identifier-like link value is sent `""`. The spider record keeps the raw defaults,
+    and `Oracle.confirm` binds the entries.
   - **Never fuzzed:** credential-named parameters from crawl or form sources (ground
     truth is unaffected), submitters, sensitive names, and hidden object selectors.
-  - **Never imported:** multipart, POST-selector and destructive forms, and
-    password-bearing forms other than in-app login forms (FR-FUZZ-44 supersedes the
-    phase 1 blanket password exclusion).
+  - **Never imported:** multipart and destructive forms, and password-bearing forms
+    other than in-app login forms (FR-FUZZ-44 supersedes the phase 1 blanket
+    password exclusion). ~~POST selector forms~~ *(superseded by FR-FUZZ-43: a POST
+    selector is skipped only when a control is settings-named, its select name is
+    too short, or the crawler saw it act as a settings form).*
   - **Residuals:**
     - probes complete real submissions, so rows, users or mail are created;
     - forms needing a fresh CSRF token do not confirm;
     - fillers ignore `maxlength` / `pattern`;
     - one confirmation per (url, param, method, location).
+- **FR-FUZZ-43** *(forms phase 2: link siblings, header points, POST selectors;
+  `CC-FUZZ-0063`, 2026-10-14).*
+  - **Link siblings.** A crawled URL's query is a sibling set (a `form` row with
+    `enctype` NULL, `core.forms.is_link_set`). A set with two or more names is bound to
+    its parameters that no form binds (forms win; the first crawled link wins). Values
+    pass `store_adapter.redact_sibling` (a sensitive name or an identifier-like raw
+    value is stored and sent `""`). A set with a destructive or credential entry is not
+    stored or bound (its parameters stay lone points).
+  - **Header points** (`fuzzlab auto --header-points [NAMES]`, crawl points only, **off
+    by default**; alone: User-Agent, Referer). One point per crawled 2xx GET page and
+    name, after every other point. The URL carries the page's representative query
+    (its first link set only): identifier-like and sensitive values **blanked** (sent
+    `""`, as in the link set; not left out), ip/host/url values sent as loopback. Names pass `core.http.header_point_refusal` (framing,
+    routing, method-override and credential headers refused) at the CLI, before the
+    store is opened, and again at every sender's header branch
+    (`check_send_header`; ground-truth points are explicit). With an identity, header
+    points whose lower-bound cost exceeds `budget_total` are refused before the store
+    is opened.
+  - **Header breaker.** `SeamProbeSender` listens to its main manager's logouts
+    (FR-SESS-16). A logout seen on a header probe's response, or on the first main
+    send after one, stops every later header probe of the run (`HeaderPointsStopped`,
+    raised before the send), unless an isolated copy login (lane B) happened since.
+    At most one re-login follows; the stopped points stay `pending` and are reported
+    (`metrics["header_breaker"]`, `skipped_points`).
+  - **POST selector forms** are fuzzed unless a control name carries a
+    `formnav.settings_word`, the select name has fewer than 3 characters, or the
+    crawler saw the picker act as a settings form (FR-CRAWL-10). GET selectors are not
+    subject to that rule. A POST picker repeated at several actions is fuzzed once (the
+    first crawled).
+  - **Never relocated** (BUG-0115, PA-0115). A sender or executor that cannot place a
+    payload at the point's location refuses; greybox places header probes in headers;
+    DOM XSS applies only to query/fragment points; the pipeline's fingerprint probe goes
+    through the first query (else form-body) point at its own method with its
+    siblings, never a header point. The probe senders' unknown-location
+    fallback is pinned by a strict xfail (not fixed; needs a scored ground-truth run).
+  - **Reporting.** A breaker trip is reported in `metrics["header_breaker"]` even when no
+    later header probe raises; invalid plugin rules are counted in
+    `metrics["invalid_plugin_rules"]` / `run_metrics` and printed by `fuzzlab auto`.
+  - **Ground-truth evaluation rows.** The 4 `tests/data/auto_summary` goldens' extra
+    negatives (+46 = 2 × 23 points) come from the origin-gated header rules evaluating
+    on ground-truth points, where they can never apply; they are rule negatives in
+    `evaluation`, not training rows (candidates are unchanged).
+  - **Residuals:** pages that log a header grow the lab DB per probe; a page that
+    changes state on a plain visit is visited once per header probe; a site-wide
+    picker routed to different per-page handlers is probed at one page; an
+    identifier-like sibling is sent blank, so a gate needing it does not confirm; an
+    e-mail default is sent as is (it may trigger mail).
 - **FR-FUZZ-44** *(in-app login forms on an isolated session; `CC-FUZZ-0064`,
   2026-10-14).*
   - **Imported:** a form with exactly one password control, exactly one text, email or
@@ -1451,6 +1506,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     `/account/login`, `/my-account`, a login button valued `Save`, and bWAPP's
     `ba_weak_pwd.php` and `ba_pwd_attacks_2.php`.
   - **Residuals:**
+    - `verify_live` refuses any hop to another host, so an app whose base page
+      redirects to an SSO or auth origin always trips the single-session breaker and
+      all its isolated paths go anonymous (reviewer B; fails closed);
     - after a probe re-binds a path's throwaway session, later probes of that same path
       run as whichever user it was bound to;
     - per-user state a login handler changes (last login, failed-attempt counters) is

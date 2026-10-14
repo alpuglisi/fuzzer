@@ -22,6 +22,118 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0063 — Link siblings, header points with a session breaker, POST selectors, neutral host values; BUG-0115 (forms phase 2, lane A) (2026-10-14)
+- Change:
+  - **Link siblings (`store_adapter`):** every query-bearing crawled URL's query becomes
+    a `form` row with `enctype` NULL (`_import_link_sets`, after forms, so forms win;
+    the first crawled link wins, `ORDER BY rowid`). Values pass `redact_sibling`
+    (sensitive name or identifier-like raw value → `""`; raw value from
+    `query_pairs`, percent-decoded only). `entries_refusal` (one check for forms and
+    link sets) refuses a set with a destructive or credential entry. Sets with two or
+    more names are bound; one-name sets only give header points their query.
+  - **POST selectors (`form_skip_reason`):** fuzzed unless a control name is a
+    `formnav.settings_word`, the select name is shorter than 3, or the crawler's
+    verdict is `settings`; GET selectors unaffected. `_import_forms` fuzzes a POST
+    picker repeated at several actions once. `enctype` read NULL-safe.
+  - **Points (`harness/auto`):** crawl points carry `origin="crawl"`, their example's
+    `value_shapes` (inherited by name when the example is empty or a filler, one pass)
+    and `base_value=127.0.0.1` for ip/host shapes; siblings are sent through
+    `_send_value` (loopback for ip/host/url defaults, fillers as they are).
+    Ground-truth points carry `origin="ground-truth"`.
+  - **Header points:** `header_points_from_store` (2xx GET pages, representative query
+    from `core.forms.first_link_set` only, destructive pages skipped and reported,
+    appended last); `run_auto(header_names=)`; `plan_run(header_points=)` refuses them
+    with ground-truth points; `fuzzlab auto --header-points [NAMES]` (off by default),
+    names checked before the store opens, and with an identity the lower-bound cost
+    (`header_point_cost`, derived from the strategies) is refused over `budget_total`.
+  - **Header breaker (`SeamProbeSender`):** registers `add_logout_listener` on its main
+    manager; a logout seen on a header probe's response, or on the first main send
+    after one, sets `header_stop_reason` unless `isolated_copy_logins()` (lane B; read
+    with `getattr(self, "isolated_copy_logins", lambda: 0)()` until lane B merges)
+    rose since; later header sends raise `HeaderPointsStopped` before the gate. The
+    pipeline leaves the remaining header keys `pending`, subtracts them from checked
+    keys, and reports `metrics["header_breaker"]` and `skipped_points`.
+  - **Senders:** `check_send_header` in the Seam, Requests and greybox header branches.
+  - **Strategies:** the command-injection timing and OOB strategies start from
+    `Candidate.base_value` (baselines and a payload prefix) when set (CC-AUD-0032 refers
+    here); `SqliBooleanStrategy.probes` named for the cost estimate.
+  - **BUG-0115:** greybox `send_correlated` places header probes in headers and refuses
+    any other unplaceable location (`UnplaceableLocation`); `DomXssStrategy` applies only
+    to query/fragment points and never relocates; the browser executor refuses an
+    unplaceable observe or store location before starting a browser. The probe senders'
+    unknown-location fallback is pinned by a strict xfail (not fixed).
+  - **Follow-up (code review of 97fe402, reviewers A and B):**
+    - header-point URLs are tested to carry loopback for host/url link values (their
+      neutralisation was untested); identifier-like values there are **blanked**, as
+      agreed in deviation 1 (v2 had said "dropped");
+    - a breaker trip with no later header probe is still reported
+      (`pipeline._header_stop_reason` reads it through the wrappers);
+    - `invalid_plugin_rules` reaches `metrics`, `run_metrics` and the summary;
+    - the fingerprint probe goes through the first query (else form-body) point with
+      its method and siblings, never a header point (BUG-0115 instance 6; clears
+      deviation 3);
+    - `_on_logout` trips only for the run's target host (the operator's base URL's).
+  - **Supersedes** CC-FUZZ-0062's binding where FR-FUZZ-42's "Siblings" clause was
+    amended (link queries; neutral host values; blank identifiers) and its "never a POST
+    selector" rule.
+- Impact:
+  - **Behaviour:** crawl-sourced runs bind link siblings, fuzz POST pickers, and (opt-in)
+    probe request headers; hostname-shaped form defaults are now sent as `127.0.0.1`.
+    Ground-truth runs gain no candidate (tested per real contract); their evaluation
+    rows grow by the four new rules (`R-SQLI-HEADER`/`R-XSS-HEADER` within sqli/xss
+    plans): the four `tests/data/auto_summary/*` goldens' "negatives" were re-derived,
+    not regenerated (PA-0073(3)): 41→87 and 2→48, i.e. +2 rules × 23 points. These
+    are origin-gated rules that cannot apply to ground-truth points; they are rule
+    negatives in `evaluation`, not training rows.
+  - **Changed existing tests** (requirement changes, not silent edits): the POST-picker
+    case of `test_unsafe_forms_are_never_imported` now expects a settings-named picker
+    (FR-FUZZ-42 superseded); `test_evaluate_category_filter_scopes_rules` derives its
+    sqli rule count from the rule set (PA-0001); the two ground-truth header-location
+    sender tests now mark their URL explicit, as `run_auto` does.
+  - **ML:** `rules_fired` drifts on crawl runs (CC-ML-0027).
+  - **Residuals:** header-logging pages grow the lab DB per probe; state-changing
+    plain visits repeat per header probe; a site-wide picker is probed at one action;
+    an identifier-like sibling is sent blank (a gate needing it does not confirm); an
+    e-mail default is sent as is (may trigger mail); the web page shows breaker stops as
+    "pending" without the reason (lane C rewords that text).
+- Risk: medium (more traffic and real submissions), within the gates above; header
+  points are opt-in and budget-checked.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase2.py`, 260 passed + 1 skipped joint test until
+    lane B merges; `tests/test_sender_conformance.py`, 9 passed + 2 strict xfail) — done
+  - [x] FR-FUZZ-43; FR-FUZZ-42 amended in place; NFR-FUZZ-safe `Enforced by:` — done
+  - [x] BUG-0115 / PA-0115 / ERROR_LOG — done
+- Review: reviewers A and B, draft v1–v3 (scratchpad `p2-a-draft.md`), with two agreed
+  deviations (`.invalid` filler exempt from neutral values; header representative
+  queries from link-set rows only).
+- Merge with lanes B and C (orchestrator; reviewers A and B, code review):
+  - **Target row:** a run with points but no query/body point still writes its one
+    `target` row (origin only, NULL fingerprint, no probe). ML's same-target key and
+    holdout sealing need it: otherwise a sealed target's header-only run leaked into
+    training (reviewer B, PA-0092; reviewer A, L2).
+  - **`SeamProbeSender`:**
+    - lane A's `_target_host` became `_header_target_host`, because lane B has its
+      own;
+    - the copy-login count is a direct `isolated_copy_logins()` call;
+    - the `HeaderPointsStopped` gate and `check_send_header` run before lane B's
+      isolated routing;
+    - the main-send bookkeeping uses the identity actually sent.
+  - **Joint tests:** `tests/test_forms_phase2_joint.py` (5) runs on lane B's real copy
+    logins:
+    - a copy login logs main out → lane B's breaker, not the header breaker;
+    - a UA-bound session with a live copy → both breakers trip, once;
+    - a header probe to an isolated path rides its copy;
+    - a stopped or refused header never causes a copy login.
+
+    A mutation check over the joints killed 5/5.
+- Effectiveness: verified offline (the tests above; mutation check 40/40 killed over
+  the new logic at 97fe402, 52/52 after the review follow-up, whose dead `url` branch
+  in `neutral_value` was removed when its mutant proved equivalent). Live bWAPP verification (`[design]`, PA-0015): crawl from
+  `portal.php` with `--follow-selector-forms bug`, then `auto --points crawl --identity
+  … --header-points User-Agent,Referer,bWAPP` with `budget_total` raised; expected new
+  confirmations: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37, #43, #44, #48.
+
 ### CC-FUZZ-0065 — String-context SQLi confirmation; probes must cause their evidence (BUG-0117) (2026-10-14)
 - Change:
   - **One engine** (`ConfirmationStrategy._differential`, FR-FUZZ-45 (a)):
@@ -114,6 +226,15 @@ note of the same date.
   - **Implementation:** by the orchestrator. The lane agent stopped before writing code.
   - **Deviations:** C is skipped on raw whole-body points, like the string families.
     The redraw of C's second product is bounded (32 tries).
+- Merge with lanes A and B (orchestrator; reviewers A and B, code review):
+  - **SSTI and SpEL:** the second value must be absent from response 1 (with a redraw,
+    like C). Response 2 may still show product 1, so a stored listing of results
+    confirms; a cached page does not. The old "neither shows the other" clause
+    rejected a genuine stored SSTI (reviewer B).
+  - **CLI:** the `fuzzlab auto` inconclusive line is now asserted (reviewer A, C1).
+  - **Lane A's `header_point_cost`:** reads the families' screens
+    (`3 × len(_FAMILIES)`) and C's probe, instead of the removed
+    `SqliBooleanStrategy.probes`.
 - Effectiveness: effective in tests (counts above). Live pending: the bWAPP sandbox
   check of sqli_4/11/12/14, and the PFF scored run (a possible +1 tp on
   `/login.php [username]`, fp=0 expected).

@@ -65,7 +65,9 @@ def test_evaluate_category_filter_scopes_rules(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("audit", "h")
         counts = evaluate(points, store, run_id, categories=["sql-injection"])
-        # Only the SQLi rule ran (category selection hook, D14/T2.9).
-        assert counts["evaluation"] == 1
+        # Only the SQLi rules ran (category selection hook, D14/T2.9) -- counted from
+        # the rule set, not a literal (PA-0001; forms phase 2 added R-SQLI-HEADER)
+        assert counts["evaluation"] == sum(1 for r in load_rules()
+                                           if r.category == "sql-injection")
         assert store.conn.execute(
             "SELECT DISTINCT category FROM evaluation").fetchone()["category"] == "sql-injection"

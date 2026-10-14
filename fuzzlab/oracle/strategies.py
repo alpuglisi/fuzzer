@@ -311,7 +311,7 @@ class ConfirmationStrategy:
     tolerance = 0.6       # measured latency may fall this far short of the request
 
     def _confirm_timing(self, candidate: Candidate, sender: Sender,
-                        templates: list[str]) -> Verdict | None:
+                        templates: list[str], baseline_value: str = "1") -> Verdict | None:
         """Confirm a time-based injection: latency must rise with the requested delay.
 
         Shared by SQLi (SQL SLEEP) and command injection (shell sleep). Robust
@@ -319,7 +319,7 @@ class ConfirmationStrategy:
         two requested delays — never one slow response.
         """
         base = build_baseline([
-            self._send(sender, candidate, "1", timing=True).elapsed
+            self._send(sender, candidate, baseline_value, timing=True).elapsed
             for _ in range(self.baseline_samples)
         ])
         for template in templates:
@@ -627,24 +627,26 @@ class SstiStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         """A template's product must appear (digit-bounded) with its literal absent,
-        then the same template with a second, different product must too, and
-        neither response may show the other's product (BUG-0117 sweep: a page full
-        of numbers is not an evaluator). +1 request, only after a match."""
+        then the same template with a second product, absent from the first response,
+        must appear in the response to the probe that computed it (BUG-0117 sweep: a
+        page full of numbers is not an evaluator). Response 2 may still show product 1
+        (a stored listing). +1 request, only after a match."""
         a, b = self._draw()
         expr = f"{a}*{b}"
         for index, payload in enumerate(_ssti_payloads(expr)):
             text = self._send(sender, candidate, payload).text or ""
             if not _contains_number(text, a * b) or expr in text:
                 continue
-            c, d = self._draw()
-            while c * d == a * b:
+            for _ in range(32):                     # a product absent from response 1
                 c, d = self._draw()
+                if c * d != a * b and not _contains_number(text, c * d):
+                    break
+            else:
+                return None                         # a page full of numbers
             expr2 = f"{c}*{d}"
             payload2 = _ssti_payloads(expr2)[index]
             text2 = self._send(sender, candidate, payload2).text or ""
-            if (_contains_number(text2, c * d) and expr2 not in text2
-                    and not _contains_number(text, c * d)
-                    and not _contains_number(text2, a * b)):
+            if _contains_number(text2, c * d) and expr2 not in text2:
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"payload": payload, "product": str(a * b),
                                 "cross_check": [payload2, str(c * d)]})
@@ -675,20 +677,23 @@ class SpelInjectionStrategy(ConfirmationStrategy):
     category = "spel-injection"
 
     def confirm(self, candidate, sender):
-        """Two independent canaries, each seen (digit-bounded) only in its own response
-        and never reflected (BUG-0117 sweep). +1 request, only after a match."""
+        """Two independent canaries, the second absent from the first response, each
+        seen (digit-bounded) in the response to its own probe and never reflected
+        (BUG-0117 sweep). +1 request, only after a match."""
         n = secrets.randbelow(900) + 100
         payload = f"T(java.lang.Math).abs(-{n})"
         text = self._send(sender, candidate, payload).text or ""
         if not _contains_number(text, n) or payload in text:
             return None
-        m = secrets.randbelow(900) + 100
-        while m == n:
+        for _ in range(32):                         # a canary absent from response 1
             m = secrets.randbelow(900) + 100
+            if m != n and not _contains_number(text, m):
+                break
+        else:
+            return None                             # a page full of numbers
         payload2 = f"T(java.lang.Math).abs(-{m})"
         text2 = self._send(sender, candidate, payload2).text or ""
-        if (_contains_number(text2, m) and payload2 not in text2
-                and not _contains_number(text, m) and not _contains_number(text2, n)):
+        if _contains_number(text2, m) and payload2 not in text2:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"payload": payload, "result": str(n),
                             "cross_check": [payload2, str(m)]})
@@ -1039,7 +1044,14 @@ class CommandInjectionStrategy(ConfirmationStrategy):
     category = "command-injection"
 
     def confirm(self, candidate, sender):
-        return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
+        # FR-AUD-20: a point whose default was a host starts from loopback, so the app
+        # never receives its own (third-party) host from us
+        base = candidate.base_value
+        if base is None:
+            return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
+        return self._confirm_timing(candidate, sender,
+                                    [base + t for t in _CMDI_TIMING_TEMPLATES],
+                                    baseline_value=base)
 
 
 class RegexDosStrategy(ConfirmationStrategy):
@@ -1154,7 +1166,8 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
         for template in _CMDI_OOB_TEMPLATES:
             token = self._listener.register()
             canary = self._listener.callback_url(token)
-            self._send(sender, candidate, template.format(url=canary))
+            self._send(sender, candidate,
+                       (candidate.base_value or "") + template.format(url=canary))
             hit = self._listener.wait_for(token, timeout=self._timeout)
             if hit is not None:
                 return Verdict(True, self.vuln_class, self.mechanism,
@@ -1983,15 +1996,24 @@ class _BrowserXssStrategy(ConfirmationStrategy):
 
 
 class DomXssStrategy(_BrowserXssStrategy):
-    """M6: payload in the URL (query/fragment) executes client-side (no server round-trip)."""
+    """M6: payload in the URL (query/fragment) executes client-side (no server round-trip).
+
+    Only a query or fragment point applies: a body or header payload is never moved
+    into the URL (BUG-0115, PA-0115) -- that would record a URL-borne DOM XSS against
+    a POST field or a header, and cost a browser load per probe for nothing."""
     vuln_class = "xss-dom"
     mechanism = "browser-execution"
+    _PLACEABLE = ("query", "fragment")
+
+    def applies(self, candidate: Candidate) -> bool:
+        return super().applies(candidate) and candidate.location in self._PLACEABLE
 
     def _observe(self, candidate, payload, token):
-        location = candidate.location if candidate.location in ("query", "fragment") else "query"
+        if candidate.location not in self._PLACEABLE:     # refuse, never relocate
+            return ExecObservation(False)
         return self._executor.run(
             ExecRequest(url=candidate.url, param=candidate.param, value=payload,
-                        location=location), token)
+                        location=candidate.location), token)
 
 
 class StoredXssStrategy(_BrowserXssStrategy):

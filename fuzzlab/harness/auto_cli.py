@@ -19,7 +19,8 @@ from urllib.parse import urlparse
 
 from fuzzlab.core.runmode import RunModeError
 from fuzzlab.core.store import Store
-from fuzzlab.harness.auto import plan_run, run_auto
+from fuzzlab.harness.auto import (DEFAULT_HEADER_POINTS, header_point_cost,
+                                  header_point_estimate, plan_run, run_auto)
 from fuzzlab.labels import contract
 from fuzzlab.tools.probesender import make_probe_sender
 from fuzzlab.tools.store_adapter import import_spider
@@ -123,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--plugins", action="store_true",
                    help="Discover and attach entry-point plugins (Phase 10); the active "
                         "set is recorded on the run. Default off (runs with no plugins).")
+    p.add_argument("--header-points", nargs="?", const=",".join(DEFAULT_HEADER_POINTS),
+                   default=None, metavar="NAME[,NAME...]",
+                   help="Also probe request headers of every crawled page (crawl points "
+                        "only). Alone: User-Agent and Referer. Off by default: about "
+                        f"{header_point_cost()} requests per page and name. Cookie, "
+                        "Authorization, Host, framing, routing and method-override headers "
+                        "are refused (FR-FUZZ-43).")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     from fuzzlab.cli_dryrun import add_dry_run_flag
@@ -183,12 +191,14 @@ def main(argv: list[str]) -> int:
     # Every usage-level check runs before any side effect (BUG-0078, PA-0079): the run
     # plan by the same function `run_auto` uses (D15 fail-safe, a ground-truth source
     # without a contract), then the environment the flags need.
+    args.header_names = _header_names(p, args)
     try:
         plan_run(mode=args.mode, ground_truth=ground_truth, selected_categories=selected,
-                 points_source=args.points)
+                 points_source=args.points, header_points=bool(args.header_names))
     except RunModeError as exc:
         p.error(str(exc))
     _precheck_environment(p, args)
+    _precheck_header_budget(p, args)
 
     with Store(args.store) as store:
         run_id = store.start_run("auto", host)
@@ -200,6 +210,39 @@ def main(argv: list[str]) -> int:
             # usage error still exits 2 and a real bug keeps its traceback
             store.mark_aborted(run_id, exc)
             raise
+
+
+def _header_names(p, args) -> list[str] | None:
+    """``--header-points`` names, each checked by the one rule before any side effect
+    (PA-0079; `core.http.header_point_refusal`)."""
+    if args.header_points is None:
+        return None
+    from fuzzlab.core.http import header_point_refusal
+    names = [n.strip() for n in args.header_points.split(",") if n.strip()]
+    if not names:
+        p.error("--header-points: no header name given")
+    for name in names:
+        reason = header_point_refusal(name)
+        if reason:
+            p.error(f"--header-points: refusing {name!r}: {reason}")
+    return list(dict.fromkeys(names))
+
+
+def _precheck_header_budget(p, args) -> None:
+    """An authenticated run spends the seam's request budget: refuse, before the store
+    is opened, header points whose lower-bound cost alone exceeds it (Q2)."""
+    if not args.header_names:
+        return
+    pages, cost = header_point_estimate(args.spider_db, args.header_names)
+    args.header_estimate = (pages, cost)
+    if not args.identity:
+        return                         # the anonymous sender has no request budget
+    from fuzzlab.core.config import load_config
+    total = int(load_config().get("budget_total", 5000))
+    if cost > total:
+        p.error(f"--header-points: {pages} page(s) x {len(args.header_names)} header(s) "
+                f"need at least {cost} requests, more than budget_total={total}; raise "
+                f"budget_total in the fuzzlab config, or name fewer headers")
 
 
 def _precheck_environment(p, args) -> None:
@@ -250,7 +293,8 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           selected_categories=selected, points_source=args.points,
                           browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
                           scheduler=scheduler, plugins=plugins,
-                          confirm_budget=args.confirm_budget)
+                          confirm_budget=args.confirm_budget,
+                          header_names=args.header_names)
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:
@@ -451,9 +495,19 @@ def _print_summary(args, counts, result, plugins=None) -> int:
             print(f"    - {item['location']} {to_path(item['url'])} [{item['param']}]: "
                   f"{item['mechanism']}; not started: "
                   f"{', '.join(item['families_not_started']) or '-'}")
+    if getattr(args, "header_names", None):
+        pages, cost = getattr(args, "header_estimate", (0, 0))
+        print(f"  header points: {m.get('header_points', 0)} "
+              f"({', '.join(args.header_names)}; at least {cost} requests over "
+              f"{pages} page(s))")
+    if m.get("header_breaker"):
+        print(f"  header probing stopped: {m['header_breaker']}")
+    if m.get("invalid_plugin_rules"):
+        print(f"  plugin rules left out (invalid): {m['invalid_plugin_rules']}")
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
-        print(f"  not fuzzed ({len(skipped)} crawl point(s), NFR-FUZZ-safe):")
+        print(f"  not fuzzed ({len(skipped)} crawl point(s): destructive URL, credential, "
+              f"or stopped by a breaker; NFR-FUZZ-safe):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
     elif skipped:

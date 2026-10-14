@@ -737,6 +737,28 @@ def test_ssti_and_spel_markers_need_a_two_sample_cross_check(dense_page):
             return Probe(200, f"<p>{m[1]}</p>" if m else "<p>?</p>")
     assert SstiStrategy().confirm(ssti, Jinja())
     assert SpelInjectionStrategy().confirm(spel, Spel())
+
+    class StoredJinja(Jinja):
+        """A stored listing of evaluated entries: earlier results stay on the page."""
+
+        def __init__(self):
+            self.shown: list[str] = []
+
+        def send(self, url, param, value, **kw):
+            text = super().send(url, param, value).text
+            if re.fullmatch(r"\{\{\d+\*\d+\}\}", value):
+                self.shown.append(text)
+            return Probe(200, "".join(self.shown) or text)
+    assert SstiStrategy().confirm(ssti, StoredJinja())   # product 1 may stay (reviewers)
+
+    class Cached:
+        """The first response, every time: product 2 never appears."""
+        first = None
+
+        def send(self, url, param, value, **kw):
+            self.first = self.first or Jinja().send(url, param, value)
+            return self.first
+    assert SstiStrategy().confirm(ssti, Cached()) is None
     assert GoTemplateSstiStrategy._contains_token("a 142 b", 142)
 
 
@@ -870,6 +892,18 @@ def test_cap_exhaustion_is_inconclusive_never_a_negative(tmp_path, budgeted, cap
         stored = {r["key"]: r["value"] for r in store.conn.execute(
             "SELECT key, value FROM run_metrics WHERE run_id=?", (run_id,))}
         assert stored["pipeline_oracle_inconclusive"] == 2.0
+    # the operator sees it (reviewer A, C1)
+    from types import SimpleNamespace
+
+    from fuzzlab.harness import auto_cli
+    capsys.readouterr()
+    auto_cli._print_summary(SimpleNamespace(score=False, rank=False, anomaly=False),
+                            None, result)
+    out = capsys.readouterr().out
+    assert ("inconclusive (1 candidate key(s): a cost cap stopped a check that had "
+            "started; unlabelled, FR-FUZZ-45):") in out
+    assert ("- query /bWAPP/page.php [title]: boolean-differential; not started: "
+            "string-grammar, string-evaluation") in out
 
 
 # --- what each engine and marker check is for (mutation-checked) -----------------------

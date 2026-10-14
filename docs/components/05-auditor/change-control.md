@@ -3,6 +3,36 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0032 — Value-shape and header rules; rules validated on load (forms phase 2, lane A) (2026-10-14)
+- Change:
+  - `audit/value_shape.py`: `value_shape` (url, ip, filename, path, hostname; total,
+    bounded, linear, regex-free), `neutral_value`, `SAFE_HOST`, `SAFE_URL`.
+  - `InjectionPoint.origin`, `.value_shapes`, `.base_value`; a fired rule's evidence
+    carries `"base_value"` when set (the strategy prefix is built under CC-FUZZ-0063).
+  - `audit/rules.py`: `value_shape_in` and `origin_in` predicates; `validate_rule` /
+    `RuleError` in `load_rules`; `evaluate` leaves an invalid plugin rule out and counts
+    it (`invalid_plugin_rules`), never fatal.
+  - Rules: `R-SQLI-HEADER`, `R-XSS-HEADER` (crawl header points),
+    `R-COMMAND-INJECTION-VALUE`, `R-FILE-INCLUSION-VALUE` (appended last).
+- Follow-up (code review of 97fe402, reviewer B R3): `neutral_value` now errs toward
+  loopback — any `://` value (any scheme, any length) or `//`-prefixed value →
+  `SAFE_URL`; a host or ip with a port → `SAFE_HOST`, with a path → `SAFE_URL`. Before,
+  `10.0.0.1:8080`, `www.example.com:8080`, `//host/`, `gopher://…`, `dict://…`,
+  `www.example.com/page` and a >2048-character URL went out unchanged. E-mail
+  defaults are a stated residual.
+- Impact: crawl points whose default is a host or a file name become command-injection
+  or file-inclusion candidates whatever their name; ground-truth candidates are
+  unchanged (tested per contract). Accepted false positive: `user.id`, `order.by`
+  classify as host names (one command-injection candidate each, 11 requests on a
+  negative). Each run records four more `evaluation` rows per point.
+- Risk: low to medium (more candidates on crawl runs; one confirmation per key).
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase2.py`) — done
+  - [x] FR-AUD-20 — done
+- Review: as CC-FUZZ-0063.
+- Effectiveness: verified offline; mutation check as CC-FUZZ-0063.
+
 ### CC-AUD-0031 — Candidate evidence carries a form point's entries (forms phase 1) (2026-10-13)
 - Change: `audit/engine.InjectionPoint.base_entries`. A fired rule's candidate evidence
   includes `"entries"`, values already blanked for secrets.

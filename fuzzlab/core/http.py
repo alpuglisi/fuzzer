@@ -11,6 +11,7 @@ injectable so tests never touch the network.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
@@ -50,6 +51,66 @@ DEFAULT_BROWSER_HEADERS = {
 
 class OutOfScope(RuntimeError):
     """Raised when a request targets a host outside the configured scope."""
+
+
+# --- header injection points (forms phase 2, FR-CORE-32, PA-0003) ----------------------
+#: Request headers a crawl-sourced header point may never carry, by class. Whole names,
+#: compared case-insensitively (PA-0022).
+HEADER_POINT_DENY: dict[str, frozenset[str]] = {
+    # message framing / hop-by-hop: smuggling stays dual-use and default-off
+    "framing": frozenset({
+        "content-length", "transfer-encoding", "connection", "keep-alive", "te",
+        "trailer", "upgrade", "expect", "proxy-connection", "content-type",
+        "content-encoding"}),
+    # request routing: could move a probe to another vhost or past the URL gate
+    "routing": frozenset({
+        "host", "forwarded", "x-forwarded-host", "x-host", "x-original-url",
+        "x-rewrite-url", "x-forwarded-proto", "x-forwarded-scheme", "x-forwarded-ssl",
+        "x-forwarded-port", "x-forwarded-prefix", "x-forwarded-server", "x-forwarded-uri",
+        "x-original-host", "x-http-host-override"}),
+    # method override: a GET could become a DELETE
+    "method override": frozenset({
+        "x-http-method-override", "x-http-method", "x-method-override"}),
+    # credentials: the session's own material (plus any name redaction calls secret)
+    "credential": frozenset({
+        "cookie", "cookie2", "authorization", "proxy-authorization"}),
+}
+#: RFC 7230 ``token`` (a header field-name), at most 64 characters.
+_HEADER_TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}")
+
+
+class HeaderPointRefused(ValueError):
+    """A header point names a header no crawl-sourced probe may set."""
+
+
+def header_point_refusal(name) -> str | None:
+    """Why a crawl-sourced header point may not probe header ``name``, or None.
+
+    The one rule for the ``auto --header-points`` names and every sender's header
+    branch (`check_send_header`). ``X-Forwarded-For``, ``X-Real-IP`` and ``Client-IP``
+    are allowed: they change no routing."""
+    from fuzzlab.core.redaction import is_sensitive_name
+    if not isinstance(name, str) or not _HEADER_TOKEN.fullmatch(name):
+        return f"{name!r} is not a header name (RFC 7230 token, at most 64 characters)"
+    low = name.lower()
+    for kind, names in HEADER_POINT_DENY.items():
+        if low in names:
+            return f"{name} is a {kind} header"
+    if is_sensitive_name(name):
+        return f"{name} names a credential"
+    return None
+
+
+def check_send_header(name: str, url: str, explicit: frozenset[str] = frozenset()) -> None:
+    """Refuse a header probe the rule forbids unless its URL was explicitly enumerated
+    (ground truth's own header points: ``Authorization``, signature headers). Every
+    sender's header branch calls this (PA-0083(1))."""
+    reason = header_point_refusal(name)
+    if reason is None:
+        return
+    from fuzzlab.core.urls import url_key
+    if url_key(url) not in explicit:
+        raise HeaderPointRefused(f"refusing to probe header {name!r}: {reason}")
 
 
 @dataclass

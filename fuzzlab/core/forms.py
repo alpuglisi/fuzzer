@@ -98,6 +98,34 @@ class FormEntries(list):
         return out
 
 
+#: The store's ``form`` table holds a request's default sibling entry list: a crawled
+#: form's (``enctype`` set, possibly ``""``) or a crawled link's query (``enctype``
+#: NULL). The link-set writer uses this value; every reader asks `is_link_set`
+#: (forms phase 2, FR-CORE-32, PA-0003).
+LINK_SET_ENCTYPE = None
+
+
+def is_link_set(row) -> bool:
+    """True when a store ``form`` row (a mapping or ``sqlite3.Row`` with ``enctype``)
+    is a crawled link's query rather than a crawled form."""
+    return row["enctype"] is LINK_SET_ENCTYPE
+
+
+def first_link_set(conn, run_id: int, path: str) -> list[tuple[str, str]] | None:
+    """The first crawled link query recorded for ``GET path`` in a run (already
+    redacted by the importer), or None. The one store reader of ``form.enctype``
+    (a guard test keeps it that way)."""
+    import json
+    for row in conn.execute(
+            "SELECT f.enctype AS enctype, f.entries AS entries FROM form f "
+            "JOIN endpoint e ON e.id = f.endpoint_id "
+            "WHERE f.run_id = ? AND e.url = ? AND e.method = 'GET' ORDER BY f.id",
+            (run_id, path)).fetchall():
+        if is_link_set(row):
+            return [(str(n), str(v)) for n, v in json.loads(row["entries"])]
+    return None
+
+
 def _input_type(el) -> str:
     return (el.get("type") or "text").strip().lower()
 

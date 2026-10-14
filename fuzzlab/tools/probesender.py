@@ -10,8 +10,9 @@ from __future__ import annotations
 import threading
 import time
 
+from fuzzlab.core.http import check_send_header
 from fuzzlab.core.urls import check_send_url, to_path, url_key
-from fuzzlab.oracle.probe import Probe
+from fuzzlab.oracle.probe import HeaderPointsStopped, Probe
 from fuzzlab.tools.authhttp import with_query, with_query_param
 
 
@@ -57,6 +58,17 @@ class SeamProbeSender(_ExplicitAllowance):
     be had (no ``isolated_client`` factory, a failed or non-distinct login, a cap, a
     tripped breaker), anonymously. A probe that re-binds a session server-side can then
     only re-bind the throwaway one.
+
+    **Header breaker** (forms phase 2, FR-FUZZ-43). An app that binds its session to a
+    request header (User-Agent, say) logs the session out when a header probe changes
+    it. The sender listens to its main manager's logouts (``add_logout_listener``,
+    FR-SESS-16): a logout seen on a header probe's response, or on the first main send
+    after one, stops every later header probe of the run (`HeaderPointsStopped`, raised
+    before the send). The next main send re-logs in once, and no header probe ever
+    rides on that session. Sends are sequential (the pipeline confirms on one thread),
+    so "the previous main send" is well defined. A logout that follows an isolated copy
+    login (lane B's per-path session copies, `isolated_copy_logins`) is not
+    attributed to the header probe; that sender's own breaker owns it.
     """
 
     def __init__(self, client, identity: str = "anonymous", manager=None,
@@ -89,6 +101,16 @@ class SeamProbeSender(_ExplicitAllowance):
                         "verifications": 0, "send_ordinal": 0}
         self._first_copy_login_send: int | None = None
         self._run_host: str | None = None
+
+        # -- header breaker (FR-FUZZ-43) --
+        self.header_stop_reason: str | None = None
+        self._current: tuple[str, str, str] | None = None   # (location, param, url)
+        self._last_main_was_header: tuple[str, str] | None = None   # (param, url)
+        self._copies_at_header = 0
+        add = getattr(manager, "add_logout_listener", None)
+        if add is not None and identity != "anonymous":
+            add(self._on_logout)
+
 
     # -- isolation (FR-FUZZ-44) -------------------------------------------------
     def isolate(self, urls) -> None:
@@ -272,6 +294,40 @@ class SeamProbeSender(_ExplicitAllowance):
                     "the isolated login logged the run's session out")
         return alive
 
+    def _copy_logins(self) -> int:
+        # isolated-copy login attempts so far (FR-FUZZ-44), never this run's own logins
+        return self.isolated_copy_logins()
+
+    def _header_target_host(self, urlsplit) -> str | None:
+        """The run's target host: the operator's base URL's, else the host of the
+        main send in progress or last made."""
+        if self._base_url:
+            return urlsplit(self._base_url).hostname
+        for seen in (self._current, self._last_main_was_header):
+            if seen is not None:
+                return urlsplit(seen[-1]).hostname
+        return None
+
+    def _on_logout(self, host: str, identity: str) -> None:
+        """Told by the main manager inside the send that observed a logout. Records
+        only; never raises, so that probe's response is kept."""
+        if self.header_stop_reason is not None or identity != self._identity:
+            return
+        from urllib.parse import urlsplit
+        if host != self._header_target_host(urlsplit):
+            return                                   # not the run's target (reviewers)
+        current = self._current
+        if current is not None and current[0] == "header":
+            culprit = (current[1], current[2])
+        elif self._last_main_was_header is not None:
+            culprit = self._last_main_was_header
+        else:
+            return                                   # not after a header probe
+        if self._copy_logins() > self._copies_at_header:
+            return                                   # an isolated copy login since then
+        self.header_stop_reason = (f"session bound to a probed header ({culprit[0]} on "
+                                   f"{urlsplit(culprit[1]).path or '/'})")
+
     def _identity_for(self, url: str) -> str:
         if self._manager is None or self._identity == "anonymous":
             return self._identity
@@ -297,7 +353,13 @@ class SeamProbeSender(_ExplicitAllowance):
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None) -> Probe:
         from fuzzlab.session.manager import IsolatedLoginFailed
+        # every gate before any routing: a stopped or refused header probe never causes
+        # an isolated copy login (reviewers A/B, forms phase 2 merge)
+        if location == "header" and self.header_stop_reason is not None:
+            raise HeaderPointsStopped(self.header_stop_reason)
         check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        if location == "header":
+            check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
         identity = self._identity_for(url)
         with self._iso_lock:
             self._counts["send_ordinal"] += 1
@@ -367,7 +429,16 @@ class SeamProbeSender(_ExplicitAllowance):
         else:
             req = Request(method.upper(), with_query_param(url, param, value),
                           identity=identity, timing=timing, component="oracle")
-        r = client.send(req)
+        main = identity != "anonymous" and identity == self._identity
+        if main and location == "header":
+            self._copies_at_header = self._copy_logins()
+        self._current = (location, param, url) if main else None
+        try:
+            r = client.send(req)
+        finally:
+            self._current = None
+        if main:
+            self._last_main_was_header = (param, url) if location == "header" else None
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers))
 
@@ -437,6 +508,7 @@ class RequestsProbeSender(_ExplicitAllowance):
         elif entries is not None and location == "query":
             url = with_query(url, entries)
         elif location == "header":
+            check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
             kwargs["headers"] = {param: value}
         elif location == "body" and content_type:
             # Whole-body point at its own declared content type -- never

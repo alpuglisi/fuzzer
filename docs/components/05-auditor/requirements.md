@@ -172,6 +172,33 @@ budget where a vulnerability is plausible.
 - **FR-AUD-19** *(`CC-AUD-0031`, 2026-10-13).* A form point's candidate evidence
   carries its entry list (`"entries"`, secrets blank), so the oracle probes it with its
   sibling fields.
+- **FR-AUD-20** *(forms phase 2; `CC-AUD-0032`, 2026-10-14).*
+  - **Value shapes.** `audit/value_shape.value_shape` is the one classifier of an
+    example value: `url`, `ip`, `filename` (a closed extension set), `path`, `hostname`
+    (RFC 1123 labels; the last a two-letter or listed generic TLD), or none. It is
+    total, bounded (2048 characters) and linear, with no regular expression.
+    Accepted false positive: a dotted name ending in two letters (`user.id`,
+    `order.by`) is a host name.
+  - **Predicates.** `value_shape_in` (the point's `value_shapes`) and `origin_in`
+    (`crawl` / `ground-truth`). `load_rules` validates every rule: unknown keys, values
+    outside a closed set, or a regex that does not compile raise `RuleError`. An invalid
+    plugin rule is left out and counted (`invalid_plugin_rules`).
+  - **Rules.** `R-COMMAND-INJECTION-VALUE` (ip, hostname) and `R-FILE-INCLUSION-VALUE`
+    (filename, path) fire whatever the parameter is called; `R-SQLI-HEADER` and
+    `R-XSS-HEADER` fire on crawl-sourced header points only. None fires on a
+    ground-truth point.
+  - **Examples.** Crawl points carry their example's shapes; a field whose own example
+    is empty or our filler takes the shapes its name has elsewhere in the run (one
+    pass).
+  - **Neutral base values.** A point whose example is ip- or hostname-shaped is probed
+    from `127.0.0.1` (the command-injection base value and payload prefix, built under
+    CC-FUZZ-0063). `value_shape.neutral_value` errs toward loopback for siblings and
+    header-point queries: any value with `://` (any scheme, any length) or starting
+    with `//` → `http://127.0.0.1/`; an ip or host name, also with a port →
+    `127.0.0.1`, and with a path after it → `http://127.0.0.1/`. Our own fillers (exact
+    match) are sent as they are. The fuzzer never sends a host name taken from the app's
+    own defaults. Stated residual: an e-mail default (`user@mail.example.com`) is sent
+    as is and may trigger mail.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

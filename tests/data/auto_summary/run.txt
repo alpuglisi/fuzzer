@@ -2,7 +2,7 @@ rc=0
 
 auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-truth)
   points from: ground-truth
-  points audited: 23   candidates: 46   negatives: 2
+  points audited: 23   candidates: 46   negatives: 48
   findings (oracle-confirmed): 0
   oracle budget: checked 2 of 44 confirmable candidate(s); 42 skipped (ordered by score, trained on 40 earlier labelled candidate(s) from this target; model 184ee66b22cc)
     skipped candidates count as misses in the score

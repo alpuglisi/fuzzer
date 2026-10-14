@@ -2,7 +2,7 @@ rc=0
 
 auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-truth)
   points from: ground-truth
-  points audited: 23   candidates: 46   negatives: 41
+  points audited: 23   candidates: 46   negatives: 87
   findings (oracle-confirmed): 3
   score vs ground truth: tp=3 fp=0 fn=5 tn=8
   requests: 448   requests/finding: 149.333

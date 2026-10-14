@@ -1177,6 +1177,21 @@ tracked in the requirements files, not here.
     distinct, never persisted, labelled `<identity>#isolated:<n>`), or the send goes
     anonymously, behind run-wide single-session and failed-login breakers.
     Credential-change forms are never imported;
+  - **Forms phase 2, lane A (CC-FUZZ-0063 / CC-AUD-0032 / CC-CRAWL-0014 /
+    CC-CORE-0042, no migration):**
+    - store contract: a `form` row is a request's sibling entry list, a crawled form's
+      (`enctype` set) or a crawled link's query (`enctype` NULL), told apart only by
+      `core.forms.is_link_set` (`first_link_set` is the one reader);
+    - `fuzzlab auto --header-points` (off by default) adds header points per crawled
+      page, checked by `core.http.header_point_refusal` at the CLI and at every
+      sender's header branch; `SeamProbeSender`'s breaker (a main-manager logout
+      listener, FR-SESS-16) stops header probing when it logs the session out;
+    - `audit/value_shape.py` classifies example values for the `value_shape_in`
+      rules; ip/host/url defaults are sent as loopback; `origin_in` keeps the header
+      rules off ground truth;
+    - POST selector forms are fuzzed unless settings-like; the spider's
+      `selector_verdicts` records what a submitted picker did;
+    - BUG-0115: placement is a conformance contract (`UnplaceableLocation`);
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a

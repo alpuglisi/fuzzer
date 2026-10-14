@@ -483,7 +483,10 @@ CREATE TABLE IF NOT EXISTS holdout_seal_meta (
 #: Migration 20 (forms phase 1, CC-CORE-0039, FR-CORE-29): a crawled form's default
 #: entry list (sensitive values already blanked), so a probe of one of its fields sends
 #: the others with it. ``parameter.form_id`` links a form field to it; NULL for every
-#: other parameter, legacy rows included.
+#: other parameter, legacy rows included. Since forms phase 2 (FR-CORE-32, no schema
+#: change) a row is a request's default sibling entry list: a crawled form's (``enctype``
+#: set, possibly ``""``) or a crawled link's query (``enctype`` NULL), told apart only by
+#: ``core.forms.is_link_set``.
 _M0020 = """
 CREATE TABLE IF NOT EXISTS form (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

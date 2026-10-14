@@ -39,6 +39,12 @@ class PlaywrightBrowserExecutor:
         self._headers = storage_headers or {}
 
     def run(self, request: ExecRequest, token: str) -> ExecObservation:
+        # refuse, never relocate (BUG-0115, PA-0115): checked before any browser starts
+        if request.param is not None and request.location not in ("query", "fragment"):
+            return ExecObservation(False, detail=f"unplaceable location {request.location!r}")
+        if request.store is not None and request.store.location not in ("body", "query"):
+            return ExecObservation(False, detail="unplaceable store location "
+                                                 f"{request.store.location!r}")
         from playwright.sync_api import sync_playwright
 
         init = (f"window.{SENTINEL}=window.{SENTINEL}||function(t){{"
