@@ -301,8 +301,12 @@ fuzzer.
   - **What it lets through (W2, `spa.window_request_refusal`, on every request of every
     context of the crawl, and on each redirect hop):** GET and HEAD only, any other
     method aborted whatever its destination; every navigation request aborted
-    (`ERR_ABORTED`, so the page stays) and its target queued through the normal queue
-    gates (scope, the destructive rule — a logout is refused — not visited, depth); a
+    (`ERR_ABORTED`, so the page stays) and, for a GET/HEAD navigation, its target queued
+    through the normal queue gates (scope, the destructive rule — a logout is refused —
+    not visited, depth); a refused **non-GET** navigation (an auto-submitted form) is a
+    blocked write (`reveal_writes_blocked`), never a page: its target is not queued, so
+    it is never requested later as a GET (CC-CRAWL-0029, one rule with FR-CRAWL-17's
+    query window); a
     GET refused when destructive (also by its SPA fragment), a transaction
     (`transaction_reason`, CC-CORE-0045), or with a credential token
     (`CREDENTIAL_TOKENS`, path and query names) or an explicit account-**action** token
@@ -548,7 +552,7 @@ fuzzer.
   card with an interactive descendant is not one target, a dialog's own buttons are
   never clicked, and after a reveal in an authenticated crawl the session is checked
   (FR-CRAWL-15/16).
-  - Enforced by (the reveal window, W1-W3): `navguard.make_route_handler(window=)` / `make_ws_handler(hold=)`, `spa.window_request_refusal`, `LocalSpider._window` / `_window_refusal` / `_restore` / `_quiesce` — `tests/test_forms_phase4.py::test_the_window_lets_only_safe_gets_through`, `tests/test_forms_phase4.py::test_the_route_asks_the_window_before_any_fetch_and_keeps_the_page_on_navigation`, `tests/test_forms_phase4.py::test_the_window_is_asked_again_on_every_redirect_hop`, `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`, `tests/test_forms_phase4.py::test_w2_a_reveal_can_only_read`, `tests/test_forms_phase4.py::test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal`, `tests/test_forms_phase4.py::test_w3_a_websocket_message_in_the_window_is_dropped`, `tests/test_forms_phase4.py::test_w1_a_debounced_post_after_close_never_arrives`, `tests/test_forms_phase4.py::test_g1_a_selection_change_post_is_never_sent_before_the_submission`, `tests/test_forms_phase4.py::test_the_lift_covers_exactly_one_click_and_its_settle`, `tests/test_forms_phase4.py::test_a_click_that_raises_never_leaves_the_window_open`, `tests/test_forms_phase4.py::test_the_own_reload_exemption_matches_the_exact_url`, `tests/test_forms_phase4.py::test_a_redirect_after_the_own_reload_is_still_a_navigation`, `tests/test_forms_phase4.py::test_a_failed_close_still_closes_the_windows_popups`
+  - Enforced by (the reveal window, W1-W3): `navguard.make_route_handler(window=)` / `make_ws_handler(hold=)`, `spa.window_request_refusal`, `LocalSpider._window` / `_window_refusal` / `_restore` / `_quiesce` — `tests/test_forms_phase4.py::test_the_window_lets_only_safe_gets_through`, `tests/test_forms_phase4.py::test_a_refused_post_navigation_in_a_reveal_is_a_write_never_a_page`, `tests/test_forms_phase4.py::test_the_route_asks_the_window_before_any_fetch_and_keeps_the_page_on_navigation`, `tests/test_forms_phase4.py::test_the_window_is_asked_again_on_every_redirect_hop`, `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`, `tests/test_forms_phase4.py::test_w2_a_reveal_can_only_read`, `tests/test_forms_phase4.py::test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal`, `tests/test_forms_phase4.py::test_w3_a_websocket_message_in_the_window_is_dropped`, `tests/test_forms_phase4.py::test_w1_a_debounced_post_after_close_never_arrives`, `tests/test_forms_phase4.py::test_g1_a_selection_change_post_is_never_sent_before_the_submission`, `tests/test_forms_phase4.py::test_the_lift_covers_exactly_one_click_and_its_settle`, `tests/test_forms_phase4.py::test_a_click_that_raises_never_leaves_the_window_open`, `tests/test_forms_phase4.py::test_the_own_reload_exemption_matches_the_exact_url`, `tests/test_forms_phase4.py::test_a_redirect_after_the_own_reload_is_still_a_navigation`, `tests/test_forms_phase4.py::test_a_failed_close_still_closes_the_windows_popups`
   *(CC-CRAWL-0027, forms phase 5:)* **a query seed or probe load can only read**: each
   runs inside the reveal window (no write, navigation or WebSocket message reaches the
   app; it leaves for `about:blank` inside the window), a destructive, transaction,

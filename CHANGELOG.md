@@ -4,6 +4,11 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Reveal window: a refused POST navigation is a write, never a page)
+- A reveal that auto-submits a POST form no longer gets its action queued and crawled as a
+  GET: both windows now treat a refused non-GET navigation as a blocked write
+  (CC-CRAWL-0029, FR-CRAWL-16; review A3-N1).
+
 ## 2026-10-14 (FR-CRAWL-17 review round 3: a request whose redirect hop was refused stays blocked)
 - While a SPA query load's window is open, every request that fails is blocked for it, so
   a GET whose redirect hop the window refused is never fetched again outside the window;

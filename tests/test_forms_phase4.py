@@ -500,6 +500,25 @@ def test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal(revea
         db, "SELECT action_url, method FROM discovered_forms")
 
 
+def test_a_refused_post_navigation_in_a_reveal_is_a_write_never_a_page(monkeypatch,
+                                                                        tmp_path):
+    """CC-CRAWL-0029 (review A3-N1, one rule for both windows): a reveal click that
+    auto-submits a POST form makes a POST navigation; the window refuses it as a blocked
+    write and never queues its target, so the action is never requested -- not as the
+    POST, and not later as a GET."""
+    from tests._spa_fixture import PostRevealSpa
+    chromium_or_skip(monkeypatch)
+    lab = PostRevealSpa()
+    try:
+        sp, db, _logs = _crawl(lab, tmp_path)
+    finally:
+        lab.close()
+    assert sp.spa_counts["reveals_clicked"] >= 1
+    assert not any(p.startswith("/api/revealpost") for p in _paths(lab))
+    assert not any("revealpost" in u for (u,) in db_rows(db, "SELECT url FROM discovered_pages"))
+    assert sp.spa_counts["reveal_writes_blocked"] >= 1
+
+
 def test_w3_a_websocket_message_in_the_window_is_dropped(revealed):
     lab, sp, _db, _logs = revealed
     assert "hello" in lab.ws_messages                    # forwarded outside the window

@@ -3,6 +3,36 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
+- Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
+  target for the queue only when it is a GET/HEAD navigation. A refused non-GET
+  navigation -- an auto-submitted form's POST -- is counted as the window's blocked
+  write (`reveal_writes_blocked`; in a query window `spa_query_writes_blocked`) and its
+  target is never queued, so the crawl never requests the action later as a GET.
+  Before, the reveal window queued that target, and the crawl then fetched the write
+  endpoint with a GET outside the window (review A3-N1 of FR-CRAWL-17; the query window
+  already had this rule since its U1 amendment).
+- Impact: CRAWL only (reveal navigation, FR-CRAWL-16 W2). A GET/HEAD navigation (a menu
+  item's `location.assign`) is queued as before. Fewer pages: a form action reached only
+  through a reveal's POST navigation is no longer crawled as a GET page.
+- Risk: low; it only removes requests. Coverage cost: such an action URL is no longer
+  discovered by that path (its form, when rendered, is still recorded as a form).
+- Deliverables:
+  - [x] code: `_window_refusal`, docstring — done
+  - [x] test: `tests/test_forms_phase4.py::test_a_refused_post_navigation_in_a_reveal_is_a_write_never_a_page`
+    (real Chromium; fixture `PostRevealSpa`) — done
+  - [x] FR-CRAWL-16 W2 text in place, NFR-CRAWL-safe trace, CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): the new test passes with a real browser, and the
+  mutation that restores the old rule for reveal windows fails it (the server got
+  `GET /api/revealpost`); `tests/test_forms_phase4.py` is otherwise unchanged and green
+  (its GET-navigation queueing test still passes). Every test file that imports a module
+  changed since `cdde39f` (`core/urls.py`, `tools/fetcher.py`, `spa.py`, `spider.py`,
+  `store_adapter.py`; 31 files, found by AST), plus `test_no_wall_clock_ratio`,
+  `test_requirements_traceability` and `test_lint` (`FUZZLAB_REQUIRE_LINT=1`), with
+  `FUZZLAB_REQUIRE_BROWSER=1`, one process at a time: 1638 passed, 0 failed, 4 skipped
+  (the spring-boot navigability file's own reproduction skips), 4 xfailed (strict pins).
+  This tree also carries the CC-CRAWL-0027 round-3 (Y1-Y4) amendment.
+
 ### CC-CRAWL-0027 — SPA route query-parameter discovery: scan, seeds, the observation probe (FR-CRAWL-17, forms phase 5) (2026-10-14)
 - Change (the agreed design `spa-query-draft.md`, **Revision 2**: reviewer B's
   Revision 1 and reviewer A's points reconciled into Q1-Q7; that review was this

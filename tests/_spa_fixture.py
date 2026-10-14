@@ -753,3 +753,28 @@ class PopupSpa(_Lab):
     """A reveal that opens a popup with a delayed POST (review A-S1)."""
     index = _HASH_INDEX.replace("/main.js", "/pop.js").replace("#/about", "#/pop")
     script = ("/pop.js", _POPUP_JS)
+
+
+_POST_REVEAL_JS = r"""
+const routes = [{path:'postreveal'}, {path:'after1'}];
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  document.getElementById('app').innerHTML = name === 'postreveal' ?
+    "<button id='b' aria-haspopup='dialog' aria-label='Show details'>Details</button>" :
+    '<p>' + (name || 'home') + '</p>';
+  const b = document.getElementById('b');
+  // a reveal whose click auto-submits a POST form: a POST navigation (CC-CRAWL-0029)
+  if (b) b.onclick = () => { const f = document.createElement('form');
+    f.method = 'post'; f.action = '/api/revealpost';
+    const i = document.createElement('input'); i.name = 'v'; i.value = '1';
+    f.appendChild(i); document.body.appendChild(f); f.submit(); };
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class PostRevealSpa(_Lab):
+    """A reveal whose click submits a POST form (CC-CRAWL-0029)."""
+    index = _HASH_INDEX.replace("/main.js", "/postrev.js").replace("#/about", "#/postreveal")
+    script = ("/postrev.js", _POST_REVEAL_JS)

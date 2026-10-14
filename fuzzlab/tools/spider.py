@@ -620,7 +620,9 @@ class LocalSpider:
         aborted unless `spa.window_request_refusal` lets it through -- or it comes from
         the context whose vetted final submission lifted the window (W1), or it is the
         window's own reload of its route (GET, that route's URL, from that context).
-        A refused navigation's target is kept, to be queued through the normal gates."""
+        A refused GET/HEAD navigation's target is kept, to be queued through the normal
+        gates; a refused non-GET navigation (an auto-submitted form) is a blocked write,
+        never a page (CC-CRAWL-0029)."""
         win = self._win
         if win is None:
             return None
@@ -645,12 +647,13 @@ class LocalSpider:
             # word rules refused (a transaction or account GET)
             if method not in ("GET", "HEAD") or not navigation:
                 win["writes"] = win.get("writes", 0) + 1
-        if navigation and not (win.get("query") and method not in ("GET", "HEAD")):
-            # a query window's refused non-GET navigation (an auto-submitted form) is a
-            # write, never a page to visit: its target is not queued as a GET (A2-M1)
+        if navigation and method in ("GET", "HEAD"):
             win["navs"].append(url)
         else:
-            # a seed or probe load's window (FR-CRAWL-17, Q4) counts its own
+            # one rule for both windows (CC-CRAWL-0029): a refused non-GET navigation (an
+            # auto-submitted form) is a blocked write, never a page -- its target is not
+            # queued as a GET. A seed or probe load's window (FR-CRAWL-17, Q4) counts its
+            # own
             self.spa_counts["spa_query_writes_blocked" if win.get("query")
                             else "reveal_writes_blocked"] += 1
         return why
