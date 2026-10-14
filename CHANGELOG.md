@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0134 review round 2: the crawled page stays when a script navigates away; `Request.session_decision`)
+- **Why:** reviewer A showed live that aborting another origin's document with
+  `blockedbyclient` put Chromium's error page in place of the crawled page, so a page that
+  script-navigated to another port was lost; the reviewers also asked for a narrower
+  "carries the session" match, pinned guard allowances, a declared request field and a
+  canonical `--auth-origin` scope check.
+- **What:** ERR_ABORTED for withheld documents, and the crawl discards a page only when
+  its own navigation met the other origin; `_carries` contains only secret-looking
+  values; guard allowances pin their counts; `core.http.Request.session_decision`
+  (CC-CORE-0054); `--auth-origin` accepts `localhost` for a `127.0.0.1` scope.
+  CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080 amendments.
+
 ## 2026-10-14 (BUG-0134 review round 1: no other-origin document in an authenticated browser; `--auth-origin`)
 - **Why:** reviewer A showed live that a redirected landing on another origin ran that
   app's script with the session's cookies and localStorage, and that `route.fetch` let

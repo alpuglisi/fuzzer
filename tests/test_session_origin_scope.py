@@ -237,7 +237,6 @@ def test_a_send_to_another_port_carries_no_session_and_never_logs_in_there(apps)
 def test_prepare_records_its_decision_on_the_request(apps):
     """R6: the decision is recorded on the request prepare was given, never recomputed
     after the send."""
-    from fuzzlab.session.manager import SESSION_DECISION
     a, b = apps
     mgr = _mgr()
     mgr.ensure("127.0.0.1", "user", a.base, operator=True)
@@ -245,8 +244,9 @@ def test_prepare_records_its_decision_on_the_request(apps):
     mgr.prepare(out, "user")
     inside = Request("GET", a.base + "x", identity="user")
     mgr.prepare(inside, "user")
-    assert getattr(out, SESSION_DECISION) == OUT_OF_ORIGIN
-    assert getattr(inside, SESSION_DECISION, None) is None
+    assert out.session_decision == OUT_OF_ORIGIN           # the declared field (T4)
+    assert inside.session_decision is None
+    assert Request("GET", a.base).session_decision is None  # its default
 
 
 def test_an_operator_base_logs_in_on_its_own_origin_never_on_the_requests(apps):
@@ -608,6 +608,7 @@ class _HdrRoute:
 
     def abort(self, *a):
         self.outcome = "abort"
+        self.abort_code = a[0] if a else None
 
     def fulfill(self, response=None, status=None, headers=None):
         self.outcome = "fulfill"
@@ -654,7 +655,8 @@ def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_les
     bearer = {"Authorization": "Bearer T"}
     handler = make_route_handler(in_scope=host_scope, api=Api(), headers=bearer,
                                  header_scope=cookie_scope, cookie_scope=cookie_scope,
-                                 on_session_withheld=lambda u, k: withheld.append((u, k)),
+                                 on_session_withheld=lambda u, k, src: withheld.append(
+                                     (u, k)),
                                  isolated_request=factory)
     own = _HdrRoute("http://127.0.0.2:3000/a")
     handler(own)
@@ -662,6 +664,7 @@ def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_les
     doc = _HdrRoute("http://127.0.0.2:8090/a")
     handler(doc)
     assert doc.outcome == "abort" and not doc.fetched and made == []  # never loaded
+    assert doc.abort_code == "aborted"        # ERR_ABORTED: no error page (T1)
     frame = _HdrRoute("http://127.0.0.2:8090/f")
     frame.request.frame = type("F", (), {"parent_frame": object()})()
     handler(frame)
@@ -682,8 +685,9 @@ def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_les
     sub = _HdrRoute("http://127.0.0.2:3000/go", site, navigation=False)
     handler(sub)
     assert api_calls == [] and made[-1].calls[-1][0] == "http://127.0.0.2:8090/land"
+    assert nav.abort_code == "aborted"
     assert ("http://127.0.0.2:8090/a", "document") in withheld and \
-        ("http://127.0.0.2:8090/land", "document") in withheld and \
+        ("http://127.0.0.2:8090/land", "landing") in withheld and \
         ("http://127.0.0.2:8090/i.png", "request") in withheld
     lone = _HdrRoute("http://127.0.0.2:8090/i.png", navigation=False)
     make_route_handler(in_scope=host_scope, cookie_scope=cookie_scope)(lone)
@@ -706,7 +710,7 @@ def test_a_websocket_to_another_origin_is_never_connected_in_an_authenticated_co
             connected.append(self.url)
     handler = make_ws_handler(lambda u: "127.0.0.2" in u,
                               cookie_scope=lambda u: in_origin_scope(u, origins),
-                              on_session_withheld=lambda u, k: told.append(k))
+                              on_session_withheld=lambda u, k, src: told.append(k))
     handler(WS("ws://127.0.0.2:3000/s"))
     handler(WS("ws://127.0.0.2:8090/s"))
     assert connected == ["ws://127.0.0.2:3000/s"] and told == ["websocket"]
@@ -939,37 +943,38 @@ SESSION_SEND_MODULES = ("fuzzlab/session/manager.py", "fuzzlab/session/browserlo
                         "fuzzlab/greybox/greybox_cli.py",
                         "fuzzlab/proxy/session_capture.py", "fuzzlab/tools/spider.py",
                         "fuzzlab/tools/fetcher.py", "fuzzlab/tools/browserexec.py")
+#: Host comparisons that decide no send, as ``module:function`` -> (how many such
+#: compares the function holds, why). The count is pinned (review round 2, T3): an
+#: extra compare in an allowed function is flagged, and so is a stale count.
 HOST_COMPARE_ALLOWED = {
     # each is a deny-only gate (a host scope that refuses, never admits a session) or
     # a filter of what is adopted; where a session goes is decided by origin elsewhere
-    "fuzzlab/session/manager.py:prepare":
-        "the seam's host scope gate (refuses); the session is applied by origin after",
-    "fuzzlab/session/manager.py:ensure":
-        "the host scope gate (refuses a login outside scope); bases checked by origin",
-    "fuzzlab/session/manager.py:authorize":
-        "refuses a retarget to another host (deny only); origins checked after",
-    "fuzzlab/session/manager.py:auth_endpoints":
-        "lists recorded endpoints by host for display; never a send decision",
-    "fuzzlab/session/manager.py:_states_on_host":
-        "selects the sessions a retargeted request may carry, to refuse (deny only)",
-    "fuzzlab/session/manager.py:_jar_cookies":
-        "which jar cookies the session carries (cookie domain match); sent by origin",
-    "fuzzlab/session/manager.py:parse_auth_origins":
-        "--auth-origin validation: an origin whose host is out of scope is refused",
-    "fuzzlab/session/browserlogin.py:filter_storage_state":
-        "which jar cookies a browser context adopts (domain match); sent by origin "
-        "(the route's cookie_scope)",
-    "fuzzlab/session/browserlogin.py:cookie_ok":
-        "filter_storage_state's cookie-domain predicate (same reason)",
-    "fuzzlab/greybox/greybox_cli.py:_cookie_for":
-        "builds the scope list; the cookie goes by cookie_origins",
-    "fuzzlab/proxy/session_capture.py:_note_origin":
-        "keeps only the capture host's origins (narrows; deny only)",
-    "fuzzlab/tools/spider.py:_in_scope":
-        "the crawl's request scope (BUG-0050/0123), not where the session goes "
-        "(cookie_scope / header_scope by origin)",
-    "fuzzlab/tools/spider.py:_start_browser":
-        "a loopback start chooses the launch's resolver rules (scope), not a session",
+    "fuzzlab/session/manager.py:prepare": (
+        1, "the seam's host scope gate (refuses); the session is applied by origin after"),
+    "fuzzlab/session/manager.py:ensure": (
+        1, "the host scope gate (refuses a login outside scope); bases checked by origin"),
+    "fuzzlab/session/manager.py:authorize": (
+        1, "refuses a retarget to another host (deny only); origins checked after"),
+    "fuzzlab/session/manager.py:auth_endpoints": (
+        1, "lists recorded endpoints by host for display; never a send decision"),
+    "fuzzlab/session/manager.py:_states_on_host": (
+        1, "selects the sessions a retargeted request may carry, to refuse (deny only)"),
+    "fuzzlab/session/manager.py:_jar_cookies": (
+        1, "which jar cookies the session carries (cookie domain match); sent by origin"),
+    "fuzzlab/session/browserlogin.py:filter_storage_state": (
+        1, "which jar cookies a browser context adopts (domain match); sent by origin "
+           "(the route's cookie_scope)"),
+    "fuzzlab/session/browserlogin.py:cookie_ok": (
+        1, "filter_storage_state's cookie-domain predicate (same reason)"),
+    "fuzzlab/greybox/greybox_cli.py:_cookie_for": (
+        1, "builds the scope list; the cookie goes by cookie_origins"),
+    "fuzzlab/proxy/session_capture.py:_note_origin": (
+        1, "keeps only the capture host's origins (narrows; deny only)"),
+    "fuzzlab/tools/spider.py:_in_scope": (
+        2, "the crawl's request scope (BUG-0050/0123), not where the session goes "
+           "(cookie_scope / header_scope by origin)"),
+    "fuzzlab/tools/spider.py:_start_browser": (
+        1, "a loopback start chooses the launch's resolver rules (scope), not a session"),
 }
 #: Calls whose result is a host (``canonical_host`` and the crawler's ``_norm_host``).
 _HOST_CALLS = {"canonical_host", "_norm_host", "_canonical_host"}
@@ -1049,11 +1054,22 @@ def _host_compares(tree):
                 yield fn.name, node.lineno
 
 
-def host_compare_offenders(source: str, module: str) -> list[str]:
+def host_compare_offenders(source: str, module: str, allowed=None) -> list[str]:
     """Host comparisons outside `HOST_COMPARE_ALLOWED` (PA-0134: a send decision
-    compares origins, never hosts)."""
-    return sorted({f"{module}:{fn}:{line}" for fn, line in _host_compares(ast.parse(source))
-                   if f"{module}:{fn}" not in HOST_COMPARE_ALLOWED})
+    compares origins, never hosts), and every allowed function whose count of them is
+    not the pinned one (T3)."""
+    allowed = HOST_COMPARE_ALLOWED if allowed is None else allowed
+    found: dict[str, list[int]] = {}
+    for fn, line in _host_compares(ast.parse(source)):
+        found.setdefault(f"{module}:{fn}", []).append(line)
+    out = []
+    for key, lines in sorted(found.items()):
+        if key not in allowed:
+            out += [f"{key}:{line}" for line in sorted(set(lines))]
+        elif len(set(lines)) != allowed[key][0]:
+            out.append(f"{key}: {len(set(lines))} host compare(s), pinned "
+                       f"{allowed[key][0]} (lines {sorted(set(lines))})")
+    return out
 
 
 def test_no_session_send_decision_compares_hosts():
@@ -1069,6 +1085,21 @@ def test_every_host_compare_allowance_is_still_used():
         used |= {f"{module}:{fn}" for fn, _line in
                  _host_compares(ast.parse((ROOT / module).read_text()))}
     assert set(HOST_COMPARE_ALLOWED) <= used
+
+
+def test_an_extra_host_compare_in_an_allowed_function_is_flagged():
+    """T3 (review A2-S2): an allowance is a pinned count, not a blanket pass for the
+    function."""
+    allowed = {"rogue.py:gate": (1, "a scope gate")}
+    one = "def gate(self, u):\n    host = urlparse(u).hostname\n    return host in self._scope\n"
+    assert host_compare_offenders(one, "rogue.py", allowed) == []
+    extra = ("def gate(self, u, h):\n    host = urlparse(u).hostname\n"
+             "    if host not in self._scope:\n        return False\n"
+             "    return host == h\n")
+    flagged = host_compare_offenders(extra, "rogue.py", allowed)
+    assert flagged and "2 host compare(s), pinned 1" in flagged[0]
+    assert host_compare_offenders("def gate(self):\n    return 1\n", "rogue.py",
+                                  allowed) == []          # no compare: nothing to pin
 
 
 @pytest.mark.parametrize("src", [
@@ -1318,3 +1349,108 @@ def test_an_https_session_refuses_plain_http_even_on_another_port():
     with pytest.raises(SessionAuthError, match="plain http"):
         mgr.prepare(req, "user")
     assert "Cookie" not in req.headers
+
+
+# --- review round 2 ------------------------------------------------------------------
+def test_a_script_navigation_to_another_origin_leaves_the_page_crawled(monkeypatch,
+                                                                       tmp_path):
+    """T1 (review A2-M1, B2-S2; reviewer A's live probe): A's page navigates to B 200 ms
+    after load. The route aborts that document with ERR_ABORTED, so the page stays on A
+    (``"blockedbyclient"`` committed Chromium's error page in its place). A is extracted
+    normally -- its content stored, its ``/next`` link queued and crawled -- B receives
+    nothing, and B is recorded as skipped."""
+    import sqlite3
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.spider import LocalSpider
+    _chromium_or_skip(monkeypatch)
+    b = _App("127.0.0.2")
+    a = _App("127.0.0.2")
+    a.pages["/"] = (200, (
+        f"<html><body><p>A-OWN-CONTENT</p><a href='/next'>n</a><script>"
+        f"setTimeout(()=>location.href='{b.base}x',200)</script></body></html>").encode(),
+        [])
+    try:
+        sp = LocalSpider(a.base, max_depth=1, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=8000,
+                         session_manager=_mgr(host="127.0.0.2"), identity="user")
+        if sp.engine != "playwright":
+            skip_or_fail("playwright engine unavailable")
+        try:
+            sp.crawl()
+        except Exception as exc:  # noqa: BLE001 - a launch failure is a skip, not a pass
+            skip_or_fail(f"chromium could not launch: {exc}")
+    finally:
+        a.close()
+        b.close()
+    rows = dict(sqlite3.connect(str(tmp_path / "s.db")).execute(
+        "SELECT url, content FROM discovered_pages").fetchall())
+    assert "A-OWN-CONTENT" in (rows.get(a.base) or "")       # A's page, extracted
+    assert "/next" in [p for _m, p, _c, _h in a.requests]    # its link queued and crawled
+    assert b.requests == []                                  # B received nothing
+    assert sp.skipped_other_origin.get(b.base + "x", "").startswith("document: ")
+
+
+def test_carries_matches_short_plain_cookies_only_as_exact_pairs(apps):
+    """T2 (review A2-S1): containment only for secret-looking values; a short plain
+    cookie counts only as its exact pair. An anonymous out-of-origin request edited on
+    its own origin with ordinary browser headers is not refused; a carried session is."""
+    from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
+    from fuzzlab.session.manager import _carries
+    a, b = apps
+    mgr = _mgr()
+    state = mgr.ensure("127.0.0.1", "user", a.base, operator=True)
+    state.cookies.update({"language": "en", "security": "low", "security_level": "0"})
+    browserish = Request("GET", b.base + "x", headers=dict(DEFAULT_BROWSER_HEADERS))
+    assert not _carries(browserish, state)                   # "en", "low", "0" as text
+    assert _carries(Request("GET", "x", headers={"Cookie": "security=low"}), state)
+    assert not _carries(Request("GET", "x", headers={"Cookie": "security=lowest"}), state)
+
+    class Edit:
+        def on_request(self, request):
+            request.url = b.base + "x?edited=1"
+            request.headers.update(DEFAULT_BROWSER_HEADERS)
+            return request
+
+        def on_response(self, request, response):
+            pass
+    _get(_client(mgr, plugins=Edit()), b.base + "x")          # anonymous: allowed
+    assert b.requests[-1][1] == "/x?edited=1" and not b.got_session()
+
+    class Carry(Edit):
+        def on_request(self, request):
+            request.url = b.base + "y"
+            request.headers["Cookie"] = f"sid={state.cookies['sid']}'OR1"
+            return request
+    with pytest.raises(SessionAuthError, match="not one of the session's"):
+        _get(_client(mgr, plugins=Carry()), a.base + "x")
+    assert "/y" not in [p for _m, p, _c, _h in b.requests]
+
+
+def test_a_localhost_auth_origin_is_accepted_for_a_127_scope():
+    """T5 (review A2-OP2, B2-S1): canonical compare (loopback aliases one host)."""
+    from fuzzlab.session.manager import parse_auth_origins
+    assert parse_auth_origins(["http://localhost:3001"], ["127.0.0.1"]) == [
+        "http://127.0.0.1:3001"]
+    assert parse_auth_origins(["http://127.0.0.1:3001"], ["localhost"]) == [
+        "http://127.0.0.1:3001"]
+    with pytest.raises(ValueError, match="not in scope"):
+        parse_auth_origins(["http://127.0.0.2:3001"], ["127.0.0.1"])   # another 127/8
+
+
+def test_skipped_reasons_name_the_kind_and_isolated_contexts_are_counted(tmp_path):
+    """T6 (review nits): a skipped page's reason names what was withheld; the cookie-less
+    request contexts made are counted."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.2:3000/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    sp._note_session_withheld("http://127.0.0.2:8090/f", "frame", "http://127.0.0.2:3000/")
+    sp._note_session_withheld("ws://127.0.0.2:8090/s", "websocket", "ws://127.0.0.2:8090/s")
+    assert sp.skipped_other_origin["http://127.0.0.2:8090/f"].startswith("frame: ")
+    assert sp.skipped_other_origin["ws://127.0.0.2:8090/s"].startswith("websocket: ")
+    sp._pw = type("PW", (), {"request": type("R", (), {
+        "new_context": lambda _s: object()})()})()
+    sp._isolated_request()
+    sp._isolated_request()
+    assert sp.isolated_contexts_created == 2
+    sp.storage.close()

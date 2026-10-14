@@ -58,6 +58,24 @@ Newest first.
     with an empty Cookie) each fail the route unit test and/or the real-Chromium crawl
     (`test_an_authenticated_crawl_never_hands_the_session_to_another_port`, now with a
     frame, a WebSocket, a beaconing landing and a cookie-setting image of B).
+- Review round 2 of 97101a9 (2026-10-14; T1, T6 of the reconciled list):
+  - **T1 (A2-M1, B2-S2; seen live):** a withheld document, frame or redirect landing is
+    aborted with `"aborted"` (ERR_ABORTED, as the reveal window), not `"blockedbyclient"`,
+    which committed Chromium's error page in the page's place. `on_session_withheld` now
+    gets `(url, kind, source)`: `document` (the navigation's own target), `landing` (its
+    redirect landing), `frame`, `websocket`, `request`, and the chain's first URL. The
+    spider raises `SessionWithheld` only when the navigation's own target or its
+    landing was withheld, or the main frame committed off the session's origins
+    (`_navigation_withheld`); a script-initiated navigation away leaves the page
+    extracted normally, its target recorded as skipped.
+  - **T6:** `skipped_other_origin` reasons name the kind; `isolated_contexts_created`
+    counts the cookie-less request contexts (logged at the end); `isolated_fetch`'s
+    docstring names both disposals kept (at the next fetch, and the creator's at
+    teardown).
+  - Mutation checks: `"blockedbyclient"` restored fails
+    `test_a_script_navigation_to_another_origin_leaves_the_page_crawled` and the route
+    unit test; attributing every withheld document to the current navigation fails the
+    former.
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

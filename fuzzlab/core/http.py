@@ -122,6 +122,10 @@ class Request:
     identity: str = "anonymous"
     timing: bool = False          # timing-sensitive -> serialized per host
     component: str = "http"
+    #: What the session addon decided for this request, when it did not apply the
+    #: identity's session: ``"anonymous (out of origin)"`` (FR-SESS-20, CC-CORE-0054).
+    #: Set by ``prepare``; the sender that built the request reads it after the send.
+    session_decision: str | None = None
 
 
 @dataclass

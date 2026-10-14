@@ -315,3 +315,42 @@ origin*.
 - **A plugin retarget** is judged by containment of any secret value, so a short
   cookie value may refuse an unrelated retarget (fail-safe) —
   `test_a_retarget_carrying_an_edited_session_value_is_refused`.
+
+## Review round 2 (added in review round 2, 2026-10-14)
+Reviewer B: AGREE. Reviewer A: AGREE-with-changes; all round-1 findings closed, both
+browser leaks verified gone live. The reconciled list T1–T6 (D45) is built in a third
+commit (CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080 amendments; CC-CORE-0054).
+
+### What round 2 found (added in review round 2)
+- **A2-M1 / B2-S2, an error page in place of the crawled page.** The withheld document
+  was aborted with `"blockedbyclient"`, which commits Chromium's `chrome-error://`
+  page in the frame; a script-initiated navigation from A to B 200 ms after load
+  therefore replaced A's page, and the crawl discarded A (reviewer A's live probe).
+  **Fixed (T1):** aborts use `"aborted"` (ERR_ABORTED, as the reveal window); the page
+  stays on A. The crawl raises `SessionWithheld` only when the navigation's **own**
+  target or its redirect landing was withheld (the route now reports the chain's first
+  URL with the kind), or the main frame committed off the session's origins; otherwise
+  A is extracted normally and B recorded as skipped.
+- **A2-S1, `_carries` too wide.** Containment of every cookie value made a short plain
+  value (`en`, `low`, `0`) match ordinary browser headers, so an anonymous
+  out-of-origin request's own edit could be refused. **Fixed (T2):** containment only
+  for secret-looking values; other cookies as their exact pair.
+- **A2-S2, allowances were blanket passes.** **Fixed (T3):** each allowed function's
+  host-compare count is pinned.
+- **A2-S3 / B2-R6, a dynamic attribute on core `Request`.** **Fixed (T4):** the declared
+  field `Request.session_decision` (CC-CORE-0054).
+- **A2-OP2 / B2-S1, `--auth-origin` scope by raw string.** **Fixed (T5):** canonical
+  compare.
+- **Nits (T6):** the skipped reason names its kind; cookie-less contexts are counted;
+  `isolated_fetch` documents its two disposals.
+
+### Residuals restated (added in review round 2)
+- **`_carries` (restated, T2).** A secret-looking session value contained in any header
+  of a retargeted request refuses the retarget (fail-safe); a short plain cookie refuses
+  it only as its exact pair. Pinned:
+  `test_carries_matches_short_plain_cookies_only_as_exact_pairs`,
+  `test_a_retarget_carrying_an_edited_session_value_is_refused`.
+- **A script-initiated navigation to another origin** is aborted (ERR_ABORTED), so the
+  page stays on its own origin and is crawled; the other origin is only recorded.
+  Pinned: `test_a_script_navigation_to_another_origin_leaves_the_page_crawled`.
+- The other residuals of round 1 are unchanged.

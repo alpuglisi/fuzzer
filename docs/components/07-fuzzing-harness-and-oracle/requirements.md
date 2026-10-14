@@ -1738,8 +1738,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **Out-of-origin sends** *(CC-FUZZ-0080, FR-SESS-20, BUG-0134).* A send the session
     manager made without the session because its origin is not one of the session's
     comes back with `Probe.session = "anonymous (out of origin)"`, copied from the
-    decision `prepare` recorded on the request (`request.session_decision`, review
-    round 1 R6; never recomputed); the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
+    decision `prepare` recorded on the request (the declared field
+    `Request.session_decision`, CC-CORE-0054; review rounds 1-2, R6/T4; never
+    recomputed); the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
     such note on the verdict's `evidence["session"]` (confirming or inconclusive);
     `SeamProbeSender.session_out_of_origin` (the run's manager and every copy) becomes
     `metrics["session_out_of_origin"]`, which `fuzzlab auto` prints. `fuzzlab auto

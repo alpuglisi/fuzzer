@@ -661,8 +661,7 @@ class SeamProbeSender(_ExplicitAllowance):
         R6): ``"anonymous (out of origin)"`` when it withheld the run's (or the copy's)
         session because the URL is on another origin; else None. Read, never
         recomputed."""
-        from fuzzlab.session.manager import SESSION_DECISION
-        note = getattr(req, SESSION_DECISION, None)
+        note = req.session_decision         # core.http.Request's field (CC-CORE-0054)
         return note if isinstance(note, str) else None
 
 

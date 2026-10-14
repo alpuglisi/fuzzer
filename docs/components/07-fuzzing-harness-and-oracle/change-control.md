@@ -61,6 +61,9 @@ note of the same date.
   - **R5:** `fuzzlab auto --auth-origin` and `greybox-run --auth-origin` (repeatable;
     bare, in-scope origins; a usage error before any side effect); `make_probe_sender`
     and greybox's `_cookie_for` take `auth_origins` (auto passes it only when given).
+- Review round 2 of 97101a9 (2026-10-14; T4): `SeamProbeSender._session_note` reads the
+  declared `Request.session_decision` (CC-CORE-0054) in place of round 1's
+  `SESSION_DECISION` dynamic attribute.
 
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's

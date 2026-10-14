@@ -386,9 +386,13 @@ class LocalSpider:
         #: in-scope pages (documents, WebSockets) never loaded because they are on
         #: another origin than the session's, with the reason (FR-SESS-20, R1)
         self.skipped_other_origin: dict[str, str] = {}
-        self._withheld_document = False
+        #: the navigation targets (``url_key``) whose own document or redirect landing
+        #: the route withheld during the current page navigation (FR-SESS-20, T1)
+        self._withheld_targets: set = set()
         #: the cookie-less request contexts the guards made (R2), disposed at the end
         self._isolated_requests: list = []
+        #: how many such contexts were created (review round 2, T6)
+        self.isolated_contexts_created = 0
         #: the in-scope localStorage entries the crawl adopted, ``{origin: {name:
         #: value}}``, checked after each authenticated submission (FR-CRAWL-14)
         self._adopted_storage: dict = {}
@@ -873,16 +877,19 @@ class LocalSpider:
                            "separately, or pass --auth-origin if it is this app's "
                            "(FR-SESS-20)")
 
-    def _note_session_withheld(self, url, kind="request"):
+    def _note_session_withheld(self, url, kind="request", source=None):
         """An in-scope request went without the session (another origin, FR-SESS-20). A
-        document, frame or WebSocket there is never loaded (R1): recorded as skipped;
-        the page navigation that met such a document (its own or a redirect landing,
-        never a child frame's) extracts nothing."""
+        document, landing, frame or WebSocket there is never loaded (R1): recorded as
+        skipped, with its kind (T6). Only a page navigation whose **own** target or
+        redirect landing was withheld (``source`` is that target) extracts nothing (T1):
+        a script-initiated navigation away, aborted with ERR_ABORTED, leaves the page
+        where it was, and it is extracted normally."""
         self.session_out_of_origin += 1
-        if kind in ("document", "frame", "websocket"):
-            self._withheld_document = self._withheld_document or kind == "document"
+        if kind in ("document", "landing", "frame", "websocket"):
+            if kind in ("document", "landing"):
+                self._withheld_targets.add(url_key(source or url))
             if url not in self.skipped_other_origin:
-                self.skipped_other_origin[url] = self.OTHER_ORIGIN_REASON
+                self.skipped_other_origin[url] = f"{kind}: {self.OTHER_ORIGIN_REASON}"
                 logging.info(f"skipped {url} ({kind}): {self.OTHER_ORIGIN_REASON}")
 
     def _isolated_request(self):
@@ -890,6 +897,7 @@ class LocalSpider:
         (FR-SESS-20, R2); disposed when the browser stops."""
         ctx = self._pw.request.new_context()
         self._isolated_requests.append(ctx)
+        self.isolated_contexts_created += 1
         return ctx
 
     def _other_origin(self, url):
@@ -925,18 +933,38 @@ class LocalSpider:
         """
         self._xhr_urls = []   # collected by _on_request during this navigation
         self._rendered_ok = False
-        self._withheld_document = False
+        self._withheld_targets = set()
         try:
-            return self._goto_and_parse(url)
+            result = self._goto_and_parse(url)
         except Exception as e:
-            if self._withheld_document:
-                # the navigation met a document on another origin than the session's
-                # (a redirect landing, R1): nothing is extracted, no static fallback
-                # (it would file that origin's page under this URL)
+            if self._navigation_withheld(url):
+                # this navigation's own target or its redirect landing is on another
+                # origin than the session's (R1, T1): nothing is extracted, and no
+                # static fallback (it would file that origin's page under this URL)
                 raise SessionWithheld(url) from None
             logging.info(f"Browser could not render {url} ({str(e).splitlines()[0][:80]}); "
                          f"falling back to a static request")
             return self._fetch_static(url)
+        if self._navigation_withheld(url):
+            raise SessionWithheld(url)            # committed off the session's origins
+        return result
+
+    def _navigation_withheld(self, url):
+        """Did this page navigation meet another origin than the session's (FR-SESS-20,
+        T1)? Its own target or redirect landing was withheld by the route, or the main
+        frame committed off the session's origins (an error page included). A
+        script-initiated navigation away that the route aborted is neither: the page
+        stays, and is extracted."""
+        if self._cookie_scope is None:
+            return False
+        if url_key(url) in self._withheld_targets:
+            return True
+        try:
+            committed = self._page.url if self._page is not None else ""
+        except Exception:  # noqa: BLE001 - a closed page: nothing committed here
+            return False
+        return bool(committed) and committed != "about:blank" and \
+            not self._cookie_scope(committed)
 
     def _goto_and_parse(self, url):
         self._last_final_url, self._last_html, self._last_base = url, None, None
@@ -1956,6 +1984,9 @@ class LocalSpider:
                 logging.info(f"Sent {self.session_out_of_origin} in-scope request(s) "
                              f"without the session: another origin than the session's "
                              f"(session_out_of_origin, FR-SESS-20).")
+            if self.isolated_contexts_created:
+                logging.info(f"Made {self.isolated_contexts_created} cookie-less request "
+                             f"context(s) for other-origin requests (FR-SESS-20).")
             if self.skipped_other_origin:
                 logging.info(f"Skipped {len(self.skipped_other_origin)} in-scope page(s) "
                              f"on another origin: {self.OTHER_ORIGIN_REASON}.")

@@ -129,7 +129,7 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
-  O1-O13; review round 1, R1-R9)**
+  O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins
     (`core.urls.canonical_origin`: scheme, host, port; loopback aliases one origin):
     the base URL the login ran from, the login page, the credential destination and the
@@ -140,10 +140,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     is one of them. A request to an in-scope host but another origin goes out
     **anonymously** (that app's anonymous visitor), never triggers a login there, is
     logged once per (origin, identity) and counted (`out_of_origin_sends`, reported as
-    `session_out_of_origin` by the crawl, auto and greybox summaries). *(R6:)* `prepare`
-    records its decision on the request it was given (`request.session_decision =
-    "anonymous (out of origin)"`); the seam sender copies it into `Probe.session` after
-    the send, never recomputing it; the oracle copies that into
+    `session_out_of_origin` by the crawl, auto and greybox summaries). *(R6, T4:)*
+    `prepare` records its decision on the request it was given, in the declared field
+    `core.http.Request.session_decision` (CC-CORE-0054; `"anonymous (out of origin)"`);
+    the seam sender copies it into `Probe.session` after the send, never recomputing it; the oracle copies that into
     `Verdict.evidence["session"]`, greybox into the attempt's features.
     *(R9:)* an https-only session's **plain-http** request to another port of its host
     is refused loudly (`SessionAuthError`, BUG-0098's floor runs before the origin
@@ -153,10 +153,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     the operator base's origin); never from a request's directory on another origin.
     Otherwise `SessionAuthError` names the remedy: a distinct identity name per app
     (D38: refuse rather than warn). An isolated copy raises it as `IsolatedLoginFailed`.
-  - **authorize / observe (O4).** A plugin retarget that carries the session (*R7:* any
-    of its cookie, header or token values contained anywhere in the request's headers,
-    so an edited `sid=<v>'OR1` still counts) to an origin outside the session's (another
-    port included) is refused, as another host is; an anonymous out-of-origin request may
+  - **authorize / observe (O4).** A plugin retarget that carries the session to an
+    origin outside the session's (another port included) is refused, as another host
+    is. *Carries* (`_carries`; R7, narrowed by T2): a secret-looking value -- any
+    Authorization value or its token, a cookie value `looks_like_identifier` holds for
+    or of at least 8 characters -- contained anywhere in the request's headers (an
+    edited `sid=<v>'OR1` still counts); any other cookie only as its exact `name=value`
+    pair in `Cookie` (a short plain value like `en` or `0` is ordinary header text); an anonymous out-of-origin request may
     still be edited on its own origin. `observe` finds the session by origin
     membership, so another app's login page never logs it out.
   - **verify_live and the probe differential (O5).** `_navigate(session_origins=)`
@@ -172,16 +175,19 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     port-agnostic (RFC 6265 §8.5), so in an authenticated context (`cookie_scope`) the
     guarded route, for an in-scope origin outside the session's:
     - **aborts every document** (a navigation, top-level or frame, and a redirect landing
-      there) and **every WebSocket**: a document loaded there would run that app's script
-      with the context's cookies and `localStorage` (R1, review A-M1, seen live);
+      there) with ERR_ABORTED (`"aborted"`, T1: the page stays where it is, no error page)
+      and **every WebSocket**: a document loaded there would run that app's script with
+      the context's cookies and `localStorage` (R1, review A-M1, seen live);
     - fetches every other request there (and every hop) through **one cookie-less
       request context per guard** (`isolated_request`, a `playwright.request.new_context()`
       with no storage, retired once it holds a cookie), never `route.fetch` or the
       context's client, and fulfils it with `Set-Cookie` removed, so that origin can
       neither read nor write the jar (R2, review A-M2, seen live);
-    - the crawl records such a page as skipped ("crawl that origin separately, or
-      --auth-origin") and extracts nothing from it; the spider's `_isolated_submit`
-      drops the jar's cookies for such an action (FR-CRAWL-14).
+    - the crawl records such a page as skipped, with its kind ("crawl that origin
+      separately, or --auth-origin"); a page navigation whose own target or redirect
+      landing was withheld extracts nothing, while a script-initiated navigation away
+      leaves the page extracted (T1); the spider's `_isolated_submit` drops the jar's
+      cookies for such an action (FR-CRAWL-14).
   - **Listeners and auth endpoints (O9).** FR-SESS-16's listener gets the logout's
     origin; lane A's header breaker and lane B's single-session breaker compare it with
     the run's session's origins. `is_auth_endpoint` compares origin and path.
@@ -199,7 +205,8 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `--auth-origin ORIGIN` (repeatable) on `crawl`, `auto`, `session print` and
     `greybox-run` authorises an origin as both a credential destination and a session
     origin. Each value must be a bare http(s) origin (no user, path, query or fragment)
-    whose host is in the CLI's scope, else a usage error before any side effect
+    whose host is in the CLI's scope, compared canonically (T5: `localhost` ≡
+    `127.0.0.1`), else a usage error before any side effect
     (`manager.parse_auth_origins`). `adopt` unions the manager's `auth_origins` into a
     captured session's origins.
   - **Residuals (O13, stated; each pinned by a test, BUG-0134).** The key stays

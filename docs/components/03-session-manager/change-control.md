@@ -116,6 +116,24 @@ Newest first.
     effectiveness, plus `test_auto_cli_side_effects.py`; `tests/test_session_origin_scope.py`
     now has 69 tests): **1464 passed, 2 xfailed, 0 skipped** with
     `FUZZLAB_REQUIRE_BROWSER=1`. The full suite is the coordinator's run.
+- Review round 2 of 97101a9 (reviewer B AGREE; reviewer A AGREE-with-changes, both browser
+  leaks verified gone live; reconciled list T1-T6, D45; a follow-up commit, 2026-10-14):
+  - **T2 (A2-S1):** `_carries` matches by containment only secret-looking values (any
+    Authorization value or token; a cookie value `looks_like_identifier` holds for, or
+    of at least `CARRIED_MIN_LEN` = 8); any other cookie only as its exact `name=value`
+    pair. An anonymous out-of-origin request's own edit with ordinary browser headers is
+    no longer refused because `en` or `0` appear in `Accept-Language`.
+  - **T4 (A2-S3, B2-R6):** `prepare` sets the declared `Request.session_decision`
+    (CC-CORE-0054); the `SESSION_DECISION` dynamic attribute of round 1 is removed.
+  - **T5 (A2-OP2, B2-S1):** `parse_auth_origins` compares canonical origins with the
+    canonical scope (`localhost` ≡ `127.0.0.1`; another 127/8 address is not).
+  - **T3 (A2-S2):** the host-compare guard's allowances pin each allowed function's
+    count; `parse_auth_origins` no longer holds a host compare (its allowance removed).
+  - Mutation checks: T2 (containment for every cookie value again) fails
+    `test_carries_matches_short_plain_cookies_only_as_exact_pairs`; T3 (an allowance
+    passing any count) fails `test_an_extra_host_compare_in_an_allowed_function_is_flagged`.
+    T1: see CC-CRAWL-0026.
+  - Effectiveness (review round 2): the related suites (round 1's set, plus the core seam suites) with `FUZZLAB_REQUIRE_BROWSER=1`: **1490 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 74 tests. The full suite is the coordinator's run.
 
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:

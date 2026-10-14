@@ -76,7 +76,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        header_scope: Callable[[str], bool] | None = None,
                        window: Callable[[str, str, bool], str | None] | None = None,
                        cookie_scope: Callable[[str], bool] | None = None,
-                       on_session_withheld: Callable[[str, str], None] | None = None,
+                       on_session_withheld: Callable[[str, str, str], None] | None = None,
                        isolated_request: Callable[[], object] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
@@ -107,11 +107,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
 
     ``cookie_scope`` (an authenticated context, FR-SESS-20): for an in-scope URL it
     refuses (another origin than the session's), a document request (a navigation, or
-    a redirect hop of one) is aborted, and ``on_session_withheld(url, "document")`` is
-    told (``"frame"`` for a child frame's); any other request, and each such redirect hop, is fetched through the
-    guard's one cookie-less request context (``isolated_request()``, created lazily,
-    replaced once it holds a cookie; ``on_session_withheld(url, "request")``), without
-    the session's headers, and fulfilled with ``Set-Cookie`` removed. Without
+    a redirect hop of one) is aborted with ``"aborted"`` (``ERR_ABORTED``, as the reveal
+    window does: the page stays where it is; ``"blockedbyclient"`` would commit
+    Chromium's error page in its place, review round 2 T1), and
+    ``on_session_withheld(url, kind, source)`` is told: ``kind`` is ``"document"`` for
+    a page navigation's own target, ``"landing"`` for its redirect landing, ``"frame"``
+    for a child frame's, and ``source`` the URL the request chain started at (the
+    navigation's target). Any other request, and each such redirect hop, is fetched
+    through the guard's one cookie-less request context (``isolated_request()``,
+    created lazily, retired once it holds a cookie; kind ``"request"``), without the
+    session's headers, and fulfilled with ``Set-Cookie`` removed. Without
     ``isolated_request`` such a request is aborted (fail closed). None: nothing is
     withheld (an unauthenticated context has no session to withhold).
 
@@ -148,19 +153,22 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         session's (FR-SESS-20): the session must not reach it."""
         return cookie_scope is not None and in_scope(url) and not cookie_scope(url)
 
-    def tell_withheld(url: str, kind: str) -> None:
+    def tell_withheld(url: str, kind: str, source: str) -> None:
         logging.info(f"sent no session to {urlsplit(url).hostname or '?'!r} "
                      f"({kind}: another origin than the session's, FR-SESS-20)")
         if on_session_withheld is not None:
-            on_session_withheld(url, kind)
+            on_session_withheld(url, kind, source)
 
     isolated = {"ctx": None, "stale": []}
 
     def isolated_fetch(url: str, method: str, data, req_headers):
         """One fetch through the guard's cookie-less request context (R2); the context
-        is retired once an answer set a cookie, so it never sends one. A retired
-        context is disposed only at the next fetch: its answer is still being
-        fulfilled (a disposed context's response cannot be)."""
+        is retired once an answer set a cookie, so it never sends one. Two disposals
+        are kept: a retired context is disposed here at the guard's next isolated
+        fetch (not at once: its answer is still being fulfilled, and a disposed
+        context's response cannot be), and every context ``isolated_request()`` made
+        is disposed by its creator at teardown (the spider's ``_stop_browser``), which
+        covers the last one retired (review round 2, T6)."""
         while isolated["stale"]:
             try:
                 isolated["stale"].pop().dispose()
@@ -225,13 +233,14 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         document = _is_document(req)
         doc_kind = "frame" if document and _is_subframe(req) else "document"
         if withheld(url) and (document or isolated_request is None):
-            tell_withheld(url, doc_kind if document else "request")
-            route.abort("blockedbyclient")      # FR-SESS-20 (R1): never loaded
+            tell_withheld(url, doc_kind if document else "request", url)
+            # FR-SESS-20 (R1): never loaded; ERR_ABORTED keeps the page where it is (T1)
+            route.abort("aborted") if document else route.abort()
             return
         stripped = False                         # an answer from the isolated context
         try:
             if withheld(url):
-                tell_withheld(url, "request")
+                tell_withheld(url, "request", url)
                 first = isolated_fetch(url, req.method.upper(), req.post_data_buffer,
                                        req.headers)
                 stripped = True
@@ -266,10 +275,11 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     # a landing there of a document is aborted; any other hop goes
                     # through the cookie-less context (FR-SESS-20, R1/R2)
                     if document or isolated_request is None:
-                        tell_withheld(nxt, doc_kind if document else "request")
-                        route.abort("blockedbyclient")
+                        landing = "frame" if doc_kind == "frame" else "landing"
+                        tell_withheld(nxt, landing if document else "request", url)
+                        route.abort("aborted") if document else route.abort()
                         return
-                    tell_withheld(nxt, "request")
+                    tell_withheld(nxt, "request", url)
                     final = isolated_fetch(nxt, method,
                                            req.post_data_buffer if keep_body else None,
                                            hop)
@@ -377,7 +387,7 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                     hold: Callable[[], bool] | None = None,
                     on_drop: Callable[[str], None] | None = None,
                     cookie_scope: Callable[[str], bool] | None = None,
-                    on_session_withheld: Callable[[str, str], None] | None = None):
+                    on_session_withheld: Callable[[str, str, str], None] | None = None):
     """WebSockets are routed separately from HTTP: an in-scope socket is connected
     through; an out-of-scope one is **never connected** -- Playwright then serves it as
     a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
@@ -393,13 +403,13 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     ``cookie_scope`` (an authenticated context, FR-SESS-20, R1): an in-scope socket on
     another origin than the session's is never connected either (the browser would open
     it with the context's port-agnostic jar); ``on_session_withheld(url,
-    "websocket")`` is told."""
+    "websocket", url)`` is told."""
     def handler(ws) -> None:
         if in_scope(ws.url) and cookie_scope is not None and not cookie_scope(ws.url):
             logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
                          f"another origin than the session's (FR-SESS-20)")
             if on_session_withheld is not None:
-                on_session_withheld(ws.url, "websocket")
+                on_session_withheld(ws.url, "websocket", ws.url)
             return
         if in_scope(ws.url):
             server = ws.connect_to_server()
@@ -438,7 +448,7 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                ws_hold: Callable[[], bool] | None = None,
                on_ws_drop: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
-               on_session_withheld: Callable[[str, str], None] | None = None,
+               on_session_withheld: Callable[[str, str, str], None] | None = None,
                isolated_request: Callable[[], object] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard

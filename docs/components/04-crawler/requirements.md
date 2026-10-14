@@ -201,10 +201,13 @@ fuzzer.
     (`BrowserSession.cookie_scope`, the header-scope predicate), for an in-scope origin
     outside the session's *(review round 1, R1/R2, CC-CRAWL-0026 amendment)*:
     - every **document** (a navigation, top-level or frame, and a redirect landing
-      there) and every **WebSocket** is aborted, never loaded or connected: such a page is
-      recorded as skipped (`skipped_other_origin`: "crawl that origin separately, or
-      --auth-origin"), nothing is extracted from the navigation that met it, and no
-      static fallback files it under another URL;
+      there) is aborted with ERR_ABORTED (`"aborted"`: the page stays, no error page;
+      review round 2 T1) and every **WebSocket** is never connected: such a page is
+      recorded as skipped (`skipped_other_origin`, its reason naming the kind: "crawl that
+      origin separately, or --auth-origin"). A page navigation whose own target or
+      redirect landing was withheld, or whose main frame committed off the session's
+      origins, extracts nothing and has no static fallback; a script-initiated
+      navigation away leaves the page extracted normally;
     - every other request there, and every hop, is fetched through one cookie-less
       request context per guard (`navguard.guard_page(isolated_request=)`, the spider's
       `pw.request.new_context()`, disposed at the end) and fulfilled with `Set-Cookie`

@@ -42,10 +42,6 @@ _LOG = logging.getLogger(__name__)
 #: ``evidence["session"]``.
 OUT_OF_ORIGIN = "anonymous (out of origin)"
 
-#: The attribute `prepare` records its decision under, on the request it was given
-#: (FR-SESS-20, R6): `OUT_OF_ORIGIN` when it withheld the session. A sender that built
-#: the request reads it after the send (``Probe.session``); nothing recomputes it.
-SESSION_DECISION = "session_decision"
 
 #: The remedy every origin refusal names (O3, O13): two apps on one host share the
 #: host-keyed credential entry unless their identities differ.
@@ -74,9 +70,14 @@ def parse_auth_origins(values, scope_hosts) -> list[str]:
     """The canonical origins of ``--auth-origin`` values (FR-SESS-20, R5), or
     `ValueError`: each must be a bare http(s) origin (no user, path, query or fragment)
     whose host is in ``scope_hosts`` (the CLI's scope: the config's ``scope_hosts`` plus
-    the target's host). A usage error, checked before any side effect (PA-0079)."""
+    the target's host), compared canonically (review round 2, T5: ``localhost`` and
+    ``127.0.0.1`` are one host). A usage error, checked before any side effect
+    (PA-0079)."""
     from urllib.parse import urlsplit
-    scope = {str(h).lower() for h in scope_hosts or ()}
+    def as_url(name) -> str:
+        name = str(name)
+        return f"http://[{name.strip('[]')}]/" if ":" in name else f"http://{name}/"
+    scope = origin_scope(*(as_url(h) for h in scope_hosts or ()))
     out: list[str] = []
     for value in values or ():
         text = str(value).strip()
@@ -94,10 +95,13 @@ def parse_auth_origins(values, scope_hosts) -> list[str]:
         origin = canonical_origin(text)
         if origin is None:
             raise ValueError(f"--auth-origin {text!r}: not an origin")
-        if parts.hostname.lower() not in scope:           # the CLI's scope, as the seam's
+        # its host, canonically, against the scope's hosts (an origin compare: the
+        # scope's origins on this origin's scheme and port)
+        same_host = canonical_origin(as_url(parts.hostname))
+        if same_host not in scope:
             raise ValueError(f"--auth-origin {text!r}: its host is not in scope "
-                             f"({', '.join(sorted(scope)) or 'none'}); add it to "
-                             f"scope_hosts first")
+                             f"({', '.join(sorted(scope_hosts or ())) or 'none'}); add "
+                             f"it to scope_hosts first")
         out.append(origin)
     return out
 
@@ -733,7 +737,7 @@ class SessionManager:
         """Record on ``request`` (R6), count, and log once per (origin, identity) a send
         made without the session because its origin is not one of the session's
         (FR-SESS-20)."""
-        setattr(request, SESSION_DECISION, OUT_OF_ORIGIN)
+        request.session_decision = OUT_OF_ORIGIN    # core.http.Request's field (T4)
         with self._origin_guard:
             self._out_of_origin += 1
             first = (origin or "?", identity) not in self._out_of_origin_seen
@@ -1231,18 +1235,39 @@ def distinctness_problem(new: SessionState, other: SessionState) -> str | None:
 MAX_LOGIN_HOPS = 5
 
 
+#: A cookie value at least this long is matched by containment in `_carries` (T2).
+CARRIED_MIN_LEN = 8
+
+
 def _carries(request, state: SessionState) -> bool:
-    """Does ``request`` carry any of ``state``'s secrets anywhere in its headers (a
-    header value, a token, a cookie value), by containment (R7: an edit that appends to
-    a value, ``sid=<v>'OR1``, still carries it)? What `prepare` applied, as `authorize`
-    sees it."""
-    secrets = {str(v) for v in (state.cookies or {}).values()}
+    """Does ``request`` carry any of ``state``'s secrets? What `prepare` applied, as
+    `authorize` sees it (R7, narrowed in review round 2, T2):
+
+    * a **secret-looking** value -- any Authorization value or its token, and a cookie
+      value that `core.redaction.looks_like_identifier` holds for or that is at least
+      `CARRIED_MIN_LEN` long -- counts when it is **contained** anywhere in the
+      request's headers (an edited ``sid=<v>'OR1`` still carries it);
+    * any other cookie (``language=en``, ``security=low``) counts only as its exact
+      ``name=value`` pair in the ``Cookie`` header: a short plain value is common
+      text (``en`` in ``Accept-Language``), and containment would refuse an
+      anonymous request's own edit."""
+    secrets: set[str] = set()
     for value in (state.headers or {}).values():
         _scheme, sep, token = str(value).partition(" ")
         secrets |= {str(value), token} if sep else {str(value)}
-    secrets = {v for v in secrets if v}
-    sent = [str(v) for v in (request.headers or {}).values()]
-    return any(secret in value for secret in secrets for value in sent)
+    pairs: set[str] = set()
+    for name, value in (state.cookies or {}).items():
+        value = str(value)
+        if looks_like_identifier(value) or len(value) >= CARRIED_MIN_LEN:
+            secrets.add(value)
+        elif value:
+            pairs.add(f"{name}={value}")
+    secrets.discard("")
+    headers = {str(k).lower(): str(v) for k, v in (request.headers or {}).items()}
+    if any(secret in value for secret in secrets for value in headers.values()):
+        return True
+    sent_pairs = {p.strip() for p in headers.get("cookie", "").split(";")}
+    return bool(pairs & sent_pairs)
 
 
 def _check_origin(state: SessionState, url: str) -> None:
