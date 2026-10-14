@@ -3,6 +3,60 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0047 — The redaction boundary for the crawler's captured requests and SPA route URLs (forms phase 3, lane S) (2026-10-14)
+- Change:
+  - `core/redaction.py`: `CAPTURE_MAX_BYTES` (64 KiB), `CAPTURE_MAX_DEPTH` (8),
+    `redact_captured_body(body, content_type) -> (value, None) | (None, reason)`,
+    `redact_url_identifiers(url)`, `redact_spa_fragment(url)` (FR-CORE-37). The body
+    redactor first runs `redact_body` (fail closed: a body it would omit is not
+    recorded), then blanks sensitively named keys (whole subtree) and identifier-like
+    strings keeping the type (`""`, `null`, an empty container). It is total.
+  - Why in `core`: the draft (Revision 1) required capture to go through
+    `core.redaction` with no second redactor (PA-0003, PA-0100); a typed blanking walk
+    and identifier-aware URL redaction did not exist there.
+  - Found while building it: SPA fragments are now kept as pages (FR-CRAWL-12), and
+    `redact_url` never reads a fragment, so `#/cb?access_token=…` would have been stored
+    verbatim. `redact_spa_fragment` closes that before any such row is written.
+- Impact (other components / project): FR-CORE-37 (new). Used by the crawler only
+  (CC-CRAWL-0016/0017); lane J reads the stored, already-redacted rows. Nothing that
+  exists changes (`redact_url` / `redact_body` untouched).
+- Risk (level; mitigation or accepted-risk justification): low. New functions; the
+  failure direction is "not recorded" (a missed body costs a point, never a secret).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_spa_capture.py` (each name form × value shape, PA-0091;
+    identifier values, JSON and form; every "not recorded" reason incl. 64 KiB, depth 9,
+    NaN, a 5,000-digit integer, a trailing comma with a secret, multipart, a scalar;
+    sniffed `text/plain`; totality; URL and fragment redaction); the PA-0100 producer
+    guard in `tests/test_storage_redaction.py` extended to `discovered_requests` (both
+    capture redactors required), proven on synthetic offenders — done
+  - [x] FR-CORE-37; NFR-CORE-secrets `Enforced by` — done
+- Review: design agreed by reviewers A and B (p3 draft revisions 1–4); code review
+  pending.
+- Effectiveness (assessed 2026-10-14): verified offline (unit and real-browser tests;
+  the mutation check of lane S's gates kills each redaction mutant). The live Juice
+  Shop re-crawl is pending.
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Must-fix 1 (B; A: should-fix): the boundary must not depend on the encoding.*
+    `redact_captured_body` now blanks a non-bool `int`/`float` whose text
+    `looks_like_identifier` to `null` (`{"cardNum": 4716190207394368}` was stored while
+    its form twin was blanked), and replaces an identifier-like key or form name with
+    `REDACTED_KEY` (`__REDACTED_KEY_<n>__`, numbered per body, the same key one name),
+    its value blanked. Tests: a card number, a 19-digit id and a nested PAN become
+    `null` while `expMonth`, `expYear`, `quantity` and `price` are kept; identifier-like
+    keys in JSON and form bodies; a JSON-vs-form parity test over the same values.
+  - *Should-fix 2 (decided under the operator's standing instruction): security
+    answers.* `is_sensitive_name` gains `SENSITIVE_PAIRS` -- the adjacent whole tokens
+    (`security`, `answer`), (`secret`, `answer`), (`recovery`, `answer`), plural
+    folded. The bare token `answer` is deliberately not added (quiz and survey fields).
+    This widens the one predicate every redaction site uses (proxy history, the HTTP
+    recorder, logs, crawled forms): only the safe direction (more is redacted). Tests:
+    `securityAnswer` (JSON) and `security_answer=` (form) blanked; `answer`, `answers`,
+    `quizAnswer`, `answer_security`, `securityQuestion` kept.
+  - FR-CORE-37 updated in place.
+  - Effectiveness of the fixes: each new redaction gate is mutation-checked (killed;
+    46 of 46 over lane S, CC-CRAWL-0017).
 ### CC-CORE-0046 — The `json` point location; SPA routes; the send-time DELETE gate (forms phase 3, lane J) (2026-10-14)
 - Change:
   - `core/jsonbody.py` (new): the one convention for JSON-body points (PA-0003).

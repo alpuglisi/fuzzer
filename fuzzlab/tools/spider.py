@@ -1,13 +1,16 @@
 import argparse
+import functools
 import logging
 import sqlite3
+import time
 from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
-from fuzzlab.core.urls import destructive_reason, in_origin_scope, origin_scope, url_key
+from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, url_key
+from fuzzlab.tools import spa
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,10 +19,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # content and links produced by JavaScript become visible. If it is not
 # installed the crawler falls back to the static requests engine.
 try:
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
     _PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     _PLAYWRIGHT_AVAILABLE = False
+
+    class PlaywrightError(Exception):
+        """Stand-in so ``except PlaywrightError`` is valid without Playwright."""
 
 
 class StorageManager:
@@ -68,6 +75,31 @@ class StorageManager:
                 verdict TEXT
             )
         ''')
+        # The app's own fetch/XHR requests with a JSON or form body (forms phase 3,
+        # FR-CRAWL-13), the contract lane J imports: body_json is the redacted body as
+        # JSON text; source is 'passive' or 'submit'; signature = method + canonical URL
+        # path + sorted top-level keys. Request headers and cookies are never stored.
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS discovered_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_url TEXT,
+                method TEXT,
+                url TEXT,
+                content_type TEXT,
+                body_json TEXT,
+                source TEXT,
+                signature TEXT UNIQUE
+            )
+        ''')
+        # What the crawl's SPA features did (FR-CRAWL-12/13): `LocalSpider.spa_counts`
+        # plus `submit_stopped` (0/1), written at the end of each crawl so reports can
+        # read them (PA-0110; lane S review).
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crawl_stats (
+                name TEXT PRIMARY KEY,
+                value INTEGER
+            )
+        ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -76,13 +108,60 @@ class StorageManager:
             except sqlite3.OperationalError:
                 pass  # column already exists
         self.conn.commit()
+        # Visit keys (`spa.visit_key`) of the pages already stored: a page is "visited"
+        # by key, so loopback aliases are one site and SPA routes distinct pages.
+        self._keys = {spa.visit_key(u) for (u,) in
+                      self.cursor.execute('SELECT url FROM discovered_pages')}
 
     def reset(self):
         """Clears previous results so a fresh crawl starts from an empty map."""
         self.cursor.execute('DELETE FROM discovered_pages')
         self.cursor.execute('DELETE FROM discovered_forms')
         self.cursor.execute('DELETE FROM selector_verdicts')
+        self.cursor.execute('DELETE FROM discovered_requests')
+        self.cursor.execute('DELETE FROM crawl_stats')
         self.conn.commit()
+        self._keys = set()
+
+    def record_stats(self, counts):
+        """Store the crawl's counts (``name -> int``), replacing earlier values of the
+        same names (a resumed crawl records its own run's counts)."""
+        self.cursor.executemany(
+            "INSERT INTO crawl_stats (name, value) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+            [(str(k), int(v)) for k, v in counts.items()])
+        self.conn.commit()
+
+    def record_request(self, page_url, method, url, content_type, body, source):
+        """Store one request the page made (FR-CRAWL-13), redacted here, at the write
+        site, by the one boundary (PA-0100): both URLs by
+        `core.redaction.redact_url_identifiers`, the body by
+        `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed). Only the
+        media type of the request's own Content-Type is kept; no other header and no
+        cookie is ever taken. Returns None when stored, else why not (``duplicate`` for
+        a signature already stored)."""
+        import json
+
+        from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
+        doc, why = redact_captured_body(body, content_type)
+        if why is not None:
+            return why
+        safe_url = redact_url_identifiers(url)
+        method = (method or "").upper()
+        keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
+        sig = json.dumps([method, url_key(safe_url), keys])
+        media = (content_type or "").split(";", 1)[0].strip().lower()
+        try:
+            self.cursor.execute('''
+                INSERT INTO discovered_requests
+                    (page_url, method, url, content_type, body_json, source, signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (redact_url_identifiers(page_url), method, safe_url, media,
+                  json.dumps(doc, ensure_ascii=False), source, sig))
+            self.conn.commit()
+            return None
+        except sqlite3.IntegrityError:
+            return "duplicate"
 
     def record_verdict(self, sig, verdict):
         """File what a submitted selector form did (``settings`` wins over
@@ -123,22 +202,27 @@ class StorageManager:
 
     def mark_visited(self, url, status_code, depth, title=None, content=None,
                      rendered=0, source='link'):
-        """Records a URL (and any parsed content). Returns False if already present."""
+        """Records a URL (and any parsed content). Returns False if already present
+        (by visit key: an alias spelling of a stored page is present)."""
+        key = spa.visit_key(url)
+        if key in self._keys:
+            return False
         try:
             self.cursor.execute('''
                 INSERT INTO discovered_pages (url, status_code, depth, title, content, rendered, source)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (url, status_code, depth, title, content, int(rendered), source))
             self.conn.commit()
+            self._keys.add(key)
             return True
         except sqlite3.IntegrityError:
             # URL already exists in the unique column
             return False
 
     def is_visited(self, url):
-        """Checks if a URL has already been processed."""
-        self.cursor.execute('SELECT 1 FROM discovered_pages WHERE url = ?', (url,))
-        return self.cursor.fetchone() is not None
+        """Whether a page with this URL's visit key (`spa.visit_key`: canonical origin,
+        path, query and SPA-route fragment) has already been processed."""
+        return spa.visit_key(url) in self._keys
 
     def close(self):
         self.conn.close()
@@ -149,7 +233,8 @@ class LocalSpider:
 
     def __init__(self, start_url, max_depth=3, db_name="spider_results.db",
                  engine="auto", timeout_ms=10000, resume=False,
-                 session_manager=None, identity=None, selector_forms=None):
+                 session_manager=None, identity=None, selector_forms=None,
+                 spa_routes=True, submit_spa_forms=None):
         self.start_url = start_url
         self.max_depth = max_depth
         self.storage = StorageManager(db_name)
@@ -226,12 +311,69 @@ class LocalSpider:
         self._auth_headers: dict = {}
         self._last_final_url = None
         self._last_html = None
+        # --- single-page apps (forms phase 3) ---
+        # FR-CRAWL-12: routes from already-loaded same-origin scripts, hash routes as
+        # distinct pages; default on in the Playwright engine (--no-spa-routes).
+        self._spa_on = self.engine == "playwright" and bool(spa_routes)
+        # FR-CRAWL-13: None = off (default); an empty set = every eligible route; else
+        # only the routes named (normalised, `spa.normalise_route`).
+        self._submit_routes = (None if submit_spa_forms is None else
+                               frozenset(spa.normalise_route(r) for r in submit_spa_forms
+                                         if spa.normalise_route(r)))
+        if self._submit_routes is not None and not self._spa_on:
+            logging.warning("--submit-spa-forms needs the Playwright engine with SPA routes "
+                            "on; no SPA form will be submitted")
+        self._authenticated = bool(session_manager and identity)
+        self._injected_cookies: list = []
+        self._app_base = self._start_dir(start_url)
+        self._scripts_seen: set = set()
+        self._page_scripts = 0
+        self._pending_routes: list = []
+        self._route_names: set = set()     # routes taken from scripts
+        self._route_keys: set = set()      # their page URLs, by visit key
+        self._doc_url = start_url
+        self._last_doc = (200, "text/html")
+        self._last_base = None
+        self._current_url = start_url
+        self._capture_source = "passive"
+        self._capture_page = None
+        # the one browser context a named-route submission is clicking in, or None
+        self._delete_ok_for = None
+        self._submitted_sigs: set = set()
+        self._inflight: dict = {}
+        #: Why SPA form submission stopped early (session lost), or None (FR-CRAWL-13).
+        self.spa_submit_stopped = None
+        #: What the SPA features did, reported at the end of the crawl (PA-0110: each
+        #: count is of an effect that happened, e.g. a route page actually loaded).
+        self.spa_counts = dict.fromkeys((
+            "routes_found", "routes_visited", "routes_skipped_destructive",
+            "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
+            "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
+            "requests_not_recorded", "deletes_blocked", "forms_submitted",
+            "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
+            "submissions_over_cap"), 0)
+
+    @staticmethod
+    def _start_dir(url):
+        """The start URL's directory: the app root for history-mode routes (the base
+        URL keeps its path, PA-0113)."""
+        head = url.split("#", 1)[0].split("?", 1)[0]
+        return head if head.endswith("/") else head.rsplit("/", 1)[0] + "/"
+
+    def _crawl_url(self, url):
+        """``url`` as the crawler queues it: its fragment dropped, unless it names a SPA
+        route and SPA routes are on (FR-CRAWL-12); a kept fragment's query passes the
+        redaction boundary (`core.redaction.redact_spa_fragment`), since it is stored."""
+        from fuzzlab.core.redaction import redact_spa_fragment
+        return redact_spa_fragment(spa.crawl_url(url, self._spa_on))
 
     def _destructive(self, url):
-        """The deny-list reason for ``url`` (None for the start URL), recorded once."""
-        if url_key(url) in self._allow:
+        """The deny-list reason for ``url`` (None for the start URL), recorded once. A SPA
+        route's fragment is checked too (``/#/logout``), which the browser's route guard
+        never sees: a hash navigation sends no request (FR-CRAWL-12)."""
+        if url_key(url) in self._allow and spa.spa_fragment(url) is None:
             return None
-        reason = destructive_reason(url)
+        reason = spa.route_destructive_reason(url)
         if reason is not None and url not in self.skipped_destructive:
             self.skipped_destructive[url] = reason
             logging.info(f"skipped destructive link {url} ({reason!r})")
@@ -246,7 +388,7 @@ class LocalSpider:
         # Scope-confined launch (BUG-0123): no proxy, nothing resolvable outside the
         # crawl scope (the start origin; for an external start, its host on any port,
         # BUG-0050), no background networking (see browser_launch_args).
-        from fuzzlab.tools.navguard import browser_launch_args, guard_page
+        from fuzzlab.tools.navguard import browser_launch_args
         if self._scope_host in self._LOOPBACK:
             args = browser_launch_args([self.start_url])
         else:
@@ -262,17 +404,17 @@ class LocalSpider:
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(service_workers="block")
         # guard the context, not the page, so popups are confined too (BUG-0123)
-        guard_page(context, allow=self._allow,
-                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
-                   in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope)
+        self._guard(context, scripts=True)
         self._context = context
         self._page = context.new_page()
+        self._track(self._page)
         if self._session_manager and self._identity:
             from fuzzlab.tools import browserauth
             cookies, headers = browserauth.playwright_auth(
                 self._session_manager, self._identity, self._auth_base_url)
             browserauth.apply_to_context(self._page.context, cookies, headers)
             self._auth_headers = dict(headers or {})
+            self._injected_cookies = [(c["name"], c["value"]) for c in cookies]
             logging.info(f"Crawler authenticated as {self._identity} "
                          f"({len(cookies)} cookie(s))")
         # Record fetch()/XMLHttpRequest targets. These endpoints are where a
@@ -280,12 +422,127 @@ class LocalSpider:
         # as <a href> anywhere, so link-following alone can never reach them.
         self._page.on("request", self._on_request)
 
+    def _guard(self, context, *, scripts):
+        """The one guard every context this crawl opens gets (BUG-0123, FR-CRAWL-12/13):
+        scope, the destructive rule, the DELETE rule and the passive observer (which
+        reads script bodies only in the crawl's own context)."""
+        from fuzzlab.tools.navguard import guard_page
+        guard_page(context, allow=self._allow,
+                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
+                   in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope,
+                   method_refusal=functools.partial(self._method_refusal,
+                                                    context=context),
+                   observe=functools.partial(self._observe,
+                                             scripts=scripts and self._spa_on))
+
+    def _track(self, page):
+        """Count a page's requests in flight, so a settle waits for the app's own XHRs
+        (a hash-route change or a click leaves the page's load state as it was)."""
+        key = id(page)
+        self._inflight[key] = 0
+
+        def up(_request):
+            self._inflight[key] = self._inflight.get(key, 0) + 1
+
+        def down(_request):
+            self._inflight[key] = max(0, self._inflight.get(key, 0) - 1)
+        page.on("request", up)
+        page.on("requestfinished", down)
+        page.on("requestfailed", down)
+
+    def _settle(self, page, budget_ms=None):
+        """Let ``page``'s requests finish: three quiet 100 ms polls in a row, bounded."""
+        budget = min(self.timeout_ms, 5000) if budget_ms is None else budget_ms
+        deadline = time.monotonic() + budget / 1000
+        quiet = 0
+        while time.monotonic() < deadline and quiet < 3:
+            page.wait_for_timeout(100)
+            quiet = quiet + 1 if self._inflight.get(id(page), 0) == 0 else 0
+
+    def _method_refusal(self, method, url, context=None):
+        """FR-CRAWL-12 (reviewer A6): the crawl never deletes. A browser-initiated DELETE
+        is aborted unless it comes from a submission on a route the operator named with
+        ``--submit-spa-forms``, **from the context doing that click** (``context`` is the
+        context whose guard asks; the crawl context's background requests during an
+        unauthenticated context's click are still refused, lane S review), and **once per
+        click** (a button deletes one thing; a background poller in the clicking context
+        gets at most that one); each abort is counted."""
+        if method != "DELETE":
+            return None
+        if self._delete_ok_for is not None and context is self._delete_ok_for:
+            self._delete_ok_for = None                   # single use
+            return None
+        self.spa_counts["deletes_blocked"] += 1
+        return "browser-initiated DELETE"
+
     def _on_request(self, request):
         try:
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
         except Exception:
             pass  # never let instrumentation break a crawl
+
+    # ----- passive observation (forms phase 3) -----
+    def _observe(self, request, response, *, scripts):
+        """Called by the guard for each request it sent (FR-CRAWL-12/13): a same-origin
+        script body is scanned for routes (crawl context only); a fetch/XHR request with a
+        body is captured. Nothing is requested here: both come from what the browser
+        already loaded."""
+        rtype = request.resource_type
+        if rtype == "script":
+            if scripts:
+                self._note_script(request.url, response)
+            return
+        if rtype not in ("xhr", "fetch"):
+            return
+        method = request.method.upper()
+        if method in ("GET", "HEAD", "OPTIONS"):
+            return
+        if spa.is_transport_url(request.url):
+            self.spa_counts["transport_urls_skipped"] += 1
+            return
+        body = request.post_data_buffer
+        if not body:
+            return
+        # the request's own Content-Type is the one header read; none is stored
+        content_type = (request.headers or {}).get("content-type", "")
+        why = self.storage.record_request(self._capture_page or self._current_url, method,
+                                          request.url, content_type, body,
+                                          self._capture_source)
+        if why is None:
+            self.spa_counts["requests_captured"] += 1
+        elif why != "duplicate":
+            self.spa_counts["requests_not_recorded"] += 1
+            logging.info(f"captured request {method} {request.url.split('?', 1)[0]} not "
+                         f"recorded ({why})")
+
+    def _note_script(self, url, response):
+        """Scan one already-loaded script for route declarations, if it is same-origin
+        with the page, under the size cap, and within the per-page script cap."""
+        if response.status != 200:
+            return
+        if canonical_origin(url) != canonical_origin(self._doc_url):
+            return                                    # cross-origin scripts are not read
+        key = url.split("#", 1)[0]
+        if key in self._scripts_seen:
+            return
+        self._scripts_seen.add(key)
+        if self._page_scripts >= spa.MAX_SCRIPTS_PER_PAGE:
+            self.spa_counts["scripts_over_page_cap"] += 1
+            return
+        self._page_scripts += 1
+        declared = (response.headers or {}).get("content-length")
+        if declared and declared.isdigit() and int(declared) > spa.MAX_SCRIPT_BYTES:
+            self.spa_counts["scripts_too_large"] += 1
+            return
+        body = response.body()
+        routes = spa.scan_routes(body.decode("utf-8", "replace")) \
+            if len(body) <= spa.MAX_SCRIPT_BYTES else None
+        if routes is None:
+            self.spa_counts["scripts_too_large"] += 1
+            return
+        self.spa_counts["scripts_scanned"] += 1
+        self._pending_routes.extend(routes)
 
     def _stop_browser(self):
         try:
@@ -376,10 +633,19 @@ class LocalSpider:
             return self._fetch_static(url)
 
     def _goto_and_parse(self, url):
-        self._last_final_url, self._last_html = url, None
+        self._last_final_url, self._last_html, self._last_base = url, None, None
+        self._doc_url, self._page_scripts, self._pending_routes = url, 0, []
         response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-        status = response.status if response else 0
-        ct = (response.headers or {}).get('content-type', '') if response else ''
+        same_document = response is None and spa.spa_fragment(url) is not None
+        if same_document:
+            # a hash-route change in the loaded app: no new document, no response; the
+            # document's own status stands, and the app's XHRs are waited for
+            status, ct = self._last_doc
+        else:
+            status = response.status if response else 0
+            ct = (response.headers or {}).get('content-type', '') if response else ''
+            if response:
+                self._last_doc = (status, ct)
 
         title, text, links = None, None, []
         if 'text/html' in ct or ct == '':
@@ -388,9 +654,14 @@ class LocalSpider:
                 self._page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
             except Exception:
                 pass
+            if same_document:
+                self._settle(self._page)
             title = self._page.title()
             self._last_final_url = self._page.url
             self._last_html = self._page.content()
+            if self._spa_on:
+                self._last_base = self._page.evaluate(
+                    "() => document.querySelector('base') ? document.baseURI : null")
             # Links and text come from the RENDERED DOM, so JS-injected nav links
             # and JS-built content are included.
             links = self._page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
@@ -407,11 +678,17 @@ class LocalSpider:
         from fuzzlab.core.redaction import redact_url
         more = []
         final = self._last_final_url
-        if (final and final.split('#')[0] != url and self._in_scope(final)
-                and not self._destructive(final)):
+        landing = self._crawl_url(final) if final else None
+        if (landing and spa.visit_key(landing) != spa.visit_key(url)
+                and self._in_scope(landing) and not self._destructive(landing)):
             # the landing URL keeps its query (xss_eval.php?date=Date()), redacted
-            self.storage.mark_visited(redact_url(final.split('#')[0]), status, depth,
+            self.storage.mark_visited(redact_url(landing), status, depth,
                                       title, content, source='redirect')
+        if self._spa_on and self.engine == "playwright":
+            more += self._queue_routes(final or url, depth)
+            if (self._submit_routes is not None and self._last_html is not None
+                    and self._is_spa_page(url)):
+                self._submit_spa_forms(final or url)
         if not self._last_html:
             return more
         from fuzzlab.core.forms import form_record
@@ -437,6 +714,194 @@ class LocalSpider:
                 if not self._destructive(target) and not self.storage.is_visited(target):
                     more.append((target, depth + 1, 'form'))
         return more
+
+    # ----- SPA routes (forms phase 3, FR-CRAWL-12) -----
+    def _is_spa_page(self, url):
+        """A SPA route page: a route fragment, or a history-mode route found in a
+        script."""
+        return spa.spa_fragment(url) is not None or spa.visit_key(url) in self._route_keys
+
+    def _queue_routes(self, page_url, depth):
+        """Turn the routes the page's scripts declared into pages to crawl: hash mode
+        when the page or its links use ``#/`` (or ``#!/``), else history mode under the
+        page's ``<base>`` or the start URL's directory. Parameterised, wildcard and
+        destructive routes are skipped and counted."""
+        routes, self._pending_routes = self._pending_routes, []
+        if not routes:
+            return []
+        frag = spa.spa_fragment(page_url) or ""
+        hrefs = []
+        try:
+            hrefs = self._page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
+        except PlaywrightError:
+            pass
+        link_frags = [spa.spa_fragment(h) for h in hrefs]
+        hash_mode = bool(frag) or any(f is not None for f in link_frags)
+        hashbang = frag.startswith("!/") or any(f and f.startswith("!/") for f in link_frags)
+        base = self._last_base or self._app_base
+        more = []
+        for path in routes:
+            kind, reason = spa.classify_route(path)
+            if kind in spa.NOT_ROUTES:                       # not counted as found
+                continue
+            name = spa.normalise_route(path)
+            if name in self._route_names:
+                continue
+            self._route_names.add(name)
+            self.spa_counts["routes_found"] += 1
+            if kind == spa.ROUTE_PARAM:
+                self.spa_counts["routes_skipped_parameterised"] += 1
+                logging.info(f"SPA route {name!r} skipped: parameterised or wildcard")
+                continue
+            if kind == spa.ROUTE_DESTRUCTIVE:
+                self.spa_counts["routes_skipped_destructive"] += 1
+                logging.info(f"SPA route {name!r} skipped: destructive ({reason!r})")
+                continue
+            target = spa.route_url(page_url, path, hash_mode=hash_mode, hashbang=hashbang,
+                                   base=base)
+            self._route_keys.add(spa.visit_key(target))
+            if depth >= self.max_depth:
+                continue
+            if (self._in_scope(target) and not self._destructive(target)
+                    and not self.storage.is_visited(target)):
+                more.append((target, depth + 1, 'spa-route'))
+        return more
+
+    # ----- SPA form submission (forms phase 3, FR-CRAWL-13) -----
+    def _submit_spa_forms(self, page_url):
+        """Fill and click, once per form signature, each eligible form on this SPA route.
+        The gate is `spa.form_refusal`. A form with a password input is submitted only in
+        a fresh unauthenticated context; in an authenticated crawl, any form is submitted
+        in the crawl's own context only when its route was named. After each submission
+        in an authenticated context the session is re-checked; on loss, submitting stops
+        and is reported. At most `spa.MAX_SUBMISSIONS` per crawl."""
+        if self.spa_submit_stopped:
+            return
+        route = spa.route_of(page_url, self._last_base or self._app_base)
+        named = self._submit_routes or None
+        try:
+            forms = self._page.evaluate(spa.FORMS_JS, 20)
+        except PlaywrightError as exc:
+            logging.info(f"could not read the forms on {page_url} ({exc})")
+            return
+        for form in forms:
+            sig = spa.form_signature(form)
+            if sig in self._submitted_sigs:
+                continue
+            self._submitted_sigs.add(sig)
+            why = spa.form_refusal(form, route, named=named)
+            if why:
+                self.spa_counts["forms_refused"] += 1
+                logging.info(f"SPA form on {page_url} not submitted: {why}")
+                continue
+            if self.spa_counts["forms_submitted"] >= spa.MAX_SUBMISSIONS:
+                self.spa_counts["submissions_over_cap"] += 1
+                logging.info(f"SPA form on {page_url} not submitted: the crawl's "
+                             f"{spa.MAX_SUBMISSIONS}-submission cap is reached")
+                continue
+            # the route was named (form_refusal refuses an unnamed one when routes are)
+            explicit = named is not None
+            anonymous = spa.has_password(form) or (self._authenticated and not explicit)
+            if anonymous:
+                self._submit_anonymously(page_url, sig, explicit)
+                continue
+            if self._fill_and_click(self._page, self._context, form, page_url,
+                                    explicit) and \
+                    self._authenticated:
+                intact, why = self._session_intact()
+                if not intact:
+                    self.spa_submit_stopped = (f"the crawl's session was lost after "
+                                               f"submitting a form on {route!r} ({why})")
+                    logging.warning(f"SPA form submission stopped: "
+                                    f"{self.spa_submit_stopped}")
+                    return
+
+    def _fill_and_click(self, page, context, form, page_url, explicit):
+        """Fill ``form``'s typed controls with our fillers and click its button once.
+        Returns True when the click happened (counted). A DELETE it causes is allowed
+        only on a named route (``explicit``) and only from ``context``."""
+        for (name, kind), cid in zip(form["controls"], form["ids"]):
+            if not spa.fillable(kind) or (kind != "password"
+                                          and spa.sensitive_control(name)):
+                continue
+            try:
+                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind),
+                          timeout=self.timeout_ms)
+            except PlaywrightError:
+                pass                                    # e.g. a range or read-only input
+        button = form.get("button_id")
+        selector = f'[data-fuzzlab-id="{button}"]'
+        try:
+            if not button or not page.is_enabled(selector, timeout=self.timeout_ms):
+                self.spa_counts["forms_not_submittable"] += 1
+                logging.info(f"SPA form on {page_url} not submittable (no enabled button)")
+                return False
+        except PlaywrightError:
+            self.spa_counts["forms_not_submittable"] += 1
+            return False
+        self._capture_source, self._capture_page = "submit", page_url
+        self._delete_ok_for = context if explicit else None
+        try:
+            page.click(selector, timeout=self.timeout_ms)
+            self.spa_counts["forms_submitted"] += 1
+            logging.info(f"submitted the SPA form {form.get('button')!r} on {page_url}")
+            self._settle(page)
+            return True
+        except PlaywrightError as exc:
+            self.spa_counts["forms_not_submittable"] += 1
+            logging.info(f"SPA form on {page_url} could not be clicked "
+                         f"({str(exc).splitlines()[0][:80]})")
+            return False
+        finally:
+            self._capture_source, self._capture_page = "passive", None
+            self._delete_ok_for = None
+
+    def _submit_anonymously(self, page_url, sig, explicit):
+        """Load the route in a fresh unauthenticated context (same browser, so the same
+        launch arguments; the same guard and scope) and submit the form with this
+        signature there. The context is closed afterwards."""
+        from fuzzlab.tools.navguard import release
+        context = self._browser.new_context(service_workers="block")
+        self._guard(context, scripts=False)
+        try:
+            page = context.new_page()
+            self._track(page)
+            page.goto(page_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            self._settle(page)
+            forms = page.evaluate(spa.FORMS_JS, 20)
+            match = next((f for f in forms if spa.form_signature(f) == sig), None)
+            if match is None:
+                self.spa_counts["forms_not_found_anonymous"] += 1
+                logging.info(f"SPA form on {page_url} not found in an unauthenticated "
+                             f"context: not submitted")
+                return
+            self._fill_and_click(page, context, match, page_url, explicit)
+        except PlaywrightError as exc:
+            self.spa_counts["forms_not_submittable"] += 1
+            logging.info(f"unauthenticated submission on {page_url} failed "
+                         f"({str(exc).splitlines()[0][:80]})")
+        finally:
+            release(context)
+            context.close()
+
+    def _session_intact(self):
+        """Is the crawl's own session still there after a submission (Revision 1)? Each
+        cookie we injected must still hold its value in the crawl's context, and the
+        session manager must still find the session live (`verify_live`). Returns
+        ``(ok, why)``; anything that cannot be verified is a loss (fail closed)."""
+        jar = {c["name"]: c["value"] for c in self._context.cookies()}
+        for name, value in self._injected_cookies:
+            if jar.get(name) != value:
+                return False, f"cookie {name!r} was changed or cleared"
+        verify = getattr(self._session_manager, "verify_live", None)
+        if verify is not None:
+            host = urlparse(self._auth_base_url).hostname or ""
+            try:
+                if not verify(host, self._identity, self._auth_base_url):
+                    return False, "the server no longer accepts the session"
+            except Exception as exc:  # noqa: BLE001 - unverifiable counts as lost
+                return False, f"the session could not be verified ({type(exc).__name__})"
+        return True, None
 
     def _isolated_submit(self, method, action_url, entries):
         """Submit a selector form without following redirects, through a client that
@@ -474,8 +939,53 @@ class LocalSpider:
                         timeout=self.timeout_ms / 1000)
         return r.status_code, dict(r.headers)
 
+    def _queue_xhr(self, current_url, href):
+        """An XHR/fetch URL as a page to crawl, or None: socket.io / engine.io transport
+        URLs are not pages (counted); an identifier-like query value is blanked, as a
+        stored request's is (`core.redaction.redact_url_identifiers`)."""
+        from fuzzlab.core.redaction import redact_url_identifiers
+        link = urljoin(current_url, href).split('#')[0]
+        if spa.is_transport_url(link):
+            self.spa_counts["transport_urls_skipped"] += 1
+            return None
+        return redact_url_identifiers(link)
+
+    def spa_summary(self):
+        """The crawl summary's SPA lines (FR-CRAWL-12/13): routes visited and skipped,
+        requests captured, DELETEs blocked, forms submitted and refused, and why
+        submitting stopped. Empty when none of it happened."""
+        c = self.spa_counts
+        lines = []
+        if c["routes_found"] or c["routes_visited"]:
+            lines.append(f"SPA routes: {c['routes_visited']} visited, "
+                         f"{c['routes_skipped_destructive']} skipped as destructive, "
+                         f"{c['routes_skipped_parameterised']} skipped as parameterised "
+                         f"({c['routes_found']} found in {c['scripts_scanned']} script(s)).")
+        if c["scripts_too_large"] or c["scripts_over_page_cap"]:
+            lines.append(f"Scripts not scanned for routes: {c['scripts_too_large']} over "
+                         f"{spa.MAX_SCRIPT_BYTES} bytes, {c['scripts_over_page_cap']} over "
+                         f"the {spa.MAX_SCRIPTS_PER_PAGE}-per-page cap.")
+        if c["requests_captured"] or c["requests_not_recorded"]:
+            lines.append(f"Captured {c['requests_captured']} request(s) of the app "
+                         f"(redacted); {c['requests_not_recorded']} not recorded.")
+        if c["transport_urls_skipped"]:
+            lines.append(f"Skipped {c['transport_urls_skipped']} socket.io/engine.io "
+                         f"transport URL(s).")
+        if c["deletes_blocked"]:
+            lines.append(f"Blocked {c['deletes_blocked']} browser-initiated DELETE "
+                         f"request(s) (NFR-CRAWL-safe).")
+        if self._submit_routes is not None:
+            lines.append(f"SPA forms: {c['forms_submitted']} submitted (cap "
+                         f"{spa.MAX_SUBMISSIONS}), {c['forms_refused']} refused, "
+                         f"{c['forms_not_submittable']} not submittable, "
+                         f"{c['forms_not_found_anonymous']} not found unauthenticated, "
+                         f"{c['submissions_over_cap']} over the cap.")
+        if self.spa_submit_stopped:
+            lines.append(f"SPA form submission stopped: {self.spa_submit_stopped}.")
+        return lines
+
     def crawl(self):
-        queue = [(self.start_url, 0, 'link')]
+        queue = [(self._crawl_url(self.start_url), 0, 'link')]
         logging.info(f"Starting crawl at {self.start_url} (max_depth={self.max_depth})")
 
         if self.engine == "playwright":
@@ -490,6 +1000,7 @@ class LocalSpider:
                     continue
 
                 try:
+                    self._current_url = current_url
                     if self.engine == "playwright":
                         status, ct, title, text, raw_links, xhr_links = self._fetch_rendered(current_url)
                     else:
@@ -502,6 +1013,9 @@ class LocalSpider:
                         source=source,
                     )
                     crawled += 1
+                    if self._spa_on and self._is_spa_page(current_url) \
+                            and self._last_html is not None:
+                        self.spa_counts["routes_visited"] += 1     # rendered (PA-0110)
                     queue.extend(self._after_fetch(current_url, status, depth, title,
                                                    content))
                     logging.info(
@@ -513,7 +1027,7 @@ class LocalSpider:
                     if depth < self.max_depth:
                         if 'text/html' in ct or ct == '':
                             for href in raw_links:
-                                absolute_link = urljoin(current_url, href).split('#')[0]
+                                absolute_link = self._crawl_url(urljoin(current_url, href))
                                 if (self._in_scope(absolute_link)
                                         and not self._destructive(absolute_link)
                                         and not self.storage.is_visited(absolute_link)):
@@ -522,8 +1036,8 @@ class LocalSpider:
                         # content type, so JSON APIs behind rendered pages land
                         # in the map and get audited like any other URL.
                         for href in xhr_links:
-                            absolute_link = urljoin(current_url, href).split('#')[0]
-                            if (self._in_scope(absolute_link)
+                            absolute_link = self._queue_xhr(current_url, href)
+                            if absolute_link and (self._in_scope(absolute_link)
                                     and not self._destructive(absolute_link)
                                     and not self.storage.is_visited(absolute_link)):
                                 queue.append((absolute_link, depth + 1, 'xhr'))
@@ -555,6 +1069,10 @@ class LocalSpider:
                                   sorted(self.skipped_out_of_scope.items()))
                 logging.info(f"Blocked {sum(self.skipped_out_of_scope.values())} "
                              f"out-of-scope browser request(s): {hosts} (BUG-0123).")
+            for line in self.spa_summary():
+                logging.info(line)
+            self.storage.record_stats({**self.spa_counts,
+                                       "submit_stopped": int(bool(self.spa_submit_stopped))})
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 
@@ -590,9 +1108,30 @@ def build_parser():
                         "<select> has one of these names (e.g. 'bug'). Off by default: "
                         "a submission can change state, so POST pickers are submitted "
                         "only when named, never settings-like ones (FR-CRAWL-8).")
+    p.add_argument("--no-spa-routes", action="store_true",
+                   help="Do not read single-page-app routes from the page's own scripts "
+                        "nor crawl hash routes (#/x) as pages. On by default in the "
+                        "Playwright engine: it is navigation, like link following "
+                        "(FR-CRAWL-12).")
+    p.add_argument("--submit-spa-forms", nargs="*", default=None, metavar="ROUTE",
+                   help="Fill and submit SPA forms once each, with filler values, so the "
+                        "app sends its real requests (captured, redacted). Alone: every "
+                        "eligible route (in an authenticated crawl, only in a fresh "
+                        "unauthenticated context). With routes (e.g. 'login search'): "
+                        "only those. Off by default: a submission changes lab state. "
+                        "Destructive, settings, transaction, credential-change, 2FA and "
+                        "file-upload forms are never submitted (FR-CRAWL-13).")
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
+
+
+def spa_route_names(values):
+    """``--submit-spa-forms`` values as route names: split on commas and whitespace (a
+    web-form value arrives as one string); None when the flag is absent."""
+    if values is None:
+        return None
+    return [r for v in values for r in v.replace(",", " ").split() if r]
 
 
 def parse_args():
@@ -624,6 +1163,8 @@ if __name__ == "__main__":
         selector_forms=(None if args.follow_selector_forms is None else
                         [n.strip() for n in args.follow_selector_forms.split(",")
                          if n.strip()]),
+        spa_routes=not args.no_spa_routes,
+        submit_spa_forms=spa_route_names(args.submit_spa_forms),
     )
     spider.crawl()
     if args.store:

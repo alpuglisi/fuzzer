@@ -83,6 +83,14 @@ def is_credential_name(name: str) -> bool:
     return bool(set(name_tokens(name)) & CREDENTIAL_TOKENS)
 
 
+#: Adjacent tokens that together name a secret (``securityAnswer``,
+#: ``recovery_answers``): an account-recovery answer is a credential (forms phase 3,
+#: lane S review). ``answer`` alone is deliberately not one: it names ordinary quiz and
+#: survey fields.
+SENSITIVE_PAIRS = frozenset({("security", "answer"), ("secret", "answer"),
+                             ("recovery", "answer")})
+
+
 def is_sensitive_name(name: str) -> bool:
     """True when the field or parameter ``name`` holds a secret."""
     tokens = [_fold(t) for t in name_tokens(name)]
@@ -90,6 +98,9 @@ def is_sensitive_name(name: str) -> bool:
         return False
     if any(t in SENSITIVE_TOKENS or t.endswith(("sessid", "sessionid")) for t in tokens):
         return True                               # incl. PHPSESSID / JSESSIONID
+    for first, second in zip(tokens, tokens[1:]):  # whole adjacent tokens, plural folded
+        if (first, second[:-1] if second.endswith("s") else second) in SENSITIVE_PAIRS:
+            return True
     if "key" in tokens:
         return len(tokens) == 1 or any(t in _KEY_QUALIFIERS for t in tokens)
     return tokens == ["code"]                     # an OAuth code, only as the whole name
@@ -351,3 +362,186 @@ def redact_body(body: bytes, content_type: str) -> bytes:
             return body
         return redact_json_body(body)
     return body
+
+
+# --- the crawler's captured requests (forms phase 3, FR-CRAWL-13, CC-CORE-0047) ------
+
+#: A captured request body larger than this is not recorded.
+CAPTURE_MAX_BYTES = 64 * 1024
+#: ... nor one whose JSON nests deeper than this many containers.
+CAPTURE_MAX_DEPTH = 8
+
+
+def _redact_query_identifiers(query: str) -> str:
+    """`redact_query`, then each value that `looks_like_identifier` (judged on its raw,
+    percent-decoded form) blanked to ``name=``."""
+    from urllib.parse import unquote
+    out = []
+    for part in redact_query(query).split("&"):
+        name, eq, raw = part.partition("=")
+        out.append(f"{name}=" if eq and looks_like_identifier(unquote(raw)) else part)
+    return "&".join(out)
+
+
+def redact_spa_fragment(url: str) -> str:
+    """``url`` with the query of a SPA-route fragment (``#/reset?token=...``,
+    ``#!/x?id=...``) redacted like a URL query: sensitive names replaced, identifier-like
+    values blanked. A fragment that is not a route (``#top``) is left alone. The crawler
+    keeps such fragments as pages (FR-CRAWL-12), so they pass this boundary."""
+    head, sep, frag = (url or "").partition("#")
+    if not sep or not (frag.startswith("/") or frag.startswith("!/")) or "?" not in frag:
+        return url
+    route, _q, query = frag.partition("?")
+    new = _redact_query_identifiers(query)
+    return url if new == query else f"{head}#{route}?{new}"
+
+
+def redact_url_identifiers(url: str) -> str:
+    """`redact_url`, then each query value that `looks_like_identifier` (given its raw,
+    percent-decoded value) blanked to ``name=``, and a SPA-route fragment's query
+    redacted the same way (`redact_spa_fragment`): how the crawler stores an XHR URL and
+    a captured request's URLs (FR-CRAWL-12/13). Total; a URL with neither is returned
+    unchanged."""
+    url = redact_spa_fragment(redact_url(url))
+    if "?" not in (url or "").split("#", 1)[0]:
+        return url
+    parts = urlsplit(url)
+    new = _redact_query_identifiers(parts.query)
+    return url if new == parts.query else urlunsplit(parts._replace(query=new))
+
+
+def _blank(value):
+    """A blanked value keeps its declared type: ``""`` for a string, ``null`` for a
+    number or a boolean, an empty container for a container (its whole subtree goes,
+    PA-0091(2))."""
+    if isinstance(value, str):
+        return ""
+    if isinstance(value, dict):
+        return {}
+    if isinstance(value, list):
+        return []
+    return None
+
+
+#: An identifier-like key (a card number, a session id used as a map key) is replaced by
+#: this, numbered per body, and its value blanked (lane S review, reviewer B must-fix 1).
+REDACTED_KEY = "__REDACTED_KEY_{n}__"
+
+
+class _KeyNamer:
+    """Replaces identifier-like keys of one body; the same key gets the same name."""
+
+    def __init__(self):
+        self.names: dict[str, str] = {}
+
+    def __call__(self, key: str) -> str | None:
+        """The placeholder for ``key`` when it looks like an identifier, else None."""
+        if not looks_like_identifier(key):
+            return None
+        if key not in self.names:
+            self.names[key] = REDACTED_KEY.format(n=len(self.names))
+        return self.names[key]
+
+
+def _identifier_number(value) -> bool:
+    """A JSON number whose digits look like an identifier (a card number, a 19-digit
+    id): judged as its text, so a body's encoding never decides (reviewer B)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and looks_like_identifier(str(value)))
+
+
+def _blank_tree(value, namer: _KeyNamer):
+    """``value`` with every sensitively named key's value, every identifier-like string
+    or number blanked, and every identifier-like key replaced (its value blanked)
+    (called on a tree at most `CAPTURE_MAX_DEPTH` deep)."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            key = str(k)
+            placeholder = namer(key)
+            if placeholder is not None:
+                out[placeholder] = _blank(v)
+            elif is_sensitive_name(key):
+                out[k] = _blank(v)
+            else:
+                out[k] = _blank_tree(v, namer)
+        return out
+    if isinstance(value, list):
+        return [_blank_tree(v, namer) for v in value]
+    if isinstance(value, str) and looks_like_identifier(value):
+        return ""
+    if _identifier_number(value):
+        return None
+    return value
+
+
+def _container_depth_ok(doc, limit: int) -> bool:
+    stack = [(doc, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, (dict, list)):
+            if depth > limit:
+                return False
+            children = node.values() if isinstance(node, dict) else node
+            stack.extend((c, depth + 1) for c in children if isinstance(c, (dict, list)))
+    return True
+
+
+def _reject_constant(name):
+    raise ValueError(f"non-standard JSON constant {name}")
+
+
+def redact_captured_body(body: bytes, content_type: str):
+    """A request body the crawler captured, as the JSON value it may store, or why not:
+    ``(value, None)`` or ``(None, reason)`` (FR-CRAWL-13, the one boundary for it).
+
+    Only a JSON object or array, or a form-encoded body (an object of name -> value,
+    the last value of a repeated name winning), is recorded, at most
+    `CAPTURE_MAX_BYTES` and `CAPTURE_MAX_DEPTH` deep. It first passes `redact_body` (the
+    storage boundary, fail closed): a body that boundary would omit is not recorded.
+    Then every sensitively named key's value (`is_sensitive_name`; passwords, tokens,
+    sessions) is blanked whatever its shape, and every identifier-like value is blanked
+    -- a string (a form value judged on its raw, percent-decoded form) or a number
+    judged as its text, so ``4716190207394368`` is blanked as a JSON number exactly as
+    it is in a form: a string becomes ``""``, a number or boolean ``null``, a container
+    empty. An identifier-like **key** (or form name) is replaced by `REDACTED_KEY`
+    (numbered per body) and its value blanked. The result never depends on whether the
+    body was JSON or form-encoded (lane S review). Total: it never raises."""
+    from urllib.parse import unquote
+    try:
+        if not body:
+            return None, "empty body"
+        if len(body) > CAPTURE_MAX_BYTES:
+            return None, "body too large"
+        kind = body_kind(body, content_type)
+        if kind not in ("json", "json?", "form"):
+            return None, "not a JSON or form-encoded body"
+        if redact_body(body, content_type).startswith(b"__BODY_OMITTED__"):
+            return None, "body the storage boundary omits"
+        namer = _KeyNamer()
+        if kind == "form":
+            doc = {}
+            for part in body.decode("latin-1").split("&"):
+                if not part:
+                    continue
+                name, _eq, raw = part.partition("=")
+                key = unquote_plus(name)
+                placeholder = namer(unquote(name))
+                if placeholder is not None:
+                    doc[placeholder] = ""
+                elif is_sensitive_name(key) or looks_like_identifier(unquote(raw)):
+                    doc[key] = ""
+                else:
+                    doc[key] = unquote_plus(raw)
+            return (doc, None) if doc else (None, "empty body")
+        try:
+            doc = json.loads(body.decode("utf-8"), parse_constant=_reject_constant)
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            return None, "unparseable JSON"
+        if not isinstance(doc, (dict, list)):
+            return None, "a JSON body that is not an object or array"
+        if not _container_depth_ok(doc, CAPTURE_MAX_DEPTH):
+            return None, "body nested too deep"
+        return _blank_tree(doc, namer), None
+    except Exception:                       # total (PA-0096): never raises, never stores
+        return None, "redaction failed"

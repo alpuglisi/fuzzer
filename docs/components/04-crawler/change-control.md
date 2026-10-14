@@ -3,6 +3,204 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0017 — Request capture and SPA form submission (forms phase 3, lane S: I) (2026-10-14)
+- Change:
+  - `tools/spider.py`:
+    - `StorageManager`: the spider table `discovered_requests (id, page_url, method, url,
+      content_type, body_json TEXT, source TEXT, signature TEXT UNIQUE)`, cleared on
+      reset; `record_request(...)` is its one write site and redacts there through
+      `core.redaction` only (`redact_captured_body`, `redact_url_identifiers`,
+      CC-CORE-0047). Only the media type of the request's own Content-Type is read; no
+      header and no cookie is stored. `signature` = `[method, url_key(url), sorted keys]`.
+    - Passive capture (default on, Playwright engine): the guard's `observe` hook hands
+      each sent fetch/XHR request with a body (not GET/HEAD/OPTIONS) to `_observe`;
+      socket.io / engine.io requests are excluded (counted).
+    - `--submit-spa-forms [ROUTE …]` (default off; values also split on commas and
+      spaces, for the web form): `_submit_spa_forms` reads the rendered page's forms
+      and form-like containers (`spa.FORMS_JS`), gates each with `spa.form_refusal`,
+      fills (`store_adapter` fillers; `spa.PASSWORD_FILLER`) and clicks once per
+      `spa.form_signature`, at most `spa.MAX_SUBMISSIONS` (50) per crawl.
+      `_submit_anonymously` submits password forms (and, in an authenticated crawl,
+      every form whose route was not named) in a fresh context of the same browser,
+      guarded the same way, closed afterwards. `_session_intact` re-checks the crawl's
+      session after each authenticated submission (injected cookies unchanged, then
+      `verify_live`; unverifiable = lost); on loss submitting stops and
+      `spa_submit_stopped` is reported. A settle loop (`_track` / `_settle`) waits for
+      the page's own requests after a click or a hash change.
+  - `tools/spa.py` (new): `form_refusal` (the one gate: unnamed route, destructive /
+    settings / transaction route, label, action or control, file input,
+    credential-change via `store_adapter.credential_change_reason`, 2FA-only),
+    `fillable` / `filler`, `form_signature`, `FORMS_JS`.
+  - `tools/navguard.py`: `observe(request, response)` on `make_route_handler` /
+    `guard_page`, called after a request was sent and before it is answered,
+    contained (a failing observer is logged, never changes the answer).
+- Impact (other components / project): FR-CRAWL-13 (new); NFR-CRAWL-safe gains the
+  submission clauses, traced. The spider DB gains a table (the spider's own schema; no
+  store migration); lane J's importer reads it (an absent table = none). `navguard`'s
+  new hooks are optional; the auditor's fetcher and the M6 executor are unchanged.
+  The PA-0100 producer guard (`tests/test_storage_redaction.py`) now covers
+  `discovered_requests` and requires both capture redactors; `tools/spa.py` joins the
+  PA-0122 guard's module scope.
+- Risk (level; mitigation or accepted-risk justification): medium. Submissions change
+  lab state (a feedback row, a failed login, a registration attempt with filler data):
+  default off, lab only, refusals and caps as above, mutation-checked. A password
+  filler is a constant that is never a real credential. Accepted gaps: file-upload
+  forms are never submitted; a form whose button stays disabled after filling (e.g. a
+  required slider or CAPTCHA) is counted "not submittable"; Angular forms without
+  `name` attributes are described by `id` / `formcontrolname` / label.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_spa_capture.py` (redaction boundary, table contract, write
+    site, passive filters, every refusal and every transaction word, fillers, session
+    check, CLI; real browser: capture on by default and redacted, submission off by
+    default, bare submission in an anonymous crawl incl. both contexts' scope, the fake
+    SPA whose failed login clears the token, a named login route still anonymous, an
+    authenticated bare flag never using the crawl's context, session loss stopping
+    submission, the cap); `tests/test_storage_redaction.py` (capture producers and
+    their synthetic offenders); `tests/test_logout_redirect.py` (scope) — done
+  - [x] FR-CRAWL-13; NFR-CRAWL-safe `Enforced by`; requirements §5 contract — done
+- Review: design agreed by reviewers A and B (p3 draft revisions 1–4); code review
+  pending.
+- Effectiveness (assessed 2026-10-14): verified offline with a real Chromium against a
+  loopback fake SPA; mutation check of lane S's safety gates: 36 of 36 mutants killed
+  (one survivor on the first pass, a password form routed into the crawl's context on
+  a named route, now killed by
+  `test_a_named_login_route_is_still_submitted_only_unauthenticated`). The live Juice
+  Shop re-crawl (`--submit-spa-forms login search contact`) is pending (D11: not run
+  here).
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Must-fix 1:* the capture boundary no longer depends on the body's encoding
+    (identifier-like numbers and keys; CC-CORE-0047).
+  - *Should-fix 2 (decided under the operator's standing instruction):* security
+    answers are secrets (CC-CORE-0047); the registration body's `securityAnswer` is now
+    blanked when captured.
+  - *Should-fix 4 (decided under the standing instruction): the DELETE window is the
+    clicking context's.* `_delete_ok` (crawl-wide) became `_delete_ok_for`, the one
+    context whose named-route click is in progress; each context's guard passes its
+    own context to `_method_refusal`, so the crawl context's background DELETEs during
+    an unauthenticated context's click are refused. Found while testing it: within the
+    clicking context the window (click plus settle, up to 5 s while the page keeps
+    polling) let a background poller through as often as it polled, so the allowance
+    is now **single use** -- one DELETE per named-route click. Stated residual: that
+    one DELETE may be the clicking context's background request rather than the
+    click's own. Tests: `_method_refusal` with two contexts and the single use; a real
+    browser crawl where the crawl context polls with DELETE every 50 ms while the
+    unauthenticated context clicks the named login route: the server receives none.
+  - *Should-fix 5 (decided under the standing instruction): the counts are stored.*
+    `StorageManager` gains `crawl_stats (name TEXT PRIMARY KEY, value INTEGER)`,
+    cleared on reset; `record_stats` upserts `spa_counts` plus `submit_stopped` (0/1)
+    at the end of every crawl. The log line stays. Tests: upsert and reset; the stored
+    counts equal `spa_counts` after a real crawl.
+  - FR-CRAWL-13 and NFR-CRAWL-safe updated in place.
+  - Effectiveness of the fixes (assessed 2026-10-14): the mutation check re-run over
+    every lane S gate, including the ten new ones (identifier-like numbers, JSON keys,
+    form names, security-answer pairs, transport and `//` routes, non-routes not
+    counted, the DELETE window's context and single use, stored counts): 46 of 46
+    mutants killed. Click and fill timeouts now follow the crawl's per-page timeout
+    (the fixed 2–3 s timed out on a loaded host).
+- Live-run fix (2026-10-14; from the orchestrator's interim live Juice Shop crawl with
+  4476e93: 72 pages, 40 SPA routes, 8 forms, the github open redirect blocked,
+  `crawl_stats` stored, but **0 forms submitted**):
+  - Defect (a false refusal): `#/login` was refused as `destructive button ('exit')`.
+    Juice Shop's login button is `<button aria-label="Login"><mat-icon>exit_to_app
+    </mat-icon> Log in</button>`; `FORMS_JS` read the icon's ligature text as part of
+    the label, and `exit` is a destructive token.
+  - Fix (`tools/spa.py`): the label judged is the button's text with icon elements'
+    text removed (`mat-icon`, `.material-icons`, `material-symbols`,
+    `[aria-hidden="true"]`, `i.fa`, `[class*="fa-"]`, `svg`), and its `aria-label` /
+    `title` is judged too (`button_aria`); the button is refused when **either** is
+    destructive, settings-like or a transaction, so a real "Log out" is refused
+    whatever its icon. The submission signature uses the cleaned label. Addition
+    (fail closed, not in the request): an icon-only button with no aria-label or title
+    keeps its raw text, so `<button><mat-icon>delete</mat-icon></button>` is still
+    refused. The aria-label also joins the credential-change submitter check.
+  - Tests: `test_the_button_is_refused_on_its_text_or_its_aria_label`; a real-browser
+    crawl of a new icon fixture (`IconSpa`): Juice Shop's login button and a Font
+    Awesome "Search" button are submitted; `aria-label="Log out"` with an
+    `exit_to_app` icon, `aria-label="Sign out"` with a neutral icon, a
+    `material-icons` "delete" + "Remove" button and an icon-only "delete" button are
+    refused; no signature carries `exit_to_app`. Mutation check on the label cleaning:
+    4 of 4 killed (icon text kept, aria-label not judged, aria-label never read, no
+    raw-text fallback).
+  - Not a defect (stated gap, unchanged): `#/contact` stays "not submittable" -- its
+    button is disabled until the math CAPTCHA and the rating are valid.
+
+### CC-CRAWL-0016 — SPA routes, canonical page keys, transport noise, the DELETE rule (forms phase 3, lane S: R) (2026-10-14)
+- Change:
+  - `tools/spa.py` (new): `scan_routes` (linear `str.find` scan with bounded
+    look-around; Angular, Vue and React declarations; `MAX_SCRIPT_BYTES` 4 MiB,
+    `MAX_ROUTES_PER_SCRIPT`), `classify_route` (parameterised / wildcard / destructive /
+    root / invalid), `route_url` (hash, hashbang, history under a base), `spa_fragment`,
+    `crawl_url`, `visit_key` (canonical origin + path + query + SPA fragment),
+    `route_destructive_reason` (the URL and its SPA fragment), `route_of`,
+    `is_transport_url`, `MAX_SCRIPTS_PER_PAGE` (32).
+  - `tools/spider.py`:
+    - `StorageManager.is_visited` / `mark_visited` key on `spa.visit_key` (an in-memory
+      key set, rebuilt from the table on open for `--resume`), so loopback aliases are
+      one site and hash routes distinct pages. Stored URLs keep the spelling first seen.
+    - Routes (default on in the Playwright engine; `--no-spa-routes`): `_note_script`
+      scans same-origin scripts the guard already fetched (`observe`), cross-origin ones
+      never read, size and per-page caps, each script once; `_queue_routes` builds hash
+      or history URLs and queues them as `spa-route` pages; counts in `spa_counts`,
+      reported by `spa_summary()` at the end of the crawl (PA-0110: "visited" counts a
+      route page actually rendered).
+    - Links keep a SPA fragment (its query through `core.redaction.redact_spa_fragment`);
+      `_destructive` also checks the fragment. A same-document hash navigation keeps the
+      document's status and waits for the app's own requests.
+    - XHR URLs (`_queue_xhr`): socket.io / engine.io transport URLs dropped (counted);
+      sensitive and identifier-like query values redacted (`redact_url_identifiers`).
+    - `_method_refusal`: every browser-initiated DELETE is aborted (counted) unless a
+      submission on an operator-named route sends it (`_delete_ok`).
+    - `_guard(context)`: the one guard call for every context the crawl opens (scope,
+      destructive rule, DELETE rule, observer).
+  - `tools/navguard.py`: `method_refusal(method, url)` on `make_route_handler` /
+    `guard_page`: a reason aborts the first request before any fetch, whatever `allow`
+    says; `on_abort` is told.
+- Impact (other components / project): FR-CRAWL-12 (new); NFR-CRAWL-safe gains the
+  DELETE and SPA-route clauses, traced. `discovered_pages.source` gains `spa-route`; a
+  route page's URL keeps `#/…` (the importer's `to_path` maps it to its path, as
+  before; lane J reads the fragment). The static engine is unchanged except for alias
+  dedupe. Juice Shop's hash routes become pages, so its forms are rendered and recorded.
+- Risk (level; mitigation or accepted-risk justification): medium. More pages per
+  crawl (one per route) and one settle wait (≤ 5 s, usually 300 ms) per hash change.
+  Stated residuals: a route load can trigger the app's own non-DELETE writes (the guard
+  aborts only DELETE and destructive-token URLs); nested routes are not joined to their
+  parent's path; a history-mode false positive (an object with a `path` key that is
+  not a route) costs one in-scope, destructive-checked GET.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_spa_routes.py` (declarations, near-misses, linear time on
+    5 MB adversarial bodies incl. an unterminated `{path:'` repeated plus a growth-ratio
+    check, the size cap, the route cap, classification, route URLs never leaving the
+    origin, fragment destructiveness, visit keys and alias dedupe incl. resume,
+    transports, XHR identifiers, the guard's method rule before any fetch, observer
+    containment, the spider's DELETE rule, cross-origin / oversized / per-page script
+    caps; real browser: hash routes crawled with destructive and parameterised ones
+    never rendered, summary counts, `--no-spa-routes`, loopback alias start, socket.io
+    pages and identifiers, a route-load DELETE aborted, a DELETE sent only from a named
+    route's submission, history mode) — done
+  - [x] FR-CRAWL-12; NFR-CRAWL-safe `Enforced by` — done
+- Review: design agreed by reviewers A and B (p3 draft revisions 1–4); code review
+  pending.
+- Effectiveness (assessed 2026-10-14): verified offline with a real Chromium against
+  loopback hash- and history-mode fake SPAs; mutation check: every route, DELETE,
+  script-cap and XHR mutant killed (see CC-CRAWL-0017 for the total). The live Juice
+  Shop re-crawl is pending (D11: not run here).
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Should-fix 3 (decided under the operator's standing instruction): transport paths
+    are not routes.* `spa.classify_route` returns `ROUTE_TRANSPORT` for a route whose
+    path `is_transport_url` recognises (socket.io's own `{path:'/socket.io'}` client
+    option, `/engine.io`) and `ROUTE_INVALID` for a value starting with `//` (before
+    normalising, which used to strip it to a same-origin path); `spa.NOT_ROUTES`
+    (root, invalid, transport) are skipped **before** counting, so `routes_found`
+    counts routes only. Tests: classification cases; the fake SPA's bundle now carries
+    both values and the real crawl still finds exactly its 14 routes and visits
+    neither.
+  - *Should-fix 5:* the route counts are stored in `crawl_stats` (see CC-CRAWL-0017).
+  - FR-CRAWL-12 updated in place.
+
 ### CC-CRAWL-0015 — The crawler's browser is confined to the crawl scope; a loopback crawl to its origin (BUG-0123) (2026-10-14)
 - Change:
   - `tools/navguard.py` (shared with the auditor and M6, owned here):

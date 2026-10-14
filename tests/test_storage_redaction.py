@@ -115,24 +115,30 @@ ALLOWED = {
 }
 _REDACTORS = {"redact", "redact_url", "redact_body", "redact_body_for", "_prepare",
               "_prep", "redact_json_body", "redact_form_body"}
+#: The crawler's captured requests (forms phase 3, FR-CRAWL-13): a producer must call
+#: **both** capture redactors of `core.redaction` (the body and the URLs).
+_CAPTURE_REDACTORS = {"redact_captured_body", "redact_url_identifiers"}
 
 
 def traffic_producers(source: str) -> list[tuple[str, int]]:
-    """Functions that INSERT INTO flow / flow_fts but call no redactor."""
+    """Functions that INSERT INTO flow / flow_fts but call no redactor, or INSERT INTO
+    discovered_requests without calling both capture redactors."""
     tree = ast.parse(source)
     out = []
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        inserts = any(isinstance(n, ast.Constant) and isinstance(n.value, str)
-                      and ("INSERT INTO flow" in n.value)
-                      for n in ast.walk(fn))
-        if not inserts:
+        consts = [n.value for n in ast.walk(fn)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+        flow = any("INSERT INTO flow" in c for c in consts)
+        capture = any("INSERT INTO discovered_requests" in c for c in consts)
+        if not flow and not capture:
             continue
         called = {(n.func.attr if isinstance(n.func, ast.Attribute) else
                    getattr(n.func, "id", None)) for n in ast.walk(fn)
                   if isinstance(n, ast.Call)}
-        if not called & _REDACTORS:
+        if (flow and not called & _REDACTORS) or \
+                (capture and not _CAPTURE_REDACTORS <= called):
             out.append((fn.name, fn.lineno))
     return out
 
@@ -169,6 +175,29 @@ def test_the_guard_catches_a_synthetic_producer():
     clean = ('def save(conn, url, body):\n'
              '    conn.execute("INSERT INTO flow (url) VALUES (?)", (redact_url(url),))\n')
     assert traffic_producers(clean) == []
+
+
+def test_the_guard_catches_a_synthetic_capture_producer():
+    """PA-0034(2) for the crawler's capture writer (FR-CRAWL-13): one redactor is not
+    enough, and neither is a flow redactor."""
+    insert = '    conn.execute("INSERT INTO discovered_requests (url, body_json) VALUES (?,?)",'
+    for args in ("(url, body))", "(redact_url_identifiers(url), body))",
+                 "(url, redact_captured_body(body, ct)))",
+                 "(redact_url(url), redact_body(body, ct)))"):
+        offender = f"def capture(conn, url, body, ct):\n{insert}\n        {args}\n"
+        assert traffic_producers(offender) == [("capture", 1)], args
+    clean = (f"def capture(conn, url, body, ct):\n{insert}\n"
+             "        (redact_url_identifiers(url), redact_captured_body(body, ct)))\n")
+    assert traffic_producers(clean) == []
+
+
+def test_the_spiders_capture_writer_is_seen_by_the_guard():
+    """Not vacuous: the guard finds the real writer and it passes."""
+    src = (REPO / "fuzzlab" / "tools" / "spider.py").read_text()
+    assert "INSERT INTO discovered_requests" in src
+    assert traffic_producers(src) == []
+    broken = src.replace("redact_captured_body(body, content_type)", "(body, None)")
+    assert [name for name, _line in traffic_producers(broken)] == ["record_request"]
 
 
 def test_a_gzip_body_with_a_secret_is_omitted_by_history(tmp_path):

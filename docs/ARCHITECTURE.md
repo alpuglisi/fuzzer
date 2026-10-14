@@ -1228,6 +1228,23 @@ tracked in the requirements files, not here.
       separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
       only client-side rules (`location_not_in`), and its finding keeps its route
       (`oracle.finding_url` → `to_route_path`);
+  - **Forms phase 3, lane S — single-page apps in the crawler (CC-CRAWL-0016 /
+    CC-CRAWL-0017 / CC-CORE-0047, no store migration):**
+    - `tools/spa.py`: route declarations read from the page's already-loaded
+      same-origin scripts (through `navguard`'s `observe` hook: no extra request; a
+      linear, size- and count-capped scan), hash routes (`#/x`) as pages, history
+      routes as paths, parameterised and destructive routes skipped and counted; pages
+      keyed on `spa.visit_key` (loopback aliases one site); socket.io / engine.io URLs
+      never pages; the crawl guard's `method_refusal` aborts a browser-initiated DELETE
+      unless a named route's submission sends it;
+    - the spider table `discovered_requests` (the contract lane J imports) holds the
+      app's own fetch/XHR requests with a JSON or form body, redacted only by
+      `core.redaction.redact_captured_body` / `redact_url_identifiers` at the one write
+      site (PA-0100 guard); no header or cookie is stored;
+    - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms
+      once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
+      unauthenticated context of the same guarded browser; in an authenticated crawl
+      the crawl's own context only on a named route, the session re-checked after each;
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
@@ -1287,9 +1304,14 @@ tracked in the requirements files, not here.
 ### 4. Crawler / spider `[built; to harden]`
 - **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
-  navigation, URL normalization, crawl budget.
+  navigation, URL normalization, crawl budget. Built for single-page apps (forms
+  phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
+  mode), canonical page keys, request-body capture (`discovered_requests`) and opt-in
+  SPA form submission (FR-CRAWL-12/13).
 - **Depends on (components):** `core/`, session manager, target lab.
-- **Writes:** `page`, `endpoint`, discovered `parameter` rows.
+- **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
+  from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,
+  `discovered_requests`, and `crawl_stats`, the last crawl's SPA counts).
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,
