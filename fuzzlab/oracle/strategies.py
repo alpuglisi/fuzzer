@@ -23,6 +23,7 @@ from fuzzlab.oracle.browser import (
     BrowserExecutor,
     ExecObservation,
     ExecRequest,
+    NotObserved,
     StoreStep,
 )
 from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
@@ -2180,6 +2181,9 @@ def _xss_exec_payloads(token: str) -> list[str]:
 class _BrowserXssStrategy(ConfirmationStrategy):
     """Shared M6 logic: place a tokened payload, execute in a browser, confirm on fire."""
     category = "xss"
+    #: Payloads not observed in a row before the strategy stops trying (BUG-0137 review
+    #: Z1): a page that cannot be loaded costs at most this many browser loads.
+    MAX_NOT_OBSERVED = 2
 
     def __init__(self, executor: BrowserExecutor | None = None):
         self._executor = executor
@@ -2195,11 +2199,29 @@ class _BrowserXssStrategy(ConfirmationStrategy):
             raise UnplaceableLocation("no browser attached: browser XSS not observed"
                                       if candidate.location != "fragment" else
                                       "a fragment point is placed by the browser only")
+        not_observed: str | None = None
+        misses = 0                                   # payloads not observed in a row
         for payload in _xss_exec_payloads((token := _token())):
-            obs = self._observe(candidate, payload, token)
+            try:
+                obs = self._observe(candidate, payload, token)
+            except NotObserved as exc:
+                # BUG-0137 review (Z1): this payload's page could not be observed; the
+                # next payload is still tried. A browser that cannot start
+                # (`UnplaceableLocation`) or a placement refusal stops at once.
+                not_observed = not_observed or str(exc)
+                misses += 1
+                if misses >= self.MAX_NOT_OBSERVED:  # cost bound (FR-FUZZ-48)
+                    break
+                continue
+            misses = 0
             if obs.executed:
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"payload": payload, "detail": obs.detail})
+        if not_observed is not None:
+            # Z4 (D54): no hit, and a payload was not observed: inconclusive
+            # (FR-FUZZ-45) -- never a negative, so it never enters the ML negatives
+            return Verdict(False, self.vuln_class, self.mechanism,
+                           {"not_observed": not_observed[:200]}, inconclusive=True)
         return None
 
 

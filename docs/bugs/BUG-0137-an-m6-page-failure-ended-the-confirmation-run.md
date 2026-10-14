@@ -162,3 +162,49 @@ listener (M8) and the greybox seams are not browsers.
   verdict would still escape; it has not been seen.
 - A page that never fires `load` costs `LOAD_WAIT_MS` + `SETTLE_MS` per payload (about
   7 s by default) before its no verdict.
+
+## Review of the fix (added in review)
+Reviewers A and B both agreed with changes (D54, Z1–Z6). Both found the same main gap:
+the corrective action contained a failure **per candidate** but not **per probe**. One
+unobserved payload raised `UnplaceableLocation` out of the strategy's payload loop, so
+a later payload that would have fired was never tried. And because that path is "no
+verdict from this mechanism", a query point whose other mechanisms ran ended CHECKED,
+a negative in the ML data.
+
+- **Z1, per payload:** the executor raises `NotObserved` (a subclass of
+  `UnplaceableLocation`) for a probe it could not observe. The strategy tries its next
+  payload and stops after 2 unobserved in a row, a stated cost bound. A launch failure
+  or an unavailable browser stays the plain `UnplaceableLocation` and stops at once.
+- **Z4, inconclusive (decision D54):** no hit with at least one payload not observed
+  gives an inconclusive Verdict (`evidence["not_observed"]`), so the FR-FUZZ-45 path
+  records the candidate INCONCLUSIVE: unlabelled, never a negative, never in the ML
+  negatives. This **supersedes** the corrective action's "other mechanisms still
+  decide" for a page that could not be observed. Placement refusals (BUG-0115) and
+  "browser unavailable" (BUG-0126) are unchanged.
+- **Z2:** the driver's stop is contained (the first residual above is closed). A
+  failed stop is logged and never replaces the result; repeated failed stops make the
+  browser unavailable for the run.
+- **Z3:** the post-`load` settle is a full `SETTLE_MS` from when `load` fires
+  (`page.once("load")`), capped at `timeout_ms` + `SETTLE_MS`. Before, a page whose
+  load took over 3 s got less than `SETTLE_MS` after it.
+- **Z5:** the browser login's password clear (BUG-0136 X3) no longer waits for the
+  field (CC-SESS-0023).
+- **Z6:**
+  - `_wait_for_token` catches only the Playwright error (closes the second residual);
+  - pending sentinel calls are pumped before the failure branch reads the hits;
+  - hits are read again after the load check;
+  - the plant navigation uses the commit and a bounded load too (closes the plant
+    residual).
+
+Updated sweep rows (the PA-0002 table above):
+
+| Call | Now |
+| --- | --- |
+| plant `goto` | commit + bounded `load`; error → not observed |
+| observe `goto` / load wait / never loaded | not observed **per payload**; the candidate is inconclusive if nothing hit |
+| `_wait_for_token` | only the Playwright error ends the wait |
+| `manager.__exit__` | contained by `_stop_driver`; logged; 2 in a row → unavailable |
+
+Remaining residual: an unobservable page still costs up to 2 × (`LOAD_WAIT_MS` +
+`SETTLE_MS`) per candidate (about 14 s by default). This is the stated bound
+(FR-FUZZ-48).

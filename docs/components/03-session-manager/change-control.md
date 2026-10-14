@@ -149,6 +149,16 @@ Newest first.
     (real Chromium, `other` and `users` variants). A spy on `navguard.release` records
     only whether a password field still holds a value, never the value.
   - Effectiveness: 2 passed. Mutation check: dropping the `page.fill` fails both.
+- Amendment, BUG-0137 final review (2026-10-14; Z5, reviewer B-S4): the X3 clear never
+  waits. `page.fill(pw, "", timeout=timeout_ms)` waited for the field, so an app that
+  removed it after the refused submission held the teardown for the login's
+  `timeout_ms` (10 s). It is now `page.evaluate` of a clear-if-present
+  (`_CLEAR_IF_PRESENT`), with a Playwright error suppressed. FR-SESS-19 is edited in
+  place.
+  - Tests: `tests/test_session_browser_login.py::test_clearing_a_password_field_the_app_removed_costs_nothing`
+    (real Chromium; the fixture's new `remove_form` takes the login form away after a
+    failed attempt). The login fails in 2.0 s; with the old waited `fill` it took 12.0 s
+    and the test fails. X3's own tests still pass.
 
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:

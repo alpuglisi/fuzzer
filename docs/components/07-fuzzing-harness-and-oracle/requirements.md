@@ -1217,25 +1217,48 @@ rewards) derives from it.
   - after `load`, with no sink: executed=False, as before;
   - a sink that fires and then navigates: executed=True, as before;
   - **during parsing or at `DOMContentLoaded` (before `load`):** the page never loads;
-    with no hit it is no verdict (BUG-0137, below); before BUG-0136 the error page
-    loaded and the run reported executed=False.
-  - **the target's own redirect refused:** no verdict (BUG-0137); it was a raise.
-  *(CC-FUZZ-0083, BUG-0137:)* **a page the executor could not observe is no verdict,
-  never the end of the run.**
-  - The observe navigation waits for the commit (`wait_until="commit"`), then for
-    `load` for at most `LOAD_WAIT_MS` (3 s, suppressed), then for the sentinel as
-    above. A load that a refused navigation superseded is not waited out: before, it
-    cost `timeout_ms` (8 s) and then a raise.
-  - A Playwright error or timeout of the context set-up, the plant or the observe
-    navigation is `UnplaceableLocation` with a reason (the error's class and text up to
-    the URL, never the URL, which carries the payload). So is a page that never reached
-    `load` by the end of the sentinel wait. Both apply only when there was no hit: a
-    hit recorded at any point is executed=True.
-  - Only Playwright errors are caught (PA-0106); any other exception propagates.
-    `browser.close()` failing on a dead browser is suppressed.
-  - A launch failure keeps BUG-0126's behaviour.
-  - As for a missing browser, other mechanisms still decide the candidate (the
-    oracle's `UnplaceableLocation` path).
+    with no hit it is not observed, and the candidate is inconclusive (BUG-0137,
+    below). Before BUG-0136 the error page loaded and the run reported executed=False.
+  - **the target's own redirect refused:** not observed, so inconclusive (BUG-0137);
+    it was a raise.
+  *(CC-FUZZ-0083, BUG-0137, with its review fixes D54:)* **a page the executor could
+  not observe is inconclusive, never a negative and never the end of the run.**
+  - **Navigation.** The plant and the observe navigation each wait for the commit
+    (`wait_until="commit"`), then for `load` for at most `LOAD_WAIT_MS` (3 s,
+    suppressed). A load that a refused navigation superseded is not waited out: before,
+    it cost `timeout_ms` (8 s) and then a raise.
+  - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
+    Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
+    from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
+    page's sink is still seen. Only a Playwright error ends the wait early.
+  - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
+    the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
+    in `oracle/browser.py`). So does a page that never reached `load` by the end of the
+    sentinel wait.
+    - Both apply only with no hit. Pending sentinel calls are pumped before deciding,
+      and hits are read again after the load check; a hit recorded at any point is
+      executed=True.
+    - The reason is the error's class and its text up to the URL; it never includes
+      the URL, which carries the payload.
+  - **Per candidate.** `_BrowserXssStrategy` tries its next payload after a
+    `NotObserved`, and stops after `MAX_NOT_OBSERVED` (2) in a row; that is the cost
+    bound: an unobservable page costs at most 2 browser loads, each up to
+    `LOAD_WAIT_MS` + `SETTLE_MS`.
+    - A hit from any payload confirms.
+    - No hit, with at least one payload not observed: `Verdict(False, ...,
+      inconclusive=True, evidence {"not_observed": reason})`. The FR-FUZZ-45 path
+      reports it inconclusive when nothing confirms, for query and fragment points
+      alike, so it never enters the ML negatives.
+    - Every payload observed, no hit: `None`, a negative, as before.
+  - **What still stops at once.** A browser that cannot start, or one marked
+    unavailable, is the plain `UnplaceableLocation` (BUG-0126). So are the strategies'
+    placement refusals (BUG-0115).
+  - **The driver's stop.** A Playwright error from stopping the driver is logged and
+    contained; it never replaces a result or a no-verdict. After
+    `MAX_LAUNCH_FAILURES` (2) failed stops in a row, the browser is unavailable for the
+    run.
+  - **Errors.** Only Playwright errors are caught (PA-0106); any other exception
+    propagates. `browser.close()` failing on a dead browser is suppressed.
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
     `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,
@@ -1246,6 +1269,7 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
   - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict`
   - Enforced by (a page the executor could not observe is no verdict, never the end of the run; CC-FUZZ-0083, BUG-0137): `PlaywrightBrowserExecutor.run` (`wait_until="commit"`, `LOAD_WAIT_MS`, `except PlaywrightError`) — `tests/test_m6_navigation_failures.py::test_a_before_load_navigation_is_no_verdict_well_under_the_timeout`, `tests/test_m6_navigation_failures.py::test_a_hit_after_a_before_load_navigation_counts`, `tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline`, `tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url`, `tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed`
+  - Enforced by (per payload, inconclusive, the driver's stop, a slow page's settle; BUG-0137 review D54): `_BrowserXssStrategy.confirm` (`NotObserved`, `MAX_NOT_OBSERVED`), `PlaywrightBrowserExecutor._stop_driver` / `_wait_for_token` — `tests/test_m6_navigation_failures.py::test_a_later_payload_is_tried_after_an_unobserved_one`, `tests/test_m6_navigation_failures.py::test_two_unobserved_payloads_in_a_row_stop_and_are_inconclusive`, `tests/test_m6_navigation_failures.py::test_a_partly_observed_candidate_without_a_hit_is_inconclusive`, `tests/test_m6_navigation_failures.py::test_every_payload_observed_without_a_hit_is_a_plain_negative`, `tests/test_m6_navigation_failures.py::test_a_browser_that_cannot_start_stops_at_once`, `tests/test_m6_navigation_failures.py::test_a_failed_driver_stop_keeps_the_result`, `tests/test_m6_navigation_failures.py::test_a_driver_that_never_stops_cleanly_makes_the_browser_unavailable`, `tests/test_m6_navigation_failures.py::test_a_sink_that_fires_after_a_slow_load_is_seen`
 - **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
   server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
   `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`

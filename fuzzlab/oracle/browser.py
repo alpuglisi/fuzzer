@@ -17,9 +17,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from fuzzlab.oracle.probe import UnplaceableLocation
+
 # The sentinel the payload calls and the executor defines. A confirmed execution is
 # ``window.SENTINEL('<token>')`` actually running (not the string being reflected).
 SENTINEL = "__fzlbHit"
+
+
+class NotObserved(UnplaceableLocation):
+    """The executor started, but this probe's page could not be observed: its plant or
+    observe navigation failed or timed out, or it never finished loading, and no hit
+    was recorded (BUG-0137). Per payload: the strategy tries its next payload, and with
+    no hit at all it is inconclusive (FR-FUZZ-45), never a negative. A browser that
+    cannot start is the plain `UnplaceableLocation` (BUG-0126): it stops at once."""
 
 
 @dataclass

@@ -1769,3 +1769,8 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Enforced by a run, not only a unit:** a multi-candidate run in which an early
      candidate's mechanism fails and a later one must still be confirmed, plus one test
      per failure point that mutation-checks the mapping. (from BUG-0137)
+  4. *(Review, D54.)* **The unit of "not observed" is the probe, not the mechanism or
+     the candidate:** a probe that could not be observed ends only that probe; the
+     mechanism goes on to its next probe within a stated bound. With no evidence and
+     anything unobserved, the result is inconclusive, never a negative, so it never
+     becomes a training negative.

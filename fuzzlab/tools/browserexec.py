@@ -15,7 +15,7 @@ import time
 from contextlib import suppress
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest
+from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import UnplaceableLocation
 
 
@@ -75,6 +75,7 @@ class PlaywrightBrowserExecutor:
         #: why this run has no browser (BUG-0126), once launches have failed
         self._unavailable: str | None = None
         self._failures = 0                             # launch failures in a row
+        self._stop_failures = 0                        # driver stops failed in a row
 
     #: How long a loaded page may take to fire the sentinel: a single-page app renders
     #: after its own API calls, well after ``load`` (BUG-0126: 300 ms missed Juice Shop's
@@ -87,16 +88,27 @@ class PlaywrightBrowserExecutor:
     #: sentinel wait that follows sees a sink whenever it fires.
     LOAD_WAIT_MS = 3000
 
-    def _wait_for_token(self, page, hits: set, token: str) -> bool:
+    def _wait_for_token(self, page, hits: set, token: str, error, load_at=None,
+                        cap: float | None = None) -> bool:
         """Wait up to `SETTLE_MS` for ``token`` in ``hits``, which the context's
         sentinel binding fills from any document of the page -- a hit before a
         navigation is kept (reviewers A and B). Waiting pumps Playwright's events; a page
-        that closes or navigates under the wait is "not yet", never an error."""
-        deadline = time.monotonic() + self.SETTLE_MS / 1000
-        while token not in hits and time.monotonic() < deadline:
+        that closes or navigates under the wait is "not yet", never an error (only a
+        Playwright error ends the wait, BUG-0137 review A-N1). Once ``load`` has fired
+        (``load_at[0]``, a `time.monotonic()`), the wait lasts a full `SETTLE_MS` from
+        it, up to ``cap`` (BUG-0137 review Z3): a slow page's sink is still seen."""
+        settle = self.SETTLE_MS / 1000
+        deadline = time.monotonic() + settle
+        while token not in hits:
+            if load_at is not None and load_at[0] is not None:
+                after_load = load_at[0] + settle
+                deadline = max(deadline, after_load if cap is None else
+                               min(after_load, cap))
+            if time.monotonic() >= deadline:
+                break
             try:
                 page.wait_for_timeout(self._POLL_MS)
-            except Exception:  # noqa: BLE001 - the page or context went away: no more hits
+            except error:                # the page or context went away: no more hits
                 break
         return token in hits
 
@@ -110,99 +122,141 @@ class PlaywrightBrowserExecutor:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
 
-        from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
-        from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
-                                            chromium_launch_kwargs, guard_page, release)
-        # The browser reaches only the observe and store origins (BUG-0123).
-        scope_urls = [request.url] + ([request.store.url] if request.store else [])
-        origins = origin_scope(*scope_urls)
-        def in_scope(url):
-            return in_origin_scope(url, origins)
         if self._unavailable is not None:              # BUG-0126: no browser, no verdict
             raise UnplaceableLocation(self._unavailable)
-        launch = chromium_launch_kwargs(browser_launch_args(scope_urls),
-                                        headless=self._headless)       # BUG-0126
         try:
             manager = sync_playwright()
             pw = manager.__enter__()                   # the driver itself may not start
         except Exception as exc:  # noqa: BLE001 - reviewer A: a driver that cannot start
             self._launch_failed(exc)                   # is the same as no browser
         try:
-            try:
-                browser = pw.chromium.launch(**launch)
-            except Exception as exc:  # noqa: BLE001 - any launch failure: no browser here
-                self._launch_failed(exc)
-            self._failures = 0
-            context = None
-            hits: set = set()
-            try:
-                context = browser.new_context(service_workers="block")   # BUG-0111
-                # the sentinel is a binding: every document of the page calls back here,
-                # so a hit survives the page navigating afterwards (reviewer B)
-                context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
-                page = context.new_page()
-                # Abort destructive subresources/redirects; the navigation targets
-                # themselves are the explicit (ground-truth) points (BUG-0111).
-                allowed = {url_key(request.url)}
-                if request.store is not None:
-                    allowed.add(url_key(request.store.url))
-                # storage headers go through the guarded route only, in scope, never
-                # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076)
-                guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
-                           headers=dict(self._headers) or None)
-                # a dialog is dismissed and never counted: the payloads call the
-                # sentinel, and an app's own alert/confirm is not the probe's doing
-                # (BUG-0129)
-                page.on("dialog", lambda d: d.dismiss())
-
-                if request.store is not None:                 # stored XSS: plant first
-                    s = request.store
-                    if s.location == "body":
-                        # API requests bypass `route`: scope-check, never redirect
-                        checked_api_request(in_scope, s.url)
-                        context.request.post(s.url, form={s.param: s.value},
-                                             max_redirects=0)
-                    else:
-                        page.goto(_with_query(s.url, s.param, s.value),
-                                  wait_until="load", timeout=self._timeout)
-
-                target = request.url
-                if request.param is not None and request.value is not None:
-                    target = (_with_fragment if request.location == "fragment"
-                              else _with_query)(request.url, request.param, request.value)
-                # BUG-0137: wait for the commit only, then for `load` briefly: a load
-                # that a refused navigation superseded never comes, and is not waited
-                # out (it was `timeout_ms`, then a raise)
-                page.goto(target, wait_until="commit", timeout=self._timeout)
-                load_ms = min(self.LOAD_WAIT_MS, self._timeout)
-                with suppress(PlaywrightError):
-                    page.wait_for_load_state("load", timeout=load_ms)
-                fired = self._wait_for_token(page, hits, token)   # BUG-0126: async sinks
-                if fired:
-                    return ExecObservation(executed=True, detail="playwright")
-                if not _loaded(page, PlaywrightError):
-                    # never loaded, even by the end of the sentinel wait, and no hit:
-                    # the page was not observed -- no verdict, never a negative
-                    raise UnplaceableLocation(
-                        f"the page committed but did not finish loading within "
-                        f"{load_ms} ms (a navigation superseded its load, or it is "
-                        f"slow): not observed")
-                return ExecObservation(executed=False, detail="")
-            except PlaywrightError as exc:
-                # BUG-0137: a page that failed to plant or load (a refused redirect, a
-                # timeout, a crash) observed nothing: no verdict for this candidate --
-                # never a negative, never an exception that ends the run. A hit recorded
-                # before the failure still counts.
-                if token in hits:
-                    return ExecObservation(executed=True, detail="playwright")
-                raise UnplaceableLocation(_failure_reason(exc)) from None
-            finally:
-                if context is not None:
-                    release(context)
-                with suppress(PlaywrightError):      # BUG-0137: a dead browser closes too
-                    browser.close()
+            # a result, or the probe's own no-verdict (NotObserved / a launch failure),
+            # or a defect: the driver's stop below never replaces any of them (Z2)
+            return self._in_browser(pw, request, token, PlaywrightError)
         finally:
+            self._stop_driver(manager, PlaywrightError)
+
+    def _in_browser(self, pw, request: ExecRequest, token: str,
+                    error) -> ExecObservation:
+        from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
+        from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
+                                            chromium_launch_kwargs, guard_page, release)
+        # The browser reaches only the observe and store origins (BUG-0123).
+        scope_urls = [request.url] + ([request.store.url] if request.store else [])
+        origins = origin_scope(*scope_urls)
+
+        def in_scope(url):
+            return in_origin_scope(url, origins)
+        launch = chromium_launch_kwargs(browser_launch_args(scope_urls),
+                                        headless=self._headless)       # BUG-0126
+        try:
+            browser = pw.chromium.launch(**launch)
+        except Exception as exc:  # noqa: BLE001 - any launch failure: no browser here
+            self._launch_failed(exc)
+        self._failures = 0
+        context = page = None
+        hits: set = set()
+        load_ms = min(self.LOAD_WAIT_MS, self._timeout)
+        try:
+            context = browser.new_context(service_workers="block")   # BUG-0111
+            # the sentinel is a binding: every document of the page calls back here,
+            # so a hit survives the page navigating afterwards (reviewer B)
+            context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
+            page = context.new_page()
+            # Abort destructive subresources/redirects; the navigation targets
+            # themselves are the explicit (ground-truth) points (BUG-0111).
+            allowed = {url_key(request.url)}
+            if request.store is not None:
+                allowed.add(url_key(request.store.url))
+            # storage headers go through the guarded route only, in scope, never
+            # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076)
+            guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
+                       headers=dict(self._headers) or None)
+            # a dialog is dismissed and never counted: the payloads call the
+            # sentinel, and an app's own alert/confirm is not the probe's doing
+            # (BUG-0129)
+            page.on("dialog", lambda d: d.dismiss())
+
+            if request.store is not None:                 # stored XSS: plant first
+                s = request.store
+                if s.location == "body":
+                    # API requests bypass `route`: scope-check, never redirect
+                    checked_api_request(in_scope, s.url)
+                    context.request.post(s.url, form={s.param: s.value},
+                                         max_redirects=0)
+                else:
+                    # the commit, then a bounded load, as the observe navigation
+                    # (BUG-0137 review A-N3)
+                    page.goto(_with_query(s.url, s.param, s.value),
+                              wait_until="commit", timeout=self._timeout)
+                    with suppress(error):
+                        page.wait_for_load_state("load", timeout=load_ms)
+
+            target = request.url
+            if request.param is not None and request.value is not None:
+                target = (_with_fragment if request.location == "fragment"
+                          else _with_query)(request.url, request.param, request.value)
+            # when the observe navigation's `load` fires (BUG-0137 review Z3)
+            load_at: list = [None]
+            page.once("load", lambda *_: load_at.__setitem__(0, time.monotonic()))
+            # BUG-0137: wait for the commit only, then for `load` briefly: a load
+            # that a refused navigation superseded never comes, and is not waited
+            # out (it was `timeout_ms`, then a raise)
+            page.goto(target, wait_until="commit", timeout=self._timeout)
+            committed = time.monotonic()
+            with suppress(error):
+                page.wait_for_load_state("load", timeout=load_ms)
+            fired = self._wait_for_token(                  # BUG-0126: async sinks
+                page, hits, token, error, load_at,
+                cap=committed + (self._timeout + self.SETTLE_MS) / 1000)
+            loaded = fired or _loaded(page, error)
+            if fired or token in hits:                     # re-read after `_loaded`
+                return ExecObservation(executed=True, detail="playwright")
+            if not loaded:
+                # never loaded, even by the end of the sentinel wait, and no hit:
+                # the page was not observed -- no verdict, never a negative
+                raise NotObserved(
+                    f"the page committed but did not finish loading within "
+                    f"{load_ms} ms (a navigation superseded its load, or it is "
+                    f"slow): not observed")
+            return ExecObservation(executed=False, detail="")
+        except error as exc:
+            # BUG-0137: a page that failed to plant or load (a refused redirect, a
+            # timeout, a crash) observed nothing: no verdict for this payload --
+            # never a negative, never an exception that ends the run. A hit recorded
+            # before the failure still counts: pending sentinel calls are pumped
+            # first (review A-N2).
+            if page is not None:
+                with suppress(error):
+                    page.wait_for_timeout(self._POLL_MS)
+            if token in hits:
+                return ExecObservation(executed=True, detail="playwright")
+            raise NotObserved(_failure_reason(exc)) from None
+        finally:
+            if context is not None:
+                release(context)
+            with suppress(error):                   # BUG-0137: a dead browser closes too
+                browser.close()
+
+    def _stop_driver(self, manager, error) -> None:
+        """Stop the Playwright driver (BUG-0137 review Z2). A Playwright error there is
+        logged and contained: it never replaces the probe's result or its no-verdict.
+        After `MAX_LAUNCH_FAILURES` stops in a row fail, the browser is unavailable for
+        the run (BUG-0126's path): a driver that cannot stop is not reused."""
+        try:
             manager.__exit__(None, None, None)
+        except error as exc:
+            self._stop_failures += 1
+            logging.warning(f"M6: the Playwright driver did not stop cleanly "
+                            f"({type(exc).__name__})")
+            if self._stop_failures >= self.MAX_LAUNCH_FAILURES:
+                self._unavailable = (f"browser unavailable: the Playwright driver did "
+                                     f"not stop cleanly {self._stop_failures} times in "
+                                     f"a row ({type(exc).__name__})")
+                logging.warning(f"M6 browser execution disabled for this run: "
+                                f"{self._unavailable}")
+            return
+        self._stop_failures = 0
 
     #: Launch failures in a row before the browser mechanisms are off for the run: one
     #: transient failure (memory pressure) does not silence M6 (reviewer A).

@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0137 final review: an unobserved M6 probe ends only that probe; such candidates are inconclusive)
+- **Why:** reviewers found that one unobserved payload ended the browser strategy's
+  payload loop (a later hit was never tried), and that a candidate whose page could
+  not be observed could end CHECKED, a negative in the ML data. They also found the
+  driver's stop uncontained, a slow page's sink missed after a late `load`, and the
+  login's password clear able to wait 10 s.
+- **What:** per-probe `NotObserved`, with the strategy going on to its next payload
+  (at most 2 unobserved in a row). No hit with anything unobserved is an inconclusive
+  verdict (D54). The driver stop is contained. The settle is a full `SETTLE_MS` from
+  `load`. The password clear never waits. CC-FUZZ-0083 and CC-SESS-0023 amendments.
+
 ## 2026-10-14 (BUG-0137: a page the M6 browser could not load no longer ends the run; the auditor's failed load ends the previous page)
 - **Why:** an exception from the M6 executor (a timeout, a refused own redirect, a page
   whose load a refused navigation superseded) escaped the oracle and the pipeline and

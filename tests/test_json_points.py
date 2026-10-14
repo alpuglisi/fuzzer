@@ -776,6 +776,9 @@ def _fake_playwright(monkeypatch) -> list:
         def wait_for_load_state(self, state, **kw):  # the bounded load wait (BUG-0137)
             pass
 
+        def once(self, event, fn):                   # the load time (BUG-0137 review)
+            pass
+
     class Context:
         request = types.SimpleNamespace(post=lambda *a, **k: None)
 

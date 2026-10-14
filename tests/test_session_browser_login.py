@@ -444,6 +444,26 @@ def test_a_refused_submission_leaves_no_password_in_the_page(spa, monkeypatch, v
         other.close()
 
 
+def test_clearing_a_password_field_the_app_removed_costs_nothing(spa):
+    """BUG-0137 review (Z5): the X3 clear never waits for the field. An app that takes
+    its login form away after the refused submission must not hold the teardown for the
+    login's `timeout_ms` (10 s) waiting for a field that is gone."""
+    import time
+    other = Recorder()
+    try:
+        pw = _password()
+        lab = spa(pw, variant="other", other_port=other.server.server_address[1],
+                  remove_form=True)
+        started = time.monotonic()
+        with pytest.raises(SessionAuthError, match="in the login window"):
+            _login(_manager(lab, pw), lab)
+        took = time.monotonic() - started
+        assert other.requests == [] and lab.seen("POST") == []
+    finally:
+        other.close()
+    assert took < 8.0, f"{took:.1f}s: the clear waited for a removed field"
+
+
 def test_register_and_change_password_forms_on_the_login_route_are_never_used(spa):
     pw = _password()
     lab = spa(pw, variant="mixed")

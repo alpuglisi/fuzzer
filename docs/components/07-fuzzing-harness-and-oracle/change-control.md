@@ -63,6 +63,59 @@ note of the same date.
   - without the `except PlaywrightError` block, the two-candidate pipeline test fails
     (the raise ends the run), as do the URL-free reason test and the renamed pin (c);
   - with `wait_until="load"` restored, the timing test fails (8.8 s, not under 6.5 s).
+- Amendment, final review of c196bf9 / 7e8a4b6 / 3b29669 (2026-10-14; reviewers A and
+  B AGREE-with-changes; D54, Z1–Z4 and Z6; Z5 in CC-SESS-0023):
+  - **Z1 (A-M1 = B-S1):** one unobserved payload ended the strategy's payload loop, so
+    a later payload's hit was never tried. The executor's per-probe failures now raise
+    `NotObserved` (a subclass of `UnplaceableLocation`, `oracle/browser.py`); a launch
+    failure or an unavailable browser stays the plain `UnplaceableLocation` and stops at
+    once. `_BrowserXssStrategy.confirm` catches `NotObserved` per payload and goes on;
+    it stops after `MAX_NOT_OBSERVED` (2) in a row, the cost bound stated in FR-FUZZ-48.
+  - **Z4 (B-S3; decision D54, inconclusive):** no hit with at least one payload not
+    observed returns `Verdict(False, ..., inconclusive=True, evidence {"not_observed":
+    reason})`. The FR-FUZZ-45 path then reports the candidate INCONCLUSIVE (not
+    CHECKED), so it never enters the ML negatives. All payloads observed, no hit:
+    `None`, as before. Placement refusals (BUG-0115) and "browser unavailable"
+    (BUG-0126 / CC-FUZZ-0070) are unchanged.
+  - **Z2 (A-M2):** the driver's stop (`manager.__exit__`) is contained by
+    `_stop_driver`: a Playwright error is logged, and the probe's result or no-verdict
+    stands. Without a result the probe has already raised its own no-verdict, so
+    nothing is invented. After `MAX_LAUNCH_FAILURES` (2) failed stops in a row the
+    browser is unavailable for the run.
+  - **Z3 (A-S1 = B-S2):** `page.once("load")` records when `load` fires. The sentinel
+    wait then lasts a full `SETTLE_MS` from it, capped at `timeout_ms` + `SETTLE_MS`
+    after the commit. A slow page (load at about 5 s, sink 2.5 s later) is seen;
+    before, the wait ended 7 s after the commit.
+  - **Z6:**
+    - `_wait_for_token`'s `except` is narrowed to the Playwright error (A-N1);
+    - before reading hits in the failure branch, one suppressed 100 ms pump delivers
+      pending sentinel calls (A-N2);
+    - hits are read again after the load check (B-N1);
+    - the plant navigation uses the commit and a bounded load too (A-N3).
+  - Tests (`tests/test_m6_navigation_failures.py`, 14 tests):
+    - per-payload continuation (an unobserved payload, then a hit on payload 2, or on
+      payload 3 after a miss);
+    - two unobserved payloads stop the strategy and give an inconclusive verdict; a
+      partly observed candidate is inconclusive; an all-observed one is a plain
+      negative; a launch failure stops at once;
+    - a failed driver stop keeps the result (two-candidate pipeline), and repeated
+      failures make the browser unavailable;
+    - the slow-load sink (real Chromium);
+    - the pipeline test pins `/redir` INCONCLUSIVE, with `oracle_inconclusive` = 1,
+      `oracle_inconclusive_browser-execution` = 1 and `oracle_rejected` = 0.
+    The `test_navigation_aborts.py` pin (c) expects `NotObserved`. The fakes gain
+    `once`.
+  - Mutation checks (each reverted):
+    - Z1, the per-payload catch removed: 5 fail (the pipeline test, both continuation
+      cases, the stop-after-two test and the partly-observed test);
+    - Z2, a plain `manager.__exit__`: both driver-stop tests fail;
+    - Z3, the settle not extended after a late load: the slow-load test fails;
+    - Z4, `None` in place of the inconclusive verdict: the pipeline test and both
+      inconclusive tests fail.
+  - Effectiveness: every test file importing `oracle/browser.py`, `oracle/strategies.py`, the
+    `fuzzlab.oracle` package, `tools/browserexec.py`, `session/browserlogin.py` or the
+    login fixture, plus the changed test files and the traceability guard (60 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1597 passed, 2 xfailed, 0 skipped, 0 failed.
 
 ### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
 - Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort

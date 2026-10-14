@@ -414,6 +414,10 @@ def _sel(fid: str) -> str:
     return f'[data-fuzzlab-id="{fid}"]'
 
 
+#: Empties the password field if the page still has it; never waits (X3, Z5).
+_CLEAR_IF_PRESENT = "(sel) => { const e = document.querySelector(sel); if (e) e.value = ''; }"
+
+
 def _login_routes(page, gate: LoginGate, base_url: str) -> list[str]:
     """URLs of the app's login routes: SPA routes from its scripts and links, and
     same-origin links, whose last segment is a login word (whole segment)."""
@@ -587,9 +591,11 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
                                        or gate.account_refusal is not None):
                 # BUG-0136 review (X3): a refused submission leaves the login page
                 # alive (ERR_ABORTED keeps the document; a refused fetch never replaced
-                # it), so the password is taken out of its field before teardown
+                # it), so the password is taken out of its field before teardown.
+                # Cleared in place if the field is still there, never waited for: an
+                # app that removed it costs nothing (BUG-0137 review Z5)
                 with suppress(PlaywrightError):
-                    page.fill(_sel(pw_id), "", timeout=timeout_ms)
+                    page.evaluate(_CLEAR_IF_PRESENT, _sel(pw_id))
             if gate.login is not None:
                 _settle(page, inflight, SETTLE_MS, cancelled,
                         until=(lambda: bool(gate.probes))

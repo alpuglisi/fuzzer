@@ -19,6 +19,7 @@ from __future__ import annotations
 import glob
 import sqlite3
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -149,18 +150,21 @@ def test_the_document_abort_code_is_err_aborted():
 # --- real Chromium ------------------------------------------------------------------
 class _Site:
     """A loopback server: ``pages`` maps a path to HTML, ``redirects`` a path to a 302
-    ``Location``. Every GET path is recorded in ``requests``, every POST path in
-    ``posts``, and both in order in ``log`` as ``(method, path)``."""
+    ``Location``, ``delays`` a path to seconds its answer is held back. Every GET path
+    is recorded in ``requests``, every POST path in ``posts``, and both in order in
+    ``log`` as ``(method, path)``."""
 
     def __init__(self, host="127.0.0.1"):
         require_loopback(host)                    # PA-0130
-        self.pages, self.redirects = {}, {}
+        self.pages, self.redirects, self.delays = {}, {}, {}
         self.requests, self.posts, self.log = [], [], []
         site = self
 
         class Handler(BaseHTTPRequestHandler):
             def _answer(self):
                 path = self.path.split("?", 1)[0]
+                if site.delays.get(path):
+                    time.sleep(site.delays[path])
                 if path in site.redirects:
                     self.send_response(302)
                     self.send_header("Location", site.redirects[path])
@@ -566,14 +570,14 @@ def test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed(monkeypatch
 
 def test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict(monkeypatch):
     """(c): the observe URL itself redirects to /logout.php: the hop is refused with
-    ``net::ERR_ABORTED`` (it was ``net::ERR_FAILED``), and the run gives no verdict
-    (`UnplaceableLocation`, BUG-0137), never a Playwright error that ends the run. The
+    ``net::ERR_ABORTED`` (it was ``net::ERR_FAILED``), and the run reports the page not
+    observed (`NotObserved`, BUG-0137), never a Playwright error that ends the run. The
     reason never carries the URL (whose query carries the payload)."""
-    from fuzzlab.oracle.probe import UnplaceableLocation
+    from fuzzlab.oracle.browser import NotObserved
     _chromium_or_skip(monkeypatch)
     site = _m6_site()
     try:
-        with pytest.raises(UnplaceableLocation, match="ERR_ABORTED") as err:
+        with pytest.raises(NotObserved, match="ERR_ABORTED") as err:
             _m6_run(site, "/redir", value="PAYLOAD-MARK")
     finally:
         site.close()
