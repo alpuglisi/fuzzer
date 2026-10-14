@@ -682,3 +682,70 @@ class SessionRevealSpa(_Lab):
     routes' toggles clear the token client-side (W4)."""
     index = _HASH_INDEX.replace("/main.js", "/sess.js").replace("#/about", "#/session1")
     script = ("/sess.js", _SESSION_REVEAL_JS)
+
+
+_DIALOG2_JS = r"""
+const routes = [{path:'reviews'}, {path:'after1'}, {path:'after2'}];
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
+  'application/json'}, body: JSON.stringify(body || {})}).catch(() => {});
+function openDialog() {
+  const dlg = document.createElement('div');
+  dlg.setAttribute('role', 'dialog');
+  // form A: its button is detached by the test right after the window's lift (see
+  // test_a_click_that_raises_never_leaves_the_window_open); form B: a select that
+  // autosaves on change
+  dlg.innerHTML = "<form id='fa'><textarea name='review'></textarea>" +
+    "<button id='sa'>Send</button></form>" +
+    "<form id='fb'><select name='topic' required><option value=''>--</option>" +
+    "<option value='g'>General</option></select><button id='sb' disabled>Save</button></form>";
+  document.body.appendChild(dlg);
+  document.querySelector('#fa textarea').addEventListener('input',
+    () => post('/api/autosave-a', {}));
+  document.getElementById('fa').onsubmit = e => { e.preventDefault(); post('/api/first'); };
+  const sel = document.querySelector('#fb select');
+  sel.addEventListener('change', () => { post('/api/autosave-b', {});
+    document.getElementById('sb').disabled = !sel.value; });
+  document.getElementById('fb').onsubmit = e => { e.preventDefault(); post('/api/second'); };
+}
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  document.getElementById('app').innerHTML = name === 'reviews' ?
+    "<div class='tile' role='button' tabindex='0' id='t'>Apple Juice</div>" :
+    '<p>' + (name || 'home') + '</p>';
+  const t = document.getElementById('t');
+  if (t) t.onclick = openDialog;
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class TwoFormDialogSpa(_Lab):
+    """A revealed dialog with two forms: the first one's click raises after the lift;
+    the second one's select POSTs on change (review B-M1)."""
+    index = _HASH_INDEX.replace("/main.js", "/dlg2.js").replace("#/about", "#/reviews")
+    script = ("/dlg2.js", _DIALOG2_JS)
+
+
+_POPUP_JS = r"""
+const routes = [{path:'pop'}, {path:'after1'}, {path:'after2'}, {path:'after3'}];
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  document.getElementById('app').innerHTML = name === 'pop' ?
+    "<button id='b' aria-haspopup='dialog' aria-label='Open preview'>Preview</button>" :
+    '<p>' + (name || 'home') + '</p>';
+  const b = document.getElementById('b');
+  // a popup (no request: about:blank) whose own timer POSTs shortly after
+  if (b) b.onclick = () => { const w = window.open('', '_blank');
+    if (w) w.document.write("<script>setTimeout(() => fetch('/api/popup-post', " +
+      "{method: 'POST', body: 'x'}).catch(() => {}), 300)<\/script>"); };
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class PopupSpa(_Lab):
+    """A reveal that opens a popup with a delayed POST (review A-S1)."""
+    index = _HASH_INDEX.replace("/main.js", "/pop.js").replace("#/about", "#/pop")
+    script = ("/pop.js", _POPUP_JS)

@@ -30,8 +30,10 @@ import pytest
 from fuzzlab.tools import spa
 from tests._spa_fixture import (
     G1Spa,
+    PopupSpa,
     RevealSpa,
     SessionRevealSpa,
+    TwoFormDialogSpa,
     chromium_or_skip,
     db_rows,
     run_crawl,
@@ -52,9 +54,14 @@ from tests._spa_fixture import (
     ("GET", "http://h/#/delete-account", False, "a destructive GET"),
     ("GET", "http://h/api/order-history", False, "a transaction GET"),
     ("GET", "http://h/rest/wallet/balance", False, "a transaction GET"),
-    ("GET", "http://h/rest/user/change-password?new=x", False, "an account endpoint"),
-    ("GET", "http://h/api/register", False, "an account endpoint"),
-    ("GET", "http://h/api/items?action=create", False, "an account word"),
+    ("GET", "http://h/rest/user/change-password?new=x", False, "a credential token"),
+    ("GET", "http://h/rest/user/change-email?new=x", False, "an account action"),
+    ("GET", "http://h/api/register", False, "an account action"),
+    ("GET", "http://h/api/items?action=sign-up", False, "an account action"),
+    ("GET", "http://h/rest/user/signup?x=1", False, "an account action"),
+    # review A-S3: the app's own identity check and a users collection pass
+    ("GET", "http://h/rest/user/whoami", False, None),
+    ("GET", "http://h/api/Users/1", False, None),
     ("GET", "http://h/rest/products?password=x", False, "a credential token"),
     ("GET", "http://h/rest/products?pwd=x", False, "a credential token"),
 ])
@@ -705,8 +712,8 @@ def test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals(
     chromium_or_skip(monkeypatch)
     lab = SessionRevealSpa()
     try:
-        sp, db, _logs = _crawl(lab, tmp_path, session_manager=_LsManager(lab.base),
-                               identity="user")
+        manager = _LsManager(lab.base)
+        sp, db, _logs = _crawl(lab, tmp_path, session_manager=manager, identity="user")
     finally:
         lab.close()
     gets = _paths(lab, "GET")
@@ -719,6 +726,7 @@ def test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals(
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
     assert stats["reveals_stopped"] == 1 and stats["session_losses_after_reveal"] == 2
     assert any("Reveals stopped" in ln for ln in sp.spa_summary())
+    assert manager.verified >= 1          # the re-adoption is verified live (A-N1)
 
 
 # =====================================================================================
@@ -769,3 +777,176 @@ def test_the_text_guard_catches_synthetic_offenders():
     for ok in ('r = text_destructive_reason(label)', 'r = destructive_reason(url)',
                'r = destructive_reason("/" + route)'):
         assert not _embedded_text_offenders(ok), ok
+
+
+# =====================================================================================
+# Code review round 1 (reviewers A and B)
+# =====================================================================================
+class _FakePage:
+    """Just enough of a page for `_fill_and_click_now`: the vetted click raises after
+    the labels were re-read (``fail``), or succeeds; ``seen`` records the window's lift
+    during each wait."""
+
+    def __init__(self, sp, fail):
+        self.sp, self.fail, self.seen = sp, fail, []
+        self.keyboard = type("K", (), {"press": lambda s, k: None})()
+
+    def fill(self, *a, **kw):
+        pass
+
+    def evaluate(self, script, *a):
+        return []                                      # G1: no invalid control
+
+    def is_enabled(self, *a, **kw):
+        return True
+
+    def eval_on_selector(self, sel, script, *a):
+        return ["Send", "", ""]
+
+    def click(self, sel, trial=False, timeout=None):
+        if trial:
+            return
+        if self.fail:
+            from fuzzlab.tools.spider import PlaywrightError
+            raise PlaywrightError("element is not attached to the DOM")
+
+    def wait_for_timeout(self, ms):
+        self.seen.append(self.sp._win["lifted_for"])
+
+
+@pytest.mark.parametrize("fail", [True, False])
+def test_the_lift_covers_exactly_one_click_and_its_settle(tmp_path, fail):
+    """B-M1: the lift is cleared when the submission ends, whether its click raised or
+    not; a successful click's settle runs lifted."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    ctx = object()
+    try:
+        sp._win = {"context": ctx, "lifted_for": None, "own_nav": frozenset(),
+                   "aborted": 0, "navs": [], "restore_aborted": 0, "pages": []}
+        page = _FakePage(sp, fail)
+        form = {"controls": [["review", "textarea"]], "ids": ["c0"], "button": "Send",
+                "button_aria": "", "button_icons": "", "button_id": "b"}
+        clicked = sp._fill_and_click_now(page, ctx, form, "http://127.0.0.1:9/#/r", True,
+                                         g1=True)
+        assert clicked is (not fail)
+        assert sp._click_attempted is True
+        assert sp._win["lifted_for"] is None              # never outlives the click
+        if not fail:
+            assert page.seen and all(s is ctx for s in page.seen)   # settle lifted
+    finally:
+        sp.storage.close()
+
+
+def _spider_with_window(tmp_path, page_url):
+    from fuzzlab.tools.spider import LocalSpider, _nav_key
+    sp = LocalSpider("http://127.0.0.1:8080/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    ctx = object()
+    sp._win = {"context": ctx, "lifted_for": None,
+               "own_nav": frozenset({_nav_key(page_url)}), "aborted": 0, "navs": [],
+               "restore_aborted": 0, "pages": []}
+    return sp, ctx
+
+
+def test_the_own_reload_exemption_matches_the_exact_url(tmp_path):
+    """A-S2: scheme, host, port, path and query -- not the path alone."""
+    sp, ctx = _spider_with_window(tmp_path, "http://127.0.0.1:8080/app/#/route")
+    try:
+        allowed = "http://127.0.0.1:8080/app/"
+        assert sp._window_refusal("GET", allowed, True, context=ctx) is None
+        assert sp._window_refusal("GET", "http://localhost:8080/app/", True,
+                                  context=ctx) is None              # a loopback alias
+        for other in ("http://127.0.0.1:8080/app/?action=x", "https://127.0.0.1:8080/app/",
+                      "http://127.0.0.1:8081/app/", "http://127.0.0.1:8080/app/x"):
+            assert sp._window_refusal("GET", other, True, context=ctx), other
+        assert sp._window_refusal("GET", allowed, True, context=object())   # other ctx
+        assert sp._win["navs"][0].endswith("?action=x")             # queued instead
+    finally:
+        sp.storage.close()
+
+
+def test_a_redirect_after_the_own_reload_is_still_a_navigation(tmp_path):
+    """A-S2: the reload is let through, but its redirect to the same path with
+    ``?action=x`` is a navigation hop and is refused before it is fetched."""
+    import functools
+
+    from fuzzlab.tools.navguard import make_route_handler
+    sp, ctx = _spider_with_window(tmp_path, "http://127.0.0.1:8080/#/route")
+    redirect = type("R", (), {"status": 302, "headers": {"location": "/?action=x"}})()
+
+    class _Api:
+        calls: list = []
+
+        def fetch(self, *a, **kw):
+            self.calls.append(a)
+            raise AssertionError("a refused hop is never fetched")
+    try:
+        handler = make_route_handler(in_scope=lambda u: True, api=_Api(),
+                                     window=functools.partial(sp._window_refusal,
+                                                              context=ctx))
+        route = _Route("http://127.0.0.1:8080/", navigation=True,
+                       site={"http://127.0.0.1:8080/": redirect})
+        handler(route)
+        assert route.fetched == ["http://127.0.0.1:8080/"]          # the reload itself
+        assert route.outcome == "abort" and _Api.calls == []
+        assert sp._win["navs"] == ["http://127.0.0.1:8080/?action=x"]
+    finally:
+        sp.storage.close()
+
+
+def test_a_click_that_raises_never_leaves_the_window_open(monkeypatch, tmp_path):
+    """B-M1: the first revealed form's button is detached right after the window's
+    lift (after the labels were re-read), so its vetted click raises. Nothing more is
+    done in that reveal: the second form (whose select autosaves) is never filled or
+    submitted, and nothing at all is written to the server. A page event cannot land
+    between the re-read and the click (a mouseover fires already in the trial click),
+    so the detach rides on ``before_click``, the exact point B-M1 names."""
+    chromium_or_skip(monkeypatch)
+    from fuzzlab.tools.spider import LocalSpider
+    original = spa.click_vetted
+    detached = []
+
+    def detaching(page, selector, vetted, *, before_click=None, **kw):
+        def lift_then_detach():
+            before_click()
+            if list(vetted)[:1] == ["Send"]:
+                page.eval_on_selector(selector, "el => el.remove()")
+                detached.append(selector)
+        return original(page, selector, vetted, **kw,
+                        before_click=lift_then_detach if before_click else None)
+    monkeypatch.setattr(spa, "click_vetted", detaching)
+    lab = TwoFormDialogSpa()
+    try:
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=4000,
+                         submit_spa_forms=["reviews"])
+        run_crawl(sp)
+    finally:
+        lab.close()
+    assert detached and sp._click_attempted
+    assert _paths(lab, "POST") == []
+    assert sp.spa_counts["reveal_writes_blocked"] >= 1        # the first form's autosave
+    assert sp.spa_counts["forms_not_submittable"] >= 1        # its click raised
+    assert sp.spa_counts["forms_submitted"] == 0
+
+
+def test_a_failed_close_still_closes_the_windows_popups(monkeypatch, tmp_path):
+    """A-S1: if `_restore` fails, every page the window opened is closed (and the
+    route's page left) before the window is lifted: the popup's delayed POST never
+    arrives."""
+    chromium_or_skip(monkeypatch)
+    from fuzzlab.tools import spider
+
+    def broken_restore(self, page, page_url, win):
+        raise spider.PlaywrightError("the close failed")
+    monkeypatch.setattr(spider.LocalSpider, "_restore", broken_restore)
+    lab = PopupSpa()
+    try:
+        sp, _db, logs = _crawl(lab, tmp_path)
+    finally:
+        lab.close()
+    assert sp.spa_counts["reveals_clicked"] >= 1
+    assert any("could not close" in ln for ln in logs)
+    assert "/api/popup-post" not in _paths(lab)

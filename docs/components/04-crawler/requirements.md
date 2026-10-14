@@ -222,7 +222,9 @@ fuzzer.
     context or the fresh unauthenticated one. Entirely inside the reveal window
     (FR-CRAWL-16, W1): the existing fill, every G1 interaction and the checks run with
     its write block on; only `spa.click_vetted`'s final vetted click lifts it, for that
-    click (`before_click`), and the route is then closed and reloaded inside the window.
+    click and its settle only (`before_click`; the lift is cleared when the submission
+    ends, a click that raised included -- review B-M1), and the route is then closed and
+    reloaded inside the window.
     A bare `--submit-spa-forms` (no route named) fills as before, without G1.
   - **Signals.** Per control (`spa.G1_READ_JS`): `type`, `required`, `min`, `max`,
     `step`, `minlength`, `maxlength`, `pattern`; invalid by `validity`,
@@ -281,19 +283,26 @@ fuzzer.
     own context and that URL only; a dialog's timers die with it) and a final quiet
     period (`_quiesce`: `_settle` — nothing in flight, three quiet 100 ms polls — then
     a driver round trip that flushes pending events). Only `click_vetted`'s final vetted
-    submission of a named-route form lifts it, for that click. If the close fails, the
-    page goes to `about:blank` before the window is lifted.
+    submission of a named-route form lifts it, for that click and its settle; the lift
+    is cleared when that submission ends, even if its click raised (review B-M1). The
+    own-reload exemption matches the exact URL (scheme, host, port, path and query,
+    `spider._nav_key`), never the path alone, and a redirect hop of a navigation is a
+    navigation too (review A-S2). If the close fails, every page the window opened is
+    closed and the route's page goes to `about:blank` before the window is lifted
+    (review A-S1).
   - **What it lets through (W2, `spa.window_request_refusal`, on every request of every
     context of the crawl, and on each redirect hop):** GET and HEAD only, any other
     method aborted whatever its destination; every navigation request aborted
     (`ERR_ABORTED`, so the page stays) and its target queued through the normal queue
     gates (scope, the destructive rule — a logout is refused — not visited, depth); a
     GET refused when destructive (also by its SPA fragment), a transaction
-    (`transaction_reason`, CC-CORE-0045), an account endpoint
-    (`browserlogin.account_endpoint_reason`) or with an account word
-    (`ACCOUNT_WORDS`/`ACCOUNT_PAIRS`) or a credential token (`CREDENTIAL_TOKENS`) in
-    its path or query names. Residual: an opaque GET with a side effect and none of
-    those words.
+    (`transaction_reason`, CC-CORE-0045), or with a credential token
+    (`CREDENTIAL_TOKENS`, path and query names) or an explicit account-**action** token
+    (`browserlogin.ACCOUNT_PATH_TOKENS`: register, signup, password, reset, change …,
+    or `sign up`; path and query) -- not the users / accounts collection rule, so the
+    app's own identity check (Juice Shop's `/rest/user/whoami`) passes and the app
+    does not log itself out (review A-S3). Residual: an opaque GET with a side effect
+    and none of those words.
   - **WebSockets (W3).** An in-scope socket goes through a forwarding handler
     (`navguard.make_ws_handler(hold=, on_drop=)`: `connect_to_server()`, then each
     page-to-server message forwarded with `send` only while the window is closed,
@@ -337,18 +346,24 @@ fuzzer.
     method, never relocated, BUG-0115), so the importer applies its existing rules.
     Never imported as points otherwise. A revealed form is submitted only on a route
     named with `--submit-spa-forms`, under FR-CRAWL-13's gate and G1, in the crawl's own
-    context, never a password form (those are submitted only in a fresh context, which
-    a reveal cannot reproduce: a stated gap).
+    context, at most one click **attempt** per reveal (a click that raised included:
+    nothing more is done in that reveal, review B-M1), never a password form (those are
+    submitted only in a fresh context, which a reveal cannot reproduce: a stated gap).
   - **The session after a reveal (W4, authenticated crawls).** After every reveal the
     client-side check (each injected cookie and adopted localStorage entry, no network;
     `_client_session_intact`), plus `verify_live` when the window aborted anything. On a
     loss: reveals stop on that route, the adopted browser state is re-adopted once (the
     session's cookies, its browser login's cookies, the localStorage entries as
-    adopted, then a reload) and the crawl goes on; a second loss, or a re-adoption that
-    does not hold (which also stops submitting), stops reveals for the crawl
-    (`reveals_stopped`, reported). Counted `session_losses_after_reveal`.
+    adopted, then a reload; it holds only if the client-side check **and** `verify_live`,
+    when the session manager has one, pass -- review A-N1) and the crawl goes on; a
+    second loss, or a re-adoption that does not hold (which also stops submitting),
+    stops reveals for the crawl (`reveals_stopped`, reported). Counted
+    `session_losses_after_reveal`.
   - **Switch.** On by default in the Playwright engine (`--no-reveal` turns it off);
-    never in the static engine.
+    never in the static engine. Reveals run in **authenticated** crawls too, in the
+    crawl's own context: the safety basis there is the window (nothing is written,
+    navigated or sent over a WebSocket while it is open) plus W4's session check after
+    every reveal (review A-N2).
   - **Counts** (`crawl_stats`, PA-0110): `reveals_clicked`, `reveals_refused`,
     `reveals_over_cap`, `reveal_writes_blocked` (every write or side-effect GET the
     window aborted, G1's included), `reveal_ws_dropped`, `reveal_navigations_captured`,
@@ -358,7 +373,11 @@ fuzzer.
     the window lifts whose route callback the driver dispatches after it (narrowed by
     the flush round trip); a card clickable only through an `addEventListener` handler
     with no pointer cursor is not seen; a card with an interactive descendant (Juice
-    Shop's product card with "Add to basket" while logged in) is not one target.
+    Shop's product card with "Add to basket" while logged in) is not one target;
+    dropping page-to-server WebSocket frames inside the window can split a multi-frame
+    message (a socket.io binary event, an engine.io pong), so the app's socket may
+    desync or reconnect after a reveal -- a coverage effect, never a safety one (review
+    A-N2, B).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -398,7 +417,7 @@ fuzzer.
   card with an interactive descendant is not one target, a dialog's own buttons are
   never clicked, and after a reveal in an authenticated crawl the session is checked
   (FR-CRAWL-15/16).
-  - Enforced by (the reveal window, W1-W3): `navguard.make_route_handler(window=)` / `make_ws_handler(hold=)`, `spa.window_request_refusal`, `LocalSpider._window` / `_window_refusal` / `_restore` / `_quiesce` — `tests/test_forms_phase4.py::test_the_window_lets_only_safe_gets_through`, `tests/test_forms_phase4.py::test_the_route_asks_the_window_before_any_fetch_and_keeps_the_page_on_navigation`, `tests/test_forms_phase4.py::test_the_window_is_asked_again_on_every_redirect_hop`, `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`, `tests/test_forms_phase4.py::test_w2_a_reveal_can_only_read`, `tests/test_forms_phase4.py::test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal`, `tests/test_forms_phase4.py::test_w3_a_websocket_message_in_the_window_is_dropped`, `tests/test_forms_phase4.py::test_w1_a_debounced_post_after_close_never_arrives`, `tests/test_forms_phase4.py::test_g1_a_selection_change_post_is_never_sent_before_the_submission`
+  - Enforced by (the reveal window, W1-W3): `navguard.make_route_handler(window=)` / `make_ws_handler(hold=)`, `spa.window_request_refusal`, `LocalSpider._window` / `_window_refusal` / `_restore` / `_quiesce` — `tests/test_forms_phase4.py::test_the_window_lets_only_safe_gets_through`, `tests/test_forms_phase4.py::test_the_route_asks_the_window_before_any_fetch_and_keeps_the_page_on_navigation`, `tests/test_forms_phase4.py::test_the_window_is_asked_again_on_every_redirect_hop`, `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`, `tests/test_forms_phase4.py::test_w2_a_reveal_can_only_read`, `tests/test_forms_phase4.py::test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal`, `tests/test_forms_phase4.py::test_w3_a_websocket_message_in_the_window_is_dropped`, `tests/test_forms_phase4.py::test_w1_a_debounced_post_after_close_never_arrives`, `tests/test_forms_phase4.py::test_g1_a_selection_change_post_is_never_sent_before_the_submission`, `tests/test_forms_phase4.py::test_the_lift_covers_exactly_one_click_and_its_settle`, `tests/test_forms_phase4.py::test_a_click_that_raises_never_leaves_the_window_open`, `tests/test_forms_phase4.py::test_the_own_reload_exemption_matches_the_exact_url`, `tests/test_forms_phase4.py::test_a_redirect_after_the_own_reload_is_still_a_navigation`, `tests/test_forms_phase4.py::test_a_failed_close_still_closes_the_windows_popups`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
   - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
   - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_refused`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`

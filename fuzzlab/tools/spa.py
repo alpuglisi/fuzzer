@@ -852,14 +852,17 @@ def window_request_refusal(method: str, url: str, navigation: bool) -> str | Non
     """Why a request is aborted while the reveal window is open (W2), or None: every
     navigation (its target is queued through the normal gates instead); every method but
     GET and HEAD, whatever its destination; and a GET or HEAD that is destructive (also
-    by its SPA fragment), a transaction (`core.urls.transaction_reason`), an account
-    endpoint (`browserlogin.account_endpoint_reason`) or carries an account word or a
-    credential token in its path or query (whole tokens). Residual: an opaque GET with
-    a side effect and none of these words."""
+    by its SPA fragment), a transaction (`core.urls.transaction_reason`), or carries an
+    explicit account-**action** token (`browserlogin.ACCOUNT_PATH_TOKENS`: register,
+    signup, password, reset, change …, or ``sign up``) or a credential token in its path
+    or query (whole tokens). Not the users / accounts collection rule: the app's own
+    identity check (Juice Shop's ``/rest/user/whoami``) must pass, or the app may log
+    itself out (review A-S3). Residual: an opaque GET with a side effect and none of
+    these words."""
     from urllib.parse import unquote_plus
 
     from fuzzlab.core.redaction import CREDENTIAL_TOKENS
-    from fuzzlab.session.browserlogin import _account_hit, account_endpoint_reason
+    from fuzzlab.session.browserlogin import ACCOUNT_PATH_TOKENS
     if navigation:
         return "a navigation (its target is queued instead)"
     method = (method or "").upper()
@@ -871,19 +874,18 @@ def window_request_refusal(method: str, url: str, navigation: bool) -> str | Non
     reason = transaction_reason(url)
     if reason:
         return f"a transaction GET ({reason!r})"
-    reason = account_endpoint_reason(url)
-    if reason:
-        return f"an account endpoint ({reason})"
     parts = urlsplit(url or "")
-    text = unquote_plus(parts.path) + " " + unquote_plus(parts.query)
-    word = _account_hit(text)
-    if word:
-        return f"an account word in a GET ({word!r})"
     names = [unquote_plus(p.partition("=")[0]) for p in parts.query.split("&") if p]
     toks = {t.lower() for n in [unquote_plus(parts.path), *names] for t in name_tokens(n)}
     hit = toks & CREDENTIAL_TOKENS
     if hit:
         return f"a credential token in a GET ({sorted(hit)[0]!r})"
+    text = unquote_plus(parts.path) + " " + unquote_plus(parts.query)
+    words = [t.lower() for t in name_tokens(text)]
+    word = next((t for t in words if t in ACCOUNT_PATH_TOKENS), None) or (
+        "sign up" if ("sign", "up") in set(zip(words, words[1:])) else None)
+    if word:
+        return f"an account action in a GET ({word!r})"
     return None
 
 

@@ -89,8 +89,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
 
     ``window(method, url, navigation)`` (the crawler's reveal window, FR-CRAWL-15/16):
     asked after the scope and destructive checks, before anything is fetched, for the
-    request and again for every redirect hop (``navigation`` False there); a reason
-    aborts it. The caller keeps its own state (whether the window is open, what it
+    request and again for every redirect hop (a navigation's hop is a navigation too);
+    a reason aborts it. The caller keeps its own state (whether the window is open, what it
     blocked, which navigation targets to enqueue)."""
     def refused(url: str) -> bool:
         if not in_scope(url):
@@ -143,8 +143,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if refused(url):
             route.abort()
             return
+        navigation = bool(req.is_navigation_request()) if window is not None else False
         if window is not None:
-            navigation = bool(req.is_navigation_request())
             if window_refused(req.method.upper(), url, navigation):
                 # a navigation aborted as ERR_ABORTED leaves the page where it is (no
                 # error page is committed); its target was kept by the caller
@@ -176,7 +176,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
-                if window is not None and window_refused(method, nxt, False):
+                # a navigation's redirect hop is still a navigation (review A-S2)
+                if window is not None and window_refused(method, nxt, navigation):
                     route.abort()
                     return
                 keep_body = method not in ("GET", "HEAD")

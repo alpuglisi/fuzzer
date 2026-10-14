@@ -104,6 +104,43 @@ Newest first.
     clicked) — done
   - [x] FR-CRAWL-16, FR-CRAWL-13 (CAPTCHA, texts), NFR-CRAWL-safe traced, §5 contract,
     ARCHITECTURE #2/#4 — done
+- Code review round 1 (reviewer A AGREE; reviewer B AGREE-with-changes; a follow-up
+  commit):
+  - **B-M1 (must):** the lift outlived its one click. `before_click` set
+    `win["lifted_for"]` and only the window's exit cleared it, so after a click that
+    raised, the next revealed form's fills and G1 interactions and the menu-item clicks
+    ran unblocked. Now `_fill_and_click_now`'s `finally` clears the lift (it covers one
+    click and its settle), and `_submit_revealed` stops after the first click
+    **attempt** (`_click_attempted`, set by the lift), a raising one included.
+  - **A-S1:** a failed close also closes every page the window opened
+    (`_close_window_pages`) before `about:blank` and the lift.
+  - **A-S2:** the own-reload exemption compares the exact navigation URL (`_nav_key`:
+    canonical origin, path, query) instead of `url_key`; `navguard` asks the window
+    about a navigation's redirect hop as a navigation.
+  - **A-S3:** in the window a GET is refused for explicit account-action tokens
+    (`ACCOUNT_PATH_TOKENS`, `sign up`) and credential tokens only, no longer for the
+    users / accounts collection rule or the broader account words, so the app's
+    identity check (`/rest/user/whoami`) passes. The clean reload stays.
+  - **A-N1:** `_readopt_session` also requires `verify_live`.
+  - **A-N2 / B nit:** FR-CRAWL-16 states that reveals run in authenticated crawls (the
+    window plus W4 as the safety basis) and records the split-WebSocket-frame residual.
+  - Tests (`tests/test_forms_phase4.py`): `test_the_lift_covers_exactly_one_click_and_its_settle`
+    (raise and success), `test_a_click_that_raises_never_leaves_the_window_open`
+    (a two-form dialog; the first button is detached right after the lift through
+    `before_click`, because a page event fires already in the trial click),
+    `test_a_failed_close_still_closes_the_windows_popups`,
+    `test_the_own_reload_exemption_matches_the_exact_url`,
+    `test_a_redirect_after_the_own_reload_is_still_a_navigation`, whoami / users
+    collection pass in `test_the_window_lets_only_safe_gets_through`, and
+    `verify_live` after the re-adoption in the W4 test.
+  - Mutation checks (each killed for the expected assertion): the lift not cleared
+    (the fake page's lift outlived the click), no stop after a click attempt
+    (`/api/second` arrived), popups not closed on a failed close (`/api/popup-post`
+    arrived), own reload by `url_key` (`?action=x` let through), hops not navigations
+    (the hop was fetched), the collection rule back (whoami refused).
+  - Item 7: `tests/test_forms_phase4.py` had 116 tests at 61ddb4d (none skipped or
+    deselected); the "119" reported was a combined run with
+    `tests/test_requirements_traceability.py` (3 tests).
 - Effectiveness (assessed 2026-10-14): offline only. Real-browser fixtures reproduce
   Juice Shop's patterns (a script-navigating account-menu item, product cards with a
   review dialog, an icon-only client-side logout); every safety clause has a failing
@@ -159,6 +196,11 @@ Newest first.
   - [x] mutation checks: G1c (identifier options: the card form was submitted), G1d
     (checkbox gate: the delete-account form was submitted) — done
   - [x] FR-CRAWL-15 — done
+- Code review round 1 (reviewer B-M1, in CC-CRAWL-0024's follow-up commit): the G1
+  window's lift now covers the vetted click and its settle only and is cleared in
+  `_fill_and_click_now`'s `finally`, a click that raised included
+  (`tests/test_forms_phase4.py::test_the_lift_covers_exactly_one_click_and_its_settle`,
+  mutation-checked).
 - Effectiveness (assessed 2026-10-14): offline fixture forms with Juice Shop's patterns
   are submitted or refused as specified; the live address/contact/recycle forms are not
   verified here (no lab traffic in this lane; contact is a CAPTCHA form and is now

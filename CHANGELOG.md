@@ -22,6 +22,14 @@ changed, and the reason. Reference the commit hash where useful.
   destructive word after it, because those texts were judged by embedding them in a URL;
   texts now have their own rule (`core.urls.text_destructive_reason`) and an AST guard
   forbids the embedding (PA-0131).
+- **Review round 1 (reviewers A and B):** the reveal window's lift now covers one click
+  and its settle only (a click that raised no longer leaves later fills and menu clicks
+  unblocked), and a reveal stops after its first submission attempt; a failed close
+  also closes the window's popups; the own-reload exemption matches the exact URL and a
+  navigation's redirect hop counts as a navigation; GETs in the window are refused for
+  account actions and credentials only, so an app's own identity check
+  (`/rest/user/whoami`) passes; a re-adopted session is verified live
+  (CC-CRAWL-0023/0024).
 - **BUG-0131 follow-up:** point selection (`harness.auto`) also judges a SPA route's
   fragment as a text, so `/#/a#/logout` is never fuzzed. The sweep's one residual is
   closed and PA-0131's AST guard has no exception left (CC-FUZZ-0077).

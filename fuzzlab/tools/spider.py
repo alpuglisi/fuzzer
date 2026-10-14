@@ -275,6 +275,16 @@ def _storage_rotated(value) -> bool:
     return looks_like_identifier(str(value))
 
 
+def _nav_key(url):
+    """A navigation's exact target for the reveal window's own-reload exemption (review
+    A-S2): canonical origin (scheme, host, port), path and query -- never only the path
+    (`url_key`), so a redirect or a navigation to ``?action=x`` on the same path is not
+    the window's own reload. The fragment is dropped: a reload never sends one."""
+    parts = urlparse(url or "")
+    origin = canonical_origin(url) or ""
+    return origin + (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+
+
 #: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).
 _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
@@ -432,6 +442,8 @@ class LocalSpider:
         self._adopted_original: dict = {}
         self._g1_attempts = 0
         self._rendered_ok = False
+        #: set by the window's lift: a vetted final click was attempted (B-M1)
+        self._click_attempted = False
 
     @staticmethod
     def _start_dir(url):
@@ -559,7 +571,7 @@ class LocalSpider:
         if win["lifted_for"] is not None and context is win["lifted_for"]:
             return None
         if navigation and method in ("GET", "HEAD") and context is win["context"] \
-                and url_key(url) in win["own_nav"]:
+                and _nav_key(url) in win["own_nav"]:
             return None
         why = spa.window_request_refusal(method, url, navigation)
         if why is None:
@@ -590,8 +602,8 @@ class LocalSpider:
         in it closed, the route reloaded (GET; `_restore`) -- and it is lifted only after
         a final quiet period (`_quiesce`: nothing in flight, then a round trip that
         flushes pending events). Re-entrant: a G1 inside a reveal uses the open window.
-        If the close fails, the page is sent to ``about:blank`` (its timers die) before
-        the window is lifted."""
+        If the close fails, every page the window opened is closed and the route's page
+        is sent to ``about:blank`` (their timers die) before the window is lifted."""
         if self._win is not None:
             yield self._win
             return
@@ -609,6 +621,9 @@ class LocalSpider:
             except PlaywrightError as exc:
                 logging.info(f"the reveal window could not close {page_url} cleanly "
                              f"({str(exc).splitlines()[0][:80]}); leaving the page")
+                # every page the window opened is closed, and the route's page left,
+                # before the window is lifted: their timers die with them (review A-S1)
+                self._close_window_pages(win, page)
                 with contextlib.suppress(PlaywrightError):
                     page.goto("about:blank", timeout=self.timeout_ms)
             finally:
@@ -621,12 +636,9 @@ class LocalSpider:
         this URL only) and let it settle. A dialog's timers die with the reload."""
         page.keyboard.press("Escape")
         page.wait_for_timeout(100)
-        for extra in list(getattr(win["context"], "pages", []) or []):
-            if extra not in win["pages"] and extra is not page:
-                with contextlib.suppress(PlaywrightError):
-                    extra.close()
+        self._close_window_pages(win, page)
         before = win["aborted"]
-        win["own_nav"] = frozenset({url_key(page_url)})
+        win["own_nav"] = frozenset({_nav_key(page_url)})
         try:
             if spa.visit_key(page.url) != spa.visit_key(page_url):
                 page.goto(page_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
@@ -635,6 +647,15 @@ class LocalSpider:
         finally:
             win["own_nav"] = frozenset()
             win["restore_aborted"] += win["aborted"] - before
+
+    @staticmethod
+    def _close_window_pages(win, page):
+        """Close every page opened while the window was open (popups), errors
+        suppressed."""
+        for extra in list(getattr(win["context"], "pages", []) or []):
+            if extra not in win["pages"] and extra is not page:
+                with contextlib.suppress(PlaywrightError):
+                    extra.close()
 
     def _quiesce(self, page):
         """The final quiet period before the window is lifted (W1): settle, flush the
@@ -651,6 +672,7 @@ class LocalSpider:
         """``click_vetted``'s ``before_click``: lift the window for ``context``'s one
         vetted final submission (W1)."""
         def lift():
+            self._click_attempted = True
             if self._win is not None:
                 self._win["lifted_for"] = context
         return lift
@@ -1130,6 +1152,11 @@ class LocalSpider:
         finally:
             self._capture_source, self._capture_page = "passive", None
             self._delete_ok_for = None
+            if g1 and self._win is not None:
+                # the lift covers exactly this one click and its settle (review B-M1):
+                # whatever follows in the window -- a click that raised included --
+                # runs with the write block and the WebSocket hold on again
+                self._win["lifted_for"] = None
 
     # ----- G1: constraint-aware filling (forms phase 4, FR-CRAWL-15) -----
     def _g1_invalid_names(self, page, form):
@@ -1522,7 +1549,9 @@ class LocalSpider:
     def _submit_revealed(self, page, context, page_url, route, forms):
         """Submit a revealed form only as a named route's form is (FR-CRAWL-13 + G1): the
         route named, the gate passed, no password, in the crawl's own context. Inside
-        the open window (its vetted click lifts it). Returns True when one was clicked."""
+        the open window (its vetted click lifts it, for that click only). Returns True
+        after the first click **attempt** -- a click that raised included: nothing more
+        (no other form, no menu item) is done in that reveal (review B-M1)."""
         if not self._submit_routes or self.spa_submit_stopped or not self._spa_on:
             return False
         named = self._submit_routes
@@ -1541,7 +1570,13 @@ class LocalSpider:
             if self.spa_counts["forms_submitted"] >= spa.MAX_SUBMISSIONS:
                 self.spa_counts["submissions_over_cap"] += 1
                 continue
+            self._click_attempted = False
             clicked = self._fill_and_click(page, context, form, page_url, True)
+            if not clicked and self._click_attempted:
+                # one click attempt per reveal, even one that raised (review B-M1)
+                logging.info(f"revealed SPA form on {page_url}: its click failed; no "
+                             f"further form or menu item in this reveal")
+                return True
             if clicked:
                 self.storage.record_revealed_form(page_url, route, sig, submitted=True)
                 if self._authenticated:
@@ -1609,7 +1644,8 @@ class LocalSpider:
         """Re-adopt the session the crawl started with (W4): its cookies and its
         browser login's cookies, and the adopted localStorage entries **as adopted**
         (never a rotated value), then reload the page so the app reads them. Returns the
-        client-side check's ``(ok, why)``."""
+        client-side check's ``(ok, why)``, then `verify_live`'s when the session manager
+        has one (review A-N1)."""
         from fuzzlab.tools import browserauth
         sess, ctx = self._browser_session, self._context
         try:
@@ -1630,7 +1666,10 @@ class LocalSpider:
             self._settle(self._page)
         except PlaywrightError as exc:
             return False, f"re-adoption failed ({type(exc).__name__})"
-        return self._client_session_intact()
+        ok, why = self._client_session_intact()
+        if ok:
+            ok, why = self._live_session_intact()    # the server too (review A-N1)
+        return ok, why
 
     def _isolated_submit(self, method, action_url, entries):
         """Submit a selector form without following redirects, through a client that
