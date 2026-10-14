@@ -66,6 +66,11 @@ the oracle owns truth (the oracle/advisory split).
   `R-OPEN-REDIRECT-VALUE` and `R-SSRF-VALUE`, crawl points only; the same
   non-comparability holds. The evidence key `redirect_seed` is not a feature
   (`core/features` reads named keys only).
+  *(CC-ML-0030 note, forms phase 3, 2026-10-14:)* `loc_body` is 1 for location `json`
+  (a JSON body leaf, FR-CORE-36) as for `body`; `CANDIDATE_FEATURE_VERSION` stays 1
+  because no earlier row had that location. `rules_fired` also counts the rules firing
+  on JSON leaves (crawl points only); the `name_*` features read the whole display name
+  (`user.email`).
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
   config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
   CC-FUZZ-0050 / CC-UI-0041.)*

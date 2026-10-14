@@ -1204,6 +1204,30 @@ tracked in the requirements files, not here.
     - POST selector forms are fuzzed unless settings-like; the spider's
       `selector_verdicts` records what a submitted picker did;
     - BUG-0115: placement is a conformance contract (`UnplaceableLocation`);
+  - **Forms phase 3, lane J — JSON body points (CC-AUD-0035 / CC-FUZZ-0068 /
+    CC-CORE-0046 / CC-ML-0030, no migration):**
+    - a new point location, `json` (`core/jsonbody.py`, FR-CORE-36): one leaf of a JSON
+      request body. Stored as a `form` row with `enctype` `application/json` and
+      entries `[[path segments], typed value]`; the parameter name is the escaped
+      display path (`user.tags[0]`), parsed back exactly. Every sender rebuilds the
+      whole body (types kept) with the leaf set to the payload as a string, or raises
+      `UnplaceableLocation` (greybox and the M6 executor do);
+    - `store_adapter.import_spider` reads the crawler's captured requests (spider table
+      `discovered_requests`, lane I; absent in old spider DBs). Refused at import:
+      DELETE and other methods, PUT/PATCH without `--fuzz-json-writes`, destructive and
+      transaction URLs, credential-change bodies (`credential_change_rule`, shared with
+      forms), settings fields. Password leaves are never points, are sent `""` and
+      isolate the path (FR-FUZZ-44); object selectors, sensitive and identifier-like
+      leaves are pinned. Every sender refuses a non-enumerated DELETE at send;
+    - an SPA hash route's query (`/#/search?q=`) is a `fragment` point on the endpoint
+      `/#/search` (`core.urls.to_route_path`), built only with a browser; in a crawl run
+      an HTTP send at `fragment` is refused (`harness.auto._FragmentGuard`) and the M6
+      executor places the payload in the route's own query;
+    - the oracle takes `UnplaceableLocation` from a mechanism as no verdict; a candidate
+      no mechanism could place is `inconclusive` (mechanism `unplaceable`, counted
+      separately as `oracle_unplaceable`), never a negative; a `fragment` point draws
+      only client-side rules (`location_not_in`), and its finding keeps its route
+      (`oracle.finding_url` → `to_route_path`);
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
@@ -1767,8 +1791,8 @@ detail):
 | --- | --- | --- |
 | `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, CC-CORE-0033), `schema_version` | core | everything |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
-| `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
-| `form` (a crawled form's default `entries`, migration 20; `password_fields`, the names of its password controls, migration 21 — non-empty marks an in-app login form) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44) |
+| `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor | auditor, ranker, fuzzer |
+| `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader) |
 | `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
 | `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18; `identity` is `<identity>#isolated:<n>` for an isolated copy's sends, FR-SESS-17) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |

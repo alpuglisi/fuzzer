@@ -11,9 +11,25 @@ import threading
 import time
 
 from fuzzlab.core.http import check_send_header
+from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
+from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
+from fuzzlab.core.jsonbody import JsonPlacementError, body_for
 from fuzzlab.core.urls import check_send_url, to_path, url_key
-from fuzzlab.oracle.probe import HeaderPointsStopped, Probe
+from fuzzlab.oracle.probe import HeaderPointsStopped, Probe, UnplaceableLocation
 from fuzzlab.tools.authhttp import with_query, with_query_param
+
+
+def _json_body(param: str, value: str, entries, content_type=None) -> bytes:
+    """A ``json`` send's body (`core.jsonbody.body_for`), or `UnplaceableLocation` when
+    the leaf cannot be placed -- or when the send is a raw whole body (``content_type``
+    set: XML, multipart), which a JSON leaf cannot carry: refused before any session
+    routing or send, never reinterpreted (PA-0115)."""
+    if content_type:
+        raise UnplaceableLocation(f"a raw {content_type} body cannot be a JSON leaf")
+    try:
+        return body_for(param, value, entries)
+    except JsonPlacementError as exc:
+        raise UnplaceableLocation(f"cannot place JSON leaf {param!r}: {exc}") from exc
 
 
 class _ExplicitAllowance:
@@ -357,7 +373,10 @@ class SeamProbeSender(_ExplicitAllowance):
         # an isolated copy login (reviewers A/B, forms phase 2 merge)
         if location == "header" and self.header_stop_reason is not None:
             raise HeaderPointsStopped(self.header_stop_reason)
-        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
+        check_send_url(url, self._explicit, method=method)
+        if location == JSON_LOCATION:                    # placeable, or refused here
+            _json_body(param, value, entries, content_type)
         if location == "header":
             check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
         identity = self._identity_for(url)
@@ -394,7 +413,14 @@ class SeamProbeSender(_ExplicitAllowance):
         from urllib.parse import urlencode
 
         from fuzzlab.core.http import Request
-        if entries is not None and location in ("query", "body"):
+        if location == JSON_LOCATION:
+            # one leaf of a JSON body (forms phase 3, FR-CORE-36): the whole body
+            # rebuilt from its entries, types kept, the leaf set to the payload string
+            req = Request(method.upper(), url, headers={"Content-Type": JSON_ENCTYPE},
+                          body=_json_body(param, value, entries, content_type),
+                          identity=identity,
+                          timing=timing, component="oracle")
+        elif entries is not None and location in ("query", "body"):
             # a form point: the whole entry list, the fuzzed field already set
             req = (Request(method.upper(), url,
                            headers={"Content-Type": "application/x-www-form-urlencoded"},
@@ -494,7 +520,10 @@ class RequestsProbeSender(_ExplicitAllowance):
         # client, which already sets this (see that module's own
         # request-building code) -- this was a real inconsistency between
         # the two `Sender` implementations, not a deliberate difference.
-        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
+        check_send_url(url, self._explicit, method=method)
+        body = (_json_body(param, value, entries, content_type)
+                if location == JSON_LOCATION else None)
         if url_key(url) in self._isolated_keys:
             self._isolated_sends += 1
         # Anonymous means anonymous: no cookie a probe response set (a payload that
@@ -503,7 +532,10 @@ class RequestsProbeSender(_ExplicitAllowance):
         if jar is not None:
             jar.clear()
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
-        if entries is not None and location == "body":   # a form point (forms phase 1)
+        if body is not None:                             # a JSON leaf (FR-CORE-36)
+            kwargs["data"] = body
+            kwargs["headers"] = {"Content-Type": JSON_ENCTYPE}
+        elif entries is not None and location == "body":   # a form point (forms phase 1)
             kwargs["data"] = list(entries)
         elif entries is not None and location == "query":
             url = with_query(url, entries)

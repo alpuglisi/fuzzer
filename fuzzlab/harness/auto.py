@@ -194,9 +194,33 @@ def isolated_paths_from_store(store, run_id: int, base_url: str) -> frozenset[st
     return frozenset(_login_form_paths(store, run_id, base_url))
 
 
+def _json_base_entries(raw):
+    """A JSON point's siblings as sent (forms phase 3, FR-FUZZ-47): the stored leaves
+    (`core.jsonbody.decode_entries`, already passed `store_adapter.redact_leaf`), each
+    value through `_send_value` (loopback for a host/url-shaped one), types kept. None
+    when the stored list is malformed (the point is then dropped, PA-0108)."""
+    from fuzzlab.core import jsonbody
+    entries = jsonbody.decode_entries(raw) if raw else None
+    if entries is None:
+        return None
+    return tuple((path, _send_value(value)) for path, value in entries)
+
+
+def _crawl_url_refusal(url: str) -> str | None:
+    """Why a crawl point's URL is never fuzzed: a destructive URL, or a destructive
+    SPA hash route (``/#/logout``), which `destructive_reason` alone does not read."""
+    from fuzzlab.core.urls import destructive_reason, spa_route
+    reason = destructive_reason(url)
+    route = spa_route(url)
+    if reason is None and route is not None:
+        reason = destructive_reason(route[0] + ("?" + route[1] if route[1] else ""))
+    return reason
+
+
 def injection_points_from_store(store, run_id: int, base_url: str,
                                 skipped: list | None = None,
-                                isolated: set | None = None) -> list[InjectionPoint]:
+                                isolated: set | None = None,
+                                browser_available: bool = False) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
 
     A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
@@ -209,10 +233,16 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     with its session. A caller that can passes a set: it receives every such path's
     ``url_key`` and the points. A parameter named like a password control of a form on
     that path is never a point.
+
+    A ``json`` point (a captured request's leaf, forms phase 3) carries its body's
+    other leaves as ``base_entries`` (paths and typed values). A ``fragment`` point (an
+    SPA hash route's query) is built only with ``browser_available``; without a browser
+    it is reported, as ground truth's DOM points are.
     """
     from urllib.parse import urlsplit
 
-    from fuzzlab.core.urls import destructive_reason, url_key
+    from fuzzlab.core import jsonbody
+    from fuzzlab.core.urls import url_key
     # Stored crawl paths are absolute (`to_path`), so they join to the base URL's
     # origin, never its path: `--base-url .../bWAPP/` must not give /bWAPP/bWAPP/
     # (BUG-0113).
@@ -244,12 +274,20 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         if key in seen:
             continue
         seen.add(key)
-        reason = destructive_reason(base + path)
+        reason = _crawl_url_refusal(base + path)
         if reason is not None:
             if skipped is not None:
                 skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
             continue
-        if _credential_name(r["name"]):
+        location = r["location"] or "query"
+        if location == "fragment" and not browser_available:
+            if skipped is not None:
+                skipped.append((path, method, r["name"],
+                                "client-only/DOM (needs browser execution, M6)"))
+            continue
+        names = (jsonbody.segments_of(r["name"]) if location == jsonbody.LOCATION
+                 else [r["name"]])
+        if any(_credential_name(n) for n in names):
             # never fill a credential with payloads (it could change the operator's
             # password); ground-truth points are not affected (reviewers A/B)
             if skipped is not None:
@@ -267,7 +305,14 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                     skipped.append((path, method, r["name"], why))
                 continue
         entries = None
-        if r["entries"]:
+        if location == jsonbody.LOCATION:
+            entries = _json_base_entries(r["entries"])
+            if entries is None:
+                if skipped is not None:
+                    skipped.append((path, method, r["name"],
+                                    "malformed form row (JSON entries)"))
+                continue
+        elif r["entries"]:
             try:
                 entries = tuple((n, _send_value(v)) for n, v in json.loads(r["entries"]))
             except (ValueError, TypeError):
@@ -277,7 +322,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         if example in (None, "") or is_filler(example):
             shapes = frozenset(shapes_by_name.get(r["name"], ()))
         points.append(InjectionPoint(url=base + path, param=r["name"],
-                                     method=method, location=r["location"] or "query",
+                                     method=method, location=location,
                                      base_entries=entries, origin="crawl",
                                      value_shapes=shapes,
                                      base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
@@ -405,6 +450,36 @@ class _CountingSender:
         return self.count
 
 
+class _FragmentGuard:
+    """Crawl-sourced runs (forms phase 3): an SPA route's query never reaches the server,
+    so an HTTP send at location ``fragment`` is refused (`UnplaceableLocation`) before
+    it reaches the sender, whose last branch would put it in the query (BUG-0115
+    instance 4, pinned). Only the M6 browser executor places a fragment point; the
+    oracle takes a refusal as "no verdict from this mechanism" (PA-0115). Ground-truth
+    runs are not wrapped (their pinned behaviour is unchanged)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None, entries=None):
+        if location == "fragment":
+            from fuzzlab.oracle.probe import UnplaceableLocation
+            raise UnplaceableLocation("a fragment point is placed by the browser only")
+        if entries is not None:
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, entries=entries)
+        if method == "GET" and location == "query":
+            return self._inner.send(url, param, value, timing=timing)
+        if content_type:
+            return self._inner.send(url, param, value, timing=timing,
+                                    method=method, location=location,
+                                    content_type=content_type)
+        return self._inner.send(url, param, value, timing=timing,
+                                method=method, location=location)
+
+
 def plan_run(*, mode: str, ground_truth, selected_categories,
              points_source: str = "auto",
              header_points: bool = False) -> tuple[str, RunPlan]:
@@ -469,7 +544,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
             sender.allow_explicit([u for p in points for u in (p.url, p.store_url)])
     else:
         points = injection_points_from_store(store, run_id, base_url, skipped=skipped,
-                                             isolated=isolated)
+                                             isolated=isolated,
+                                             browser_available=browser is not None)
         if isolated:
             if hasattr(sender, "isolate"):
                 sender.isolate(isolated)       # never the run's session there (FR-FUZZ-44)
@@ -496,7 +572,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
             except ValueError as exc:          # PluginConflict: two would order it
                 raise RunModeError(str(exc)) from exc
     counting = _CountingSender(sender)
-    result = run_pipeline(points, store, run_id, counting, plan,
+    # crawl points: a fragment is never sent over HTTP (forms phase 3, PA-0115)
+    probing = counting if source == "ground-truth" else _FragmentGuard(counting)
+    result = run_pipeline(points, store, run_id, probing, plan,
                           ground_truth=ground_truth, pages_html=pages_html,
                           budget=counting, browser=browser, oob=oob,
                           coverage=coverage, dbfault=dbfault, scheduler=scheduler,

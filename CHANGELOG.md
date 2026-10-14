@@ -4,6 +4,29 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3, lane J: review follow-ups)
+- **Why:** reviewers A and B agreed lane J with should-fixes: `inconclusive` had
+  gained a second meaning silently, fragment points drew server-side candidates that
+  could only be unplaceable, fragment findings collapsed to `/`, and a missing JSON
+  leaf was appended to the app's body.
+- **What:** `inconclusive` reworded and reported per mechanism (CLI, run page,
+  `oracle_unplaceable`); server-side rules exclude `fragment` (`location_not_in`);
+  fragment findings keep their route; an absent leaf is refused; `_FragmentGuard` is in
+  the wrapper tests; an AST guard forbids masking a send (CC-FUZZ-0068, CC-CORE-0046,
+  CC-AUD-0035 follow-ups; FR-FUZZ-47, FR-CORE-33/36, FR-AUD-22, FR-UI-19).
+
+## 2026-10-14 (Forms phase 3, lane J: JSON body injection points)
+- **Why:** a single-page app's real inputs are JSON APIs (Juice Shop's
+  `POST /rest/user/login`); the fuzzer could send only a whole raw body, never a payload
+  in one field of it, and an SPA route's query was not a point at all.
+- **What:** captured requests (the crawler's `discovered_requests`) import as `json`
+  points, one per body leaf, with every agreed refusal (DELETE, unflagged PUT/PATCH,
+  destructive/transaction URLs, credential-change and settings bodies) and login bodies
+  isolated; every sender rebuilds the body with one leaf set, or refuses; a DELETE is
+  refused again at send; SPA route queries are `fragment` points placed by M6 inside the
+  route (CC-AUD-0035, CC-FUZZ-0068, CC-CORE-0046, CC-ML-0030; FR-AUD-22, FR-FUZZ-47,
+  FR-CORE-36). No migration.
+
 ## 2026-10-14 (Forms phase 3 prerequisite: one transaction-word rule)
 - **Why:** forms phase 3 (SPA routes and JSON APIs) submits SPA forms and imports the
   app's own captured requests; the reviewers required one shared list of transaction

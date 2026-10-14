@@ -141,10 +141,15 @@ plugin registry. It is the layer that makes the store the integration bus.
   vocabulary (`checked`, `skipped_budget`, `no_confirmer`, `pending`, `inconclusive`,
   and the `UNLABELLED` set) is defined once in `core/oracle_status.py`.
 - **FR-CORE-33** *(`CC-CORE-0043`, 2026-10-14).*
-  - `inconclusive` is a member of `UNLABELLED`, so a check that could not decide is
-    never a negative label.
+  - `inconclusive` means the candidate **could not be decided: a cost cap stopped it,
+    or no mechanism could place the point** (the second since CC-CORE-0046,
+    FR-FUZZ-47: every applicable mechanism raised `UnplaceableLocation`, mechanism
+    `unplaceable`). It is a member of `UNLABELLED`, so it is never a negative label.
   - The pipeline writes it for every row of a key whose confirmation returned an
-    inconclusive verdict and nothing confirmed (FR-FUZZ-45).
+    inconclusive verdict and nothing confirmed (FR-FUZZ-45). Which meaning applies is
+    the verdict's mechanism, carried in the run's `inconclusive` detail and shown by
+    `fuzzlab auto` and the web run page (`unplaceable` vs the capped mechanism, e.g.
+    `boolean-differential`).
 - **FR-CORE-24** *(atomic migrations; `CC-CORE-0034`, 2026-10-13, BUG-0087).*
   - **Each migration is atomic.** It runs in one `BEGIN IMMEDIATE` transaction,
     statement by statement (`split_statements`), with its version row: `COMMIT`, or
@@ -324,6 +329,33 @@ plugin registry. It is the layer that makes the store the integration bus.
   path, query and SPA fragment, a route path or a button label (tokenised like
   `destructive_reason`, plural folded). Such a page may be visited; its form is never
   submitted by the crawler and a captured request to it is never imported for fuzzing.
+- **FR-CORE-36** *(the `json` point location; `CC-CORE-0046`, 2026-10-14, forms phase
+  3; no schema change).*
+  - **The location.** `parameter.location = "json"` (`core.jsonbody.LOCATION`) is a
+    point whose payload goes into **one leaf** of a JSON body sent as
+    `Content-Type: application/json`. Its `form` row has `enctype = "application/json"`
+    (`jsonbody.ENCTYPE`) and `entries` `[[path segments], typed value]`, a path being
+    string keys and integer list indexes. A send rebuilds the whole body from the
+    entries (types kept: numbers, bools, null, empty containers) with the leaf set to
+    the payload **as a string**. A sender that cannot place it raises
+    `UnplaceableLocation` (PA-0115). A leaf the captured entries do not have is never
+    added to the body (`replace_leaf` refuses); only a send with no entries sends
+    `{leaf: payload}` alone.
+  - **Names.** `jsonbody.display_name` joins keys with `.` and writes indexes as
+    `[n]`, escaping `\`, `.`, `[` and `]` inside a key with `\`; `parse_name` is its
+    exact inverse (byte for byte) and is None for any other text. The parameter name
+    is the display name.
+  - **Bounds and parsing.** A body over 64 leaves or 16 levels is not a point source.
+    `jsonbody.decode_entries` is the one reader of a stored entry list; a malformed
+    list (bad shape or type, a non-finite number, a repeated path, a path through
+    another leaf) is None, and the caller drops the point.
+  - **SPA routes.** `core.urls.spa_route` reads a hash route (`#/x?q=1`, `#!/x`) and
+    `to_route_path` stores a `fragment` point's endpoint as `/#/x` (the route's query
+    dropped), so a browser can load the route.
+  - **DELETE at send.** `check_send_url(url, explicit, method=)` refuses a `DELETE`
+    whose URL was not explicitly enumerated (`REFUSED_SEND_METHODS`).
+  - **Candidate feature.** `loc_body` counts `json` as a body location (CC-ML-0030; the
+    feature version is unchanged).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
@@ -338,6 +370,7 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **NFR-CORE-secrets** Secrets are referenced, never stored in the store or
   config; redaction on write.
   - Enforced by: the credential store and the storage-redaction boundary — `tests/test_credentials.py::test_set_get_delete_per_host`, `tests/test_storage_redaction.py::test_the_http_client_records_no_secret`, `tests/test_storage_redaction.py::test_every_traffic_producer_goes_through_the_redaction_boundary`, `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`, `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_redaction.py::test_logs_use_the_same_predicate`
+  - Enforced by (captured request bodies, forms phase 3; CC-AUD-0035): the importer's JSON producer stores every leaf through `store_adapter.redact_leaf` and passwords as `""` — `tests/test_json_points.py::test_the_json_producer_goes_through_redaction`, `tests/test_json_points.py::test_object_selectors_sensitive_and_identifier_leaves_are_pinned`, `tests/test_json_points.py::test_a_password_leaf_on_any_segment_is_isolated_sent_empty_and_never_a_point`
   - Not yet enforced: config accepts secret values unchecked; `repeater_tab.raw_request` and `run_plugin.config` are stored unredacted; `session_state.login_url` is not passed through `redact_url`. (BUG-0111 sweep; reported to the operator.)
 - **NFR-CORE-no-bypass** No tool constructs HTTP or session state outside core.
   - Not yet enforced: the spider, the auditor, the standalone fuzzer, `RequestsProbeSender`, the greybox sender and the login fetcher build their own `requests.Session`, and the proxy uses sockets; there is no guard test. The destructive-URL gate (BUG-0111/0112) is enforced at each of them instead. (BUG-0111 sweep; reported to the operator.)

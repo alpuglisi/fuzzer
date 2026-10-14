@@ -24,9 +24,22 @@ def _with_query(url: str, param: str, value: str) -> str:
 
 
 def _with_fragment(url: str, param: str, value: str) -> str:
+    """``url`` with ``param=value`` in its fragment. A single-page app's hash route
+    (``/#/search``, `core.urls.spa_route`) keeps its route: the pair goes into the
+    route's own query (``/#/search?q=<value>``, forms phase 3), percent-encoded (a
+    space is ``%20``: the app's router reads it, not a form decoder), never after a
+    second ``#``. Any other fragment is replaced by the pair, as before."""
+    from urllib.parse import quote
+
+    from fuzzlab.core.urls import spa_route
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query,
-                       urlencode({param: value})))
+    pair = urlencode({param: value}, quote_via=quote)
+    if spa_route(url) is not None:
+        route, sep, query = parts.fragment.partition("?")
+        fragment = route + "?" + (query + "&" if sep and query else "") + pair
+    else:
+        fragment = urlencode({param: value})
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
 
 
 class PlaywrightBrowserExecutor:

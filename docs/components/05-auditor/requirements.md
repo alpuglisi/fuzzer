@@ -223,6 +223,63 @@ budget where a vulnerability is plausible.
   - **Stated gaps:** a protocol-relative example (`//host/x`, shape `path`) gets no
     rule and no seed; an allowlist keyed on a query string is not matched (the seed
     drops the query).
+- **FR-AUD-22** *(captured requests and JSON leaves; `CC-AUD-0035`, 2026-10-14, forms
+  phase 3, lane J).*
+  - **Source.** `store_adapter.import_spider` reads the spider table
+    `discovered_requests` (`id, page_url, method, url, content_type, body_json, source,
+    signature`; FR-CRAWL-13). A spider DB without it imports exactly as before.
+  - **Never imported** (counted `request_refused`, nothing stored): a method outside
+    GET/POST/PUT/PATCH (DELETE included); PUT/PATCH unless `fuzzlab auto
+    --fuzz-json-writes` is given (and the URL passes the next rules); a URL
+    `destructive_reason` or `transaction_reason` flags; a URL on another origin than
+    the page that sent it; a content type other than JSON (`application/json`,
+    `application/*+json`) or form-encoded; a body that is malformed, not an object,
+    empty, over 64 leaves or 16 levels; a **credential-change body**
+    (`store_adapter.credential_change_rule`, the one rule crawled forms use: two or
+    more password fields, a password field named with a change word — new, confirm,
+    repeat, current, old …, or an account-management token in the URL path); a body
+    with a settings word (`formnav.settings_word`) on any key; a destructive name or
+    value (`entries_refusal`, run with `credential_names=True` over the non-password
+    leaves — every credential-named leaf is a password field, so that half is a second
+    check).
+  - **Stored.** A JSON body is a `form` row (`enctype` `application/json`, entries as
+    FR-CORE-36). A form-encoded body is a `form` row (`enctype`
+    `application/x-www-form-urlencoded`) and imports as today's form points (`body`).
+    The endpoint is the request's path plus its (redacted) query, at its method. Every
+    stored value passes `redact_leaf` (a sensitive key on the path or an
+    identifier-like value: `""` for a string, `null` otherwise; PA-0100).
+  - **Points.** Each string, number or bool leaf is a `json` parameter named by its
+    display name, with its value as the example (non-strings as JSON text), except:
+    - a **password field** — a credential name (`is_credential_name`) on any key of
+      its path: never a point, stored and sent `""`, listed in `form.password_fields`,
+      so `isolated_paths_from_store` isolates the path (FR-FUZZ-44);
+    - a sensitive or identifier-like leaf (pinned, sent blank);
+    - an **object selector** (`_object_selector` on the last key: `UserId`,
+      `BasketId`, `username`, `owner` …; pinned, sent as captured).
+
+    When two captured requests share an endpoint, the first one's leaf wins a name.
+  - **Rules on JSON leaves.** `name_regex` matches the path's last object key
+    (`rules.rule_name`); credential and sensitive checks run on every key; value shapes
+    apply to the leaf's example, and a url leaf's `redirect_seed` keeps FR-AUD-21's host
+    and path identifier checks. `R-SQLI-PARAM` and `R-SSTI` include `json`.
+    `R-XSS-REFLECT` does not: a JSON response is not rendered as HTML, and the
+    reflected-XSS check does not read the response's content type, so a JSON echo would
+    read as a break-out (stated gap: reflected and stored XSS through JSON bodies).
+  - **SPA route queries.** A crawled URL whose fragment is a hash route with a query
+    (`/#/search?q=x`) gives `fragment` parameters on the endpoint `/#/search`
+    (`core.urls.to_route_path`), never `query` ones; lane A's link sets and header
+    queries read only `urlsplit(url).query`. A `fragment` crawl point is built only with
+    a browser (`--browser`, M6), else reported as ground truth's DOM points are; a
+    destructive route (`/#/logout`) is never a point.
+  - **Client-side categories only on fragment points.** A `fragment` payload never
+    reaches the server, so every server-side rule carries `location_not_in:
+    ["fragment"]` (a closed predicate beside `location_in`) or a `location_in` without
+    it: a fragment point draws only xss and open-redirect candidates (reviewer B).
+  - **Stated gaps:** points are only as good as lane I's capture (no captured request,
+    no points; API calls only seen in a bundle are not imported); an object-selector
+    user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
+    an identifier-like value blanked by the crawler before import reads as an empty
+    example; other query parameters of an SPA route are not sent with a fragment probe.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
@@ -250,7 +307,9 @@ budget where a vulnerability is plausible.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_audit_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_audit_dry_run_reports_plan_and_sends_nothing`
 
 ## 5. Interfaces and data contracts
-Reads `page`, `endpoint`, `parameter` from the store; writes `candidate` rows
+Reads `page`, `endpoint`, `parameter` (and, for crawl points, `form` sibling entries;
+the importer writes them from the spider's `discovered_forms` and, since forms phase 3,
+`discovered_requests`, FR-AUD-22) from the store; writes `candidate` rows
 (rule evidence, `features_json` + `feature_version`) and `target` fingerprint
 data. Reads indicators/rules from the indicator DB & catalogs. Authenticates via
 the session manager. Runs standalone or in the discovery pipeline.

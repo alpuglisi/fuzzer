@@ -105,6 +105,9 @@ CANDIDATE_FEATURE_NAMES = [
     "param_len", "name_id", "name_redirect", "name_file", "name_cmd", "rules_fired",
 ]
 CANDIDATE_FEATURE_VERSION = 1
+#: Locations the ``loc_body`` feature counts as a request body (``json``: one leaf of a
+#: JSON body, `core.jsonbody.LOCATION`).
+_BODY_LOCATIONS = frozenset({"body", "json"})
 
 _RE_ID = _re.compile(r"(^id$|_id$|^id_|id$)", _re.I)
 _RE_REDIR = _re.compile(r"url|next|redirect|return|dest|goto|continue|target", _re.I)
@@ -113,13 +116,16 @@ _RE_CMD = _re.compile(r"cmd|exec|command|ping|host|dns|domain|ip", _re.I)
 
 
 def extract_candidate_v1(ev: dict, sink_context, rules_fired: int) -> list[float]:
-    """The v1 candidate vector, in `CANDIDATE_FEATURE_NAMES` order."""
+    """The v1 candidate vector, in `CANDIDATE_FEATURE_NAMES` order. ``loc_body`` is 1 for
+    a ``json`` point too (a leaf of a request body; forms phase 3, CC-ML-0030): no
+    stored row had that location before, so no v1 vector changes and the version
+    stays."""
     name = ev.get("param", "") or ""
     loc = ev.get("location", "query")
     method = (ev.get("method", "GET") or "GET").upper()
     cat = ev.get("category", "")
     return [
-        1.0 if loc == "body" else 0.0,
+        1.0 if loc in _BODY_LOCATIONS else 0.0,
         1.0 if method == "POST" else 0.0,
         1.0 if sink_context else 0.0,
         1.0 if cat == "sql-injection" else 0.0,

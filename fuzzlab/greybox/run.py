@@ -135,7 +135,8 @@ class RequestsCorrelatingSender:
     def send_correlated(self, url: str, param: str, value: str, *,
                         method: str = "GET", location: str = "query", entries=None):
         from fuzzlab.core.urls import check_send_url
-        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
+        check_send_url(url, self._explicit, method=method)
         # The operator's cookie is the only session material: none a probe response
         # set rides along, and an auth endpoint is probed anonymously (BUG-0112).
         jar = getattr(self._session, "cookies", None)   # an injected session may have none
@@ -161,7 +162,8 @@ class RequestsCorrelatingSender:
         # (and can crash outright on a self-referencing Location value).
         kwargs = {"timeout": self._timeout, "headers": headers, "allow_redirects": False}
         if location not in ("query", "body", "header"):
-            # refuse, never relocate (BUG-0115, PA-0115)
+            # refuse, never relocate (BUG-0115, PA-0115); `json` included: greybox does
+            # not rebuild JSON bodies (forms phase 3, FR-FUZZ-47)
             raise UnplaceableLocation(f"cannot place a probe at location {location!r}")
         if location == "header":
             from fuzzlab.core.http import check_send_header
@@ -466,7 +468,20 @@ def points_with_classes(ground_truth, base_url: str, browser_available: bool = F
 def points_from_store(store, run_id: int, base_url: str,
                       skipped: list | None = None) -> list[GreyboxPoint]:
     """Crawl-discovered points as :class:`GreyboxPoint` (class unknown -> None).
-    Destructive URLs are left out and reported in ``skipped`` (BUG-0112)."""
+    Destructive URLs are left out and reported in ``skipped`` (BUG-0112). So are JSON
+    body points (forms phase 3): `RequestsCorrelatingSender` cannot place them and
+    raises `UnplaceableLocation` (FR-FUZZ-47), so they are reported, not sent."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
     from fuzzlab.harness.auto import injection_points_from_store
-    return [GreyboxPoint(url=p.url, param=p.param, method=p.method, location=p.location)
-            for p in injection_points_from_store(store, run_id, base_url, skipped=skipped)]
+    out = []
+    for p in injection_points_from_store(store, run_id, base_url, skipped=skipped):
+        if p.location == JSON_LOCATION:
+            if skipped is not None:
+                skipped.append((urlsplit(p.url).path or "/", p.method, p.param,
+                                "JSON body point (greybox cannot place it)"))
+            continue
+        out.append(GreyboxPoint(url=p.url, param=p.param, method=p.method,
+                                location=p.location))
+    return out

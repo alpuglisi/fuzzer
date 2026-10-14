@@ -92,9 +92,12 @@ def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
     return None
 
 
-def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
-    """Import discovered pages -> page/endpoint/parameter rows, crawled forms, and each
-    query-bearing URL's query as a link set (forms phase 2)."""
+def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
+                  fuzz_json_writes: bool = False) -> dict[str, int]:
+    """Import discovered pages -> page/endpoint/parameter rows, crawled forms, each
+    query-bearing URL's query as a link set (forms phase 2), each SPA hash route's query
+    as ``fragment`` parameters, and the app's own captured requests (forms phase 3,
+    FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``)."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
@@ -133,7 +136,9 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str,
                     )
                     counts["parameter"] += 1
             link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
+        _import_route_query(store, run_id, raw, source, counts)
     _import_forms(src, store, run_id, counts)
+    _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes)
     _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
     src.close()
@@ -243,31 +248,44 @@ def credential_change_reason(form: dict) -> str | None:
     """Why a form with a password control changes a credential or manages an account
     (never imported, even with an isolated session: it changes the account, not the
     session), or None. Reviewers A/B (FR-FUZZ-44)."""
+    kinds = dict(form["controls"])
+    return credential_change_rule(
+        [n for n, k in form["controls"] if k == "password"], form["action_url"],
+        submitters=[t for n, v in form["entries"] if kinds.get(n) == "submit"
+                    for t in (n, v)],
+        hidden=[n for n, k in form["controls"] if k == "hidden"])
+
+
+def credential_change_rule(passwords, action_url: str, *, submitters=(), hidden=(),
+                           what: str = "form", field: str = "password control") -> str | None:
+    """The one credential-change rule (PA-0003), for crawled forms and captured
+    requests alike (forms phase 3, FR-AUD-22): given a request's password fields (a
+    form's password controls, a body's credential-named leaves), why it changes a
+    credential or manages an account, or None. Two or more password fields; a password
+    field whose name has a change word (new, confirm, repeat, current, old, ...); or an
+    account-management token in the action path, a submitter, or a hidden field name."""
     from urllib.parse import urlsplit
 
     from fuzzlab.core.redaction import name_tokens
-    passwords = [n for n, k in form["controls"] if k == "password"]
+    passwords = list(passwords)
     if not passwords:
         return None
     if len(passwords) >= 2:
-        return f"credential-change form ({len(passwords)} password controls)"
+        return f"credential-change {what} ({len(passwords)} {field}s)"
     for name in passwords:
         hit = next((sub for sub in _CHANGE_SUBSTRINGS if sub in name.lower()), None)
         if hit:
-            return f"credential-change form (password control {name!r} has {hit!r})"
-    kinds = dict(form["controls"])
-    texts = [("action", urlsplit(form["action_url"]).path)]
-    texts += [("submitter", t) for n, v in form["entries"] if kinds.get(n) == "submit"
-              for t in (n, v)]
-    hidden = [n for n, k in form["controls"] if k == "hidden"]
+            return f"credential-change {what} ({field} {name!r} has {hit!r})"
+    texts = [("action", urlsplit(action_url).path)]
+    texts += [("submitter", t) for t in submitters]
     texts += [("hidden field", n) for n in hidden]
     for where, text in texts:
         hit = next((t for t in name_tokens(text or "") if t in _CHANGE_TOKENS), None)
         if hit:
-            return f"credential-change form ({where} has {hit!r})"
+            return f"credential-change {what} ({where} has {hit!r})"
     for name in hidden:
         if _object_selector(name):
-            return f"credential-change form (hidden object selector {name!r})"
+            return f"credential-change {what} (hidden object selector {name!r})"
     return None
 
 
@@ -400,6 +418,220 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
                 "form_id) VALUES (?,?,?,?,?,?)",
                 (run_id, endpoint_id, name, location, value, form_id))
             counts["parameter"] += 1
+
+
+def _import_route_query(store: Store, run_id: int, raw: str, source, counts: dict) -> None:
+    """A crawled SPA hash route's query (``/#/search?q=x``) -> ``fragment`` parameters
+    on the route's endpoint (``/#/search``, `core.urls.to_route_path`). The app reads it
+    in the browser, so it is a DOM point (confirmed only with a browser, M6), never a
+    ``query`` one: the server never sees it (forms phase 3, FR-AUD-22)."""
+    from fuzzlab.core.urls import spa_route, to_route_path
+    route = spa_route(raw)
+    if route is None or not route[1]:
+        return
+    counts.setdefault("fragment_parameter", 0)
+    endpoint_id = _upsert_endpoint(store, run_id, to_route_path(raw), "GET", source)
+    counts["endpoint"] += 1
+    for name, value in parse_qsl(route[1], keep_blank_values=True):
+        if _get_parameter(store, run_id, endpoint_id, name) is None:
+            store.conn.execute(
+                "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
+                "VALUES (?,?,?,?,?)", (run_id, endpoint_id, name, "fragment", value))
+            counts["parameter"] += 1
+            counts["fragment_parameter"] += 1
+
+
+# --- captured requests (forms phase 3, lane J; FR-AUD-22) ------------------------------
+#: Methods a captured request may have to be imported; any other (DELETE included) is
+#: never imported.
+REQUEST_METHODS = ("GET", "POST", "PUT", "PATCH")
+#: Methods imported only with ``--fuzz-json-writes`` (each probe updates the row the
+#: request targets; FR-FUZZ-47).
+WRITE_METHODS = frozenset({"PUT", "PATCH"})
+#: The ``form.enctype`` of a captured form-encoded request.
+FORM_URLENCODED = "application/x-www-form-urlencoded"
+
+
+def _body_kind(content_type) -> str | None:
+    """``"json"``, ``"form"`` or None for a captured request's content type."""
+    media = (content_type or "").split(";", 1)[0].strip().lower()
+    if media == "application/json" or (media.startswith("application/")
+                                        and media.endswith("+json")):
+        return "json"
+    if media == FORM_URLENCODED:
+        return "form"
+    return None
+
+
+def redact_leaf(segments, value):
+    """A captured body leaf as it may be stored and sent: blanked (a string ``""``, any
+    other type ``null``) when any key of its path is sensitive or its value looks like
+    an identifier, else ``value``. The JSON counterpart of `redact_sibling` (PA-0100,
+    FR-AUD-22)."""
+    from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
+    if any(is_sensitive_name(s) for s in segments) or looks_like_identifier(value):
+        return "" if isinstance(value, str) else None
+    return value
+
+
+def _captured_leaves(kind: str, body):
+    """``[(name, key segments, path or None, value)]`` of a captured body, or a refusal.
+    A JSON body's leaves keep their paths; a form body's names are flat."""
+    from fuzzlab.core import jsonbody
+    if kind == "json":
+        found = jsonbody.leaves(body)
+        if found is None:
+            return ("not a JSON object, or over the leaf/depth limits "
+                    f"({jsonbody.MAX_LEAVES} leaves, depth {jsonbody.MAX_DEPTH})")
+        return [(jsonbody.display_name(p), [s for s in p if isinstance(s, str)], p, v)
+                for p, v in found]
+    if not isinstance(body, dict) or not all(isinstance(v, str) for v in body.values()):
+        return "a form body that is not an object of strings"
+    if len(body) > jsonbody.MAX_LEAVES:
+        return f"over {jsonbody.MAX_LEAVES} fields"
+    return [(n, [n], None, v) for n, v in body.items()]
+
+
+def request_refusal(method: str, url: str, *, fuzz_json_writes: bool = False,
+                    page_url: str | None = None) -> str | None:
+    """Why a captured request is never imported, judged on its method and URL alone, or
+    None (FR-AUD-22): a method outside GET/POST/PUT/PATCH (DELETE included); PUT/PATCH
+    without ``fuzz_json_writes``; a destructive or transaction URL (the shared
+    `core.urls` rules); a URL on another origin than the page that sent it."""
+    from fuzzlab.core.urls import canonical_origin, destructive_reason, transaction_reason
+    method = (method or "").upper()
+    if method not in REQUEST_METHODS:
+        return f"method {method or '(none)'} is never imported"
+    if method in WRITE_METHODS and not fuzz_json_writes:
+        return f"{method} imported only with --fuzz-json-writes"
+    reason = destructive_reason(url)
+    if reason is not None:
+        return f"destructive URL ({reason!r})"
+    reason = transaction_reason(url)
+    if reason is not None:
+        return f"transaction URL ({reason!r})"
+    if page_url and "://" in (url or "") and "://" in page_url \
+            and canonical_origin(url) != canonical_origin(page_url):
+        return "a request to another origin than its page"
+    return None
+
+
+def body_refusal(url: str, leaves) -> str | None:
+    """Why a captured body is never imported, or None (FR-AUD-22): a credential-change
+    or account-management body (`credential_change_rule`, the one rule forms use), a
+    settings field (`formnav.settings_word` on any key), or a destructive or credential
+    entry (`entries_refusal`, credential names checked on every non-password leaf)."""
+    from fuzzlab.core.redaction import is_credential_name
+    from fuzzlab.tools.formnav import settings_word
+    passwords = [name for name, segs, _p, _v in leaves
+                 if any(is_credential_name(s) for s in segs)]
+    reason = credential_change_rule(passwords, url, what="body", field="password field")
+    if reason:
+        return reason
+    for name, segs, _p, _v in leaves:
+        word = next((w for w in map(settings_word, segs) if w), None)
+        if word:
+            return f"settings field {name!r} ({word!r})"
+    others = [(name, value if isinstance(value, str) else json.dumps(value))
+              for name, segs, _p, value in leaves if name not in passwords]
+    return (entries_refusal(others, credential_names=True)
+            or entries_refusal([(name, "") for name in passwords]))
+
+
+def _import_requests(src, store: Store, run_id: int, counts: dict, *,
+                     fuzz_json_writes: bool = False) -> None:
+    """The app's own captured requests (spider table ``discovered_requests``, lane I's
+    contract) -> endpoint, `form` row and parameters (forms phase 3, FR-AUD-22).
+
+    A JSON object body becomes a `form` row with ``enctype`` `core.jsonbody.ENCTYPE`,
+    its entries the leaves as ``[[path segments], typed value]`` (`jsonbody.
+    encode_entries`), and each string/number/bool leaf a ``json`` parameter named by
+    `jsonbody.display_name`. A form-encoded body becomes today's form points (``body``).
+    Never points: a password leaf (a credential name on any key; sent ``""`` and listed
+    in `form.password_fields`, so the path is isolated, FR-FUZZ-44), a sensitive or
+    identifier-like leaf (blanked, `redact_leaf`), and an object selector
+    (`_object_selector` on the last key; sent as captured). Refused requests are counted
+    (``request_refused``), never stored. An older spider DB has no such table."""
+    try:
+        rows = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
+    except sqlite3.Error:
+        return                                   # a spider DB from before FR-CRAWL-13
+    for key in ("request", "request_json", "request_form", "request_refused"):
+        counts.setdefault(key, 0)
+    for row in rows:
+        counts["request"] += 1
+        reason, kind, leaves = captured_request(dict(row), fuzz_json_writes=fuzz_json_writes)
+        if reason is not None:
+            counts["request_refused"] += 1
+            continue
+        _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
+                       leaves)
+
+
+def captured_request(row: dict, *, fuzz_json_writes: bool = False):
+    """``(refusal or None, body kind, leaves)`` for one ``discovered_requests`` row: the
+    whole import decision, pure (FR-AUD-22). ``leaves`` is ``[(name, key segments,
+    path or None, value)]`` when the request is accepted."""
+    from fuzzlab.core import jsonbody
+    url = row.get("url") or ""
+    kind = _body_kind(row.get("content_type"))
+    reason = request_refusal(row.get("method") or "", url,
+                             fuzz_json_writes=fuzz_json_writes,
+                             page_url=row.get("page_url"))
+    if reason is None and kind is None:
+        reason = f"unsupported content type {row.get('content_type')!r}"
+    if reason is not None:
+        return reason, kind, None
+    try:
+        leaves = _captured_leaves(kind, jsonbody.loads(row.get("body_json") or ""))
+    except (ValueError, TypeError, RecursionError):
+        leaves = "a malformed body"
+    if isinstance(leaves, str):
+        return leaves, kind, None
+    if not leaves:
+        return "an empty body", kind, None
+    return body_refusal(url, leaves), kind, leaves
+
+
+def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
+    """Write one accepted captured request (`_import_requests`): every value passes
+    `redact_leaf` before it is stored (PA-0100)."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
+    passwords, entries, points = [], [], []
+    for name, segs, path, value in leaves:
+        if any(is_credential_name(s) for s in segs):
+            passwords.append(name)
+            stored = ""                          # a password is sent empty, never fuzzed
+        else:
+            stored = redact_leaf(segs, value)
+        entries.append((path if kind == "json" else name, stored))
+        pinned = (stored != value or any(is_sensitive_name(s) for s in segs)
+                  or _object_selector(segs[-1] if segs else name))
+        if name not in passwords and not pinned and jsonbody.is_point_value(value):
+            points.append((name, value))
+    parts = urlparse(url)
+    endpoint_url = to_path(url) + ("?" + parts.query if parts.query else "")
+    endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
+    enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
+    cur = store.conn.execute(
+        "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields) "
+        "VALUES (?,?,?,?,?)",
+        (run_id, endpoint_id, enctype,
+         jsonbody.encode_entries(entries) if kind == "json" else json.dumps(entries),
+         json.dumps(passwords)))
+    form_id = int(cur.lastrowid)
+    counts["request_json" if kind == "json" else "request_form"] += 1
+    location = jsonbody.LOCATION if kind == "json" else "body"
+    for name, value in points:
+        if _get_parameter(store, run_id, endpoint_id, name) is not None:
+            continue                             # the first captured request wins
+        example = value if isinstance(value, str) else json.dumps(value)
+        store.conn.execute(
+            "INSERT INTO parameter (run_id, endpoint_id, name, location, example, "
+            "form_id) VALUES (?,?,?,?,?,?)",
+            (run_id, endpoint_id, name, location, example, form_id))
+        counts["parameter"] += 1
 
 
 def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
