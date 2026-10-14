@@ -77,7 +77,14 @@ rewards) derives from it.
   probe, base or variant, is checked by `refuse_destructive` **before it is sent**;
   refusals are counted as `destructive_refused`) — the harness's own consumer of
   Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
-  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
+  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring). *(CC-FUZZ-0080, FR-SESS-20, BUG-0134:)*
+  an authenticated grey-box run hands `RequestsCorrelatingSender` the session's
+  canonical origins with its cookie (`cookie_origins`, from `greybox_cli._cookie_for`):
+  the cookie is attached only to a probe on one of them (a cookie without origins is
+  refused at construction); a probe on another origin goes without it, its
+  `Probe.session` is `"anonymous (out of origin)"`, the attempt's features carry
+  `session`, and the run counts it (`summary["session_out_of_origin"]`, the
+  `greybox_session_out_of_origin` metric when non-zero, the CLI summary).
 - **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
   to `core/store.py`'s `metric_series` table (component #2, CORE) once per
   attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
@@ -1714,8 +1721,10 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **Breakers (run-wide):**
     - *single-session:* the run's session fails `verify_live` after the run's first copy
       login or any copy re-login, or the run's manager reports a logout of the run's
-      identity on the run's host while a copy is live (a logout listener registered,
-      once, before the first copy login). Copies are dropped; every isolated path goes
+      identity on one of the run's session's origins while a copy is live (a logout
+      listener registered, once, before the first copy login; *CC-FUZZ-0080,
+      FR-SESS-20:* compared by canonical origin, never host, so another app's logout
+      on another port of the host never trips it; lane A's header breaker likewise). Copies are dropped; every isolated path goes
       anonymous; the run's session re-logs in once.
     - *failed-logins:* after 2 failed copy logins, no new copies.
   - **Budget and records.** Isolated sends spend the run's `RequestBudget`; copy logins,
@@ -1724,6 +1733,13 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     and per-path reasons — fixed texts, never a failure message, URL or credential
     value; `fuzzlab auto` prints it.
     `isolated_copy_logins()` is public (lane A's header breaker reads it).
+  - **Out-of-origin sends** *(CC-FUZZ-0080, FR-SESS-20, BUG-0134).* A send the session
+    manager made without the session because its origin is not one of the session's
+    (`SessionManager.session_note`) comes back with `Probe.session = "anonymous (out of
+    origin)"`; the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
+    such note on the verdict's `evidence["session"]` (confirming or inconclusive);
+    `SeamProbeSender.session_out_of_origin` (the run's manager and every copy) becomes
+    `metrics["session_out_of_origin"]`, which `fuzzlab auto` prints.
   - **Accepted false positives** (a real login form excluded: a missed finding, never a
     safety risk): Rails `/sessions/new`, Devise `/users/sign_in`, `/admin/login`,
     `/account/login`, `/my-account`, a login button valued `Save`, and bWAPP's

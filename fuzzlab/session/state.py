@@ -1,4 +1,4 @@
-"""Per-(host, identity) session state: cookies + headers/tokens.
+"""Per-(host, identity) session state: cookies + headers/tokens, bound to its origins.
 
 Generalized beyond a cookie jar so it holds whatever the detected scheme uses —
 a session cookie, a bearer/JWT header, or an HTTP Basic header. Secrets are
@@ -49,6 +49,14 @@ class SessionState:
     #: cookie jar (a cookie the app's JS set, e.g. Juice Shop's ``token``) rather than
     #: from the login response (BUG-0132). In memory only.
     browser_cookies: tuple[str, ...] = field(default=(), repr=False, compare=False)
+    #: The canonical origins (``core.urls.canonical_origin``) this session's cookies,
+    #: tokens and Basic header may be sent to (FR-SESS-20, BUG-0134): the base URL the
+    #: login ran from, the login page, the credential destination and the operator's
+    #: ``auth_origins`` (`session.manager.session_origins`); for a captured session, the
+    #: origins it was observed on. Another port of the same host is another origin. In
+    #: memory only: never persisted, so a resumed record never applies a session by
+    #: itself. Empty means nowhere (fail closed). Not a secret.
+    origins: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         if self.secure_only is None:
@@ -86,6 +94,7 @@ class SessionState:
             "cookies": sorted(self.cookies.keys()),           # names only
             "auth_headers": sorted(self.headers.keys()),      # names only
             "token_exp": self.token_exp,
+            "origins": sorted(self.origins),                  # not secret (FR-SESS-20)
         }
 
     def non_secret_state(self) -> dict[str, object]:

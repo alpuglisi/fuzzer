@@ -22,6 +22,40 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0080 — Senders and the oracle respect origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change:
+  - **`greybox/run.py`:** `RequestsCorrelatingSender(cookie_origins=)`: the cookie is
+    attached only to a probe on one of the session's canonical origins; otherwise the
+    probe goes without it, `Probe.session = "anonymous (out of origin)"`, counted
+    (`session_out_of_origin`). A cookie without origins is refused at construction.
+    `run_greybox` records `features["session"]`, `summary["session_out_of_origin"]` and
+    the `greybox_session_out_of_origin` metric (when non-zero).
+  - **`greybox/greybox_cli.py`:** `_cookie_for` also returns the session's origins and
+    hands them to the sender; the summary prints the count.
+  - **`oracle/probe.py`:** `Probe.session`.
+  - **`oracle/oracle.py`:** `_SessionNotes`, around every strategy run (forwarding only
+    non-default arguments; transparent `__getattr__`, `send_correlated` watched too),
+    stamps a probe's note on the verdict's `evidence["session"]`.
+  - **`tools/probesender.py`:** `SeamProbeSender` stamps `Probe.session` from the
+    manager's `session_note` (the copy's for an isolated send) and reports
+    `session_out_of_origin`; lane A `_on_logout` and lane B `_on_main_logout` take the
+    logout's origin and compare it with the run's session's origins
+    (`session_origins_for`), never a host.
+  - **`harness/auto.py` / `auto_cli.py`:** `metrics["session_out_of_origin"]`, printed.
+- Impact: greybox and auto runs report probes sent without the session; a finding made
+  without it says so in its evidence. `tests/test_sender_conformance.py` lists the new
+  wrapper.
+- Risk: low. Mitigated: the conformance guard (signature, forwarding, PRG capability)
+  covers `_SessionNotes`; greybox's gate is mutation-checked.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_session_origin_scope.py`; updated
+    `test_forms_phase2.py`, `test_login_form_isolation.py`, `test_destructive_urls.py`,
+    `test_session_transport_binding.py`, `test_sender_conformance.py`) — done
+  - [x] FR-FUZZ-8 and FR-FUZZ-44 amended in place — done
+- Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (the greybox gate mutation
+  fails its test); the oracle, greybox, sender-conformance, PRG and lane A/B suites pass.
+
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
   literal sat in the edit field (`<input value="#{728*889}">`) and its rule was

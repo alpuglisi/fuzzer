@@ -373,6 +373,11 @@ class LocalSpider:
         self._auth_headers: dict = {}
         #: where the session's headers may go (FR-CRAWL-14; set with the session)
         self._header_scope = self._in_scope
+        #: where the context's cookies may go (FR-SESS-20: the session's origins; set
+        #: with the session, None for an unauthenticated crawl)
+        self._cookie_scope = None
+        #: in-scope requests sent without the session: another origin (FR-SESS-20)
+        self.session_out_of_origin = 0
         #: the in-scope localStorage entries the crawl adopted, ``{origin: {name:
         #: value}}``, checked after each authenticated submission (FR-CRAWL-14)
         self._adopted_storage: dict = {}
@@ -500,6 +505,7 @@ class LocalSpider:
                 in_scope=self._in_scope, scope_urls=[self.start_url])
             self._auth_headers = dict(session.headers)
             self._header_scope = session.header_scope
+            self._cookie_scope = session.cookie_scope
             self._adopted_storage = dict(session.local_storage)
             # what a re-adoption after a session loss restores (W4): the values as
             # adopted, never a rotated one
@@ -535,8 +541,10 @@ class LocalSpider:
         scope, the destructive rule, the DELETE rule and the passive observer (which
         reads script bodies only in the crawl's own context). ``session``: the crawl's
         own authenticated context, whose route adds the session's headers to in-scope
-        requests on the session's host (FR-CRAWL-14); an unauthenticated context gets
-        none."""
+        requests on the session's origins (FR-CRAWL-14) and withholds the context's
+        port-agnostic cookies from an in-scope request on any other origin (FR-SESS-20,
+        BUG-0134: an external crawl's scope is its host on every port); an
+        unauthenticated context gets neither."""
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
                    on_abort=self._note_guard_abort,
@@ -547,6 +555,8 @@ class LocalSpider:
                                              scripts=scripts and self._spa_on),
                    headers=(self._auth_headers or None) if session else None,
                    header_scope=self._header_scope if session else None,
+                   cookie_scope=self._cookie_scope if session else None,
+                   on_session_withheld=self._note_session_withheld if session else None,
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
@@ -841,6 +851,10 @@ class LocalSpider:
     def _note_out_of_scope(self, url):
         host = urlparse(url).hostname or "?"
         self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
+
+    def _note_session_withheld(self, url):
+        """An in-scope request went without the session: another origin (FR-SESS-20)."""
+        self.session_out_of_origin += 1
 
     # ----- fetchers -----
     def _fetch_static(self, url):
@@ -1694,12 +1708,17 @@ class LocalSpider:
         checked_api_request(self._in_scope, action_url)          # BUG-0123
         if self.engine == "playwright" and self._pw is not None:
             # one scope-checked request, no redirects: the session's headers only when
-            # the action is on the session's host over its transport (FR-CRAWL-14)
+            # the action is on the session's origins over its transport (FR-CRAWL-14)
             headers = self._auth_headers if self._auth_headers and \
                 self._header_scope(action_url) else None
-            ctx = self._pw.request.new_context(
-                storage_state=self._page.context.storage_state(),
-                extra_http_headers=headers)
+            storage = self._page.context.storage_state()
+            if self._cookie_scope is not None and not self._cookie_scope(action_url):
+                # another origin than the session's: none of the jar's port-agnostic
+                # cookies go with it (FR-SESS-20, BUG-0134)
+                storage = {**storage, "cookies": []}
+                self._note_session_withheld(action_url)
+            ctx = self._pw.request.new_context(storage_state=storage,
+                                               extra_http_headers=headers)
             try:
                 if method == "POST":
                     resp = ctx.fetch(action_url, method="POST", data=urlencode(pairs),
@@ -1878,6 +1897,10 @@ class LocalSpider:
                                   sorted(self.skipped_out_of_scope.items()))
                 logging.info(f"Blocked {sum(self.skipped_out_of_scope.values())} "
                              f"out-of-scope browser request(s): {hosts} (BUG-0123).")
+            if self.session_out_of_origin:
+                logging.info(f"Sent {self.session_out_of_origin} in-scope request(s) "
+                             f"without the session: another origin than the session's "
+                             f"(session_out_of_origin, FR-SESS-20).")
             for line in self.spa_summary():
                 logging.info(line)
             self.storage.record_stats({**self.spa_counts,

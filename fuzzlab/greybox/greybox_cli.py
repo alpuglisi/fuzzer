@@ -25,11 +25,12 @@ from fuzzlab.tools.store_adapter import import_spider
 
 
 def _cookie_for(host: str, identity: str, base_url: str):
-    """``(Cookie header value or None, secure_only, is_auth_endpoint)`` for an
+    """``(Cookie header value or None, secure_only, is_auth_endpoint, origins)`` for an
     authenticated surface (fail loud). ``secure_only``: the session was established over
     https, so the sender must never put the cookie on a plain-http request (BUG-0098).
     ``is_auth_endpoint``: the session's login endpoints, probed without the cookie
-    (BUG-0112)."""
+    (BUG-0112). ``origins``: the session's canonical origins; the sender attaches the
+    cookie only to a probe on one of them (FR-SESS-20, BUG-0134)."""
     from fuzzlab.core.config import load_config
     from fuzzlab.core.credentials import CredentialStore
     from fuzzlab.session.manager import SessionManager
@@ -42,10 +43,11 @@ def _cookie_for(host: str, identity: str, base_url: str):
     mgr = SessionManager(store, scope_hosts=scope)
     header = mgr.session_header(host, identity, base_url,     # SessionAuthError if wrong
                                 operator=True)
-    secure_only = bool(mgr.ensure(host, identity, base_url, operator=True).secure_only)
+    state = mgr.ensure(host, identity, base_url, operator=True)
+    secure_only, origins = bool(state.secure_only), frozenset(state.origins)
     if header.startswith("Cookie: "):
-        return header[len("Cookie: "):], secure_only, mgr.is_auth_endpoint
-    return None, secure_only, mgr.is_auth_endpoint
+        return header[len("Cookie: "):], secure_only, mgr.is_auth_endpoint, origins
+    return None, secure_only, mgr.is_auth_endpoint, origins
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -109,11 +111,11 @@ def main(argv: list[str]) -> int:
         p.error("--points ground-truth requires --ground-truth")
 
     host = urlparse(args.base_url).hostname or args.base_url
-    cookie, cookie_secure_only, is_auth_endpoint = None, False, None
+    cookie, cookie_secure_only, is_auth_endpoint, cookie_origins = None, False, None, None
     if args.identity:
         from fuzzlab.session.manager import SessionAuthError
         try:
-            cookie, cookie_secure_only, is_auth_endpoint = _cookie_for(
+            cookie, cookie_secure_only, is_auth_endpoint, cookie_origins = _cookie_for(
                 host, args.identity, args.base_url)
         except SessionAuthError as exc:
             p.error(f"authentication failed for {args.identity}@{host}: {exc}")
@@ -142,6 +144,7 @@ def main(argv: list[str]) -> int:
 
             sender = gbrun.RequestsCorrelatingSender(cookie=cookie,
                                                      cookie_secure_only=cookie_secure_only,
+                                                     cookie_origins=cookie_origins,
                                                      is_auth_endpoint=is_auth_endpoint)
             if source == "ground-truth":                 # explicit points (BUG-0112)
                 sender.allow_explicit(p.url for p in points)
@@ -182,6 +185,9 @@ def _print_summary(args, source, counts, points, skipped, summary, run_id) -> No
     if args.mutation_variants:
         print(f"  mutation variants probed: {summary.get('mutation_variants_probed', 0)}   "
               f"recorded (accepted): {summary.get('mutation_variants_recorded', 0)}")
+    if summary.get("session_out_of_origin"):
+        print(f"  probes sent without the session (another origin, FR-SESS-20): "
+              f"{summary['session_out_of_origin']}")
     if summary.get("destructive_refused"):
         print(f"  destructive payloads refused (never sent): "
               f"{summary['destructive_refused']} — pass --allow-destructive (lab-only)")

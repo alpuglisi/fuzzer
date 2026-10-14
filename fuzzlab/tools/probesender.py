@@ -215,7 +215,7 @@ class SeamProbeSender(_ExplicitAllowance):
         self._counts = {"sends": 0, "anonymous_sends": 0, "failed_logins": 0,
                         "verifications": 0, "send_ordinal": 0}
         self._first_copy_login_send: int | None = None
-        self._run_host: str | None = None
+        self._run_url: str | None = None
 
         # -- header breaker (FR-FUZZ-43) --
         self.header_stop_reason: str | None = None
@@ -260,10 +260,31 @@ class SeamProbeSender(_ExplicitAllowance):
                               "reason": r} for k, r in sorted(self._failed.items())],
             }
 
+    @property
+    def session_out_of_origin(self) -> int:
+        """Sends made without the session because their origin is not one of its
+        origins (FR-SESS-20): the run's manager's and every isolated copy's."""
+        with self._iso_lock:
+            copies = list(self._all_copies)
+        managers = ([self._manager] if self._manager is not None else []) + \
+            [c.manager for c in copies]
+        return sum(int(getattr(m, "out_of_origin_sends", 0) or 0) for m in managers)
+
     def _target_host(self, url: str) -> str:
         """The run's target host: the operator's base URL's, else this URL's."""
         from urllib.parse import urlparse
         return urlparse(self._base_url or url).hostname or ""
+
+    def _run_origins(self, target_url: str | None) -> frozenset[str]:
+        """The origins of the run's session for ``target_url`` (the operator's base, else
+        the probed URL): what a logout's origin is compared with (FR-SESS-20, O9), never
+        a host. Before any session exists, the target's own origin."""
+        from fuzzlab.core.urls import origin_scope
+        if not target_url:
+            return frozenset()
+        found = self._manager.session_origins_for(target_url, self._identity) \
+            if self._manager is not None else frozenset()
+        return found or origin_scope(target_url)
 
     def _listen(self, url: str) -> None:
         """Register the main-logout listener once, before the first copy login starts
@@ -272,14 +293,15 @@ class SeamProbeSender(_ExplicitAllowance):
             if self._listening or self._manager is None:
                 return
             self._listening = True
-            self._run_host = self._target_host(url)
+            self._run_url = self._base_url or url
         self._manager.add_logout_listener(self._on_main_logout)   # idempotent too
 
-    def _on_main_logout(self, host: str, identity: str) -> None:
+    def _on_main_logout(self, origin: str, identity: str) -> None:
         """The run's session was logged out while a copy was live: treat it as a
         single-session app (FR-FUZZ-44). Runs inside the main send that observed it;
-        only the run's own identity on the run's target host counts."""
-        if identity != self._identity or host != self._run_host:
+        only the run's own identity on one of the run's session's origins counts
+        (FR-SESS-20: another port of the same host is another app)."""
+        if identity != self._identity or origin not in self._run_origins(self._run_url):
             return
         with self._iso_lock:
             if not self._copies:
@@ -413,23 +435,24 @@ class SeamProbeSender(_ExplicitAllowance):
         # isolated-copy login attempts so far (FR-FUZZ-44), never this run's own logins
         return self.isolated_copy_logins()
 
-    def _header_target_host(self, urlsplit) -> str | None:
-        """The run's target host: the operator's base URL's, else the host of the
-        main send in progress or last made."""
+    def _header_target_url(self) -> str | None:
+        """The run's target: the operator's base URL, else the URL of the main send in
+        progress or last made."""
         if self._base_url:
-            return urlsplit(self._base_url).hostname
+            return self._base_url
         for seen in (self._current, self._last_main_was_header):
             if seen is not None:
-                return urlsplit(seen[-1]).hostname
+                return seen[-1]
         return None
 
-    def _on_logout(self, host: str, identity: str) -> None:
+    def _on_logout(self, origin: str, identity: str) -> None:
         """Told by the main manager inside the send that observed a logout. Records
-        only; never raises, so that probe's response is kept."""
+        only; never raises, so that probe's response is kept. Only a logout on one of
+        the run's session's origins counts (FR-SESS-20, O9; never a host compare)."""
         if self.header_stop_reason is not None or identity != self._identity:
             return
         from urllib.parse import urlsplit
-        if host != self._header_target_host(urlsplit):
+        if origin not in self._run_origins(self._header_target_url()):
             return                                   # not the run's target (reviewers)
         current = self._current
         if current is not None and current[0] == "header":
@@ -629,7 +652,22 @@ class SeamProbeSender(_ExplicitAllowance):
         if main:
             self._last_main_was_header = (param, url) if location == "header" else None
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
-                     elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers))
+                     elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers),
+                     session=self._session_note(client, identity, req.url))
+
+    def _session_note(self, client, identity: str, url: str) -> str | None:
+        """What the session manager decided for this send (FR-SESS-20, O2): its
+        `session_note` -- ``"anonymous (out of origin)"`` when the run's (or the copy's)
+        session was withheld because ``url`` is on another origin -- else None."""
+        if identity == "anonymous":
+            return None
+        manager = self._manager
+        if client is not self._client:
+            with self._iso_lock:
+                manager = next((c.manager for c in self._all_copies
+                                if c.client is client), None)
+        note = getattr(manager, "session_note", None)
+        return note(url, identity) if callable(note) else None
 
 
 class RequestsProbeSender(_ExplicitAllowance):

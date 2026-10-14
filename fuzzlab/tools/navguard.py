@@ -25,8 +25,15 @@ requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
 
 A session's headers (a bearer) are added **by the route only**, to a request that passed
 the scope predicate and the caller's header scope, and to each fetched redirect hop
-that does -- never ``set_extra_http_headers`` (FR-CRAWL-14). A ``request_refusal`` hook
-sees a request's body before it is sent (FR-SESS-19's login window).
+that does -- never ``set_extra_http_headers`` (FR-CRAWL-14). In an authenticated
+context the route also **withholds the context's cookies** from an in-scope request
+(and hop) the caller's ``cookie_scope`` refuses -- another origin than the session's
+(FR-SESS-20, BUG-0134): browser cookies are port-agnostic, so the jar would otherwise
+reach another app on another port of the host. ``route.fetch`` (and the context's
+request client) add the jar only when the request carries no ``Cookie`` header, so the
+route passes an explicit empty one (``headers=``): the request goes out with no cookie
+value. A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's
+login window).
 
 The crawler's **reveal window** (FR-CRAWL-15/16, W1-W3) uses two hooks: ``window`` on
 the route (asked for every request after the scope and destructive checks, and for
@@ -59,7 +66,9 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        | None = None,
                        headers: dict[str, str] | None = None,
                        header_scope: Callable[[str], bool] | None = None,
-                       window: Callable[[str, str, bool], str | None] | None = None):
+                       window: Callable[[str, str, bool], str | None] | None = None,
+                       cookie_scope: Callable[[str], bool] | None = None,
+                       on_session_withheld: Callable[[str], None] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -87,6 +96,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     ``header_scope`` (default ``in_scope``) -- never ``set_extra_http_headers``, which
     would hand them to whatever the browser sends.
 
+    ``cookie_scope`` (an authenticated context, FR-SESS-20): an in-scope URL it refuses
+    (another origin than the session's) is fetched -- the request and each such
+    redirect hop -- with an empty ``Cookie`` header, so neither ``route.fetch`` nor the
+    request client adds the context's port-agnostic jar, and without the session's
+    headers; ``on_session_withheld(url)`` is told. A redirected navigation that lands
+    on such a URL is answered with the landing response itself, never with a redirect
+    the browser would follow unrouted with its jar (verified live; ``page.url`` then
+    stays the first URL). None: nothing is withheld (an unauthenticated context has no
+    session to withhold).
+
     ``window(method, url, navigation)`` (the crawler's reveal window, FR-CRAWL-15/16):
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
@@ -110,9 +129,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
 
     def session_headers(url: str) -> dict[str, str]:
         """The session's headers for ``url``: only after ``in_scope`` (the caller has
-        already refused anything else) and ``header_scope`` pass (FR-CRAWL-14)."""
-        if not headers or not in_scope(url) or \
-                not (header_scope or in_scope)(url):
+        already refused anything else) and ``header_scope`` pass (FR-CRAWL-14). With
+        ``cookie_scope``, a URL it refuses gets an empty ``Cookie`` instead, which keeps
+        the context's jar off it (FR-SESS-20)."""
+        if not in_scope(url):
+            return {}
+        if cookie_scope is not None and not cookie_scope(url):
+            if on_session_withheld is not None:
+                on_session_withheld(url)
+            return {"cookie": ""}                   # withhold the jar (BUG-0134)
+        if not headers or not (header_scope or in_scope)(url):
             return {}
         return dict(headers)
 
@@ -210,9 +236,13 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                              f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})")
         if final is first:
             route.fulfill(response=first)
-        elif req.is_navigation_request() and method in ("GET", "HEAD"):
+        elif req.is_navigation_request() and method in ("GET", "HEAD") and \
+                (cookie_scope is None or cookie_scope(final_url)):
             # the browser re-requests the (checked) landing URL itself, so page.url and
-            # relative links are right; a GET or HEAD only, never a body (reviewers)
+            # relative links are right; a GET or HEAD only, never a body (reviewers).
+            # That re-request is Chromium's own and never routed, so it carries the
+            # context's jar: in an authenticated context only a landing on the
+            # session's origins is answered this way (FR-SESS-20, BUG-0134)
             status = 303 if req.method.upper() not in ("GET", "HEAD") else 302
             route.fulfill(status=status, headers={"location": final_url})
         else:
@@ -305,11 +335,14 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                header_scope: Callable[[str], bool] | None = None,
                window: Callable[[str, str, bool], str | None] | None = None,
                ws_hold: Callable[[], bool] | None = None,
-               on_ws_drop: Callable[[str], None] | None = None) -> None:
+               on_ws_drop: Callable[[str], None] | None = None,
+               cookie_scope: Callable[[str], bool] | None = None,
+               on_session_withheld: Callable[[str], None] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
-    (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window`` and the
-    session ``headers`` (with ``header_scope``): see `make_route_handler`; ``ws_hold`` /
+    (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
+    session ``headers`` (with ``header_scope``) and ``cookie_scope`` /
+    ``on_session_withheld`` (FR-SESS-20): see `make_route_handler`; ``ws_hold`` /
     ``on_ws_drop``: see `make_ws_handler`. Session headers are applied by the route only
     (FR-CRAWL-14)."""
     api = getattr(target, "request", None)
@@ -319,7 +352,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             observe=observe,
                                             request_refusal=request_refusal,
                                             headers=headers, header_scope=header_scope,
-                                            window=window))
+                                            window=window, cookie_scope=cookie_scope,
+                                            on_session_withheld=on_session_withheld))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "

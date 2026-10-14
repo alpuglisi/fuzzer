@@ -21,17 +21,29 @@ LOGGED_OUT = Response(200, {}, LOGIN_HTML.encode(), 5.0)
 FINE = Response(200, {}, b"<html>welcome admin</html>", 5.0)
 
 
-def test_listener_told_once_per_logout_with_host_and_identity():
+def test_listener_told_once_per_logout_with_origin_and_identity():
+    """FR-SESS-20: the listener gets the canonical origin the logout was seen on (one
+    of the session's origins; loopback aliases folded), never a bare host."""
     mgr, seen = _mgr(), []
-    mgr.add_logout_listener(lambda host, identity: seen.append((host, identity)))
+    mgr.add_logout_listener(lambda origin, identity: seen.append((origin, identity)))
     mgr.observe(REQ, FINE, "admin")
     assert seen == []
     mgr.observe(REQ, LOGGED_OUT, "admin")
     mgr.observe(REQ, LOGGED_OUT, "admin")        # already invalid: not told again
-    assert seen == [("localhost", "admin")]
+    assert seen == [("http://127.0.0.1:80", "admin")]
     mgr.prepare(REQ, "admin")                    # re-login; a new logout is told again
     mgr.observe(REQ, LOGGED_OUT, "admin")
-    assert seen == [("localhost", "admin")] * 2
+    assert seen == [("http://127.0.0.1:80", "admin")] * 2
+
+
+def test_another_ports_login_page_never_logs_the_session_out():
+    """FR-SESS-20 (O4): observe looks the session up by origin membership, so another
+    app's login page on another port of the same host is not this session's logout."""
+    mgr, seen = _mgr(), []
+    mgr.add_logout_listener(lambda origin, identity: seen.append(origin))
+    other = Request("GET", "http://localhost:8090/login.php", identity="admin")
+    mgr.observe(other, LOGGED_OUT, "admin")
+    assert seen == [] and mgr._state[("localhost", "admin")].valid
 
 
 def test_adding_the_same_listener_twice_registers_it_once():

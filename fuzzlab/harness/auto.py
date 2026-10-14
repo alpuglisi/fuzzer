@@ -622,6 +622,10 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     anonymous = getattr(sender, "auth_endpoint_anonymous_sends", None)
     if anonymous is not None:
         result.metrics["auth_endpoint_anonymous_sends"] = anonymous
+    out_of_origin = getattr(sender, "session_out_of_origin", None)
+    if isinstance(out_of_origin, int) and out_of_origin:
+        # sends made without the session: another origin (FR-SESS-20, BUG-0134)
+        result.metrics["session_out_of_origin"] = out_of_origin
     if plugins is not None:
         # post-run stages (the ML stages, FR-ML-6), each its own guarded unit of work;
         # then close the run's plugin record with each plugin's final status

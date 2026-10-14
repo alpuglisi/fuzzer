@@ -3,6 +3,41 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change:
+  - **`tools/browserauth.py`:** `header_scope_for(state, base_url, in_scope)` admits an
+    in-scope URL whose canonical origin is one of `state.origins` (a state without
+    origins: the base URL's origin only), with the https floor; it was
+    `canonical_host(url) == host`. `BrowserSession.cookie_scope` (default: the same
+    predicate, PA-0003).
+  - **`tools/navguard.py`:** `make_route_handler` / `guard_page` take `cookie_scope` and
+    `on_session_withheld`. In an authenticated context an in-scope request or redirect
+    hop on another origin is fetched with an explicit empty `Cookie` header (Playwright's
+    API client adds the context's port-agnostic jar only when no `Cookie` header is
+    given; checked in its source and live) and without the session's headers; a
+    redirected navigation landing there is answered with the landing response, not a
+    redirect: Chromium's own re-request of the landing URL is never routed and carried
+    the jar (found by the real-browser test, fixed, then mutation-checked).
+  - **`tools/spider.py`:** the crawl's authenticated context passes `cookie_scope` and
+    counts withheld requests (`session_out_of_origin`, summarised at the end of the
+    crawl); `_isolated_submit` drops the jar's cookies for an action on another origin.
+- Impact: an external (any-port) crawl visits another port of its host anonymously; a
+  loopback crawl is unchanged (its scope is already the exact origin). The auditor's
+  browser (CC-AUD-0038) gets the origin-based header scope through `browserauth` with no
+  code change. On such a landing, `page.url` stays the first URL (relative links on that
+  page resolve against it; in scope either way).
+- Risk: low-medium (browser path). Mitigated: unit tests of the route (request, hop,
+  landing) and a real-Chromium crawl whose second server records every request.
+  Residual: an in-scope WebSocket on another origin is connected by the browser itself.
+- Deliverables:
+  - [x] code (`tools/browserauth.py`, `tools/navguard.py`, `tools/spider.py`) — done
+  - [x] tests (`tests/test_session_origin_scope.py`: header scope, the route's
+    withholding, `_isolated_submit`, the real-Chromium external crawl) — done
+  - [x] FR-CRAWL-14 amended in place — done
+- Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (mutation checks of
+  `header_scope_for`, the cookie strip and its landing rule each fail their tests);
+  the browser scope / browser login / SPA / forms phase 4 suites pass.
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

@@ -342,6 +342,7 @@ def test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_
             return R()
 
     sender = RequestsCorrelatingSender(cookie="PHPSESSID=s", session=S(),
+                                       cookie_origins=frozenset({"http://h:80"}),
                                        is_auth_endpoint=lambda u: u.endswith("/login.php"))
     sender.send_correlated("http://h/login.php", "u", "x")
     sender.send_correlated("http://h/a.php", "id", "1")

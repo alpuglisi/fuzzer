@@ -556,6 +556,9 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     if m.get("auth_endpoint_anonymous_sends"):
         print(f"  auth-endpoint probes sent without the session: "
               f"{m['auth_endpoint_anonymous_sends']} (NFR-FUZZ-safe)")
+    if m.get("session_out_of_origin"):
+        print(f"  probes sent without the session (another origin, FR-SESS-20): "
+              f"{m['session_out_of_origin']}")
     ml = stage("score") if args.score else None
     rank = stage("rank") if args.rank else None
     anomaly = stage("anomaly") if args.anomaly else None

@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0134: a session is sent only to its own origins, FR-SESS-20)
+- **Why:** a session keyed by host went to every port of it, so on the loopback lab one
+  app's cookie and bearer reached another app (and could log in there); BUG-0132's review
+  (reviewer A S2) found it, PA-0123's "stated exception" had kept it.
+- **What:** `SessionState.origins` (O1-O13 of the reconciled design); `prepare`,
+  `ensure`, `authorize`, `observe`, `verify_live`/the probe differential, greybox, proxy
+  capture, the browser route (jar withheld from another origin), the breakers' listeners,
+  auth endpoints and `session print` all decide by origin; out-of-origin sends are
+  anonymous, counted (`session_out_of_origin`) and stamped on verdicts. CC-SESS-0023,
+  CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023; BUG-0134, PA-0134.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

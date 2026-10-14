@@ -1700,3 +1700,27 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+
+- **PA-0134** — Strengthens `PA-0123` (scope is an origin), `PA-0099` (a floor binds every
+  credential-bearing artefact at every send point) and `PA-0132` (a session handed between
+  clients), after BUG-0134: a session was sent to every port of its host (Juice Shop's
+  cookie and bearer to bWAPP on another loopback port), and a request there could log in
+  there. PA-0123 governed request scope only, and the host-level session rule survived it
+  as a "stated exception" no test pinned.
+  1. **Every secret-bearing artefact carries the origins it belongs to from creation**
+     (a session's cookies, tokens and Basic header, a browser's jar and storage state, a
+     captured session), and every send path checks membership through one predicate
+     (`SessionState.origins`; `prepare`, `authorize`, `_navigate(session_origins=)`,
+     `header_scope_for` / `cookie_scope`, greybox's `cookie_origins`). A storage key such
+     as `(host, identity)` indexes; it never authorises a send. An artefact with no
+     origins goes nowhere (fail closed).
+  2. **A stated exception to where a secret may go is pinned by a test of its exact
+     extent, and is re-reviewed in the same change whenever a PA narrows the same class**
+     (as PA-0123 narrowed scope to an origin). A security exception is never deferred in
+     prose only (`PA-0054(3)`, `PA-0056(3)`).
+  3. **Enforced by an AST guard** over the session-carrying modules: no `==`/`!=` with a
+     hostname (`.hostname`, `canonical_host(...)`) decides a send, except listed, reasoned
+     allowances; proven on BUG-0134's own shapes (PA-0034(2))
+     (`tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts`).
+     The guard is a lint: the real-server tests (B receives nothing) are the proof.
+  (from BUG-0134)

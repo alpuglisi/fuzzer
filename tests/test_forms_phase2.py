@@ -765,13 +765,16 @@ def test_a_trip_on_the_last_header_probe_is_still_reported(tmp_path):
     assert len([r for r in site.requests if "User-Agent" in r[1]]) == 1
 
 
-def test_a_logout_on_another_host_does_not_trip():
+def test_a_logout_on_another_host_or_port_does_not_trip():
+    """FR-SESS-20 (O9): the logout's canonical origin is compared with the run's
+    session's origins, never a host: another port of the same host is another app."""
     site, sender = _ua_bound_sender()
     sender.send("http://localhost/a.php", "id", "1")
     sender._current = ("header", "User-Agent", "http://localhost/a.php")
-    sender._on_logout("elsewhere.example", "admin")
+    sender._on_logout("http://elsewhere.example:80", "admin")
+    sender._on_logout("http://127.0.0.1:3000", "admin")         # same host, other port
     assert sender.header_stop_reason is None
-    sender._on_logout("localhost", "admin")
+    sender._on_logout("http://127.0.0.1:80", "admin")
     assert sender.header_stop_reason
 
 

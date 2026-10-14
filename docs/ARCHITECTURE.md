@@ -1322,7 +1322,12 @@ tracked in the requirements files, not here.
   the session's protected probe for `verify_live`). The context's `storage_state` is
   kept in memory only (`SessionState.browser_state`).
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
-  identity)`, `ensure(identity)`, resolved by the request's host. `authorize(request,
+  identity)`, `ensure(identity)`, resolved by the request's host and **sent by
+  origin**: a session carries `SessionState.origins` (base, login page, credential
+  destination, `auth_origins`; in memory only) and every carrier -- `prepare`,
+  `authorize`, `observe`, `verify_live`, greybox's `cookie_origins`, the browser
+  route's `header_scope`/`cookie_scope`, `session_header(s)` -- checks membership;
+  another port of the host is another app (FR-SESS-20, CC-SESS-0023, BUG-0134). `authorize(request,
   identity, prepared_host)` re-checks a request after a plugin edits it. Login
   discovery walks redirects by hand, anchored to operator input; an https session is
   never sent over http (`secure_only`) on any send path (CC-SESS-0013,
@@ -1330,7 +1335,8 @@ tracked in the requirements files, not here.
   (`ensure(..., operator=True)`, remembered per host and identity for re-login); a
   derived base is the request's directory without its query, never the bare origin
   (CC-SESS-0016, BUG-0113). `add_logout_listener` tells a caller when `observe` logs a
-  session out (CC-SESS-0017). `isolated_copy` gives a throwaway manager with its own
+  session out (CC-SESS-0017; since CC-SESS-0023 the listener receives the logout's
+  canonical origin, not a host). `isolated_copy` gives a throwaway manager with its own
   login and no store, for probing in-app login forms; `verify_live` re-checks the run's
   session (CC-SESS-0018, FR-SESS-17). Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,

@@ -191,9 +191,22 @@ fuzzer.
     the session's own cookies (`add_cookies`, origin root).
   - **Headers.** The session's headers (a bearer) are added by the crawl context's
     guarded route only: `route.fetch(headers=)` after `in_scope` passes, and on each
-    fetched redirect hop only when that hop is in scope; only to the session's own host
-    (loopback aliases one host), and over https when the session is https-only
-    (`browserauth.header_scope_for`). Never `set_extra_http_headers` or a browser
+    fetched redirect hop only when that hop is in scope; only to the session's own
+    origins *(CC-CRAWL-0026, FR-SESS-20, BUG-0134; before: its own host)* (loopback
+    aliases one origin, another port another app), and over https when the session is
+    https-only (`browserauth.header_scope_for`).
+  - **Cookies withheld from another origin** *(CC-CRAWL-0026, FR-SESS-20).* Browser
+    cookies are port-agnostic (RFC 6265 §8.5), and an external crawl's scope is its
+    host on every port (BUG-0050). In the crawl's authenticated context the route
+    withholds the context's jar (`BrowserSession.cookie_scope`, the header-scope
+    predicate) from an in-scope request or redirect hop on another origin: fetched with
+    an explicit empty `Cookie` header through `route.fetch(headers=)` / the request
+    client, without the session's headers; a redirected navigation landing there is
+    answered with the landing response (the browser's own unrouted re-request would
+    carry the jar; verified live). The selector-form API client drops the jar's cookies
+    for such an action. Each is counted (`session_out_of_origin`) and summarised at the
+    end of the crawl. Residual: an in-scope WebSocket on another origin is connected by
+    the browser. Never `set_extra_http_headers` or a browser
     context's `extra_http_headers` (an AST guard over `fuzzlab/`). An unauthenticated
     submission context gets none. The selector-form API client sends them only when the
     action passes the same header scope. The auditor's browser (CC-AUD-0038) and the M6
