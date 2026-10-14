@@ -278,6 +278,50 @@ class IconSpa(_Lab):
     script = ("/icons.js", _ICON_JS)
 
 
+_OVERLAY_JS = r"""
+const routes = [{path:'signin'}, {path:'signin-stuck'}, {path:'danger'}];
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
+  'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+const login = "<div class='lf'><input id='email' type='text'>" +
+  "<input id='password' type='password'><button id='b' aria-label='Login'>Log in</button></div>";
+const views = {
+  '': '<p>home</p>',
+  'signin': login,                 // the overlay closes on Escape
+  // the overlay ignores Escape: the dispatch path (another label: its own signature)
+  'signin-stuck': login.replace('>Log in<', '>Sign in<'),
+  'danger': "<div><input name='reason'><button id='b'>Delete account</button></div>",
+};
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  const app = document.getElementById('app');
+  app.innerHTML = views[name] || '<p>?</p>';
+  const b = document.getElementById('b');
+  if (b) b.onclick = () => post('/api/submit/' + name, {route: name});
+  if (!views[name] || name === '') return;
+  // a first-visit welcome dialog over everything (Juice Shop's mat-dialog pattern)
+  const ov = document.createElement('div');
+  ov.id = 'overlay';
+  ov.setAttribute('style', 'position:fixed;left:0;top:0;width:100vw;height:100vh;' +
+    'z-index:1000;background:rgba(0,0,0,0.4)');
+  ov.innerHTML = "<div class='dlg'><p>Welcome</p><button id='dismiss'>Dismiss</button></div>";
+  document.body.appendChild(ov);
+  document.getElementById('dismiss').onclick = () => post('/api/overlay-dismissed', {});
+  if (name !== 'signin-stuck')
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') ov.remove(); });
+}
+window.addEventListener('hashchange', () => {
+  const old = document.getElementById('overlay'); if (old) old.remove(); render(); });
+render();
+"""
+
+
+class OverlaySpa(_Lab):
+    """Forms covered by a modal overlay that intercepts pointer events (the live Juice
+    Shop click timeout): closable by Escape, not closable, and over a destructive form."""
+    index = _HASH_INDEX.replace("/main.js", "/overlay.js").replace("#/about", "#/signin")
+    script = ("/overlay.js", _OVERLAY_JS)
+
+
 class Recorder(_Lab):
     """Another loopback service: anything it receives is a scope escape."""
 

@@ -646,6 +646,29 @@ def test_icon_text_never_decides_a_button_label(monkeypatch, tmp_path):
     assert not any("exit_to_app" in lab for lab in labels)
 
 
+def test_a_covered_button_is_still_clicked_exactly_once(monkeypatch, tmp_path):
+    """Live Juice Shop run (70c2aca): the login click timed out behind the first-visit
+    welcome dialog in the fresh unauthenticated context. A covered vetted button gets
+    Escape once, then its own click(); the overlay's buttons are never clicked, and a
+    destructive button behind an overlay is still refused (the gate runs first)."""
+    from tests._spa_fixture import OverlaySpa
+    chromium_or_skip(monkeypatch)
+    lab = OverlaySpa()
+    try:
+        sp, db = _crawl(lab, tmp_path, submit_spa_forms=[])
+    finally:
+        lab.close()
+    posts = [r[1] for r in lab.seen("POST")]
+    assert posts.count("/api/submit/signin") == 1           # Escape cleared the overlay
+    assert posts.count("/api/submit/signin-stuck") == 1     # the dispatch path
+    assert "/api/submit/danger" not in posts                 # refused before any click
+    assert "/api/overlay-dismissed" not in posts             # never the overlay's button
+    assert sp.spa_counts["clicks_dispatched"] == 1
+    assert sp.spa_counts["forms_submitted"] == 2 and sp.spa_counts["forms_refused"] == 1
+    stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
+    assert stats["clicks_dispatched"] == 1
+
+
 def test_submissions_are_capped_and_the_cap_is_reported(lab, tmp_path, monkeypatch):
     spa_lab, _other = lab
     monkeypatch.setattr(spa, "MAX_SUBMISSIONS", 2)

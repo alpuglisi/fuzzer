@@ -125,6 +125,29 @@ Newest first.
     raw-text fallback).
   - Not a defect (stated gap, unchanged): `#/contact` stays "not submittable" -- its
     button is disabled until the math CAPTCHA and the rating are valid.
+- Live-run fix 2 (2026-10-14; from the orchestrator's live re-crawl with 70c2aca: the
+  login button now passed the gate, but `SPA form on …/#/login could not be clicked
+  (Page.click: Timeout 15000ms exceeded.)`; 0 submitted, 12 refused, 2 not submittable):
+  - Cause, confirmed on a loopback fixture (no lab traffic): a password form is
+    submitted in a fresh unauthenticated context, where the app shows its first-visit
+    overlays (Juice Shop's welcome `mat-dialog`, the cookie bar); Playwright's
+    actionability wait times out because the overlay "intercepts pointer events". A
+    plain click on the fixture fails the same way and sends nothing, so a timed-out
+    click never clicked (no double submission).
+  - Fix (`LocalSpider._click_vetted`, used for every SPA submission): a trial click
+    (actionability only, nothing clicked; at most 5 s) first; if the button is covered,
+    `Escape` is pressed once and the trial repeated; if it is still covered, the vetted
+    button's own `click()` is run on the element. Exactly one real or dispatched click,
+    always after the gate (`spa.form_refusal`) passed. An overlay's own buttons are
+    never clicked (their labels are unvetted). `clicks_dispatched` is counted, stored
+    in `crawl_stats` and in the summary line.
+  - Tests: `test_a_covered_button_is_still_clicked_exactly_once` (fixture `OverlaySpa`:
+    a login view under a modal that closes on Escape, one whose modal ignores Escape
+    (the dispatch path), and a "Delete account" button under a modal): the server sees
+    exactly one POST for each of the two logins, none for the destructive form and none
+    from the overlay's "Dismiss" button; `clicks_dispatched` is 1, in memory and in
+    `crawl_stats`. Mutation check on the fallback: 4 of 4 killed (no Escape, no
+    dispatch, no actionability trial, a double dispatch).
 
 ### CC-CRAWL-0016 — SPA routes, canonical page keys, transport noise, the DELETE rule (forms phase 3, lane S: R) (2026-10-14)
 - Change:
