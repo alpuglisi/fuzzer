@@ -3,6 +3,58 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0255 — Every lab server the harnesses and tests launch binds loopback, checked on its real sockets (BUG-0130) (2026-10-14)
+- Change:
+  - **Harnesses:** `live_boot_spring_boot.py` adds `--server.address=127.0.0.1` (Spring
+    binds 0.0.0.0 by default); `go_live_boot.py` sets `HOST=127.0.0.1` in the server's
+    env (the generated `main.go` binds `$HOST`; the env was inherited whole). All five
+    harnesses call `procutil.assert_loopback_only(self._server)` right after boot
+    (`__enter__` closes on failure). PHP, Rails and Django were already pinned.
+  - **Tests:** the four Spring Boot launches add `--server.address=127.0.0.1`; the four
+    Node launches set `HOST=127.0.0.1` in env; the CircleFeed raw-socket PHP responder,
+    the `go run` header-sanitisation program and the no-ML child server take their bind
+    host from argv (`127.0.0.1`), the latter through `core.net.require_loopback`.
+  - **Guards (`tests/test_loopback_listeners.py`):** a procutil launch is no longer read
+    as `asyncio.start_server` (the full-suite failure); the listener guard also scans
+    `tests/`; a static pin rule requires a loopback literal in every
+    `procutil.start_server`/`astart_server` call's argv/env (direct, same-module helper,
+    or enclosing-function assignment) and no wildcard literal; three non-server launch
+    sites allowlisted with reasons and exact counts.
+  - New tests: `tests/test_live_boot_cleanup.py::test_the_go_harness_ignores_an_inherited_wildcard_host`
+    and listener assertions in the Laravel/Go harness tests; NFR-LAB-safety gains an
+    `Enforced by:` line (edited in place).
+- Impact: every lab server run on the host is loopback-only by construction and by a
+  runtime check (CC-CORE-0051); a run whose server listens beyond loopback now fails.
+- Risk: low-medium. The Spring Boot, Node, Rails and Django pins were not booted here
+  (Maven/npm/network installs); they are checked statically, and by the stop-time
+  runtime check whenever they run. `--server.address` is the property the lab's own
+  `web-spring.Dockerfile` already uses.
+- Deliverables:
+  - [x] site pins, harness boot checks, guards — done
+  - [x] BUG-0130, PA-0130, ERROR_LOG, CHANGELOG, NFR-LAB-safety — done
+- Effectiveness (assessed 2026-10-14): see CC-CORE-0051 for the run counts. The pin
+  rule passes over `fuzzlab/` and `tests/` and flags six synthetic offenders; reverting
+  the Spring or MeadowMart pin, or the Go `HOST`, fails it (the Go revert also fails the
+  real inherited-`HOST` boot test).
+- Follow-up (2026-10-14, same branch: the netns change plus reviews A and B; BUG-0130
+  "Follow-up"):
+  - **Pin rule rewritten (`tests/test_loopback_listeners.py`).** It accepts only
+    pin-shaped tokens: a host flag or `--<host key>=` set to loopback, an exact
+    loopback token, or a host env key set to loopback. A base URL or a docstring is
+    not a pin. Launch detection is alias-proof. Wildcards are flagged in every form:
+    `0.0.0.0`, `::`, `[::]`, `*`, `scheme://*`, `*:port`, an empty host and `0`.
+    18 synthetic offenders and 6 pass cases.
+  - **New netns rule.** No test binds a wildcard except in a launch wrapped by
+    `tests/_netns.private_netns` (`unshare -rn`). 7 offenders and 5 pass cases.
+  - **New boot-check rule.** Every server site calls procutil's
+    `assert_loopback_only` after its launch. The site checks were added to the four
+    Node, four Spring Boot, `go run`, two CircleFeed and no-ML test servers. The five
+    harnesses already had them.
+  - **The rules are lints.** The runtime check (CC-CORE-0051) is authoritative,
+    according to PA-0130 items 4 and 5.
+  - **NFR-LAB-safety** gains a further `Enforced by:` line, edited in place.
+  - **Effectiveness.** See CC-CORE-0051. Mutation: **16/17 killed**; the survivor (dropping `::` from `_WILDCARD_VALUE`) is equivalent: the empty-host alternative followed by `(:.*)` already matches `::`.
+
 ### CC-LAB-0254 — Live-boot harnesses and test servers own their whole process tree (BUG-0125) (2026-10-14)
 - Change:
   - **The five harnesses** (`labgen/conformance/live_boot.py`, `rails_live_boot.py`,

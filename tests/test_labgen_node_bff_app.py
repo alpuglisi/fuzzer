@@ -210,12 +210,13 @@ def live_app(npm_installed: Path):
     server = procutil.start_server(
         ["node", "app.js"],
         cwd=npm_installed,
-        env={**os.environ, "PORT": str(port)},
+        env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     proc = server.proc
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield port
     finally:
         procutil.stop_server(server)

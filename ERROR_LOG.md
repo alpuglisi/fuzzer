@@ -18,6 +18,13 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Lab servers launched by harnesses/tests not pinned to loopback (fixed, BUG-0130/PA-0130)
+- **Symptom:** the integration full suite (p3-int + bug-0125 at 83650d6) failed `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`: it read the five harnesses' `procutil.start_server` calls (and `run_bounded`'s) as `asyncio.start_server`. Checking what those launched servers bind found real exposure: Spring Boot (harness + 4 tests) started with `--server.port` only, i.e. on 0.0.0.0; Go and Node servers took `HOST` from the inherited environment.
+- **Root cause:** loopback-only was enforced at fuzzlab's own Python listener calls (PA-0081) and the compose port binds, never at the real sockets of servers launched as other programs; launch sites left the bind address to framework defaults and inherited env.
+- **Remediation:** every launch site pins loopback explicitly (`--server.address=127.0.0.1`, `HOST=127.0.0.1`, host in argv); `procutil.listeners` reads the tree's real LISTEN sockets from /proc and `stop_server` (every site) raises `NonLoopbackListener`, the harnesses also check right after boot; the listener guard exempts procutil launches and scans tests/ too; a static pin rule over fuzzlab/ and tests/. CC-LAB-0255, CC-CORE-0051. `docs/bugs/BUG-0130-lab-servers-not-pinned-to-loopback.md`.
+- **Status:** Fixed (Spring/Node/Rails/Django pins verified statically only: no network installs here)
+- **Follow-up (same day, review):** the stop's listener check could abort the stop on an exception (now total: recorded, stop/sweep/collect always run, `ListenerCheckFailed` raised after); exposure masked a lost server (`ExposedAndLost`); exposure tests now bind wildcards only in a private netns. BUG-0130 "Follow-up", PA-0130 items 4-5.
+
 ## 2026-10-14 — Fuzzer: any page dialog confirmed browser XSS (fixed, BUG-0129/PA-0129)
 - **Symptom:** in code review (reviewers A and B), and reproduced on a real browser: a page that shows its own `alert` on load, with an inert reflection, was reported as executing the DOM-XSS payload.
 - **Root cause:** the M6 executor recorded the probe's token on any dialog; the payloads never open one (they call the tokened sentinel). PA-0117's noise guard never reached the executor's own channels.

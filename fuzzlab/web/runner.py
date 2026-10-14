@@ -186,6 +186,13 @@ class Runner:
         run = self._runs.get(token)
         if run and run.handle is not None and not run.finished and not run.stopping:
             run.stopping = True
+            # BUG-0130: a job's tree must never listen beyond loopback; checked while it
+            # still runs, reported on its stream (the tools gate their own listeners).
+            # (The report names pid and address only; the job's argv carries no secrets
+            # (D12: credentials live in the keyring) -- revisit if a secret-bearing flag
+            # is ever added.)
+            for lst in procutil.exposed_listeners(run.handle):
+                run.queue.put_nowait(("output", f"[fuzzlab] exposed beyond loopback: {lst.describe()}"))
             procutil.request_stop(run.handle)
             asyncio.get_running_loop().create_task(self._enforce_stop(run))
             return True
@@ -197,7 +204,10 @@ class Runner:
             await asyncio.wait_for(asyncio.shield(run.proc.wait()),
                                    run.handle.grace + procutil.STOP_MARGIN_S)
         except asyncio.TimeoutError:
-            await procutil.astop_server(run.handle, timeout=0.1)
+            try:
+                await procutil.astop_server(run.handle, timeout=0.1)
+            except procutil.ProcUtilError as exc:  # lost / exposed: say so on its stream
+                await run.queue.put(("output", f"[fuzzlab] {exc}"))
 
     async def shutdown(self) -> None:
         """Stop every live job (the UI is shutting down; BUG-0125 D18)."""
@@ -205,8 +215,12 @@ class Runner:
             if run.handle is not None and not run.finished:
                 try:
                     await procutil.astop_server(run.handle)
+                except procutil.NonLoopbackListener as exc:  # BUG-0130 (ExposedAndLost too)
+                    await run.queue.put(("output", f"[fuzzlab] {exc}"))
                 except procutil.ServerLost:
                     pass  # already stopped without a request; reported on its stream
+                except procutil.ProcUtilError as exc:  # e.g. ListenerCheckFailed: loud
+                    await run.queue.put(("output", f"[fuzzlab] {exc}"))
 
     def known(self, token: str) -> bool:
         return token in self._runs

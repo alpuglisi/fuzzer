@@ -102,7 +102,7 @@ def boot(root: Path) -> Iterator[str]:
     """Run `node app.js` on a free loopback port; yield its base URL."""
     port = _free_port()
     server = procutil.start_server(
-        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port)},
+        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc
@@ -116,6 +116,7 @@ def boot(root: Path) -> Iterator[str]:
                 if time.monotonic() > deadline or proc.poll() is not None:
                     raise AssertionError(f"node app.js never listened on {port}") from None
                 time.sleep(0.1)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:
         procutil.stop_server(server)

@@ -415,6 +415,25 @@ plugin registry. It is the layer that makes the store the integration bus.
     nothing is signalled, `start_server` refuses such a server, and the safety net
     reports such a record. Nothing is killed by name or pattern (`kill_process_group`,
     `group_members`, `session_members`, `read_stat`).
+  - Listening sockets *(BUG-0130, CC-CORE-0051)*: `listeners(handle)` returns every TCP
+    LISTEN socket held by the server's tree (`/proc/<pid>/fd` inodes mapped to
+    `/proc/<pid>/net/tcp{,6}` LISTEN rows), only while the supervisor pid is held;
+    `exposed_listeners` / `assert_loopback_only` (raises `NonLoopbackListener`). Every
+    stop (`stop_server`, `astop_server`, the safety net) checks them while the server is
+    still up and, after stopping the tree, raises `NonLoopbackListener` on exposure.
+    *(BUG-0130 follow-up, CC-CORE-0051.)* Each `Listener` carries its `netns`.
+    `listeners()` reads one table per distinct `/proc/<pid>/ns/net`, from that
+    process's own `/proc/<pid>/net/tcp{,6}`, and skips unparseable rows.
+    A listener is **exposed** only if it is non-loopback *and* in the host's network
+    namespace. The host's namespace is this process's own; `host_netns=` overrides it
+    for tests. A wildcard listener in a private namespace (`unshare -n`) is listed but
+    not exposed.
+    The rule is "checked after boot, and at stop while live", and the stop's check is
+    total. Anything the check raises is recorded, and the stop, sweep and collect
+    always run. Afterwards the stop raises `ListenerCheckFailed`. An exposed server
+    that had also been stopped without a request raises `ExposedAndLost`, which is
+    both a `NonLoopbackListener` and a `ServerLost`. This runtime check is
+    authoritative; the source rules are lints.
   - A registry of what this process started (`registered()`); `reap_registered()` stops
     every live entry and returns `Leak(argv, pid, age_s, note)` records, dropping a
     record whose pid now names another process.

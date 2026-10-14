@@ -302,7 +302,8 @@ class SpringBootLiveBootHarness:
         self._port = _find_free_port()
         jar_path = self._app_dir / "target" / "trackernest.jar"
         self._server = procutil.start_server(
-            ["java", "-jar", str(jar_path), f"--server.port={self._port}"],
+            ["java", "-jar", str(jar_path), f"--server.port={self._port}",
+             "--server.address=127.0.0.1"],  # BUG-0130: Spring binds 0.0.0.0 by default
             cwd=self._app_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -310,6 +311,7 @@ class SpringBootLiveBootHarness:
         )
         self._proc = self._server.proc
         self._wait_for_boot()
+        procutil.assert_loopback_only(self._server)  # BUG-0130: never exposed
 
     def _wait_for_boot(self) -> None:
         assert self._port is not None

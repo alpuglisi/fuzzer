@@ -7,7 +7,7 @@ prints one JSON object for the parent to assert on. Never imports a helper that 
 imports `fuzzlab.ml` (only `tests.test_auto`, which does not).
 
 Usage: ``python tests/_no_ml_child.py check <seeded.db> <run_id> <workdir>``
-       ``python tests/_no_ml_child.py serve <seeded.db> <port>``
+       ``python tests/_no_ml_child.py serve <seeded.db> <port> <host>``
 """
 
 from __future__ import annotations
@@ -143,10 +143,13 @@ def check(seeded: Path, run_id: int, workdir: Path) -> dict:
     return out
 
 
-def serve(seeded: Path, port: int) -> None:
+def serve(seeded: Path, port: int, host: str) -> None:
     import uvicorn
+
+    from fuzzlab.core.net import require_loopback
+    require_loopback(host, "no-ML test server")  # BUG-0130: the one listener gate
     print("ML_BLOCKED" if _ml_blocked() else "ML_PRESENT", flush=True)
-    uvicorn.run(_app(seeded, port), host="127.0.0.1", port=port, log_level="error")
+    uvicorn.run(_app(seeded, port), host=host, port=port, log_level="error")
 
 
 if __name__ == "__main__":
@@ -154,4 +157,4 @@ if __name__ == "__main__":
     if mode == "check":
         print(json.dumps(check(Path(sys.argv[2]), int(sys.argv[3]), Path(sys.argv[4]))))
     else:
-        serve(Path(sys.argv[2]), int(sys.argv[3]))
+        serve(Path(sys.argv[2]), int(sys.argv[3]), sys.argv[4])

@@ -62,9 +62,12 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import errno as _errno
+import ipaddress
 import os
 import select
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -85,6 +88,13 @@ __all__ = [
     "astop_server",
     "CODE_UNKNOWN",
     "finish",
+    "ListenerCheckFailed",
+    "ExposedAndLost",
+    "listeners",
+    "exposed_listeners",
+    "assert_loopback_only",
+    "NonLoopbackListener",
+    "Listener",
     "group_members",
     "kill_process_group",
     "is_live",
@@ -124,10 +134,25 @@ class SupervisorUnavailable(ProcUtilError):
     """The platform lacks a capability the supervisor requires (``prctl``)."""
 
 
+class NonLoopbackListener(ProcUtilError):
+    """A process this module started listened on a non-loopback address (BUG-0130):
+    the lab is loopback-only and must never be exposed."""
+
+
 class ServerLost(ProcUtilError):
     """The supervisor stopped its server without a stop request from its owner
     (``reason=signal``): e.g. PDEATHSIG after the forking thread exited
     (``allow_thread=True``), or an external SIGTERM."""
+
+
+class ExposedAndLost(NonLoopbackListener, ServerLost):
+    """Both at once (review B1): the server listened beyond loopback *and* had been
+    stopped without a request. Caught by a handler of either."""
+
+
+class ListenerCheckFailed(ProcUtilError):
+    """The listener check itself failed while the server was up (review A-M1). The
+    stop still ran in full; this is raised afterwards, never instead of stopping."""
 
 
 # --- /proc ------------------------------------------------------------------
@@ -273,6 +298,157 @@ def _descendants_of(root: int) -> list[ProcStat]:
             out.append(st)
             todo.append(st.pid)
     return out
+
+# --- listening sockets (BUG-0130) ---------------------------------------------
+
+@dataclass(frozen=True)
+class Listener:
+    """A listening TCP socket held by a process of a server's tree."""
+
+    pid: int
+    address: str
+    port: int
+    #: The network namespace the socket lives in (``net:[inode]``): each process's
+    #: own table is read, so a server in a private namespace is seen too.
+    netns: str = ""
+
+    def is_loopback(self) -> bool:
+        ip = ipaddress.ip_address(self.address)
+        mapped = getattr(ip, "ipv4_mapped", None)
+        return ip.is_loopback or (mapped is not None and mapped.is_loopback)
+
+    def describe(self) -> str:
+        host = f"[{self.address}]" if ":" in self.address else self.address
+        ns = f" (netns {self.netns})" if self.netns else ""
+        return f"pid {self.pid} listens on {host}:{self.port}{ns}"
+
+
+_TCP_LISTEN = "0A"
+
+
+def _decode_proc_net_address(hex_addr: str) -> tuple[str, int]:
+    """``/proc/net/tcp{,6}`` ``local_address`` (``ADDR:PORT``, the address as 32-bit
+    words in host byte order) to ``(address, port)``."""
+    addr, port = hex_addr.split(":")
+    words = [int(addr[i:i + 8], 16) for i in range(0, len(addr), 8)]
+    raw = b"".join(struct.pack("=I", w) for w in words)
+    family = socket.AF_INET if len(raw) == 4 else socket.AF_INET6
+    return socket.inet_ntop(family, raw), int(port, 16)
+
+
+def _listen_table(pid: int) -> dict[int, tuple[str, int]]:
+    """``{socket inode: (address, port)}`` of every LISTEN socket in ``pid``'s network
+    namespace (``/proc/<pid>/net/tcp`` and ``tcp6``; a missing file -- no IPv6 -- is
+    an empty table)."""
+    table: dict[int, tuple[str, int]] = {}
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(f"/proc/{pid}/net/{name}") as fh:
+                table.update(_parse_tcp_table(fh.read()))
+        except (FileNotFoundError, ProcessLookupError, PermissionError):  # gone / no IPv6 / hidden
+            continue
+    return table
+
+
+def _parse_tcp_table(text: str) -> dict[int, tuple[str, int]]:
+    """LISTEN rows only (``st`` 0A) of one ``/proc/net/tcp{,6}`` file: an established
+    connection (an outbound fetch, a client) is not a listener, wherever it is bound."""
+    table: dict[int, tuple[str, int]] = {}
+    for row in text.splitlines()[1:]:
+        cols = row.split()
+        if len(cols) > 9 and cols[3] == _TCP_LISTEN:
+            try:
+                table[int(cols[9])] = _decode_proc_net_address(cols[1])
+            except (ValueError, OSError, struct.error):  # an unparseable row is skipped
+                continue
+    return table
+
+
+def _socket_inodes(pid: int) -> set[int]:
+    out: set[int] = set()
+    try:
+        fds = os.listdir(f"/proc/{pid}/fd")
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return out
+    for fd in fds:
+        try:
+            target = os.readlink(f"/proc/{pid}/fd/{fd}")
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        if target.startswith("socket:["):
+            out.add(int(target[8:-1]))
+    return out
+
+
+def listeners(h: "ServerHandle") -> list[Listener]:
+    """Every listening TCP socket held by the server's process tree: the supervisor
+    and its descendants (escaped ones included -- it is their subreaper), mapped
+    through ``/proc/<pid>/fd`` socket inodes to the LISTEN rows of **that process's
+    own** ``/proc/<pid>/net/tcp{,6}`` -- per network namespace, so a server in a
+    private namespace (``unshare -n``) is seen as well. Identity-checked: only while
+    the supervisor pid is held with its recorded start time (BUG-0130, PA-0130;
+    probes the real sockets, PA-0035)."""
+    if not _held(h.pid, h.start_time):
+        return []
+    sup = read_stat(h.pid)
+    procs = ([sup] if sup is not None else []) + _descendants_of(h.pid)
+    tables: dict[str, dict[int, tuple[str, int]]] = {}
+    out = []
+    for st in procs:
+        inodes = _socket_inodes(st.pid)
+        if not inodes:
+            continue
+        ns = _netns(st.pid)
+        key = ns or f"pid:{st.pid}"  # one read per namespace; an unreadable one per process
+        if key not in tables:
+            tables[key] = _listen_table(st.pid)
+        for inode in inodes:
+            if inode in tables[key]:
+                address, port = tables[key][inode]
+                out.append(Listener(pid=st.pid, address=address, port=port, netns=ns))
+    return out
+
+
+def _netns(pid: int) -> str:
+    try:
+        return os.readlink(f"/proc/{pid}/ns/net")
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return ""
+
+
+def _host_netns() -> str:
+    """This process's network namespace: the one a listener is exposed from."""
+    return _netns(os.getpid())
+
+
+def _is_exposed(lst: Listener, host_netns: str) -> bool:
+    """A non-loopback listener in the host's network namespace. One in a private
+    namespace (``unshare -n``: its only interface is its own loopback) is not
+    reachable from outside, whatever its address (review B2 / A-S2)."""
+    return not lst.is_loopback() and (not lst.netns or lst.netns == host_netns)
+
+
+def exposed_listeners(h: "ServerHandle", *, host_netns: str | None = None) -> list[Listener]:
+    """The server tree's listeners reachable beyond loopback: a non-loopback address in
+    the host's network namespace (``host_netns``, default this process's)."""
+    ns = _host_netns() if host_netns is None else host_netns
+    return [lst for lst in listeners(h) if _is_exposed(lst, ns)]
+
+
+def assert_loopback_only(h: "ServerHandle", *, host_netns: str | None = None) -> list[Listener]:
+    """Raise :class:`NonLoopbackListener` if any process of the server's tree is
+    exposed beyond loopback; return its listeners otherwise. The rule: **checked
+    after boot, and at stop while live** -- the harnesses call this right after boot;
+    every stop re-checks while the server still runs."""
+    found = listeners(h)
+    ns = _host_netns() if host_netns is None else host_netns
+    exposed = [lst for lst in found if _is_exposed(lst, ns)]
+    if exposed:
+        raise NonLoopbackListener(
+            f"{list(h.argv)!r} is exposed beyond loopback: "
+            + "; ".join(lst.describe() for lst in exposed))
+    return found
+
 
 
 # --- prctl --------------------------------------------------------------------
@@ -963,12 +1139,32 @@ def _stop_core(h: ServerHandle, timeout: float | None) -> str:
             return h.exit_reason
         h.exit_reason = None if h.exit_reason == "unreaped" else h.exit_reason
         wait = h.grace + STOP_MARGIN_S if timeout is None else timeout
+        exposed: list[Listener] = []
+        check_failed = ""
         if not _exited(h):
+            # BUG-0130: every server is checked while still up, at the one choke point
+            # every site goes through. The check is total (review A-M1): whatever it
+            # raises is recorded, and the stop, sweep and collect always run; the
+            # finding is raised only afterwards.
+            try:
+                exposed = exposed_listeners(h)
+            except Exception as exc:  # noqa: BLE001 -- recorded, re-raised after the stop
+                check_failed = f"{type(exc).__name__}: {exc}"
             request_stop(h)
             if not _wait_exited(h, wait):
                 _fallback_kill(h)
                 _wait_exited(h, KILL_BOUND_S)
         _collect_locked(h)
+        if exposed:
+            msg = (f"{list(h.argv)!r} was exposed beyond loopback while it ran (stopped now): "
+                   + "; ".join(lst.describe() for lst in exposed))
+            if h.exit_reason == "signal":  # review B1: do not mask a lost server
+                raise ExposedAndLost(msg + "; it had also been stopped without a stop request")
+            raise NonLoopbackListener(msg)
+        if check_failed:
+            raise ListenerCheckFailed(
+                f"listener check failed for {list(h.argv)!r} (the tree was stopped anyway): "
+                f"{check_failed}")
         return h.exit_reason or ""
 
 
@@ -1019,7 +1215,10 @@ def reap_registered() -> list[Leak]:
             continue
         leaks.append(Leak(argv=h.argv, pid=h.pid, age_s=h.age()))
         if _popen_of(h) is not None:
-            _stop_core(h, None)  # sync and asyncio handles alike; never reaps before the sweep
+            try:
+                _stop_core(h, None)  # sync and asyncio handles alike; never reaps before the sweep
+            except (NonLoopbackListener, ListenerCheckFailed) as exc:
+                leaks[-1] = Leak(argv=h.argv, pid=h.pid, age_s=leaks[-1].age_s, note=str(exc))
             continue
         # A record without a process object (not our child): signal the recorded
         # supervisor (identity-checked); its session only while its pid is held.
@@ -1042,7 +1241,10 @@ def run_bounded(argv: Sequence[str], *, timeout: float, cwd: Any = None,
     session, so a timeout -- or the tool's own exit -- takes its whole tree down, not
     just the direct child. Raises :class:`subprocess.TimeoutExpired` (with the output
     so far) on timeout, like ``subprocess.run``. Callable from any thread: this call
-    blocks the forking thread until the tool has ended."""
+    blocks the forking thread until the tool has ended. If a timed-out tool's tree was
+    listening beyond loopback, the stop raises :class:`NonLoopbackListener` (a
+    :class:`ProcUtilError`) **instead of** ``TimeoutExpired``; a caller that catches
+    only ``TimeoutExpired`` lets it through, as it should (BUG-0130)."""
     h = start_server(argv, cwd=cwd, env=env, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text, grace=grace,
                      allow_thread=True)

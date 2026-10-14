@@ -164,7 +164,7 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
     from tests.test_web_pages_browser import _Page
     db, run_id, _ = seeded
     port = free_port()
-    server_handle = procutil.start_server([sys.executable, str(CHILD), "serve", str(db), str(port)],
+    server_handle = procutil.start_server([sys.executable, str(CHILD), "serve", str(db), str(port), "127.0.0.1"],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                               env=_env(), cwd=str(REPO))
     server = server_handle.proc
@@ -177,6 +177,7 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
                 break
             except OSError:
                 time.sleep(0.1)
+        procutil.assert_loopback_only(server_handle)  # BUG-0130: checked after boot
         with sync_playwright() as pw:
             browser = launch_browser_or_skip(pw)
             try:

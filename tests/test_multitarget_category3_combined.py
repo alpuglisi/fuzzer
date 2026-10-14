@@ -130,12 +130,13 @@ def trackernest_base_url(trackernest_app_dir: Path):
     port = _free_port()
     jar_path = trackernest_app_dir / "target" / "trackernest.jar"
     server = procutil.start_server(
-        ["java", "-jar", str(jar_path), f"--server.port={port}"],
+        ["java", "-jar", str(jar_path), f"--server.port={port}", "--server.address=127.0.0.1"],
         cwd=trackernest_app_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc
     try:
         _wait_until_listening(port)
+        procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:
         procutil.stop_server(server)

@@ -262,6 +262,7 @@ class GoLiveBootHarness:
         self._port = _find_free_port()
         proc_env = _go_env()
         proc_env["PORT"] = str(self._port)
+        proc_env["HOST"] = "127.0.0.1"  # BUG-0130: never an inherited HOST (main.go reads it)
         self._server = procutil.start_server(
             [str(self._binary_path)],
             cwd=self._app_dir,
@@ -272,6 +273,7 @@ class GoLiveBootHarness:
         )
         self._proc = self._server.proc
         self._wait_for_boot()
+        procutil.assert_loopback_only(self._server)  # BUG-0130: never exposed
 
     def _wait_for_boot(self) -> None:
         assert self._port is not None

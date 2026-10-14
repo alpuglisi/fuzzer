@@ -1609,3 +1609,36 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      is never evidence: it is handled (dismissed) and ignored.
   2. **Each executor evidence channel has a real-page test producing that channel's
      noise with an inert payload**, which must not confirm. (from BUG-0129)
+
+- **PA-0130** — Strengthens `PA-0081` (one loopback gate, guarded by call shape) from
+  fuzzlab's own listener calls to **every server it or its tests launch**, after
+  BUG-0130: Spring Boot test servers listened on 0.0.0.0 (port flag only) and Go/Node
+  servers took `HOST` from the inherited environment. PA-0081's guard could not see a
+  bind address that is another program's argv flag, env variable or framework default.
+  1. **A launched server binds loopback explicitly at its launch site** -- an argv flag
+     or an env value set there (`--server.address=127.0.0.1`, `HOST=127.0.0.1`, a host
+     argument) -- never a framework default or an inherited variable, even one whose
+     default is safe.
+  2. **The real sockets are checked** (`PA-0035`): `procutil.listeners` reads the LISTEN
+     sockets of the server's process tree from `/proc`; `stop_server` -- the choke point
+     every site goes through -- fails on a non-loopback listener, and the harnesses also
+     check right after boot.
+  3. **Enforced in source over `fuzzlab/` and `tests/`:** the static pin rule
+     (`tests/test_loopback_listeners.py::test_every_server_launched_through_procutil_pins_loopback`)
+     and the listener guard (now over tests/ too), each proven on synthetic offenders
+     (PA-0034(2)); a process launcher is not mistaken for a listener. (from BUG-0130)
+  4. **The runtime check is authoritative; the source rules are lints** (BUG-0130
+     follow-up). The rule is "checked after boot, and at stop while live". Every server
+     site calls `procutil.assert_loopback_only` right after boot, and every stop
+     re-checks while the server still runs. The static pin, boot-check and netns rules
+     catch common mistakes early, but they can miss what another program does at
+     runtime. They are never the proof that a server is not exposed.
+     "Exposed" means a non-loopback listener in the **host's** network namespace.
+     The stop's check is total: if the check itself fails, the stop still runs in
+     full and the failure is raised afterwards (`ListenerCheckFailed`). A check
+     never aborts a cleanup.
+  5. **A test that must bind a wildcard address does it only in a private network
+     namespace** (`tests/_netns.private_netns`: `unshare -rn`). It skips, or fails
+     under `FUZZLAB_REQUIRE_NETNS=1`, and never falls back to a host bind. Detection
+     is proven by injecting that namespace as the host's. Enforced by
+     `test_no_test_binds_a_wildcard_address_outside_a_private_netns`.

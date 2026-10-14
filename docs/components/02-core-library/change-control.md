@@ -3,6 +3,66 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0051 — `procutil` reads a server tree's real listening sockets; exposure fails the stop (BUG-0130) (2026-10-14)
+- Change (`fuzzlab/procutil.py`): `listeners(h)` -> `Listener(pid, address, port)` for
+  every TCP LISTEN socket held by the server's tree (the supervisor and its
+  descendants, only while its pid is held): `/proc/<pid>/fd` socket inodes mapped to
+  `/proc/<pid>/net/tcp` and `tcp6` LISTEN rows (`_parse_tcp_table`, LISTEN state 0A
+  only; `_decode_proc_net_address`, host-order words; a missing `tcp6` is empty).
+  `Listener.is_loopback` uses `ipaddress` (127/8, `::1`, IPv4-mapped loopback).
+  `exposed_listeners(h)`, `assert_loopback_only(h)` (raises the new
+  `NonLoopbackListener`). `_stop_core` -- `stop_server`, `astop_server` and the safety
+  net -- reads the exposed listeners while the server is still up, stops the tree, then
+  raises `NonLoopbackListener`; `reap_registered` records it on the leak. The web
+  launcher reports exposure on a job's stream at Stop (CC-UI-0053 note). FR-CORE-38's
+  contract gains these functions (edited in place).
+- Impact: every lab server launched through procutil is checked on its real sockets at
+  the one choke point all sites go through; the harnesses also check after boot
+  (CC-LAB-0255).
+- Risk: low. Read-only `/proc` reads, identity-checked.
+- Deliverables:
+  - [x] code; tests `tests/test_procutil.py::test_a_server_listening_beyond_loopback_is_caught`
+    (the server itself, and a process it forked), `::test_a_loopback_only_server_passes`,
+    `::test_the_safety_net_reports_an_exposed_server`,
+    `::test_proc_net_tcp_decoding_covers_ipv4_and_ipv6` (IPv6 and the LISTEN filter on
+    synthetic rows: this sandbox has no `/proc/net/tcp6`),
+    `tests/test_web_runner.py::test_runner_stop_reports_a_job_listening_beyond_loopback` — done
+- Effectiveness (assessed 2026-10-14): final targeted offline run (one pytest process,
+  `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_BROWSER=1`, including
+  `test_loopback_listeners.py`, `test_lint.py`, `test_requirements_traceability.py`):
+  **341 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by design).
+  Mutation (BUG-0130, runtime check and static rule): **15/16 killed**; the survivor
+  drops the explicit IPv4-mapped branch, which Python 3.13's `ipaddress` already
+  treats as loopback (equivalent here; kept for 3.11/3.12, which the project supports).
+- Follow-up (2026-10-14, same branch: the netns change plus reviews A and B; BUG-0130
+  "Follow-up"):
+  - **Per-namespace reads.** `listeners()` reads one table per distinct
+    `/proc/<pid>/ns/net`. A namespace that cannot be read is read per process. Each
+    `Listener` gains `netns`.
+  - **Exposed means host namespace.** A listener counts as exposed only if it is
+    non-loopback and in the host's namespace (`_host_netns`, or the injected
+    `host_netns=`). A wildcard listener in a private `unshare -rn` namespace is listed
+    but not exposed.
+  - **New exceptions.** `ExposedAndLost` (both a `NonLoopbackListener` and a
+    `ServerLost`; review B1) and `ListenerCheckFailed`.
+  - **Total stop check (review A-M1).** `_stop_core`'s check is total: any exception
+    is recorded, the stop, sweep and collect always run, and the error is raised
+    afterwards. `_parse_tcp_table` skips unparseable rows. `reap_registered` records
+    both new exceptions on the leak.
+  - **Docstrings and launcher.** The `run_bounded` docstring is corrected
+    (`NonLoopbackListener` instead of `TimeoutExpired`). `assert_loopback_only` states
+    "checked after boot, and at stop while live". In the launcher, `shutdown` reports
+    an exposure ahead of a lost server, and `_enforce_stop` reports any
+    `ProcUtilError`.
+  - **Tests.** The deliberately exposed test servers now run in a private network
+    namespace (`tests/_netns.py`), so nothing binds a wildcard on the host. FR-CORE-38
+    is edited in place.
+  - **New tests.**
+    `tests/test_procutil.py::test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed`,
+    `::test_an_exposed_server_that_was_also_lost_reports_both`,
+    `::test_a_failing_listener_check_never_aborts_the_stop`.
+  - **Effectiveness.** Final targeted offline run (one pytest process, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`, `FUZZLAB_REQUIRE_BROWSER=1`, including `test_procutil.py`, `test_loopback_listeners.py`, `test_lint.py`, `test_requirements_traceability.py`): **377 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by design). Mutation: **9/9 killed** (B1 x2, B2 x4, A-M1 x3; BUG-0130 "Follow-up").
+
 ### CC-CORE-0050 — BUG-0125 review fixes: an id is trusted only while its leader pid is held (2026-10-14)
 - Change (`fuzzlab/procutil.py`, on top of CC-CORE-0048; reviewer A's must-fixes, B's
   items; A-M1 supersedes B's should-fix 1):
