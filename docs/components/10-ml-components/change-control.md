@@ -3,6 +3,27 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0030 — Note: the `loc_body` feature counts `json` points as body (forms phase 3; documentation) (2026-10-14)
+- Change: FR-ML-5 gains a dated note: the candidate feature `loc_body`
+  (`core/features.extract_candidate_v1`) is 1 for location `json` (one leaf of a JSON
+  request body, FR-CORE-36) as for `body`. The one-line code change lives in
+  `core/features.py` (recorded in CC-CORE-0046). `CANDIDATE_FEATURE_VERSION` is not
+  bumped: no stored candidate had location `json` before, so no recomputed v1 vector
+  changes (the v1 golden is unchanged). `rules_fired` also counts `R-SQLI-PARAM` /
+  `R-SSTI` and the name/value rules firing on JSON leaves (CC-AUD-0035), crawl points
+  only. The `name_*` features read the whole display name (`user.email`), not the last
+  key; left as is (changing it would change the feature's meaning).
+- Impact: crawl-run training rows with captured JSON requests gain body-location rows;
+  ground-truth runs are unchanged. Decision D7 of the phase 3 design (equal
+  flexibility → the recommended option: no bump, no invalidated saved models).
+- Risk: low (documented).
+- Deliverables:
+  - [x] FR-ML-5 note — done
+  - [x] test: `tests/test_json_points.py::test_the_location_feature_treats_json_as_body`
+    — done
+- Review: phase 3 design, reviewer A item 7 (agreed by reviewers A and B).
+- Effectiveness: verified offline (the candidate-feature golden test is unchanged).
+
 ### CC-ML-0029 — Note: `rules_fired` counts the url value-shape rules on crawl runs (BUG-0124; documentation only) (2026-10-14)
 - Change: FR-ML-5 gains a dated note: `rules_fired` also counts `R-OPEN-REDIRECT-VALUE`
   and `R-SSRF-VALUE` (CC-AUD-0034), crawl points only. `redirect_seed` is not a feature

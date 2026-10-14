@@ -21,6 +21,15 @@ def to_path(url: str) -> str:
     return path
 
 
+def to_route_path(url: str) -> str:
+    """`to_path`, plus ``#`` and the path of a single-page app's hash route when the URL
+    has one (``http://h/#/search?q=x`` -> ``/#/search``): how a ``fragment`` point's
+    endpoint is stored, so a browser can load the route (forms phase 3, FR-CORE-36). The
+    route's query is not kept. Any other URL is exactly `to_path`."""
+    route = spa_route(url)
+    return to_path(url) + ("#" + route[0] if route is not None else "")
+
+
 #: Hostnames that all mean "this machine" — one lab target, however it was typed.
 _LOOPBACK_NAMES = {"localhost"}
 _DEFAULT_PORT = {"http": 80, "https": 443}
@@ -194,17 +203,39 @@ def url_key(url: str) -> str:
     return f"{canonical_origin(url) or ''}{urlsplit(url or '').path or '/'}"
 
 
+def spa_route(url: str | None) -> tuple[str, str] | None:
+    """``(route path, route query)`` of a URL whose fragment is a single-page app's hash
+    route (``/#/search?q=x`` -> ``("/search", "q=x")``; ``#!/x`` too), or None for any
+    other fragment or none (forms phase 3, FR-CORE-36). A route's query is read by the
+    app in the browser and never reaches the server."""
+    fragment = urlsplit(url or "").fragment
+    if not fragment.startswith(("/", "!/")):
+        return None
+    path, _sep, query = fragment.partition("?")
+    return path, query
+
+
+#: Methods a probe never sends unless its URL was explicitly enumerated (forms phase 3,
+#: FR-FUZZ-47): a crawl-captured DELETE is never imported, and refused again at the send.
+REFUSED_SEND_METHODS = frozenset({"DELETE"})
+
+
 class DestructiveUrlRefused(ValueError):
     """A send to a destructive URL the operator did not explicitly enumerate."""
 
 
-def check_send_url(url: str, explicit: frozenset[str] = frozenset()) -> None:
-    """Refuse a probe to a destructive URL unless it is explicitly allowed.
+def check_send_url(url: str, explicit: frozenset[str] = frozenset(),
+                   method: str | None = None) -> None:
+    """Refuse a probe to a destructive URL, or with a refused method (``DELETE``),
+    unless the URL is explicitly allowed.
 
-    Every probe sender calls this first (NFR-FUZZ-safe, CC-FUZZ-0060). ``explicit``
-    holds :func:`url_key` values of operator-enumerated (ground-truth) points.
+    Every probe sender calls this first (NFR-FUZZ-safe, CC-FUZZ-0060), passing its
+    send's ``method``. ``explicit`` holds :func:`url_key` values of operator-enumerated
+    (ground-truth) points.
     """
     reason = destructive_reason(url)
+    if reason is None and (method or "").upper() in REFUSED_SEND_METHODS:
+        reason = f"{method.upper()} method"
     if reason is not None and url_key(url) not in explicit:
         raise DestructiveUrlRefused(
             f"refusing to send to {url.split('?', 1)[0]}: it looks destructive "

@@ -8,7 +8,8 @@ changes. The predicate is a small, safe condition language:
 - ``location_in``: [query, body, ...]
 - ``method_in``: [GET, POST]
 - ``sink_context_in``: [html, html-attribute, url-attribute, js]
-- ``name_regex``: a regex matched (case-insensitively) against the parameter name
+- ``name_regex``: a regex matched (case-insensitively) against the parameter name (a
+  ``json`` point's last object key, `rule_name`; forms phase 3, FR-AUD-22)
 - ``value_shape_in``: [ip, hostname, filename, path, url] — the point's example value
   has one of these shapes (`fuzzlab.audit.value_shape`; forms phase 2, FR-AUD-20)
 - ``origin_in``: [crawl, ground-truth] — where the point came from (FR-AUD-20)
@@ -104,6 +105,19 @@ def known_categories(rules: list[Rule] | None = None) -> list[str]:
     return sorted({r.category for r in rules})
 
 
+def rule_name(point) -> str:
+    """The name ``name_regex`` matches: a ``json`` point's last object key
+    (`core.jsonbody.name_segment`; ``user.email`` -> ``email``), so a leaf is judged by
+    its own name however deep it sits (forms phase 3, FR-AUD-22); else the parameter
+    name."""
+    from fuzzlab.core import jsonbody
+    name = point.param or ""
+    if getattr(point, "location", None) == jsonbody.LOCATION:
+        path = jsonbody.parse_name(name)
+        return jsonbody.name_segment(path) if path is not None else name
+    return name
+
+
 def matches(rule: Rule, point) -> bool:
     """Evaluate a rule's ``when`` predicate against an injection point."""
     when = rule.when
@@ -117,7 +131,7 @@ def matches(rule: Rule, point) -> bool:
     if "sink_context_in" in when:
         checks.append((point.sink_context or "") in when["sink_context_in"])
     if "name_regex" in when:
-        checks.append(bool(re.search(when["name_regex"], point.param or "", re.I)))
+        checks.append(bool(re.search(when["name_regex"], rule_name(point), re.I)))
     if "value_shape_in" in when:
         shapes = getattr(point, "value_shapes", None) or ()
         checks.append(bool(set(shapes) & set(when["value_shape_in"])))

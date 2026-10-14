@@ -3,6 +3,54 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0035 — Captured JSON requests become points; rules on JSON leaves; SPA route queries are fragment points (forms phase 3, lane J) (2026-10-14)
+- Change:
+  - `tools/store_adapter.py`: `import_spider(..., fuzz_json_writes=False)` reads the
+    spider table `discovered_requests` (lane I's contract; absent = nothing).
+    `captured_request(row)` is the whole, pure import decision; `request_refusal`
+    (method outside GET/POST/PUT/PATCH incl. DELETE; PUT/PATCH without the flag;
+    `destructive_reason`; `transaction_reason`; another origin than its page) and
+    `body_refusal` (`credential_change_rule`, settings words on any key,
+    `entries_refusal(credential_names=True)` on the non-password leaves). A JSON
+    object body is stored as a `form` row (`enctype` `application/json`, entries via
+    `jsonbody.encode_entries`, `password_fields` = the display names of leaves with a
+    credential name on any key, sent `""`); each string/number/bool leaf that is not
+    a password, sensitive, identifier-like (`redact_leaf`) or an object selector
+    (`_object_selector` on the last key) is a `json` parameter. A form-encoded body
+    is stored as today's form (`body` points). `credential_change_reason` now calls
+    the extracted `credential_change_rule`, shared with bodies (its messages for
+    forms are unchanged). An SPA hash route's query becomes `fragment` parameters on
+    the route's endpoint (`_import_route_query`).
+  - `audit/rules.py`: `rule_name(point)` — `name_regex` matches a `json` point's last
+    object key. `default_rules.json`: `R-SQLI-PARAM` and `R-SSTI` list `json` in
+    `location_in`; `R-XSS-REFLECT` deliberately does not (FR-AUD-22).
+  - `harness/auto.py` (`injection_points_from_store`): `json` points carry their
+    body's other leaves (`_json_base_entries`: `decode_entries`, then `_send_value`);
+    credential names checked on every key; a destructive SPA route is refused
+    (`_crawl_url_refusal`); `fragment` points only with `browser_available`.
+  - `harness/auto_cli.py`: `--fuzz-json-writes`; a "captured requests" summary line
+    (printed only when the spider DB has captured requests).
+- Impact: FR-AUD-22 (new); the AUD interface section names `discovered_requests`. The
+  crawler (lane I, CC-CRAWL-0017) writes the table; nothing here edits the spider.
+  Old spider DBs import unchanged (tested). The sqli/xss `auto_summary` goldens are
+  unchanged (their runs have no captured requests). FUZZ (CC-FUZZ-0068) sends the new
+  points; CORE (CC-CORE-0046) holds the convention.
+- Risk: medium (new traffic shapes against a lab app's real API). Mitigation: every
+  refusal tested; PUT/PATCH opt-in; DELETE never imported and refused again at send;
+  login bodies isolated (FR-FUZZ-44); the residuals are stated in FR-FUZZ-47.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_json_points.py` (import, every refusal, pinning, password
+    isolation, the PA-0100 producer guard, old spider DBs, the `form.enctype` readers,
+    rules on leaves, the seed checks, fragment points) — done
+  - [x] FR-AUD-22 — done
+- Review: phase 3 design (`p3-spa-draft.md`, revisions 1–4), agreed by reviewers A and
+  B; implementation review by the orchestrator pending.
+- Effectiveness: verified offline, 2026-10-14 (`tests/test_json_points.py` 90 passed;
+  mutation check: every import refusal, the password, pinning and redaction gates and
+  the leaf/depth limits killed — see CC-FUZZ-0068). The live Juice Shop crawl (lane I
+  capture) and `fuzzlab auto` run are the remaining check.
+
 ### CC-AUD-0034 — URL-valued parameters imply open redirect and SSRF; the redirect seed (BUG-0124) (2026-10-14)
 - Change:
   - `audit/value_shape.py`: `SHAPE_CATEGORIES` (the one shape → categories table) and

@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core import jsonbody
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, url_key
-from fuzzlab.oracle.probe import Candidate, Sender, Verdict
+from fuzzlab.oracle.probe import Candidate, Sender, UnplaceableLocation, Verdict
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
 
@@ -50,18 +51,40 @@ class _FormBoundSender:
     A send to the candidate's own URL (``url_key``), method and query/body location
     goes out as the form's full entry list with ``param`` set to ``value``; any other
     send (a stored-XSS observe page, another URL) passes through unchanged. The one
-    place sibling fields are bound, so no strategy changes (reviewers A/B)."""
+    place sibling fields are bound, so no strategy changes (reviewers A/B).
+
+    A ``json`` point (forms phase 3, FR-FUZZ-47) is bound the same way: its siblings
+    are the body's other leaves (paths and typed values, already redacted and made
+    neutral by the point builder) and ``param`` names the leaf set to ``value``. A
+    malformed JSON entry list or leaf name is refused (`UnplaceableLocation`), never
+    sent as a bare field."""
 
     def __init__(self, inner: Sender, candidate: Candidate):
         self._inner = inner
-        self._base = FormEntries(tuple(e) for e in candidate.base_entries)
         self._key = (url_key(candidate.url), candidate.method.upper(), candidate.location)
+        self._base = self._json_base = None
+        if candidate.location == jsonbody.LOCATION:
+            try:
+                self._json_base = jsonbody.normalize_entries(candidate.base_entries)
+            except jsonbody.JsonPlacementError:
+                self._json_base = None           # every own send is then refused
+        else:
+            self._base = FormEntries(tuple(e) for e in candidate.base_entries)
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None):
-        if (entries is None and location in ("query", "body") and not content_type
-                and (url_key(url), method.upper(), location) == self._key):
+        own = (entries is None and not content_type
+               and (url_key(url), method.upper(), location) == self._key)
+        if own and location == jsonbody.LOCATION:
+            try:
+                if self._json_base is None:
+                    raise jsonbody.JsonPlacementError("malformed JSON entry list")
+                entries = jsonbody.replace_leaf(self._json_base, param, value)
+            except jsonbody.JsonPlacementError as exc:
+                raise UnplaceableLocation(f"cannot place JSON leaf {param!r}: {exc}") \
+                    from exc
+        elif own and location in ("query", "body"):
             entries = self._base.replace(param, value)
         if entries is not None:
             return self._inner.send(url, param, value, timing=timing, method=method,
@@ -118,12 +141,20 @@ class Oracle:
             ctx, ordered = None, applicable
 
         inconclusive: Verdict | None = None
+        placed, unplaceable = False, None
         for strategy in ordered:
-            if self.scheduler is not None:
-                probe = _CostCounter(sender)             # measure this mechanism's cost
-                verdict = strategy.confirm(candidate, probe)
-            else:
-                verdict = strategy.confirm(candidate, sender)
+            try:
+                if self.scheduler is not None:
+                    probe = _CostCounter(sender)         # measure this mechanism's cost
+                    verdict = strategy.confirm(candidate, probe)
+                else:
+                    verdict = strategy.confirm(candidate, sender)
+            except UnplaceableLocation as exc:
+                # this mechanism cannot place the point (PA-0115): no verdict from it,
+                # and no reward or cost for its arm; the others still run
+                unplaceable = unplaceable or str(exc)
+                continue
+            placed = True
             confirmed = verdict is not None and verdict.confirmed
             if (not confirmed and verdict is not None and verdict.inconclusive
                     and inconclusive is None):
@@ -139,6 +170,11 @@ class Oracle:
                         "method": candidate.method, "param": candidate.param,
                         "mechanism": verdict.mechanism})
                 return verdict, None
+        if not placed and unplaceable is not None:
+            # no mechanism could place it: unlabelled, never a negative (PA-0108)
+            return None, Verdict(False, candidate.vuln_class or "", "unplaceable",
+                                 {"unplaceable": candidate.location,
+                                  "reason": unplaceable[:200]}, inconclusive=True)
         return None, inconclusive
 
     def _write_finding(self, candidate: Candidate, verdict: Verdict) -> None:

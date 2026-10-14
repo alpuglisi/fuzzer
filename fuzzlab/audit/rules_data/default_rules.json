@@ -5,7 +5,7 @@
       "id": "R-SQLI-PARAM",
       "category": "sql-injection",
       "transaction_type": "SQL Injection",
-      "when": { "location_in": ["query", "body"] },
+      "when": { "location_in": ["query", "body", "json"] },
       "reference": "sql-injection"
     },
     {
@@ -40,7 +40,7 @@
       "id": "R-SSTI",
       "category": "server-side-template-injection",
       "transaction_type": "Template Injection",
-      "when": { "location_in": ["query", "body"] },
+      "when": { "location_in": ["query", "body", "json"] },
       "reference": "server-side-template-injection"
     },
     {

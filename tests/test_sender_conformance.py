@@ -185,6 +185,14 @@ class _Wire:
     # requests-style session (RequestsProbeSender, RequestsCorrelatingSender)
     cookies: dict = {}
 
+    @staticmethod
+    def _json(headers, raw):
+        """A JSON body's object (forms phase 3), or {} when the send is not JSON."""
+        import json
+        if (headers or {}).get("Content-Type") != "application/json":
+            return {}
+        return json.loads(raw)
+
     def request(self, method, url, **kw):
         from urllib.parse import parse_qsl, urlsplit
         query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
@@ -192,8 +200,9 @@ class _Wire:
         query.update(dict(params) if isinstance(params, (dict, list)) else {})
         data = kw.get("data")
         body = dict(data) if isinstance(data, (dict, list)) else {}
-        self.sent.append({"query": query, "body": body, "headers": dict(kw.get("headers")
-                                                                        or {})})
+        headers = dict(kw.get("headers") or {})
+        self.sent.append({"query": query, "body": body, "headers": headers,
+                          "json": self._json(headers, data)})
 
         class R:
             status_code, text, headers = 200, "ok", {}
@@ -202,9 +211,10 @@ class _Wire:
     # core seam transport (SeamProbeSender)
     def transport(self, method, url, headers, body, timeout):
         from urllib.parse import parse_qsl, urlsplit
+        json_body = self._json(headers, body)
         self.sent.append({"query": dict(parse_qsl(urlsplit(url).query)),
-                          "body": dict(parse_qsl((body or b"").decode())),
-                          "headers": dict(headers)})
+                          "body": {} if json_body else dict(parse_qsl((body or b"").decode())),
+                          "headers": dict(headers), "json": json_body})
         return 200, {}, b"ok"
 
 
@@ -228,10 +238,14 @@ PLACEMENT_FACTORIES = {
 }
 
 
-def placement_problems(send) -> list[str]:
+#: Every location a probe sender must place (forms phase 3 added ``json``, FR-CORE-36).
+PLACEABLE = ("query", "body", "header", "json")
+
+
+def placement_problems(send, locations=PLACEABLE) -> list[str]:
     """Send a marked value at each placeable location; it must arrive there only."""
     out = []
-    for location in ("query", "body", "header"):
+    for location in locations:
         wire = _Wire()
         try:
             send(wire, location)
@@ -239,8 +253,8 @@ def placement_problems(send) -> list[str]:
             out.append(f"{location}: raised {exc!r}")
             continue
         got = wire.sent[-1]
-        where = [k for k in ("query", "body", "headers")
-                 if got[k].get("X-Probe") == "zqmark"]
+        where = [k for k in ("query", "body", "headers", "json")
+                 if got.get(k, {}).get("X-Probe") == "zqmark"]
         if where != [{"header": "headers"}.get(location, location)]:
             out.append(f"{location}: landed in {where}")
     return out
@@ -249,7 +263,7 @@ def placement_problems(send) -> list[str]:
 def _via(factory):
     def send(wire, location):
         factory(wire).send("http://h/a.php", "X-Probe", "zqmark",
-                           method="POST" if location == "body" else "GET",
+                           method="POST" if location in ("body", "json") else "GET",
                            location=location)
     return send
 
@@ -271,9 +285,13 @@ def test_the_greybox_sender_places_a_probe_where_the_point_says():
     def send(wire, location):
         RequestsCorrelatingSender(session=wire, id_factory=lambda: "c").send_correlated(
             "http://h/a.php", "X-Probe", "zqmark", location=location)
-    assert placement_problems(send) == []
-    with pytest.raises(UnplaceableLocation):
-        send(_Wire(), "fragment")
+    assert placement_problems(send, ("query", "body", "header")) == []
+    # greybox does not rebuild JSON bodies: it refuses (FR-FUZZ-47), never relocates
+    for location in ("fragment", "json"):
+        wire = _Wire()
+        with pytest.raises(UnplaceableLocation):
+            send(wire, location)
+        assert wire.sent == []
 
 
 def test_the_placement_check_catches_a_relocating_sender():
@@ -285,7 +303,117 @@ def test_the_placement_check_catches_a_relocating_sender():
                  content_type=None, entries=None):
             key = "data" if location == "body" else "params"
             return self._wire.request(method, url, **{key: {param: value}})
-    assert placement_problems(_via(Relocating)) == ["header: landed in ['query']"]
+    assert placement_problems(_via(Relocating)) == ["header: landed in ['query']",
+                                                    "json: landed in ['query']"]
+
+    class FormEncodesJson(Relocating):          # json sent as a form field
+        def send(self, url, param, value, timing=False, method="GET", location="query",
+                 content_type=None, entries=None):
+            if location == "json":
+                return self._wire.request(method, url, data={param: value})
+            return super().send(url, param, value, method=method, location=location)
+    assert "json: landed in ['body']" in placement_problems(_via(FormEncodesJson))
+
+
+# --- json (forms phase 3, FR-CORE-36 / FR-FUZZ-47): one leaf of the whole body ----------
+_JSON_ENTRIES = ((("a", "b", 0), "x"), (("a", "b", 1), "old"), (("n",), 5),
+                 (("t",), True), (("z",), None), (("e",), []))
+_JSON_WANT = {"a": {"b": ["x", "zqmark"]}, "n": 5, "t": True, "z": None, "e": []}
+
+
+def json_placement_problems(send) -> list[str]:
+    """A nested leaf with typed siblings: the body is rebuilt with that leaf (only) set
+    to the payload as a string, sent as application/json, nothing in the query; a
+    malformed leaf name is refused with nothing sent."""
+    wire = _Wire()
+    send(wire, "a.b[1]", _JSON_ENTRIES)
+    got = wire.sent[-1]
+    out = []
+    if got["json"] != _JSON_WANT:
+        out.append(f"body {got['json']!r}")
+    if got["headers"].get("Content-Type") != "application/json":
+        out.append(f"content type {got['headers'].get('Content-Type')!r}")
+    if got["query"] or got["body"]:
+        out.append(f"also sent query {got['query']!r} / form {got['body']!r}")
+    wire = _Wire()
+    try:
+        send(wire, "a.b[", _JSON_ENTRIES)
+        out.append("a malformed leaf name was sent")
+    except UnplaceableLocation:
+        if wire.sent:
+            out.append("a malformed leaf name was refused after a send")
+    return out
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_every_sender_places_a_json_leaf_in_the_rebuilt_body(key):
+    def send(wire, name, entries):
+        PLACEMENT_FACTORIES[key](wire).send("http://h/api", name, "zqmark", method="POST",
+                                            location="json", entries=entries)
+    assert json_placement_problems(send) == []
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_a_raw_body_send_at_a_json_point_is_refused_not_reinterpreted(key):
+    """An XXE / upload strategy sends a raw whole body (``content_type``): a JSON leaf
+    cannot carry it, so the sender refuses before sending anything (PA-0115)."""
+    wire = _Wire()
+    with pytest.raises(UnplaceableLocation):
+        PLACEMENT_FACTORIES[key](wire).send("http://h/api", "a", "<x/>", method="POST",
+                                            location="json",
+                                            content_type="application/xml")
+    assert wire.sent == []
+
+
+def test_the_form_bound_sender_places_a_json_leaf_in_the_rebuilt_body():
+    from fuzzlab.oracle.oracle import _FormBoundSender
+    from fuzzlab.oracle.probe import Candidate
+
+    def send(wire, name, entries):
+        cand = Candidate(url="http://h/api", param=name, method="POST", location="json",
+                         base_entries=tuple((list(p), v) for p, v in entries))
+        _FormBoundSender(_requests_factory(wire), cand).send(
+            "http://h/api", name, "zqmark", method="POST", location="json")
+    assert json_placement_problems(send) == []
+
+
+def test_the_json_check_catches_a_sender_that_drops_siblings_or_types():
+    class Flat:                                 # {param: value}, siblings dropped
+        def __init__(self, wire):
+            self._wire = wire
+
+        def send(self, url, param, value, timing=False, method="GET", location="query",
+                 content_type=None, entries=None):
+            import json
+            return self._wire.request(method, url, data=json.dumps({param: value}),
+                                      headers={"Content-Type": "application/json"})
+
+    def send(wire, name, entries):
+        Flat(wire).send("http://h/api", name, "zqmark", method="POST", location="json",
+                        entries=entries)
+    problems = json_placement_problems(send)
+    assert problems[0].startswith("body {'a.b[1]': 'zqmark'}")
+    assert problems[-1] == "a malformed leaf name was sent"
+
+
+# --- the M6 executor places a fragment inside an SPA hash route (forms phase 3) ---------
+def test_the_executor_places_a_fragment_point_inside_the_hash_route(monkeypatch):
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    from tests.test_json_points import _fake_playwright
+    gotos = _fake_playwright(monkeypatch)
+    for url, want in (("http://h/#/search", "http://h/#/search?q=zqmark"),
+                      ("http://h/#!/s?page=2", "http://h/#!/s?page=2&q=zqmark"),
+                      ("http://h/p.php", "http://h/p.php#q=zqmark")):
+        gotos.clear()
+        PlaywrightBrowserExecutor().run(ExecRequest(url=url, param="q", value="zqmark",
+                                                    location="fragment"), "t")
+        assert gotos == [want] and want.count("#") == 1
+    for location in ("json", "body", "header"):              # refused before any browser
+        gotos.clear()
+        obs = PlaywrightBrowserExecutor().run(ExecRequest(
+            url="http://h/#/search", param="q", value="zqmark", location=location), "t")
+        assert not obs.executed and gotos == []
 
 
 @pytest.mark.xfail(strict=True, reason="BUG-0115 instance 4, pinned not fixed: the probe "

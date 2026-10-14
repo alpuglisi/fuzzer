@@ -22,6 +22,64 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0068 — JSON body points: senders, oracle binding, executor placement (forms phase 3, lane J) (2026-10-14)
+- Change:
+  - `tools/probesender.py`: `SeamProbeSender` and `RequestsProbeSender` get a `json`
+    branch — the body rebuilt from the entries (`core.jsonbody.body_for`, types kept)
+    with the leaf set to the payload as a string, `Content-Type: application/json`; a
+    leaf that cannot be placed raises `UnplaceableLocation` before any session routing
+    or send. Both pass `method` to `check_send_url` (a crawl-sourced DELETE is refused
+    at send).
+  - `oracle/oracle.py`: `_FormBoundSender` binds a `json` candidate's siblings
+    (`jsonbody.normalize_entries` / `replace_leaf`; malformed → `UnplaceableLocation`).
+    `Oracle.confirm_outcome` treats `UnplaceableLocation` from a strategy as no verdict
+    from that mechanism (no reward or cost for its arm; the others still run); when
+    every applicable mechanism refused, the candidate is `inconclusive` (mechanism
+    `unplaceable`), never a negative.
+  - `harness/auto.py`: `_FragmentGuard` wraps a crawl-sourced run's sender: an HTTP
+    send at location `fragment` raises `UnplaceableLocation` (only M6 places a fragment
+    point; the senders' unknown-location fallback stays pinned, BUG-0115 instance 4).
+    Ground-truth runs are not wrapped. `run_auto` builds `fragment` crawl points only
+    with a browser.
+  - `greybox/run.py`: `RequestsCorrelatingSender` passes `method` to the send gate and
+    raises `UnplaceableLocation` for `json` (it does not rebuild JSON bodies);
+    `points_from_store` leaves JSON points out and reports them.
+  - `tools/browserexec.py`: `_with_fragment` places a fragment payload inside an SPA
+    hash route's query (`/#/search?q=<payload>`, `%20`-encoded), never after a second
+    `#`; the M6 executor already refuses `json` (no verdict, before any browser).
+  - `harness/auto_cli.py`: a "not placeable" summary block when a candidate had no
+    mechanism that could place it.
+- Impact: FR-FUZZ-47 (new); NFR-FUZZ-safe gains the JSON / DELETE clauses with their
+  tests. Every sender's existing locations are unchanged (conformance re-run). The
+  pinned unknown-location fallback is not changed for ground truth. AUD
+  (CC-AUD-0035) imports the points; CORE (CC-CORE-0046) holds the convention.
+- Risk: medium: probes now reach JSON APIs and complete real writes (stated in
+  FR-FUZZ-47). Mitigation: PUT/PATCH opt-in, DELETE refused at import and at send,
+  login bodies only on an isolated or anonymous session, siblings redacted and
+  neutral.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_sender_conformance.py` (`json` registered for every concrete
+    sender and `_FormBoundSender`, a nested leaf with typed siblings, synthetic
+    offenders, greybox refusal, the executor's fragment placement) and
+    `tests/test_json_points.py` (end-to-end JSON login SQLi on an isolated session and
+    anonymously, sibling redaction, DELETE per sender, fragment never sent over HTTP,
+    the oracle's refusal handling) — done
+  - [x] FR-FUZZ-47, NFR-FUZZ-safe trace lines — done
+- Review: phase 3 design (`p3-spa-draft.md`, revisions 1–4), agreed by reviewers A and
+  B; implementation review by the orchestrator pending.
+- Effectiveness: verified offline, 2026-10-14. `tests/test_json_points.py` 90 passed;
+  `tests/test_sender_conformance.py` 16 passed, 2 xfailed (the pinned BUG-0115
+  instance 4); the lane's focused set (19 files, `FUZZLAB_REQUIRE_LINT=1`) 707 passed,
+  2 xfailed. Mutation check of the safety gates (import refusals, password isolation,
+  pinning, redaction, the DELETE send gate per sender, `json` placement, sibling
+  binding and neutrality, the fragment guard, greybox, the oracle's refusal handling,
+  the parser, the name rule): 34 of 35 mutants killed; the survivor (the point
+  builder's per-key credential check reduced to the display name) is equivalent —
+  `name_tokens` already splits the display name at every key boundary, and production
+  never writes a `json` parameter with a credential key. The live Juice Shop `fuzzlab
+  auto` run (expected: `/rest/user/login` `email` SQLi) is the remaining check.
+
 ### CC-FUZZ-0067 — Open-redirect confirmation passes containment allowlists; host-based (BUG-0124) (2026-10-14)
 - Change:
   - `oracle/strategies.py` `OpenRedirectStrategy`: `_lands_on` (urljoin + urlsplit:

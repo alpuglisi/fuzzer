@@ -3,6 +3,47 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0046 — The `json` point location; SPA routes; the send-time DELETE gate (forms phase 3, lane J) (2026-10-14)
+- Change:
+  - `core/jsonbody.py` (new): the one convention for JSON-body points (PA-0003).
+    `LOCATION = "json"`, `ENCTYPE = "application/json"`, `MAX_LEAVES = 64`,
+    `MAX_DEPTH = 16`; `leaves(body)` (a JSON object's leaves in document order, empty
+    containers kept as leaves; None over the limits), `display_name(path)` /
+    `parse_name(name)` (keys joined by `.`, indexes as `[n]`, `\ . [ ]` escaped in a
+    key; exact inverses, linear), `name_segment`, `segments_of`, `decode_entries` (the
+    one reader of a stored JSON entry list, PA-0108: shape, types, finite numbers,
+    no repeated or nested paths), `encode_entries`, `build`, `normalize_entries`,
+    `replace_leaf`, `body_for` (the body a `json` send carries; `JsonPlacementError`
+    when a leaf cannot be placed), `loads` (NaN/Infinity rejected).
+  - `core/urls.py`: `spa_route(url)` (an SPA hash route's path and query, `#/` or
+    `#!/`), `to_route_path(url)` (`to_path` plus `#<route path>`: how a `fragment`
+    point's endpoint is stored), `REFUSED_SEND_METHODS = {"DELETE"}` and a `method`
+    argument on `check_send_url` (a DELETE is refused unless its URL was explicitly
+    enumerated).
+  - `core/features.py`: `extract_candidate_v1`'s `loc_body` is 1 for `json` too
+    (`_BODY_LOCATIONS`); documented as CC-ML-0030. No stored vector changes (no row had
+    location `json` before), so `CANDIDATE_FEATURE_VERSION` stays 1.
+- Impact: FR-CORE-36 (new). No migration: `form.enctype`, `form.entries` and
+  `parameter.location` are free text (confirmed: `form.enctype` has no CHECK and is
+  read only by `core.forms`, whose `is_link_set` is false for `application/json`;
+  `parameter.location` has no CHECK). Users: the importer (AUD, CC-AUD-0035), the
+  point builder, senders, oracle binding and the M6 executor (FUZZ, CC-FUZZ-0068).
+  Every existing `check_send_url` caller keeps its behaviour for every method but
+  DELETE.
+- Risk: low. A route endpoint (`/#/search`) is stored outside `to_path` form; only
+  `fragment` parameters use it, and their findings are written at `to_path` (`/`).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_json_points.py` (round trip over adversarial keys, the
+    malformed-name and malformed-entry tables, limits, route helpers, the DELETE gate
+    per sender) and `tests/test_sender_conformance.py` (the `json` location) — done
+  - [x] FR-CORE-36 — done
+- Review: phase 3 design (`p3-spa-draft.md`, revisions 1–4), agreed by reviewers A and
+  B; implementation review by the orchestrator pending.
+- Effectiveness: verified offline, 2026-10-14 (lane J test run; the DELETE gate,
+  the leaf/depth limits and the entry parser are killed mutants — see CC-FUZZ-0068).
+  The live Juice Shop run is the remaining check.
+
 ### CC-CORE-0045 — One transaction-word rule (forms phase 3, shared prerequisite) (2026-10-14)
 - Change:
   - `core/urls.py`: `TRANSACTION_TOKENS` (checkout, purchase, pay/payment, order,

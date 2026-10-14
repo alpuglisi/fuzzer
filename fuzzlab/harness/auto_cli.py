@@ -131,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
                         f"{header_point_cost()} requests per page and name. Cookie, "
                         "Authorization, Host, framing, routing and method-override headers "
                         "are refused (FR-FUZZ-43).")
+    p.add_argument("--fuzz-json-writes", action="store_true",
+                   help="Also import captured PUT/PATCH requests as JSON points (forms "
+                        "phase 3). Off by default: each probe updates the row the request "
+                        "targets. DELETE is never imported.")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     from fuzzlab.cli_dryrun import add_dry_run_flag
@@ -258,7 +262,8 @@ def _precheck_environment(p, args) -> None:
 
 
 def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
-    counts = import_spider(args.spider_db, store, run_id) if \
+    counts = import_spider(args.spider_db, store, run_id,
+                           fuzz_json_writes=getattr(args, "fuzz_json_writes", False)) if \
         os.path.exists(args.spider_db) else {}
     sender = make_probe_sender(args.base_url, args.identity)
     browser = None
@@ -473,6 +478,11 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     if counts:
         print(f"  crawl imported: {counts.get('endpoint', 0)} endpoint(s), "
               f"{counts.get('parameter', 0)} parameter(s)")
+    if counts and counts.get("request"):             # forms phase 3 (FR-AUD-22)
+        print(f"  captured requests: {counts['request']} seen, "
+              f"{counts.get('request_json', 0)} JSON and {counts.get('request_form', 0)} "
+              f"form-encoded imported, {counts.get('request_refused', 0)} refused "
+              f"(method, write, destructive, transaction, credential-change, settings)")
     print(f"  points audited: {result.points_audited}   "
           f"candidates: {result.candidates}   negatives: {result.negatives}")
     print(f"  findings (oracle-confirmed): {result.findings}")
@@ -487,6 +497,14 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
     unsure = getattr(result, "inconclusive", None) or []
+    unplaced = [u for u in unsure if u.get("mechanism") == "unplaceable"]
+    unsure = [u for u in unsure if u.get("mechanism") != "unplaceable"]
+    if unplaced:
+        from fuzzlab.core.urls import to_path
+        print(f"  not placeable ({len(unplaced)} candidate key(s): no mechanism could "
+              f"place the point; unlabelled, PA-0115):")
+        for item in unplaced:
+            print(f"    - {item['location']} {to_path(item['url'])} [{item['param']}]")
     if unsure:
         from fuzzlab.core.urls import to_path
         print(f"  inconclusive ({len(unsure)} candidate key(s): a cost cap stopped a "
