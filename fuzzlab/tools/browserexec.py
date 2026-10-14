@@ -11,6 +11,7 @@ lab host), not in the offline test sandbox.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from contextlib import suppress
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -45,13 +46,22 @@ def _with_fragment(url: str, param: str, value: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
 
 
+#: What a failure text may not keep: a quoted string, or a ``scheme://`` token.
+_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+_URL_TOKEN = re.compile(r"\S*://\S*")
+
+
 def _failure_reason(exc) -> str:
     """Why the browser observed nothing (BUG-0137): the error's class and the first
-    line of its text up to the URL. The URL carries the payload, so it is never
-    included."""
+    line of its text with every quoted string and every ``scheme://`` token removed,
+    then capped. A URL carries the payload, and Playwright prints one quoted
+    (``Navigation to "<url>" is interrupted by another navigation to "<url>"``) or
+    after ``at`` (``net::ERR_ABORTED at <url>``): neither is ever kept (review A)."""
     first = str(exc).splitlines()[0] if str(exc) else ""
-    return (f"the browser could not load the page ({type(exc).__name__}: "
-            f"{first.split(' at ', 1)[0][:120]})")
+    text = _URL_TOKEN.sub("", _QUOTED.sub("", first)).replace('"', "").replace("'", "")
+    text = " ".join(text.split())
+    text = text[:-3] if text.endswith(" at") else text
+    return f"the browser could not load the page ({type(exc).__name__}: {text[:120]})"
 
 
 def _loaded(page, error) -> bool:

@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0137, review of 1702c29: the not-observed reason never carries a URL)
+- **Why:** Playwright's "navigation interrupted" message quotes the payload-carrying URL
+  with no `" at "`, so it reached the stored reason. Reviewer B also asked for the
+  reason in the run's inconclusive detail, an inconclusive result for a late launch
+  failure, and oracle-level pins.
+- **What:** the reason drops every quoted string and `scheme://` token; the pipeline's
+  inconclusive detail carries it; a launch failure after an unobserved payload stays
+  inconclusive; oracle-order tests. CC-FUZZ-0083 amendment.
+
 ## 2026-10-14 (BUG-0137 final review: an unobserved M6 probe ends only that probe; such candidates are inconclusive)
 - **Why:** reviewers found that one unobserved payload ended the browser strategy's
   payload loop (a later hit was never tried), and that a candidate whose page could

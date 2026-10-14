@@ -2213,6 +2213,12 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                 if misses >= self.MAX_NOT_OBSERVED:  # cost bound (FR-FUZZ-48)
                     break
                 continue
+            except UnplaceableLocation:
+                # the browser cannot start (BUG-0126) after a payload went unobserved:
+                # still the inconclusive verdict below, not "no verdict" (review B-N2)
+                if not_observed is None:
+                    raise
+                break
             misses = 0
             if obs.executed:
                 return Verdict(True, self.vuln_class, self.mechanism,

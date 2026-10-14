@@ -1238,8 +1238,12 @@ rewards) derives from it.
     - Both apply only with no hit. Pending sentinel calls are pumped before deciding,
       and hits are read again after the load check; a hit recorded at any point is
       executed=True.
-    - The reason is the error's class and its text up to the URL; it never includes
-      the URL, which carries the payload.
+    - The reason is the error's class and the first line of its text with every
+      quoted string and every `scheme://` token removed, capped at 120 characters. It
+      never includes a URL, which carries the payload, whatever the message's shape
+      (`Navigation to "<url>" is interrupted ...`, `net::ERR_ABORTED at <url>`, a
+      timeout's call log). The run's inconclusive detail (`PipelineResult.inconclusive`)
+      carries it as `reason`.
   - **Per candidate.** `_BrowserXssStrategy` tries its next payload after a
     `NotObserved`, and stops after `MAX_NOT_OBSERVED` (2) in a row; that is the cost
     bound: an unobservable page costs at most 2 browser loads, each up to
@@ -1250,6 +1254,8 @@ rewards) derives from it.
       reports it inconclusive when nothing confirms, for query and fragment points
       alike, so it never enters the ML negatives.
     - Every payload observed, no hit: `None`, a negative, as before.
+    - A browser that cannot start, after a payload went unobserved: still the
+      inconclusive verdict, not a propagated "no verdict".
   - **What still stops at once.** A browser that cannot start, or one marked
     unavailable, is the plain `UnplaceableLocation` (BUG-0126). So are the strategies'
     placement refusals (BUG-0115).
@@ -1270,6 +1276,7 @@ rewards) derives from it.
   - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict`
   - Enforced by (a page the executor could not observe is no verdict, never the end of the run; CC-FUZZ-0083, BUG-0137): `PlaywrightBrowserExecutor.run` (`wait_until="commit"`, `LOAD_WAIT_MS`, `except PlaywrightError`) — `tests/test_m6_navigation_failures.py::test_a_before_load_navigation_is_no_verdict_well_under_the_timeout`, `tests/test_m6_navigation_failures.py::test_a_hit_after_a_before_load_navigation_counts`, `tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline`, `tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url`, `tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed`
   - Enforced by (per payload, inconclusive, the driver's stop, a slow page's settle; BUG-0137 review D54): `_BrowserXssStrategy.confirm` (`NotObserved`, `MAX_NOT_OBSERVED`), `PlaywrightBrowserExecutor._stop_driver` / `_wait_for_token` — `tests/test_m6_navigation_failures.py::test_a_later_payload_is_tried_after_an_unobserved_one`, `tests/test_m6_navigation_failures.py::test_two_unobserved_payloads_in_a_row_stop_and_are_inconclusive`, `tests/test_m6_navigation_failures.py::test_a_partly_observed_candidate_without_a_hit_is_inconclusive`, `tests/test_m6_navigation_failures.py::test_every_payload_observed_without_a_hit_is_a_plain_negative`, `tests/test_m6_navigation_failures.py::test_a_browser_that_cannot_start_stops_at_once`, `tests/test_m6_navigation_failures.py::test_a_failed_driver_stop_keeps_the_result`, `tests/test_m6_navigation_failures.py::test_a_driver_that_never_stops_cleanly_makes_the_browser_unavailable`, `tests/test_m6_navigation_failures.py::test_a_sink_that_fires_after_a_slow_load_is_seen`
+  - Enforced by (the reason carries no URL; a late launch failure; M6's inconclusive in the oracle's order; review of 1702c29): `browserexec._failure_reason`, `_BrowserXssStrategy.confirm`, `pipeline._confirm` — `tests/test_m6_navigation_failures.py::test_the_reason_never_carries_a_url_or_the_payload`, `tests/test_m6_navigation_failures.py::test_a_launch_failure_after_an_unobserved_payload_is_still_inconclusive`, `tests/test_m6_navigation_failures.py::test_an_m6_inconclusive_first_never_hides_a_later_confirmation`, `tests/test_m6_navigation_failures.py::test_the_first_inconclusive_is_kept_before_an_m6_one`
 - **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
   server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
   `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`

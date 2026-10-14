@@ -208,3 +208,18 @@ Updated sweep rows (the PA-0002 table above):
 Remaining residual: an unobservable page still costs up to 2 × (`LOAD_WAIT_MS` +
 `SETTLE_MS`) per candidate (about 14 s by default). This is the stated bound
 (FR-FUZZ-48).
+
+### Review of 1702c29 (added in review)
+Both reviewers agreed. Four small fixes (CC-FUZZ-0083 amendment):
+- **The reason could carry the payload (reviewer A).** It kept the text up to
+  `" at "`. Playwright's `Navigation to "<url>" is interrupted by another navigation
+  to "<url>"` has no `" at "`, so the payload-carrying URL reached the stored
+  `evidence["not_observed"]`. The reason now drops every quoted string and every
+  `scheme://` token, then is capped. Five message shapes are pinned. This is a gap in
+  this bug's own "never the URL" rule, found before release, so no data was stored with
+  it outside tests.
+- **B-N1:** the run's inconclusive detail carries the not-observed reason.
+- **B-N2:** a launch failure after an unobserved payload stays inconclusive (Z4) and
+  is not propagated.
+- **B-N3:** oracle-level tests pin that an M6 inconclusive never hides a later
+  confirmation and never replaces an earlier inconclusive.

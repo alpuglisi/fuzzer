@@ -121,6 +121,9 @@ def test_a_page_that_cannot_load_never_ends_the_pipeline(monkeypatch, tmp_path):
     assert result.metrics["oracle_inconclusive"] == 1
     assert result.metrics["oracle_inconclusive_browser-execution"] == 1
     assert result.metrics["oracle_rejected"] == 0     # no negative from the redirect
+    # the run's inconclusive detail says why (review B-N1), with no URL in it
+    detail, = [item for item in result.inconclusive if item["url"].endswith("/redir")]
+    assert "could not load" in detail["reason"] and "http" not in detail["reason"]
     assert "/logout.php" not in site.requests
 
 
@@ -368,3 +371,87 @@ def test_a_sink_that_fires_after_a_slow_load_is_seen(monkeypatch):
         assert _m6_run(site, "/slowpage", settle_ms=4000).executed is True
     finally:
         site.close()
+
+
+# --- review of 1702c29: the reason never carries a URL; late launch failure; oracle --
+_PAYLOAD_URL = "http://127.0.0.1:3000/x?q=%3Cimg+src%3Dx+onerror%3DPAYLOADMARK%3E"
+
+
+@pytest.mark.parametrize("message", [
+    # Playwright's interrupted navigation: both URLs quoted, no " at "
+    f'Page.goto: Navigation to "{_PAYLOAD_URL}" is interrupted by another navigation '
+    f'to "http://127.0.0.1:3000/logout.php"\nCall log:\n  - navigating to "x"',
+    f"Page.goto: net::ERR_ABORTED at {_PAYLOAD_URL}\nCall log:\n  - navigating",
+    f'Page.goto: Timeout 8000ms exceeded.\nCall log:\n  - navigating to "{_PAYLOAD_URL}"',
+    # a quoted raw payload with spaces, and a URL that is not quoted
+    "Page.goto: Navigation to \"http://h/x?q=<img src=x onerror=PAYLOADMARK>\" failed",
+    f"frame was detached while loading {_PAYLOAD_URL} (PAYLOADMARK-free tail)",
+])
+def test_the_reason_never_carries_a_url_or_the_payload(message):
+    """Review A: every quoted string and every ``scheme://`` token is removed from the
+    stored reason (``evidence["not_observed"]``), whatever the message's shape."""
+    from fuzzlab.tools.browserexec import _failure_reason
+    reason = _failure_reason(_FakeError(message))
+    assert "http" not in reason and "://" not in reason
+    assert '"' not in reason and "'" not in reason
+    assert "PAYLOADMARK" not in reason.replace("PAYLOADMARK-free", "")
+    assert reason.startswith("the browser could not load the page (_FakeError: ")
+
+
+def test_a_launch_failure_after_an_unobserved_payload_is_still_inconclusive():
+    """Review B-N2: a payload went unobserved, then the browser could not start: the
+    candidate is inconclusive (Z4), not "no verdict" from a propagated error."""
+    executor = _ScriptedExecutor("unobserved", "no-browser")
+    verdict = _dom_confirm(executor)
+    assert verdict is not None and verdict.inconclusive and not verdict.confirmed
+    assert executor.calls == 2
+
+
+class _Stub:
+    """A strategy that returns a fixed verdict."""
+    category = "xss"
+
+    def __init__(self, arm, verdict):
+        self.arm, self.mechanism, self._verdict = arm, arm, verdict
+
+    def applies(self, candidate):
+        return True
+
+    def confirm(self, candidate, sender):
+        return self._verdict
+
+
+def _oracle_outcome(*strategies):
+    from fuzzlab.oracle import Oracle
+    from fuzzlab.oracle.probe import Candidate
+    cand = Candidate(url="http://127.0.0.1:3000/p", param="q", category="xss",
+                     location="query")
+    return Oracle(strategies=list(strategies)).confirm_outcome(cand, _QuietSender())
+
+
+def _m6_inconclusive():
+    from fuzzlab.oracle.probe import Verdict
+    return Verdict(False, "xss-dom", "browser-execution",
+                   {"not_observed": "the browser could not load the page (x)"},
+                   inconclusive=True)
+
+
+def test_an_m6_inconclusive_first_never_hides_a_later_confirmation():
+    """Review B-N3: M6's inconclusive verdict, ordered first, then a confirming
+    strategy: the candidate is confirmed, with no inconclusive."""
+    from fuzzlab.oracle.probe import Verdict
+    confirmed = Verdict(True, "xss", "reflection", {})
+    verdict, unsure = _oracle_outcome(_Stub("m6", _m6_inconclusive()),
+                                      _Stub("reflected", confirmed))
+    assert verdict is confirmed and unsure is None
+
+
+def test_the_first_inconclusive_is_kept_before_an_m6_one():
+    """Review B-N3: a cost-capped strategy's inconclusive verdict comes first; M6's
+    after it does not replace it."""
+    from fuzzlab.oracle.probe import Verdict
+    capped = Verdict(False, "xss", "cost-cap", {"families_not_started": ["x"]},
+                     inconclusive=True)
+    verdict, unsure = _oracle_outcome(_Stub("capped", capped),
+                                      _Stub("m6", _m6_inconclusive()))
+    assert verdict is None and unsure is capped

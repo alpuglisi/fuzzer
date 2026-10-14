@@ -116,6 +116,28 @@ note of the same date.
     `fuzzlab.oracle` package, `tools/browserexec.py`, `session/browserlogin.py` or the
     login fixture, plus the changed test files and the traceability guard (60 files,
     FUZZLAB_REQUIRE_BROWSER=1): 1597 passed, 2 xfailed, 0 skipped, 0 failed.
+- Amendment, review of 1702c29 (2026-10-14; reviewers A and B AGREE; four small
+  fixes):
+  - **A, the reason:** `_failure_reason` kept the text up to `" at "`. Playwright's
+    `Page.goto: Navigation to "<url>" is interrupted by another navigation to "<url>"`
+    has no `" at "`, so a payload-carrying URL reached `evidence["not_observed"]`. Now
+    every quoted string and every `scheme://` token is removed, then the text is
+    capped at 120 characters. Pinned on five message shapes: interrupted, ERR_ABORTED
+    at, a timeout's call log, a quoted raw payload, an unquoted URL. Mutation (the old
+    rule): 3 of 5 fail.
+  - **B-N1:** `harness/pipeline._confirm` puts a not-observed reason in the run's
+    inconclusive detail (`item["reason"]`), pinned in the two-candidate pipeline test.
+    Mutation: that test fails.
+  - **B-N2:** a plain `UnplaceableLocation` (a launch failure) after an unobserved
+    payload gives the inconclusive verdict instead of propagating. Unit test; mutation:
+    it fails.
+  - **B-N3:** oracle-level tests: M6's inconclusive verdict ordered first does not hide
+    a later confirmation, and a cost-capped strategy's earlier inconclusive is kept
+    over M6's. These pin existing behavior, so there is no mutation.
+  - Effectiveness: `tests/test_m6_navigation_failures.py` 22 passed. Every test file importing
+    `tools/browserexec.py`, `oracle/strategies.py`, `harness/pipeline.py` or the
+    `fuzzlab.oracle` package, plus the traceability guard (59 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1351 passed, 2 xfailed, 0 skipped, 0 failed.
 
 ### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
 - Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort
