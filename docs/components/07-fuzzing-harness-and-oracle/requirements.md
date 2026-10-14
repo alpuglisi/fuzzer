@@ -51,10 +51,14 @@ rewards) derives from it.
     a selected `<option>`: an edit form showing the stored input back), and when it is in
     a form control the number must appear outside every form control. A second, fresh
     value must likewise appear in the response to its own probe (BUG-0117). Limits: a
-    page listing earlier values as unselected options refuses (a false negative).
+    page listing earlier values as unselected options refuses, and a number split
+    across elements (`593<b>541</b>`) is in no single parsed part and cannot confirm
+    (fail-empty false negatives).
     - Enforced by: `tests/test_evaluation_marker_echo.py::test_each_evaluation_marker_judges_the_echo_by_where_it_is`,
       `tests/test_evaluation_marker_echo.py::test_the_prg_edit_form_confirms_like_juice_shops_profile`,
-      `tests/test_evaluation_marker_echo.py::test_no_strategy_judges_its_literal_by_a_raw_substring`
+      `tests/test_evaluation_marker_echo.py::test_no_strategy_judges_its_literal_by_a_raw_substring`,
+      `tests/test_evaluation_marker_echo.py::test_input_echo_with_a_fixed_number_equal_to_probe_1s_never_confirms`,
+      `tests/test_evaluation_marker_echo.py::test_input_echo_on_a_dense_number_page_never_confirms`
 - **FR-FUZZ-5** The oracle is the **only** writer of `finding` labels; keep
   detection (the measurement) decoupled from the payload's label to avoid circular
   labeling. New classes register via a built-in strategy registry now, and the
