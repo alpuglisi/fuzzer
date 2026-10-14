@@ -4,6 +4,12 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-CRAWL-17 review round 3: a request whose redirect hop was refused stays blocked)
+- While a SPA query load's window is open, every request that fails is blocked for it, so
+  a GET whose redirect hop the window refused is never fetched again outside the window;
+  unclean window closes are counted; the session re-check also runs when leaving the page
+  fails (CC-CRAWL-0027 review amendment, round 3).
+
 ## 2026-10-14 (FR-CRAWL-17 review round 2: every write counted, seeds filed fail-closed)
 - A query load's window now counts as a write every refused non-GET (a form's POST
   navigation too, whose target is no longer queued as a GET), held WebSocket message and

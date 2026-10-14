@@ -261,6 +261,26 @@ Newest first.
     `test_session_browser_login`, `test_form_entries`, `test_cli_dry_run`,
     `test_auditor_seam`: 649).
 
+- **Review amendment, round 3 (2026-10-14; reviewer A AGREE, reviewer B AGREE-with-changes,
+  no must-fix; the reconciled fix list Y1-Y4, D52).** Appended.
+  - **Y1 (A3-S1 = B3-S1):** `LocalSpider._on_request_failed` (the crawl page's
+    `requestfailed` event): while a query window is open every failed request's URL goes
+    into `win["blocked"]` (and the probe's): a GET whose redirect hop the window refused
+    fails, so it is never queued from the load's request list and fetched later outside
+    the window (where the hop would run). `observed_names` documents exact-URL matching
+    (A3-N2).
+  - **Y2 (B3-S2, B3-N2):** `spa_query_unclean_windows` counts a query window that did not
+    close cleanly (summary, `crawl_stats`); every seed not promoted -- a write, an unclean
+    close or a failed visit -- is counted in `spa_query_write_seeds`.
+  - **Y3 (B3-S3):** `_recheck_query_session` also runs on the window's failure path,
+    after its `about:blank` attempt.
+  - **Y4 (B3-N1):** the slow-expiry test's docstring says it passes through either check.
+  - Effectiveness (Y1-Y4, assessed 2026-10-14): `tests/test_spa_query.py` 94 passed, 0
+    skipped (real Chromium). Mutations, each reverted: Y1 (no `requestfailed` hook) ->
+    the hop test and the M6 test fail (the server got `GET /api/order/confirm?via=go`
+    twice); Y3 (no re-check on the failure path) -> its unit test fails. The every-file
+    run is recorded with CC-CRAWL-0029.
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

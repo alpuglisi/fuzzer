@@ -446,7 +446,7 @@ class LocalSpider:
             "spa_query_kept", "spa_query_refused", "spa_query_writes_blocked",
             "spa_query_marker_in_path", "spa_query_step_cap", "spa_query_seeded",
             "spa_query_seeded_fragment", "spa_query_write_seeds",
-            "spa_query_session_losses"), 0)
+            "spa_query_session_losses", "spa_query_unclean_windows"), 0)
         # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
         #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
         self._query_on = self._spa_on and bool(spa_query)
@@ -576,6 +576,7 @@ class LocalSpider:
         # JavaScript-rendered page actually gets its data, and they never appear
         # as <a href> anywhere, so link-following alone can never reach them.
         self._page.on("request", self._on_request)
+        self._page.on("requestfailed", self._on_request_failed)      # FR-CRAWL-17, Y1
 
     def _guard(self, context, *, scripts, session=False):
         """The one guard every context this crawl opens gets (BUG-0123, FR-CRAWL-12/13):
@@ -717,6 +718,9 @@ class LocalSpider:
                 self._close_window_pages(win, page)
                 with contextlib.suppress(PlaywrightError):
                     page.goto("about:blank", timeout=self.timeout_ms)
+                if query:
+                    # Y3 (review B3-S3): the session re-check runs on this path too
+                    self._recheck_query_session(win)
             finally:
                 self._win = None
                 if query == spa.SEED_SOURCE:
@@ -863,6 +867,21 @@ class LocalSpider:
                 return                         # blocked ones are marked at the read
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
+        except Exception:
+            pass  # never let instrumentation break a crawl
+
+    def _on_request_failed(self, request):
+        """FR-CRAWL-17 (Y1, review A3-S1 / B3-S1): while a seed or probe window is open,
+        every request of the page that failed is blocked for that window -- among them a
+        request whose redirect **hop** the window refused (the original request fails
+        when its hop is aborted, and only the original is in the load's request list), so
+        it is never queued and fetched later outside the window, nor evidence."""
+        try:
+            win = self._win
+            if win is not None and win.get("query"):
+                win.setdefault("blocked", set()).add(request.url)
+                if self._probe is not None:
+                    self._probe["blocked"].add(request.url)
         except Exception:
             pass  # never let instrumentation break a crawl
 
@@ -1329,13 +1348,18 @@ class LocalSpider:
         and probe loads stop for the crawl, and the session is re-adopted once on the
         start page; a re-adoption that does not hold stops reveals and submissions too
         (as W4)."""
-        if win.get("query") == spa.SEED_SOURCE and visited:
-            if win.get("closed") and not win.get("writes"):
+        if win.get("query") and not win.get("closed"):
+            self.spa_counts["spa_query_unclean_windows"] += 1     # Y2 (review B3-S2)
+        if win.get("query") == spa.SEED_SOURCE:
+            if visited and win.get("closed") and not win.get("writes"):
                 self.storage.set_source(url, spa.SEED_SOURCE)
             else:
+                # a write, an unclean close, or a failed visit (filed by the loop's
+                # failure path): kept as a page, never a point (B3-N2: all counted)
                 self.spa_counts["spa_query_write_seeds"] += 1
                 logging.info(f"SPA query seed {url} blocked a write (or its window did "
-                             f"not close cleanly): kept as a page, never a point")
+                             f"not close cleanly, or its visit failed): kept as a page, "
+                             f"never a point")
         ok, why = win.get("session", (not self._authenticated, "no session check"))
         if ok:
             return
@@ -2164,13 +2188,16 @@ class LocalSpider:
             why = ", ".join(f"{k} x{v}" for k, v in sorted(self.spa_query_refused.items()))
             lines.append(f"SPA query parameters refused: {why}.")
         if c["spa_query_writes_blocked"] or c["spa_query_marker_in_path"] or \
-                c["spa_query_step_cap"] or c["spa_query_write_seeds"]:
+                c["spa_query_step_cap"] or c["spa_query_write_seeds"] or \
+                c["spa_query_unclean_windows"]:
             lines.append(f"SPA query loads: {c['spa_query_writes_blocked']} request(s) "
                          f"blocked by their window; {c['spa_query_write_seeds']} seed(s) "
                          f"that blocked a write kept as pages, never points; "
                          f"{c['spa_query_marker_in_path']} marker(s) or filler(s) seen in "
                          f"a request path (no point); the step budget stopped "
-                         f"{c['spa_query_step_cap']} script scan(s).")
+                         f"{c['spa_query_step_cap']} script scan(s); "
+                         f"{c['spa_query_unclean_windows']} window(s) did not close "
+                         f"cleanly.")
         if self.spa_query_stopped:
             lines.append(f"SPA query loads stopped: {self.spa_query_stopped}.")
         return lines

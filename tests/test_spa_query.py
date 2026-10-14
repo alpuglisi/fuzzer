@@ -512,9 +512,23 @@ def test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points(quer
     for route, name in (("track", "id"), ("search", "q"), ("score-board", "q")):
         assert (f"/#/{route}", name, "fragment") in params, route
     c = query_crawl["sp"].spa_counts
-    # track..login, autopost, wsping, txn, and logout:bye (refused later); never ./rel
-    assert c["spa_query_pairs"] == 11
+    # track..login, autopost, wsping, txn, hopper, and logout:bye (refused later); never
+    # ./rel
+    assert c["spa_query_pairs"] == 12
     assert c["spa_query_seeded"] == c["spa_query_seeded_fragment"] >= 9
+
+
+def test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again(query_crawl):
+    """Y1 (review A3-S1 / B3-S1): ``#/hopper?x=`` fetches ``/api/go``, which redirects
+    to a transaction GET the window refuses: the request fails, so it is blocked for the
+    window -- never queued from the load's request list, never fetched again outside
+    the window (where its hop would run), never stored. Runs before any other crawl of
+    this lab."""
+    lab, db = query_crawl["lab"], query_crawl["db"]
+    assert lab.seen("GET", "/api/order/confirm") == []
+    assert len(lab.seen("GET", "/api/go")) == 1             # the window's own fetch only
+    assert not any("/api/go" in u for u in _pages(db))
+    assert lab.base + "#/hopper?x=fuzzlab" in _pages(db)
 
 
 def test_search_and_score_board_q_stay_two_points_and_one_parameter_each(query_crawl):
@@ -612,7 +626,7 @@ def test_the_probe_keeps_only_observed_names(query_crawl):
     c = sp.spa_counts
     # term, extra, next, and dot (from ``./rel``: a relative route names none, U7)
     assert c["spa_query_unpaired"] == 4 and c["spa_query_kept"] == 5
-    assert c["spa_query_probe_loads"] == 20                 # every rendered route once
+    assert c["spa_query_probe_loads"] == 21                 # every rendered route once
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
     assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
@@ -667,6 +681,8 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
         assert sources[lab.base + seed] == spa.WRITE_SEED_SOURCE, seed
     assert sources[lab.base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE     # promoted
     assert sp.spa_counts["spa_query_write_seeds"] >= 4
+    # Y2 (review B3-S2): every window closed cleanly, so these came from real writes
+    assert sp.spa_counts["spa_query_unclean_windows"] == 0
     assert dict(db_rows(db, "SELECT name, value FROM crawl_stats"))[
         "spa_query_write_seeds"] >= 1
     monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS",
@@ -932,6 +948,29 @@ def test_a_cookie_cleared_while_the_page_leaves_is_a_loss(tmp_path):
         sp.storage.close()
 
 
+def test_the_session_is_rechecked_when_leaving_the_page_fails(tmp_path):
+    """Y3 (review B3-S3): the page's ``about:blank`` fails (the window's failure path)
+    after the jar was cleared: the re-check still runs there, so the window's verdict is
+    a loss."""
+    from fuzzlab.tools.spider import PlaywrightError
+    sp, ctx, _m = _session_spider(tmp_path)
+
+    class Page(_FakePage):
+        def goto(self, url, **kw):
+            if url == "about:blank":
+                ctx.jar = []
+                raise PlaywrightError("navigation failed")
+            self.url = url
+    try:
+        page = Page("http://127.0.0.1:9/#/x?a=fuzzlab")
+        with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
+            pass
+        assert not win.get("closed")
+        assert win["session"][0] is False and "sid" in win["session"][1]
+    finally:
+        sp.storage.close()
+
+
 @pytest.mark.parametrize("live", [True, False])
 def test_verify_live_runs_after_a_window_that_blocked_a_write(tmp_path, live):
     """U4 (review B2-S2, W4 parity): the server's verdict is asked only when the window
@@ -1106,7 +1145,10 @@ class _CookieManager:
 def test_a_slow_response_that_expires_the_session_cookie_is_a_loss(monkeypatch, tmp_path):
     """U4: the ``chill`` seed's slow GET answers ``Set-Cookie: sid=; Max-Age=0``; the
     session check sees the cleared cookie, query loads stop (``after2``'s seed is
-    refused) and the session is re-adopted."""
+    refused) and the session is re-adopted. End to end, it passes through either check
+    -- the one before the page leaves or the re-check after the quiet period, depending
+    on when the answer lands (Y4); the re-check alone is pinned by
+    `test_a_cookie_cleared_while_the_page_leaves_is_a_loss`."""
     from tests._spa_query_fixture import SessionCookieSpa
     chromium_or_skip(monkeypatch)
     lab = SessionCookieSpa()

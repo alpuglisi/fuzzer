@@ -1918,6 +1918,9 @@ def observed_names(texts, requests, markers: dict, names, *, doc_path: str | Non
     name whose only evidence is a blocked request is not kept (review A-M1). The
     caller marks requests blocked by URL, which is conservative: a completed GET to a
     URL that was also blocked (as a POST, say) is not evidence either (review B-N4).
+    Blocked includes every request of the load that failed while the window was open
+    (a request whose redirect hop the window refused fails, Y1); matching is by the
+    exact URL string the page requested (review A3-N2).
 
     A marker counts where it appears with non-alphanumeric boundaries in a string that
     carries no other of this load's markers. ``<name>=`` syntax of a probed name also

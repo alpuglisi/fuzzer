@@ -31,7 +31,7 @@ const routes = [{path:'track'}, {path:'search'}, {path:'score-board'}, {path:'po
   {path:'hop'}, {path:'away'}, {path:'login'}, {path:'logout'}, {path:'reflect'},
   {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'memo'},
   {path:'fetcher'}, {path:'forward'}, {path:'pathy'}, {path:'beacon'}, {path:'autopost'},
-  {path:'wsping'}, {path:'txn'}];
+  {path:'wsping'}, {path:'txn'}, {path:'hopper'}];
 // read by the crawler's scan only (never called): Angular-style navigations and reads
 class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}});
 this.router.navigate([`/search`],{queryParams:{q:t}});
@@ -46,6 +46,7 @@ this.router.navigate([`/vault`],{queryParams:{token:t}});
 this.router.navigate([`/autopost`],{queryParams:{go2:t}});
 this.router.navigate([`/wsping`],{queryParams:{ping:t}});
 this.router.navigate([`/txn`],{queryParams:{ref:t}});
+this.router.navigate([`/hopper`],{queryParams:{x:t}});
 this.router.navigate([`./rel`],{queryParams:{dot:t}})}
 read(){return[this.route.snapshot.queryParams.term,this.route.queryParams.subscribe(n=>n),
 this.route.snapshot.queryParamMap.get(`extra`),this.route.snapshot.queryParamMap.get(`next`)]}}
@@ -103,6 +104,9 @@ function render() {
   else if (name === 'txn') { text('txn');
     // a transaction GET the window's word rules refuse (U1)
     if (p.get('ref')) fetch('/api/order/confirm?ref=' + p.get('ref')).catch(() => {}); }
+  else if (name === 'hopper') { text('hopper');
+    // a GET whose redirect hop is a transaction GET the window refuses (Y1)
+    if (p.get('x')) fetch('/api/go').catch(() => {}); }
   else if (name === 'logout') mark('LOGOUT');
   else text(name || 'home');
 }
@@ -115,8 +119,17 @@ _QUERY_INDEX = _HASH_INDEX.replace("/main.js", "/q.js").replace(
     "<a href='#/search?q=fuzzlab'>Search</a> <a href='#/search?q=hello'>Hello</a>")
 
 
+def _go(handler):
+    """``/api/go``: a redirect to a transaction GET (Y1)."""
+    handler.send_response(302)
+    handler.send_header("Location", "/api/order/confirm?via=go")
+    handler.send_header("Content-Length", "0")
+    handler.end_headers()
+
+
 class QuerySpa(_Lab):
     index = _QUERY_INDEX
+    responders = {"/api/go": _go}
     script = ("/q.js", _QUERY_JS)
     pages = {"/plain": ("<!doctype html><html><head><title>plain</title></head>"
                         "<body><p>plain page</p></body></html>")}
