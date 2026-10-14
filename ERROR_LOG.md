@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Crawler: a refused script navigation replaced the page with Chromium's error page (fixed, BUG-0136/PA-0136)
+- **Symptom:** a page whose script navigated after load to an out-of-scope host or a destructive URL was stored with Chromium's error page as its content; its links were never crawled.
+- **Root cause:** `navguard`'s route aborted refused navigations with the default error code (Chromium then commits its error page); only the reveal window and BUG-0134's withheld branch used `"aborted"`.
+- **Remediation:** one rule: every abort of a document request uses `"aborted"`, a subresource the default (`navguard._abort_code`). CC-CRAWL-0028. `docs/bugs/BUG-0136-a-refused-navigation-replaced-the-page-with-an-error-page.md`.
+- **Status:** Fixed (real Chromium; mutation-checked)
+
 ## 2026-10-14 — BUG-0134's first fix still leaked in the browser and the login (fixed in review round 1, BUG-0134/PA-0134)
 - **Symptom:** reviewer A, live in real Chromium: a redirected navigation landing on another port was answered under A's URL, so B's script read A's `document.cookie` / `localStorage`; `route.fetch` stored B's `Set-Cookie` in the shared jar (replacing A's `sid`); the login still accepted an in-scope host on any port (and an https upgrade to any port).
 - **Root cause:** the first fix withheld request headers only, while the browser shares a jar and storage with every document it loads; the login's anchor kept FR-SESS-12's host-level clause.

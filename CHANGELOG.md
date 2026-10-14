@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0136: a refused navigation keeps the crawled page)
+- **Why:** the browser guard aborted a refused navigation (out of scope, destructive,
+  refused method or body) with the default error code, so Chromium replaced the page
+  with its error page and the crawl lost the page's content and links.
+- **What:** every abort of a document request uses `"aborted"` (ERR_ABORTED), whatever
+  the reason; subresources keep the default; pinned per reason. CC-CRAWL-0028; BUG-0136,
+  PA-0136.
+
 ## 2026-10-14 (BUG-0134 review round 3: the isolated request context never sends a cookie)
 - **Why:** reviewer A saw concurrent withheld fetches carry a cookie another other-origin
   answer had stored in the isolated context (a race with its retirement).

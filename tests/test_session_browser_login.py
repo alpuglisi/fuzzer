@@ -641,8 +641,8 @@ class _FakeRoute:
         self.fetched.append(self.request.url)
         return self.site.get(self.request.url, _Resp())
 
-    def abort(self):
-        self.outcome = "abort"
+    def abort(self, code=None):
+        self.outcome, self.code = "abort", code
 
     def fulfill(self, response=None, status=None, headers=None):
         self.outcome = "fulfill"

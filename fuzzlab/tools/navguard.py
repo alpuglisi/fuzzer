@@ -205,15 +205,24 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if url.lower().startswith(_LOCAL_SCHEMES):
             route.continue_()
             return
+        # BUG-0136 (PA-0136): every abort of a document request -- a navigation,
+        # top-level or frame, and each of its redirect hops -- uses "aborted"
+        # (ERR_ABORTED), whatever the reason: the current document survives (the
+        # default code commits Chromium's error page in its place) and `goto` of that
+        # target still raises. A subresource keeps the default code.
+        document = _is_document(req)
+
+        def abort() -> None:
+            route.abort(_abort_code(document)) if document else route.abort()
+
         if refused(url):
-            route.abort()
+            abort()
             return
-        navigation = bool(req.is_navigation_request()) if window is not None else False
+        navigation = document if window is not None else False
         if window is not None:
             if window_refused(req.method.upper(), url, navigation):
-                # a navigation aborted as ERR_ABORTED leaves the page where it is (no
-                # error page is committed); its target was kept by the caller
-                route.abort("aborted") if navigation else route.abort()
+                # its target was kept by the caller
+                abort()
                 return
         why = method_refusal(req.method.upper(), url) if method_refusal else None
         if why is not None:
@@ -221,17 +230,15 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                          f"({why})")
             if on_abort is not None:
                 on_abort(url, why)
-            route.abort()
+            abort()
             return
         if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
-            route.abort()
+            abort()
             return
-        document = _is_document(req)
         doc_kind = "frame" if document and _is_subframe(req) else "document"
         if withheld(url) and (document or isolated_request is None):
             tell_withheld(url, doc_kind if document else "request", url)
-            # FR-SESS-20 (R1): never loaded; ERR_ABORTED keeps the page where it is (T1)
-            route.abort("aborted") if document else route.abort()
+            abort()                              # FR-SESS-20 (R1): never loaded (T1)
             return
         stripped = False                         # an answer from the isolated context
         try:
@@ -252,18 +259,18 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     break
                 nxt = urljoin(final_url, location)
                 if api is None or refused(nxt):
-                    route.abort()
+                    abort()
                     return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
                 # a navigation's redirect hop is still a navigation (review A-S2)
                 if window is not None and window_refused(method, nxt, navigation):
-                    route.abort()
+                    abort()
                     return
                 keep_body = method not in ("GET", "HEAD")
                 if keep_body and body_refused(method, nxt, req.headers or {},
                                               req.post_data_buffer):
-                    route.abort()
+                    abort()
                     return
                 hop = {"content-type": req.headers.get("content-type", "")} \
                     if keep_body else {}
@@ -273,7 +280,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     if document or isolated_request is None:
                         landing = "frame" if doc_kind == "frame" else "landing"
                         tell_withheld(nxt, landing if document else "request", url)
-                        route.abort("aborted") if document else route.abort()
+                        abort()
                         return
                     tell_withheld(nxt, "request", url)
                     final = isolated_fetch(nxt, method,
@@ -289,12 +296,12 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             else:
                 logging.info(f"blocked a browser redirect chain over {MAX_REDIRECTS} "
                              f"hops from {url.split('?', 1)[0]}")
-                route.abort()
+                abort()
                 return
         except Exception as exc:  # noqa: BLE001 - an unfetchable request is aborted
             logging.info(f"browser request {url.split('?', 1)[0]} failed "
                          f"({str(exc).splitlines()[0][:80]})")
-            route.abort()
+            abort()
             return
         if observe is not None:
             try:
@@ -330,6 +337,18 @@ def _is_document(req) -> bool:
     except Exception:  # noqa: BLE001 - a request that cannot say counts by its type
         pass
     return getattr(req, "resource_type", None) == "document"
+
+
+#: The abort code of a document request (BUG-0136, PA-0136): ERR_ABORTED leaves the
+#: current document where it is; any other code commits Chromium's error page.
+DOCUMENT_ABORT = "aborted"
+
+
+def _abort_code(document: bool) -> str | None:
+    """The code a guard aborts a request with: `DOCUMENT_ABORT` for a document
+    request (a navigation, top-level or frame, and its redirect hops), else None (the
+    default), whatever the reason (PA-0136: one rule, one place)."""
+    return DOCUMENT_ABORT if document else None
 
 
 def _is_subframe(req) -> bool:

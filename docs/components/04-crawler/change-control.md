@@ -3,6 +3,34 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0028 — A refused navigation keeps the current document: one abort rule (BUG-0136) (2026-10-14)
+- Change: `tools/navguard.py` `make_route_handler` decides a request's kind once
+  (`document = _is_document(req)`) and refuses it through one `abort()`:
+  `_abort_code(document)` gives `DOCUMENT_ABORT = "aborted"` for a document request (a
+  navigation, top-level or frame, and its redirect hops) and the default code for a
+  subresource. This holds for every reason: scope, destructive, refused method or body,
+  the reveal window, a withheld session, too many hops, an unfetchable request. Before,
+  only the reveal window and the withheld branch (BUG-0134 T1) used `"aborted"`; the
+  rest used the default, which makes Chromium commit its error page in the page's
+  place.
+- Impact (other components / project): the crawler, the auditor's browser (CC-AUD), the
+  M6 executor (FUZZ) and the browser login (SESS) all install this guard; none aborts a
+  route itself, and none reads the abort code. `goto` of a refused target still raises
+  (`net::ERR_ABORTED` instead of `ERR_FAILED`), so the crawl's own-target fallbacks and
+  `SessionWithheld` behave as before. All bookkeeping callbacks are unchanged. No
+  contract change.
+- Risk: low (a refusal stays a refusal; only the browser's response to it changes).
+  Mitigated by real-Chromium tests of both common reasons, a per-reason pin, and the
+  existing scope, browser-login, SPA and reveal suites passing.
+- Deliverables:
+  - [x] code (`tools/navguard.py`) — done
+  - [x] tests (`tests/test_navigation_aborts.py`; fake routes in
+    `test_browser_scope.py` and `test_session_browser_login.py` record the code) — done
+  - [x] BUG-0136 (RCA, recurrence review, prior-PA analysis, PA-0002 sweep), PA-0136,
+    ERROR_LOG, CHANGELOG, NFR-CRAWL-safe edited in place and traced — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-14): `tests/test_navigation_aborts.py` 26 passed (22 per-reason pins, the code pin, 3 real-Chromium tests); the related suites (22 files, FUZZLAB_REQUIRE_BROWSER=1) 1272 passed, 2 xfailed, 0 failed; the traceability guard 3 passed. Mutation checks: the first request's scope/destructive abort reverted to `route.abort()` fails 5 (both real crawl tests, the `goto` test, and the out-of-scope and destructive navigation pins), 20 pass; `_abort_code` returning the default for a document fails 14 (the 3 real tests and all 11 navigation pins), 12 pass. Effective.
+
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:
   - **`tools/browserauth.py`:** `header_scope_for(state, base_url, in_scope)` admits an

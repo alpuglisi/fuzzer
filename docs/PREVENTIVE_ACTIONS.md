@@ -1735,3 +1735,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      request, since its own jar fills from the answers it fetches, and it is made once
      per guard (concurrent handlers race on any lazy or retiring lifecycle).
   (from BUG-0134)
+
+- **PA-0136** — Strengthens `PA-0003` / `PA-0087` (one policy decision, one place) for
+  the browser guard, and generalises BUG-0134 T1 and the reveal window's choice, after
+  BUG-0136: a refused navigation was aborted with Playwright's default code, so Chromium
+  replaced the crawled page with its error page; only two branches used `"aborted"`.
+  1. **How a request is refused is decided once, by the kind of request, never per
+     reason:** every abort of a document request -- a navigation, top-level or frame,
+     and each of its redirect hops -- uses `"aborted"` (ERR_ABORTED: the current
+     document survives, and `goto` of that target still raises); a subresource keeps
+     the default. One helper (`navguard._abort_code`), one `abort()` in the handler.
+  2. **A browser guard's tests record what the browser is told, not only that it was
+     refused:** fake routes keep the abort code, and the code is pinned per reason
+     (`tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation`).
+  3. **A fix of one branch of a shared mechanism sweeps every sibling branch in the
+     same change** (here, every abort site), whatever feature the first fix was filed
+     under. (from BUG-0136)
+
