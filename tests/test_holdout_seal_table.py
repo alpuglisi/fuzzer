@@ -72,7 +72,8 @@ def test_upgrading_a_v18_store_backfills_every_legacy_seal(tmp_path):
         _model(store, json.dumps({"run_id": c}))                       # never sealed
         top = store.conn.execute("SELECT MAX(id) FROM model").fetchone()[0]
     with Store(path) as store:                                         # migrates to 19
-        assert store.schema_version() == 20      # 19, then 20 (the form table)
+        # 19, then every later migration (PA-0001: the head is derived, never typed)
+        assert store.schema_version() == max(v for v, _ in migrations.MIGRATIONS)
         rows = store.conn.execute("SELECT origin, version, fraction FROM holdout_seal "
                                   "ORDER BY id").fetchall()
         assert [tuple(r) for r in rows] == [(TARGET, 1, 0.2),

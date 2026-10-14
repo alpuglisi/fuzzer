@@ -1169,6 +1169,14 @@ tracked in the requirements files, not here.
     - migration 20's `form` table carries a form's entry list to its fields;
     - `Oracle.confirm` binds it, so every probe of a form field sends the other
       fields;
+  - **In-app login forms (forms phase 2, lane B; CC-FUZZ-0064 / CC-SESS-0018 /
+    CC-CORE-0041):** migration 21's `form.password_fields` marks them;
+    `harness.auto.isolated_paths_from_store` turns the mark into path keys, and
+    `SeamProbeSender` never sends the run's session to those paths. Each gets its own
+    throwaway login of the same identity (`SessionManager.isolated_copy`, verified
+    distinct, never persisted, labelled `<identity>#isolated:<n>`), or the send goes
+    anonymously, behind run-wide single-session and failed-login breakers.
+    Credential-change forms are never imported;
   - `tests/test_requirements_traceability.py` (PA-0112): every NFR is classified, and
     every safety NFR names the tests that enforce it or says "Not yet enforced";
   - `core/forms.py`: the one HTML form serialiser (a browser's entry list, with a
@@ -1210,7 +1218,10 @@ tracked in the requirements files, not here.
   BUG-0097/0098). The discovery base is the operator's own URL, path kept
   (`ensure(..., operator=True)`, remembered per host and identity for re-login); a
   derived base is the request's directory without its query, never the bare origin
-  (CC-SESS-0016, BUG-0113). Internally the
+  (CC-SESS-0016, BUG-0113). `add_logout_listener` tells a caller when `observe` logs a
+  session out (CC-SESS-0017). `isolated_copy` gives a throwaway manager with its own
+  login and no store, for probing in-app login forms; `verify_live` re-checks the run's
+  session (CC-SESS-0018, FR-SESS-17). Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
   header-key) — implementation detail, not user config. Post-Phase 6, logins
   detection can't crack are handled by **adopting a session the proxy captures
@@ -1730,8 +1741,9 @@ detail):
 | `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, CC-CORE-0033), `schema_version` | core | everything |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` | crawler, auditor | auditor, ranker, fuzzer |
+| `form` (a crawled form's default `entries`, migration 20; `password_fields`, the names of its password controls, migration 21 — non-empty marks an in-app login form) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44) |
 | `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
-| `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
+| `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18; `identity` is `<identity>#isolated:<n>` for an isolated copy's sends, FR-SESS-17) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |
 | `attempt` (features, reward) | fuzzer | classifier, bandit, active learner |
 | `finding` (labels, evidence) | oracle only | UI, ML training, reports |
 | `bandit_posteriors` | scheduler | scheduler |

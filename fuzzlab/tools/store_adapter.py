@@ -130,18 +130,92 @@ def _filled(entries, kinds) -> list:
     return out
 
 
+#: A password control whose lower-cased name contains one of these belongs to a
+#: credential-change form. A bare substring on purpose (PA-0022's "specifically
+#: intended" case): a false match only *excludes* a form, the safe direction, and it
+#: catches run-together names (``newpassword``) that `name_tokens` cannot split.
+_CHANGE_SUBSTRINGS = ("new", "conf", "change", "reset", "old", "curr", "repeat", "retype",
+                      "verify", "again")
+#: Anchored tokens (`core.redaction.name_tokens`) of a password form's action path, its
+#: sent submitter's name or value, or a hidden field's name, that mark it as one that
+#: changes or manages an account rather than logging in (FR-FUZZ-44, reviewer B-R3).
+#: Accepted false positives (a real login form excluded; a missed finding, never a
+#: safety risk): Rails ``/sessions/new``, Devise ``/users/sign_in``, ``/admin/login``,
+#: ``/account/login``, ``/my-account``, a login button valued ``Save``.
+_CHANGE_TOKENS = frozenset({
+    "change", "new", "set", "reset", "update", "edit", "modify", "register", "signup",
+    "create", "forgot", "recover", "activate", "password", "passwd", "pwd", "pass",
+    "save", "admin", "manage", "account", "profile", "users"})
+#: Control kinds a login form may have besides its one password and one user field.
+_LOGIN_EXTRA_KINDS = frozenset({"hidden", "submit", "select", "checkbox", "radio",
+                                "reset", "button", "image"})
+_LOGIN_USER_KINDS = frozenset({"text", "email", "tel"})
+
+
+def credential_change_reason(form: dict) -> str | None:
+    """Why a form with a password control changes a credential or manages an account
+    (never imported, even with an isolated session: it changes the account, not the
+    session), or None. Reviewers A/B (FR-FUZZ-44)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.redaction import name_tokens
+    passwords = [n for n, k in form["controls"] if k == "password"]
+    if not passwords:
+        return None
+    if len(passwords) >= 2:
+        return f"credential-change form ({len(passwords)} password controls)"
+    for name in passwords:
+        hit = next((sub for sub in _CHANGE_SUBSTRINGS if sub in name.lower()), None)
+        if hit:
+            return f"credential-change form (password control {name!r} has {hit!r})"
+    kinds = dict(form["controls"])
+    texts = [("action", urlsplit(form["action_url"]).path)]
+    texts += [("submitter", t) for n, v in form["entries"] if kinds.get(n) == "submit"
+              for t in (n, v)]
+    hidden = [n for n, k in form["controls"] if k == "hidden"]
+    texts += [("hidden field", n) for n in hidden]
+    for where, text in texts:
+        hit = next((t for t in name_tokens(text or "") if t in _CHANGE_TOKENS), None)
+        if hit:
+            return f"credential-change form ({where} has {hit!r})"
+    for name in hidden:
+        if _object_selector(name):
+            return f"credential-change form (hidden object selector {name!r})"
+    return None
+
+
+def login_shaped(form: dict) -> bool:
+    """An in-app login form: exactly one password control, exactly one user field
+    (text, email or tel), and nothing else a user types (hidden fields, selects,
+    checkboxes and buttons are allowed). FR-FUZZ-44."""
+    kinds = [k for _n, k in form["controls"]]
+    others = [k for k in kinds if k != "password"]
+    users = [k for k in others if k in _LOGIN_USER_KINDS]
+    return (kinds.count("password") == 1 and len(users) == 1
+            and all(k in _LOGIN_EXTRA_KINDS or k in _LOGIN_USER_KINDS for k in others))
+
+
+def password_fields(form: dict) -> list[str]:
+    """The names of ``form``'s password controls (stored in `form.password_fields`)."""
+    return [n for n, k in form["controls"] if k == "password"]
+
+
 def form_skip_reason(form: dict) -> str | None:
     """Why a crawled form is never fuzzed (reported), or None. The whole form is
-    skipped when submitting it could change a credential, the session's identity, or
-    something destructive (forms phase 1, reviewers A/B)."""
+    skipped when submitting it could change a credential, an account, or something
+    destructive (forms phase 1, reviewers A/B). A form with a password control is
+    imported only when it is an in-app login form; its points are then probed on an
+    isolated session, never the run's (FR-FUZZ-44)."""
     from fuzzlab.core.urls import destructive_reason
-    kinds = [k for _n, k in form["controls"]]
     if form["enctype"].startswith("multipart/"):
         return "multipart form (not sent as multipart in phase 1)"
     if form["selector"] and form["method"] == "POST":
         return "POST selector form (navigation or settings, never an injection target)"
-    if "password" in kinds:
-        return "has a password control (login or credential form; phase 2)"
+    reason = credential_change_reason(form)
+    if reason:
+        return reason
+    if password_fields(form) and not login_shaped(form):
+        return "password form that is not a login form (settings, CAPTCHA or other)"
     reason = destructive_reason(form["action_url"])
     if reason:
         return f"destructive action ({reason!r})"
@@ -181,15 +255,18 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
         url = path + ("?" + query if query and form["method"] == "POST" else "")
         endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
         cur = store.conn.execute(
-            "INSERT INTO form (run_id, endpoint_id, enctype, entries) VALUES (?,?,?,?)",
-            (run_id, endpoint_id, form["enctype"], json.dumps(form["entries"])))
+            "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields) "
+            "VALUES (?,?,?,?,?)",
+            (run_id, endpoint_id, form["enctype"], json.dumps(form["entries"]),
+             json.dumps(password_fields(form))))
         form_id = int(cur.lastrowid)
         counts["form"] += 1
         location = "body" if form["method"] == "POST" else "query"
         for name, value in form["entries"]:
             kind = kinds.get(name)
-            if (kind == "submit" or is_sensitive_name(name)
+            if (kind in ("submit", "password") or is_sensitive_name(name)
                     or (kind == "hidden" and _object_selector(name))):
+                # a password control is never fuzzed, whatever its name (FR-FUZZ-44)
                 continue
             existing = _get_parameter(store, run_id, endpoint_id, name)
             if existing is not None:

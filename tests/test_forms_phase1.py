@@ -300,8 +300,10 @@ def test_post_and_get_forms_become_points_with_their_siblings(tmp_path):
 
 
 @pytest.mark.parametrize("html,why", [
-    ("<form method=post><input name=login><input type=password name=password></form>",
-     "password"),
+    # forms phase 2 (FR-FUZZ-44) lifted the blanket password exclusion: a plain login
+    # form is now imported (probed on an isolated session); a credential changer is not
+    ("<form method=post><input name=login><input type=password name=password_new>"
+     "<input type=password name=password_conf></form>", "credential-change"),
     ("<form method=post enctype='multipart/form-data'><input type=file name=f>"
      "<input name=t></form>", "multipart"),
     ("<form method=post>" + PICKER[PICKER.index("<select"):], "selector"),

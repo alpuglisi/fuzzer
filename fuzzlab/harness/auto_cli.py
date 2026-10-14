@@ -444,8 +444,7 @@ def _print_summary(args, counts, result, plugins=None) -> int:
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
-        print(f"  not fuzzed ({len(skipped)} crawl point(s) on a destructive URL, "
-              f"NFR-FUZZ-safe):")
+        print(f"  not fuzzed ({len(skipped)} crawl point(s), NFR-FUZZ-safe):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
     elif skipped:
@@ -453,6 +452,16 @@ def _print_summary(args, counts, result, plugins=None) -> int:
               f"capability; they score as false negatives):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
+    iso = m.get("isolated_sessions")
+    if iso:
+        print(f"  login forms on isolated sessions (FR-FUZZ-44): {iso['paths']} path(s), "
+              f"{iso['logins']} isolated login(s), {iso['sends']} isolated send(s), "
+              f"{iso['anonymous_sends']} sent anonymously")
+        if iso.get("breaker"):
+            print(f"    breaker tripped ({iso['breaker']['trip']}): "
+                  f"{iso['breaker']['reason']}")
+        for f in iso.get("failures") or []:
+            print(f"    - {f['path']}: anonymous — {f['reason']}")
     if m.get("auth_endpoint_anonymous_sends"):
         print(f"  auth-endpoint probes sent without the session: "
               f"{m['auth_endpoint_anonymous_sends']} (NFR-FUZZ-safe)")

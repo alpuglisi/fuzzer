@@ -22,6 +22,70 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0064 — In-app login forms probed on an isolated session (forms phase 2, lane B) (2026-10-14)
+- Change:
+  - **Import (`store_adapter.form_skip_reason`):** the blanket "has a password control"
+    skip is replaced.
+    - **Credential-change forms stay excluded** (`credential_change_reason`): two or
+      more password controls; a password control's name containing `new`, `conf`,
+      `change`, `reset`, `old`, `curr`, `repeat`, `retype`, `verify` or `again`; the
+      action path, the sent submitter or a hidden name tokenising to `change`, `new`,
+      `set`, `reset`, `update`, `edit`, `modify`, `register`, `signup`, `create`,
+      `forgot`, `recover`, `activate`, `password`, `passwd`, `pwd`, `pass`, `save`,
+      `admin`, `manage`, `account`, `profile` or `users`; or a hidden object selector.
+    - **Password forms that are not login forms stay excluded** (`login_shaped`: one
+      password control, one text/email/tel field, nothing else typed).
+    - **A login-shaped form is imported.** `password_fields` is written; a password
+      control is never a parameter, whatever its name; its sibling is sent `""`.
+  - **Marking (`harness.auto`):** `isolated_paths_from_store` (the one derivation): the
+    `url_key` of every path with such a form, for any method and point source.
+    `injection_points_from_store(..., isolated=None)` drops such points and reports
+    them unless the caller passes a set; a parameter named like a password control on
+    that path is never a point.
+  - **Run wiring (`run_auto`, `fuzzlab auto`):** registers the paths with
+    `sender.isolate`, or drops the points when the sender cannot isolate;
+    `metrics["isolated_sessions"]` and one summary line.
+  - **Sender (`SeamProbeSender`):** after the destructive gate and the auth-endpoint rule
+    (which wins), a send to an isolated path goes on that path's own copy
+    (`SessionManager.isolated_copy`, CC-SESS-0018), created lazily and kept for the run,
+    labelled `<identity>#isolated:<n>` in `flow`; or anonymously.
+    - **Fallbacks, reported:** no factory, a failed or non-distinct login, a copy
+      re-login failure, the cap (`MAX_ISOLATED_SESSIONS` = 32), or a tripped breaker.
+      Caught: `IsolatedLoginFailed` only; a transport refusal propagates.
+    - **Breakers:** *single-session*, when `verify_live` fails after the run's first
+      copy login or any copy re-login, or when the main manager's logout listener fires
+      while a copy is live (registered before the first copy login, once, host- and
+      identity-checked); copies are dropped and every isolated path goes anonymous.
+      *Failed-logins*, after 2 failed copy logins: no new copies.
+    - **Locking:** a plain `Lock`, never held across a send, login or verification; the
+      listener takes it only briefly.
+    - **Public:** `isolate`, `isolated_copy_logins()` (lane A reads it),
+      `isolation_report()`.
+  - **`make_probe_sender`** wires an isolated-client factory sharing only the run's
+    `RequestBudget` and scope (`authhttp.make_auth_with_isolation`).
+  - **`RequestsProbeSender`:** isolated by construction; `isolate` only counts.
+- Impact:
+  - **Behaviour:** crawl-sourced `auto` runs now probe in-app login forms. Each costs one
+    extra login per path plus one main verification after the first copy login.
+  - **greybox-run** never receives these points (dropped and reported by default).
+  - **`fuzz --identity` / `mutate-run --identity`:** a stated residual (operator's own
+    `--url`); see NFR-FUZZ-safe.
+  - **Accepted false positives** (excluded login forms, missed findings only): Rails
+    `/sessions/new`, Devise `/users/sign_in`, `/admin/login`, `/account/login`, a "Save"
+    login button, and bWAPP's `ba_weak_pwd.php` and `ba_pwd_attacks_2.php` (`pwd` in
+    the action path; no current oracle confirms their bugs).
+- Risk: medium (login-form submissions; more logins), within the caps, breakers and
+  fallbacks above.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_login_form_isolation.py`, 65; `tests/test_forms_phase1.py`'s
+        "password" skip case replaced by a credential-change case) — done
+  - [x] FR-FUZZ-44; FR-FUZZ-42 edited in place; NFR-FUZZ-safe clause — done
+- Review: reviewers A and B, lane B draft v1 → v2 → v2.1 → v2.2 → v2.3 (AGREED, both).
+- Effectiveness: verified offline (65 new tests: 64 fail on the pre-change code, the
+  65th is the fake app's non-vacuity control; mutation check 32/32 over the new logic);
+  live bWAPP pending (orchestrator).
+
 ### CC-FUZZ-0062 — Forms as injection points, probed with their sibling fields (forms phase 1) (2026-10-13)
 - Change:
   - **`store_adapter.import_spider`:**

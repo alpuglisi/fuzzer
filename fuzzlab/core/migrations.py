@@ -496,6 +496,15 @@ CREATE INDEX IF NOT EXISTS ix_form_endpoint ON form(endpoint_id);
 ALTER TABLE parameter ADD COLUMN form_id INTEGER REFERENCES form(id);
 """
 
+#: Migration 21 (forms phase 2, CC-CORE-0041, FR-CORE-31): the names of a form's password
+#: controls (a JSON list; ``[]`` when it has none). A form with any is an in-app login
+#: form: its path is probed only on an isolated session, and these names are never
+#: fuzzed (FR-FUZZ-44). Migration-20 rows read ``[]``, truthfully: password forms were
+#: never imported before.
+_M0021 = """
+ALTER TABLE form ADD COLUMN password_fields TEXT NOT NULL DEFAULT '[]';
+"""
+
 
 def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
     """Migration 19's post-step: copy every present ``holdout`` record of an existing
@@ -564,6 +573,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (18, _M0018),
     (19, _M0019),
     (20, _M0020),
+    (21, _M0021),
 ]
 
 

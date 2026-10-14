@@ -108,6 +108,34 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-17 (isolated session copies, CC-SESS-0018)**
+  - **`isolated_copy(identity, *, ordinal, max_logins=3)`** returns a throwaway manager
+    for probing an in-app login form (FR-FUZZ-44): its own login, so its own
+    server-side session. It is built through `__init__` and shares no mutable state;
+    it shares the credential store and fetch factory, and copies scope, auth origins
+    and the operator's bases. It has no store (never persisted). It answers only to
+    its label `<identity>#isolated:<n>` (also its `flow.identity`) and refuses every
+    other identity; it never adopts a captured session.
+  - **Login cap.** `max_logins` login attempts per host/identity, then
+    `LoginCapReached`. A run's manager has no cap (default None).
+  - **Distinctness (distinctness-specific policy).** Every copy login is checked
+    against the run's session and every other live copy (`distinctness_problem`).
+    Basic is distinct. Otherwise the new state must carry a credential and differ in
+    at least one value, and no credential with the same name may have an equal value
+    that is identifier-like: a sensitive name, `core.redaction.looks_like_identifier`
+    (FR-CORE-30), **or at least 16 characters** (`DISTINCT_MIN_LEN`, local to this
+    check: a false "not distinct" only costs an anonymous fallback). Failure raises
+    `SessionIsolationError`, naming credentials, never values.
+  - **Errors.** A copy reports any failure to obtain a usable session as
+    `IsolatedLoginFailed` (a `SessionAuthError`); a transport refusal stays a plain
+    `SessionAuthError`.
+  - **`verify_live(host, identity, base_url)`** re-checks the run's session with one
+    fresh-fetcher walk of the operator's base carrying its cookies; on failure it marks
+    the state invalid and persists that, without telling listeners.
+  - **Accepted:** an equal session id shorter than 16 characters, low-entropy, under a
+    name `is_sensitive_name` misses (`ASPSESSIONID…`, Drupal `SESS…`,
+    `wordpress_logged_in_*`, `express:sess`, `remember_web_*`) would be accepted as
+    distinct. No realistic framework issues such ids.
 - **FR-SESS-16 (logout listeners, CC-SESS-0017)**
   - `add_logout_listener(fn)` registers `fn(host, identity)`. `observe` calls it once
     each time it marks a valid session of this manager logged out; the check-and-set
@@ -153,6 +181,7 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   JWT `exp`); validate on a schedule or reactively, not before every request.
 - **NFR-SESS-redaction** Credentials, cookies, and tokens redacted on write.
   - Enforced by: `SessionState.non_secret_state` / `redacted` — `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_session_capture.py::test_adopt_persists_only_non_secret_metadata`, `tests/test_session_detect.py::test_session_state_apply_and_redacted`
+  - Enforced by (isolated copies, FR-SESS-17): never persisted, and no credential value in an isolation error or report — `tests/test_login_form_isolation.py::test_the_isolated_session_is_never_persisted`, `tests/test_login_form_isolation.py::test_isolation_errors_and_report_carry_no_secret_values`
   - Not yet enforced: no test runs `SessionManager` with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.)
 - **NFR-SESS-portable** Works on interactive desktops, headless hosts, containers,
   and CI via the credential-store backend resolution (D12).

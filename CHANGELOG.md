@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 2, lane B: in-app login forms probed on an isolated session; CC-FUZZ-0064, CC-SESS-0018, CC-CORE-0041)
+- **What:** crawled in-app login forms (one password control, one user field) are now
+  imported and fuzzed; every send to such a page goes on a separate, throwaway login
+  of the same identity, verified distinct, never persisted, labelled
+  `<identity>#isolated:<n>`, or anonymously, behind single-session and failed-login
+  breakers. The password field is never fuzzed and is sent empty. Credential-change
+  forms stay excluded. Migration 21 adds `form.password_fields`.
+- **Why:** phase 1 skipped every password form, because a payload such as
+  `' or 1=1-- -` can re-bind the run's own session to another user on the server. This
+  unlocks bWAPP's login-form SQL injections (sqli_3, sqli_16, xss_login) without that
+  risk: the run's session is never sent there.
+
 ## 2026-10-14 (Shared groundwork for forms phase 2; CC-CORE-0040, CC-SESS-0017)
 - **What:**
   - added `core.redaction.looks_like_identifier`, one total, linear-time test for

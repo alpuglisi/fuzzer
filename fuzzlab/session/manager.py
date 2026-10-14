@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 from urllib.parse import urljoin, urlparse
 
+from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
 from fuzzlab.core.urls import canonical_origin
 from fuzzlab.session import detect
 from fuzzlab.session.state import SessionState, secure_only_of
@@ -28,6 +29,31 @@ ANONYMOUS = "anonymous"
 
 class SessionAuthError(RuntimeError):
     """Raised when a host's login cannot be detected/completed (fail loud)."""
+
+
+class IsolatedLoginFailed(SessionAuthError):
+    """An isolated copy (FR-SESS-17) could not obtain a usable session of its own: the
+    login was rejected, credentials were missing, the copy's login cap was reached, or
+    the new session was not distinct. The one class a sender catches to fall back to an
+    anonymous send; every other `SessionAuthError` (a transport refusal) propagates."""
+
+
+class SessionIsolationError(IsolatedLoginFailed):
+    """An isolated copy's new session is not distinct from the run's session or another
+    live copy's (FR-SESS-17). Its message names credentials, never their values."""
+
+
+class LoginCapReached(IsolatedLoginFailed):
+    """A manager built with ``max_logins`` has used them all for this host/identity."""
+
+
+#: An equal credential value at least this long is never accepted as distinct, whatever
+#: its shape: distinctness-specific policy, OR-ed with the shared
+#: `core.redaction.looks_like_identifier` (FR-SESS-17). A false "not distinct" only
+#: costs an anonymous fallback.
+DISTINCT_MIN_LEN = 16
+#: The label of an isolated copy's requests (and `flow.identity`): ``<identity>#isolated:<n>``.
+ISOLATED_LABEL = "{identity}#isolated:{n}"
 
 
 @dataclass
@@ -89,7 +115,8 @@ class SessionManager:
     def __init__(self, credentials, scope_hosts: list[str] | None = None,
                  fetch_factory: Callable[[], Fetcher] | None = None,
                  identities: list[str] | None = None, max_reauth: int = 3,
-                 logger=None, store=None, auth_origins: list[str] | None = None):
+                 logger=None, store=None, auth_origins: list[str] | None = None,
+                 max_logins: int | None = None):
         self._creds = credentials
         self._scope = set(scope_hosts or [])
         # extra origins credentials may be sent to (an auth service elsewhere), beyond
@@ -116,6 +143,16 @@ class SessionManager:
         # guards only the valid->invalid check-and-set in observe(), so concurrent
         # sends tell a listener once per logout; never held across a send or listener
         self._observe_guard = threading.Lock()
+        # forms phase 2 (FR-SESS-17): a login-attempt cap (None: unlimited, as before);
+        # an isolated copy's label and the manager it was copied from; a main manager's
+        # registry of its live copies
+        self._max_logins = max_logins
+        self._attempts: dict[tuple[str, str], int] = {}
+        self._label: str | None = None
+        self._label_identity: str | None = None
+        self._isolated_from: SessionManager | None = None
+        self._copies: list[SessionManager] = []
+        self._copies_guard = threading.Lock()
         self._persisted: dict[tuple[str, str], dict] = {}
         if self._store is not None:
             for rec in self._store.all_session_states():
@@ -152,6 +189,9 @@ class SessionManager:
         and persist only the NON-SECRET metadata (secrets stay in memory, like a
         normal login). No per-host config file is needed.
         """
+        if self._isolated_from is not None:
+            raise SessionAuthError("an isolated session never adopts a captured one "
+                                   "(a captured session is the operator's own)")
         state.valid = True
         self._scope.add(state.host)
         self._state[(state.host, state.identity)] = state
@@ -163,6 +203,7 @@ class SessionManager:
     # -- addon interface used by the HTTP seam ----------------------------
     def prepare(self, request, identity: str) -> None:
         host = urlparse(request.url).hostname or ""
+        identity = self._own_identity(identity)
         if identity == ANONYMOUS or host not in self._scope:
             return
         state = self._state.get((host, identity))
@@ -180,6 +221,7 @@ class SessionManager:
         """Re-check an authenticated request after something (a plugin) edited it:
         raise `SessionAuthError` if it now goes to another host than the session was
         applied for, or over http with an https-established session (BUG-0098)."""
+        identity = self._own_identity(identity)
         if identity == ANONYMOUS:
             return
         host = urlparse(request.url).hostname or ""
@@ -193,6 +235,10 @@ class SessionManager:
 
     def observe(self, request, response, identity: str) -> None:
         host = urlparse(request.url).hostname or ""
+        if self._label is not None:
+            if identity != self._label:
+                return              # prepare() already refused it; nothing of ours
+            identity = self._label_identity
         state = self._state.get((host, identity))
         if state is None:
             return
@@ -247,11 +293,28 @@ class SessionManager:
                 raise SessionAuthError(
                     f"re-auth cap ({self._max_reauth}) reached for {identity}@{host}"
                 )
+            if self._max_logins is not None and \
+                    self._attempts.get((host, identity), 0) >= self._max_logins:
+                raise LoginCapReached(
+                    f"login cap ({self._max_logins}) reached for the isolated session "
+                    f"{self._label or identity}@{host}")
+            self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
+            from fuzzlab.core.credentials import CredentialError
             try:
                 state = self._login(host, identity, base_url)
-            except SessionAuthError:
+                if self._isolated_from is not None:
+                    self._check_isolated(host, identity, state)   # FR-SESS-17
+            except SessionAuthError as exc:
                 self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
+                if self._isolated_from is not None and \
+                        not isinstance(exc, IsolatedLoginFailed):
+                    raise IsolatedLoginFailed(str(exc)) from exc
                 raise
+            except CredentialError as exc:
+                if self._isolated_from is None:
+                    raise                                         # unchanged for a run
+                self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
+                raise IsolatedLoginFailed(str(exc)) from exc
             self._failures[(host, identity)] = 0
             self._state[(host, identity)] = state
             return state
@@ -270,6 +333,107 @@ class SessionManager:
         if "Authorization" in applied:
             return f"Authorization: {applied['Authorization']}"
         return ""
+
+    # -- isolated copies (forms phase 2, FR-SESS-17) -------------------------
+    def isolated_copy(self, identity: str, *, ordinal: int,
+                      max_logins: int = 3) -> SessionManager:
+        """A throwaway manager for ``identity``: its own login, so its own server-side
+        session, for probing an in-app login form without ever sending the run's session
+        there (FR-FUZZ-44).
+
+        Built through ``__init__`` (never ``copy.copy``), so no mutable state is shared:
+        its states, auth endpoints, locks, failures, login attempts and logout listeners
+        start empty. It shares the credential store and the fetch factory (which must
+        return a fresh fetcher, with its own jar, per call), and copies the scope, the
+        authorised auth origins and the operator's bases, so a (re-)login is discovered
+        from the operator's URL under the same credential-destination anchors. It has no
+        store: never persisted (a persisted copy would overwrite the run's
+        ``(host, identity)`` row). It answers only to its label
+        ``<identity>#isolated:<ordinal>``, has at most ``max_logins`` login attempts, and
+        accepts a new session only when it is distinct from the run's and from every
+        other live copy's (`_check_isolated`). It is registered here until
+        `release_copy`."""
+        copy = SessionManager(self._creds, scope_hosts=sorted(self._scope),
+                              fetch_factory=self._fetch_factory,
+                              identities=list(self._identities),
+                              max_reauth=self._max_reauth, logger=self._log, store=None,
+                              max_logins=max_logins)
+        copy._auth_origins = set(self._auth_origins)
+        copy._bases = dict(self._bases)
+        copy._operator_bases = set(self._operator_bases)
+        copy._label = ISOLATED_LABEL.format(identity=identity, n=ordinal)
+        copy._label_identity = identity
+        copy._isolated_from = self
+        with self._copies_guard:
+            self._copies.append(copy)
+        return copy
+
+    @property
+    def label(self) -> str | None:
+        """An isolated copy's request label (None for a run's own manager)."""
+        return self._label
+
+    def release_copy(self, copy: SessionManager) -> None:
+        """Drop ``copy`` from the live copies (its session is simply abandoned)."""
+        with self._copies_guard:
+            if copy in self._copies:
+                self._copies.remove(copy)
+
+    def login_attempts(self) -> int:
+        """Login attempts made through `ensure` (every host and identity)."""
+        return sum(self._attempts.values())
+
+    def _own_identity(self, identity: str) -> str:
+        """An isolated copy maps its own label to its identity and refuses every other
+        identity, the bare one and ``anonymous`` included; a run's manager is unchanged."""
+        if self._label is None:
+            return identity
+        if identity == self._label:
+            return self._label_identity or identity
+        raise SessionAuthError(f"the isolated session {self._label!r} refuses requests "
+                               f"labelled {identity!r}")
+
+    def _check_isolated(self, host: str, identity: str, state: SessionState) -> None:
+        """Raise `SessionIsolationError` unless ``state`` is distinct from the run's
+        session and from every other live copy's (FR-SESS-17)."""
+        main = self._isolated_from
+        assert main is not None
+        others = [("the run's session", main._state.get((host, identity)))]
+        with main._copies_guard:
+            others += [(c._label or "an isolated session", c._state.get((host, identity)))
+                       for c in main._copies if c is not self]
+        for whom, other in others:
+            if other is None:
+                continue
+            problem = distinctness_problem(state, other)
+            if problem is not None:
+                raise SessionIsolationError(
+                    f"the isolated session {self._label}@{host} is not distinct from "
+                    f"{whom}: {problem}")
+
+    def verify_live(self, host: str, identity: str, base_url: str) -> bool:
+        """Is the run's session for ``identity`` still logged in? One GET of ``base_url``
+        (the operator's base) with a fresh fetcher carrying the session's cookies and
+        headers, walked hop by hop inside the approved origins (`_navigate`). It fails on
+        401/403 or on this session's login form, as `_verify_authenticated` does. On a
+        failure the state is marked invalid (and persisted), so the next send re-logs in
+        once; listeners are not told (the caller decides). An unapproved hop raises
+        `SessionAuthError` (the caller treats it as "cannot verify")."""
+        state = self._state.get((host, identity))
+        if state is None or not state.valid:
+            return False
+        fetcher = self._fetch_factory()
+        floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
+        probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
+                                             headers=state.apply({}))
+        ok = probe.status not in (401, 403) and (
+            state.kind == "basic" or not detect.shows_login_form(
+                probe.text, page, state.login_url, state.login_fields))
+        if not ok:
+            with self._observe_guard:
+                state.valid = False
+            self._persist(state)
+        return ok
 
     def is_auth_endpoint(self, url: str) -> bool:
         host = urlparse(url).hostname or ""
@@ -544,6 +708,40 @@ class SessionManager:
         # that has a password field of its own (BUG-0113)
         return not detect.shows_login_form(probe.text, page, state.login_url,
                                            state.login_fields)
+
+
+def _credential_items(state: SessionState) -> dict[tuple[str, str], str]:
+    out = {("cookie", k): str(v) for k, v in (state.cookies or {}).items()}
+    out.update({("header", k): str(v) for k, v in (state.headers or {}).items()})
+    return out
+
+
+def _identifier_like(name: str, value: str) -> bool:
+    """An equal credential that identifies a session: a sensitive name, an
+    identifier-looking value (the shared predicate), or a long value (local policy)."""
+    return (is_sensitive_name(name) or looks_like_identifier(value)
+            or len(value) >= DISTINCT_MIN_LEN)
+
+
+def distinctness_problem(new: SessionState, other: SessionState) -> str | None:
+    """Why ``new`` is not a separate server-side session from ``other``, or None.
+
+    Basic auth has no server-side session to re-bind (and the seam adopts no cookie),
+    so it is distinct. Otherwise ``new`` must carry a credential, at least one of its
+    cookie or header values must differ, and no credential with the same name may have
+    the same identifier-like value (`_identifier_like`). The reason names the
+    credential, never its value (FR-SESS-17)."""
+    if new.kind == "basic":
+        return None
+    mine, theirs = _credential_items(new), _credential_items(other)
+    if not mine:
+        return "it carries no session credential"
+    for (where, name), value in mine.items():
+        if theirs.get((where, name)) == value and _identifier_like(name, value):
+            return f"{where} {name!r} has the same identifier-like value"
+    if all(theirs.get(key) == value for key, value in mine.items()):
+        return "every credential is the same"
+    return None
 
 
 #: The most redirects login discovery follows from one candidate URL (BUG-0097).

@@ -3,6 +3,61 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0018 — Isolated session copies for in-app login forms (forms phase 2, lane B) (2026-10-14)
+- Change:
+  - **`SessionManager.isolated_copy(identity, *, ordinal, max_logins=3)`.** A throwaway
+    manager:
+    - **built through `__init__`**, never `copy.copy`, so its states, auth endpoints,
+      locks, failures, login attempts, copies and logout listeners start empty;
+    - **shared, read-only:** the credential store and the fetch factory (one fresh
+      fetcher, with its own jar, per login);
+    - **copied:** scope, authorised auth origins, the operator's bases and operator
+      bases, so a (re-)login uses the operator's URL and the same
+      credential-destination anchors;
+    - **`store=None`:** never persisted, so it cannot overwrite the run's
+      `(host, identity)` row;
+    - **label:** answers only to `<identity>#isolated:<n>` in `prepare`, `authorize`
+      and `observe`; refuses every other identity, the bare one and `anonymous`
+      included; `adopt` refuses.
+  - **Registry.** `_copies`, the main manager's live copies; `release_copy`.
+  - **`max_logins`** (new `__init__` keyword, default None = unlimited, as before):
+    counts login attempts in `ensure`; over the cap → `LoginCapReached`.
+  - **Distinctness.** After every copy login, `_check_isolated` compares the new state
+    with the run's and with every other live copy's (`distinctness_problem`):
+    - Basic is distinct (no server-side session);
+    - otherwise a credential must exist and at least one value must differ;
+    - an equal cookie or header value is an identifier when its name is sensitive,
+      `core.redaction.looks_like_identifier` holds (shared, CC-CORE-0040), or it is at
+      least `DISTINCT_MIN_LEN` = 16 characters (local policy);
+    - a failure raises `SessionIsolationError`, naming credentials, never values.
+  - **Errors.** `IsolatedLoginFailed(SessionAuthError)`, with `SessionIsolationError`
+    and `LoginCapReached` under it. A copy wraps any login failure, credential error
+    included, in it; a run's manager is unchanged.
+  - **`verify_live(host, identity, base_url)`.** One walk of the operator's base with a
+    fresh fetcher carrying the session's cookies and headers; false on 401/403 or this
+    session's login form, and then the state is marked invalid and persisted (listeners
+    are not told; the caller decides).
+- Impact:
+  - **Callers:** `tools.probesender.SeamProbeSender` (CC-FUZZ-0064). Existing callers
+    are unaffected (new keyword defaults; a run's manager has no label).
+  - **Shared code used as delivered:** `add_logout_listener` (CC-SESS-0017) and
+    `looks_like_identifier` (CC-CORE-0040), unmodified.
+- Risk: low to medium (a second login per login-form path). Bounded by the copy's
+  login cap and the sender's caps and breakers (CC-FUZZ-0064).
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_login_form_isolation.py`: no shared mutable state, built via
+        `__init__`, label-only identity, a copy's logout never told to the main
+        listener, never persisted, distinct from the run's and every live copy's,
+        by-value rule wired to the shared predicate, no values in messages, login cap,
+        `verify_live` carries the cookie and marks a dead session) — done
+  - [x] FR-SESS-17; NFR-SESS-redaction `Enforced by:` — done
+- Review: reviewers A and B, lane B draft v1 → v2 → v2.1 → v2.2 → v2.3 (AGREED, both).
+  Carried conditions: built through `__init__`, a copy's logout not passed to the main
+  listener (test), T22's wiring patches `fuzzlab.session.manager.looks_like_identifier`.
+- Effectiveness: verified offline (mutation check 32/32 over lane B's new logic); live
+  bWAPP pending (orchestrator).
+
 ### CC-SESS-0017 — Logout listeners (`add_logout_listener`) for forms phase 2's breakers (2026-10-14)
 - Change:
   - **`SessionManager.add_logout_listener(listener)`.**

@@ -138,22 +138,74 @@ def _credential_name(name: str) -> bool:
     return bool({t.lower() for t in name_tokens(name)} & _CREDENTIAL_TOKENS)
 
 
+def _password_fields(raw) -> tuple[str, ...] | None:
+    """The one reader of `form.password_fields` (PA-0108): a JSON list of strings, or
+    None when the stored value is malformed (the caller fails closed)."""
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else None
+    except ValueError:
+        return None
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return None
+    return tuple(value)
+
+
+def _login_form_paths(store, run_id: int, base_url: str) -> dict[str, frozenset | None]:
+    """``{url_key: password-control names}`` of every path with an in-app login form in
+    this run (None: a malformed row — the path is isolated and all its points dropped)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.urls import url_key
+    parts = urlsplit(base_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    out: dict[str, frozenset | None] = {}
+    for r in store.conn.execute(
+            "SELECT e.url AS path, f.password_fields AS pw FROM form f "
+            "JOIN endpoint e ON e.id = f.endpoint_id WHERE f.run_id = ?", (run_id,)):
+        path = r["path"] if r["path"].startswith("/") else "/" + r["path"]
+        key = url_key(origin + path)
+        names = _password_fields(r["pw"])
+        if names is None:
+            out[key] = None
+        elif names and out.get(key, frozenset()) is not None:
+            out[key] = frozenset(out.get(key, frozenset()) | set(names))
+    return out
+
+
+def isolated_paths_from_store(store, run_id: int, base_url: str) -> frozenset[str]:
+    """The ``url_key`` (origin + path, no query) of every path with an in-app login form
+    in this run: the paths a sender must never send the run's session to (FR-FUZZ-44).
+    Path-level, for any method and any point source. The one derivation (PA-0003)."""
+    return frozenset(_login_form_paths(store, run_id, base_url))
+
+
 def injection_points_from_store(store, run_id: int, base_url: str,
-                                skipped: list | None = None) -> list[InjectionPoint]:
+                                skipped: list | None = None,
+                                isolated: set | None = None) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
 
     A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
     delete, ...) is never fuzzed from a crawl (NFR-FUZZ-safe, BUG-0112); it is appended
     to ``skipped`` as ``(path, method, param, reason)`` instead.
+
+    A point on a path with an in-app login form (`isolated_paths_from_store`) needs an
+    isolated session (FR-FUZZ-44). By default (``isolated`` None) such points are
+    dropped and reported, so a caller that cannot isolate never fuzzes a login form
+    with its session. A caller that can passes a set: it receives every such path's
+    ``url_key`` and the points. A parameter named like a password control of a form on
+    that path is never a point.
     """
     from urllib.parse import urlsplit
 
-    from fuzzlab.core.urls import destructive_reason
+    from fuzzlab.core.urls import destructive_reason, url_key
     # Stored crawl paths are absolute (`to_path`), so they join to the base URL's
     # origin, never its path: `--base-url .../bWAPP/` must not give /bWAPP/bWAPP/
     # (BUG-0113).
     parts = urlsplit(base_url)
     base = f"{parts.scheme}://{parts.netloc}"
+    login_paths = _login_form_paths(store, run_id, base_url)
+    if isolated is not None:
+        isolated.update(login_paths)
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
         "f.entries AS entries "
@@ -182,6 +234,17 @@ def injection_points_from_store(store, run_id: int, base_url: str,
             if skipped is not None:
                 skipped.append((path, method, r["name"], "credential parameter"))
             continue
+        key = url_key(base + path)
+        if key in login_paths:
+            names = login_paths[key]
+            why = ("malformed form row (password_fields)" if names is None else
+                   "password control" if r["name"] in names else
+                   None if isolated is not None else
+                   "needs an isolated session (login form)")
+            if why is not None:
+                if skipped is not None:
+                    skipped.append((path, method, r["name"], why))
+                continue
         entries = None
         if r["entries"]:
             try:
@@ -192,6 +255,11 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                                      method=method, location=r["location"] or "query",
                                      base_entries=entries))
     return points
+
+
+def _path_of(url: str) -> str:
+    from urllib.parse import urlsplit
+    return urlsplit(url).path or "/"
 
 
 class _CountingSender:
@@ -273,6 +341,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                             points_source=points_source)
 
     skipped: list[tuple[str, str, str, str]] = []
+    isolated: set[str] = set()
     if source == "ground-truth":
         points, skipped = points_from_ground_truth(
             ground_truth, base_url, browser_available=browser is not None)
@@ -281,7 +350,21 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
         if hasattr(sender, "allow_explicit"):
             sender.allow_explicit([u for p in points for u in (p.url, p.store_url)])
     else:
-        points = injection_points_from_store(store, run_id, base_url, skipped=skipped)
+        points = injection_points_from_store(store, run_id, base_url, skipped=skipped,
+                                             isolated=isolated)
+        if isolated:
+            if hasattr(sender, "isolate"):
+                sender.isolate(isolated)       # never the run's session there (FR-FUZZ-44)
+            else:
+                from fuzzlab.core.urls import url_key
+                kept = []
+                for p in points:
+                    if url_key(p.url) in isolated:
+                        why = "needs an isolated session; this sender cannot provide one"
+                        skipped.append((_path_of(p.url), p.method, p.param, why))
+                    else:
+                        kept.append(p)
+                points = kept
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
@@ -299,6 +382,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           prioritizer=prioritizer)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
+    report = getattr(sender, "isolation_report", None)
+    if source != "ground-truth" and isolated and callable(report):
+        result.metrics["isolated_sessions"] = report()
     anonymous = getattr(sender, "auth_endpoint_anonymous_sends", None)
     if anonymous is not None:
         result.metrics["auth_endpoint_anonymous_sends"] = anonymous

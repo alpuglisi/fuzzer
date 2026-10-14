@@ -30,7 +30,14 @@ def with_query(url: str, entries) -> str:
 
 
 def _build(target_url: str, timeout: float, store_path: str | None = None):
-    """Build the session manager + an HttpClient sharing it, scoped to the target.
+    """Build the session manager + an HttpClient sharing it, scoped to the target."""
+    manager, client, _budget, _scope = _build_parts(target_url, timeout, store_path)
+    return manager, client
+
+
+def _build_parts(target_url: str, timeout: float, store_path: str | None = None):
+    """``(manager, client, budget, scope)``: the session manager + an HttpClient sharing
+    it, scoped to the target, and the request budget and scope they were built with.
 
     The target host is added to scope (the tool's `--authorized`/`--url`/`--base-url`
     is the authorization). Credentials come from the per-host credential store (D12).
@@ -55,7 +62,7 @@ def _build(target_url: str, timeout: float, store_path: str | None = None):
     manager = SessionManager(creds, scope_hosts=scope, store=store)
     budget = RequestBudget(int(cfg.get("budget_total", 5000)))
     client = HttpClient(budget, scope, session=manager, timeout=timeout)
-    return manager, client
+    return manager, client, budget, scope
 
 
 def make_authenticated_client(target_url: str, identity: str, timeout: float = 15.0,
@@ -74,3 +81,17 @@ def make_session_manager(target_url: str, timeout: float = 15.0,
                          store_path: str | None = None):
     """Just the session manager for a target (Playwright cookie injection)."""
     return _build(target_url, timeout, store_path)[0]
+
+
+def make_auth_with_isolation(target_url: str, timeout: float = 15.0):
+    """``(manager, client, isolated_client)``: as `make_auth`, plus a factory that builds
+    an isolated copy's `HttpClient` (FR-FUZZ-44). The factory shares only the run's
+    request budget and scope — isolated sends spend the run's budget — and attaches
+    the copy as the session addon; nothing else is shared."""
+    from fuzzlab.core.http import HttpClient
+    manager, client, budget, scope = _build_parts(target_url, timeout)
+
+    def isolated_client(copy_manager):
+        return HttpClient(budget, list(scope), session=copy_manager, timeout=timeout)
+
+    return manager, client, isolated_client

@@ -285,6 +285,13 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **No second definition:** nothing else in `fuzzlab/` defines its own entropy or
     identifier test.
 
+- **FR-CORE-31** *(forms phase 2, lane B; `CC-CORE-0041`, 2026-10-14).*
+  - **Migration 21** adds `form.password_fields` (`TEXT NOT NULL DEFAULT '[]'`): the
+    names of the form's password controls, as a JSON list, written by the importer from
+    the control kinds. A form with any is an in-app login form (FR-FUZZ-44).
+  - Rows from migration 20 read `[]`. The one reader (`harness.auto._password_fields`)
+    treats a malformed value as unknown and fails closed.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

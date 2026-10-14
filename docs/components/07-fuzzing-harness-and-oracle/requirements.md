@@ -1107,6 +1107,15 @@ rewards) derives from it.
   verdicts are reproducible (state reset via snapshot/restore between iterations).
 - **NFR-FUZZ-safe** Destructive payload classes off by default; auth endpoints
   excluded from scope; no traffic off localhost.
+  - Clause (in-app login forms; FR-FUZZ-44, CC-FUZZ-0064): the run's session is never
+    sent to a path with an in-app login form **for store-sourced (crawl) points in
+    `fuzzlab auto`**; such sends use an isolated session or none, and credential-change
+    forms are never imported.
+  - Enforced by (in-app login forms): `SeamProbeSender` isolated routing,
+    `injection_points_from_store`'s default drop, `form_skip_reason` — `tests/test_login_form_isolation.py::test_a_login_form_is_confirmed_on_an_isolated_session_and_the_run_session_survives`, `tests/test_login_form_isolation.py::test_credential_change_forms_stay_excluded`, `tests/test_login_form_isolation.py::test_a_password_control_is_never_a_point_whatever_its_name`, `tests/test_login_form_isolation.py::test_without_isolated_the_points_are_dropped_and_reported`, `tests/test_login_form_isolation.py::test_greybox_never_gets_login_form_points`, `tests/test_login_form_isolation.py::test_a_rejected_isolated_login_falls_back_to_anonymous_once`, `tests/test_login_form_isolation.py::test_a_copy_must_differ_from_every_live_copy`, `tests/test_login_form_isolation.py::test_a_single_session_app_trips_the_breaker_after_one_copy_login`, `tests/test_login_form_isolation.py::test_a_lazy_single_session_logout_trips_the_breaker`
+  - Not yet enforced (in-app login forms): `fuzz --identity` and `mutate-run --identity`
+    send to the operator's own `--url` with the run's session; an operator who points
+    them at an in-app login form must run them without `--identity`.
   - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`, `tests/test_forms_phase1.py::test_credential_parameters_from_links_are_never_fuzzed`, `tests/test_forms_phase1.py::test_object_selecting_hidden_fields_and_csrf_are_pinned_not_fuzzed`
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
@@ -1330,10 +1339,67 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     raw defaults, and `Oracle.confirm` binds the entries.
   - **Never fuzzed:** credential-named parameters from crawl or form sources (ground
     truth is unaffected), submitters, sensitive names, and hidden object selectors.
-  - **Never imported:** multipart, POST-selector, password-bearing and destructive
-    forms.
+  - **Never imported:** multipart, POST-selector and destructive forms, and
+    password-bearing forms other than in-app login forms (FR-FUZZ-44 supersedes the
+    phase 1 blanket password exclusion).
   - **Residuals:**
     - probes complete real submissions, so rows, users or mail are created;
     - forms needing a fresh CSRF token do not confirm;
     - fillers ignore `maxlength` / `pattern`;
     - one confirmation per (url, param, method, location).
+- **FR-FUZZ-44** *(in-app login forms on an isolated session; `CC-FUZZ-0064`,
+  2026-10-14).*
+  - **Imported:** a form with exactly one password control, exactly one text, email or
+    tel field and nothing else typed (`login_shaped`), unless it is a credential-change
+    form. Its password-control names are stored (`form.password_fields`, FR-CORE-31).
+  - **Credential-change forms are never imported** (they change the account, which
+    isolation cannot protect): two or more password controls; a password-control name
+    containing `new`, `conf`, `change`, `reset`, `old`, `curr`, `repeat`, `retype`,
+    `verify` or `again` (a bare substring, deliberately: a false match only excludes);
+    an action path, sent submitter or hidden name tokenising to `change`, `new`, `set`,
+    `reset`, `update`, `edit`, `modify`, `register`, `signup`, `create`, `forgot`,
+    `recover`, `activate`, `password`, `passwd`, `pwd`, `pass`, `save`, `admin`,
+    `manage`, `account`, `profile` or `users`; or a hidden object selector. Other
+    password forms (settings, CAPTCHA) are not imported either.
+  - **The password is never fuzzed:** a password control is never a parameter, whatever
+    its name, and no parameter on that path with a password-control name is a point.
+    Its sibling value is `""`, as stored; the operator's password is never sent there.
+  - **Isolated paths:** `isolated_paths_from_store` gives the `url_key` of every path
+    with such a form (any method, any point source). `injection_points_from_store`
+    drops their points and reports them unless the caller passes `isolated=`; `run_auto`
+    registers them with `sender.isolate`, or drops them when the sender cannot isolate.
+    greybox-run therefore never receives them.
+  - **Sending.** In `SeamProbeSender`, after the destructive gate and the auth-endpoint
+    rule (which wins), a send to an isolated path goes on that path's own isolated
+    session (FR-SESS-17), created lazily, kept for the run and labelled
+    `<identity>#isolated:<n>`; otherwise anonymously, with the reason reported. The run's
+    session is never sent there. `RequestsProbeSender` is isolated by construction.
+  - **Fallbacks to anonymous (reported):** no isolated-client factory; a rejected,
+    non-distinct or capped copy login, at creation or re-login; more than
+    `MAX_ISOLATED_SESSIONS` (32) copies; a tripped breaker.
+  - **Breakers (run-wide):**
+    - *single-session:* the run's session fails `verify_live` after the run's first copy
+      login or any copy re-login, or the run's manager reports a logout of the run's
+      identity on the run's host while a copy is live (a logout listener registered,
+      once, before the first copy login). Copies are dropped; every isolated path goes
+      anonymous; the run's session re-logs in once.
+    - *failed-logins:* after 2 failed copy logins, no new copies.
+  - **Budget and records.** Isolated sends spend the run's `RequestBudget`; copy logins,
+    like the run's own, go through the fetcher and are not budgeted.
+    `metrics["isolated_sessions"]` (`isolation_report()`) carries counts, the breaker
+    and per-path reasons, never a credential value; `fuzzlab auto` prints it.
+    `isolated_copy_logins()` is public (lane A's header breaker reads it).
+  - **Accepted false positives** (a real login form excluded: a missed finding, never a
+    safety risk): Rails `/sessions/new`, Devise `/users/sign_in`, `/admin/login`,
+    `/account/login`, `/my-account`, a login button valued `Save`, and bWAPP's
+    `ba_weak_pwd.php` and `ba_pwd_attacks_2.php`.
+  - **Residuals:**
+    - after a probe re-binds a path's throwaway session, later probes of that same path
+      run as whichever user it was bound to;
+    - per-user state a login handler changes (last login, failed-attempt counters) is
+      not isolated; per-IP rate limiting may throttle the lab client;
+    - a logout of the run's session unrelated to the copies, while a copy is live, also
+      trips the single-session breaker (fails closed); the main-path probe that observed
+      it got a login page;
+    - an unrecognised, short, low-entropy equal session id is accepted as distinct
+      (FR-SESS-17).

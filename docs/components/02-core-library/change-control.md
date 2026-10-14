@@ -3,6 +3,29 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0041 — Migration 21: `form.password_fields` (forms phase 2, lane B) (2026-10-14)
+- Change:
+  - **Migration 21:** `ALTER TABLE form ADD COLUMN password_fields TEXT NOT NULL
+    DEFAULT '[]'`: the names of a form's password controls, as a JSON list.
+  - **Writer:** `store_adapter._import_forms`, from the control kinds (the authoritative
+    signal, PA-0008). **Reader:** `harness.auto._password_fields`, the one parser
+    (PA-0108); a malformed value fails closed.
+  - **Legacy rows** read `[]`, truthfully: no password form was imported before.
+  - `tests/test_holdout_seal_table.py` now derives the schema head from `MIGRATIONS`
+    (PA-0001) instead of the literal `20`.
+- Impact:
+  - **Store contract:** one column with a default; existing readers are unaffected.
+    ARCHITECTURE's store-contract table is updated.
+  - **Consumers:** `harness.auto` (CC-FUZZ-0064).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_login_form_isolation.py`: a v20 store upgrades and its rows
+        read `[]`; a malformed value fails closed) — done
+  - [x] FR-CORE-31; ARCHITECTURE — done
+- Review: lane B v2 (Option M approved with migration 21, CC-CORE-0041, FR-CORE-31).
+- Effectiveness: verified offline; live pending.
+
 ### CC-CORE-0040 — Shared identifier-like value predicate (`looks_like_identifier`) (2026-10-14)
 - Change:
   - **`core/redaction.looks_like_identifier(value)`:** one total predicate (PA-0096)
