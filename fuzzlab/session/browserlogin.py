@@ -53,7 +53,7 @@ import json
 import os
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from urllib.parse import quote, quote_plus, unquote, urlsplit
 
@@ -500,6 +500,7 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
     """The browser part of the login (runs on the worker thread). ``cancelled`` (set by
     `run` at the deadline) is checked before every navigation, fill and the click, and
     makes the gate refuse every request; the ``finally`` still closes everything."""
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
     from fuzzlab.tools import spa
@@ -582,6 +583,13 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
                     and not cancelled.is_set():
                 page.wait_for_timeout(100)
                 quiet = quiet + 1 if gate.window_refusals and inflight.n == 0 else 0
+            if gate.login is None and (gate.window_refusals
+                                       or gate.account_refusal is not None):
+                # BUG-0136 review (X3): a refused submission leaves the login page
+                # alive (ERR_ABORTED keeps the document; a refused fetch never replaced
+                # it), so the password is taken out of its field before teardown
+                with suppress(PlaywrightError):
+                    page.fill(_sel(pw_id), "", timeout=timeout_ms)
             if gate.login is not None:
                 _settle(page, inflight, SETTLE_MS, cancelled,
                         until=(lambda: bool(gate.probes))

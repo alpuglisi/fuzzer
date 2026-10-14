@@ -30,6 +30,34 @@ Newest first.
     ERROR_LOG, CHANGELOG, NFR-CRAWL-safe edited in place and traced — done
   - [x] mutation checks — done
 - Effectiveness (assessed 2026-10-14): `tests/test_navigation_aborts.py` 26 passed (22 per-reason pins, the code pin, 3 real-Chromium tests); the related suites (22 files, FUZZLAB_REQUIRE_BROWSER=1) 1272 passed, 2 xfailed, 0 failed; the traceability guard 3 passed. Mutation checks: the first request's scope/destructive abort reverted to `route.abort()` fails 5 (both real crawl tests, the `goto` test, and the out-of-scope and destructive navigation pins), 20 pass; `_abort_code` returning the default for a document fails 14 (the 3 real tests and all 11 navigation pins), 12 pass. Effective.
+- Amendment, review of c69e6fb (2026-10-14; reviewer A AGREE, reviewer B
+  AGREE-with-changes; D50 X1, X4, X5; X2 in CC-FUZZ-0082, X3 in CC-SESS-0023):
+  - **X1 (B-M1):** an ERR_ABORTED abort keeps the previous document alive, timers and
+    all, so after a failed `goto` its fetches ran on and were sent and captured under
+    the URLs crawled next. `LocalSpider._fetch_rendered`'s `except` now first sends the
+    page to `about:blank` (Playwright errors suppressed), then runs the withheld check,
+    `SessionWithheld` or the static fallback as before. As a result
+    `_navigation_withheld` decides there by the withheld targets alone (its committed-URL
+    half sees `about:blank`); its docstring is updated (A-N2, B-N2).
+  - **X4 (A-S1, A-S2):** real-Chromium pins: the crawl's own target whose 302 lands out
+    of scope or on /logout.php raises ERR_ABORTED with the page kept, and /go is
+    recorded through the static fallback (status 302). A script-submitted POST form to
+    a refused URL keeps the page and posts nothing. A refused iframe keeps its parent.
+  - **X5:** the unit table adds an iframe navigation and a `document` request whose
+    `is_navigation_request` raises (B-N1). NFR-CRAWL-safe notes that a refused
+    navigation looks as if nothing happened and is visible only through `skipped_*`
+    and the summary (A-N1). B-N3 is accepted as is.
+  - Effectiveness: `tests/test_navigation_aborts.py` has 59 tests (44 per-reason pins over 4 request
+    kinds, the code pin, 14 real-Chromium tests), all passing. The X1 test passed 25 of
+    25 repeated runs. The files that import `tools/spider.py`, `session/browserlogin.py`
+    or `tools/navguard.py`, plus the traceability guard (23 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1295 passed, 4 skipped (labgen live-boot reproductions),
+    4 xfailed, 0 failed. Mutation checks:
+    - dropping the `about:blank` line fails the X1 test 3 of 3 times. With its
+      `about:blank` assertion moved last, the server-side assertion fails on its own:
+      a burst of ticks after the fallback;
+    - `_abort_code` returning the default fails 43 and passes 16. The iframe pins and
+      M6 (a)/(b) pass either way, because they pin behavior that did not change.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:

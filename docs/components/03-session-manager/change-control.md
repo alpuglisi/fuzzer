@@ -138,6 +138,17 @@ Newest first.
   browser bullet is edited in place: the isolated context is made once per guard and
   every fetch through it carries an empty `Cookie`; only an in-scope commit off the
   session's origins is FR-SESS-20's. No session-manager code changed.
+- Amendment, BUG-0136 review (2026-10-14; X3, reviewer B-S2): the browser login's
+  guard now aborts a refused navigation with ERR_ABORTED (BUG-0136), so a refused
+  submission leaves the login page alive (a refused fetch never replaced it either).
+  `browserlogin._drive`: when the click produced no login request and something was
+  refused in the window (`window_refusals`, or an `account_refusal`), the password
+  field is cleared (`page.fill(pw, "")`, a Playwright error suppressed) before
+  `storage_state()` and teardown. FR-SESS-19 is edited in place.
+  - Tests: `tests/test_session_browser_login.py::test_a_refused_submission_leaves_no_password_in_the_page`
+    (real Chromium, `other` and `users` variants). A spy on `navguard.release` records
+    only whether a password field still holds a value, never the value.
+  - Effectiveness: 2 passed. Mutation check: dropping the `page.fill` fails both.
 
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:

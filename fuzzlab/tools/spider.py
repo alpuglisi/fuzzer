@@ -937,6 +937,12 @@ class LocalSpider:
         try:
             result = self._goto_and_parse(url)
         except Exception as e:
+            # BUG-0136 review (X1): a failed load ends the previous document. A refused
+            # navigation is aborted with ERR_ABORTED, which leaves the page shown before
+            # it alive; its timers and fetches would otherwise run on and be sent and
+            # captured under the URLs crawled next
+            with contextlib.suppress(PlaywrightError):
+                self._page.goto("about:blank", timeout=self.timeout_ms)
             if self._navigation_withheld(url):
                 # this navigation's own target or its redirect landing is on another
                 # origin than the session's (R1, T1): nothing is extracted, and no
@@ -954,9 +960,11 @@ class LocalSpider:
         T1)? Its own target or redirect landing was withheld by the route, or the main
         frame committed on an **in-scope** origin outside the session's. A
         script-initiated navigation away that the route aborted is neither: the page
-        stays, and is extracted. An out-of-scope committed URL (or the error page the
-        scope guard's abort leaves) is BUG-0123's scope abort, already counted under its
-        own reason (`skipped_out_of_scope`), never FR-SESS-20's (review round 3, V2)."""
+        stays (ERR_ABORTED, BUG-0136), and is extracted. An out-of-scope committed URL
+        is BUG-0123's scope abort, already counted under its own reason
+        (`skipped_out_of_scope`), never FR-SESS-20's (review round 3, V2). After a
+        failed `goto` the page has already been sent to ``about:blank`` (BUG-0136
+        review, X1), so there only the withheld targets decide."""
         if self._cookie_scope is None:
             return False
         if url_key(url) in self._withheld_targets:

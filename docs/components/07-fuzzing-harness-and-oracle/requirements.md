@@ -1208,6 +1208,20 @@ rewards) derives from it.
   and B). Without a browser the DOM and stored XSS strategies give no verdict at **any**
   location, and an unplaceable DOM location or a stored candidate with no store URL is
   no verdict too (CC-FUZZ-0073).
+  *(CC-FUZZ-0082, BUG-0136:)* the executor's guard aborts a refused navigation (out
+  of scope, destructive) with ERR_ABORTED, which keeps the page; before, Chromium's
+  error page replaced it. Measured on a real browser, for a page that navigates by
+  script to a refused URL:
+  - after `load`, with a sink firing later: now executed=True; before, executed=False
+    (a false negative);
+  - after `load`, with no sink: executed=False, as before;
+  - a sink that fires and then navigates: executed=True, as before;
+  - **during parsing or at `DOMContentLoaded` (before `load`):** now `goto` waits for a
+    `load` that never comes, so the run takes `timeout_ms` and raises; before, the
+    error page loaded and the run reported executed=False. *Open, flagged:* a raise
+    from the executor is not contained by the oracle or the pipeline (it ends the
+    confirmation loop), as already for a target whose own redirect is refused
+    (`net::ERR_ABORTED`, was `net::ERR_FAILED`).
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
     `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,
@@ -1216,6 +1230,7 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
     `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
+  - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_raises`
 - **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
   server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
   `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`

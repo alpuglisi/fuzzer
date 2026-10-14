@@ -140,3 +140,56 @@ browser guard, and generalises BUG-0134 T1 and the reveal window's choice), in
 | `navguard.make_ws_handler` | WebSockets | never connected (no abort code applies) | not this class |
 | `spider` (`_guard`), `fetcher` (auditor), `browserexec` (M6), `browserlogin` | — | all install `navguard.guard_page`; none aborts a route itself (`grep route.abort`/`.route(` over `fuzzlab/`) | covered by the one rule |
 | `spider._isolated_submit` (`checked_api_request`) | API request, not a navigation | raises before sending | not this class |
+
+## Review of the fix (added in review)
+Reviewer A agreed; reviewer B agreed with changes (D50, X1–X5). What the review found
+is a consequence of the fix itself: ERR_ABORTED keeps the current document, which is
+the point, but that document **keeps running**, and some callers relied on the error
+page to stop it.
+
+- **X1 (B-M1), the crawl's own failed `goto`:** after a refused target (or any failed
+  load), the page shown before stayed alive, so its timers and fetches went on, and
+  they were sent and captured (`discovered_requests.page_url`) under the URLs crawled
+  next. Fixed: `_fetch_rendered`'s `except` sends the page to `about:blank` first, as
+  the reveal window already does when it cannot close cleanly (CC-CRAWL-0024). Pinned
+  by `test_a_failed_load_ends_the_previous_document`: a 50 ms POST ticker on A, A's
+  link /go redirecting to /logout.php. The server gets no tick after the fallback's
+  own request, and nothing is captured but what A sent before it ended. A fetch A sent
+  just before it ended can still finish after the mark, so the test bounds those at 2;
+  that is in-flight work, not the leak. Without the line, a burst of ticks reaches the
+  server after the fallback and is captured under /next.
+- **X2 (B-S1), the M6 semantic shift (CC-FUZZ-0082, FR-FUZZ-48).** Measured on a real
+  browser, for a page that navigates by script to /logout.php:
+
+  | When the page navigates | Before (default code) | After (`"aborted"`) |
+  | --- | --- | --- |
+  | after its sink fired | executed=True | executed=True |
+  | after `load`, no sink | executed=False | executed=False |
+  | after `load`, sink fires later | executed=False (false negative) | **executed=True** |
+  | during parsing / at `DOMContentLoaded` | executed=False | **`goto` times out, the run raises** |
+  | the target's own redirect is refused | raises `ERR_FAILED` | raises `ERR_ABORTED` |
+
+  The fourth row is open and flagged, not built. A raise from the executor is
+  contained by neither the oracle nor the pipeline (it ends the confirmation loop),
+  which is already true for the last row and for any `goto` timeout. Rows 1, 2, 3 and 5
+  are pinned (`test_m6_*`).
+- **X3 (B-S2), the browser login:** a refused submission now leaves the login page,
+  and its filled password field, alive until teardown. The field is cleared first
+  (CC-SESS-0023 amendment, FR-SESS-19).
+- **X4 (A-S1, A-S2):** real-Chromium pins added: the crawl's own target redirected to
+  a refused URL (raises, the page stays, recorded through the static fallback), a
+  script-submitted POST form to a refused URL (page kept, nothing posted), and a
+  refused iframe (parent kept).
+- **X5:** unit pins for an iframe navigation and for a `document` request whose
+  `is_navigation_request` raises (B-N1); NFR-CRAWL-safe states that a refused
+  navigation looks like nothing happened and shows only in `skipped_*` and the summary
+  (A-N1). B-N3 is accepted as is.
+
+Sweep additions (the PA-0002 table above, for what keeps running after an abort):
+| Site | After a refused navigation | Disposition |
+| --- | --- | --- |
+| `spider._fetch_rendered` (`except`) | the previous page ran on into the next URLs | **fixed** (X1): `about:blank` first |
+| reveal window close failure (`spider._window`) | pages closed, route page sent to `about:blank` | already handled (CC-CRAWL-0024) |
+| `browserlogin._drive` after a refused submission | login page alive with the password filled | **fixed** (X3): field cleared |
+| `browserexec.run` | the page stays; the context is closed right after the wait | no leak (one probe per context); verdict shift recorded (X2) |
+| `fetcher.ContentFetcher.fetch` (auditor, `tools/fetcher.py`) | the same leak: one page for the whole audit, `_xhr_urls` reset per URL, `except` goes straight to the static fallback, so a previous page's XHRs are listed under the next URL's `xhr_urls` | **open, flagged**: the same one-line fix belongs to the auditor component (a CC-AUD entry), which this lane has no number for |

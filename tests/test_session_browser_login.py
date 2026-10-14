@@ -415,6 +415,35 @@ def test_the_password_never_leaves_to_another_port(spa, variant):
         other.close()
 
 
+@pytest.mark.parametrize("variant", ["other", "users"])
+def test_a_refused_submission_leaves_no_password_in_the_page(spa, monkeypatch, variant):
+    """BUG-0136 review (X3, FR-SESS-19): a refused submission keeps the login page
+    alive (ERR_ABORTED, or a refused fetch), so the password field is cleared before
+    the context is torn down. Only whether a password field still holds a value is
+    recorded here, never the value."""
+    from fuzzlab.tools import navguard
+    real_release = navguard.release
+    filled = []
+
+    def release(context):
+        for page in list(getattr(context, "pages", []) or []):
+            filled.append(page.evaluate(
+                "() => [...document.querySelectorAll('input[type=password]')]"
+                ".some(e => e.value !== '')"))
+        return real_release(context)
+    monkeypatch.setattr(navguard, "release", release)
+    other = Recorder()
+    try:
+        pw = _password()
+        lab = spa(pw, variant=variant, other_port=other.server.server_address[1])
+        with pytest.raises(SessionAuthError, match="in the login window|account endpoint"):
+            _login(_manager(lab, pw), lab)
+        assert filled == [False]                       # the page was alive; cleared
+        assert other.requests == [] and lab.seen("POST") == []
+    finally:
+        other.close()
+
+
 def test_register_and_change_password_forms_on_the_login_route_are_never_used(spa):
     pw = _password()
     lab = spa(pw, variant="mixed")

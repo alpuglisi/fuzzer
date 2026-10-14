@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0136 review: a failed load ends the previous page; M6 shift recorded)
+- **Why:** with refused navigations aborted as ERR_ABORTED (BUG-0136) the previous page
+  stays alive. After a failed load its fetches ran on under the next crawled URLs, and a
+  refused login submission left the filled password field in a live page. Reviewers
+  also asked for the M6 verdict shift to be measured and pinned.
+- **What:** the crawl sends the page to `about:blank` after a failed load; the browser
+  login clears the password field after a refused submission; real-Chromium pins for
+  a refused own redirect, POST form submission and iframe; the M6 shift is recorded
+  (one open pre-`load` case flagged). CC-CRAWL-0028 and CC-SESS-0023 amendments,
+  CC-FUZZ-0082.
+
 ## 2026-10-14 (FR-SESS-20 review fix: the oracle's form-binding pin walks the sender chain)
 - **Why:** the oracle's `_SessionNotes` wrapper (CC-FUZZ-0080) became the outermost
   sender, which broke a test that checked the outermost sender's type. The binding

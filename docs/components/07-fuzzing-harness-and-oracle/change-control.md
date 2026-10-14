@@ -22,6 +22,41 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
+- Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort
+  every refused navigation with ERR_ABORTED, and `PlaywrightBrowserExecutor` runs under
+  that guard. This entry records the effect on M6 verdicts (review B-S1, X2), measured
+  on a real browser for a page that navigates by script to /logout.php, and pins it with
+  tests:
+  - **sink fires, then navigates:** executed=True (unchanged);
+  - **after `load`, no sink:** executed=False (unchanged), no exception;
+  - **after `load`, sink fires later:** executed=True; it was executed=False, a false
+    negative, because the error page replaced the page;
+  - **the target's own redirect is refused:** the run raises (`net::ERR_ABORTED`; it
+    was `net::ERR_FAILED`), as before;
+  - **during parsing or at `DOMContentLoaded`, before `load` (not pinned, flagged):**
+    `goto` now waits out `timeout_ms` (8 s) and raises `TimeoutError`; it was
+    executed=False.
+  FR-FUZZ-48 amended in place.
+- Impact (other components / project): some DOM-XSS candidates move from a negative to
+  a confirmation (the after-`load` case). Pre-`load` navigations move from a negative
+  to a raise. Today a raise from the executor ends the pipeline's confirmation loop: it
+  is contained by neither the oracle nor `harness/pipeline._confirm`, which is already
+  true for a refused own redirect and for any `goto` timeout. That containment, or a
+  `goto` that tolerates a superseded load, is an M6 design change, **flagged and not
+  built here**.
+- Risk: low for the pinned cases; the pre-`load` case is a known open risk (above).
+- Deliverables:
+  - [x] tests (`tests/test_navigation_aborts.py`: the four `test_m6_*` pins) — done
+  - [x] FR-FUZZ-48 amended in place; BUG-0136 "M6 semantic shift" (added in review) —
+    done
+  - [x] mutation check — done (below)
+- Effectiveness (assessed 2026-10-14): the four M6 pins pass. With `_abort_code`
+  returning the default code, (d) (`..._after_a_refused_navigation_is_executed`) and
+  (c) (`..._own_redirect_is_refused_raises`, by its error) fail. (a) and (b) pass
+  either way, because they pin unchanged behavior. A scratch probe (not a test)
+  measured the pre-`load` rows of the table on both codes.
+
 ### CC-FUZZ-0080 — Senders and the oracle respect origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:
   - **`greybox/run.py`:** `RequestsCorrelatingSender(cookie_origins=)`: the cookie is
