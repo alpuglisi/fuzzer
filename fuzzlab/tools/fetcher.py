@@ -360,8 +360,13 @@ class ContentFetcher:
             session = browserauth.browser_session(
                 self._session_manager, self._identity, self._auth_base_url,
                 in_scope=self._in_scope)
-        # service workers would fetch outside page.route (BUG-0111)
-        context = self._browser.new_context(service_workers="block")
+        # service workers would fetch outside page.route (BUG-0111); a browser login's
+        # in-scope storage_state (localStorage and cookies) is adopted the crawl's way,
+        # so an app that reads its token from localStorage renders logged in here too
+        # (CC-AUD-0040, BUG-0132 sweep)
+        from fuzzlab.tools import browserauth
+        context = self._browser.new_context(service_workers="block",
+                                            **browserauth.context_options(session))
         # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is
         # confined to the fixed scope
         guard_page(context, in_scope=self._in_scope,
@@ -375,7 +380,9 @@ class ContentFetcher:
             from fuzzlab.tools import browserauth
             browserauth.apply_to_context(context, session.cookies)
             logging.info(f"Auditor authenticated as {self._identity} "
-                         f"({len(session.cookies)} cookie(s))")
+                         f"({len(session.cookies)} cookie(s), "
+                         f"{sum(map(len, session.local_storage.values()))} localStorage "
+                         f"entr(ies))")
 
     def _on_request(self, request):
         try:

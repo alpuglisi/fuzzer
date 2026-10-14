@@ -12,8 +12,9 @@ changed, and the reason. Reference the commit hash where useful.
   respected, password-cleaned) and reach the senders through the one cookie path; the
   probe differential corrupts the cookie copy of the bearer too; `session print` prints
   every header; the crawler's cookie check covers credential cookies only (CC-SESS-0022,
-  CC-CRAWL-0025, PA-0132). The auditor's browser still does not adopt localStorage:
-  pinned by a strict xfail and flagged.
+  CC-CRAWL-0025, PA-0132). The sweep's one gap, the auditor's browser not adopting a
+  browser login's localStorage (so an SPA rendered logged out there), is fixed too: it
+  adopts the in-scope `storage_state` through the crawl's helper (CC-AUD-0040).
 
 ## 2026-10-14 (forms phase 4: constraint-aware filling and reveal navigation)
 - **The crawler can now submit Angular forms whose button stays disabled until their

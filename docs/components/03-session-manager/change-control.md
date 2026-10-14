@@ -53,6 +53,9 @@ Newest first.
     real-path send, the cookie-only probe, re-login and the isolated copy); the cookie
     copy of the bearer left uncorrupted (the corrupted-arm unit, the cookie-only probe);
     `secure`, host scope or expiry ignored (the `_jar_cookies` table) — done
+- Follow-up (same branch): the sweep's pinned gap is fixed by CC-AUD-0040. The auditor's
+  browser now adopts the in-scope `storage_state` through `browserauth.context_options`,
+  and the xfail is a passing test.
 - Review: the coordinator's BUG-0132 brief (verified live on Juice Shop). Mechanism as
   specified: jar cookies through the existing cookie path; the corrupted arm corrupts
   the bearer and the cookie equal to it.

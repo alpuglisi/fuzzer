@@ -506,10 +506,9 @@ class LocalSpider:
             self._browser_session = session
             self._adopted_original = copy.deepcopy(session.local_storage)
         # service workers would fetch outside page.route (BUG-0111)
-        context = self._browser.new_context(
-            service_workers="block",
-            **({"storage_state": session.storage_state}
-               if session is not None and session.storage_state else {}))
+        from fuzzlab.tools import browserauth
+        context = self._browser.new_context(service_workers="block",
+                                            **browserauth.context_options(session))
         # guard the context, not the page, so popups are confined too (BUG-0123)
         self._guard(context, scripts=True, session=session is not None)
         self._context = context

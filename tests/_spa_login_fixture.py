@@ -100,6 +100,9 @@ const views = {
       document.getElementById('me').textContent = j.secret || 'anonymous'; })
       .catch(() => {});
     return "<p id='me'>loading</p>"; },
+  // the app's own logged-in UI, from its localStorage token alone (no request):
+  // CC-AUD-0040, the auditor's browser renders it only if it adopted localStorage
+  'account': () => tok() ? "<p id='ui'>LOGGED-IN-UI</p>" : "<p id='ui'>LOGGED-OUT-UI</p>",
   'notes': () => "<div><input name='note'><button id='nb'>Save</button></div>",
   'feedback': () => "<div><input name='comment'><button id='fb'>Send</button></div>",
   'contact': () => "<div><input name='topic'><button id='cb'>Submit</button></div>",

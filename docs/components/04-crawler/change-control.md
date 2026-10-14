@@ -22,6 +22,9 @@ Newest first.
     (the fixture now rewrites the cookie with the localStorage token); the mutation that
     checks every cookie fails it — done
   - [x] FR-CRAWL-14 in place — done
+- Follow-up (same branch, with CC-AUD-0040): `_start_browser` creates its context through
+  `browserauth.context_options(session)`, the one adoption helper the auditor now shares.
+  The crawl's behaviour is unchanged.
 - Review: with CC-SESS-0022 (BUG-0132 brief).
 - Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`): the targeted run (`test_session*.py`, `test_login_form_isolation`, `test_browser_scope`, `test_forms_phase4`, `test_lint`, `test_requirements_traceability`, `test_browserauth`, `test_spa_capture`, `test_subpath_apps`, `test_logout_listener`, `test_proxy_session_capture`, `test_logout_redirect`, `test_loopback_listeners`) gave 751 passed, 1 xfailed (the strict pin of the auditor's localStorage gap), 0 skipped, 0 failed. Not verified here: the live Juice Shop re-run (no lab traffic in this change).
 

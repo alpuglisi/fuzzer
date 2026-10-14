@@ -154,10 +154,13 @@ PA-0002 sweep (every place a session moves from one client to another; dispositi
   `storage_state=` of the live context): complete.
 - browser login → auditor browser (`fetcher._start_browser`): cookies (the JS-set one
   included since this fix) and headers through the route, but **not localStorage**.
-  **Not fixed here** (no AUD change number was assigned to this task); pinned by a strict
-  xfail,
+  First pinned by a strict xfail and flagged (no AUD change number was assigned).
+  **Fixed in a follow-up commit (CC-AUD-0040):** the auditor's context adopts the
+  in-scope `storage_state` through `browserauth.context_options`, the one helper the
+  crawl uses too. The xfail is now a passing test,
   `tests/test_session_browser_login.py::test_the_auditors_browser_adopts_a_browser_logins_local_storage`,
-  and flagged to the coordinator.
+  with a real-browser one,
+  `tests/test_session_browser_login.py::test_the_auditors_browser_renders_the_app_logged_in`.
 - manual browser login → proxy capture → manager (`proxy.session_capture.adopt_into`):
   complete (built from the Cookie headers the browser actually sent).
 - session → `fuzzlab session print` (`session/cli.py`): printed one header; now prints

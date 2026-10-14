@@ -106,6 +106,17 @@ def browser_session(manager, identity: str, base_url: str, *,
                                            if c["name"] not in jar])
 
 
+def context_options(session: BrowserSession | None) -> dict:
+    """The ``browser.new_context(...)`` keywords that adopt ``session``: its browser
+    login's ``storage_state``, already filtered to in-scope origins by
+    `browser_session` (reviewer A7). The one adoption helper for every authenticated
+    browser context (the crawl, FR-CRAWL-14; the auditor, CC-AUD-0040). Empty for no
+    session or one without a browser state."""
+    if session is None or not session.storage_state:
+        return {}
+    return {"storage_state": session.storage_state}
+
+
 def apply_to_context(context, cookies, headers=None) -> None:
     """Add the session's cookies to a Playwright browser context. Headers are refused
     here: they go through the guarded route only (``guard_page(headers=...)``), never

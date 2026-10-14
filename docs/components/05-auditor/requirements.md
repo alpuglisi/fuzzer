@@ -307,6 +307,7 @@ budget where a vulnerability is plausible.
   - Enforced by (scope): `ContentFetcher.fetch` / `_start_browser`, `navguard` — `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_auditors_scope_is_fixed_and_never_moves`, `tests/test_browser_scope.py::test_the_static_auditor_refuses_another_origin_too`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
   - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
   - Enforced by (session headers; CC-AUD-0038, FR-CRAWL-14's mechanism): the rendered fetcher ensures the session before its context opens and hands its headers to the guarded route only (in scope, the session's host, its transport), never `set_extra_http_headers` — `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`, `tests/test_browserauth.py::test_an_https_sessions_headers_never_go_over_http`
+  - Enforced by (a browser login's state adopted in scope only, through the one helper; CC-AUD-0040): `ContentFetcher._start_browser` → `browserauth.context_options` — `tests/test_session_browser_login.py::test_the_auditors_browser_adopts_a_browser_logins_local_storage`, `tests/test_session_browser_login.py::test_the_auditors_browser_renders_the_app_logged_in`, `tests/test_session_browser_login.py::test_storage_state_adoption_keeps_in_scope_origins_only`
   - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)
 - **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).
 - **NFR-AUD-dry-run** `fuzzlab audit` accepts `--dry-run`: plans and prints the
@@ -322,7 +323,11 @@ the importer writes them from the spider's `discovered_forms` and, since forms p
 `discovered_requests`, FR-AUD-22) from the store; writes `candidate` rows
 (rule evidence, `features_json` + `feature_version`) and `target` fingerprint
 data. Reads indicators/rules from the indicator DB & catalogs. Authenticates via
-the session manager. Runs standalone or in the discovery pipeline.
+the session manager: the static path through the `core/` seam; the rendered path's
+browser context adopts the session the crawl's way (`browserauth.browser_session`,
+then `browserauth.context_options`: a browser login's `storage_state`, cookies and
+localStorage, filtered to in-scope origins; its cookies; its headers through the guarded
+route only; CC-AUD-0038, CC-AUD-0040). Runs standalone or in the discovery pipeline.
 
 ## 6. Dependencies (components)
 `core/`, session manager, crawler, indicator DB & catalogs.

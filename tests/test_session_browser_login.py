@@ -1064,19 +1064,42 @@ def test_the_js_set_cookie_value_is_in_no_repr_log_or_store(spa, tmp_path, caplo
     assert "token" in state.redacted()["cookies"]             # its name only
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG-0132 PA-0002 sweep, flagged and not fixed here (no AUD change number "
-    "assigned): the auditor's rendered fetch adopts the session's cookies (the JS-set "
-    "one included since BUG-0132) and its headers, but not a browser login's "
-    "localStorage, so an app that reads its token from localStorage renders logged out "
-    "in the auditor's browser"))
 def test_the_auditors_browser_adopts_a_browser_logins_local_storage():
+    """CC-AUD-0040 (BUG-0132 sweep; a strict xfail until then): the auditor's browser
+    context is created through the one adoption helper, as the crawl's is (PA-0003)."""
     import ast
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "fuzzlab" / "tools" / "fetcher.py").read_text()
-    fn = next(n for n in ast.walk(ast.parse(src))
-              if isinstance(n, ast.FunctionDef) and n.name == "_start_browser")
-    contexts = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
-                and isinstance(c.func, ast.Attribute) and c.func.attr == "new_context"]
-    assert contexts and any(k.arg == "storage_state" or k.arg is None
-                            for c in contexts for k in c.keywords)
+    tools = Path(__file__).resolve().parents[1] / "fuzzlab" / "tools"
+    for name in ("fetcher.py", "spider.py"):
+        fn = next(n for n in ast.walk(ast.parse((tools / name).read_text()))
+                  if isinstance(n, ast.FunctionDef) and n.name == "_start_browser")
+        contexts = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
+                    and isinstance(c.func, ast.Attribute) and c.func.attr == "new_context"]
+        assert contexts and all(
+            any(k.arg is None and isinstance(k.value, ast.Call)
+                and getattr(k.value.func, "attr", None) == "context_options"
+                for k in c.keywords) for c in contexts), name
+
+
+def test_the_auditors_browser_renders_the_app_logged_in(spa):
+    """CC-AUD-0040: after a browser login, the auditor's rendered fetch shows the app's
+    logged-in UI, which the app derives from its localStorage token alone (no request
+    the route could authenticate), and only the in-scope state is adopted."""
+    from fuzzlab.tools import browserauth
+    from fuzzlab.tools.fetcher import ContentFetcher
+    pw = _password()
+    lab = spa(pw)
+    mgr = _manager(lab, pw)
+    _login(mgr, lab)
+    fetcher = ContentFetcher(engine="playwright", timeout_ms=10000, identity="user",
+                             session_manager=mgr, auth_base_url=lab.base)
+    with fetcher:
+        status, _ct, html, _xhr = fetcher.fetch(lab.base + "#/account")
+    assert status == 200 and "LOGGED-IN-UI" in html and "LOGGED-OUT-UI" not in html
+    session = browserauth.browser_session(mgr, "user", lab.base,
+                                          in_scope=fetcher._in_scope)
+    assert browserauth.context_options(session) == \
+        {"storage_state": session.storage_state}
+    assert {o["origin"] for o in session.storage_state["origins"]} == \
+        {lab.base.rstrip("/")}
+    assert browserauth.context_options(None) == {}
