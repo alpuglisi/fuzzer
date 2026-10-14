@@ -605,7 +605,8 @@ class OpenRedirectStrategy(ConfirmationStrategy):
     def _lands_on(target, page_url, host) -> bool:
         """Does a redirect target lead to our canary? Parsed, never a prefix test
         (PA-0122): resolved against the probed URL (scheme-relative included), an http(s)
-        URL whose host is our token host and whose path is ``/cb``. The host is the
+        URL whose host is our token host and whose path is ``/cb`` (or ``/cb/``, as an
+        app may normalise it). The host is the
         signal; ``https://github.com/x?u=https://oracle….example/cb`` is not."""
         from urllib.parse import urljoin, urlsplit
         try:
@@ -613,7 +614,7 @@ class OpenRedirectStrategy(ConfirmationStrategy):
         except ValueError:
             return False
         return (parts.scheme.lower() in ("http", "https")
-                and (parts.hostname or "") == host and parts.path == "/cb")
+                and (parts.hostname or "") == host and parts.path in ("/cb", "/cb/"))
 
     def _probe(self, sender, candidate, value, host):
         probe = self._send(sender, candidate, value)

@@ -112,6 +112,7 @@ def test_no_seed_means_one_probe_only():
     (lambda v: "javascript:alert(1)//" + v, False),
     (lambda v: "data:text/html," + v, False),
     (lambda v: v.replace("/cb", "/other"), False),
+    (lambda v: v.replace("/cb", "/cb/"), True),                  # normalised by the app
     (lambda v: "https://other.example/cb", False),              # /cb, not our host
     (lambda v: v.replace("https://", "ftp://"), False),         # our host, not http(s)
 ])
