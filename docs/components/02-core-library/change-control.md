@@ -70,6 +70,17 @@ Newest first.
   `tests/test_web_runner.py::test_runner_stops_reading_output_a_survivor_holds_open`.
   Effectiveness: **287 passed, 13 skipped** (same targeted offline run); mutation
   **round 2: 4/4 killed**, all lists **26/30** (the same four survivors as round 1).
+- Review round 3 (2026-10-14; A and B agreed on round 2): **B** `arun_bounded` returns
+  `None`, never `CODE_UNKNOWN`, for an unknown exit status (the launcher and Lab page
+  side is CC-UI-0053); **A nit** `_reap_supervisor` waits at most `KILL_BOUND_S`, then
+  writes a loud `fuzzlab.procutil:` line and returns False: a failed start leaves the
+  handle registered for the session safety net instead of hanging, and a stop marks it
+  `unreaped` and keeps it registered (a later stop retries). New tests:
+  `test_arun_bounded_never_returns_code_unknown_as_a_status`,
+  `test_reaping_a_stuck_supervisor_is_bounded_and_loud`,
+  `test_a_failed_start_that_cannot_reap_leaves_the_handle_for_the_safety_net`.
+  Effectiveness: targeted offline run **292 passed, 13 skipped**; mutation **round 3:
+  7/7 killed** (procutil, runner, labcontrol and both JS handlers).
 
 ### CC-CORE-0048 — `procutil`: one owner for every child process tree (BUG-0125) (2026-10-14)
 - Change: new `fuzzlab/procutil.py` (FR-CORE-38), a stdlib-only leaf.

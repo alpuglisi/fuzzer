@@ -315,6 +315,43 @@ Reviewers A and B agreed on round 1; four items followed.
 - **Mutation check (round 2): 4/4 killed** (each round-2 revert makes a test fail; all
   lists 26/30, the same four survivors as round 1). Targeted run: 287 passed, 13 skipped.
 
+### Review round 3 (CC-CORE-0050, CC-UI-0053, 2026-10-14)
+Reviewers A and B agreed on round 2; two small items followed.
+- **B (should-fix): `CODE_UNKNOWN` (-256) reached the operator as an exit status** --
+  `[exit -256]` in the launcher and Lab pages, and "labctl.sh ps exited -256".
+  *Mechanism:* the status is unknown, so it is shown as unknown. `Runner._pump` maps it
+  to `None` in the `done` payload and posts `[fuzzlab] exit status unknown: the job's
+  supervisor was reaped outside fuzzlab` (a run's "finished" is now its own flag, so a
+  `None` status no longer reads as "still running"); `launcher.js` and `lab.js` print
+  `[exit unknown]` for a null `returncode`; `arun_bounded` returns `None` for it and
+  `labcontrol.fetch_states` says "exit status unknown". *Tests:*
+  `tests/test_web_runner.py::test_runner_done_event_carries_null_for_an_unknown_exit_status`
+  (a real job whose supervisor is SIGKILLed and reaped with `os.waitpid` behind the
+  handle: `done` carries `null`, never -256, plus the notice),
+  `::test_lab_states_report_an_unknown_exit_status_plainly`,
+  `tests/test_procutil.py::test_arun_bounded_never_returns_code_unknown_as_a_status`, and
+  the real-browser
+  `tests/test_web_pages_browser.py::test_an_unknown_exit_status_renders_as_unknown`
+  (Chromium; the run and its SSE stream are routed, so no job runs and no container is
+  touched): both pages print `[exit unknown]`, with no page error or CSP violation.
+- **A (nit): the failed-start path's reap was unbounded.** *Mechanism:*
+  `_reap_supervisor` waits at most `KILL_BOUND_S`; past that it writes a
+  `fuzzlab.procutil:` line to stderr and returns False. The failed-start path then
+  leaves the handle **registered** (the session-end safety net reports it) instead of
+  hanging; a stop that cannot reap marks the handle `unreaped` and keeps it registered
+  with its fds, so a later stop retries. *Tests:*
+  `test_reaping_a_stuck_supervisor_is_bounded_and_loud` (a process that ignores SIGTERM
+  stands in for one stuck in D state) and
+  `test_a_failed_start_that_cannot_reap_leaves_the_handle_for_the_safety_net`.
+- **Mutation check (round 3): 7/7 killed** -- the runner, `arun_bounded`, labcontrol
+  and each JS handler passing the raw status through; an unbounded reap (the test run
+  hangs); a failed start that cannot reap not left registered. One note from that run:
+  the hung "unbounded reap" mutant was killed by the harness's timeout, which left the
+  test's SIGTERM-ignoring stand-in process orphaned until its own `sleep` ended (not
+  killed by pattern; it expired on its own). The stand-in now sleeps 30 s, so it ends
+  by itself even if a hung run is killed. Targeted run: 292 passed, 13 skipped; browser
+  (`FUZZLAB_REQUIRE_BROWSER=1`): 10 passed.
+
 ## What was verified here (and what was not)
 - Real processes, offline: `tests/test_procutil.py` (22), `tests/test_live_boot_cleanup.py`
   (8: a real Laravel boot — composer offline from the local cache, `php -S` — and a

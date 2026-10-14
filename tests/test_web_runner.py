@@ -154,6 +154,48 @@ def test_runner_stops_reading_output_a_survivor_holds_open(monkeypatch):
     assert "event: done" in events[-1]
 
 
+def test_runner_done_event_carries_null_for_an_unknown_exit_status():
+    """Review round 3 (B): a job whose supervisor was reaped outside fuzzlab ends with
+    ``returncode: null`` and a line saying the status is unknown -- never -256."""
+    import os
+    import signal
+
+    from fuzzlab import procutil
+
+    async def go():
+        r = Runner()
+        token = await r.launch(["sleep", "300"])
+        h = r._runs[token].handle
+        os.kill(h.pid, signal.SIGKILL)
+        os.waitpid(h.pid, 0)  # reaped behind the handle's back
+        events = await asyncio.wait_for(_collect(r.stream(token)), 10)
+        return events, h
+
+    async def _collect(gen):
+        return [ev async for ev in gen]
+
+    events, h = asyncio.run(go())
+    done = [e for e in events if "event: done" in e]
+    assert done and '"returncode":null' in done[-1].replace(" ", ""), events
+    assert not any("-256" in e for e in events)
+    assert any("exit status unknown" in e for e in events)
+    assert h not in procutil.registered()
+
+
+def test_lab_states_report_an_unknown_exit_status_plainly(monkeypatch):
+    """Review round 3 (B): ``labctl.sh ps`` with an unknown exit status says so."""
+    from fuzzlab import procutil
+    from fuzzlab.web import labcontrol
+
+    async def unknown(argv, *, timeout, env=None):
+        return None, b"", b"", False
+
+    monkeypatch.setattr(labcontrol, "available", lambda: True)
+    monkeypatch.setattr(procutil, "arun_bounded", unknown)
+    states, error = asyncio.run(labcontrol.fetch_states())
+    assert states == {} and "exit status unknown" in error and "-256" not in error
+
+
 def test_runner_stream_unknown_token():
     async def go():
         r = Runner()

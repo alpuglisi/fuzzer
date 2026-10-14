@@ -740,10 +740,29 @@ def _wait_exited(h: ServerHandle, timeout: float) -> bool:
     return True
 
 
-def _reap_supervisor(h: ServerHandle) -> None:
+def _owner_loud(msg: str) -> None:
+    try:
+        sys.stderr.write(f"fuzzlab.procutil: {msg}\n")
+        sys.stderr.flush()
+    except (BrokenPipeError, ValueError):  # stderr closed or gone
+        pass
+
+
+def _reap_supervisor(h: ServerHandle) -> bool:
+    """Reap the supervisor, waiting at most ``KILL_BOUND_S`` (review round 3: one stuck
+    in D state must not hang its owner). Returns False -- after a loud line -- if it
+    could not be reaped; the caller then leaves the handle registered, so the session
+    safety net reports it."""
     p = _popen_of(h)
-    if p is not None and p.returncode is None:
-        p.wait()  # Popen.wait maps an already-reaped child (ECHILD) to returncode 0
+    if p is None or p.returncode is not None:
+        return True
+    try:
+        p.wait(timeout=KILL_BOUND_S)  # an already-reaped child (ECHILD) maps to 0
+    except subprocess.TimeoutExpired:
+        _owner_loud(f"supervisor {h.pid} of {list(h.argv)!r} could not be reaped within "
+                    f"{KILL_BOUND_S}s (stuck in D state?); left registered for the safety net")
+        return False
+    return True
 
 
 def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | None = None,
@@ -795,7 +814,9 @@ def _start_failure_paths(h: ServerHandle, proc: subprocess.Popen):
             _fallback_kill(h)
             _wait_exited(h, KILL_BOUND_S)
         _sweep_session(h)
-        proc.wait()
+        if not _reap_supervisor(h):  # bounded; loud; left for the safety net
+            _register(h)
+            return
         _close_fds(h)
 
     return abandon, abandon
@@ -897,7 +918,9 @@ def _collect(h: ServerHandle) -> None:
 
 def _collect_locked(h: ServerHandle) -> None:
     _sweep_session(h)
-    _reap_supervisor(h)
+    if not _reap_supervisor(h):
+        h.exit_reason = "unreaped"  # stays registered with its fds: a later stop retries
+        return
     if h._status is not None:
         while True:
             line = h._status.readline(0.5)
@@ -936,8 +959,9 @@ def _stop_core(h: ServerHandle, timeout: float | None) -> str:
     if _popen_of(h) is None:
         raise ProcUtilError("stop_server needs a handle returned by start_server")
     with h._lock:
-        if h.exit_reason is not None and h._status is None:
+        if h.exit_reason is not None and h.exit_reason != "unreaped" and h._status is None:
             return h.exit_reason
+        h.exit_reason = None if h.exit_reason == "unreaped" else h.exit_reason
         wait = h.grace + STOP_MARGIN_S if timeout is None else timeout
         if not _exited(h):
             request_stop(h)
@@ -1120,7 +1144,9 @@ async def astop_server(h: ServerHandle, *, timeout: float | None = None) -> str:
 async def arun_bounded(argv: Sequence[str], *, timeout: float,
                        env: dict[str, str] | None = None) -> tuple[int | None, bytes, bytes, bool]:
     """Async bounded run for a forking tool: ``(returncode, stdout, stderr,
-    timed_out)``. On timeout the tool's whole tree is stopped."""
+    timed_out)``. On timeout the tool's whole tree is stopped. ``returncode`` is None on
+    a timeout, and also when the exit status is unknown (the supervisor was reaped
+    outside fuzzlab) -- never ``CODE_UNKNOWN``."""
     import asyncio
 
     h = await astart_server(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1137,7 +1163,8 @@ async def arun_bounded(argv: Sequence[str], *, timeout: float,
         await astop_server(h)
         raise
     await astop_server(h)  # exited: sweep (held), reap, collect
-    return h.proc.returncode, out, err, False
+    code = h.proc.returncode
+    return (None if code == CODE_UNKNOWN else code), out, err, False
 
 
 if __name__ == "__main__":

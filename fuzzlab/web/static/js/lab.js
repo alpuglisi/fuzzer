@@ -63,6 +63,7 @@ async function control(service, action) {
   es.addEventListener("done", (e) => {
     let rc = "";
     try { rc = JSON.parse(e.data).returncode; } catch (_) { /* ignore */ }
+    if (rc === null) rc = "unknown";  // the job's exit status is unknown (BUG-0125)
     output.textContent += `[exit ${rc}]\n`;
     finish();
   });

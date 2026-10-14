@@ -30,6 +30,21 @@ Newest first.
     `tests/test_web_lab.py::test_fetch_states_timeout_stops_labctls_whole_tree` — done
 - Effectiveness (assessed 2026-10-14): `test_web_runner.py` 14 passed, `test_web_lab.py`
   42 passed (offline; a stand-in `labctl.sh`, no engine, no traffic).
+- BUG-0125 review rounds 2-3 (2026-10-14, with CC-CORE-0050): `Runner._pump` reads output
+  in a task, waits for the supervisor's exit, then drains for at most `Runner.DRAIN_S`
+  (a descendant that outlives the job cannot hold the stream open); a run's end is its
+  own `finished` flag; an unknown exit status (the supervisor reaped outside fuzzlab,
+  `procutil.CODE_UNKNOWN`) goes out as `returncode: null` plus a `[fuzzlab] exit status
+  unknown` line, and `launcher.js` / `lab.js` print `[exit unknown]` for null (never
+  `[exit -256]`); `labcontrol.fetch_states` says "exit status unknown". Tests:
+  `tests/test_web_runner.py::test_runner_stops_reading_output_a_survivor_holds_open`,
+  `::test_runner_done_event_carries_null_for_an_unknown_exit_status`,
+  `::test_lab_states_report_an_unknown_exit_status_plainly`, and the real-browser
+  `tests/test_web_pages_browser.py::test_an_unknown_exit_status_renders_as_unknown`
+  (routed run and stream: no job, no container). Effectiveness (PA-0065(2)): with
+  `FUZZLAB_REQUIRE_BROWSER=1`, `test_web_pages_browser.py` + `test_web_launcher_browser.py`
+  **10 passed** and `test_web_templates_csp.py` 20 passed, 0 skipped; reverting either JS
+  handler fails the browser test.
 
 ### CC-UI-0052 — Run page: `inconclusive` oracle coverage; `pending` reworded (2026-10-14)
 - Change:

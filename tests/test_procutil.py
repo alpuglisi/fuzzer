@@ -650,6 +650,59 @@ def test_an_async_wait_returns_when_the_supervisor_was_reaped_elsewhere() -> Non
     assert _wait_gone([child]) == []  # the server died of its PDEATHSIG(SIGKILL)
 
 
+def test_arun_bounded_never_returns_code_unknown_as_a_status(monkeypatch) -> None:
+    """Review round 3 (B): an unknown exit status reaches arun_bounded's caller as
+    None, never as CODE_UNKNOWN (-256)."""
+    import asyncio
+
+    monkeypatch.setattr(procutil, "_peek_code", lambda h: procutil.CODE_UNKNOWN)
+    code, out, err, timed_out = asyncio.run(procutil.arun_bounded(["true"], timeout=BOUND_S))
+    assert (code, timed_out) == (None, False)
+
+
+def test_reaping_a_stuck_supervisor_is_bounded_and_loud(monkeypatch, capsys) -> None:
+    """Review round 3 (A nit): a supervisor that will not exit (D state, simulated by
+    a process that ignores SIGTERM) cannot hang its owner: the reap gives up after
+    KILL_BOUND_S with a loud line."""
+    stuck = _bystander([sys.executable, "-c",
+                        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                        "time.sleep(30)"])  # self-ending even if a hung run is killed
+    try:
+        st = procutil.read_stat(stuck.pid)
+        h = procutil.ServerHandle(argv=("stuck",), pid=stuck.pid, start_time=st.start,
+                                  child_pid=0, child_start_time=0, proc=stuck)
+        monkeypatch.setattr(procutil, "KILL_BOUND_S", 0.3)
+        t0 = time.monotonic()
+        assert procutil._reap_supervisor(h) is False
+        assert time.monotonic() - t0 < BOUND_S
+        assert "could not be reaped" in capsys.readouterr().err
+    finally:
+        stuck.kill()
+        stuck.wait()
+
+
+def test_a_failed_start_that_cannot_reap_leaves_the_handle_for_the_safety_net(monkeypatch) -> None:
+    """Review round 3 (A nit): when the failed-start path cannot reap its supervisor,
+    it does not hang; it leaves the handle registered, so the session-end safety net
+    reports it."""
+    stuck = _bystander(["sleep", "300"])
+    st = procutil.read_stat(stuck.pid)
+    h = procutil.ServerHandle(argv=("stuck",), pid=stuck.pid, start_time=st.start,
+                              child_pid=0, child_start_time=0, proc=stuck)
+    monkeypatch.setattr(procutil, "request_stop", lambda h: True)
+    monkeypatch.setattr(procutil, "_wait_exited", lambda h, t: True)
+    monkeypatch.setattr(procutil, "_sweep_session", lambda h: [])
+    monkeypatch.setattr(procutil, "_reap_supervisor", lambda h: False)
+    try:
+        abandon, _ = procutil._start_failure_paths(h, stuck)
+        abandon()
+        assert h in procutil.registered()
+    finally:
+        procutil._unregister(h)
+        stuck.kill()
+        stuck.wait()
+
+
 def test_kill_process_group_kills_exactly_the_recorded_group() -> None:
     """The mechanism the corpus sandbox's timeout uses (BUG-0125 D14): every member of the
     recorded group, identity-checked, and nothing else."""

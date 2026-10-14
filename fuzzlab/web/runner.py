@@ -101,7 +101,8 @@ class _Run:
         self.handle: procutil.ServerHandle | None = None
         self.stopping = False
         self.queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
-        self.returncode: int | None = None
+        self.returncode: int | None = None  # None while running, or status unknown
+        self.finished = False
 
 
 class Runner:
@@ -145,7 +146,13 @@ class Runner:
         # Read until the supervisor has exited, then drain for at most DRAIN_S
         # (BUG-0125 review round 2).
         reader = asyncio.ensure_future(lines())
-        run.returncode = await run.proc.wait()
+        code = await run.proc.wait()
+        if code == procutil.CODE_UNKNOWN:  # never shown as if it were a real status
+            await run.queue.put(("output", "[fuzzlab] exit status unknown: the job's "
+                                           "supervisor was reaped outside fuzzlab"))
+            code = None
+        run.returncode = code
+        run.finished = True
         try:
             await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
         except asyncio.TimeoutError:
@@ -177,7 +184,7 @@ class Runner:
         was requested. Non-blocking: the supervisor stops the tree, and a watchdog
         task falls back to a direct, identity-checked group kill if it does not."""
         run = self._runs.get(token)
-        if run and run.handle is not None and run.returncode is None and not run.stopping:
+        if run and run.handle is not None and not run.finished and not run.stopping:
             run.stopping = True
             procutil.request_stop(run.handle)
             asyncio.get_running_loop().create_task(self._enforce_stop(run))
@@ -195,7 +202,7 @@ class Runner:
     async def shutdown(self) -> None:
         """Stop every live job (the UI is shutting down; BUG-0125 D18)."""
         for run in list(self._runs.values()):
-            if run.handle is not None and run.returncode is None:
+            if run.handle is not None and not run.finished:
                 try:
                     await procutil.astop_server(run.handle)
                 except procutil.ServerLost:
