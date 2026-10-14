@@ -234,7 +234,7 @@ class SeamProbeSender(_ExplicitAllowance):
         except IsolatedLoginFailed as exc:     # the one class a copy login fails with
             self._manager.release_copy(manager)
             with self._iso_lock:
-                self._fail_locked(key, str(exc))
+                self._fail_locked(key, exc.reason)   # fixed text, never a URL
                 if not isinstance(exc, LoginCapReached):
                     self._count_failed_login_locked()
             return None
@@ -317,7 +317,7 @@ class SeamProbeSender(_ExplicitAllowance):
             self._manager.release_copy(copy.manager)
             with self._iso_lock:
                 self._copies.pop(key, None)
-                self._fail_locked(key, str(exc))
+                self._fail_locked(key, exc.reason)   # fixed text, never a URL
                 if not isinstance(exc, LoginCapReached):
                     self._count_failed_login_locked()
                 self._counts["anonymous_sends"] += 1

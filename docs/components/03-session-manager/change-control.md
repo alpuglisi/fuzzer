@@ -36,7 +36,13 @@ Newest first.
   - **`verify_live(host, identity, base_url)`.** One walk of the operator's base with a
     fresh fetcher carrying the session's cookies and headers; false on 401/403 or this
     session's login form, and then the state is marked invalid and persisted (listeners
-    are not told; the caller decides).
+    are not told; the caller decides). The session goes to the session's own host
+    only: `_navigate(..., session_host=)` refuses, before fetching, a hop to any other
+    host, even an approved one (code review, reviewer A); the caller treats that, like
+    an unapproved hop, as "cannot verify".
+  - **Report-safe reasons.** `IsolatedLoginFailed.reason` is a fixed text (rejected, no
+    credentials, cap reached, not distinct from <whom>: <credential name>); the message
+    may quote a URL, the reason never does.
 - Impact:
   - **Callers:** `tools.probesender.SeamProbeSender` (CC-FUZZ-0064). Existing callers
     are unaffected (new keyword defaults; a run's manager has no label).
@@ -55,8 +61,9 @@ Newest first.
 - Review: reviewers A and B, lane B draft v1 → v2 → v2.1 → v2.2 → v2.3 (AGREED, both).
   Carried conditions: built through `__init__`, a copy's logout not passed to the main
   listener (test), T22's wiring patches `fuzzlab.session.manager.looks_like_identifier`.
-- Effectiveness: verified offline (mutation check 32/32 over lane B's new logic); live
-  bWAPP pending (orchestrator).
+- Effectiveness: verified offline (mutation check 40/40 over lane B's new logic, code
+  review mutants included; see CC-FUZZ-0064 for how the pre-change failures were
+  measured); live bWAPP pending (orchestrator).
 
 ### CC-SESS-0017 — Logout listeners (`add_logout_listener`) for forms phase 2's breakers (2026-10-14)
 - Change:

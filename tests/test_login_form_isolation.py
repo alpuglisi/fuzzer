@@ -60,11 +60,13 @@ class FakeApp:
     ``victim`` when the login breaks the query, as an injection that logs in would."""
 
     def __init__(self, *, sid_mode="fresh", reject_copies=False, single_session=None,
-                 public_base=False, https=False):
+                 public_base=False, https=False, cookie_redirect=None):
         self.sid_mode = sid_mode              # fresh | same_for_copies | same_for_all
         self.reject_copies = reject_copies
         self.single_session = single_session  # None | "eager" | "lazy"
         self.public_base = public_base
+        # a session-carrying GET of the base (verify_live) is redirected here
+        self.cookie_redirect = cookie_redirect
         self.scheme = "https" if https else "http"
         self.sessions: dict[str, str] = {}
         self.pending_kill: set[str] = set()
@@ -72,6 +74,7 @@ class FakeApp:
         self.login_posts = 0
         self.requests: list[tuple[str, str, str | None, dict]] = []
         self.fetcher_gets: list[tuple[str, str | None]] = []
+        self.fetcher_hosts: list[tuple[str, dict]] = []      # (host, headers) per GET
 
     # sids: realistic, distinct, sensitive-named
     def _new_sid(self) -> str:
@@ -129,7 +132,7 @@ class FakeApp:
         data = dict(parse_qsl((body or b"").decode(), keep_blank_values=True))
         if method == "GET":
             data = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
-        self.requests.append((method, urlsplit(url).path, sid, data))
+        self.requests.append((method, urlsplit(url).path, sid, data, dict(headers)))
         return self.page(method, url, sid, data)
 
 
@@ -151,6 +154,10 @@ class _Fetcher:
     def get(self, url, headers=None, allow_redirects=True):
         sid = _sid_of((headers or {}).get("Cookie")) or self.jar.get("PHPSESSID")
         self.app.fetcher_gets.append((urlsplit(url).path, sid))
+        self.app.fetcher_hosts.append((urlsplit(url).hostname, dict(headers or {})))
+        if self.app.cookie_redirect and (headers or {}).get("Cookie") and \
+                urlsplit(url).path == "/app/":
+            return FetchResponse(302, {"Location": self.app.cookie_redirect}, "", url)
         status, hdrs, body = self.app.page("GET", url, sid, {})
         return FetchResponse(status, hdrs, body.decode(), url)
 
@@ -168,10 +175,10 @@ class _Fetcher:
 
 
 def _seam(app, *, budget=None, base=BASE, store=None, run_id=None, factory=True,
-          identity="admin"):
+          identity="admin", scope=("localhost",)):
     """The run's manager, client and sender, wired as `make_probe_sender` wires them."""
     budget = budget or RequestBudget(5000)
-    mgr = SessionManager(_store(), scope_hosts=["localhost"], store=store,
+    mgr = SessionManager(_store(), scope_hosts=list(scope), store=store,
                          fetch_factory=app.fetch_factory())
 
     def isolated_client(copy):
@@ -940,3 +947,103 @@ def test_a_copys_login_cap_counts_attempts():
     with pytest.raises(LoginCapReached):
         copy.ensure("localhost", "admin", BASE)
     assert copy.login_attempts() == 1 and app.login_posts == 2
+
+
+
+# --- code review (reviewers A/B): the fallback, verify_live's hops, reasons -----------
+def test_a_failed_copy_relogin_falls_back_with_no_session_at_all():
+    """Must-fix 1: a live copy is logged out, then its re-login is rejected; the
+    fallback send carries no Cookie (never the run's session)."""
+    app = FakeApp()
+    _mgr, _client, sender = _seam(app)
+    sender.isolate([BASE + "sqli_3.php"])
+    _probe_form(sender, login="x")                             # the copy logs in
+    app.reject_copies = True
+    app.sessions.pop(app.issued[1])                            # the server drops it
+    _probe_form(sender, login="x")                             # 302: the copy logs out
+    before = sender.isolation_report()["anonymous_sends"]
+    _probe_form(sender, login="x")                             # re-login rejected
+    last = [r for r in app.requests if r[1] == "/app/sqli_3.php"][-1]
+    assert "Cookie" not in last[4] and last[2] is None
+    assert all(r[2] != app.issued[0] for r in app.requests if r[1] == "/app/sqli_3.php")
+    report = sender.isolation_report()
+    assert report["anonymous_sends"] == before + 1
+    assert report["failures"] == [{"path": "/app/sqli_3.php", "label": "admin#isolated:1",
+                                   "reason": "isolated login rejected"}]
+    assert report["failed_logins"] == 1
+
+
+def test_a_login_cap_does_not_count_toward_the_failed_logins_breaker():
+    app = FakeApp()
+    _mgr, _client, sender = _seam(app)
+    sender.isolate([BASE + "sqli_3.php"])
+    _probe_form(sender, login="x")                             # copy login 1 of 3
+    for _ in range(3):
+        app.sessions.pop(app.issued[-1])
+        _probe_form(sender, login="x")                         # the copy logs out
+        _probe_form(sender, login="x")                         # re-login 2, 3, then cap
+    report = sender.isolation_report()
+    assert sender.isolated_copy_logins() == 3
+    assert report["failed_logins"] == 0 and report["breaker"] is None
+    assert report["failures"][0]["reason"] == "isolated login cap reached"
+    assert [r for r in app.requests if r[1] == "/app/sqli_3.php"][-1][2] is None
+
+
+def test_an_unapproved_hop_while_verifying_trips_the_breaker():
+    app = FakeApp(cookie_redirect="http://evil.example/steal")
+    _mgr, _client, sender = _seam(app)
+    sender.isolate([BASE + "sqli_3.php"])
+    _probe_form(sender, login="x")
+    assert sender.isolation_report()["breaker"]["trip"] == "single-session"
+    assert all(host != "evil.example" for host, _h in app.fetcher_hosts)
+    assert [r[2] for r in app.requests if r[1] == "/app/sqli_3.php"] == [None]
+
+
+def test_verify_live_carries_the_session_to_the_session_host_only():
+    """Must-fix 2: the base 302s to a second, in-scope host; it is never fetched (so it
+    gets no Cookie or Authorization), and verification fails closed."""
+    app = FakeApp(cookie_redirect="http://other.host/app/")
+    _mgr, _client, sender = _seam(app, scope=("localhost", "other.host"))
+    sender.isolate([BASE + "sqli_3.php"])
+    _probe_form(sender, login="x")
+    assert all(host != "other.host" for host, _h in app.fetcher_hosts)
+    assert sender.isolation_report()["breaker"]["trip"] == "single-session"
+    session_gets = [h for host, h in app.fetcher_hosts if "Cookie" in h]
+    assert session_gets and all(host == "localhost" for host, h in app.fetcher_hosts
+                                if "Cookie" in h or "Authorization" in h)
+
+
+def test_reasons_are_fixed_texts_never_a_failure_message(monkeypatch):
+    """Should-fix 4: a token-bearing URL in a login error never reaches the report."""
+    app = FakeApp()
+    real = SessionManager._login
+
+    def login(self, host, identity, base_url):
+        if self._isolated_from is not None:
+            raise SessionAuthError("could not detect a login from "
+                                   "http://localhost/app/?token=SECRETTOKEN123456")
+        return real(self, host, identity, base_url)
+    monkeypatch.setattr(SessionManager, "_login", login)
+    _mgr, _client, sender = _seam(app)
+    sender.isolate([BASE + "sqli_3.php"])
+    _probe_form(sender, login="x")
+    report = sender.isolation_report()
+    assert "SECRETTOKEN123456" not in json.dumps(report)
+    assert report["failures"][0]["reason"] == "isolated login rejected"
+
+
+def test_a_login_cap_at_creation_does_not_count_either(monkeypatch):
+    original = SessionManager.isolated_copy
+    monkeypatch.setattr(SessionManager, "isolated_copy",
+                        lambda self, identity, *, ordinal, max_logins=3: original(
+                            self, identity, ordinal=ordinal, max_logins=0))
+    app = FakeApp()
+    _mgr, _client, sender = _seam(app)
+    pages = ["sqli_3.php", "sqli_16.php", "xss_login.php"]
+    sender.isolate([BASE + p for p in pages])
+    for p in pages:
+        _probe_form(sender, p, login="x")
+    report = sender.isolation_report()
+    assert report["failed_logins"] == 0 and report["breaker"] is None
+    assert {f["reason"] for f in report["failures"]} == {"isolated login cap reached"}
+    assert app.login_posts == 1                                # only the run's login

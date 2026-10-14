@@ -1112,7 +1112,7 @@ rewards) derives from it.
     `fuzzlab auto`**; such sends use an isolated session or none, and credential-change
     forms are never imported.
   - Enforced by (in-app login forms): `SeamProbeSender` isolated routing,
-    `injection_points_from_store`'s default drop, `form_skip_reason` — `tests/test_login_form_isolation.py::test_a_login_form_is_confirmed_on_an_isolated_session_and_the_run_session_survives`, `tests/test_login_form_isolation.py::test_credential_change_forms_stay_excluded`, `tests/test_login_form_isolation.py::test_a_password_control_is_never_a_point_whatever_its_name`, `tests/test_login_form_isolation.py::test_without_isolated_the_points_are_dropped_and_reported`, `tests/test_login_form_isolation.py::test_greybox_never_gets_login_form_points`, `tests/test_login_form_isolation.py::test_a_rejected_isolated_login_falls_back_to_anonymous_once`, `tests/test_login_form_isolation.py::test_a_copy_must_differ_from_every_live_copy`, `tests/test_login_form_isolation.py::test_a_single_session_app_trips_the_breaker_after_one_copy_login`, `tests/test_login_form_isolation.py::test_a_lazy_single_session_logout_trips_the_breaker`
+    `injection_points_from_store`'s default drop, `form_skip_reason` — `tests/test_login_form_isolation.py::test_a_login_form_is_confirmed_on_an_isolated_session_and_the_run_session_survives`, `tests/test_login_form_isolation.py::test_credential_change_forms_stay_excluded`, `tests/test_login_form_isolation.py::test_a_password_control_is_never_a_point_whatever_its_name`, `tests/test_login_form_isolation.py::test_without_isolated_the_points_are_dropped_and_reported`, `tests/test_login_form_isolation.py::test_greybox_never_gets_login_form_points`, `tests/test_login_form_isolation.py::test_a_rejected_isolated_login_falls_back_to_anonymous_once`, `tests/test_login_form_isolation.py::test_a_failed_copy_relogin_falls_back_with_no_session_at_all`, `tests/test_login_form_isolation.py::test_verify_live_carries_the_session_to_the_session_host_only`, `tests/test_login_form_isolation.py::test_a_copy_must_differ_from_every_live_copy`, `tests/test_login_form_isolation.py::test_a_single_session_app_trips_the_breaker_after_one_copy_login`, `tests/test_login_form_isolation.py::test_a_lazy_single_session_logout_trips_the_breaker`
   - Not yet enforced (in-app login forms): `fuzz --identity` and `mutate-run --identity`
     send to the operator's own `--url` with the run's session; an operator who points
     them at an in-app login form must run them without `--identity`.
@@ -1387,7 +1387,8 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **Budget and records.** Isolated sends spend the run's `RequestBudget`; copy logins,
     like the run's own, go through the fetcher and are not budgeted.
     `metrics["isolated_sessions"]` (`isolation_report()`) carries counts, the breaker
-    and per-path reasons, never a credential value; `fuzzlab auto` prints it.
+    and per-path reasons — fixed texts, never a failure message, URL or credential
+    value; `fuzzlab auto` prints it.
     `isolated_copy_logins()` is public (lane A's header breaker reads it).
   - **Accepted false positives** (a real login form excluded: a missed finding, never a
     safety risk): Rails `/sessions/new`, Devise `/users/sign_in`, `/admin/login`,

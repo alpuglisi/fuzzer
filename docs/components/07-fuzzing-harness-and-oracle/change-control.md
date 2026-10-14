@@ -23,6 +23,8 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 note of the same date.
 
 ### CC-FUZZ-0064 — In-app login forms probed on an isolated session (forms phase 2, lane B) (2026-10-14)
+- Merge note: CC numbers land out of numeric order here (0064 above 0062; lane A's 0063
+  lands above 0064). That is intended: "newest first" means landing order.
 - Change:
   - **Import (`store_adapter.form_skip_reason`):** the blanket "has a password control"
     skip is replaced.
@@ -59,6 +61,9 @@ note of the same date.
       *Failed-logins*, after 2 failed copy logins: no new copies.
     - **Locking:** a plain `Lock`, never held across a send, login or verification; the
       listener takes it only briefly.
+    - **Reasons** in `isolation_report()` and the CLI are fixed texts
+      (`IsolatedLoginFailed.reason`, the breaker and cap reasons), never a failure
+      message: a token-bearing URL in a login error never reaches the report or log.
     - **Public:** `isolate`, `isolated_copy_logins()` (lane A reads it),
       `isolation_report()`.
   - **`make_probe_sender`** wires an isolated-client factory sharing only the run's
@@ -78,13 +83,26 @@ note of the same date.
   fallbacks above.
 - Deliverables:
   - [x] code — done
-  - [x] tests (`tests/test_login_form_isolation.py`, 65; `tests/test_forms_phase1.py`'s
+  - [x] tests (`tests/test_login_form_isolation.py`, 71; `tests/test_forms_phase1.py`'s
         "password" skip case replaced by a credential-change case) — done
+  - [x] code-review follow-up (reviewers A/B): a failed copy re-login falls back with
+        no session at all (test); `verify_live` carries the session to the session's
+        host only (CC-SESS-0018; test); a login cap never counts toward the
+        failed-logins breaker, at creation or re-login (tests); an unapproved hop while
+        verifying trips the breaker (test); fixed reason texts (test) — done
   - [x] FR-FUZZ-44; FR-FUZZ-42 edited in place; NFR-FUZZ-safe clause — done
 - Review: reviewers A and B, lane B draft v1 → v2 → v2.1 → v2.2 → v2.3 (AGREED, both).
-- Effectiveness: verified offline (65 new tests: 64 fail on the pre-change code, the
-  65th is the fake app's non-vacuity control; mutation check 32/32 over the new logic);
-  live bWAPP pending (orchestrator).
+- Effectiveness: verified offline; live bWAPP pending (orchestrator).
+  - **New tests vs the pre-change code (65d3cba):** measured by checking out 65d3cba's
+    `fuzzlab/` (`git checkout 65d3cba -- fuzzlab`, restored afterwards) and running a
+    copy of the test module whose imports of the new names are shimmed
+    (`scratchpad/p2b-tools/base_shim_test.py`), so each test runs and fails on its own
+    rather than at collection. Of the 71 tests, 70 fail there; the one that passes is
+    `test_control_the_fake_app_rebinds_a_session_that_sends_the_injection`, the fake
+    app's non-vacuity control, which passes by design. Against the first lane B commit
+    (4c4f18c), the code-review tests that pin new behaviour fail (5).
+  - **Mutation check** over the new logic: 40/40 killed (32 at the first commit, plus
+    8 from the code review, including reviewer B's fallback-identity mutant).
 
 ### CC-FUZZ-0062 — Forms as injection points, probed with their sibling fields (forms phase 1) (2026-10-13)
 - Change:

@@ -15,6 +15,9 @@ changed, and the reason. Reference the commit hash where useful.
   `' or 1=1-- -` can re-bind the run's own session to another user on the server. This
   unlocks bWAPP's login-form SQL injections (sqli_3, sqli_16, xss_login) without that
   risk: the run's session is never sent there.
+- **Code-review follow-up:** a failed copy re-login is now tested to fall back with no
+  session; `verify_live` carries the session to the session's own host only; failure
+  reasons in reports are fixed texts, never a URL.
 
 ## 2026-10-14 (Shared groundwork for forms phase 2; CC-CORE-0040, CC-SESS-0017)
 - **What:**

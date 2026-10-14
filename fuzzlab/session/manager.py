@@ -35,7 +35,14 @@ class IsolatedLoginFailed(SessionAuthError):
     """An isolated copy (FR-SESS-17) could not obtain a usable session of its own: the
     login was rejected, credentials were missing, the copy's login cap was reached, or
     the new session was not distinct. The one class a sender catches to fall back to an
-    anonymous send; every other `SessionAuthError` (a transport refusal) propagates."""
+    anonymous send; every other `SessionAuthError` (a transport refusal) propagates.
+
+    ``reason`` is a fixed, report-safe text (no URL, no value): it is what a report or
+    log shows; the message (``str``) may quote a URL from the underlying failure."""
+
+    def __init__(self, message: str, reason: str = "isolated login rejected"):
+        super().__init__(message)
+        self.reason = reason
 
 
 class SessionIsolationError(IsolatedLoginFailed):
@@ -297,7 +304,7 @@ class SessionManager:
                     self._attempts.get((host, identity), 0) >= self._max_logins:
                 raise LoginCapReached(
                     f"login cap ({self._max_logins}) reached for the isolated session "
-                    f"{self._label or identity}@{host}")
+                    f"{self._label or identity}@{host}", reason="isolated login cap reached")
             self._attempts[(host, identity)] = self._attempts.get((host, identity), 0) + 1
             from fuzzlab.core.credentials import CredentialError
             try:
@@ -314,7 +321,8 @@ class SessionManager:
                 if self._isolated_from is None:
                     raise                                         # unchanged for a run
                 self._failures[(host, identity)] = self._failures.get((host, identity), 0) + 1
-                raise IsolatedLoginFailed(str(exc)) from exc
+                raise IsolatedLoginFailed(
+                    str(exc), reason="isolated login: no credentials") from exc
             self._failures[(host, identity)] = 0
             self._state[(host, identity)] = state
             return state
@@ -407,9 +415,10 @@ class SessionManager:
                 continue
             problem = distinctness_problem(state, other)
             if problem is not None:
+                why = f"not distinct from {whom}: {problem}"     # labels and names only
                 raise SessionIsolationError(
-                    f"the isolated session {self._label}@{host} is not distinct from "
-                    f"{whom}: {problem}")
+                    f"the isolated session {self._label}@{host} is {why}",
+                    reason=f"isolated session {why}")
 
     def verify_live(self, host: str, identity: str, base_url: str) -> bool:
         """Is the run's session for ``identity`` still logged in? One GET of ``base_url``
@@ -417,15 +426,17 @@ class SessionManager:
         headers, walked hop by hop inside the approved origins (`_navigate`). It fails on
         401/403 or on this session's login form, as `_verify_authenticated` does. On a
         failure the state is marked invalid (and persisted), so the next send re-logs in
-        once; listeners are not told (the caller decides). An unapproved hop raises
-        `SessionAuthError` (the caller treats it as "cannot verify")."""
+        once; listeners are not told (the caller decides). The session's cookies and
+        headers go only to the session's own host: a hop to any other host — even an
+        approved one — is never fetched and raises `SessionAuthError`, as does an
+        unapproved hop (the caller treats both as "cannot verify")."""
         state = self._state.get((host, identity))
         if state is None or not state.valid:
             return False
         fetcher = self._fetch_factory()
         floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
         probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
-                                             headers=state.apply({}))
+                                             headers=state.apply({}), session_host=host)
         ok = probe.status not in (401, 403) and (
             state.kind == "basic" or not detect.shows_login_form(
                 probe.text, page, state.login_url, state.login_fields))
@@ -577,11 +588,13 @@ class SessionManager:
         return None, base_url, challenge, floor
 
     def _navigate(self, fetcher: Fetcher, url: str, base_url: str, floor_https: bool,
-                  headers: dict | None = None):
+                  headers: dict | None = None, session_host: str | None = None):
         """GET ``url`` following at most `MAX_LOGIN_HOPS` redirects by hand. Every hop
         must pass `_navigation_ok` **before** it is fetched. A fetcher that cannot be
         told not to follow redirects must report a final URL equal to the one asked
-        for, or discovery refuses (it may have followed one unchecked — A3). Returns
+        for, or discovery refuses (it may have followed one unchecked — A3). With
+        ``session_host`` (`verify_live`), a hop to any other host is refused before it
+        is fetched, so ``headers`` (a session) reach that host only. Returns
         ``(response, page_url, floor_https)``."""
         current = url
         for _ in range(MAX_LOGIN_HOPS + 1):
@@ -590,6 +603,11 @@ class SessionManager:
                     f"refusing to follow the login navigation to {current}: a downgrade "
                     f"from https to http, or not the base URL's origin, an in-scope host "
                     f"or an authorised auth origin (pass auth_origins=[...] to allow it)")
+            if session_host is not None and \
+                    (urlparse(current).hostname or "") != session_host:
+                raise SessionAuthError(
+                    f"refusing to carry the session of {session_host} to another host "
+                    f"({urlparse(current).hostname}) while verifying it")
             floor_https = floor_https or urlparse(current).scheme.lower() == "https"
             resp, can_refuse = _get_no_redirects(fetcher, current, headers)
             if not can_refuse and getattr(resp, "url", None) != current:

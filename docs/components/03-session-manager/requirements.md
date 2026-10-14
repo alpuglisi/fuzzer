@@ -131,7 +131,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `SessionAuthError`.
   - **`verify_live(host, identity, base_url)`** re-checks the run's session with one
     fresh-fetcher walk of the operator's base carrying its cookies; on failure it marks
-    the state invalid and persists that, without telling listeners.
+    the state invalid and persists that, without telling listeners. The session goes
+    only to its own host: a hop to any other host is never fetched and raises
+    `SessionAuthError` ("cannot verify"), as an unapproved hop does.
+  - **Reasons.** `IsolatedLoginFailed.reason` is a fixed text, never a URL or value; it
+    is what reports and logs show.
   - **Accepted:** an equal session id shorter than 16 characters, low-entropy, under a
     name `is_sensitive_name` misses (`ASPSESSIONID…`, Drupal `SESS…`,
     `wordpress_logged_in_*`, `express:sess`, `remember_web_*`) would be accepted as
