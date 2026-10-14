@@ -1474,3 +1474,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      not confirm. The guard is proven on synthetic offenders (PA-0034(2)).
   4. **The PA-0002 sweep covers every strategy with a fixed marker or a single sample,**
      not only the failing mechanism's own class. (from BUG-0117)
+
+- **PA-0122** — Strengthens `PA-0022` (related: BUG-0113, PA-0113), after BUG-0122: the
+  session manager read any redirect containing "login" as a logout. PA-0022's
+  anchoring rule was never enforced on session detection, and its `\b` remedy is too
+  weak for URLs.
+  1. **A rule that decides session or auth state, auth-endpoint membership or
+     credential handling from a URL, a `Location` or a name compares canonical URL
+     keys** (plus query parameters where a login is query-routed) **or whole path
+     segments and tokens.** Never a substring, never `\b`.
+  2. **Enforced by an AST guard** over the modules that hold such rules (session,
+     probe senders, auth helpers, navigation, crawler, `core/urls`, `harness/auto`).
+     The guard is proven on a synthetic offender (PA-0034(2)). The oracle's
+     vulnerability detectors are out of scope.
+  3. **The PA-0002 sweep is by mechanism.** It records the pattern used and a
+     disposition per site (PA-0067(1)).
+  4. **Each such rule is checked against the lab's own vocabulary** (the target app's
+     page and field names, PA-0022's check made concrete), and that check is a test.
+     (from BUG-0122)

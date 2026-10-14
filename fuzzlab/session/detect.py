@@ -15,7 +15,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass, field
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -204,6 +204,95 @@ def detect_session_credential(status: int, headers: dict[str, str], body: str,
     return None
 
 
+#: A path segment (lower-cased, extension stripped) that names a login page, whole.
+_LOGIN_SEGMENTS = frozenset({"login", "signin", "sign_in", "sign-in", "log_in", "log-in",
+                             "logon"})
+#: ... or, only when the session's login URL is unknown, whose final `name_tokens` token
+#: is one of these (``wp-login``, ``user_login``), never a token in the middle
+#: (``ba_insecure_login_1``, ``login_form``). With a known login URL, an app page named
+#: ``xss_login.php`` is not a login page (reviewer B, PA-0022's vocabulary check).
+_LOGIN_TOKENS = frozenset({"login", "signin", "logon"})
+#: Front controllers whose routing parameter names the page (``index.php?page=login``).
+_ROUTER_SEGMENTS = frozenset({"index", "default", "main"})
+_ROUTE_PARAMS = frozenset({"page", "action", "route", "r", "p", "view"})
+
+
+def _login_segment(segment: str, final_token: bool) -> bool:
+    from fuzzlab.core.redaction import name_tokens
+    stem = segment.lower()
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[0]
+    if stem in _LOGIN_SEGMENTS:
+        return True
+    tokens = name_tokens(stem) if final_token else []
+    return bool(tokens) and tokens[-1] in _LOGIN_TOKENS
+
+
+def looks_like_login_url(url: str, *, final_token: bool = True) -> bool:
+    """Anchored: the URL's last non-empty path segment names a login page (whole, or,
+    with ``final_token``, as its final token), or it ends in ``session(s)/new``, or a
+    front controller's routing parameter does. Only ``http``/``https`` URLs. Never a
+    substring: ``ba_insecure_login_1.php``, ``login_form.php`` and ``loginhistory`` are
+    not login URLs (BUG-0122, PA-0122)."""
+    parts = urlsplit(url or "")
+    if parts.scheme and parts.scheme.lower() not in ("http", "https"):
+        return False
+    segments = [s for s in parts.path.split("/") if s]
+    if not segments:
+        return False
+    if len(segments) >= 2 and segments[-1].lower() == "new" and \
+            segments[-2].lower() in ("session", "sessions"):
+        return True
+    if _login_segment(segments[-1], final_token):
+        return True
+    if segments[-1].lower().rsplit(".", 1)[0] in _ROUTER_SEGMENTS:
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            routed = [s for s in value.split("/") if s]
+            if key.lower() in _ROUTE_PARAMS and routed and \
+                    _login_segment(routed[-1], final_token):
+                return True
+    return False
+
+
+_DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
+def _same_login_url(target: str, login_url: str) -> bool:
+    """``target`` is the session's login URL: the same host and path (the scheme may
+    differ, http <-> https in either direction, default ports only), carrying every
+    query parameter of ``login_url`` with its value (query-routed logins; extra ones
+    such as ``next`` are allowed). Never a substring test (BUG-0122)."""
+    from fuzzlab.core.urls import canonical_origin
+    a, b = canonical_origin(target), canonical_origin(login_url)
+    if a is None or b is None:
+        return False
+    if a != b:
+        (sa, ra), (sb, rb) = a.split("://", 1), b.split("://", 1)
+        ha, pa = ra.rsplit(":", 1)
+        hb, pb = rb.rsplit(":", 1)
+        if ha != hb or pa != _DEFAULT_PORTS.get(sa) or pb != _DEFAULT_PORTS.get(sb):
+            return False
+    t, lo = urlsplit(target), urlsplit(login_url)
+    if (t.path.rstrip("/") or "/") != (lo.path.rstrip("/") or "/"):
+        return False
+    have = set(parse_qsl(t.query, keep_blank_values=True))
+    return all(pair in have for pair in parse_qsl(lo.query, keep_blank_values=True))
+
+
+def redirect_is_logout(location: str, page_url: str | None,
+                       login_url: str | None) -> bool:
+    """A redirect to ``location`` (relative or absolute) sends us to a login page: the
+    session's own ``login_url`` (`_same_login_url`), or an anchored login URL
+    (`looks_like_login_url`), which also catches a login route other than the one
+    recorded. With a known ``login_url`` only whole login segments count, never a final
+    token: an app page such as ``xss_login.php`` is not a logout (reviewer B). Only this
+    hop is judged (BUG-0122)."""
+    target = urljoin(page_url or login_url or "", location)
+    if login_url and _same_login_url(target, login_url):
+        return True
+    return looks_like_login_url(target, final_token=not login_url)
+
+
 def detect_logout(status: int, headers: dict[str, str], body: str,
                   login_url: str | None = None, page_url: str | None = None,
                   content_check: bool = True, login_fields=None) -> bool:
@@ -212,8 +301,7 @@ def detect_logout(status: int, headers: dict[str, str], body: str,
         return True
     low = _lower_headers(headers)
     location = low.get("location", "")
-    if location and ("login" in location.lower()
-                     or (login_url and login_url in location)):
+    if location and redirect_is_logout(location, page_url, login_url):
         return True
     # A protected page that came back as *the* login page means we were logged out.
     # With a known login form and page, only that form counts: an app page with a

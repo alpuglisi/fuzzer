@@ -1457,7 +1457,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     changes state on a plain visit is visited once per header probe; a site-wide
     picker routed to different per-page handlers is probed at one page; an
     identifier-like sibling is sent blank, so a gate needing it does not confirm; an
-    e-mail default is sent as is (it may trigger mail).
+    e-mail default is sent as is (it may trigger mail); a privilege-gated redirect of
+    the run's session to the real login page after a header probe trips the breaker
+    (fails safe; confirming with `verify_live` first is deferred, BUG-0122).
 - **FR-FUZZ-44** *(in-app login forms on an isolated session; `CC-FUZZ-0064`,
   2026-10-14).*
   - **Imported:** a form with exactly one password control, exactly one text, email or

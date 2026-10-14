@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Session: any redirect containing "login" read as a logout (fixed, BUG-0122/PA-0122)
+- **Symptom:** in the live bWAPP phase 2 run, `ba_insecure_login.php` → `302 ba_insecure_login_1.php` re-logged the run in, and the header breaker falsely stopped header probing ("session bound to a probed header").
+- **Root cause:** `detect_logout`'s redirect rule was a substring test. PA-0022 (anchor keyword heuristics) was never enforced on session detection, and its `\b` remedy is too weak for URLs.
+- **Remediation:** `redirect_is_logout`, which matches the session's own login URL (key, scheme upgrade, query-routed) or an anchored login segment or token. An AST guard bans substring auth-state tests in the session, auth and navigation modules. CC-SESS-0019. `docs/bugs/BUG-0122-logout-redirect-substring-rule.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Fuzzer: a probe meant for one location was sent at another (fixed, BUG-0115/PA-0115)
 - **Symptom:** found in design (forms phase 2): greybox sent ground-truth header payloads as query parameters; with `--browser`, DOM XSS loaded POST-body (and would load header) payloads as URL query parameters, so a hit would be recorded against the wrong input.
 - **Root cause:** each component that builds its own request fell through to "query" for a location it did not handle; the seam conformance checks covered signatures, not placement.

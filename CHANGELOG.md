@@ -32,6 +32,15 @@ changed, and the reason. Reference the commit hash where useful.
   operator's next run (expected: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37,
   #43, #44, #48).
 
+## 2026-10-14 (BUG-0122: a redirect is a logout only to an anchored login URL; PA-0122)
+- **Why:** in the first live bWAPP run of forms phase 2, bWAPP's in-app login redirect
+  (`ba_insecure_login_1.php`) was read as a logout. The run re-logged in, and the
+  header breaker falsely stopped header probing.
+- **What:** `redirect_is_logout` matches the session's own login URL or an anchored
+  login segment or token, never a substring. An AST guard bans substring auth-state
+  tests (PA-0122 strengthens PA-0022).
+- **Records:** CC-SESS-0019, FR-SESS-18.
+
 ## 2026-10-14 (String-context SQLi confirmation; probes must cause their evidence; BUG-0117)
 - **Why:**
   - bWAPP's SQLite pages (sqli_11, sqli_14, sqli_12) and its masked-blind MySQL page

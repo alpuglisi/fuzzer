@@ -108,6 +108,23 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-18 (logout by redirect, CC-SESS-0019, BUG-0122)**
+  - A redirect is a logout only when its target, resolved against the page, is either:
+    - the session's own login URL: same host and path, an http→https upgrade on
+      default ports allowed, and `login_url`'s query parameters present with their
+      values;
+    - an anchored login URL (http/https only): the last non-empty path segment
+      (lower-cased, extension stripped) is a login word, or `session(s)/new`, or a
+      front controller's routing parameter names one; *only when no `login_url` is
+      known*, also a segment whose final name token is a login word (`wp-login`).
+  - Never a substring test (PA-0122).
+  - Only one hop is judged.
+  - **Residuals:**
+    - privilege-gated redirects to the real login page still read as a logout;
+    - without a known `login_url`, an app page whose name ends in a login token
+      (`xss_login.php`) still reads as a login URL (fails safe);
+    - the fallback misses `/auth`, `/sso`, IdP redirects and unlisted routing
+      parameters.
 - **FR-SESS-17 (isolated session copies, CC-SESS-0018)**
   - **`isolated_copy(identity, *, ordinal, max_logins=3)`** returns a throwaway manager
     for probing an in-app login form (FR-FUZZ-44): its own login, so its own

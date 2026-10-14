@@ -3,6 +3,45 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0019 — A redirect is a logout only to an anchored login URL (BUG-0122) (2026-10-14)
+- Change:
+  - **`detect.redirect_is_logout(location, page_url, login_url)`** replaces
+    `detect_logout`'s substring redirect rule. A redirect is a logout when it goes to
+    either:
+    - **the session's own login URL** (`_same_login_url`): same host and path; an
+      http→https upgrade on default ports is allowed; `login_url`'s query parameters
+      must be present with their values, so query-routed logins work;
+    - **any anchored login URL** (`looks_like_login_url`): a login segment or final
+      token, `session(s)/new`, or a front controller's routing parameter.
+  - The 401/403 and content rules are unchanged.
+- Impact:
+  - **Fixed:** bWAPP's in-app login redirects (`ba_insecure_login_1.php`) no longer log
+    the run out. No needless re-logins, and no false header-breaker trips.
+  - **Still detected:** real logouts to the login page, including other login routes
+    and `?next=` variants.
+- Risk: low-medium, since this is session-state detection. Fails safe either way: a
+  missed logout is caught on the next protected page's content.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_logout_redirect.py`, 24): the redirect table (9 of its
+        tests fail on the old rule), the no-`login_url` rule, key, scheme and query
+        matching, totality, no trip or re-login on an in-app login redirect, and the
+        PA-0122 AST guard with offender proof — done
+  - [x] FR-SESS-18 — done
+  - [x] BUG-0122 / PA-0122 / ERROR_LOG — done
+- Review: reviewers A and B, BUG-0122 draft (AGREED with changes). Adopted:
+  - **reviewer B:** the anchored rule kept when `login_url` is known; query-routed
+    logins; PA-0022 named in the recurrence review; `sign-in` / `log-in`;
+  - **reviewer A:** the http→https upgrade; the last non-empty segment and final-token
+    rule; the sweep by mechanism with an AST guard; the single-hop note;
+  - **deferred and recorded:** reviewer B's `verify_live` check before a header trip.
+  - **code review:** reviewer B required whole login segments only when `login_url`
+    is known (the final-token rule had flagged bWAPP's `xss_login.php` and
+    `ba_insecure_login.php`), checked against the lab's page names as a test (PA-0122
+    clause 4); only http/https targets. Reviewer A required the `store_adapter` sweep
+    row to be accurate.
+- Effectiveness: verified offline; live header re-run pending.
+
 ### CC-SESS-0018 — Isolated session copies for in-app login forms (forms phase 2, lane B) (2026-10-14)
 - Change:
   - **`SessionManager.isolated_copy(identity, *, ordinal, max_logins=3)`.** A throwaway
