@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0133: an edit form's echo no longer hides an evaluated SSTI)
+- **Why:** live on Juice Shop, `/profile` showed the evaluated product while its edit field
+  echoed `#{728*889}`; M4's `expr in text` rule read that echo as a reflection and refused.
+- **What:** the evaluation markers (SSTI, SpEL, the SQL and Go markers) judge their
+  literal's echo on the parsed page: only an echo outside form controls disqualifies, and
+  the number must then appear outside them; the Go marker also stops accepting an
+  HTML-escaped echo (CC-FUZZ-0079, PA-0133).
+
 ## 2026-10-14 (FR-FUZZ-49 review: PRG classification refined, the restore made total)
 - A reflection seen only after a redirect is `xss-stored` unless the redirect target
   carries the payload (then `xss-reflected`, `prg-redirect`); a restore send that raises

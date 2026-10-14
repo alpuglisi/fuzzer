@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
+- **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
+- **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.
+- **Remediation:** the literal disqualifies only when echoed outside a form control's value (parsed: input `value`, textarea, selected option), and the number must then appear outside every form control; same for SpEL, the SQL evaluation marker and the Go template marker (which also missed HTML-escaped echoes). CC-FUZZ-0079. `docs/bugs/BUG-0133-an-edit-form-echo-hid-an-evaluated-ssti.md`.
+- **Status:** Fixed (offline fixtures; the live Juice Shop re-check is the coordinator's)
+
 ## 2026-10-14 — Session manager: a browser login's senders lacked the cookie the SPA's JS set (fixed, BUG-0132/PA-0132)
 - **Symptom:** live on Juice Shop, `fuzzlab auto --identity juice-user` probed `/profile` (SSTI) and `/profile/image/url` (SSRF) effectively unauthenticated: 0 candidates, 0 attempts. `/profile` answers 500 with the bearer alone and 200 with the `token` cookie alone; the crawl (full browser state) did reach it.
 - **Root cause:** `_browser_login_state` built the session from the login response's detected credential only (the bearer); the `token` cookie the app's JS sets afterwards is in the browser's jar, never in a response, and was not carried into `SessionState.cookies`. The fixture's endpoints read only the bearer.

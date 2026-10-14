@@ -42,6 +42,19 @@ rewards) derives from it.
   signature for error-based SQLi, evaluation marker for SSTI, browser execution for
   stored/DOM XSS), and via grey-box coverage / DB-fault signals when instrumentation
   is on (D7). Ambiguity is "not confirmed," never a guess (fail-closed).
+  - **Evaluation markers** *(M4 and kin: `SstiStrategy`, `GoTemplateSstiStrategy`,
+    `SpelInjectionStrategy`, `SqliEvaluationMarkerStrategy`; BUG-0117, edited in place by
+    `CC-FUZZ-0079`, BUG-0133).* A value the probe makes the server compute must appear as
+    a whole number, and the probe's own literal must not be echoed: "evaluated, not just
+    reflected". The echo is judged on the parsed page (`strategies._echo`): the literal
+    disqualifies anywhere but a form control's value (an `<input value>`, a `<textarea>`,
+    a selected `<option>`: an edit form showing the stored input back), and when it is in
+    a form control the number must appear outside every form control. A second, fresh
+    value must likewise appear in the response to its own probe (BUG-0117). Limits: a
+    page listing earlier values as unselected options refuses (a false negative).
+    - Enforced by: `tests/test_evaluation_marker_echo.py::test_each_evaluation_marker_judges_the_echo_by_where_it_is`,
+      `tests/test_evaluation_marker_echo.py::test_the_prg_edit_form_confirms_like_juice_shops_profile`,
+      `tests/test_evaluation_marker_echo.py::test_no_strategy_judges_its_literal_by_a_raw_substring`
 - **FR-FUZZ-5** The oracle is the **only** writer of `finding` labels; keep
   detection (the measurement) decoupled from the payload's label to avoid circular
   labeling. New classes register via a built-in strategy registry now, and the

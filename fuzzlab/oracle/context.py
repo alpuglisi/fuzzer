@@ -344,6 +344,36 @@ def locate_reflection(html: str, marker: str) -> Reflection | None:
     return Reflection("html")
 
 
+def _in_form_control(node) -> bool:
+    """Is ``node`` (a string) inside a ``<textarea>`` or a selected ``<option>``?"""
+    return any(p.name == "textarea" or (p.name == "option" and p.has_attr("selected"))
+               for p in node.parents if p.name)
+
+
+def split_form_control_values(html: str) -> tuple[list[str], list[str]]:
+    """``(form-control values, everything else)`` of the parsed page (BUG-0133).
+
+    A form shows a stored value back for editing in an ``<input>``'s ``value``
+    attribute, a ``<textarea>``'s content or a selected ``<option>``'s text and
+    ``value``: those are the first list. Every other string (text, comments, script
+    and style content) and every other attribute value is the second. Values are as
+    the parser decodes them."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    controls: list[str] = []
+    rest: list[str] = []
+    for string in soup.find_all(string=True):
+        (controls if _in_form_control(string) else rest).append(str(string))
+    for tag in soup.find_all(True):
+        selected_option = tag.name == "option" and tag.has_attr("selected")
+        for attr, value in tag.attrs.items():
+            value = " ".join(value) if isinstance(value, list) else value
+            if not isinstance(value, str):
+                continue
+            edit = attr.lower() == "value" and (tag.name == "input" or selected_option)
+            (controls if edit else rest).append(value)
+    return controls, rest
+
+
 def element_injected(html: str, name: str) -> bool:
     """True when an element ``name`` exists with no inert ancestor."""
     soup = BeautifulSoup(html, "html.parser")

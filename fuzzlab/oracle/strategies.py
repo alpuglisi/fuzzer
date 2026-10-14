@@ -29,7 +29,8 @@ from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
 from fuzzlab.greybox.coverage import CoverageSource, app_lines
 from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
-from fuzzlab.oracle.context import locate_reflection, xss_breakouts
+from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
+                                    xss_breakouts)
 from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import Candidate, Probe, Sender, UnplaceableLocation, Verdict
 
@@ -118,6 +119,44 @@ def _contains_number(text: str, n: int) -> bool:
     """``n`` appears in ``text`` as a whole decimal token (``142`` not inside
     ``31420``) -- the digit-bounded rule every evaluation marker uses."""
     return re.search(rf"(?<!\d){n}(?!\d)", text or "") is not None
+
+
+def _echo(text: str, literal: str) -> tuple[bool, bool, list[str]]:
+    """``(present, outside, rest)`` for an evaluation probe's own ``literal`` in a page
+    (BUG-0133). Judged on the parsed page (`split_form_control_values`), so an
+    entity-encoded echo counts too, and on the raw text: a raw occurrence the parser
+    shows in no form control is outside. ``rest`` is every part outside the form
+    controls."""
+    text = text or ""
+    controls, rest = split_form_control_values(text)
+    in_controls = any(literal in part for part in controls)
+    outside = any(literal in part for part in rest) or (literal in text and not in_controls)
+    return outside or in_controls, outside, rest
+
+
+def _echoed_outside_form_controls(text: str, literal: str) -> bool:
+    """Does the page show ``literal`` (an evaluation probe's own expression) anywhere
+    but in a form control's value? An echo there is the sink reflecting the input, so
+    a number beside it is not evidence of evaluation ("evaluated, not just reflected",
+    M4 since its first version). An echo **only** in an ``<input value>``, a
+    ``<textarea>`` or a selected ``<option>`` is an edit form showing the stored value
+    back, not that sink (BUG-0133)."""
+    return _echo(text, literal)[1]
+
+
+def _evaluated(text: str, literal: str, n: int) -> bool:
+    """An evaluation marker's test (M4 and its kin, BUG-0133): ``n`` appears as a whole
+    number and the probe's ``literal`` is not echoed outside form controls. When the
+    literal is in the page at all, ``n`` must appear outside every form control (and so
+    outside every literal occurrence: SpEL's literal holds its own canary). With no
+    literal in the page the rule is the old one. The probe-causality checks (a second
+    value, BUG-0117) are the callers'."""
+    present, outside, rest = _echo(text, literal)
+    if not present:
+        return _contains_number(text or "", n)
+    if outside:
+        return False
+    return any(_contains_number(part, n) for part in rest)
 
 
 # --- the bracketed, replicated response differential (FR-FUZZ-45 (a)) ----------
@@ -563,7 +602,7 @@ class SqliEvaluationMarkerStrategy(ConfirmationStrategy):
             return None
         a1, b1 = self._draw()
         text1 = self._send(sender, candidate, self._value(a1, b1)).text or ""
-        if not _contains_number(text1, a1 * b1) or f"{a1}*{b1}" in text1:
+        if not _evaluated(text1, f"{a1}*{b1}", a1 * b1):        # BUG-0133
             return None
         for _ in range(32):                         # a product absent from response 1
             a2, b2 = self._draw()
@@ -572,7 +611,7 @@ class SqliEvaluationMarkerStrategy(ConfirmationStrategy):
         else:
             return None                             # a page full of numbers: no attribution
         text2 = self._send(sender, candidate, self._value(a2, b2)).text or ""
-        if _contains_number(text2, a2 * b2) and f"{a2}*{b2}" not in text2:
+        if _evaluated(text2, f"{a2}*{b2}", a2 * b2):
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"products": [a1 * b1, a2 * b2],
                             "payloads": [self._value(a1, b1), self._value(a2, b2)]})
@@ -761,7 +800,7 @@ class SstiStrategy(ConfirmationStrategy):
         for index, payload in enumerate(_ssti_payloads(expr)):
             first = self._send(sender, candidate, payload)
             text = _observed(first).text or ""
-            if not _contains_number(text, a * b) or expr in text:
+            if not _evaluated(text, expr, a * b):           # BUG-0133
                 continue
             for _ in range(32):                     # a product absent from response 1
                 c, d = self._draw()
@@ -775,7 +814,7 @@ class SstiStrategy(ConfirmationStrategy):
             text2 = _observed(second).text or ""
             if _via_prg(second) and _contains_number(text2, a * b):
                 return None                         # product 1 still shown: no attribution
-            if _contains_number(text2, c * d) and expr2 not in text2:
+            if _evaluated(text2, expr2, c * d):
                 evidence = {"payload": payload, "product": str(a * b),
                             "cross_check": [payload2, str(c * d)]}
                 if _via_prg(first) or _via_prg(second):
@@ -817,7 +856,7 @@ class SpelInjectionStrategy(ConfirmationStrategy):
         payload = f"T(java.lang.Math).abs(-{n})"
         first = self._send(sender, candidate, payload)
         text = _observed(first).text or ""
-        if not _contains_number(text, n) or payload in text:
+        if not _evaluated(text, payload, n):                # BUG-0133
             return None
         for _ in range(32):                         # a canary absent from response 1
             m = secrets.randbelow(900) + 100
@@ -830,7 +869,7 @@ class SpelInjectionStrategy(ConfirmationStrategy):
         text2 = _observed(second).text or ""
         if _via_prg(second) and _contains_number(text2, n):
             return None                             # canary 1 still shown: no attribution
-        if _contains_number(text2, m) and payload2 not in text2:
+        if _evaluated(text2, payload2, m):
             evidence = {"payload": payload, "result": str(n),
                         "cross_check": [payload2, str(m)]}
             if _via_prg(first) or _via_prg(second):
@@ -1076,9 +1115,10 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         text1 = _observed(first).text or ""
         second = self._send(sender, candidate, payload2)
         text2 = _observed(second).text or ""          # FR-FUZZ-49: as observed
-        if expr1 in text1 or expr2 in text2:
+        if _echoed_outside_form_controls(text1, expr1) or \
+                _echoed_outside_form_controls(text2, expr2):
             return None                            # literal reflection, not evaluation
-        own1, own2 = self._contains_token(text1, n1), self._contains_token(text2, n2)
+        own1, own2 = _evaluated(text1, expr1, n1), _evaluated(text2, expr2, n2)  # BUG-0133
         cross1, cross2 = self._contains_token(text1, n2), self._contains_token(text2, n1)
         if own1 and own2 and not cross1 and not cross2:
             evidence = {"lengths": [n1, n2], "payloads": [payload1, payload2]}

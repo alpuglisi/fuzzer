@@ -1683,3 +1683,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **The PA-0002 sweep for this class lists every handoff point** of a session
      between clients, with a disposition each. A gap not fixed is pinned by a strict
      xfail (`PA-0054(3)`). (from BUG-0132)
+
+- **PA-0133** — Strengthens `PA-0084(1)` and `PA-0127(1)`, and extends `PA-0117` to the
+  true-positive side, after BUG-0133: M4 refused Juice Shop's evaluated SSTI because the
+  literal echoed in the profile's edit field matched `expr in text`.
+  1. **A confirmer's disqualifying rule is judged by the same structural standard as its
+     signal:** by the parsed role of what it sees (where a probe's literal is echoed:
+     `strategies._echo`, `context.split_form_control_values`), never by a raw substring
+     anywhere. Enforced by an AST guard
+     (`tests/test_evaluation_marker_echo.py::test_no_strategy_judges_its_literal_by_a_raw_substring`),
+     proven on BUG-0133's own line (PA-0034(2)).
+  2. **Every confirmer has a true-positive fixture in a realistic page:** the input echoed
+     where real apps echo it (an edit form around the evaluated value), at least one a
+     captured third-party shape, beside a false-positive fixture for each place a
+     reflection disqualifies.
+  3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
+     reflection confirm; widening it refuses the edit form. (from BUG-0133)
+

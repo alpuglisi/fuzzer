@@ -135,6 +135,11 @@ class PrgSite:
                               if "#{" in n)
         elif self.render == "raw":
             body = name
+        elif self.render == "editform":     # Juice Shop's /profile shape (BUG-0133)
+            return 200, (f'<html><body><form><input id="username" name="username" '
+                         f'value="{html.escape(name, quote=True)}"></form>'
+                         f'<p class="name">{html.escape(self._evaluate(name))}</p>'
+                         f'</body></html>').encode(), "text/html"
         elif self.render == "sqlerr-always":
             body = SQL_ERROR + " " + html.escape(name)
         elif self.render == "sqlerr-quote" and ("'" in name or '"' in name):

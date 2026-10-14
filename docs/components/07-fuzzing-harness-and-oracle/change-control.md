@@ -22,6 +22,50 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
+- Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
+  literal sat in the edit field (`<input value="#{728*889}">`) and its rule was
+  `expr in text`. `oracle/context.split_form_control_values` splits the parsed page into
+  form-control values (input `value`, textarea content, a selected option's text and
+  value) and the rest; `strategies._echo` / `_echoed_outside_form_controls` /
+  `_evaluated` refuse when the literal is echoed outside form controls (parsed, so
+  entity-encoded too, or a raw occurrence no control accounts for) and, when it is only in
+  form controls, require the number outside every form control. No literal in the page:
+  the old rule exactly. Applied to `SstiStrategy`, `SpelInjectionStrategy`,
+  `SqliEvaluationMarkerStrategy` (both samples) and `GoTemplateSstiStrategy`. The
+  BUG-0117 second sample and FR-FUZZ-49's P5 attribution are unchanged. The rationale
+  kept: "evaluated, not just reflected" (M4 since 12ce859; SpEL's literal holds its own
+  canary).
+- Impact (other components / project): none outside FUZZ; no interface or store change.
+  More M4/SpEL/SQL-evaluation confirmations on edit-form pages (the intended effect);
+  the Go marker now also refuses an HTML-escaped text echo it used to accept.
+- Risk (level; mitigation or accepted-risk justification): medium (a confirmer relaxed).
+  Mitigated: the relaxation is limited to form-control values by parsed role; the number
+  must be outside them; the second-sample causality check still decides; every
+  reflection shape the rule exists for is a fixture that must refuse, for all four
+  strategies; mutation-checked both ways; the scored live-boot multitarget tests that
+  carry SSTI/SpEL ground truth are re-run (Effectiveness).
+- Deliverables:
+  - [x] code: `fuzzlab/oracle/context.py`, `fuzzlab/oracle/strategies.py` — done
+  - [x] tests: `tests/test_evaluation_marker_echo.py` (4 strategies × 10 page shapes, the
+    PRG edit form, the second sample, the split, the old answer, the PA-0133 guard and its
+    synthetic offenders); `tests/test_prg_observation.py`'s `editform` fixture — done
+  - [x] mutation checks — done (see Effectiveness)
+  - [x] BUG-0133, PA-0133, ERROR_LOG, FR-FUZZ-4 (in place), CHANGELOG — done
+  - [ ] on-host: Juice Shop `/profile` username SSTI confirms — todo (coordinator)
+- Effectiveness (assessed 2026-10-14, offline; on-host pending): the targeted run (34 files: the BUG-0133 and PRG
+  tests, the oracle/sender/session/forms/JSON/destructive suites, the request-count and
+  golden tests, `test_oracle_vectors`, lint, traceability, loopback) is 1169 passed, 2
+  xfailed (the existing BUG-0115 strict xfails), 0 skipped, with
+  `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`. Live-boot tests carrying SSTI/SpEL/Go-template
+  ground truth are unchanged: category 4 multitarget + `test_labgen_go_live_boot` +
+  trackernest + category 5, 32 passed; SpEL live boot + SpEL + Netflix template preview +
+  category 1 and 3 combined, 17 passed. Mutations: the old rule (`expr in text`) fails
+  the 9 edit-form cases and the PRG edit form (BUG-0133 reproduced) and accepts Go's
+  number-only-in-control page; any echo allowed fails 17 reflection cases; the number
+  anywhere fails 5; a raw-only literal check fails Go's 3 escaped-echo cases; any option
+  as a control fails the split test.
+
 ### CC-FUZZ-0078 — Post/redirect/get observation for the server-side confirmers (FR-FUZZ-49) (2026-10-14)
 - Change: builds the reviewed design's Revision 2 (P1-P9; reviewers A and B agreed,
   coordinator-assigned number). Live evidence: Juice Shop answers `POST /profile
