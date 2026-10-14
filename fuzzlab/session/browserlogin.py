@@ -62,6 +62,9 @@ from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, u
 
 #: The whole browser login (launch to close), joined with this deadline.
 LOGIN_DEADLINE_S = 120.0
+#: After the deadline the login is cancelled; its cleanup (context, browser, driver) is
+#: waited for this much longer before `run` reports it as still pending.
+CLEANUP_S = 30.0
 #: How long the login request may take to appear after the click.
 WAIT_LOGIN_MS = 10000
 #: How long the app may keep requesting after the login answer (bounded settle).
@@ -81,7 +84,9 @@ ACCOUNT_WORDS = frozenset({
 #: ... or two adjacent tokens that do.
 ACCOUNT_PAIRS = frozenset({("sign", "up"), ("security", "question"),
                            ("security", "answer")})
-#: Path tokens of an account endpoint a password must never be sent to in the window.
+#: Methods that write: in the window, none may target an account endpoint (A-S1).
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+#: Path tokens of an account endpoint nothing may be written to in the window.
 ACCOUNT_PATH_TOKENS = frozenset({"register", "registration", "signup", "password",
                                  "passwd", "reset", "change"})
 #: ... and collections of accounts, refused unless a login token is in the path too.
@@ -225,8 +230,11 @@ class LoginGate:
     the password) and the app's later GETs. Holds the password's forms in memory only,
     for the life of the worker."""
 
-    def __init__(self, destination_ok, base_url: str, auth_origins=(), *, forms):
+    def __init__(self, destination_ok, base_url: str, auth_origins=(), *, forms,
+                 cancelled: threading.Event | None = None):
         self._destination_ok = destination_ok
+        #: set by `run` at the deadline: from then on every request is refused (B-M1)
+        self.cancelled = cancelled if cancelled is not None else threading.Event()
         self._base = base_url
         self._origins = origin_scope(base_url, *auth_origins)
         self._forms = forms
@@ -242,6 +250,9 @@ class LoginGate:
         self.probes: list[str] = []
 
     def in_scope(self, url: str) -> bool:
+        if self.cancelled.is_set():
+            self.refusals.append(f"{_host(url)}: the login was abandoned")
+            return False
         if not in_origin_scope(url, self._origins):
             return False
         if self.window_open and not self._destination_ok(url, self._base,
@@ -262,14 +273,20 @@ class LoginGate:
             self.window_refusals += 1
 
     def request_refusal(self, method, url, headers, body) -> str | None:
-        if not self.window_open or not carries(self._forms, url, headers, body):
+        """Before a request (or a body-keeping redirect hop) is sent: everything once
+        the login was abandoned; in the window, every write (POST, PUT, PATCH, DELETE)
+        to an account endpoint, whatever its body (a hashed password included,
+        reviewer A-S1)."""
+        if self.cancelled.is_set():
+            return "browser login abandoned"
+        if not self.window_open or (method or "").upper() not in WRITE_METHODS:
             return None
         why = account_endpoint_reason(url)
         if why is None:
             return None
-        self.account_refusal = (f"the password was about to be sent to an account "
-                                f"endpoint on {_host(url)} ({why})")
-        return "password to an account endpoint"
+        self.account_refusal = (f"a {method.upper()} to an account endpoint on "
+                                f"{_host(url)} was refused in the login window ({why})")
+        return "write to an account endpoint"
 
     def observe(self, request, response) -> None:
         from fuzzlab.tools.spa import (MAX_SCRIPT_BYTES, MAX_SCRIPTS_PER_PAGE,
@@ -298,8 +315,31 @@ class LoginGate:
                 and 200 <= response.status < 300 and len(self.probes) < MAX_PROBES
                 and request.url not in self.probes
                 and not is_transport_url(request.url)
-                and route_destructive_reason(request.url) is None):
+                and route_destructive_reason(request.url) is None
+                # a URL carrying the password is never kept (stored as the probe)
+                and not carries(self._forms, request.url, {}, None)):
             self.probes.append(request.url)
+
+
+def strip_url(url: str) -> str:
+    """``url`` without its query and fragment: how a login URL is kept (A-M2)."""
+    from urllib.parse import urlunsplit
+    parts = urlsplit(url or "")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def drop_secret_values(storage: dict | None, forms) -> dict:
+    """``storage`` (a ``storage_state()``) without any cookie or localStorage entry
+    whose name or value carries the password (A-M2), before anything keeps it."""
+    storage = storage or {}
+
+    def clean(name, value) -> bool:
+        return not carries(forms, "", {"n": name or "", "v": value or ""}, None)
+    return {"cookies": [c for c in storage.get("cookies", []) or []
+                        if clean(c.get("name"), c.get("value"))],
+            "origins": [{**o, "localStorage": [e for e in o.get("localStorage") or []
+                                               if clean(e.get("name"), e.get("value"))]}
+                        for o in storage.get("origins", []) or []]}
 
 
 def _capture(url: str, response) -> dict:
@@ -310,11 +350,17 @@ def _capture(url: str, response) -> dict:
         if (h.get("name") or "").lower() == "set-cookie":
             set_names += list(parse_set_cookie(h.get("value") or ""))
     body = response.body()[:MAX_BODY]
-    return {"url": url, "status": response.status, "headers": dict(response.headers),
+    return {"url": strip_url(url), "status": response.status,
+            "headers": dict(response.headers),
             "body": body.decode("utf-8", "replace"), "set_cookies": set_names}
 
 
 # --- the driver ------------------------------------------------------------------------
+#: Serialises **this module's** driver starts only (A-N1, B-S4). The environment is
+#: process-wide, so this is best effort: another launcher starting at the same instant
+#: (the M6 executor, the spider, the fetcher, a `procutil` spawn) may briefly see
+#: ``DEBUG`` unset, which is harmless (less logging), and none of them types a secret;
+#: a thread that sets ``DEBUG`` inside the window has it overwritten on restore.
 _ENV_LOCK = threading.Lock()
 
 
@@ -348,10 +394,12 @@ class _Inflight:
         self.n = max(0, self.n - 1)
 
 
-def _settle(page, inflight: _Inflight, budget_ms: int) -> None:
+def _settle(page, inflight: _Inflight, budget_ms: int,
+            cancelled: threading.Event | None = None) -> None:
     deadline = time.monotonic() + budget_ms / 1000
     quiet = 0
-    while time.monotonic() < deadline and quiet < 3:
+    while time.monotonic() < deadline and quiet < 3 and \
+            not (cancelled is not None and cancelled.is_set()):
         page.wait_for_timeout(100)
         quiet = quiet + 1 if inflight.n == 0 else 0
 
@@ -434,15 +482,26 @@ def _username_control(form: dict) -> str | None:
     return users[0][2] if len(users) == 1 else None
 
 
+def _alive(cancelled: threading.Event) -> None:
+    """A checkpoint before each step that could act (a navigation, a fill, the click):
+    an abandoned login stops here (B-M1)."""
+    if cancelled.is_set():
+        raise BrowserLoginError("the browser login was abandoned at its deadline")
+
+
 def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
-           timeout_ms: int) -> LoginObservation:
-    """The browser part of the login (runs on the worker thread)."""
+           timeout_ms: int, cancelled: threading.Event | None = None) -> LoginObservation:
+    """The browser part of the login (runs on the worker thread). ``cancelled`` (set by
+    `run` at the deadline) is checked before every navigation, fill and the click, and
+    makes the gate refuse every request; the ``finally`` still closes everything."""
     from playwright.sync_api import sync_playwright
 
     from fuzzlab.tools import spa
     from fuzzlab.tools.navguard import (browser_launch_args, chromium_launch_kwargs,
                                         guard_page, release)
-    gate = LoginGate(destination_ok, base_url, auth_origins, forms=forms)
+    cancelled = cancelled if cancelled is not None else threading.Event()
+    gate = LoginGate(destination_ok, base_url, auth_origins, forms=forms,
+                     cancelled=cancelled)
     launch = chromium_launch_kwargs(browser_launch_args([base_url, *auth_origins]))
     manager = sync_playwright()
     with _driver_env_without_api_logs():
@@ -467,14 +526,16 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             page = context.new_page()
             inflight = _Inflight(page)
             page.on("dialog", lambda d: d.dismiss())    # an app's alert is never ours
+            _alive(cancelled)
             page.goto(base_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            _settle(page, inflight, SETTLE_MS)
+            _settle(page, inflight, SETTLE_MS, cancelled)
             refusals: list[str] = []
             picked = _pick_form(page, base_url, refusals, timeout_ms)
             if picked is None:
                 for url in _login_routes(page, gate, base_url):
+                    _alive(cancelled)
                     page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                    _settle(page, inflight, SETTLE_MS)
+                    _settle(page, inflight, SETTLE_MS, cancelled)
                     picked = _pick_form(page, base_url, refusals, timeout_ms)
                     if picked is not None:
                         break
@@ -494,8 +555,11 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             gate.floor_https = gate.floor_https or \
                 urlsplit(page.url).scheme.lower() == "https"
             gate.window_open = True
+            _alive(cancelled)
             page.fill(_sel(user), cred.username, timeout=timeout_ms)
+            _alive(cancelled)
             page.fill(_sel(pw_id), cred.password, timeout=timeout_ms)
+            _alive(cancelled)
             how = spa.click_vetted(page, _sel(form["button_id"]),
                                    [form.get("button") or "", form.get("button_aria") or "",
                                     form.get("button_icons") or ""],
@@ -508,13 +572,16 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             deadline = time.monotonic() + WAIT_LOGIN_MS / 1000
             quiet = 0
             while gate.login is None and gate.account_refusal is None \
-                    and time.monotonic() < deadline and quiet < 3:
+                    and time.monotonic() < deadline and quiet < 3 \
+                    and not cancelled.is_set():
                 page.wait_for_timeout(100)
                 quiet = quiet + 1 if gate.window_refusals and inflight.n == 0 else 0
             if gate.login is not None:
-                _settle(page, inflight, SETTLE_MS)
-            storage = context.storage_state()
-            page_url = page.url
+                _settle(page, inflight, SETTLE_MS, cancelled)
+            _alive(cancelled)
+            # nothing carrying the password is kept, before any filtering (A-M2)
+            storage = drop_secret_values(context.storage_state(), forms)
+            page_url = strip_url(page.url)
         finally:
             # nothing swallowed (PA-0106): a failing close still closes the browser,
             # and its error reaches `run`, which reports it (scrubbed)
@@ -534,6 +601,9 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             "the login click sent no in-scope POST/PUT carrying the password"
             + (f"; refused in the login scope: {', '.join(hosts)}" if hosts else ""))
     login = gate.login
+    if carries(forms, login["url"], {}, None):
+        raise BrowserLoginError("refusing the login: its request URL carries the "
+                                "password in its path (it would be stored)")
     jar = {c["name"]: c["value"] for c in storage.get("cookies", [])}
     return LoginObservation(
         login_url=login["url"], status=login["status"], headers=login["headers"],
@@ -548,34 +618,63 @@ def _first_line(exc) -> str:
     return text
 
 
-def run(destination_ok, base_url: str, cred, *, auth_origins=(),
-        timeout_ms: int = 10000, deadline_s: float = LOGIN_DEADLINE_S) -> LoginObservation:
+#: Live login workers by (base URL, identity): no second login starts beside one that
+#: is still running or cleaning up (B-M2).
+_LIVE: dict[tuple[str, str], threading.Thread] = {}
+_LIVE_LOCK = threading.Lock()
+
+
+def run(destination_ok, base_url: str, cred, *, identity: str = "", auth_origins=(),
+        timeout_ms: int = 10000, deadline_s: float = LOGIN_DEADLINE_S,
+        cleanup_s: float = CLEANUP_S) -> LoginObservation:
     """Perform the browser login on a dedicated worker thread (no event loop: a sync
     Playwright never nests in another, reviewer B5) and wait for it, at most
-    ``deadline_s``. Raises `BrowserLoginError`, whose text never holds the password."""
+    ``deadline_s``. At the deadline the login is **cancelled** (B-M1): the worker stops
+    at its next checkpoint, its gate refuses every request, and its ``finally`` closes
+    the context, browser and driver, which is waited for up to ``cleanup_s`` more. A
+    login for the same (base URL, identity) whose worker is still alive refuses a new
+    one (B-M2). Raises `BrowserLoginError`, whose text never holds the password."""
     if "DEBUGP" in os.environ:
         raise BrowserLoginError("refusing the browser login: DEBUGP is set, so "
                                 "Playwright would print every message, the password "
                                 "included")
     forms = secret_forms(cred.password, cred.username)
     out: dict = {}
+    cancelled = threading.Event()
+    key = (url_key(base_url), identity)
 
     def work() -> None:
         try:
             out["obs"] = _drive(destination_ok, base_url, list(auth_origins), cred, forms,
-                                timeout_ms)
+                                timeout_ms, cancelled)
         except BrowserLoginError as exc:
             out["err"] = _scrub(str(exc), forms)
         except BaseException as exc:  # noqa: BLE001 - reported, scrubbed, never raw
             out["err"] = _scrub(f"browser login failed ({type(exc).__name__}: "
                                 f"{_first_line(exc)})", forms)
+        finally:
+            with _LIVE_LOCK:
+                if _LIVE.get(key) is threading.current_thread():
+                    del _LIVE[key]
 
     worker = threading.Thread(target=work, name="fuzzlab-browser-login", daemon=True)
+    with _LIVE_LOCK:
+        previous = _LIVE.get(key)
+        if previous is not None and previous.is_alive():
+            raise BrowserLoginError("a previous browser login for this base URL and "
+                                    "identity is still finishing; not starting another")
+        _LIVE[key] = worker
     worker.start()
     worker.join(deadline_s)
     if worker.is_alive():
+        cancelled.set()
+        worker.join(cleanup_s)
+        if worker.is_alive():
+            raise BrowserLoginError(f"the browser login did not finish within "
+                                    f"{deadline_s:.0f} s; browser login abandoned; "
+                                    f"cleanup pending")
         raise BrowserLoginError(f"the browser login did not finish within "
-                                f"{deadline_s:.0f} s")
+                                f"{deadline_s:.0f} s; abandoned and closed")
     if "err" in out:
         raise BrowserLoginError(out["err"])
     return out["obs"]

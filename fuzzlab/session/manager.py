@@ -451,8 +451,8 @@ class SessionManager:
                                                   floor, headers=state.apply({}),
                                                   session_host=host)
             ok = 200 <= probe.status < 300 and (
-                state.probe_anon_digest is None
-                or _digest(probe.text) != state.probe_anon_digest)
+                state.probe_refusal_digest is None
+                or _digest(probe.text) != state.probe_refusal_digest)
         else:
             probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
                                                  headers=state.apply({}), session_host=host)
@@ -588,6 +588,7 @@ class SessionManager:
         from fuzzlab.session import browserlogin
         try:
             obs = browserlogin.run(self._credential_destination_ok, base_url, cred,
+                                   identity=self._label or identity,
                                    auth_origins=sorted(self._auth_origins))
         except browserlogin.BrowserLoginError as exc:
             raise SessionAuthError(
@@ -621,10 +622,10 @@ class SessionManager:
                                  logout_url=urljoin(base_url, "logout"),
                                  secure_only=obs.floor_https,
                                  browser_state=obs.storage_state)
-            probe, anon_digest = self._spa_probe(host, base_url, state, obs.probes)
+            probe, refusal_digest = self._spa_probe(host, base_url, state, obs.probes)
             if probe is None:
                 continue
-            state.protected_probe, state.probe_anon_digest = probe, anon_digest
+            state.protected_probe, state.probe_refusal_digest = probe, refusal_digest
             state.valid = True
             self._auth_endpoints.setdefault(host, set()).update(
                 {obs.login_url, state.logout_url})
@@ -643,35 +644,49 @@ class SessionManager:
 
     def _spa_probe(self, host: str, base_url: str, state: SessionState,
                    candidates) -> tuple[str | None, str | None]:
-        """FR-SESS-5's differential for a browser login (reviewer A3): the first
+        """FR-SESS-5's differential for a browser login (reviewers A3, A-M1): the first
         in-scope GET the app made after the click (already scope- and
-        destructive-checked; 2xx in the browser) that answers 2xx when replayed with the
-        credential and, replayed without it, 401/403, another non-5xx status, or a
-        body that differs from the credentialed one while both are stable over two
-        fetches. Returns ``(url, sha256 of the anonymous body when it was 2xx)`` or
-        ``(None, None)``. Each replay uses a fresh fetcher, walked by `_navigate` to this
-        host only."""
+        destructive-checked; 2xx in the browser, no password in its URL) that answers
+        2xx when replayed with the credential, and whose answers **without** it and with
+        a **corrupted** credential (`_corrupted`) agree with each other and not with the
+        credentialed one: the same non-2xx (non-5xx) status, or the same body, stable
+        over two fetches each, that differs from the credentialed body (also stable).
+        The corrupted arm keeps an endpoint that only reacts to the *presence* of an
+        Authorization header or cookie (an echo, a header-keyed cache, a "token present
+        but invalid" body) from confirming a login. Returns ``(url, sha256 of the
+        corrupted credential's body when it was 2xx)`` -- `verify_live`'s "not live"
+        reference -- or ``(None, None)``. Each replay uses a fresh fetcher, walked by
+        `_navigate` to this host only."""
         floor = bool(state.secure_only)
+        good, bad_headers = state.apply({}), _corrupted(state).apply({})
+
+        def ok(resp) -> bool:
+            return 200 <= resp.status < 300
         for url in list(candidates)[:8]:
             if (urlparse(url).hostname or "") != host or \
                     not self._navigation_ok(url, base_url, floor):
                 continue
             try:
-                authed = self._probe_fetch(url, base_url, floor, host, state.apply({}))
-                if not 200 <= authed.status < 300:
+                authed = self._probe_fetch(url, base_url, floor, host, good)
+                if not ok(authed):
                     continue
                 anon = self._probe_fetch(url, base_url, floor, host, None)
-                if anon.status >= 500:
+                bad = self._probe_fetch(url, base_url, floor, host, bad_headers)
+                if anon.status >= 500 or bad.status >= 500:
                     continue
-                if not 200 <= anon.status < 300:
-                    return url, None
-                again = self._probe_fetch(url, base_url, floor, host, None)
-                authed2 = self._probe_fetch(url, base_url, floor, host, state.apply({}))
+                if not ok(anon) or not ok(bad):
+                    if anon.status == bad.status:
+                        return url, None                  # e.g. 401 both ways
+                    continue
+                anon2 = self._probe_fetch(url, base_url, floor, host, None)
+                bad2 = self._probe_fetch(url, base_url, floor, host, bad_headers)
+                authed2 = self._probe_fetch(url, base_url, floor, host, good)
             except SessionAuthError:
                 continue                                  # an unapproved hop: not this one
-            if anon.text == again.text and authed.text == authed2.text and \
-                    anon.text != authed.text and 200 <= authed2.status < 300:
-                return url, _digest(anon.text)
+            stable = anon.text == anon2.text and bad.text == bad2.text and \
+                authed.text == authed2.text and ok(authed2)
+            if stable and bad.text == anon.text and authed.text != bad.text:
+                return url, _digest(bad.text)
         return None, None
 
     def _probe_fetch(self, url: str, base_url: str, floor: bool, host: str, headers):
@@ -943,6 +958,37 @@ def _directory(url: str) -> str:
     parts = urlparse(url)
     path = parts.path or "/"
     return f"{parts.scheme}://{parts.netloc}{path[:path.rfind('/') + 1]}"
+
+
+def _corrupt_token(token: str) -> str:
+    """``token`` with its last character flipped: within the base64url alphabet the
+    flip changes the character's high bits (index XOR 32), so a decoder that ignores a
+    final segment's unused low bits still sees another value."""
+    import string
+    alphabet = string.ascii_uppercase + string.ascii_lowercase + string.digits + "-_"
+    if not token:
+        return "x"
+    last = token[-1]
+    new = alphabet[alphabet.index(last) ^ 32] if last in alphabet else \
+        ("A" if last != "A" else "B")
+    return token[:-1] + new
+
+
+def _corrupted(state: SessionState) -> SessionState:
+    """A copy of ``state`` with an invalid credential of the same shape (A-M1): a
+    bearer token with its last character flipped, each cookie a random value under the
+    same name. Never stored."""
+    import dataclasses
+    import secrets
+    headers = {}
+    for name, value in (state.headers or {}).items():
+        scheme, sep, token = str(value).partition(" ")
+        headers[name] = f"{scheme} {_corrupt_token(token)}" if sep else \
+            _corrupt_token(str(value))
+    cookies = {name: secrets.token_hex(max(8, len(str(value)) // 2))
+               for name, value in (state.cookies or {}).items()}
+    return dataclasses.replace(state, headers=headers, cookies=cookies,
+                               browser_state=None)
 
 
 def _digest(text: str | None) -> str:

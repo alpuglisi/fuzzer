@@ -53,7 +53,7 @@ Newest first.
     them instead of the public base URL.
   - **`SessionState` (item 8):** `cookies`, `headers` `repr=False`; new in-memory
     fields `browser_state` (`repr=False, compare=False`), `protected_probe`,
-    `probe_anon_digest` (`repr=False`); `non_secret_state` unchanged (none persisted).
+    `probe_refusal_digest` (`repr=False`); `non_secret_state` unchanged (none persisted).
   - **Logging off (item 9).** `_driver_env_without_api_logs` removes `DEBUG` and
     `PWDEBUG` from `os.environ` under a lock for the instant the driver is spawned (it
     copies the environment then; verified that `DEBUG=pw:api` prints `fill("<value>")`);
@@ -105,6 +105,51 @@ Newest first.
     (`test_revocation_makes_verify_live_false`,
     `test_the_crawls_session_check_catches_a_revoked_token`) — done
   - [x] FR-SESS-19, FR-SESS-6 amended, NFR-SESS-redaction traced, ARCHITECTURE #3 — done
+- Code review round 1 (reviewers A and B, AGREE-with-changes; a follow-up commit):
+  - **B-M1 / A-S2, abandoned login:** `run` shares a `threading.Event` with the worker
+    and sets it at the deadline; `LoginGate.in_scope` and `request_refusal` then refuse
+    everything, the worker raises at its checkpoints (`_alive`, before each `goto`, each
+    fill, the click, and the storage capture), its `finally` still closes the context,
+    browser and driver, and `run` waits up to `CLEANUP_S` (30 s) more, else reports
+    "browser login abandoned; cleanup pending".
+  - **B-M2, no second login beside it:** a module-level `_LIVE` map of login workers per
+    (`url_key(base_url)`, identity or copy label); `run` refuses ("still finishing")
+    while one is alive; a worker removes itself when it ends.
+  - **A-M1, probe differential:** `_spa_probe` adds a corrupted-credential arm
+    (`_corrupted`: a bearer's last character flipped in its base64url high bits, a
+    cookie's value random under the same name). The no-credential and the corrupted
+    answers must agree (the same non-2xx, non-5xx status, or the same stable body) and
+    differ from the credentialed one. `SessionState.probe_anon_digest` is renamed
+    `probe_refusal_digest` (the corrupted answer's sha256), `verify_live`'s "not live"
+    reference.
+  - **A-M2, password out of URLs and storage:** the login URL is kept without query or
+    fragment (`strip_url`) in the observation, the state and the auth endpoints, and the
+    login refuses if its path still carries the password; `non_secret_state` persists
+    `login_url` / `logout_url` without query or fragment (every login); probe
+    candidates whose URL carries the password are skipped; `drop_secret_values` removes
+    any cookie or localStorage entry carrying it before `filter_storage_state`.
+  - **A-S1, account gate on every write:** `request_refusal` now refuses every POST,
+    PUT, PATCH or DELETE to an account endpoint in the window, whatever its body.
+  - **A-N1 / B-S4:** `_ENV_LOCK`'s docstring states it is best effort and process-wide.
+  - Tests (`tests/test_session_browser_login.py`): a stalling login page with a short
+    deadline sends no password-carrying POST and leaves no process; a second `run`
+    beside an abandoned one refuses; an echo endpoint is never the probe; a revoked
+    token answered with a 2xx error body reads as not live; a leaky app's password is
+    absent from the stored URL, the probe, the store, the log, the state and the adopted
+    storage; a hashed password posted to `/api/Users` sends nothing; a 307 keeping the
+    body to an account endpoint is refused at the hop (A-N2); units for the cancelled
+    gate, the checkpoint, the corrupted credential, URL stripping and storage cleaning.
+  - Mutation checks: each reverted, its test failed: no
+    cancel event (`test_an_abandoned_login_never_sends_the_password`); gate ignoring the
+    cancel (`test_a_cancelled_gate_refuses_every_request`); no checkpoints
+    (`test_a_cancelled_login_stops_at_a_checkpoint`; end to end the gate layer alone
+    still stops the send, by design); no live-login refusal
+    (`test_no_second_login_starts_beside_an_abandoned_one`); no corrupted arm
+    (`test_an_endpoint_that_echoes_the_credential_is_never_the_probe`); login URL kept
+    with its query, a password-carrying probe kept, storage not cleaned (each:
+    `test_the_password_is_kept_out_of_urls_and_storage`); the account gate needing the
+    password again (`test_a_hashed_password_posted_to_api_users_sends_nothing`,
+    `test_every_write_to_an_account_endpoint_is_refused_in_the_window`).
 - Review: reviewers A and B on the design draft (Revision 1: A, AGREE-with-changes;
   Revision 2: B, AGREE-with-changes, A and B reconciled into items 1-12, the spec built
   here). Answers adopted: fallback only, with a loud error naming a missing browser;

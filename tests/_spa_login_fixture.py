@@ -42,6 +42,9 @@ const api = (url, opt) => { opt = opt || {};
   return fetch(url, opt); };
 const post = (url, body) => api(url, {method: 'POST', headers: {'Content-Type':
   'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+if (CFG.rotate) setInterval(() => { if (tok()) localStorage.setItem('token',
+  [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16)
+    .padStart(2, '0')).join('')); }, 300);
 if (CFG.poll) { let polls = 0;
   setInterval(() => { if (++polls <= 400) api(P + 'rest/ping').catch(() => {}); }, 50); }
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -51,7 +54,7 @@ const loginDiv = (label, extra) => "<div id='lf'><input id='email' type='text' "
   label + "'><mat-icon>exit_to_app</mat-icon> " + label + "</button></div>";
 const LOGIN_VIEWS = {
   ok: loginDiv('Log in'), other: loginDiv('Log in'), other_sha: loginDiv('Log in'),
-  users: loginDiv('Log in'), signup: loginDiv('Sign up'),
+  users: loginDiv('Log in'), users_sha: loginDiv('Log in'), signup: loginDiv('Sign up'),
   captcha: loginDiv('Log in', "<input id='captcha' type='text'>"),
   mixed: "<form id='reg'><input name='email' type='email'><input name='password' " +
     "type='password'><input name='passwordRepeat' type='password'>" +
@@ -60,15 +63,19 @@ const LOGIN_VIEWS = {
     "type='password'><input name='repeat' type='password'><button type='submit'>" +
     "Change</button></form>" + loginDiv('Log in'),
 };
-const TARGETS = {users: P + 'api/Users', signup: P + 'rest/join',
+const TARGETS = {users: P + 'api/Users', users_sha: P + 'api/Users',
+  signup: P + 'rest/join',
   other: 'http://127.0.0.1:' + CFG.other + '/rest/user/login',
   other_sha: 'http://127.0.0.1:' + CFG.other + '/rest/user/login'};
 async function doLogin() {
   const email = document.getElementById('email').value;
   let pass = document.getElementById('password').value;
-  if (CFG.variant === 'other_sha')
+  if (CFG.variant === 'other_sha' || CFG.variant === 'users_sha')
     pass = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pass)));
-  const r = await fetch(TARGETS[CFG.variant] || P + 'rest/user/login', {method: 'POST',
+  let target = TARGETS[CFG.variant] || P + 'rest/user/login';
+  if (CFG.leaky) { target += '?pw=' + encodeURIComponent(pass);
+    localStorage.setItem('lastpw', pass); }
+  const r = await fetch(target, {method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-From-App': '1'},
     body: JSON.stringify({email: email, password: pass})}).catch(() => null);
   if (!r || r.status !== 200) return;
@@ -80,8 +87,13 @@ async function doLogin() {
 const views = {
   '': () => '<p>home</p>',
   'login': () => LOGIN_VIEWS[CFG.variant],
-  'search': () => { api(P + 'rest/user/whoami').catch(() => {});
-    api(P + 'api/me').catch(() => {}); api(P + 'rest/products').catch(() => {});
+  'search': () => {
+    const rest = () => { api(P + 'rest/user/whoami').catch(() => {});
+      api(P + 'api/me').catch(() => {}); api(P + 'rest/products').catch(() => {}); };
+    if (CFG.echo) api(P + 'rest/echo').then(rest, rest);         // the echo first
+    else if (CFG.leaky) api(P + 'api/me?pw=' + encodeURIComponent(
+      localStorage.getItem('lastpw'))).then(rest, rest);         // a URL with it first
+    else rest();
     return '<p>search</p>'; },
   'dashboard': () => { api(P + 'api/me').then(r => r.json()).then(j => {
       document.getElementById('me').textContent = j.secret || 'anonymous'; })
@@ -128,7 +140,9 @@ class LoginSpa:
 
     def __init__(self, password: str, *, variant: str = "ok", other_port: int = 9,
                  clear_ls: bool = False, revoke_on_feedback: bool = False,
-                 poll: bool = False, probe_delay: float = 0.0, prefix: str = "/"):
+                 poll: bool = False, probe_delay: float = 0.0, prefix: str = "/",
+                 script_delay: float = 0.0, leaky: bool = False, echo: bool = False,
+                 invalid_200: bool = False, rotate: bool = False):
         self.password = password
         self.variant = variant
         self.other_port = other_port
@@ -138,6 +152,17 @@ class LoginSpa:
         self.probe_delay = probe_delay
         #: the app's mount point (PA-0113: an app under a sub-path, ``/app/``)
         self.prefix = prefix
+        #: seconds ``app.js`` is held back (a stalling login page)
+        self.script_delay = script_delay
+        #: the app sends the password in its login URL's query and keeps it in
+        #: localStorage, then GETs a URL carrying it (A-M2)
+        self.leaky = leaky
+        #: ``/rest/echo`` echoes the Authorization header, and is requested first (A-M1)
+        self.echo = echo
+        #: ``/api/me`` answers a non-live token with a 200 error body (A-M1)
+        self.invalid_200 = invalid_200
+        #: the app replaces its localStorage token every 300 ms (B-S3)
+        self.rotate = rotate
         self.requests: list[tuple[str, str, dict, bytes]] = []
         self.tokens: set[str] = set()
         self.revoked: set[str] = set()
@@ -165,7 +190,8 @@ class LoginSpa:
     # -- the app ---------------------------------------------------------------------
     def script(self) -> str:
         cfg = {"variant": self.variant, "other": self.other_port,
-               "clear_ls": self.clear_ls, "poll": self.poll, "prefix": self.prefix}
+               "clear_ls": self.clear_ls, "poll": self.poll, "prefix": self.prefix,
+               "leaky": self.leaky, "echo": self.echo, "rotate": self.rotate}
         return _APP_JS.replace("__CFG__", json.dumps(cfg))
 
     def live(self, headers) -> bool:
@@ -182,6 +208,8 @@ class LoginSpa:
         if path == "/":
             return _send(h, 200, "text/html", _INDEX.encode())
         if path == "/app.js":
+            if self.script_delay:
+                time.sleep(self.script_delay)
             return _send(h, 200, "application/javascript", self.script().encode())
         if path == "/rest/user/login" and h.command == "POST":
             try:
@@ -200,7 +228,12 @@ class LoginSpa:
             if self.live(h.headers):
                 return _send(h, 200, "application/json",
                              json.dumps({"email": USER, "secret": PROTECTED}).encode())
+            if self.invalid_200:
+                return _send(h, 200, "application/json", b'{"error":"invalid token"}')
             return _send(h, 401, "application/json", b'{"error":"Unauthorized"}')
+        if path == "/rest/echo":
+            return _send(h, 200, "application/json", json.dumps(
+                {"auth": h.headers.get("Authorization") or ""}).encode())
         if path == "/rest/user/whoami":
             user = {"email": USER} if self.live(h.headers) else {}
             return _send(h, 200, "application/json", json.dumps({"user": user}).encode())

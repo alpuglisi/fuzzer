@@ -41,9 +41,10 @@ class SessionState:
     #: materially different body) without it. ``verify_live`` and the crawler's session
     #: check re-fetch it. In memory only.
     protected_probe: str | None = field(default=None, repr=False)
-    #: sha256 of the probe's anonymous body when that was 2xx too (the differential was
-    #: the body): a live session's probe must answer something else. In memory only.
-    probe_anon_digest: str | None = field(default=None, repr=False)
+    #: sha256 of the probe's answer to a **corrupted** credential when that was 2xx
+    #: (the differential was the body, A-M1): a live session's probe must answer
+    #: something else. In memory only.
+    probe_refusal_digest: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.secure_only is None:
@@ -90,11 +91,22 @@ class SessionState:
             "identity": self.identity,
             "kind": self.kind,
             "valid": self.valid,
-            "login_url": self.login_url,
-            "logout_url": self.logout_url,
+            # no query or fragment is ever persisted (A-M2: a login URL may carry a
+            # secret there)
+            "login_url": _no_query(self.login_url),
+            "logout_url": _no_query(self.logout_url),
             "token_exp": self.token_exp,
             "secure_only": self.secure_only,
         }
+
+
+def _no_query(url: str | None) -> str | None:
+    """``url`` without its query and fragment (None stays None)."""
+    if not url:
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 def secure_only_of(record: dict | None) -> bool:

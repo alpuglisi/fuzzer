@@ -57,6 +57,15 @@ Newest first.
   - [x] mutation checks: localStorage check, header scope, `set_extra_http_headers`
     reintroduced — each failed its tests — done
   - [x] FR-CRAWL-14, NFR-CRAWL-safe traced, ARCHITECTURE #4 — done
+- Code review round 1 (reviewer B-S3; a follow-up commit): `_session_intact` tells a
+  token rotation from a loss (`_storage_rotated`): an adopted localStorage entry changed
+  to another non-empty, identifier-like value (`core.redaction.looks_like_identifier`) is
+  re-adopted and `verify_live` still decides; cleared, empty, `"null"`, `"undefined"` or
+  a non-identifier value is a loss. Tests: an app that rotates its token every 300 ms
+  keeps submitting (and the new value is re-adopted); a clear still stops it with
+  rotation on; a predicate table. Mutation checks: no rotation ever
+  (`test_a_rotated_token_keeps_the_crawl_submitting` failed); any change a rotation
+  (`test_a_cleared_token_still_stops_the_crawl_with_rotation_on` failed).
 - Review: with CC-SESS-0021 (reviewers A and B, Revision 2 items 6, 7 and 4).
 - Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`): the targeted run (every touched test file, the session-manager tests, the browser-scope, SPA, sub-path, destructive-URL, lint, traceability and loopback-listener guards) gave 739 passed, 2 xfailed, 0 skipped, 1 failed -- `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, which fails identically on the unmodified base 2150bf8 (`labgen/conformance/*_live_boot.py` `start_server` sites, outside this change; flagged, not fixed here). The authenticated-crawl, localStorage, revocation and re-login tests passed; the header-scope and `set_extra_http_headers` mutations failed their tests. Live Juice Shop crawl not run here.
 

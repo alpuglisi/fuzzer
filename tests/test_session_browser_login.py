@@ -151,12 +151,13 @@ def test_only_a_login_shaped_form_with_no_account_word_is_used(form, route, expe
         assert why is not None and expect in why, why
 
 
-def test_the_request_side_gate_needs_the_password_and_the_window():
+def test_the_request_side_gate_needs_the_window():
+    """Since A-S1 the gate is on every write in the window, password or not."""
     gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))
     body = json.dumps({"email": "a", "password": "s3cret"}).encode()
     assert gate.request_refusal("POST", "http://h/api/Users", {}, body) is None  # closed
     gate.window_open = True
-    assert gate.request_refusal("POST", "http://h/api/Users", {}, b"{}") is None
+    assert gate.request_refusal("POST", "http://h/api/Users", {}, b"{}")
     assert gate.request_refusal("POST", "http://h/rest/user/login", {}, body) is None
     assert gate.request_refusal("POST", "http://h/api/Users", {}, body)
     assert "s3cret" not in (gate.account_refusal or "")
@@ -169,7 +170,7 @@ def test_session_state_repr_and_str_hold_no_secret():
                          browser_state={"origins": [{"origin": "http://h", "localStorage":
                                                      [{"name": "t", "value": "LSSECRET"}]}]},
                          protected_probe="http://h/api/me?k=PROBESECRET",
-                         probe_anon_digest="DIGESTSECRET", valid=True)
+                         probe_refusal_digest="DIGESTSECRET", valid=True)
     for text in (repr(state), str(state), f"{state}"):
         for secret in ("COOKIESECRET", "TOKENSECRET", "LSSECRET", "PROBESECRET",
                        "DIGESTSECRET"):
@@ -177,7 +178,7 @@ def test_session_state_repr_and_str_hold_no_secret():
     other = SessionState(HOST, "user", kind="bearer", cookies={"sid": "COOKIESECRET"},
                          headers={"Authorization": "Bearer TOKENSECRET"},
                          protected_probe="http://h/api/me?k=PROBESECRET",
-                         probe_anon_digest="DIGESTSECRET", valid=True)
+                         probe_refusal_digest="DIGESTSECRET", valid=True)
     assert other == state                         # browser_state is not compared
 
 
@@ -603,3 +604,303 @@ def test_a_relogin_during_an_authenticated_crawl(spa, tmp_path, monkeypatch):
     run_crawl(sp)
     assert relogins and relogins[0].valid
     assert len(lab.seen("POST", "/rest/user/login")) == 2
+
+
+# =====================================================================================
+# Code review round 1 (reviewers A and B)
+# =====================================================================================
+class _Req:
+    def __init__(self, url, method="POST", body=b'{"x":1}'):
+        self.url, self.method, self.post_data_buffer = url, method, body
+        self.headers = {"content-type": "application/json"}
+
+    def is_navigation_request(self):
+        return False
+
+
+class _Resp:
+    def __init__(self, status=200, location=None):
+        self.status = status
+        self.headers = {"location": location} if location else {}
+
+
+class _FakeRoute:
+    def __init__(self, req, site):
+        self.request, self.site, self.outcome, self.fetched = req, site, None, []
+
+    def fetch(self, max_redirects=None, headers=None):
+        self.fetched.append(self.request.url)
+        return self.site.get(self.request.url, _Resp())
+
+    def abort(self):
+        self.outcome = "abort"
+
+    def fulfill(self, response=None, status=None, headers=None):
+        self.outcome = "fulfill"
+
+
+class _FakeApi:
+    def __init__(self, site):
+        self.site, self.calls = site, []
+
+    def fetch(self, url, method=None, max_redirects=None, data=None, headers=None):
+        self.calls.append(url)
+        return self.site.get(url, _Resp())
+
+
+def test_every_write_to_an_account_endpoint_is_refused_in_the_window():
+    """A-S1: whatever the body (a hashed password, nothing recognisable), a write to an
+    account endpoint in the window is refused; a read, or a write before the window,
+    is not this gate's business."""
+    gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))
+    digest = json.dumps({"password": hashlib.sha256(b"s3cret").hexdigest()}).encode()
+    assert gate.request_refusal("POST", "http://h/api/Users", {}, digest) is None
+    gate.window_open = True
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        assert gate.request_refusal(method, "http://h/api/Users", {}, digest), method
+    assert gate.request_refusal("GET", "http://h/api/Users", {}, None) is None
+    assert gate.request_refusal("POST", "http://h/rest/user/login", {}, digest) is None
+
+
+def test_a_body_keeping_redirect_to_an_account_endpoint_is_refused_at_the_hop():
+    """A-N2: the login POST answers 307 to /api/Users in the window: the hop (which
+    would re-send the body) is refused before it is fetched."""
+    from fuzzlab.tools.navguard import make_route_handler
+    gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))
+    gate.window_open = True
+    site = {"http://h/rest/user/login": _Resp(307, "/api/Users")}
+    api = _FakeApi(site)
+    route = _FakeRoute(_Req("http://h/rest/user/login"), site)
+    make_route_handler(in_scope=gate.in_scope, api=api,
+                       request_refusal=gate.request_refusal)(route)
+    assert route.fetched == ["http://h/rest/user/login"]
+    assert route.outcome == "abort" and api.calls == []
+    assert gate.account_refusal and "api" not in gate.account_refusal.split("(")[0]
+
+
+def test_a_cancelled_gate_refuses_every_request():
+    """B-M1: once `run` gives up, the abandoned worker's gate lets nothing out."""
+    import threading
+    cancelled = threading.Event()
+    gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"),
+                     cancelled=cancelled)
+    assert gate.in_scope("http://h/a") and \
+        gate.request_refusal("GET", "http://h/a", {}, None) is None
+    cancelled.set()
+    assert not gate.in_scope("http://h/a")
+    assert gate.request_refusal("GET", "http://h/a", {}, None)
+
+
+def test_the_corrupted_credential_has_the_same_shape_and_another_value():
+    """A-M1: a bearer's last character flips its high bits (a lenient base64url decoder
+    still sees another value); a cookie gets a random value under the same name."""
+    from fuzzlab.session.manager import _corrupt_token, _corrupted
+    for token in ("abc.def.ghA", "abc.def.ghB", "t-_9", "x+"):
+        bad = _corrupt_token(token)
+        assert bad != token and len(bad) == len(token) and bad[:-1] == token[:-1]
+    state = SessionState(HOST, "u", kind="bearer", headers={"Authorization": "Bearer T0K"},
+                         cookies={"sid": "abcdef0123456789"}, valid=True)
+    bad = _corrupted(state)
+    assert bad.headers["Authorization"].startswith("Bearer T0") and \
+        bad.headers["Authorization"] != "Bearer T0K"
+    assert set(bad.cookies) == {"sid"} and bad.cookies["sid"] != "abcdef0123456789"
+    assert state.headers == {"Authorization": "Bearer T0K"}            # not touched
+
+
+def test_persisted_login_urls_carry_no_query_or_fragment():
+    """A-M2(a)."""
+    state = SessionState(HOST, "u", login_url="http://h/rest/login?pw=SECRET#x",
+                         logout_url="http://h/logout?t=SECRET")
+    rec = state.non_secret_state()
+    assert rec["login_url"] == "http://h/rest/login" and rec["logout_url"] == "http://h/logout"
+    assert browserlogin.strip_url("http://h/a/b?c=d#e") == "http://h/a/b"
+
+
+def test_storage_values_carrying_the_password_are_dropped():
+    """A-M2(c): before `filter_storage_state`, any cookie or localStorage entry that
+    carries the password (in any form) is dropped."""
+    import base64
+    forms = secret_forms("S3cr3t!", "alice")
+    storage = {"cookies": [{"name": "token", "value": "T"},
+                           {"name": "pw", "value": "S3cr3t%21"}],
+               "origins": [{"origin": "http://h", "localStorage": [
+                   {"name": "token", "value": "T"},
+                   {"name": "lastpw", "value": "S3cr3t!"},
+                   {"name": "basic", "value": base64.b64encode(b"alice:S3cr3t!").decode()}]}]}
+    kept = browserlogin.drop_secret_values(storage, forms)
+    assert kept["cookies"] == [{"name": "token", "value": "T"}]
+    assert kept["origins"][0]["localStorage"] == [{"name": "token", "value": "T"}]
+
+
+@pytest.mark.parametrize("value, rotated", [
+    ("9f8e7d6c5b4a39281706f5e4d3c2b1a0", True),
+    ("eyJhbGciOiAiSFMyNTYifQ.eyJleHAiOjF9.sig", True),
+    (None, False), ("", False), ("null", False), ("undefined", False),
+    ("NULL ", False), ("hello", False),
+])
+def test_a_rotated_storage_value_is_told_from_a_loss(value, rotated):
+    """B-S3."""
+    from fuzzlab.tools.spider import _storage_rotated
+    assert _storage_rotated(value) is rotated
+
+
+def _wait_worker_gone(lab, timeout=40.0):
+    import time
+    from fuzzlab.core.urls import url_key
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with browserlogin._LIVE_LOCK:
+            worker = browserlogin._LIVE.get((url_key(lab.base), "user"))
+        if worker is None or not worker.is_alive():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def test_an_abandoned_login_never_sends_the_password(spa):
+    """B-M1: the login page stalls past the deadline; the abandoned worker stops at its
+    next checkpoint, its gate refuses everything, and its browser is closed: no
+    password-carrying POST arrives afterwards and nothing it started survives."""
+    import time
+    pw = _password()
+    lab = spa(pw, script_delay=4.0)
+    mgr = _manager(lab, pw)
+    before = _live_descendants()
+    with pytest.raises(browserlogin.BrowserLoginError, match="abandoned"):
+        browserlogin.run(mgr._credential_destination_ok, lab.base, _Cred(USER, pw),
+                         identity="user", deadline_s=1.0, cleanup_s=30.0)
+    assert _wait_worker_gone(lab)
+    assert lab.seen("POST") == []
+    deadline = time.monotonic() + 10
+    while _live_descendants() - before and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert _live_descendants() - before == set()
+
+
+def test_no_second_login_starts_beside_an_abandoned_one(spa):
+    """B-M2: the first login is abandoned with its cleanup still pending; a second
+    login for the same base URL and identity refuses until the first has finished."""
+    pw = _password()
+    lab = spa(pw, script_delay=4.0)
+    mgr = _manager(lab, pw)
+    run = lambda **kw: browserlogin.run(  # noqa: E731
+        mgr._credential_destination_ok, lab.base, _Cred(USER, pw), identity="user", **kw)
+    with pytest.raises(browserlogin.BrowserLoginError, match="cleanup pending"):
+        run(deadline_s=0.5, cleanup_s=0.1)
+    with pytest.raises(browserlogin.BrowserLoginError, match="still finishing"):
+        run()
+    assert _wait_worker_gone(lab)
+    assert lab.seen("POST") == []
+
+
+def test_an_endpoint_that_echoes_the_credential_is_never_the_probe(spa):
+    """A-M1: ``/rest/echo`` answers differently with and without an Authorization
+    header, but a corrupted one gets the credentialed shape too: never accepted."""
+    pw = _password()
+    lab = spa(pw, echo=True)
+    state = _login(_manager(lab, pw), lab)
+    assert len(lab.seen("GET", "/rest/echo")) >= 2           # it was a candidate
+    assert state.protected_probe and "rest/echo" not in state.protected_probe
+
+
+def test_a_revoked_token_answered_with_a_2xx_error_body_is_not_live(spa):
+    """A-M1: the probe answers a non-live token with ``200 {"error": ...}``; the
+    corrupted-credential reference makes a revoked token read as not live."""
+    pw = _password()
+    lab = spa(pw, invalid_200=True)
+    mgr = _manager(lab, pw)
+    state = _login(mgr, lab)
+    assert state.probe_refusal_digest is not None            # a body differential
+    assert mgr.verify_live(HOST, "user", lab.base) is True
+    lab.revoke_all()
+    assert mgr.verify_live(HOST, "user", lab.base) is False
+
+
+def test_the_password_is_kept_out_of_urls_and_storage(spa, tmp_path, caplog):
+    """A-M2: the app puts the password in its login URL's query and in localStorage,
+    and GETs a URL carrying it: the stored login URL has no query, that GET is never
+    the probe, and neither the store, the log, the state nor the adopted crawl storage
+    holds any form of it."""
+    from fuzzlab.core.store import Store
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    from fuzzlab.tools import browserauth
+    caplog.set_level(logging.DEBUG)
+    pw = _password()
+    lab = spa(pw, leaky=True)
+    store_path = tmp_path / "store.db"
+    store = Store(str(store_path))
+    try:
+        mgr = SessionManager(_creds(pw), scope_hosts=[HOST], store=store,
+                             logger=logging.getLogger("fuzzlab.test"))
+        state = _login(mgr, lab)
+        origins = origin_scope(lab.base)
+        adopted = browserauth.browser_session(
+            mgr, "user", lab.base, in_scope=lambda u: in_origin_scope(u, origins))
+    finally:
+        store.close()
+    assert len(lab.seen("POST", "/rest/user/login?pw=")) == 1        # it did leak it
+    assert state.login_url == lab.base + "rest/user/login"
+    assert "pw=" not in state.protected_probe
+    texts = [caplog.text, repr(state), str(state), json.dumps(state.browser_state),
+             json.dumps(adopted.storage_state), store_path.read_bytes().decode("latin-1"),
+             json.dumps(sorted(mgr.auth_endpoints(HOST)))]
+    for form in secret_forms(pw, USER):
+        for text in texts:
+            assert form.decode() not in text
+    names = {e["name"] for o in adopted.storage_state["origins"] for e in o["localStorage"]}
+    assert "token" in names and "lastpw" not in names
+
+
+def test_a_hashed_password_posted_to_api_users_sends_nothing(spa):
+    """A-S1: the app hashes the password client-side and posts it to ``/api/Users``:
+    not recognisable as the password, still refused (a write to an account endpoint in
+    the window)."""
+    pw = _password()
+    lab = spa(pw, variant="users_sha")
+    with pytest.raises(SessionAuthError, match="account endpoint"):
+        _login(_manager(lab, pw), lab)
+    assert lab.seen("POST") == []
+
+
+def test_a_rotated_token_keeps_the_crawl_submitting(spa, tmp_path):
+    """B-S3: the app replaces its localStorage token every 300 ms: a rotation, re-adopted
+    and still checked with `verify_live`; submitting goes on."""
+    from fuzzlab.tools.spider import LocalSpider
+    pw = _password()
+    lab = spa(pw, rotate=True)
+    mgr = _manager(lab, pw)
+    sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                     engine="playwright", timeout_ms=10000, session_manager=mgr,
+                     identity="user", submit_spa_forms=["notes", "contact"])
+    run_crawl(sp)
+    assert len(lab.seen("POST", "/api/notes")) == 1
+    assert len(lab.seen("POST", "/api/contact")) == 1
+    assert sp.spa_submit_stopped is None
+    token = mgr._state[(HOST, "user")].headers["Authorization"][len("Bearer "):]
+    (entries,) = sp._adopted_storage.values()
+    assert entries["token"] != token                         # rotated and re-adopted
+
+
+def test_a_cleared_token_still_stops_the_crawl_with_rotation_on(spa, tmp_path):
+    from fuzzlab.tools.spider import LocalSpider
+    pw = _password()
+    lab = spa(pw, rotate=True, clear_ls=True)
+    sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                     engine="playwright", timeout_ms=10000,
+                     session_manager=_manager(lab, pw), identity="user",
+                     submit_spa_forms=["notes", "contact"])
+    run_crawl(sp)
+    assert len(lab.seen("POST", "/api/notes")) == 1
+    assert sp.spa_submit_stopped and "localStorage entry 'token'" in sp.spa_submit_stopped
+    assert lab.seen("POST", "/api/contact") == []
+
+
+def test_a_cancelled_login_stops_at_a_checkpoint():
+    """B-M1: the worker's checkpoint (before each navigation, fill and the click)
+    raises once the login is cancelled."""
+    import threading
+    cancelled = threading.Event()
+    browserlogin._alive(cancelled)                           # not cancelled: no raise
+    cancelled.set()
+    with pytest.raises(browserlogin.BrowserLoginError, match="abandoned"):
+        browserlogin._alive(cancelled)

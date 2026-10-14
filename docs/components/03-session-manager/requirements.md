@@ -120,7 +120,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     fails loudly naming the missing browser.
   - **Where it runs (`session/browserlogin.py`).** On a dedicated worker thread (no
     event loop: a sync Playwright never nests inside a crawl's), under the
-    per-(host, identity) login lock, joined with a deadline (120 s). Its own browser
+    per-(host, identity) login lock, joined with a deadline (120 s). *(Review round 1,
+    B-M1/B-M2:)* at the deadline the login is **cancelled**: a shared event makes the
+    gate refuse every request and the worker stop at its next checkpoint (before each
+    navigation, each fill and the click); its `finally` still closes the context,
+    browser and driver, waited for up to 30 s more, else the error says "browser login
+    abandoned; cleanup pending". While a worker for the same (base URL, identity) is
+    alive, a new browser login refuses ("still finishing"). Its own browser
     (the one launch helper, `navguard.chromium_launch_kwargs` over
     `browser_launch_args(login scope)`) and its own context (service workers blocked);
     no passive capture, no spider-DB writer, no HAR, no trace. The context is closed
@@ -134,10 +140,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `_credential_destination_ok` (transport deny first); WebSockets connect only if they
     pass it. The password detector (raw, percent, form `+`, JSON-escaped, base64; in the
     URL, headers and body) only identifies the login request (the first in-scope
-    POST/PUT carrying it after the click). A password-carrying request to an account
-    endpoint (path tokens register, sign-up, password, reset, change; users / accounts
-    without a login token) is aborted before it is sent. Aborted-request logs name the
-    host only.
+    POST/PUT carrying it after the click). Every write (POST, PUT, PATCH, DELETE) in the
+    window to an account endpoint (path tokens register, sign-up, password, reset,
+    change; users / accounts without a login token) is aborted before it is sent,
+    whatever its body (review round 1, A-S1: a client-side hashed password included),
+    and again on a 307/308 hop that keeps the body. Aborted-request logs name the host
+    only.
   - **The form.** On the base page, then on SPA routes (from the app's own scripts and
     links, hash or history mode) and same-origin links whose last segment is a login
     word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
@@ -155,17 +163,27 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     request's own response (a cookie that response set, else a token in its JSON body,
     `exp` read for refresh); a non-2xx answer is a rejected login. Success is FR-SESS-5's
     positive differential on a **protected probe**: an in-scope GET XHR the app made
-    after the click (scope- and destructive-checked, 2xx in the browser) that answers
-    2xx when replayed with the credential and, without it, 401/403, another non-5xx
-    status, or a body that differs while both are stable over two fetches. The probe
-    (and the anonymous body's sha256 when that was 2xx) is kept in memory on the
-    `SessionState`; `verify_live` re-fetches it (2xx, and not the anonymous body), so a
-    revoked token reads as lost. The login request URL and `logout` are auth endpoints
-    (FR-SESS-7); the SPA shell is not.
+    after the click (scope- and destructive-checked, 2xx in the browser, no password in
+    its URL) that answers 2xx when replayed with the credential, and whose answers with
+    **no** credential and with a **corrupted** one (review round 1, A-M1: a bearer with
+    its last character flipped in its high bits, a cookie with a random value under the
+    same name) agree with each other and not with the credentialed one: the same
+    non-2xx, non-5xx status, or the same body, stable over two fetches each, that
+    differs from the (stable) credentialed body. So an endpoint that reacts to the mere
+    presence of a header or cookie (an echo, a header-keyed cache) never confirms. The
+    probe (and the corrupted credential's body sha256 when that was 2xx) is kept in
+    memory on the `SessionState`; `verify_live` re-fetches it (2xx, and not the
+    corrupted-credential body), so a revoked token reads as lost even when the app
+    answers it with a 2xx error body. The login request URL and `logout` are auth
+    endpoints (FR-SESS-7); the SPA shell is not.
   - **What is kept.** `SessionState.browser_state` = the login context's
-    `storage_state()` (cookies and per-origin localStorage) filtered to the login scope,
-    in memory only (never persisted, never in repr, not compared). `SessionState`'s
-    cookies, headers, browser state and probe are `repr=False`.
+    `storage_state()` (cookies and per-origin localStorage) without any entry whose
+    name or value carries the password (review round 1, A-M2), then filtered to the
+    login scope, in memory only (never persisted, never in repr, not compared).
+    `SessionState`'s cookies, headers, browser state and probe are `repr=False`. The
+    login URL is kept without its query or fragment (and the login refuses if its path
+    carries the password); `non_secret_state` persists `login_url` / `logout_url`
+    without query or fragment for every login.
   - **Attempts.** Each browser login is one attempt toward `max_reauth` / `_failures`
     and an isolated copy's `max_logins`; a wrong password stops at the cap.
   - **Residuals (stated).** JWT sessions are stateless: an isolated copy's distinct
@@ -271,7 +289,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - Enforced by: `SessionState.non_secret_state` / `redacted` — `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_session_capture.py::test_adopt_persists_only_non_secret_metadata`, `tests/test_session_detect.py::test_session_state_apply_and_redacted`
   - Enforced by (isolated copies, FR-SESS-17): never persisted, and no credential value in an isolation error or report — `tests/test_login_form_isolation.py::test_the_isolated_session_is_never_persisted`, `tests/test_login_form_isolation.py::test_isolation_errors_and_report_carry_no_secret_values`
   - Enforced by (browser login, FR-SESS-19): a unique password never reaches the spider DB, the store, the logs (with `DEBUG=pw:api`), an exception or a repr; `SessionState`'s secrets are `repr=False` — `tests/test_session_browser_login.py::test_the_password_appears_nowhere`, `tests/test_session_browser_login.py::test_session_state_repr_and_str_hold_no_secret`, `tests/test_session_browser_login.py::test_the_driver_starts_without_debug_logging`, `tests/test_session_browser_login.py::test_a_failure_text_never_holds_the_password`
-  - Enforced by (browser login: where the password may go): `browserlogin.LoginGate`, `navguard.make_route_handler(request_refusal=)` — `tests/test_session_browser_login.py::test_the_password_never_leaves_to_another_port`, `tests/test_session_browser_login.py::test_the_window_gate_refuses_a_non_destination_only_in_the_window`, `tests/test_session_browser_login.py::test_a_login_route_posting_to_api_users_creates_nothing`, `tests/test_session_browser_login.py::test_a_sign_up_button_on_the_login_route_is_never_clicked`, `tests/test_session_browser_login.py::test_register_and_change_password_forms_on_the_login_route_are_never_used`
+  - Enforced by (browser login: where the password may go): `browserlogin.LoginGate`, `navguard.make_route_handler(request_refusal=)` — `tests/test_session_browser_login.py::test_the_password_never_leaves_to_another_port`, `tests/test_session_browser_login.py::test_the_window_gate_refuses_a_non_destination_only_in_the_window`, `tests/test_session_browser_login.py::test_a_login_route_posting_to_api_users_creates_nothing`, `tests/test_session_browser_login.py::test_a_sign_up_button_on_the_login_route_is_never_clicked`, `tests/test_session_browser_login.py::test_register_and_change_password_forms_on_the_login_route_are_never_used`, `tests/test_session_browser_login.py::test_a_hashed_password_posted_to_api_users_sends_nothing`, `tests/test_session_browser_login.py::test_every_write_to_an_account_endpoint_is_refused_in_the_window`, `tests/test_session_browser_login.py::test_a_body_keeping_redirect_to_an_account_endpoint_is_refused_at_the_hop`
+  - Enforced by (an abandoned browser login sends nothing; no second login beside it; review round 1): `browserlogin.run` cancellation, `LoginGate.cancelled`, `_LIVE` — `tests/test_session_browser_login.py::test_an_abandoned_login_never_sends_the_password`, `tests/test_session_browser_login.py::test_a_cancelled_gate_refuses_every_request`, `tests/test_session_browser_login.py::test_a_cancelled_login_stops_at_a_checkpoint`, `tests/test_session_browser_login.py::test_no_second_login_starts_beside_an_abandoned_one`
+  - Enforced by (the password never kept through URLs or storage; review round 1, A-M2): `browserlogin.strip_url`, `drop_secret_values`, `SessionState.non_secret_state` — `tests/test_session_browser_login.py::test_the_password_is_kept_out_of_urls_and_storage`, `tests/test_session_browser_login.py::test_persisted_login_urls_carry_no_query_or_fragment`, `tests/test_session_browser_login.py::test_storage_values_carrying_the_password_are_dropped`
   - Not yet enforced: no test runs the server-form login (`_login`) with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.)
 - **NFR-SESS-portable** Works on interactive desktops, headless hosts, containers,
   and CI via the credential-store backend resolution (D12).

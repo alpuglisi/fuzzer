@@ -228,6 +228,17 @@ class StorageManager:
         self.conn.close()
 
 
+def _storage_rotated(value) -> bool:
+    """A changed localStorage value that is a rotation, not a loss (reviewer B-S3): a
+    non-empty, identifier-like value (`core.redaction.looks_like_identifier`). Cleared,
+    empty, ``"null"`` and ``"undefined"`` (what ``localStorage.setItem(k, null)`` and
+    friends leave) are a loss."""
+    from fuzzlab.core.redaction import looks_like_identifier
+    if value is None or str(value).strip().lower() in ("", "null", "undefined"):
+        return False
+    return looks_like_identifier(str(value))
+
+
 #: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).
 _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
@@ -931,7 +942,8 @@ class LocalSpider:
         localStorage entry the crawl adopted from a browser login must still hold its
         value (read with ``page.evaluate`` on a page of its origin, FR-CRAWL-14), and the
         session manager must still find the session live (`verify_live`; a browser
-        login's protected probe). Returns ``(ok, why)``; anything that cannot be
+        login's protected probe). A localStorage entry changed to another non-empty,
+        identifier-like value is a token rotation: re-adopted, not a loss. Returns ``(ok, why)``; anything that cannot be
         verified is a loss (fail closed)."""
         jar = {c["name"]: c["value"] for c in self._context.cookies()}
         for name, value in self._injected_cookies:
@@ -947,8 +959,15 @@ class LocalSpider:
             except PlaywrightError as exc:
                 return False, f"localStorage could not be read ({type(exc).__name__})"
             for name, value in entries.items():
-                if now.get(name) != value:
-                    return False, f"localStorage entry {name!r} was changed or cleared"
+                current = now.get(name)
+                if current == value:
+                    continue
+                if _storage_rotated(current):
+                    # the app rotated its token (reviewer B-S3): re-adopted; the server
+                    # still has to accept the session (`verify_live` below)
+                    entries[name] = current
+                    continue
+                return False, f"localStorage entry {name!r} was cleared or invalidated"
         verify = getattr(self._session_manager, "verify_live", None)
         if verify is not None:
             host = urlparse(self._auth_base_url).hostname or ""

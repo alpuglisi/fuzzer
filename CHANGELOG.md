@@ -5,6 +5,12 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-14 (SPA login detection: FR-SESS-19, FR-CRAWL-14)
+- **Review round 1 (reviewers A and B):** an abandoned browser login is cancelled at
+  its deadline and can no longer send anything, and no second login starts beside it;
+  the probe differential needs a corrupted credential to answer like no credential;
+  the password is kept out of stored URLs, probes and adopted storage; every write to
+  an account endpoint in the login window is refused; the crawl re-adopts a rotated
+  token instead of stopping (CC-SESS-0021, CC-CRAWL-0022 amended before landing).
 - **Why:** `--identity` runs were impossible on single-page apps: the session manager
   only detected server-rendered login forms and HTTP Basic ("SPA logins are not
   auto-detected"), and most of Juice Shop's remaining in-class flaws sit behind its JSON
