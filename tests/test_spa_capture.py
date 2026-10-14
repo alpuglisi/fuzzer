@@ -72,6 +72,79 @@ def test_nested_sensitive_names_and_identifier_values_are_blanked():
                           "items": [{"id": "", "qty": 2}], "ref": "", "page": "products"}
 
 
+def test_identifier_like_numbers_are_blanked_ordinary_numbers_kept():
+    """Lane S review (B must-fix 1): a card number sent as a JSON number was stored
+    while its form-encoded twin was blanked."""
+    body = {"cardNum": 4716190207394368, "orderRef": 1234567890123456789,
+            "expMonth": 12, "expYear": 2031, "quantity": 3, "price": 12.5, "ok": True,
+            "nested": [{"pan": 5555555555554444}]}
+    assert _doc(body) == {"cardNum": None, "orderRef": None, "expMonth": 12,
+                          "expYear": 2031, "quantity": 3, "price": 12.5, "ok": True,
+                          "nested": [{"pan": None}]}
+
+
+def test_identifier_like_keys_are_replaced_and_their_values_blanked():
+    from fuzzlab.core.redaction import REDACTED_KEY
+    k0, k1 = REDACTED_KEY.format(n=0), REDACTED_KEY.format(n=1)
+    body = {IDENT: {"qty": 1, "note": "SECRETVALUE"}, "items": {"4716190207394368": 2},
+            "ok": 1}
+    doc = _doc(body)
+    assert doc == {k0: {}, "items": {k1: None}, "ok": 1}
+    assert IDENT not in json.dumps(doc) and "4716190207394368" not in json.dumps(doc)
+    form = f"{IDENT}=a&x=1&{IDENT}=b".encode()                  # one name, one placeholder
+    assert _doc(form, FORM) == {k0: "", "x": "1"}
+
+
+def test_json_and_form_bodies_with_the_same_values_are_redacted_alike():
+    """The boundary never depends on how a body was encoded (lane S review)."""
+    fields = [("cardNum", "4716190207394368"), ("ref", IDENT), (IDENT, "x"),
+              ("qty", "3"), ("email", "a@b.invalid"), ("securityAnswer", "Rex"),
+              ("api_key", "SECRETVALUE"), ("expMonth", "12")]
+    as_json = _doc({k: (int(v) if v.isdigit() else v) for k, v in fields})
+    as_form = _doc("&".join(f"{k}={v}" for k, v in fields).encode(), FORM)
+    assert list(as_json) == list(as_form)
+    for key in as_json:
+        blanked_json = as_json[key] in (None, "")
+        assert blanked_json == (as_form[key] == ""), key
+        if not blanked_json:
+            assert str(as_json[key]) == as_form[key], key
+    assert {k for k in as_json if as_json[k] in (None, "")} == \
+        {"cardNum", "ref", "__REDACTED_KEY_0__", "securityAnswer", "api_key"}
+
+
+@pytest.mark.parametrize("name,sensitive", [
+    ("securityAnswer", True), ("security_answer", True), ("SecurityAnswers", True),
+    ("secret_answer", True), ("recoveryAnswer", True), ("recovery-answers", True),
+    ("answer", False), ("answers", False), ("quizAnswer", False), ("answer_security", False),
+    ("securityQuestion", False),
+])
+def test_account_recovery_answers_are_secrets_and_a_bare_answer_is_not(name, sensitive):
+    from fuzzlab.core.redaction import is_sensitive_name
+    assert is_sensitive_name(name) is sensitive
+
+
+def test_a_security_answer_is_blanked_in_json_and_form_bodies():
+    assert _doc({"securityAnswer": "Rex", "answer": "42"}) == \
+        {"securityAnswer": "", "answer": "42"}
+    assert _doc(b"security_answer=Rex&answer=42", FORM) == \
+        {"security_answer": "", "answer": "42"}
+
+
+def test_crawl_stats_are_stored_replaced_and_cleared(tmp_path):
+    from fuzzlab.tools.spider import StorageManager
+    db = str(tmp_path / "s.db")
+    sm = StorageManager(db)
+    try:
+        sm.record_stats({"routes_found": 3, "deletes_blocked": 1})
+        sm.record_stats({"routes_found": 5})
+        assert dict(db_rows(db, "SELECT name, value FROM crawl_stats")) == \
+            {"routes_found": 5, "deletes_blocked": 1}
+        sm.reset()
+        assert db_rows(db, "SELECT * FROM crawl_stats") == []
+    finally:
+        sm.close()
+
+
 def test_a_form_body_is_an_object_last_value_wins_with_secrets_blanked():
     b64 = "dGhpc2lzYXNlY3JldHRva2VuMTIz+/AB"            # base64: judged on its raw form
     body = f"name=bob&api_key=SECRETVALUE&ref={IDENT}&blob={b64}&name=alice&q=a+b".encode()
@@ -390,7 +463,7 @@ def _crawl(spa_lab, tmp_path, **kw):
     from fuzzlab.tools.spider import LocalSpider
     db = str(tmp_path / "s.db")
     sp = LocalSpider(spa_lab.base, max_depth=2, db_name=db, engine="playwright",
-                     timeout_ms=5000, **kw)
+                     timeout_ms=10000, **kw)
     run_crawl(sp)
     return sp, db
 
@@ -489,6 +562,10 @@ def test_a_named_login_route_is_still_submitted_only_unauthenticated(lab, tmp_pa
     (post,) = spa_lab.seen("POST", "/api/Feedbacks")
     assert post[3] == BEARER and f"token={TOKEN}" in post[2]
     assert sp.spa_submit_stopped is None
+    # the crawl context's background DELETEs (the login view polls) are refused even
+    # while the anonymous context is clicking the named login route (lane S review)
+    assert spa_lab.seen("DELETE", "/api/poll") == []
+    assert sp.spa_counts["deletes_blocked"] >= 1
 
 
 def test_an_authenticated_bare_flag_never_submits_in_the_crawls_context(lab, tmp_path):

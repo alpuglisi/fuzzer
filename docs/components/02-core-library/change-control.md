@@ -36,6 +36,27 @@ Newest first.
 - Effectiveness (assessed 2026-10-14): verified offline (unit and real-browser tests;
   the mutation check of lane S's gates kills each redaction mutant). The live Juice
   Shop re-crawl is pending.
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Must-fix 1 (B; A: should-fix): the boundary must not depend on the encoding.*
+    `redact_captured_body` now blanks a non-bool `int`/`float` whose text
+    `looks_like_identifier` to `null` (`{"cardNum": 4716190207394368}` was stored while
+    its form twin was blanked), and replaces an identifier-like key or form name with
+    `REDACTED_KEY` (`__REDACTED_KEY_<n>__`, numbered per body, the same key one name),
+    its value blanked. Tests: a card number, a 19-digit id and a nested PAN become
+    `null` while `expMonth`, `expYear`, `quantity` and `price` are kept; identifier-like
+    keys in JSON and form bodies; a JSON-vs-form parity test over the same values.
+  - *Should-fix 2 (decided under the operator's standing instruction): security
+    answers.* `is_sensitive_name` gains `SENSITIVE_PAIRS` -- the adjacent whole tokens
+    (`security`, `answer`), (`secret`, `answer`), (`recovery`, `answer`), plural
+    folded. The bare token `answer` is deliberately not added (quiz and survey fields).
+    This widens the one predicate every redaction site uses (proxy history, the HTTP
+    recorder, logs, crawled forms): only the safe direction (more is redacted). Tests:
+    `securityAnswer` (JSON) and `security_answer=` (form) blanked; `answer`, `answers`,
+    `quizAnswer`, `answer_security`, `securityQuestion` kept.
+  - FR-CORE-37 updated in place.
+  - Effectiveness of the fixes: each new redaction gate is mutation-checked (killed;
+    46 of 46 over lane S, CC-CRAWL-0017).
 
 ### CC-CORE-0045 — One transaction-word rule (forms phase 3, shared prerequisite) (2026-10-14)
 - Change:

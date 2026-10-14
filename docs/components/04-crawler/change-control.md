@@ -68,6 +68,37 @@ Newest first.
   `test_a_named_login_route_is_still_submitted_only_unauthenticated`). The live Juice
   Shop re-crawl (`--submit-spa-forms login search contact`) is pending (D11: not run
   here).
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Must-fix 1:* the capture boundary no longer depends on the body's encoding
+    (identifier-like numbers and keys; CC-CORE-0047).
+  - *Should-fix 2 (decided under the operator's standing instruction):* security
+    answers are secrets (CC-CORE-0047); the registration body's `securityAnswer` is now
+    blanked when captured.
+  - *Should-fix 4 (decided under the standing instruction): the DELETE window is the
+    clicking context's.* `_delete_ok` (crawl-wide) became `_delete_ok_for`, the one
+    context whose named-route click is in progress; each context's guard passes its
+    own context to `_method_refusal`, so the crawl context's background DELETEs during
+    an unauthenticated context's click are refused. Found while testing it: within the
+    clicking context the window (click plus settle, up to 5 s while the page keeps
+    polling) let a background poller through as often as it polled, so the allowance
+    is now **single use** -- one DELETE per named-route click. Stated residual: that
+    one DELETE may be the clicking context's background request rather than the
+    click's own. Tests: `_method_refusal` with two contexts and the single use; a real
+    browser crawl where the crawl context polls with DELETE every 50 ms while the
+    unauthenticated context clicks the named login route: the server receives none.
+  - *Should-fix 5 (decided under the standing instruction): the counts are stored.*
+    `StorageManager` gains `crawl_stats (name TEXT PRIMARY KEY, value INTEGER)`,
+    cleared on reset; `record_stats` upserts `spa_counts` plus `submit_stopped` (0/1)
+    at the end of every crawl. The log line stays. Tests: upsert and reset; the stored
+    counts equal `spa_counts` after a real crawl.
+  - FR-CRAWL-13 and NFR-CRAWL-safe updated in place.
+  - Effectiveness of the fixes (assessed 2026-10-14): the mutation check re-run over
+    every lane S gate, including the ten new ones (identifier-like numbers, JSON keys,
+    form names, security-answer pairs, transport and `//` routes, non-routes not
+    counted, the DELETE window's context and single use, stored counts): 46 of 46
+    mutants killed. Click and fill timeouts now follow the crawl's per-page timeout
+    (the fixed 2–3 s timed out on a loaded host).
 
 ### CC-CRAWL-0016 — SPA routes, canonical page keys, transport noise, the DELETE rule (forms phase 3, lane S: R) (2026-10-14)
 - Change:
@@ -130,6 +161,19 @@ Newest first.
   loopback hash- and history-mode fake SPAs; mutation check: every route, DELETE,
   script-cap and XHR mutant killed (see CC-CRAWL-0017 for the total). The live Juice
   Shop re-crawl is pending (D11: not run here).
+- Code-review fixes (2026-10-14; reviewers A and B AGREE subject to these; a new
+  commit on top of the first):
+  - *Should-fix 3 (decided under the operator's standing instruction): transport paths
+    are not routes.* `spa.classify_route` returns `ROUTE_TRANSPORT` for a route whose
+    path `is_transport_url` recognises (socket.io's own `{path:'/socket.io'}` client
+    option, `/engine.io`) and `ROUTE_INVALID` for a value starting with `//` (before
+    normalising, which used to strip it to a same-origin path); `spa.NOT_ROUTES`
+    (root, invalid, transport) are skipped **before** counting, so `routes_found`
+    counts routes only. Tests: classification cases; the fake SPA's bundle now carries
+    both values and the real crawl still finds exactly its 14 routes and visits
+    neither.
+  - *Should-fix 5:* the route counts are stored in `crawl_stats` (see CC-CRAWL-0017).
+  - FR-CRAWL-12 updated in place.
 
 ### CC-CRAWL-0015 — The crawler's browser is confined to the crawl scope; a loopback crawl to its origin (BUG-0123) (2026-10-14)
 - Change:

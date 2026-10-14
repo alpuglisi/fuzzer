@@ -111,12 +111,20 @@ def test_one_script_yields_at_most_the_route_cap():
     ("", spa.ROUTE_ROOT), ("/", spa.ROUTE_ROOT),
     ("{path:", spa.ROUTE_INVALID), ("a b", spa.ROUTE_INVALID), ("a//b", spa.ROUTE_INVALID),
     ("http://evil.example/x", spa.ROUTE_INVALID),
+    # lane S review: transport paths and protocol-relative values are not routes
+    ("/socket.io", spa.ROUTE_TRANSPORT), ("/engine.io", spa.ROUTE_TRANSPORT),
+    ("api/socket.io/x", spa.ROUTE_TRANSPORT), ("socket-io-docs", spa.ROUTE_OK),
+    ("//evil.example/x", spa.ROUTE_INVALID), ("#//engine.io", spa.ROUTE_INVALID),
 ])
 def test_routes_are_classified(path, kind):
     assert spa.classify_route(path)[0] == kind
 
 
-@pytest.mark.parametrize("path", ["//evil.example/x", "/\\evil.example", "evil.example"])
+def test_transport_and_protocol_relative_values_are_not_counted_as_routes():
+    assert {spa.ROUTE_TRANSPORT, spa.ROUTE_INVALID, spa.ROUTE_ROOT} == spa.NOT_ROUTES
+
+
+@pytest.mark.parametrize("path", ["/evil.example/x", "/\\evil.example", "evil.example"])
 def test_a_route_url_never_leaves_the_page_origin(path):
     for hash_mode in (True, False):
         url = spa.route_url("http://127.0.0.1:3000/app/", path, hash_mode=hash_mode)
@@ -284,11 +292,18 @@ def test_the_spider_refuses_a_delete_unless_a_named_route_submission_sends_it(tm
     sp = LocalSpider("http://127.0.0.1:8080/", db_name=str(tmp_path / "s.db"),
                      engine="requests")
     try:
-        assert sp._method_refusal("DELETE", "http://127.0.0.1:8080/api/x/1")
-        assert sp._method_refusal("PATCH", "http://127.0.0.1:8080/api/x/1") is None
-        sp._delete_ok = True                         # only inside a named-route submission
-        assert sp._method_refusal("DELETE", "http://127.0.0.1:8080/api/x/1") is None
-        assert sp.spa_counts["deletes_blocked"] == 1
+        url = "http://127.0.0.1:8080/api/x/1"
+        crawl_ctx, anon_ctx = object(), object()
+        assert sp._method_refusal("DELETE", url, context=crawl_ctx)
+        assert sp._method_refusal("PATCH", url, context=crawl_ctx) is None
+        sp._delete_ok_for = anon_ctx           # a named-route click in the anonymous context
+        # lane S review: the crawl context's background DELETE during that click
+        assert sp._method_refusal("DELETE", url, context=crawl_ctx)
+        assert sp._method_refusal("DELETE", url) is not None   # an unknown context
+        assert sp._method_refusal("DELETE", url, context=anon_ctx) is None
+        # single use: a second DELETE in the same click window is refused
+        assert sp._method_refusal("DELETE", url, context=anon_ctx)
+        assert sp.spa_counts["deletes_blocked"] == 4
     finally:
         sp.storage.close()
 
@@ -354,7 +369,7 @@ def _crawl(lab, tmp_path, start=None, **kw):
     from fuzzlab.tools.spider import LocalSpider
     db = str(tmp_path / "s.db")
     sp = LocalSpider(start or lab.base, max_depth=2, db_name=db, engine="playwright",
-                     timeout_ms=5000, **kw)
+                     timeout_ms=10000, **kw)
     run_crawl(sp)
     return sp, db
 
@@ -374,6 +389,13 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert c["routes_skipped_destructive"] == 2            # logout, delete-account
     assert c["routes_skipped_parameterised"] == 2          # product/:id, **
     assert c["routes_visited"] >= 10 and c["scripts_scanned"] == 1
+    # the 14 declared routes; socket.io's {path:'/socket.io'} and a //host value are not
+    # routes: not found, not visited (lane S review)
+    assert c["routes_found"] == 14
+    assert not any("socket.io" in u or "cdn.example" in u for u in urls)
+    # the counts are stored too, not only logged (PA-0110, lane S review)
+    stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
+    assert stats == {**c, "submit_stopped": 0}
     # the bundle was read from the guard's own fetch: main.js requested once per document
     assert len(lab.seen("GET", "/main.js")) == 1
     # a form on a route is recorded

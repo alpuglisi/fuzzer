@@ -1287,7 +1287,7 @@ tracked in the requirements files, not here.
 - **Depends on (components):** `core/`, session manager, target lab.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
   from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,
-  `discovered_requests`).
+  `discovered_requests`, and `crawl_stats`, the last crawl's SPA counts).
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,

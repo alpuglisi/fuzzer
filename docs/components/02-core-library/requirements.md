@@ -332,9 +332,14 @@ plugin registry. It is the layer that makes the store the integration bus.
     value of a repeated name winning), at most `CAPTURE_MAX_BYTES` (64 KiB) and
     `CAPTURE_MAX_DEPTH` (8) deep, is recorded, and only if `redact_body` (fail closed)
     would not omit it. A sensitively named key's value (`is_sensitive_name`) is blanked
-    whatever its shape, and an identifier-like string (`looks_like_identifier`; a form
-    value judged raw) too: a string becomes `""`, a number or boolean `null`, a
-    container empty. Total (never raises).
+    whatever its shape, and an identifier-like value too -- a string (a form value
+    judged raw) or a number judged as its text: a string becomes `""`, a number or
+    boolean `null`, a container empty. An identifier-like key or form name is replaced
+    by `REDACTED_KEY` (`__REDACTED_KEY_<n>__`) and its value blanked. The result never
+    depends on whether the body was JSON or form-encoded. Total (never raises).
+  - `is_sensitive_name` also treats the adjacent token pairs `SENSITIVE_PAIRS`
+    (`security answer`, `secret answer`, `recovery answer`, plural folded) as secrets;
+    a bare `answer` is not one.
   - `redact_url_identifiers(url)`: `redact_url`, then identifier-like query values
     blanked to `name=`, and a SPA-route fragment's query redacted the same way.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that

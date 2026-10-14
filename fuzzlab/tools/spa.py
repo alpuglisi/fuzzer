@@ -120,8 +120,10 @@ def _declaration_at(text: str, i: int) -> str | None:
     return None
 
 
-ROUTE_OK, ROUTE_PARAM, ROUTE_DESTRUCTIVE, ROUTE_ROOT, ROUTE_INVALID = (
-    "ok", "parameterised", "destructive", "root", "invalid")
+ROUTE_OK, ROUTE_PARAM, ROUTE_DESTRUCTIVE, ROUTE_ROOT, ROUTE_INVALID, ROUTE_TRANSPORT = (
+    "ok", "parameterised", "destructive", "root", "invalid", "transport")
+#: Kinds that are not routes at all: never counted as found (lane S review).
+NOT_ROUTES = frozenset({ROUTE_ROOT, ROUTE_INVALID, ROUTE_TRANSPORT})
 
 
 def normalise_route(path: str) -> str:
@@ -132,12 +134,19 @@ def normalise_route(path: str) -> str:
 def classify_route(path: str) -> tuple[str, str | None]:
     """``(kind, reason)``: `ROUTE_OK`, or why the route is not visited --
     parameterised or wildcard (``:id``, ``*``, ``**``), destructive
-    (`core.urls.destructive_reason` on the route path), the root, or not a route."""
+    (`core.urls.destructive_reason` on the route path), the root, a socket.io /
+    engine.io transport path (socket.io's own ``{path:'/socket.io'}`` option,
+    `is_transport_url`), or not a route (a protocol-relative ``//host`` value
+    included)."""
+    if (path or "").lstrip("#!").startswith("//"):
+        return ROUTE_INVALID, None
     route = normalise_route(path)
     if not route:
         return ROUTE_ROOT, None
     if len(route) > MAX_ROUTE_LEN or not set(route) <= _ROUTE_CHARS or "//" in route:
         return ROUTE_INVALID, None
+    if is_transport_url("/" + route):
+        return ROUTE_TRANSPORT, None
     if "*" in route or any(seg.startswith(":") for seg in route.split("/")):
         return ROUTE_PARAM, route
     reason = destructive_reason("/" + route)

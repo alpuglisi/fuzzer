@@ -83,6 +83,14 @@ def is_credential_name(name: str) -> bool:
     return bool(set(name_tokens(name)) & CREDENTIAL_TOKENS)
 
 
+#: Adjacent tokens that together name a secret (``securityAnswer``,
+#: ``recovery_answers``): an account-recovery answer is a credential (forms phase 3,
+#: lane S review). ``answer`` alone is deliberately not one: it names ordinary quiz and
+#: survey fields.
+SENSITIVE_PAIRS = frozenset({("security", "answer"), ("secret", "answer"),
+                             ("recovery", "answer")})
+
+
 def is_sensitive_name(name: str) -> bool:
     """True when the field or parameter ``name`` holds a secret."""
     tokens = [_fold(t) for t in name_tokens(name)]
@@ -90,6 +98,9 @@ def is_sensitive_name(name: str) -> bool:
         return False
     if any(t in SENSITIVE_TOKENS or t.endswith(("sessid", "sessionid")) for t in tokens):
         return True                               # incl. PHPSESSID / JSESSIONID
+    for first, second in zip(tokens, tokens[1:]):  # whole adjacent tokens, plural folded
+        if (first, second[:-1] if second.endswith("s") else second) in SENSITIVE_PAIRS:
+            return True
     if "key" in tokens:
         return len(tokens) == 1 or any(t in _KEY_QUALIFIERS for t in tokens)
     return tokens == ["code"]                     # an OAuth code, only as the whole name
@@ -412,16 +423,55 @@ def _blank(value):
     return None
 
 
-def _blank_tree(value):
-    """``value`` with every sensitively named key's value and every identifier-like
-    string blanked (called on a tree at most `CAPTURE_MAX_DEPTH` deep)."""
+#: An identifier-like key (a card number, a session id used as a map key) is replaced by
+#: this, numbered per body, and its value blanked (lane S review, reviewer B must-fix 1).
+REDACTED_KEY = "__REDACTED_KEY_{n}__"
+
+
+class _KeyNamer:
+    """Replaces identifier-like keys of one body; the same key gets the same name."""
+
+    def __init__(self):
+        self.names: dict[str, str] = {}
+
+    def __call__(self, key: str) -> str | None:
+        """The placeholder for ``key`` when it looks like an identifier, else None."""
+        if not looks_like_identifier(key):
+            return None
+        if key not in self.names:
+            self.names[key] = REDACTED_KEY.format(n=len(self.names))
+        return self.names[key]
+
+
+def _identifier_number(value) -> bool:
+    """A JSON number whose digits look like an identifier (a card number, a 19-digit
+    id): judged as its text, so a body's encoding never decides (reviewer B)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and looks_like_identifier(str(value)))
+
+
+def _blank_tree(value, namer: _KeyNamer):
+    """``value`` with every sensitively named key's value, every identifier-like string
+    or number blanked, and every identifier-like key replaced (its value blanked)
+    (called on a tree at most `CAPTURE_MAX_DEPTH` deep)."""
     if isinstance(value, dict):
-        return {k: (_blank(v) if is_sensitive_name(str(k)) else _blank_tree(v))
-                for k, v in value.items()}
+        out = {}
+        for k, v in value.items():
+            key = str(k)
+            placeholder = namer(key)
+            if placeholder is not None:
+                out[placeholder] = _blank(v)
+            elif is_sensitive_name(key):
+                out[k] = _blank(v)
+            else:
+                out[k] = _blank_tree(v, namer)
+        return out
     if isinstance(value, list):
-        return [_blank_tree(v) for v in value]
+        return [_blank_tree(v, namer) for v in value]
     if isinstance(value, str) and looks_like_identifier(value):
         return ""
+    if _identifier_number(value):
+        return None
     return value
 
 
@@ -450,10 +500,13 @@ def redact_captured_body(body: bytes, content_type: str):
     `CAPTURE_MAX_BYTES` and `CAPTURE_MAX_DEPTH` deep. It first passes `redact_body` (the
     storage boundary, fail closed): a body that boundary would omit is not recorded.
     Then every sensitively named key's value (`is_sensitive_name`; passwords, tokens,
-    sessions) is blanked whatever its shape, and every identifier-like string value
-    (`looks_like_identifier`, a form value judged on its raw, percent-decoded form) is
-    blanked: a string becomes ``""``, a number or boolean ``null``, a container empty.
-    Total: it never raises."""
+    sessions) is blanked whatever its shape, and every identifier-like value is blanked
+    -- a string (a form value judged on its raw, percent-decoded form) or a number
+    judged as its text, so ``4716190207394368`` is blanked as a JSON number exactly as
+    it is in a form: a string becomes ``""``, a number or boolean ``null``, a container
+    empty. An identifier-like **key** (or form name) is replaced by `REDACTED_KEY`
+    (numbered per body) and its value blanked. The result never depends on whether the
+    body was JSON or form-encoded (lane S review). Total: it never raises."""
     from urllib.parse import unquote
     try:
         if not body:
@@ -465,6 +518,7 @@ def redact_captured_body(body: bytes, content_type: str):
             return None, "not a JSON or form-encoded body"
         if redact_body(body, content_type).startswith(b"__BODY_OMITTED__"):
             return None, "body the storage boundary omits"
+        namer = _KeyNamer()
         if kind == "form":
             doc = {}
             for part in body.decode("latin-1").split("&"):
@@ -472,7 +526,10 @@ def redact_captured_body(body: bytes, content_type: str):
                     continue
                 name, _eq, raw = part.partition("=")
                 key = unquote_plus(name)
-                if is_sensitive_name(key) or looks_like_identifier(unquote(raw)):
+                placeholder = namer(unquote(name))
+                if placeholder is not None:
+                    doc[placeholder] = ""
+                elif is_sensitive_name(key) or looks_like_identifier(unquote(raw)):
                     doc[key] = ""
                 else:
                     doc[key] = unquote_plus(raw)
@@ -485,6 +542,6 @@ def redact_captured_body(body: bytes, content_type: str):
             return None, "a JSON body that is not an object or array"
         if not _container_depth_ok(doc, CAPTURE_MAX_DEPTH):
             return None, "body nested too deep"
-        return _blank_tree(doc), None
+        return _blank_tree(doc, namer), None
     except Exception:                       # total (PA-0096): never raises, never stores
         return None, "redaction failed"

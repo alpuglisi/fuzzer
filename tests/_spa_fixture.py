@@ -47,6 +47,10 @@ const routes = [
   {path:'product/:id', component: 'Product'},
   {path:'**', component: 'NotFound'}
 ];
+// not routes: socket.io's own client option and a protocol-relative URL (never
+// counted as found, never visited)
+const io = {path:'/socket.io', transports: ['polling']};
+const cdn = {path:'//cdn.example/app'};
 const OTHER = __OTHER__;
 const IDENT = '__IDENT__';
 const json = (url, method, body, headers) => fetch(url, {method: method,
@@ -59,6 +63,13 @@ const views = {
   'login': {html: "<div id='lf'><input id='email' type='text'>" +
       "<input id='password' type='password'><button id='loginButton'>Log in</button></div>",
     init: () => { mark('login');
+      // background polling with DELETE, only where the session cookie is (the
+      // authenticated crawl's own context): never allowed through, even while another
+      // context is clicking a named route's button
+      if (document.cookie.split('; ').some(c => c.startsWith('token=') && c.length > 6))
+        { let polls = 0;                      // bounded: 120 x 100 ms
+          poller = setInterval(() => { if (++polls > 120) return;
+            fetch('/api/poll/1', {method: 'DELETE'}).catch(() => {}); }, 100); }
       document.getElementById('loginButton').onclick = () => {
         fetch('/rest/user/login', {method: 'POST', headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({email: document.getElementById('email').value,
@@ -112,12 +123,17 @@ const views = {
   'delete-account': {html: '<p>gone</p>', init: () => mark('D')},
   'product/:id': {html: '<p>product</p>', init: () => mark('P')},
 };
+let poller = null;
 function current() { return location.hash.replace(/^#!?\/?/, '').split('?')[0]; }
 function render() {
+  if (poller) { clearInterval(poller); poller = null; }
   const v = views[current()] || {html: '<p>not found</p>'};
-  document.getElementById('app').innerHTML = v.html + `__FOOTER__`;
+  // the login view has no footer form, so a named login route's only click is the
+  // anonymous context's (the cross-context DELETE test)
+  document.getElementById('app').innerHTML = v.html +
+    (current() === 'login' ? '' : `__FOOTER__`);
   const q = document.querySelector('.q button');
-  q.onclick = () => json('/api/questions', 'POST', {question:
+  if (q) q.onclick = () => json('/api/questions', 'POST', {question:
     document.querySelector('.q input').value});
   if (v.init) v.init();
 }

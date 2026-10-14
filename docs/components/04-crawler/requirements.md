@@ -89,11 +89,14 @@ fuzzer.
     `<Route path="/x"`.
   - **Routes.** Parameterised and wildcard routes (`:id`, `*`, `**`) are skipped (a
     stated gap); a route whose path `destructive_reason` flags (`logout`,
-    `delete-account`, …) is never visited. Hash mode (`origin/#/x`, or `#!/x`) when the
+    `delete-account`, …) is never visited. A socket.io / engine.io transport path
+    (socket.io's own `{path:'/socket.io'}` option) and a value starting with `//` are
+    not routes at all: neither visited nor counted. Hash mode (`origin/#/x`, or `#!/x`) when the
     page or its links use it, else history mode under the page's `<base>` or the start
     URL's directory. The counts of routes visited (a route page actually rendered),
     skipped as destructive and skipped as parameterised are kept
-    (`LocalSpider.spa_counts`) and reported in the crawl summary (PA-0110).
+    (`LocalSpider.spa_counts`), stored in the spider table `crawl_stats` and reported
+    in the crawl summary (PA-0110).
   - **Pages and keys.** Hash routes are distinct pages: a fragment starting with `/` or
     `!/` is kept (its own query redacted, `core.redaction.redact_spa_fragment`), any
     other fragment dropped. Pages dedupe on `spa.visit_key` (canonical origin, path,
@@ -105,8 +108,10 @@ fuzzer.
     URL is stored with sensitive and identifier-like query values redacted
     (`core.redaction.redact_url_identifiers`).
   - **DELETE.** The crawl guard aborts every browser-initiated `DELETE` unless it comes
-    from a `--submit-spa-forms` submission on a route the operator named; each abort is
-    counted and reported. Stated residual (reviewer A): loading a route can make the
+    from a `--submit-spa-forms` submission on a route the operator named, from the
+    browser context doing that click, at most once per click; each abort is counted
+    and reported. Stated residual: that one allowed DELETE may be the clicking
+    context's own background request rather than the click's. Stated residual (reviewer A): loading a route can make the
     app send its own non-DELETE writes (a POST/PUT/PATCH on page load); the guard aborts
     only DELETE and destructive-token URLs. Route children are not joined to their
     parent's path (a nested route may be visited at the wrong URL: harmless, a stated
@@ -118,8 +123,11 @@ fuzzer.
     is JSON or form-encoded is recorded in the spider table `discovered_requests`
     (contract in §5). Redaction is only `core.redaction` (FR-CORE-37,
     `StorageManager.record_request`, the one write site, in the PA-0100 producer
-    guard): sensitive names and identifier-like values blanked (a string to `""`, a
-    number or boolean to `null`, a container empty), password values blanked, bodies
+    guard): sensitive names (security answers included) and identifier-like values --
+    strings, and numbers judged as their text -- blanked (a string to `""`, a number or
+    boolean to `null`, a container empty), identifier-like keys replaced by a
+    placeholder, password values blanked, the same whether the body was JSON or
+    form-encoded, bodies
     over 64 KiB or nested deeper than 8 not recorded, fail closed. Request headers and
     cookies are never recorded; socket.io / engine.io requests are excluded.
     Non-sensitive captured values (e.g. a logged-in e-mail address) are kept and are
@@ -146,7 +154,8 @@ fuzzer.
     authenticated context only when its route is named. After each such submission the
     crawl's session is re-checked (every injected cookie still holds its value, and the
     session manager's `verify_live`); on loss, or when it cannot be verified, submitting
-    stops for the rest of the crawl and the reason is reported.
+    stops for the rest of the crawl and the reason is reported. The submission counts
+    and whether submitting stopped (`submit_stopped`) are stored in `crawl_stats`.
   - Stated risk: a submission changes lab state (a feedback row, a failed login, a
     registration attempt with filler data). Lab only, default off.
 
@@ -173,7 +182,7 @@ fuzzer.
   transaction, credential-change, 2FA-only or file form, a password form only in a fresh
   unauthenticated context, and in an authenticated crawl the crawl's own context only on
   a named route, stopping when the session is lost (FR-CRAWL-13).
-  - Enforced by (DELETE and destructive SPA routes): `navguard.make_route_handler(method_refusal=)`, `LocalSpider._method_refusal`, `spa.classify_route`, `spa.route_destructive_reason` — `tests/test_spa_routes.py::test_the_guard_aborts_a_refused_method_before_any_fetch`, `tests/test_spa_routes.py::test_the_spider_refuses_a_delete_unless_a_named_route_submission_sends_it`, `tests/test_spa_routes.py::test_a_browser_initiated_delete_is_aborted_and_counted`, `tests/test_spa_routes.py::test_a_delete_is_sent_only_from_a_named_routes_submission`, `tests/test_spa_routes.py::test_routes_are_classified`, `tests/test_spa_routes.py::test_a_hash_route_is_destructive_by_its_fragment`, `tests/test_spa_routes.py::test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages`, `tests/test_spa_routes.py::test_history_mode_routes_are_paths_under_the_base`
+  - Enforced by (DELETE and destructive SPA routes): `navguard.make_route_handler(method_refusal=)`, `LocalSpider._method_refusal`, `spa.classify_route`, `spa.route_destructive_reason` — `tests/test_spa_routes.py::test_the_guard_aborts_a_refused_method_before_any_fetch`, `tests/test_spa_routes.py::test_the_spider_refuses_a_delete_unless_a_named_route_submission_sends_it`, `tests/test_spa_capture.py::test_a_named_login_route_is_still_submitted_only_unauthenticated`, `tests/test_spa_routes.py::test_a_browser_initiated_delete_is_aborted_and_counted`, `tests/test_spa_routes.py::test_a_delete_is_sent_only_from_a_named_routes_submission`, `tests/test_spa_routes.py::test_routes_are_classified`, `tests/test_spa_routes.py::test_a_hash_route_is_destructive_by_its_fragment`, `tests/test_spa_routes.py::test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages`, `tests/test_spa_routes.py::test_history_mode_routes_are_paths_under_the_base`
   - Enforced by (SPA form submission): `spa.form_refusal`, `LocalSpider._submit_spa_forms` / `_submit_anonymously` / `_session_intact` — `tests/test_spa_capture.py::test_submission_is_off_by_default`, `tests/test_spa_capture.py::test_each_refusal`, `tests/test_spa_capture.py::test_each_transaction_word_is_refused_on_the_route_and_on_the_label`, `tests/test_spa_capture.py::test_a_route_not_named_is_refused_when_routes_are_named`, `tests/test_spa_capture.py::test_bare_submission_in_an_anonymous_crawl`, `tests/test_spa_capture.py::test_a_password_form_is_submitted_only_in_a_fresh_unauthenticated_context`, `tests/test_spa_capture.py::test_a_named_login_route_is_still_submitted_only_unauthenticated`, `tests/test_spa_capture.py::test_an_authenticated_bare_flag_never_submits_in_the_crawls_context`, `tests/test_spa_capture.py::test_a_named_route_is_submitted_authenticated_and_session_loss_stops_it`, `tests/test_spa_capture.py::test_the_session_check_fails_closed`, `tests/test_spa_capture.py::test_submissions_are_capped_and_the_cap_is_reported`
   - Enforced by (scope of SPA traffic, both contexts): `tests/test_spa_capture.py::test_bare_submission_in_an_anonymous_crawl`, `tests/test_spa_routes.py::test_cross_origin_and_oversized_scripts_are_never_read`
   - Enforced by (no request body sent twice by the guard): `tests/test_browser_scope.py::test_a_redirected_post_navigation_is_submitted_once`
@@ -198,7 +207,9 @@ pipeline.
 Spider DB (the spider's own schema, `StorageManager`; no store migration):
 `discovered_pages` (`source` is `link`, `xhr`, `redirect`, `form` or, since FR-CRAWL-12,
 `spa-route`; a SPA route page's `url` keeps its `#/…` fragment), `discovered_forms`,
-`selector_verdicts`, and, since FR-CRAWL-13, **`discovered_requests`** — the contract
+`selector_verdicts`, `crawl_stats (name TEXT PRIMARY KEY, value INTEGER)` (the last
+crawl's SPA counts and `submit_stopped`), and, since FR-CRAWL-13,
+**`discovered_requests`** — the contract
 the importer reads (lane J, forms phase 3):
 `(id, page_url, method, url, content_type, body_json TEXT, source TEXT ('passive' |
 'submit'), signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a

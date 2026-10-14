@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3, lane S: code-review fixes)
+- **Why:** the lane S code review (reviewers A and B) found the capture boundary
+  depended on the body's encoding, security answers were not secrets, socket.io's
+  `{path:'/socket.io'}` option became a route, the DELETE allowance was crawl-wide,
+  and the SPA counts were only logged.
+- **What:** identifier-like numbers and keys are blanked whatever the encoding;
+  `security`/`secret`/`recovery` + `answer` name pairs are sensitive (`answer` alone is
+  not); transport and `//` values are not routes; a DELETE is allowed only from the
+  clicking context, once per click; counts are stored in the spider table
+  `crawl_stats`. CC-CORE-0047, CC-CRAWL-0016, CC-CRAWL-0017 (FR-CORE-37, FR-CRAWL-12,
+  FR-CRAWL-13 updated).
+
 ## 2026-10-14 (Forms phase 3, lane S: SPA routes, request capture, SPA form submission)
 - **Why:** the live Juice Shop crawl collapsed every Angular hash route into `/` and saw
   no form; its real inputs are JSON APIs the crawler never recorded; `localhost` and

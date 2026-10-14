@@ -91,6 +91,15 @@ class StorageManager:
                 signature TEXT UNIQUE
             )
         ''')
+        # What the crawl's SPA features did (FR-CRAWL-12/13): `LocalSpider.spa_counts`
+        # plus `submit_stopped` (0/1), written at the end of each crawl so reports can
+        # read them (PA-0110; lane S review).
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crawl_stats (
+                name TEXT PRIMARY KEY,
+                value INTEGER
+            )
+        ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -110,8 +119,18 @@ class StorageManager:
         self.cursor.execute('DELETE FROM discovered_forms')
         self.cursor.execute('DELETE FROM selector_verdicts')
         self.cursor.execute('DELETE FROM discovered_requests')
+        self.cursor.execute('DELETE FROM crawl_stats')
         self.conn.commit()
         self._keys = set()
+
+    def record_stats(self, counts):
+        """Store the crawl's counts (``name -> int``), replacing earlier values of the
+        same names (a resumed crawl records its own run's counts)."""
+        self.cursor.executemany(
+            "INSERT INTO crawl_stats (name, value) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+            [(str(k), int(v)) for k, v in counts.items()])
+        self.conn.commit()
 
     def record_request(self, page_url, method, url, content_type, body, source):
         """Store one request the page made (FR-CRAWL-13), redacted here, at the write
@@ -318,7 +337,8 @@ class LocalSpider:
         self._current_url = start_url
         self._capture_source = "passive"
         self._capture_page = None
-        self._delete_ok = False
+        # the one browser context a named-route submission is clicking in, or None
+        self._delete_ok_for = None
         self._submitted_sigs: set = set()
         self._inflight: dict = {}
         #: Why SPA form submission stopped early (session lost), or None (FR-CRAWL-13).
@@ -410,7 +430,8 @@ class LocalSpider:
         guard_page(context, allow=self._allow,
                    on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
                    in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope,
-                   method_refusal=self._method_refusal,
+                   method_refusal=functools.partial(self._method_refusal,
+                                                    context=context),
                    observe=functools.partial(self._observe,
                                              scripts=scripts and self._spa_on))
 
@@ -438,11 +459,18 @@ class LocalSpider:
             page.wait_for_timeout(100)
             quiet = quiet + 1 if self._inflight.get(id(page), 0) == 0 else 0
 
-    def _method_refusal(self, method, url):
+    def _method_refusal(self, method, url, context=None):
         """FR-CRAWL-12 (reviewer A6): the crawl never deletes. A browser-initiated DELETE
         is aborted unless it comes from a submission on a route the operator named with
-        ``--submit-spa-forms``; each abort is counted."""
-        if method != "DELETE" or self._delete_ok:
+        ``--submit-spa-forms``, **from the context doing that click** (``context`` is the
+        context whose guard asks; the crawl context's background requests during an
+        unauthenticated context's click are still refused, lane S review), and **once per
+        click** (a button deletes one thing; a background poller in the clicking context
+        gets at most that one); each abort is counted."""
+        if method != "DELETE":
+            return None
+        if self._delete_ok_for is not None and context is self._delete_ok_for:
+            self._delete_ok_for = None                   # single use
             return None
         self.spa_counts["deletes_blocked"] += 1
         return "browser-initiated DELETE"
@@ -714,7 +742,7 @@ class LocalSpider:
         more = []
         for path in routes:
             kind, reason = spa.classify_route(path)
-            if kind in (spa.ROUTE_ROOT, spa.ROUTE_INVALID):
+            if kind in spa.NOT_ROUTES:                       # not counted as found
                 continue
             name = spa.normalise_route(path)
             if name in self._route_names:
@@ -777,7 +805,8 @@ class LocalSpider:
             if anonymous:
                 self._submit_anonymously(page_url, sig, explicit)
                 continue
-            if self._fill_and_click(self._page, form, page_url, explicit) and \
+            if self._fill_and_click(self._page, self._context, form, page_url,
+                                    explicit) and \
                     self._authenticated:
                 intact, why = self._session_intact()
                 if not intact:
@@ -787,21 +816,23 @@ class LocalSpider:
                                     f"{self.spa_submit_stopped}")
                     return
 
-    def _fill_and_click(self, page, form, page_url, explicit):
+    def _fill_and_click(self, page, context, form, page_url, explicit):
         """Fill ``form``'s typed controls with our fillers and click its button once.
-        Returns True when the click happened (counted)."""
+        Returns True when the click happened (counted). A DELETE it causes is allowed
+        only on a named route (``explicit``) and only from ``context``."""
         for (name, kind), cid in zip(form["controls"], form["ids"]):
             if not spa.fillable(kind) or (kind != "password"
                                           and spa.sensitive_control(name)):
                 continue
             try:
-                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind), timeout=2000)
+                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind),
+                          timeout=self.timeout_ms)
             except PlaywrightError:
                 pass                                    # e.g. a range or read-only input
         button = form.get("button_id")
         selector = f'[data-fuzzlab-id="{button}"]'
         try:
-            if not button or not page.is_enabled(selector, timeout=2000):
+            if not button or not page.is_enabled(selector, timeout=self.timeout_ms):
                 self.spa_counts["forms_not_submittable"] += 1
                 logging.info(f"SPA form on {page_url} not submittable (no enabled button)")
                 return False
@@ -809,9 +840,9 @@ class LocalSpider:
             self.spa_counts["forms_not_submittable"] += 1
             return False
         self._capture_source, self._capture_page = "submit", page_url
-        self._delete_ok = explicit
+        self._delete_ok_for = context if explicit else None
         try:
-            page.click(selector, timeout=3000)
+            page.click(selector, timeout=self.timeout_ms)
             self.spa_counts["forms_submitted"] += 1
             logging.info(f"submitted the SPA form {form.get('button')!r} on {page_url}")
             self._settle(page)
@@ -823,7 +854,7 @@ class LocalSpider:
             return False
         finally:
             self._capture_source, self._capture_page = "passive", None
-            self._delete_ok = False
+            self._delete_ok_for = None
 
     def _submit_anonymously(self, page_url, sig, explicit):
         """Load the route in a fresh unauthenticated context (same browser, so the same
@@ -844,7 +875,7 @@ class LocalSpider:
                 logging.info(f"SPA form on {page_url} not found in an unauthenticated "
                              f"context: not submitted")
                 return
-            self._fill_and_click(page, match, page_url, explicit)
+            self._fill_and_click(page, context, match, page_url, explicit)
         except PlaywrightError as exc:
             self.spa_counts["forms_not_submittable"] += 1
             logging.info(f"unauthenticated submission on {page_url} failed "
@@ -1040,6 +1071,8 @@ class LocalSpider:
                              f"out-of-scope browser request(s): {hosts} (BUG-0123).")
             for line in self.spa_summary():
                 logging.info(line)
+            self.storage.record_stats({**self.spa_counts,
+                                       "submit_stopped": int(bool(self.spa_submit_stopped))})
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 
