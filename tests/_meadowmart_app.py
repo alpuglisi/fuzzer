@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.labgen.emitters.node_express import (
     MEADOWMART_MANIFESTS,
     RUNTIME_SCAFFOLD_FILES,
@@ -48,9 +49,9 @@ def npm_registry_reachable(probe_dir: Path) -> bool:
         json.dumps({"name": "probe", "version": "1.0.0", "private": True}), encoding="utf-8"
     )
     try:
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["npm", "install", "--no-audit", "--no-fund", "express@4.22.3"],
-            cwd=probe_dir, capture_output=True, text=True, timeout=60,
+            cwd=probe_dir, timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -84,8 +85,8 @@ def install(root: Path, probe_dir: Path) -> None:
         pytest.skip("node/npm CLI not available on this build host (PA-0005 pattern)")
     if not npm_registry_reachable(probe_dir):
         pytest.skip("npm registry not reachable from this sandbox")
-    result = subprocess.run(
-        ["npm", "install", "--no-audit", "--no-fund"], cwd=root, capture_output=True, text=True, timeout=120,
+    result = procutil.run_bounded(
+        ["npm", "install", "--no-audit", "--no-fund"], cwd=root, timeout=120,
     )
     assert result.returncode == 0, f"npm install failed:\n{result.stdout}\n{result.stderr}"
 
@@ -100,10 +101,11 @@ def _free_port() -> int:
 def boot(root: Path) -> Iterator[str]:
     """Run `node app.js` on a free loopback port; yield its base URL."""
     port = _free_port()
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port)},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
+    proc = server.proc
     try:
         deadline = time.monotonic() + 15
         while True:
@@ -116,9 +118,4 @@ def boot(root: Path) -> Iterator[str]:
                 time.sleep(0.1)
         yield f"http://127.0.0.1:{port}"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        procutil.stop_server(server)

@@ -386,6 +386,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from fuzzlab.harness.multitarget import TargetSpec, run_targets, transfer_summary
 from fuzzlab.labels import contract
@@ -891,9 +892,9 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(f.content)
 
-    package_result = subprocess.run(
+    package_result = procutil.run_bounded(
         ["mvn", "-q", "-B", "package", "-DskipTests"],
-        cwd=root, capture_output=True, text=True, timeout=_BUILD_TIMEOUT_S,
+        cwd=root, timeout=_BUILD_TIMEOUT_S,
     )
     assert package_result.returncode == 0, (
         f"mvn package failed:\nstdout={package_result.stdout}\nstderr={package_result.stderr}"
@@ -901,10 +902,11 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
 
     port = _free_port()
     jar_path = root / "target" / "trackernest.jar"
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         ["java", "-jar", str(jar_path), f"--server.port={port}"],
         cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
+    proc = server.proc
     listener = OobListener()
     listener.start()
     try:
@@ -946,9 +948,4 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        procutil.stop_server(server)

@@ -22,6 +22,7 @@ SAFETY = {
     "NFR-PROXY-safe", "NFR-PROXY-dry-run", "NFR-PLUG-safe", "NFR-UI-localhost",
     "NFR-UI-read-only", "NFR-UI-redacted", "NFR-UI-no-auto-run",
     "NFR-UI-control-plane-hardened",
+    "NFR-LAB-cleanup",  # BUG-0125: leaked lab servers OOM-killed the host
 }
 #: Everything else, with the reason it is not a safety guarantee.
 NOT_SAFETY = {

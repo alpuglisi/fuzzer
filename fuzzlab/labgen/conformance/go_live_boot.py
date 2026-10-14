@@ -58,6 +58,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from fuzzlab import procutil
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.schema import Cell
 
@@ -123,10 +124,8 @@ def _go_module_proxy_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
         return False
     try:
         with tempfile.TemporaryDirectory(prefix="fuzzlab-go-net-http-probe-") as scratch:
-            result = subprocess.run(
+            result = procutil.run_bounded(
                 ["go", "list", "-m", "-versions", _PROBE_MODULE],
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=scratch,
                 env=_go_env(),
@@ -195,7 +194,7 @@ def _find_free_port() -> int:
 
 
 def _run(cmd: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    return procutil.run_bounded(cmd, cwd=cwd, timeout=timeout)
 
 
 class GoLiveBootHarness:
@@ -223,6 +222,7 @@ class GoLiveBootHarness:
         self._app_dir: Path | None = None
         self._binary_path: Path | None = None
         self._proc: subprocess.Popen | None = None
+        self._server: procutil.ServerHandle | None = None
         self._port: int | None = None
 
     # -- assembly ----------------------------------------------------------
@@ -262,7 +262,7 @@ class GoLiveBootHarness:
         self._port = _find_free_port()
         proc_env = _go_env()
         proc_env["PORT"] = str(self._port)
-        self._proc = subprocess.Popen(
+        self._server = procutil.start_server(
             [str(self._binary_path)],
             cwd=self._app_dir,
             stdout=subprocess.PIPE,
@@ -270,6 +270,7 @@ class GoLiveBootHarness:
             text=True,
             env=proc_env,
         )
+        self._proc = self._server.proc
         self._wait_for_boot()
 
     def _wait_for_boot(self) -> None:
@@ -346,20 +347,28 @@ class GoLiveBootHarness:
     # -- lifecycle ------------------------------------------------------------
 
     def close(self) -> None:
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-                self._proc.wait(timeout=5.0)
-        self._proc = None
+        """Stop the server's whole process tree (BUG-0125: ``procutil.stop_server``
+        signals the server's supervisor, which stops its process group and every
+        re-parented descendant, then reaps) and remove the temp tree. Idempotent; the
+        temp tree is removed even if the stop raises."""
+        server, self._server, self._proc = self._server, None, None
+        try:
+            if server is not None:
+                procutil.stop_server(server)
+        finally:
+            self._cleanup_tmp()
+
+    def _cleanup_tmp(self) -> None:
         if self._tmp is not None:
             self._tmp.cleanup()
             self._tmp = None
 
     def __enter__(self) -> "GoLiveBootHarness":
-        self.build()
+        try:
+            self.build()
+        except BaseException:
+            self.close()  # BUG-0125: __exit__ never runs when __enter__ raises
+            raise
         return self
 
     def __exit__(self, *exc_info: object) -> None:

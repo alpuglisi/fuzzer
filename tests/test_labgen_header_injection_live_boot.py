@@ -4,7 +4,7 @@ final designed cell).
 
 Real, on-host integration test: assembles a real Laravel 13 project from
 the checked-in skeleton plus this manifest's real `LaravelEmitter` output,
-runs a real `composer install`, boots a real `php artisan serve`, and sends
+runs a real `composer install`, boots a real `php -S` server (what `php artisan serve` runs; BUG-0125), and sends
 real HTTP requests against it -- one cell per harness instance, mirroring
 `ssrf_huddlehub_sample.yaml`'s own twin-pair precedent
 (`test_labgen_ssrf_live_boot.py`).
@@ -19,9 +19,9 @@ var test hygiene: never a bare `os.environ[...] =`, which would leak into
 every other test in the process; `monkeypatch` undoes it automatically at
 teardown). `HUDDLEHUB_WEBHOOK_URL` is set *before* the harness's context
 manager is entered (before its `composer install`/`artisan key:generate`/
-`artisan serve` subprocesses are started), so each of those subprocesses
+`php -S` subprocesses are started), so each of those subprocesses
 inherits it as a real process environment variable -- `LiveBootHarness._run`
-and its `artisan serve` `Popen` call both pass no explicit `env=`, so both
+and its `php -S` `procutil.start_server` call both pass no explicit `env=`, so both
 inherit the calling test process's environment at call time; the generated
 PHP's own `env('HUDDLEHUB_WEBHOOK_URL', ...)` call falls through to that
 inherited value because the harness's own generated `.env` file never

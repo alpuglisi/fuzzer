@@ -1534,6 +1534,35 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      cannot pass, or carries a stated second form** (here: a seeded canary for
      containment allowlists, sent only after the plain one fails). (from BUG-0124)
 
+- **PA-0125** — Strengthens `PA-0012` (teardown is bounded) and `PA-0035` (every
+  subprocess step is bounded) from *bounded* to *complete*, after BUG-0125: 429 orphaned
+  `php -S` servers (a stopped `artisan serve`'s child), `go run` binaries and a puma
+  (~14 GB) OOM-killed the suite. Both rules were followed by the leaking code.
+  1. **A process the toolkit or its tests start owns its whole process tree,
+     grandchildren included:** started in its own session under a supervisor tied to
+     its owner's life (`fuzzlab.procutil.start_server`; `run_bounded` for a tool that
+     forks), stopped as a group, identity-checked (pidfd plus `/proc` start time),
+     never killed by name or pattern.
+  2. **A real-process test proves nothing survives `close()` or the owner's death** --
+     the port refuses and no process remains in the server's group or session, and an
+     owner SIGKILLed with a grandchild-forking server leaves nothing.
+  3. **Enforced, not remembered:** `tests/test_procutil_guard.py` fails on any spawn
+     outside `procutil` (AST, proven on synthetic offenders), and the session-end
+     safety net (`tests/_leak_guard.py`) stops any registered server still live and
+     fails the run, naming argv, pid and age.
+  4. **A "bounded" stop is checked for completeness:** a timeout, `terminate()` or
+     `kill()` on one pid is not a stop of a launcher (`artisan`, `go run`,
+     `bundle exec`, `mvn`, `npm`).
+  5. **An id is trusted only while its leader pid is held** (review round 1): a process
+     group or session id may be signalled only while its leader pid is still held --
+     alive, or a zombie this code has not yet reaped, with the recorded start time. Pids
+     wrap within minutes (pid_max 32768 here). So a supervisor reaps its server only
+     after its last `killpg`, an owner sweeps a supervisor's session before reaping it
+     (never through a runtime that reaps for it, e.g. asyncio's child watcher), a group
+     whose leader is gone is signalled only inside a still-held session, and an unknown
+     start time (0) matches nothing. Each such kill path has a test that fakes a reused
+     id and shows nothing is signalled. (from BUG-0125)
+
 - **PA-0126** — Strengthens `PA-0035` (probe the real operation) and `PA-0123` (browser
   confinement), after BUG-0126: the M6 browser executor had never run against a real
   browser. It ignored the operator's Chromium (its launch configuration was a third

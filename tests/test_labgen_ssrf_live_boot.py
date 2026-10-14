@@ -3,7 +3,7 @@ cell (`CC-LAB-0134`, Huddle Hub -- category 3's Slack pick).
 
 Real, on-host integration test: assembles a real Laravel 13 project from
 the checked-in skeleton plus this manifest's real `LaravelEmitter` output,
-runs a real `composer install`, boots a real `php artisan serve`, and sends
+runs a real `composer install`, boots a real `php -S` server (what `php artisan serve` runs; BUG-0125), and sends
 real HTTP requests against it -- one cell per harness instance, mirroring
 `mass_assignment_laravel_sample.yaml`'s own twin-pair precedent.
 

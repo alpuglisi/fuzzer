@@ -8,7 +8,7 @@ concern/`access_control` family (`no_ownership_check`/
 Real, on-host integration test: assembles a real Laravel project from the
 checked-in skeleton (including this change's own `Photo` model/migration)
 plus this manifest's real `LaravelEmitter` output, runs a real `composer
-install`, boots a real `php artisan serve`, and sends real HTTP requests
+install`, boots a real `php -S` server (what `php artisan serve` runs; BUG-0125), and sends real HTTP requests
 against it -- **both twins together in one harness instance**, alongside
 the real `/login.php` page (`phase3_php_laravel_real_pages_auth.yaml`'s
 `LABGEN-PLA-0001`), since a genuine ownership-check differential needs a

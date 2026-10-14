@@ -72,6 +72,8 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
+from fuzzlab import procutil
+
 __all__ = [
     "VulnClass",
     "ParamLocation",
@@ -209,15 +211,12 @@ Runner = Callable[[Sequence[str], float], OracleRunResult]
 
 
 def default_runner(argv: Sequence[str], timeout_s: float) -> OracleRunResult:
-    """The real runner: shells out via `subprocess.run` under a hard timeout."""
+    """The real runner: shells out under a hard timeout, through
+    :func:`fuzzlab.procutil.run_bounded` so a timeout stops the tool's whole
+    process tree, not only its direct child (BUG-0125)."""
     start = time.monotonic()
     try:
-        proc = subprocess.run(
-            list(argv),
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
+        proc = procutil.run_bounded(list(argv), timeout=timeout_s)
         return OracleRunResult(
             argv=list(argv),
             returncode=proc.returncode,

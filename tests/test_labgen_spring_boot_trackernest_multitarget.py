@@ -57,6 +57,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from fuzzlab.harness.multitarget import TargetSpec, run_targets, transfer_summary
 from fuzzlab.labels import contract
@@ -120,9 +121,9 @@ def app_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def live_base_url(app_dir: Path):
     if not spring_boot_boot_available():
         pytest.skip("mvn/java CLI or Maven Central reachability not available (PA-0005 pattern)")
-    package_result = subprocess.run(
+    package_result = procutil.run_bounded(
         ["mvn", "-q", "-B", "package", "-DskipTests"],
-        cwd=app_dir, capture_output=True, text=True, timeout=BUILD_TIMEOUT_S,
+        cwd=app_dir, timeout=BUILD_TIMEOUT_S,
     )
     assert package_result.returncode == 0, (
         f"mvn package failed:\nstdout={package_result.stdout}\nstderr={package_result.stderr}"
@@ -130,20 +131,16 @@ def live_base_url(app_dir: Path):
 
     port = _free_port()
     jar_path = app_dir / "target" / "trackernest.jar"
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         ["java", "-jar", str(jar_path), f"--server.port={port}"],
         cwd=app_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
+    proc = server.proc
     try:
         _wait_until_listening(port)
         yield f"http://127.0.0.1:{port}"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        procutil.stop_server(server)
 
 
 @pytest.mark.slow

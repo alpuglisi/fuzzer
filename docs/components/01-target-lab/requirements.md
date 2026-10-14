@@ -1238,9 +1238,11 @@ lane) can submit a payload as
   `composer create-project laravel/laravel` output, trimmed of dev-only
   tooling/front-end build pipeline — overlaid with a manifest's real
   `LaravelEmitter`-rendered controllers/views/routes), runs a real `composer
-  install --no-dev`, seeds a real per-run SQLite database, boots a real `php
-  artisan serve` process, and makes real HTTP requests against it via
-  `LiveBootHarness`.
+  install --no-dev`, seeds a real per-run SQLite database, boots a real `php -S`
+  server (what `php artisan serve` runs, started directly under
+  `fuzzlab.procutil`'s supervisor since BUG-0125/CC-LAB-0254, so `close()` and the
+  owner's death stop it and its whole tree -- NFR-LAB-cleanup), and makes real HTTP
+  requests against it via `LiveBootHarness`.
   1. **The skeleton/generated-content seam follows `StackEnv`'s own
      scaffold convention** (`stack_env.py`'s `scaffold_files`/
      `render_scaffold`), extended rather than forked: the skeleton directory is
@@ -6283,6 +6285,19 @@ lane) can submit a payload as
   when it carries an explicit, recognizable fake-value marker.
   - Enforced by: `fuzzlab/labgen/secret_scanner.py:scan_tree_for_secrets` under `lab-generate --check` — `tests/test_labgen_secret_scanner.py::test_leaky_exit_with_injected_runner_parses_reported_leak`, `tests/test_labgen_secret_scanner.py::test_unexpected_exit_code_raises_secret_scan_error_not_treated_as_clean`, `tests/test_labgen_cli.py::test_check_fails_loud_on_a_secret_leak` (gitleaks-gated)
   - Not yet enforced: plain `lab-generate` and the committed lab trees are not scanned, and the fake-marker allow-list is tested only where gitleaks is installed. (BUG-0111 sweep.)
+- **NFR-LAB-cleanup** *(CC-LAB-0254, 2026-10-14, BUG-0125)* A process the toolkit or
+  its tests start -- a live-boot server, a test server, a forking install/build tool, a
+  web-launcher job -- does not outlive its owner or its `close()`/stop: its whole
+  process tree, grandchildren included, is stopped as a group, identity-checked, never
+  by name or pattern; a test run that leaves a registered server running fails.
+  - Enforced by (stop takes the whole tree, port freed): `fuzzlab.procutil.start_server` / `stop_server` in all five harnesses — `tests/test_live_boot_cleanup.py::test_laravel_harness_close_leaves_no_process_and_frees_the_port`, `tests/test_live_boot_cleanup.py::test_go_harness_close_leaves_no_process_and_frees_the_port`, `tests/test_live_boot_cleanup.py::test_every_harness_starts_through_procutil_and_closes_on_a_failed_enter`, `tests/test_procutil.py::test_stop_server_takes_the_whole_tree_and_reaps`, `tests/test_procutil.py::test_stop_server_catches_a_grandchild_that_escaped_group_and_session`, `tests/test_procutil.py::test_a_stopped_server_releases_its_port`
+  - Enforced by (a failed build leaves nothing): harness `__enter__` closes on failure — `tests/test_live_boot_cleanup.py::test_a_build_that_fails_after_the_server_started_leaves_nothing`
+  - Enforced by (the owner's death): the supervisor's PDEATHSIG, parent re-check and control pipe — `tests/test_procutil.py::test_owner_sigkill_takes_child_and_escaped_grandchild`, `tests/test_procutil.py::test_owner_sigkill_takes_go_run_and_its_built_binary`, `tests/test_procutil.py::test_supervisor_refuses_to_start_when_its_owner_is_not_its_parent`, `tests/test_procutil.py::test_allow_thread_server_dies_with_its_thread_and_says_so`
+  - Enforced by (identity, never a reused pid): `tests/test_procutil.py::test_a_stale_record_whose_pid_was_reused_is_never_signalled`, `tests/test_procutil.py::test_wedged_supervisor_falls_back_to_a_direct_identity_checked_group_kill`
+  - Enforced by (an id is trusted only while its leader pid is held; BUG-0125 review, CC-CORE-0050): `tests/test_procutil.py::test_the_supervisor_signals_the_servers_group_only_while_its_leader_is_held`, `tests/test_procutil.py::test_a_reaped_supervisors_session_is_never_swept`, `tests/test_procutil.py::test_the_fallback_never_signals_a_reused_server_group_outside_the_session`, `tests/test_procutil.py::test_a_killed_supervisors_leftovers_are_swept_while_its_pid_is_held`, `tests/test_procutil.py::test_an_async_handle_is_swept_before_it_is_reaped`, `tests/test_procutil.py::test_an_unknown_start_time_never_signals_anything`, `tests/test_procutil.py::test_start_server_refuses_a_server_whose_identity_cannot_be_recorded`
+  - Enforced by (forking tools on timeout): `procutil.run_bounded` — `tests/test_procutil.py::test_run_bounded_timeout_kills_the_whole_tree`
+  - Enforced by (nothing spawns around it; a leak fails the run): `tests/test_procutil_guard.py::test_every_child_process_goes_through_procutil`, `tests/test_procutil_guard.py::test_guard_flags_synthetic_offenders`, `tests/test_procutil.py::test_the_conftest_safety_net_fails_the_session_and_kills_the_leak`
+  - Not yet enforced: the Rails, Spring Boot and Django harnesses' real boots and the npm/mvn test servers were not run against this change offline (network installs); they share the code path above and are checked by source. Playwright's own driver and browser processes rely on Playwright's cleanup when their owner is SIGKILLed: measured once (BUG-0125 review S2: a pytest SIGKILLed mid browser test left 0 of its 9 recorded descendants -- the node driver in its session and 8 chrome processes in their own detached session -- after 5 s), not a standing test; follow-up owner: the crawler component (04, owner of the Playwright launch sites), to add one under `FUZZLAB_REQUIRE_BROWSER=1`. A supervisor already at `oom_score_adj` 1000 cannot have a likelier server. (BUG-0125.)
 - **NFR-LAB-label-accuracy** Labels derived, not hand-asserted; env settings that
   affect labels (e.g. `display_errors`, libxml entity handling, `open_basedir`)
   pinned and asserted.

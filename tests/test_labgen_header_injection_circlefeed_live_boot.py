@@ -63,6 +63,8 @@ import time
 
 import pytest
 
+from fuzzlab import procutil
+
 pytestmark = pytest.mark.skipif(
     shutil.which("php") is None,
     reason="php CLI not available on this build host (PA-0005 pattern)",
@@ -168,12 +170,13 @@ class _RawSocketResponder:
         script_path = tmp_path / f"raw_socket_redirect_responder_{mode}.php"
         script_path.write_text(_RAW_SOCKET_RESPONDER_PHP)
         self.port = _find_free_port()
-        self._proc = subprocess.Popen(
+        self._server = procutil.start_server(
             [shutil.which("php"), str(script_path), str(self.port), mode],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+        self._proc = self._server.proc
         deadline = time.monotonic() + 10.0
         line = self._proc.stdout.readline()
         while line.strip() != "READY" and time.monotonic() < deadline:
@@ -195,7 +198,10 @@ class _RawSocketResponder:
             return b"".join(chunks)
 
     def close(self) -> None:
-        self._proc.wait(timeout=10)
+        try:
+            self._proc.wait(timeout=10)
+        finally:
+            procutil.stop_server(self._server)
 
 
 def _header_lines(raw_response: bytes) -> list[str]:
@@ -264,12 +270,13 @@ def test_the_generated_controllers_own_header_call_cannot_be_spliced_through_a_r
         'echo "body\\n";\n'
     )
     port = _find_free_port()
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         [shutil.which("php"), "-S", f"127.0.0.1:{port}", str(script)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    proc = server.proc
     try:
         deadline = time.monotonic() + 10.0
         connected = False
@@ -302,5 +309,4 @@ def test_the_generated_controllers_own_header_call_cannot_be_spliced_through_a_r
         assert not any(line.startswith("Location:") for line in lines), lines
         assert not any(line.startswith("Set-Cookie:") for line in lines), lines
     finally:
-        proc.terminate()
-        proc.wait(timeout=10)
+        procutil.stop_server(server)

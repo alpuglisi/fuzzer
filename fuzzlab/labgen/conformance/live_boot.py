@@ -16,7 +16,7 @@ a production choice).
 Laravel 13 project (the checked-in :data:`SKELETON_DIR` skeleton, overlaid
 with a manifest's real ``LaravelEmitter``-rendered controllers/views/routes),
 runs a real ``composer install --no-dev``, migrates + seeds a real SQLite
-database, boots a real ``php artisan serve`` process, and lets a caller make
+database, boots a real ``php -S`` server (what ``php artisan serve`` runs), and lets a caller make
 real ``requests`` calls against it. :func:`Tier1Client`-conformant --
 :meth:`LiveBootHarness.fetch` implements
 :class:`fuzzlab.labgen.conformance.tier1.Tier1Client`, so a
@@ -104,6 +104,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from fuzzlab import procutil
 from fuzzlab.labgen.conformance.tier1 import Tier1Case
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.schema import Cell
@@ -119,7 +120,7 @@ from fuzzlab.labgen.schema import Cell
 #: other conformance tier.
 SKELETON_DIR = Path(__file__).resolve().parent.parent / "emitters" / "php_laravel" / "stack" / "skeleton"
 
-#: How long to wait for ``php artisan serve`` to accept connections before
+#: How long to wait for the ``php -S`` server to accept connections before
 #: giving up and reporting a boot failure, rather than hanging indefinitely.
 BOOT_TIMEOUT_S = 30.0
 
@@ -179,10 +180,8 @@ def _composer_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     if shutil.which("composer") is None:
         return False
     try:
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["composer", "show", "-a", "--no-interaction", "--no-ansi", "psr/log"],
-            capture_output=True,
-            text=True,
             timeout=timeout,
             cwd=tempfile.gettempdir(),
         )
@@ -656,14 +655,23 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
     uncaught :class:`subprocess.TimeoutExpired` and never an indefinite
     hang."""
     try:
-        return subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
-        )
+        return procutil.run_bounded(cmd, cwd=cwd, timeout=timeout, env=env)
     except subprocess.TimeoutExpired as exc:
         raise LiveBootError(
             f"{cmd[0]} did not complete within {timeout}s (cmd={cmd!r}): "
             f"stdout={exc.stdout!r} stderr={exc.stderr!r}"
         ) from exc
+
+
+def _php_server_argv(app_dir: Path, port: int) -> list[str]:
+    """The command ``php artisan serve`` itself runs (Laravel's ``ServeCommand``:
+    the app's own ``server.php`` if it has one, else the framework's bundled
+    router, served from ``public/``), started directly so the server is never a
+    grandchild that outlives a killed ``artisan`` parent (BUG-0125)."""
+    router = app_dir / "server.php"
+    if not router.is_file():
+        router = app_dir / "vendor" / "laravel" / "framework" / "src" / "Illuminate" / "Foundation" / "resources" / "server.php"
+    return ["php", "-S", f"127.0.0.1:{port}", "-t", str(app_dir / "public"), str(router)]
 
 
 @dataclass(frozen=True)
@@ -687,7 +695,8 @@ class LiveBootHarness:
         with LiveBootHarness(emitter, cells) as harness:
             resp = harness.get("/product.php", params={"id": "1"})
 
-    Every temp directory and the ``php artisan serve`` process it starts are
+    Every temp directory and the ``php -S`` server (and its whole process tree,
+    BUG-0125) it starts are
     cleaned up on ``__exit__`` -- including when an exception propagates
     (PA-0012's "bounded, deterministic teardown" rule, applied here to a
     subprocess rather than an asyncio server).
@@ -737,6 +746,7 @@ class LiveBootHarness:
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
         self._proc: subprocess.Popen | None = None
+        self._server: procutil.ServerHandle | None = None
         self._port: int | None = None
 
     # -- assembly ----------------------------------------------------------
@@ -886,7 +896,7 @@ class LiveBootHarness:
 
     def build(self) -> None:
         """Assemble the app, install real dependencies, seed the database,
-        and boot ``php artisan serve``. Raises :class:`LiveBootError` naming
+        and boot ``php -S`` (BUG-0125). Raises :class:`LiveBootError` naming
         the failing step's real stdout/stderr on any failure -- never
         swallowed, per this project's fail-loud convention."""
         self._tmp = tempfile.TemporaryDirectory(prefix="fuzzlab-php-laravel-live-boot-")
@@ -912,13 +922,18 @@ class LiveBootHarness:
         self._seed_db()
 
         self._port = _find_free_port()
-        self._proc = subprocess.Popen(
-            ["php", "artisan", "serve", "--host=127.0.0.1", f"--port={self._port}"],
-            cwd=self._app_dir,
+        # BUG-0125: start PHP's built-in server directly -- the exact command
+        # `php artisan serve` would run as its own child (Laravel's ServeCommand:
+        # `php -S host:port <router>` in `public/`) -- so the server is the
+        # supervisor's direct child instead of a grandchild behind artisan.
+        self._server = procutil.start_server(
+            _php_server_argv(self._app_dir, self._port),
+            cwd=self._app_dir / "public",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
+        self._proc = self._server.proc
         self._wait_for_boot()
 
     def _wait_for_boot(self) -> None:
@@ -928,14 +943,14 @@ class LiveBootHarness:
         while time.monotonic() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
                 out = self._proc.stdout.read() if self._proc.stdout else ""
-                raise LiveBootError(f"php artisan serve exited early (code {self._proc.returncode}):\n{out}")
+                raise LiveBootError(f"php -S exited early (code {self._proc.returncode}):\n{out}")
             try:
                 with socket.create_connection(("127.0.0.1", self._port), timeout=1.0):
                     return
             except OSError as exc:
                 last_err = exc
                 time.sleep(0.25)
-        raise LiveBootError(f"php artisan serve did not accept connections within {BOOT_TIMEOUT_S}s: {last_err}")
+        raise LiveBootError(f"php -S did not accept connections within {BOOT_TIMEOUT_S}s: {last_err}")
 
     # -- HTTP ---------------------------------------------------------------
 
@@ -1011,20 +1026,28 @@ class LiveBootHarness:
     # -- lifecycle ------------------------------------------------------------
 
     def close(self) -> None:
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-                self._proc.wait(timeout=5.0)
-        self._proc = None
+        """Stop the server's whole process tree (BUG-0125: ``procutil.stop_server``
+        signals the server's supervisor, which stops its process group and every
+        re-parented descendant, then reaps) and remove the temp tree. Idempotent; the
+        temp tree is removed even if the stop raises."""
+        server, self._server, self._proc = self._server, None, None
+        try:
+            if server is not None:
+                procutil.stop_server(server)
+        finally:
+            self._cleanup_tmp()
+
+    def _cleanup_tmp(self) -> None:
         if self._tmp is not None:
             self._tmp.cleanup()
             self._tmp = None
 
     def __enter__(self) -> "LiveBootHarness":
-        self.build()
+        try:
+            self.build()
+        except BaseException:
+            self.close()  # BUG-0125: __exit__ never runs when __enter__ raises
+            raise
         return self
 
     def __exit__(self, *exc_info: object) -> None:

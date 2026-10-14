@@ -60,6 +60,100 @@ def test_runner_streams_output_and_exit_code():
     assert done and '"returncode":3' in done[-1]
 
 
+def _gone(pid: int, start: int, bound: float = 10.0) -> bool:
+    import time
+
+    from fuzzlab import procutil
+    deadline = time.monotonic() + bound
+    while time.monotonic() < deadline:
+        st = procutil.read_stat(pid)
+        if st is None or st.start != start or st.state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_runner_stop_takes_the_jobs_whole_tree():
+    """BUG-0125 / D17: Stop ends the job's grandchildren too (a crawl's browser, a
+    compose call), not only the direct child."""
+    from fuzzlab import procutil
+
+    async def go():
+        r = Runner()
+        token = await r.launch(["sh", "-c", "sleep 300 & echo $!; wait"])
+        run = r._runs[token]
+        kind, line = await asyncio.wait_for(run.queue.get(), 10)
+        assert kind == "output"
+        grand = procutil.read_stat(int(line))
+        assert r.stop(token) is True
+        assert r.stop(token) is False  # one stop request per run
+        events = [ev async for ev in r.stream(token)]
+        return grand, events, run.handle
+
+    grand, events, handle = asyncio.run(go())
+    assert grand is not None and _gone(grand.pid, grand.start)
+    assert any("event: done" in e for e in events)
+    assert handle.exit_reason == "stop"
+    assert handle not in procutil.registered()
+
+
+def test_runner_shutdown_stops_every_live_job():
+    from fuzzlab import procutil
+
+    async def go():
+        r = Runner()
+        tokens = [await r.launch(["sleep", "300"]) for _ in range(2)]
+        handles = [r._runs[t].handle for t in tokens]
+        await r.shutdown()
+        return handles
+
+    handles = asyncio.run(go())
+    for h in handles:
+        assert _gone(h.child_pid, h.child_start_time)
+        assert h not in procutil.registered()
+
+
+def test_runner_stops_reading_output_a_survivor_holds_open(monkeypatch):
+    """Review round 2 (B nit): the job's output pipe is inherited by its descendants;
+    if one outlives the job (e.g. stuck in D state), the stream still ends -- after
+    the supervisor's exit plus a bounded drain -- with a line saying so."""
+    from fuzzlab import procutil
+
+    class _Proc:
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()  # never fed EOF: a survivor holds it
+            self.stdout.feed_data(b"started\n")
+            self.returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    class _Handle:
+        def __init__(self):
+            self.proc = _Proc()
+
+    async def fake_start(argv, **kw):
+        return _Handle()
+
+    async def fake_stop(h, **kw):
+        return "child"
+
+    monkeypatch.setattr(procutil, "astart_server", fake_start)
+    monkeypatch.setattr(procutil, "astop_server", fake_stop)
+    monkeypatch.setattr(Runner, "DRAIN_S", 0.2)
+
+    async def go():
+        r = Runner()
+        token = await r.launch(["anything"])
+        return [ev async for ev in r.stream(token)]
+
+    events = asyncio.run(asyncio.wait_for(go(), 10))
+    assert any("data: started" in e for e in events)
+    assert any("still held open" in e for e in events)
+    assert "event: done" in events[-1]
+
+
 def test_runner_stream_unknown_token():
     async def go():
         r = Runner()
@@ -128,3 +222,17 @@ def test_launch_readonly_tool_returns_token():
 def test_launch_stop_unknown_token_is_false():
     r = _client().post("/api/launch/deadbeef/stop")
     assert r.status_code == 200 and r.json()["stopped"] is False
+
+
+def test_the_ui_event_loop_runs_on_the_main_thread(monkeypatch):
+    """BUG-0125 review nit 4: the launcher spawns with ``allow_thread=True`` because the
+    event-loop thread lives as long as the UI. ``serve`` hands the app to ``uvicorn.run``
+    on the calling (main) thread, which runs the loop there."""
+    import threading
+
+    uvicorn = pytest.importorskip("uvicorn")
+    from fuzzlab.web.app import serve
+    seen = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.append(threading.current_thread()))
+    serve(load_config(overrides={"web_host": "127.0.0.1"}, environ={}))
+    assert seen == [threading.main_thread()]

@@ -45,6 +45,8 @@ from typing import Any, Callable, Iterable, Sequence
 
 import yaml
 
+from fuzzlab import procutil
+
 DEFAULT_REMOTE = "https://github.com/github/advisory-database"
 DEFAULT_CACHE_DIR = Path(".cache/advisory-database")
 DEFAULT_CROSSWALK_PATH = Path("lab/patterns/sourcing/crosswalk.yaml")
@@ -78,10 +80,11 @@ GitRunner = Callable[[Sequence[str]], "subprocess.CompletedProcess[str]"]
 
 
 def default_git_runner(argv: Sequence[str]) -> "subprocess.CompletedProcess[str]":
-    """The real runner: shells out via ``subprocess.run`` under a hard
-    timeout. Tests inject a fake runner instead — see
-    ``tests/test_pattern_corpus_sourcing.py``."""
-    return subprocess.run(argv, capture_output=True, text=True, timeout=600)
+    """The real runner: shells out under a hard timeout. Tests inject a fake
+    runner instead — see ``tests/test_pattern_corpus_sourcing.py``. ``git``
+    forks transport helpers (``git-remote-https``), so a timeout stops the
+    whole tree through :func:`fuzzlab.procutil.run_bounded` (BUG-0125)."""
+    return procutil.run_bounded(argv, timeout=600)
 
 
 def probe_reachable(

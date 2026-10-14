@@ -3,6 +3,74 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0050 — BUG-0125 review fixes: an id is trusted only while its leader pid is held (2026-10-14)
+- Change (`fuzzlab/procutil.py`, on top of CC-CORE-0048; reviewer A's must-fixes, B's
+  items; A-M1 supersedes B's should-fix 1):
+  - **A-M1:** the supervisor's `_reap` reaps every exited child except the server (each
+    zombie child found in `/proc`, by pid); `_reap_server` reaps the server only after
+    the last `killpg` (bounded; loud if it cannot).
+  - **A-M2(a):** the owner waits for the supervisor with `waitid(WNOWAIT)` (never
+    reaping), sweeps its session while the pid is held, then reaps (`_stop_core`, used by
+    `stop_server`, `astop_server` and `reap_registered`). `astart_server` spawns with
+    `subprocess.Popen` and returns an asyncio view (`_AsyncSupervisorProc`: stream
+    readers, non-reaping `wait()`, `communicate()`), because asyncio's child watcher
+    reaps its own children on exit.
+  - **A-M2(b):** the fallback's pgid kill requires `st.sid == supervisor pid` (anchor
+    held: the supervisor is alive), and it also kills the supervisor's other
+    descendants and session members before the supervisor itself.
+  - **A-M2(c) + B-2:** `_members(kind, id, start, anchor=None)` trusts an id only while
+    its leader pid is held (`_held`: present with the recorded start time, alive or
+    an unreaped zombie), or -- for a group whose leader is gone -- inside a held
+    anchor session; a start time of 0 is "identity unknown" and matches nothing;
+    `start_server` refuses such a server loudly after stopping it; the safety net
+    reports such a record (`Leak.note`) without signalling it.
+  - **A-S1:** the server's `child_setup` re-checks `getppid()` after its `prctl`.
+  - **B-3:** dead code in the safety net removed. **B-4:** `web/runner.py` documents
+    why `allow_thread=True` is right (uvicorn's loop on the main thread).
+  - **A-N1:** the "pids wrap quickly (pid_max 32768 here)" note in `_members`.
+  - FR-CORE-38 updated in place; NFR-LAB-cleanup gains the new tests and the S2
+    measurement; PA-0125 gains rule 5.
+- Impact: no API change for callers (`kill_process_group` / `group_members` gain an
+  optional `anchor`; `Leak` gains `note`). The web runner's `run.proc` is now the
+  asyncio view (same `stdout` / `wait()` / `returncode`).
+- Risk: medium (all kill paths). Mitigation: a test per must-fix that fails on its
+  revert, and a measured Playwright check (S2: 0 of 9 descendants left 5 s after a
+  pytest SIGKILL).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_procutil.py` (29, 7 new),
+    `tests/test_web_runner.py::test_the_ui_event_loop_runs_on_the_main_thread`,
+    `tests/_procs.py` (raw scans for assertions only), guard allowlist updated — done
+  - [x] BUG-0125 corrective action (review round 1), PA-0125(5), FR-CORE-38,
+    NFR-LAB-cleanup, CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): one offline pytest process over the targeted
+  files: **283 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by
+  design). Mutation: **22/26 killed**; every must-fix revert killed (A-M1; A-M2(a)
+  reap-before-sweep and asyncio-style reap; A-M2(c) absent leader without anchor, anchor
+  session not required; B-2 unknown identity at start). Survivors: the fallback group
+  TERM without its anchor (with the leader gone `_members` yields nothing and the
+  descendant/session kill that follows reaches the same processes), B-2's explicit
+  start-0 guard (subsumed by A-M2(c)), the "no older than the leader" filter
+  (unreachable while the leader is held), and A-S1 (a race; not deterministic). None
+  lets a signal reach a process this run did not start.
+- Review round 2 (2026-10-14; A and B agreed on round 1, four items): **A** every failed
+  start (no ready line, an error line, an unrecordable identity) now stops the
+  supervisor in `_collect_locked`'s order -- request a stop, D15 fallback if needed,
+  wait without reaping, `_sweep_session`, then `proc.wait()` -- instead of SIGKILL and
+  reap; **B** `_peek_code` returns `CODE_UNKNOWN` (-256) for a supervisor reaped behind
+  its `Popen`'s back, so `_AsyncSupervisorProc.wait()` cannot spin, and the stop path
+  reports `killed`; **B nit** `Runner._pump` reads output in a task, waits for the
+  supervisor's exit, then drains for at most `Runner.DRAIN_S` (2 s) and says so if a
+  survivor still holds the pipe; **A ask** the escaped-grandchild test prints the
+  supervisor's stderr on failure and checks "nothing alive" right after `stop_server`
+  without waiting; its one intermittent failure was in pid parsing, not that check
+  (BUG-0125). New tests: `test_a_server_that_misses_its_ready_timeout_leaves_nothing`,
+  `test_a_supervisor_killed_before_ready_is_swept_before_it_is_reaped`,
+  `test_an_async_wait_returns_when_the_supervisor_was_reaped_elsewhere`,
+  `tests/test_web_runner.py::test_runner_stops_reading_output_a_survivor_holds_open`.
+  Effectiveness: **287 passed, 13 skipped** (same targeted offline run); mutation
+  **round 2: 4/4 killed**, all lists **26/30** (the same four survivors as round 1).
+
 ### CC-CORE-0049 — Forms phase 3 integration: one leaf rule, one SPA-route definition (2026-10-14)
 - Change:
   - `core/redaction.py`: `is_identifier_value` (a string by `looks_like_identifier`, a
@@ -23,6 +91,40 @@ Newest first.
     `::test_one_leaf_rule_serves_capture_and_import` — done
 - Review: reviewers A and B asked for both at merge (lane J reviews J1, J5).
 - Effectiveness: verified offline.
+
+### CC-CORE-0048 — `procutil`: one owner for every child process tree (BUG-0125) (2026-10-14)
+- Change: new `fuzzlab/procutil.py` (FR-CORE-38), a stdlib-only leaf.
+  `start_server` launches a supervisor (`sys.executable -I -S fuzzlab/procutil.py`) in a
+  new session; the supervisor sets `PR_SET_PDEATHSIG(SIGTERM)` and
+  `PR_SET_CHILD_SUBREAPER` (ctypes `prctl`), re-checks `getppid()` against the owner,
+  starts the server in a new process group (`PDEATHSIG(SIGKILL)`, `oom_score_adj`
+  +500), reports `ready child=… start=… oom_*=…` on a status pipe, and on a stop request
+  (stop token on a control pipe + SIGTERM), an unrequested SIGTERM (counted, acted on
+  once), owner death (PDEATHSIG, changed parent, control-pipe EOF) or the server's
+  exit: SIGTERMs the group and each re-parented descendant once, waits the grace,
+  SIGKILLs, reaps, reports `exit reason=… code=… signals=…`, and exits with the
+  server's code. No `preexec_fn` in the owner (the single-threaded supervisor uses one
+  for the server). `stop_server` / `finish` / `request_stop`, `run_bounded`, asyncio
+  `astart_server` / `astop_server` / `arun_bounded`, `kill_process_group`,
+  `group_members` / `session_members` / `read_stat`, the registry and
+  `reap_registered`. Identity: pidfd + `/proc` start time on every signal; groups and
+  sessions member by member, only under a matching or absent leader.
+- Impact: LAB (CC-LAB-0254) and UI (CC-UI-0053) use it; labgen's import guard allows it.
+- Risk: **medium** (every long-lived child depends on it). Mitigation: real-process
+  tests for each property, a mutation check (17/18 killed), loud failure where a
+  capability is missing (`SupervisorUnavailable`) or a server is lost (`ServerLost`).
+- Design decisions (BUG-0125): D12 thread rule (`allow_thread`), D13 SIGTERM death
+  signal, D15 wedged-supervisor fallback, D16 `oom_score_adj`, D17 `allow_thread`
+  documented and loud. Deviation from the draft: the supervisor runs by file path with
+  `-I -S`, not `-m fuzzlab.procutil` (no dependency on `fuzzlab` being importable from
+  the server's cwd; isolated from `PYTHON*` variables).
+- Deliverables:
+  - [x] `fuzzlab/procutil.py` — done
+  - [x] `tests/test_procutil.py` (22), `tests/test_procutil_guard.py` (24) — done
+  - [x] FR-CORE-38; ARCHITECTURE (core section, cross-cutting testing) — done
+- Effectiveness (assessed 2026-10-14): 22 + 24 passed; owner SIGKILLed with a
+  grandchild that escaped group and session (and with `go run` + its binary): nothing
+  survives within 10 s; a reused pid is never signalled; mutation 17/18 killed.
 
 ### CC-CORE-0047 — The redaction boundary for the crawler's captured requests and SPA route URLs (forms phase 3, lane S) (2026-10-14)
 - Change:

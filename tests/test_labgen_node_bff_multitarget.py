@@ -47,6 +47,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from fuzzlab.harness.multitarget import TargetSpec, run_targets, transfer_summary
 from fuzzlab.labels import contract
@@ -74,9 +75,9 @@ def _npm_registry_reachable(probe_dir: Path) -> bool:
         json.dumps({"name": "probe", "version": "1.0.0", "private": True}), encoding="utf-8"
     )
     try:
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["npm", "install", "--no-audit", "--no-fund", "express@4.22.3"],
-            cwd=probe_dir, capture_output=True, text=True, timeout=60,
+            cwd=probe_dir, timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -125,27 +126,23 @@ def live_base_url(app_dir: Path, tmp_path_factory: pytest.TempPathFactory):
         pytest.skip("node/npm CLI not available on this build host (PA-0005 pattern)")
     if not _npm_registry_reachable(tmp_path_factory.mktemp("npm_probe")):
         pytest.skip("npm registry not reachable from this sandbox")
-    result = subprocess.run(
+    result = procutil.run_bounded(
         ["npm", "install", "--no-audit", "--no-fund"],
-        cwd=app_dir, capture_output=True, text=True, timeout=120,
+        cwd=app_dir, timeout=120,
     )
     assert result.returncode == 0, f"npm install failed:\nstdout={result.stdout}\nstderr={result.stderr}"
 
     port = _free_port()
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         ["node", "app.js"], cwd=app_dir, env={**os.environ, "PORT": str(port)},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
+    proc = server.proc
     try:
         _wait_until_listening(port)
         yield f"http://127.0.0.1:{port}"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=5)
+        procutil.stop_server(server)
 
 
 def test_meadowmart_bff_target_spec_runs_for_real_and_scores(live_base_url, tmp_path) -> None:

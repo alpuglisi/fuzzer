@@ -266,7 +266,8 @@ tracked in the requirements files, not here.
   `php_laravel`: `fuzzlab/labgen/conformance/live_boot.py` assembles a real
   Laravel 13 skeleton (checked in, trimmed from a real `composer
   create-project`) with a manifest's real emitter output, runs a real
-  `composer install`, boots a real `php artisan serve` against a seeded
+  `composer install`, boots a real `php -S` server (what `php artisan serve` runs;
+  started directly since BUG-0125) against a seeded
   SQLite DB, and makes real HTTP requests — run via
   `tests/test_labgen_conformance_live_boot.py` (skip-guarded,
   `pytest.mark.slow`, not wired into `--check`), covering the escaped-echo
@@ -1146,6 +1147,16 @@ tracked in the requirements files, not here.
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
   normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
+- **Process trees** `[built]` (CC-CORE-0048, FR-CORE-38, BUG-0125): `fuzzlab/procutil.py`,
+  a stdlib-only leaf (the one module `fuzzlab.labgen` may import beyond itself and the
+  label contract). Every long-lived child the toolkit or its tests start -- the five
+  live-boot harnesses' servers, test servers, the web launcher's jobs -- runs under a
+  supervisor in its own session (PDEATHSIG + subreaper; group stop; identity-checked by
+  pidfd and `/proc` start time, a group or session id only while its leader pid is held
+  -- CC-CORE-0050; never killed by pattern); `run_bounded` runs forking
+  tools (composer, npm, go, mvn, bundle and the corpus sync's VCS client) so a timeout
+  stops the whole tree. Enforced by an AST guard (`tests/test_procutil_guard.py`) and
+  the session-end safety net (Cross-cutting concerns, Testing).
 - **Shared safety helpers** `[built]` (CC-CORE-0034, FR-CORE-25):
   - `core/net.py`: the one loopback listener gate, enforced at every listener by an
     AST guard test;
@@ -1893,7 +1904,11 @@ replays and edits, including a raw byte path for malformed-traffic study.
   onto the `run` row; one config shared by all tools; secrets by reference only.
 - **Testing:** protocol unit tests, `hypothesis` property tests for the parser,
   golden-file feature tests, deterministic ML-pipeline tests, an
-  assert-N-known-vulns integration suite, and oracle precision tests.
+  assert-N-known-vulns integration suite, and oracle precision tests. Every server a
+  test starts goes through `fuzzlab.procutil`; `tests/conftest.py` loads
+  `tests/_leak_guard.py`, which at session end stops any registered server still
+  running (identity-checked) and fails the run naming its argv, pid and age
+  (BUG-0125, NFR-LAB-cleanup).
 - **Security and safety:** credentials in the OS keyring, redaction on write,
   automatic scope enforcement, a default-off destructive-payload gate, a lab-only
   posture throughout, **no auto-run** — bring-up presents a launcher and no
