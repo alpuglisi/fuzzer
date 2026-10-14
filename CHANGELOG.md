@@ -4,6 +4,11 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
+- Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
+  confirms on a number shown anyway beside an edit-form echo (the second sample decides),
+  and the split-across-elements false negative is stated (CC-FUZZ-0079).
+
 ## 2026-10-14 (BUG-0133: an edit form's echo no longer hides an evaluated SSTI)
 - **Why:** live on Juice Shop, `/profile` showed the evaluated product while its edit field
   echoed `#{728*889}`; M4's `expr in text` rule read that echo as a reflection and refused.

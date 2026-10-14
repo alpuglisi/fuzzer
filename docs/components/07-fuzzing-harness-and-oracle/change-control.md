@@ -65,6 +65,13 @@ note of the same date.
   number-only-in-control page; any echo allowed fails 17 reflection cases; the number
   anywhere fails 5; a raw-only literal check fails Go's 3 escaped-echo cases; any option
   as a control fails the split test.
+- Review (reviewers A and B agree; their nits, a further commit): A-N1 pins a number
+  shown anyway beside the edit-form echo (a fixed number equal to probe 1's value under a
+  seeded draw, and a dense-number page) for all four strategies: none confirms, the second
+  sample decides; a variant of each strategy that skips its second sample fails them (16
+  cases, all 4 mutations caught). B's nit: the split-number residual (`593<b>541</b>`)
+  added to BUG-0133 and FR-FUZZ-4. A's PA-0106(1)/PA-0086 note for the restore is already
+  in CC-FUZZ-0078's follow-up.
 
 ### CC-FUZZ-0078 — Post/redirect/get observation for the server-side confirmers (FR-FUZZ-49) (2026-10-14)
 - Change: builds the reviewed design's Revision 2 (P1-P9; reviewers A and B agreed,

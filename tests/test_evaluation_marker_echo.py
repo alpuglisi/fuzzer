@@ -197,3 +197,71 @@ def test_the_literal_guard_catches_the_old_rule():
                               "    pass\n")
     assert _raw_literal_tests("ok = payload2 not in (probe.text or '')\n")
     assert not _raw_literal_tests("def _echo(text, literal):\n    return literal in text\n")
+
+
+# --- A-N1: a number that is there anyway (coincidence, a dense page) ------------------
+def _seeded_draws(monkeypatch, seed: int) -> None:
+    """Every strategy draws through ``strategies.secrets.randbelow``: seed it."""
+    import random
+    import types
+
+    from fuzzlab.oracle import strategies
+    rng = random.Random(seed)
+    monkeypatch.setattr(strategies, "secrets", types.SimpleNamespace(
+        randbelow=lambda n: rng.randrange(n), token_hex=strategies.secrets.token_hex))
+
+
+def _first_number(name: str, seed: int) -> int:
+    """Probe 1's value under the same seed: a product (SSTI, the SQL marker) or the
+    drawn canary / length (SpEL, the Go marker)."""
+    import random
+    rng = random.Random(seed)
+    a = rng.randrange(900) + 100
+    if name in ("spel", "go"):
+        return a
+    return a * (rng.randrange(900) + 100)
+
+
+class _Fixed:
+    """An edit form echoing the probe, next to a fixed ``page`` of numbers that never
+    depends on the probe (A-N1)."""
+
+    def __init__(self, page: str):
+        self.page = page
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None, entries=None):
+        return Probe(200, f'<html><body><form><input name="u" value="{_attr(value)}">'
+                          f"</form>{self.page}</body></html>",
+                     headers={"Content-Type": "text/html"})
+
+
+@pytest.mark.parametrize("seed", [1, 7, 42])
+@pytest.mark.parametrize("name", sorted(STRATEGIES))
+def test_input_echo_with_a_fixed_number_equal_to_probe_1s_never_confirms(
+        monkeypatch, name, seed):
+    """Probe 1 'succeeds' by coincidence (the page already shows its number beside the
+    edit-form echo); the second sample decides."""
+    cls, _evaluate = STRATEGIES[name]
+    _seeded_draws(monkeypatch, seed)
+    page = _Fixed(f"<p>{_first_number(name, seed)}</p>")
+    cand = Candidate(url="http://h/p", param="u", category=cls.category)
+    assert cls().confirm(cand, page) is None
+
+
+@pytest.mark.parametrize("name", sorted(STRATEGIES))
+def test_input_echo_on_a_dense_number_page_never_confirms(monkeypatch, name):
+    """A page full of numbers in the range a strategy draws from: 5-6 digit products
+    (SSTI, the SQL marker; probe 1's included) or every 100-999 (SpEL, the Go marker)."""
+    import random
+    cls, _evaluate = STRATEGIES[name]
+    _seeded_draws(monkeypatch, 3)
+    if name in ("spel", "go"):
+        numbers = list(range(100, 1000))
+    else:
+        rng = random.Random(9)
+        numbers = [rng.randrange(10_000, 998_002) for _ in range(3000)]
+        numbers.append(_first_number(name, 3))
+    page = _Fixed("<ul>" + "".join(f"<li>{n}</li>" for n in numbers) + "</ul>")
+    cand = Candidate(url="http://h/p", param="u", category=cls.category)
+    assert cls().confirm(cand, page) is None

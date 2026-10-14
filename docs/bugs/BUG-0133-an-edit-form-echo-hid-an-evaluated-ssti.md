@@ -155,3 +155,10 @@ true-positive side):
 - A `<select>` that lists earlier values as unselected options disqualifies (it is outside
   the edit control): a stated false negative.
 - A non-HTML page (JSON) is parsed as one text: an echo in it disqualifies as before.
+- A number split across elements (`593<b>541</b>`) is in no single parsed part, so it
+  cannot confirm: a fail-empty false negative (reviewer B).
+- Review (reviewer A, N1): a number shown anyway beside the edit-form echo (a coincidence
+  equal to probe 1's value, or a page dense with numbers in the drawn range) never
+  confirms: the second sample decides. Pinned by
+  `tests/test_evaluation_marker_echo.py::test_input_echo_with_a_fixed_number_equal_to_probe_1s_never_confirms`
+  and `::test_input_echo_on_a_dense_number_page_never_confirms`.
