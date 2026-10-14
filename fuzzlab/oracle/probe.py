@@ -34,6 +34,9 @@ class Candidate:
     # `fuzzlab.audit.engine.InjectionPoint.body_content_type` -- `None` unless
     # the ground truth positively declared the format (CC-FUZZ-0032/FR-FUZZ-19).
     content_type: str | None = None
+    # A crawled form's default entry list: every probe of `param` sends the other
+    # fields too (forms phase 1, FR-FUZZ-42); bound by `Oracle.confirm`.
+    base_entries: tuple[tuple[str, str], ...] | None = None
 
 
 @dataclass
@@ -60,5 +63,9 @@ class Sender:
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None) -> Probe:  # pragma: no cover - interface
+             content_type: str | None = None,
+             entries=None) -> Probe:  # pragma: no cover - interface
+        """``entries`` (a form's full entry list, ``param`` already set to ``value``)
+        is sent as the whole query string or urlencoded body instead of ``{param:
+        value}`` alone (forms phase 1)."""
         raise NotImplementedError

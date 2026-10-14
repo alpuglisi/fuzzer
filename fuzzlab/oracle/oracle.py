@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 
-from fuzzlab.core.urls import to_path
+from fuzzlab.core.forms import FormEntries
+from fuzzlab.core.urls import to_path, url_key
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
@@ -26,10 +27,13 @@ class _CostCounter:
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None):
+             content_type: str | None = None, entries=None):
         # the full `Sender` signature, forwarded exactly like `harness.auto`'s
         # `_CountingSender` (BUG-0071: a JSON-body / upload / XXE probe crashed `--bandit`)
         self.count += 1
+        if entries is not None:
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, entries=entries)
         if method == "GET" and location == "query":
             return self._inner.send(url, param, value, timing=timing)
         if content_type:
@@ -38,6 +42,37 @@ class _CostCounter:
                                     content_type=content_type)
         return self._inner.send(url, param, value, timing=timing,
                                 method=method, location=location)
+
+
+class _FormBoundSender:
+    """Sends a form point's sibling fields with every probe of it (forms phase 1).
+
+    A send to the candidate's own URL (``url_key``), method and query/body location
+    goes out as the form's full entry list with ``param`` set to ``value``; any other
+    send (a stored-XSS observe page, another URL) passes through unchanged. The one
+    place sibling fields are bound, so no strategy changes (reviewers A/B)."""
+
+    def __init__(self, inner: Sender, candidate: Candidate):
+        self._inner = inner
+        self._base = FormEntries(tuple(e) for e in candidate.base_entries)
+        self._key = (url_key(candidate.url), candidate.method.upper(), candidate.location)
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None, entries=None):
+        if (entries is None and location in ("query", "body") and not content_type
+                and (url_key(url), method.upper(), location) == self._key):
+            entries = self._base.replace(param, value)
+        if entries is not None:
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, entries=entries)
+        if content_type:
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, content_type=content_type)
+        if method == "GET" and location == "query":
+            return self._inner.send(url, param, value, timing=timing)
+        return self._inner.send(url, param, value, timing=timing, method=method,
+                                location=location)
 
 
 class Oracle:
@@ -59,6 +94,8 @@ class Oracle:
         self.scheduler = scheduler
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:
+        if candidate.base_entries:                       # a form point: send its siblings
+            sender = _FormBoundSender(sender, candidate)
         applicable = [s for s in self.strategies if s.applies(candidate)]
         if self.scheduler is not None and applicable:
             ctx = context_for(candidate.category or candidate.vuln_class,

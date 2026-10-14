@@ -44,6 +44,8 @@ SENSITIVE_TOKENS = frozenset({
     "session", "sessid", "sessionid", "sid", "apikey", "auth", "authorization",
     "otp", "csrf", "xsrf", "csrftoken", "xsrftoken", "accesstoken", "refreshtoken",
     "authtoken", "bearer", "signature", "sig", "pin",
+    # anti-CSRF names that tokenise as one word (forms phase 1, reviewer B-M5)
+    "nonce", "wpnonce", "csrfmiddlewaretoken",
 })
 #: ``key`` is a secret with one of these beside it (``api_key``, ``privateKey``), or alone.
 _KEY_QUALIFIERS = frozenset({"api", "private", "secret", "access", "signing", "client",

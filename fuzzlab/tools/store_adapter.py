@@ -75,7 +75,8 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str,
             )
             seen_pages.add((path, "GET"))
             counts["page"] += 1
-        query = parse_qsl(urlparse(raw).query)
+        # blank values are parameters too (`?title=`), forms phase 1
+        query = parse_qsl(urlparse(raw).query, keep_blank_values=True)
         if query:
             endpoint_id = _upsert_endpoint(store, run_id, path, "GET", source)
             counts["endpoint"] += 1
@@ -87,9 +88,120 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str,
                         (run_id, endpoint_id, name, "query", value),
                     )
                     counts["parameter"] += 1
+    _import_forms(src, store, run_id, counts)
     store.conn.commit()
     src.close()
     return counts
+
+
+#: Hidden fields that pick an object or a user (``login``, ``user_id``): never fuzzed,
+#: sent with their default, so probes cannot rewrite another user's rows (reviewer B-S8).
+_OBJECT_SELECTOR_TOKENS = frozenset({"login", "user", "username", "uid", "owner"})
+
+
+def _object_selector(name: str) -> bool:
+    from fuzzlab.core.redaction import name_tokens
+    toks = [t.lower() for t in name_tokens(name)]
+    return bool(set(toks) & _OBJECT_SELECTOR_TOKENS) or (len(toks) > 1 and toks[-1] == "id")
+
+
+#: A benign value a user would type into an empty free-text field, by control kind.
+#: Many handlers ignore a request with an empty required field (bWAPP's xss_get needs
+#: both names), so empty text siblings are filled as a user would (forms phase 1).
+#: URL and e-mail fillers use reserved names that never resolve (RFC 2606/6761): no
+#: server-side fetch or mail is triggered by a filler (reviewers A/B).
+_FILLERS = {"email": "fuzzlab@example.invalid", "number": "1", "range": "1",
+            "tel": "5555550100", "url": "http://fuzzlab.invalid/", "date": "2020-01-01",
+            "datetime-local": "2020-01-01T00:00", "month": "2020-01", "week": "2020-W01",
+            "time": "12:00", "color": "#000000"}
+_FILLED_KINDS = frozenset({"text", "search", "textarea", *_FILLERS})
+
+
+def _filled(entries, kinds) -> list:
+    """``entries`` with each empty free-text field given a benign value; secrets,
+    passwords, hidden fields and selects are left exactly as they are."""
+    from fuzzlab.core.redaction import is_sensitive_name
+    out = []
+    for name, value in entries:
+        kind = kinds.get(name)
+        if value == "" and kind in _FILLED_KINDS and not is_sensitive_name(name):
+            value = _FILLERS.get(kind, "fuzzlab")
+        out.append((name, value))
+    return out
+
+
+def form_skip_reason(form: dict) -> str | None:
+    """Why a crawled form is never fuzzed (reported), or None. The whole form is
+    skipped when submitting it could change a credential, the session's identity, or
+    something destructive (forms phase 1, reviewers A/B)."""
+    from fuzzlab.core.urls import destructive_reason
+    kinds = [k for _n, k in form["controls"]]
+    if form["enctype"].startswith("multipart/"):
+        return "multipart form (not sent as multipart in phase 1)"
+    if form["selector"] and form["method"] == "POST":
+        return "POST selector form (navigation or settings, never an injection target)"
+    if "password" in kinds:
+        return "has a password control (login or credential form; phase 2)"
+    reason = destructive_reason(form["action_url"])
+    if reason:
+        return f"destructive action ({reason!r})"
+    for name, value in form["entries"]:
+        for text in (name, value):
+            reason = destructive_reason("/?x=" + (text or "").replace(" ", "+"))
+            if reason:
+                return f"destructive entry {name}={value!r} ({reason!r})"
+    return None
+
+
+def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
+    """Crawled forms -> endpoint, `form` row (its default entry list) and one parameter
+    per fuzzable field (FR-FUZZ-42). GET forms drop the action's query (a browser
+    replaces it); POST forms keep it on the endpoint URL (reviewer A4)."""
+    try:
+        rows = src.execute("SELECT action_url, method, enctype, entries, controls, "
+                           "selector FROM discovered_forms").fetchall()
+    except sqlite3.Error:
+        return                                   # an older spider DB: no forms
+    from fuzzlab.core.redaction import is_sensitive_name
+    counts.setdefault("form", 0)
+    counts.setdefault("form_skipped", 0)
+    for row in rows:
+        form = {"action_url": row["action_url"], "method": row["method"] or "GET",
+                "enctype": (row["enctype"] or "").lower(),
+                "entries": [tuple(e) for e in json.loads(row["entries"] or "[]")],
+                "controls": [tuple(c) for c in json.loads(row["controls"] or "[]")],
+                "selector": bool(row["selector"])}
+        if form_skip_reason(form):
+            counts["form_skipped"] += 1
+            continue
+        kinds = dict(form["controls"])
+        form["entries"] = _filled(form["entries"], kinds)
+        path = to_path(form["action_url"])
+        query = urlparse(form["action_url"]).query
+        url = path + ("?" + query if query and form["method"] == "POST" else "")
+        endpoint_id = _upsert_endpoint(store, run_id, url, form["method"], "form")
+        cur = store.conn.execute(
+            "INSERT INTO form (run_id, endpoint_id, enctype, entries) VALUES (?,?,?,?)",
+            (run_id, endpoint_id, form["enctype"], json.dumps(form["entries"])))
+        form_id = int(cur.lastrowid)
+        counts["form"] += 1
+        location = "body" if form["method"] == "POST" else "query"
+        for name, value in form["entries"]:
+            kind = kinds.get(name)
+            if (kind == "submit" or is_sensitive_name(name)
+                    or (kind == "hidden" and _object_selector(name))):
+                continue
+            existing = _get_parameter(store, run_id, endpoint_id, name)
+            if existing is not None:
+                # a link already gave this parameter: attach the form's siblings to it
+                store.conn.execute("UPDATE parameter SET form_id=? WHERE id=? AND "
+                                   "form_id IS NULL", (form_id, existing))
+                continue
+            store.conn.execute(
+                "INSERT INTO parameter (run_id, endpoint_id, name, location, example, "
+                "form_id) VALUES (?,?,?,?,?,?)",
+                (run_id, endpoint_id, name, location, value, form_id))
+            counts["parameter"] += 1
 
 
 def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, int]:

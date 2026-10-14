@@ -3,6 +3,35 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0039 — Form records and classification; migration 20 (`form`); `update`/`insert` deny tokens (BUG-0114); anti-CSRF names redacted (2026-10-13)
+- Change:
+  - **`core/forms.py`:** `control_kind`, `controls`, `is_selector_form`, `form_method`,
+    `form_record` (entries with password and sensitive values blanked; selector
+    options).
+  - **Migration 20:** `form(id, run_id, endpoint_id, enctype, entries)` and
+    `parameter.form_id` (NULL for legacy rows).
+  - **`core/redaction`:** `nonce`, `wpnonce` and `csrfmiddlewaretoken` are now
+    sensitive.
+  - **`core/urls`:** `insert`, `updatedb` and `dbupdate` are deny tokens.
+    `update`/`upgrade` are denied as a script name, a query verb (`?action=update`), or
+    next to a database word. The bare word would block the ForgeCart lab's
+    ground-truth routes (BUG-0114 / PA-0114; reviewers A/B).
+- Impact:
+  - **Store contract:** a new table and a column; readers are unaffected.
+  - **Redaction:** it covers more names, in logs too.
+  - **Behaviour:** `update.php`-style scripts and URLs with an `insert` token are no
+    longer crawled or probed (unless explicitly enumerated).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase1.py`; the migration-19 downgrade test now undoes
+        20 too) — done
+  - [x] FR-CORE-29 — done
+- Review: reviewers A and B, forms phase 1 draft v1 (changes required) → v2 (AGREED,
+  both, with A's two required changes and B's nit adopted), plus the live-run filler
+  deviation (AGREED, with `.invalid` fillers).
+- Effectiveness: verified offline (mutation check 27/27) and live (bWAPP).
+
 ### CC-CORE-0038 — `core.urls.destructive_reason` / `check_send_url` (BUG-0111/0112); NFR traceability (PA-0112) (2026-10-13)
 - Change:
   - `core/urls.py` gains:

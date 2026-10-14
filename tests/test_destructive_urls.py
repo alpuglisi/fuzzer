@@ -35,12 +35,15 @@ DESTRUCTIVE = [
     "http://127.0.0.1:8090/bWAPP/reset.php", "/logout.php", "/ba_logout_1.php",
     "/user/deleteAccount", "/sign-out", "/x.php?action=delete", "/install.php",
     "/%72eset.php", "/%2572eset.php", "/set-up-database.php", "/x?act=del", "/logOut",
-    "/api/cache/clear", "/admin/shutdown", "/account?op=revoke",
+    "/api/cache/clear", "/admin/shutdown", "/account?op=revoke", "/bWAPP/update.php",
+    "/item.php?id=3&action=update&qty=0", "/x?op=update", "/update_db.php", "/db_update.php",
+    "/updatedb.php", "/wp-admin/upgrade.php?step=1", "/schema/update",
 ]
 HARMLESS = [
     "/sqli_1.php", "/password_change.php", "/dropdown.php", "/xss_login.php",
     "/portal.php", "/model?id=1", "/delivery.php", "/clearance.php", "/exitpoll.php",
     "/installation.php", "/banner.php", "/export?format=csv", "/login.php",
+    "/admin/customers/update", "/webhooks/customers/update", "/update_profile.php",
 ]
 
 

@@ -259,3 +259,75 @@ def form_entries(form) -> FormEntries:
         else:                                            # textarea
             entries.append((name, textarea_value(el)))
     return entries
+
+
+# --- form classification and records (forms phase 1, CC-CORE-0039) ------------------
+#: Control kinds a user types free text into.
+_FREE_TEXT = frozenset({"text", "search", "email", "url", "tel", "number", "password",
+                        "textarea", "date", "datetime-local", "month", "week", "time",
+                        "color", "range"})
+
+
+def control_kind(el) -> str:
+    """``select``, ``textarea``, ``submit`` (any submit-capable button), or the
+    ``<input>`` type, lower-cased."""
+    if el.name in ("select", "textarea"):
+        return el.name
+    if el.name == "button":
+        return "submit" if _button_type(el) == "submit" else _button_type(el)
+    kind = _input_type(el)
+    return "submit" if kind in _SUBMIT_INPUT_TYPES else kind
+
+
+def controls(form) -> list[tuple[str, str]]:
+    """The form's enabled, named controls as ``(name, kind)``, in tree order."""
+    return [(el.get("name"), control_kind(el)) for el in owned_controls(form)
+            if el.get("name") and not is_disabled(el)]
+
+
+def is_selector_form(form) -> bool:
+    """A menu-like form: apart from hidden fields and buttons, exactly one ``<select>``
+    and nothing a user types or ticks."""
+    kinds = [k for _n, k in controls(form)
+             if k not in ("hidden", "submit", "reset", "button", "image")]
+    return kinds == ["select"]
+
+
+def form_method(form) -> str:
+    method = (form.get("method") or "GET").strip().upper()
+    return method if method in ("GET", "POST") else "GET"
+
+
+def form_record(form, page_url: str) -> dict:
+    """A storable description of ``form``: action, method, enctype, its entry list
+    with sensitive values blanked, and its controls. Values of password controls and of
+    names `core.redaction` deems sensitive (tokens, CSRF nonces) are never kept: they
+    are stored, and later sent, as ``""`` (reviewers A/B, forms phase 1)."""
+    from urllib.parse import urljoin
+
+    from fuzzlab.core.redaction import is_sensitive_name
+    kinds = dict(controls(form))
+    action = (form.get("action") or "").strip()
+    entries = [(name, "" if kinds.get(name) == "password" or is_sensitive_name(name)
+                else value) for name, value in form_entries(form)]
+    return {
+        "page_url": page_url,
+        "action_url": urljoin(page_url, action) if action else page_url,
+        "method": form_method(form),
+        "enctype": (form.get("enctype") or "application/x-www-form-urlencoded").lower(),
+        "entries": entries,
+        "controls": [[n, k] for n, k in controls(form)],
+        "selector": is_selector_form(form),
+        "options": _selector_options(form) if is_selector_form(form) else [],
+    }
+
+
+def _selector_options(form) -> list[list[str]]:
+    """``[[select name, value, label], ...]`` for a selector form's one select."""
+    select = next(el for el in owned_controls(form) if el.name == "select")
+    out = []
+    for opt in select.find_all("option"):
+        if not is_disabled(opt):
+            out.append([select.get("name") or "", option_value(opt),
+                        " ".join(opt.get_text().split())])
+    return out

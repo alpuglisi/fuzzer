@@ -133,7 +133,7 @@ class RequestsCorrelatingSender:
         self._explicit = frozenset(self._explicit | {url_key(u) for u in urls if u})
 
     def send_correlated(self, url: str, param: str, value: str, *,
-                        method: str = "GET", location: str = "query"):
+                        method: str = "GET", location: str = "query", entries=None):
         from fuzzlab.core.urls import check_send_url
         check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
         # The operator's cookie is the only session material: none a probe response
@@ -160,7 +160,9 @@ class RequestsCorrelatingSender:
         # silently following a redirect would report the wrong response
         # (and can crash outright on a self-referencing Location value).
         kwargs = {"timeout": self._timeout, "headers": headers, "allow_redirects": False}
-        if location == "body":
+        if entries is not None:                   # a form point's full entry list
+            kwargs["data" if location == "body" else "params"] = list(entries)
+        elif location == "body":
             kwargs["data"] = {param: value}
         else:
             kwargs["params"] = {param: value}

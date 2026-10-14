@@ -169,6 +169,10 @@ budget where a vulnerability is plausible.
   text, a checkbox's value or `on`. These values feed the value-based indicator
   rules.
 
+- **FR-AUD-19** *(`CC-AUD-0031`, 2026-10-13).* A form point's candidate evidence
+  carries its entry list (`"entries"`, secrets blank), so the oracle probes it with its
+  sibling fields.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

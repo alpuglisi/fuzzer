@@ -480,6 +480,23 @@ CREATE TABLE IF NOT EXISTS holdout_seal_meta (
 """
 
 
+#: Migration 20 (forms phase 1, CC-CORE-0039, FR-CORE-29): a crawled form's default
+#: entry list (sensitive values already blanked), so a probe of one of its fields sends
+#: the others with it. ``parameter.form_id`` links a form field to it; NULL for every
+#: other parameter, legacy rows included.
+_M0020 = """
+CREATE TABLE IF NOT EXISTS form (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    endpoint_id INTEGER NOT NULL REFERENCES endpoint(id),
+    enctype     TEXT,
+    entries     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_form_endpoint ON form(endpoint_id);
+ALTER TABLE parameter ADD COLUMN form_id INTEGER REFERENCES form(id);
+"""
+
+
 def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
     """Migration 19's post-step: copy every present ``holdout`` record of an existing
     model row (valid or malformed, as recorded) into `holdout_seal`, then record the
@@ -546,6 +563,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (17, _M0017),
     (18, _M0018),
     (19, _M0019),
+    (20, _M0020),
 ]
 
 

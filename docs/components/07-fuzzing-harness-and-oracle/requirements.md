@@ -1107,7 +1107,7 @@ rewards) derives from it.
   verdicts are reproducible (state reset via snapshot/restore between iterations).
 - **NFR-FUZZ-safe** Destructive payload classes off by default; auth endpoints
   excluded from scope; no traffic off localhost.
-  - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`
+  - Enforced by (auth endpoints, destructive URLs; CC-FUZZ-0060): `core.urls.check_send_url` in every probe sender, crawl-point filtering, anonymous auth-endpoint sends — `tests/test_destructive_urls.py::test_every_probe_sender_calls_the_send_gate`, `tests/test_destructive_urls.py::test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it`, `tests/test_destructive_urls.py::test_an_auth_endpoint_is_probed_without_the_session_and_the_session_survives`, `tests/test_destructive_urls.py::test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_jar`, `tests/test_forms_phase1.py::test_credential_parameters_from_links_are_never_fuzzed`, `tests/test_forms_phase1.py::test_object_selecting_hidden_fields_and_csrf_are_pinned_not_fuzzed`
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.)
@@ -1322,3 +1322,18 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   Crawl-sourced points join their stored absolute paths to `--base-url`'s origin, so
   the base may carry the app's path (`.../bWAPP/`). Authenticated senders (`fuzz`,
   `SeamProbeSender`) log in from the operator's URL before the first probe.
+- **FR-FUZZ-42** *(forms as injection points; `CC-FUZZ-0062`, 2026-10-13).*
+  - **Points.** Crawled forms become points.
+  - **Siblings.** Every probe of a form field sends the form's **browser-default entry
+    list, with empty free-text fields filled as a user would type them**. The URL and
+    e-mail fillers use never-resolving `.invalid` names. The spider record keeps the
+    raw defaults, and `Oracle.confirm` binds the entries.
+  - **Never fuzzed:** credential-named parameters from crawl or form sources (ground
+    truth is unaffected), submitters, sensitive names, and hidden object selectors.
+  - **Never imported:** multipart, POST-selector, password-bearing and destructive
+    forms.
+  - **Residuals:**
+    - probes complete real submissions, so rows, users or mail are created;
+    - forms needing a fresh CSRF token do not confirm;
+    - fillers ignore `maxlength` / `pattern`;
+    - one confirmation per (url, param, method, location).

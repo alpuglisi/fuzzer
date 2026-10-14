@@ -259,6 +259,13 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Users:** the crawler and auditor (NFR-CRAWL-safe), every probe sender
     (FR-FUZZ-40), and login discovery's hop check (FR-SESS-13).
 
+- **FR-CORE-29** *(forms; `CC-CORE-0039`, 2026-10-13).*
+  - `core/forms.form_record` describes a scraped form: action, method, enctype,
+    controls, the browser-default entry list with password and sensitive values
+    blanked, and selector options.
+  - **Migration 20** stores a crawled form's entries in `form`, and links its fields
+    through `parameter.form_id`.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

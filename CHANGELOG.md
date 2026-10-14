@@ -4,6 +4,23 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-13 (Forms phase 1: navigate an app as shipped, fuzz its forms with their siblings; BUG-0114)
+- **Why:** the operator asked that fuzzlab navigate bWAPP as shipped and find its
+  vulnerabilities in our categories, without seeding. bWAPP's pages are reachable only
+  through a POST "pick a bug" form, and most sinks run only when the whole form is sent.
+- **What:**
+  - the crawler can navigate operator-named selector forms (`--follow-selector-forms
+    bug`, off by default, gated before any submission, cookie-isolated), and records
+    landing URLs and every form, redacted (CC-CRAWL-0013);
+  - forms become injection points (migration 20 `form` table). Each probe sends the
+    form's other fields, with empty text fields filled as a user would, through one
+    `Oracle.confirm` binding;
+  - credential, login, multipart, selector and destructive forms are never fuzzed
+    (CC-FUZZ-0062, CC-AUD-0031, CC-CORE-0039);
+  - BUG-0114: `update.php`-style scripts and `insert` join the deny list.
+- **Result:** live, from `portal.php` only with no seeds, a bWAPP run confirmed 32
+  findings on 25 pages (9 before, with hand-seeded URLs).
+
 ## 2026-10-13 (BUG-0113: apps under a sub-path work authenticated; PA-0113)
 - **Why:** with BUG-0110..0112 fixed, the authenticated bWAPP crawl still could not log
   in. The crawler and the session manager discovered the login at the bare origin, and

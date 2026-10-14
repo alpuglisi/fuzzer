@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-13 — Crawler/fuzzer: the destructive-URL rule missed `update` / `insert` (fixed, BUG-0114/PA-0114)
+- **Symptom:** bWAPP's `update.php` rebuilds its database on a plain GET, and the deny rule allowed it (latent: nothing linked to it yet).
+- **Root cause:** BUG-0111's token list was never checked against the target's own destructive endpoints.
+- **Remediation:** an `insert` token and `update`-as-a-script-name pairs; a from-source test of bWAPP's destructive GETs. CC-CORE-0039. `docs/bugs/BUG-0114-destructive-list-missed-update-and-insert.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Session/crawler: an app under a sub-path could not log in; crawl points doubled the path (fixed, BUG-0113/PA-0113)
 - **Symptom:** `fuzzlab crawl --start http://127.0.0.1:8090/bWAPP/portal.php --identity user`: "no login form found from http://127.0.0.1:8090".
 - **Root cause:** the spider and `SessionManager.prepare` truncated the operator's URL to its origin; `injection_points_from_store` joined absolute paths to the base's path. Our labs all serve at `/`.

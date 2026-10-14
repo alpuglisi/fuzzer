@@ -11,7 +11,7 @@ import time
 
 from fuzzlab.core.urls import check_send_url, url_key
 from fuzzlab.oracle.probe import Probe
-from fuzzlab.tools.authhttp import make_auth, with_query_param
+from fuzzlab.tools.authhttp import make_auth, with_query, with_query_param
 
 
 class _ExplicitAllowance:
@@ -65,13 +65,22 @@ class SeamProbeSender(_ExplicitAllowance):
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None) -> Probe:
+             content_type: str | None = None, entries=None) -> Probe:
         from urllib.parse import urlencode
 
         from fuzzlab.core.http import Request
         check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
         identity = self._identity_for(url)
-        if location == "header":
+        if entries is not None and location in ("query", "body"):
+            # a form point: the whole entry list, the fuzzed field already set
+            req = (Request(method.upper(), url,
+                           headers={"Content-Type": "application/x-www-form-urlencoded"},
+                           body=urlencode(list(entries)).encode(), identity=identity,
+                           timing=timing, component="oracle")
+                   if location == "body" else
+                   Request(method.upper(), with_query(url, entries), identity=identity,
+                           timing=timing, component="oracle"))
+        elif location == "header":
             req = Request(method.upper(), url, headers={param: value},
                           identity=identity, timing=timing, component="oracle")
         elif location == "body" and content_type:
@@ -116,7 +125,7 @@ class RequestsProbeSender(_ExplicitAllowance):
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None) -> Probe:
+             content_type: str | None = None, entries=None) -> Probe:
         import requests
         # `allow_redirects=False` (BUG-0039, strengthened by BUG-0044/PA-0046
         # to cover every sender, not just this one): a confirmation strategy
@@ -142,7 +151,11 @@ class RequestsProbeSender(_ExplicitAllowance):
         if jar is not None:
             jar.clear()
         kwargs = {"timeout": self._timeout, "allow_redirects": False}
-        if location == "header":
+        if entries is not None and location == "body":   # a form point (forms phase 1)
+            kwargs["data"] = list(entries)
+        elif entries is not None and location == "query":
+            url = with_query(url, entries)
+        elif location == "header":
             kwargs["headers"] = {param: value}
         elif location == "body" and content_type:
             # Whole-body point at its own declared content type -- never

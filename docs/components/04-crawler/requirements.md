@@ -37,6 +37,17 @@ fuzzer.
   literal — so the crawler works on any authorized target, not only the
   loopback lab (BUG-0050/PA-0052).
 
+- **FR-CRAWL-8 (selector-form navigation, CC-CRAWL-0013)** With
+  `--follow-selector-forms [names]` (off by default), the crawler enumerates menu-like
+  forms (one `<select>`, nothing typed):
+  - GET forms always; POST forms only for operator-named selects;
+  - the gate, per-option checks, fail-safes and cookie isolation are as in
+    `tools/formnav.py`;
+  - redirects found this way are crawled as ordinary links.
+- **FR-CRAWL-9 (landings and forms recorded, CC-CRAWL-0013)** A redirect's landing URL
+  is recorded with its query (redacted). Every form seen is recorded in
+  `discovered_forms` (redacted).
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
@@ -45,8 +56,10 @@ fuzzer.
   hop checked), and never requested by the browser (`navguard.guard_page` aborts
   navigations, scripts' fetch/XHR and subresources). The start URL is the operator's
   own input and is exempt. The auditor never re-fetches one from a spider DB, old or
-  new. There is no opt-in: stricter than "default".
-  - Enforced by: `core.urls.destructive_reason`; `tools/spider.py` (queue filter, hand-followed redirects, `navguard.guard_page`); `tools/fetcher.py:load_urls` — `tests/test_destructive_urls.py::test_static_crawl_never_fetches_a_destructive_link_or_redirect`, `tests/test_destructive_urls.py::test_rendered_crawl_sends_no_destructive_request_at_all`, `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_login_discovery_never_follows_a_redirect_to_a_destructive_url`
+  new. There is no opt-in: stricter than "default". *(CC-CRAWL-0013:)* the crawler
+  POSTs only to operator-named selector forms (FR-CRAWL-8), never to a settings or
+  destructive one.
+  - Enforced by: `core.urls.destructive_reason`; `tools/spider.py` (queue filter, hand-followed redirects, `navguard.guard_page`); `tools/fetcher.py:load_urls` — `tests/test_destructive_urls.py::test_static_crawl_never_fetches_a_destructive_link_or_redirect`, `tests/test_destructive_urls.py::test_rendered_crawl_sends_no_destructive_request_at_all`, `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_login_discovery_never_follows_a_redirect_to_a_destructive_url`, `tests/test_forms_phase1.py::test_a_named_picker_is_navigated_and_the_settings_one_never_touched`, `tests/test_forms_phase1.py::test_a_settings_picker_is_never_submitted_even_when_named`, `tests/test_forms_phase1.py::test_selector_submissions_never_change_the_crawlers_cookies`, `tests/test_forms_phase1.py::test_bwapps_destructive_gets_are_refused`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
   spaces.
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →

@@ -13,6 +13,8 @@ path form via `core.urls.to_path`).
 
 from __future__ import annotations
 
+import json
+
 from fuzzlab.audit import InjectionPoint, known_categories
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
@@ -127,6 +129,15 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     return points, skipped
 
 
+#: A crawl- or form-sourced parameter with one of these name tokens is never fuzzed.
+_CREDENTIAL_TOKENS = frozenset({"password", "passwd", "pwd", "pass", "secret"})
+
+
+def _credential_name(name: str) -> bool:
+    from fuzzlab.core.redaction import name_tokens
+    return bool({t.lower() for t in name_tokens(name)} & _CREDENTIAL_TOKENS)
+
+
 def injection_points_from_store(store, run_id: int, base_url: str,
                                 skipped: list | None = None) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
@@ -144,8 +155,10 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     parts = urlsplit(base_url)
     base = f"{parts.scheme}://{parts.netloc}"
     rows = store.conn.execute(
-        "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location "
+        "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
+        "f.entries AS entries "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
+        "LEFT JOIN form f ON f.id = p.form_id "
         "WHERE p.run_id = ?",
         (run_id,),
     ).fetchall()
@@ -163,8 +176,21 @@ def injection_points_from_store(store, run_id: int, base_url: str,
             if skipped is not None:
                 skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
             continue
+        if _credential_name(r["name"]):
+            # never fill a credential with payloads (it could change the operator's
+            # password); ground-truth points are not affected (reviewers A/B)
+            if skipped is not None:
+                skipped.append((path, method, r["name"], "credential parameter"))
+            continue
+        entries = None
+        if r["entries"]:
+            try:
+                entries = tuple(tuple(e) for e in json.loads(r["entries"]))
+            except (ValueError, TypeError):
+                entries = None
         points.append(InjectionPoint(url=base + path, param=r["name"],
-                                     method=method, location=r["location"] or "query"))
+                                     method=method, location=r["location"] or "query",
+                                     base_entries=entries))
     return points
 
 
@@ -180,8 +206,11 @@ class _CountingSender:
 
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None):
+             content_type: str | None = None, entries=None):
         self.count += 1
+        if entries is not None:
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, entries=entries)
         if method == "GET" and location == "query":
             return self._inner.send(url, param, value, timing=timing)
         if content_type:

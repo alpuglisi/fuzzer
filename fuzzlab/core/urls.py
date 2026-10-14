@@ -84,11 +84,25 @@ DESTRUCTIVE_TOKENS = frozenset({
     "unsubscribe", "clear", "flush", "empty", "trash", "kill", "terminate", "revoke",
     "cancel", "disable", "ban", "shutdown", "restart", "reboot", "exit", "setup",
     "rebuild", "migrate", "seed",
+    # BUG-0114: bWAPP's insecure_crypt_storage_2.php?insert= appends to a password
+    # file. (`update` is a pair below: as a bare word it is a REST route's name, e.g.
+    # ForgeCart's /admin/customers/update, which the crawl must reach.)
+    "insert", "updatedb", "dbupdate", "upgradedb", "dbupgrade",
 })
 #: Two adjacent tokens that together name such an action (``sign-out``, ``set_up``).
 DESTRUCTIVE_PAIRS = frozenset({
     ("log", "out"), ("log", "off"), ("sign", "out"), ("sign", "off"), ("set", "up"),
     ("end", "session"),
+    # BUG-0114: `update`/`upgrade` as a script name (bWAPP's update.php rebuilds its
+    # database on a GET; WordPress's upgrade.php upgrades it), as a query verb
+    # (`?action=update`), or next to a database word (`update_db.php`) -- never a REST
+    # route segment merely named `update` (reviewers A/B)
+    *{(verb, ext) for verb in ("update", "upgrade")
+      for ext in ("php", "php5", "asp", "aspx", "jsp", "cgi", "pl", "py")},
+    *{(slot, verb) for verb in ("update", "upgrade")
+      for slot in ("action", "op", "do", "cmd", "task", "mode", "method", "func")},
+    *{pair for verb in ("update", "upgrade") for db in ("db", "database", "schema")
+      for pair in ((verb, db), (db, verb))},
 })
 _CAMEL = re.compile(r"([a-z0-9])([A-Z])")
 _TOKEN = re.compile(r"[a-z]+|[0-9]+")

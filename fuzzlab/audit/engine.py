@@ -30,6 +30,9 @@ class InjectionPoint:
     # binary-serialized, e.g. TrackerNest's XXE/insecure-deserialization
     # cases), so this is `None` unless the caller positively knows the format.
     body_content_type: str | None = None
+    # A crawled form's default entry list (forms phase 1, FR-FUZZ-42): every probe of
+    # `param` sends the other fields with it. None for a lone parameter.
+    base_entries: tuple[tuple[str, str], ...] | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -68,6 +71,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                     evidence["store_param"] = point.store_param or point.param
                 if point.body_content_type:
                     evidence["body_content_type"] = point.body_content_type
+                if point.base_entries is not None:
+                    evidence["entries"] = [list(e) for e in point.base_entries]
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",

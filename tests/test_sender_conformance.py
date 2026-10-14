@@ -68,29 +68,44 @@ class _Recorder:
         self.calls = []
 
     def send(self, url, param, value, timing=False, method="GET", location="query",
-             content_type=None):
+             content_type=None, entries=None):
         self.calls.append(dict(url=url, param=param, value=value, timing=timing,
                                method=method, location=location,
-                               content_type=content_type))
+                               content_type=content_type, entries=entries))
         return Probe(200, "ok", headers={})
+
+
+def _wrap(cls, inner):
+    """Build a wrapper around ``inner``. `_FormBoundSender` also takes its candidate
+    (a form point on another URL, so this send passes through unbound)."""
+    if cls.__name__ == "_FormBoundSender":
+        from fuzzlab.oracle.probe import Candidate
+        return cls(inner, Candidate(url="http://other/f", param="p",
+                                    base_entries=(("p", ""),)))
+    return cls(inner)
 
 
 def forwarding_problems(cls) -> list[str]:
     """Call the wrapper with every non-default protocol argument; each must reach the
     inner sender unchanged."""
-    inner = _Recorder()
-    wrapper = cls(inner)
-    sent = dict(timing=True, method="POST", location="body",
-                content_type="application/json")
-    try:
-        wrapper.send("http://h/x", "body", "{}", **sent)
-    except TypeError as exc:
-        return [f"rejects a protocol argument: {exc}"]
-    if len(inner.calls) != 1:
-        return [f"made {len(inner.calls)} inner sends, expected 1"]
-    got = inner.calls[0]
-    return [f"{k}: sent {v!r}, inner got {got[k]!r}" for k, v in sent.items()
-            if got[k] != v]
+    out = []
+    # a raw-body send carries content_type; a form send carries its entry list (forms
+    # phase 1): each protocol argument must reach the inner sender unchanged
+    for sent in (dict(timing=True, method="POST", location="body",
+                      content_type="application/json"),
+                 dict(timing=True, method="POST", location="body",
+                      entries=[("body", "{}"), ("form", "submit")])):
+        inner = _Recorder()
+        try:
+            _wrap(cls, inner).send("http://h/x", "body", "{}", **sent)
+        except TypeError as exc:
+            return out + [f"rejects a protocol argument: {exc}"]
+        if len(inner.calls) != 1:
+            return [f"made {len(inner.calls)} inner sends, expected 1"]
+        got = inner.calls[0]
+        out += [f"{k}: sent {v!r}, inner got {got[k]!r}" for k, v in sent.items()
+                if got[k] != v]
+    return out
 
 
 def _load(module, name):
@@ -147,8 +162,9 @@ class _Dropper:
 
 
 def test_the_guards_catch_a_missing_or_dropped_content_type():
-    assert signature_problems(_OldCostCounter) == ["missing parameter 'content_type'"]
+    assert signature_problems(_OldCostCounter) == ["missing parameter 'content_type'",
+                                                   "missing parameter 'entries'"]
     assert forwarding_problems(_OldCostCounter)[0].startswith("rejects a protocol argument")
-    assert signature_problems(_Dropper) == []
-    assert forwarding_problems(_Dropper) == [
-        "content_type: sent 'application/json', inner got None"]
+    assert signature_problems(_Dropper) == ["missing parameter 'entries'"]
+    assert forwarding_problems(_Dropper)[0] == (
+        "content_type: sent 'application/json', inner got None")

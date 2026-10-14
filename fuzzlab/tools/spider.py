@@ -44,6 +44,22 @@ class StorageManager:
                 source TEXT DEFAULT 'link'
             )
         ''')
+        # Every form the crawler saw (forms phase 1): entries are stored with sensitive
+        # values blanked (core.forms.form_record), one row per (action, method, controls).
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS discovered_forms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_url TEXT,
+                action_url TEXT,
+                method TEXT,
+                enctype TEXT,
+                entries TEXT,
+                controls TEXT,
+                selector INTEGER DEFAULT 0,
+                options TEXT,
+                sig TEXT UNIQUE
+            )
+        ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -56,7 +72,31 @@ class StorageManager:
     def reset(self):
         """Clears previous results so a fresh crawl starts from an empty map."""
         self.cursor.execute('DELETE FROM discovered_pages')
+        self.cursor.execute('DELETE FROM discovered_forms')
         self.conn.commit()
+
+    def record_form(self, record):
+        """Store a form record (already redacted by ``core.forms.form_record``; the
+        page and action URLs pass ``redact_url``). Returns False if already present."""
+        import json
+
+        from fuzzlab.core.redaction import redact_url
+        sig = json.dumps([record["action_url"], record["method"],
+                          sorted(n for n, _k in record["controls"])])
+        try:
+            self.cursor.execute('''
+                INSERT INTO discovered_forms
+                    (page_url, action_url, method, enctype, entries, controls, selector,
+                     options, sig)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (redact_url(record["page_url"]), redact_url(record["action_url"]),
+                  record["method"], record["enctype"], json.dumps(record["entries"]),
+                  json.dumps(record["controls"]), int(record["selector"]),
+                  json.dumps(record["options"]), sig))
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
     def count(self):
         self.cursor.execute('SELECT COUNT(*) FROM discovered_pages')
@@ -90,7 +130,7 @@ class LocalSpider:
 
     def __init__(self, start_url, max_depth=3, db_name="spider_results.db",
                  engine="auto", timeout_ms=10000, resume=False,
-                 session_manager=None, identity=None):
+                 session_manager=None, identity=None, selector_forms=None):
         self.start_url = start_url
         self.max_depth = max_depth
         self.storage = StorageManager(db_name)
@@ -153,6 +193,14 @@ class LocalSpider:
         # followed through a redirect; the start URL is the operator's own input.
         self._allow = frozenset({url_key(start_url)})
         self.skipped_destructive: dict[str, str] = {}
+        # Selector-form navigation (FR-CRAWL-8): None = off (default); else the set of
+        # select names the operator named (POST forms need a name; GET ones are allowed
+        # whenever the feature is on).
+        self._selector_forms = None if selector_forms is None else frozenset(selector_forms)
+        self._enumerated: set = set()
+        self._auth_headers: dict = {}
+        self._last_final_url = None
+        self._last_html = None
 
     def _destructive(self, url):
         """The deny-list reason for ``url`` (None for the start URL), recorded once."""
@@ -190,6 +238,7 @@ class LocalSpider:
             cookies, headers = browserauth.playwright_auth(
                 self._session_manager, self._identity, self._auth_base_url)
             browserauth.apply_to_context(self._page.context, cookies, headers)
+            self._auth_headers = dict(headers or {})
             logging.info(f"Crawler authenticated as {self._identity} "
                          f"({len(cookies)} cookie(s))")
         # Record fetch()/XMLHttpRequest targets. These endpoints are where a
@@ -254,6 +303,8 @@ class LocalSpider:
                            lambda nxt: self._in_scope(nxt) and not self._destructive(nxt))
         ct = resp.headers.get('Content-Type', '')
         title, text, links = None, None, []
+        self._last_final_url = getattr(resp, "url", None) or url
+        self._last_html = resp.text if 'text/html' in ct else None
         if 'text/html' in ct:
             soup = BeautifulSoup(resp.text, 'html.parser')
             if soup.title and soup.title.string:
@@ -278,6 +329,7 @@ class LocalSpider:
             return self._fetch_static(url)
 
     def _goto_and_parse(self, url):
+        self._last_final_url, self._last_html = url, None
         response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         status = response.status if response else 0
         ct = (response.headers or {}).get('content-type', '') if response else ''
@@ -290,6 +342,8 @@ class LocalSpider:
             except Exception:
                 pass
             title = self._page.title()
+            self._last_final_url = self._page.url
+            self._last_html = self._page.content()
             # Links and text come from the RENDERED DOM, so JS-injected nav links
             # and JS-built content are included.
             links = self._page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
@@ -298,6 +352,76 @@ class LocalSpider:
             except Exception:
                 text = None
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
+
+    # ----- landing URLs, forms, selector navigation (forms phase 1) -----
+    def _after_fetch(self, url, status, depth, title, content):
+        """Record where a redirect landed and every form on the page; enumerate allowed
+        selector forms. Returns more ``(url, depth, source)`` to queue."""
+        from fuzzlab.core.redaction import redact_url
+        more = []
+        final = self._last_final_url
+        if (final and final.split('#')[0] != url and self._in_scope(final)
+                and not self._destructive(final)):
+            # the landing URL keeps its query (xss_eval.php?date=Date()), redacted
+            self.storage.mark_visited(redact_url(final.split('#')[0]), status, depth,
+                                      title, content, source='redirect')
+        if not self._last_html:
+            return more
+        from fuzzlab.core.forms import form_record
+        page = final or url
+        for form in BeautifulSoup(self._last_html, 'html.parser').find_all('form'):
+            record = form_record(form, page)
+            self.storage.record_form(record)
+            if self._selector_forms is None or not record["selector"] or depth >= self.max_depth:
+                continue
+            from fuzzlab.tools import formnav
+            sig = formnav.signature(record)
+            if sig in self._enumerated:
+                continue
+            self._enumerated.add(sig)
+            why = formnav.refusal(record, self._selector_forms, True, self._in_scope)
+            if why:
+                logging.info(f"selector form on {page} not submitted: {why}")
+                continue
+            for target in formnav.enumerate_form(record, self._isolated_submit,
+                                                 self._in_scope):
+                if not self._destructive(target) and not self.storage.is_visited(target):
+                    more.append((target, depth + 1, 'form'))
+        return more
+
+    def _isolated_submit(self, method, action_url, entries):
+        """Submit a selector form without following redirects, through a client that
+        starts with a copy of the crawler's cookies and never writes a response cookie
+        back (reviewers A2/B-M1). Returns ``(status, headers)``."""
+        from urllib.parse import urlencode
+        pairs = list(entries)
+        if self.engine == "playwright" and self._pw is not None:
+            ctx = self._pw.request.new_context(
+                storage_state=self._page.context.storage_state(),
+                extra_http_headers=self._auth_headers or None)
+            try:
+                if method == "POST":
+                    resp = ctx.fetch(action_url, method="POST", data=urlencode(pairs),
+                                     headers={"Content-Type":
+                                              "application/x-www-form-urlencoded"},
+                                     max_redirects=0, timeout=self.timeout_ms)
+                else:   # a GET form replaces the action's query with its entries
+                    resp = ctx.fetch(action_url.split("?")[0] + "?" + urlencode(pairs),
+                                     method="GET", max_redirects=0,
+                                     timeout=self.timeout_ms)
+                return resp.status, dict(resp.headers)
+            finally:
+                ctx.dispose()
+        iso = requests.Session()
+        iso.headers.update(self.session.headers)
+        iso.cookies.update(self.session.cookies.copy())
+        if method == "POST":
+            r = iso.post(action_url, data=pairs, allow_redirects=False,
+                         timeout=self.timeout_ms / 1000)
+        else:
+            r = iso.get(action_url.split("?")[0], params=pairs, allow_redirects=False,
+                        timeout=self.timeout_ms / 1000)
+        return r.status_code, dict(r.headers)
 
     def crawl(self):
         queue = [(self.start_url, 0, 'link')]
@@ -327,6 +451,8 @@ class LocalSpider:
                         source=source,
                     )
                     crawled += 1
+                    queue.extend(self._after_fetch(current_url, status, depth, title,
+                                                   content))
                     logging.info(
                         f"[{status}] depth {depth}: {current_url}"
                         + (f" — {len(raw_links)} link(s)" if raw_links else "")
@@ -401,6 +527,13 @@ def build_parser():
     p.add_argument("--identity", default=None,
                    help="Crawl authenticated as this identity via the session manager "
                         "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
+    p.add_argument("--follow-selector-forms", nargs="?", const="", default=None,
+                   metavar="SELECT[,SELECT...]",
+                   help="Navigate through menu-like forms (one <select> and a button). "
+                        "Alone: GET forms only. With names: also submit POST forms whose "
+                        "<select> has one of these names (e.g. 'bug'). Off by default: "
+                        "a submission can change state, so POST pickers are submitted "
+                        "only when named, never settings-like ones (FR-CRAWL-8).")
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
@@ -432,6 +565,9 @@ if __name__ == "__main__":
         resume=args.resume,
         session_manager=session_manager,
         identity=args.identity,
+        selector_forms=(None if args.follow_selector_forms is None else
+                        [n.strip() for n in args.follow_selector_forms.split(",")
+                         if n.strip()]),
     )
     spider.crawl()
     if args.store:

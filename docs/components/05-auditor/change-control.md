@@ -3,6 +3,18 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0031 — Candidate evidence carries a form point's entries (forms phase 1) (2026-10-13)
+- Change: `audit/engine.InjectionPoint.base_entries`. A fired rule's candidate evidence
+  includes `"entries"`, values already blanked for secrets.
+- Impact: the pipeline (`_candidate_of`) and oracle bind them. Rules are unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests — done
+  - [x] FR-AUD-19 — done
+- Review: as CC-CORE-0039.
+- Effectiveness: verified live.
+
 ### CC-AUD-0030 — The auditor logs in from `--base-url` before any fetch (BUG-0113) (2026-10-13)
 - Change: with `--identity`, after `make_auth`, the auditor calls
   `ensure(host, identity, --base-url, operator=True)`, so seam requests and re-logins

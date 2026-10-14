@@ -22,6 +22,42 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0062 — Forms as injection points, probed with their sibling fields (forms phase 1) (2026-10-13)
+- Change:
+  - **`store_adapter.import_spider`:**
+    - imports forms: endpoint (a POST keeps its action query, a GET drops it), a `form`
+      row and fuzzable parameters;
+    - never fuzzed: the submitter, sensitive names, and hidden object selectors
+      (`login`, `user`, `*_id`), which stay pinned to their defaults;
+    - whole forms skipped: multipart, POST selector, any password control,
+      destructive action/entries/submitter/checked box;
+    - empty free-text siblings are filled as a user would type them. Never-resolving
+      `.invalid` URL and e-mail fillers;
+    - blank query values are kept.
+  - **`injection_points_from_store`:**
+    - loads `base_entries`;
+    - drops credential-named parameters (`password`, `passwd`, `pwd`, `pass`,
+      `secret`) from crawl and form sources. Ground truth is unaffected.
+  - **`Candidate.base_entries`; `Oracle.confirm`'s `_FormBoundSender`:** the one
+    binding. It matches url_key, method and location.
+  - **Senders:** every probe sender and wrapper accepts `entries=`, guarded by an AST
+    test.
+- Impact:
+  - **Behaviour:** crawl-sourced runs now probe forms. Form probes complete real
+    submissions.
+  - **Residuals:** rows or mail created by probes; one confirmation per
+    (url, param, method, location); CSRF-token forms do not confirm; fillers ignore
+    `maxlength` / `pattern`.
+- Risk: medium (more traffic, completed submissions), within the gates above and the
+  budget.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase1.py`, 40) — done
+  - [x] FR-FUZZ-42 — done
+- Review: as CC-CORE-0039.
+- Effectiveness: live. bWAPP from `portal.php` with no seeds: 32 confirmed findings on
+  25 pages (9 before).
+
 ### CC-FUZZ-0061 — Crawl points join to the origin; `fuzz` logs in from `--url` (BUG-0113) (2026-10-13)
 - Change:
   - `injection_points_from_store` joins stored absolute paths to `base_url`'s

@@ -22,6 +22,13 @@ def with_query_param(url: str, name: str, value) -> str:
     return urlunparse(parts._replace(query=urlencode(query)))
 
 
+def with_query(url: str, entries) -> str:
+    """``url`` with its query string replaced by ``entries`` (a form's full entry list,
+    in order, duplicates kept), as a browser submits a GET form."""
+    parts = urlparse(url)
+    return urlunparse(parts._replace(query=urlencode(list(entries))))
+
+
 def _build(target_url: str, timeout: float, store_path: str | None = None):
     """Build the session manager + an HttpClient sharing it, scoped to the target.
 

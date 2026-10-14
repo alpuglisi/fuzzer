@@ -1437,3 +1437,11 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Every component that takes an operator URL has a test with the app under a
      sub-path (`/app/`).** Our own labs all serve at the root and cannot surface this.
      (from BUG-0113)
+
+- **PA-0114** — Strengthens `PA-0112`, after BUG-0114: the destructive-URL rule missed
+  bWAPP's `update.php` (it rebuilds the database on a GET).
+  1. **Before any crawl of a newly adopted third-party lab, its destructive or
+     state-rewriting endpoints are enumerated from its source.** Each is checked
+     against `core.urls.destructive_reason` in a test.
+  2. **An endpoint the rule cannot catch is listed with its compensating control, or as
+     a stated residual,** never silently. (from BUG-0114)

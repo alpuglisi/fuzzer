@@ -3,6 +3,42 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0013 — Selector-form navigation; landing URLs and forms recorded (forms phase 1) (2026-10-13)
+- Change: `tools/spider.py` and new `tools/formnav.py`.
+  - **Navigation.** `--follow-selector-forms [names]`, off by default.
+    - GET selector forms are enumerated. POST ones are enumerated only for
+      operator-named selects.
+    - Never submitted: a form with a settings-named control, or a destructive or
+      out-of-scope action. Skipped: an option with a settings word or destructive
+      value/label.
+    - Enumeration stops on a non-3xx response, a cookie, or a destructive or
+      out-of-scope `Location`. Self-redirects are skipped, and five in a row stop the
+      form.
+    - Submissions go through an isolated client (a throwaway session, or a Playwright
+      `APIRequestContext` seeded from cookies). A response cookie never reaches the
+      crawler.
+  - **Recording.** The landing URL of a redirect is recorded with its query
+    (`redact_url`). Every form is recorded in `discovered_forms` (redacted).
+- Impact:
+  - **Behaviour:** the crawler POSTs for the first time, only under the flag.
+    NFR-CRAWL-safe's text and `Enforced by:` lines are updated.
+  - **Spider DB:** a new table.
+- Risk: medium (state change by submission), mitigated by the gate before any
+  submission, which reviewers A and B required, and the fail-safes.
+- Residuals:
+  - a named settings picker could change state, so the operator names deliberately;
+  - a visit to bWAPP's `restrict_folder_access.php` deletes its `.htaccess`.
+- Deliverables:
+  - [x] code — done
+  - [x] tests — done
+  - [x] FR-CRAWL-8 and FR-CRAWL-9; NFR-CRAWL-safe — done
+- Review: as CC-CORE-0039. Reviewer A's optional nit was declined: A suggested that a
+  destructive or out-of-scope `Location` *skip* that option rather than stop the form.
+  Stopping is the v2 rule reviewer B required (a menu leading somewhere destructive is
+  not trusted further). It costs coverage only.
+- Effectiveness: live. From `portal.php` alone, 159 pages and 304 forms; the
+  security-level picker was never submitted.
+
 ### CC-CRAWL-0012 — The crawler logs in from its start URL (BUG-0113) (2026-10-13)
 - Change: `LocalSpider._auth_base_url = start_url`, not its origin. `playwright_auth`
   marks it as operator input and scopes the injected cookies to the origin root.
