@@ -206,6 +206,8 @@ with the launch sites pinned (`test_the_launch_sites_are_the_three_known_ones`).
 - **Walked hops carry the context's headers and cookies, not the browser's request
   headers** (only `content-type` is copied). A site whose hop needs `Accept` or a
   custom header may answer differently: coverage, not safety.
+- **An auditor whose `--base-url` is on a separate auth origin** refuses every page
+  fetch (fails closed, logged "outside the audit scope"): its audit finds nothing.
 - **With `--no-proxy-server`, a browser in a container whose only egress is a proxy
   cannot reach an external target at all.** It fails safe; the static engine is the
   fallback.

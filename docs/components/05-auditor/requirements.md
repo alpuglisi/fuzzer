@@ -211,6 +211,9 @@ budget where a vulnerability is plausible.
     once (the auth base's, else the first fetched URL's); a URL outside it is never
     fetched, and the rendered fetcher's browser reaches nothing else (a context-wide
     route, redirect chains walked, plus launch arguments for Chromium's own traffic).
+    Stated consequence: with `--base-url` on a separate auth origin (a login hosted
+    elsewhere), every page fetch is refused and logged ("outside the audit scope"),
+    so the audit finds nothing; audit with a base URL on the pages' own origin.
   - Enforced by (scope): `ContentFetcher.fetch` / `_start_browser`, `navguard` — `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_auditors_scope_is_fixed_and_never_moves`, `tests/test_browser_scope.py::test_the_static_auditor_refuses_another_origin_too`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
   - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
   - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)
