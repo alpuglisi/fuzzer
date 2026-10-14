@@ -113,6 +113,47 @@ def test_runner_shutdown_stops_every_live_job():
         assert h not in procutil.registered()
 
 
+def test_runner_stops_reading_output_a_survivor_holds_open(monkeypatch):
+    """Review round 2 (B nit): the job's output pipe is inherited by its descendants;
+    if one outlives the job (e.g. stuck in D state), the stream still ends -- after
+    the supervisor's exit plus a bounded drain -- with a line saying so."""
+    from fuzzlab import procutil
+
+    class _Proc:
+        def __init__(self):
+            self.stdout = asyncio.StreamReader()  # never fed EOF: a survivor holds it
+            self.stdout.feed_data(b"started\n")
+            self.returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    class _Handle:
+        def __init__(self):
+            self.proc = _Proc()
+
+    async def fake_start(argv, **kw):
+        return _Handle()
+
+    async def fake_stop(h, **kw):
+        return "child"
+
+    monkeypatch.setattr(procutil, "astart_server", fake_start)
+    monkeypatch.setattr(procutil, "astop_server", fake_stop)
+    monkeypatch.setattr(Runner, "DRAIN_S", 0.2)
+
+    async def go():
+        r = Runner()
+        token = await r.launch(["anything"])
+        return [ev async for ev in r.stream(token)]
+
+    events = asyncio.run(asyncio.wait_for(go(), 10))
+    assert any("data: started" in e for e in events)
+    assert any("still held open" in e for e in events)
+    assert "event: done" in events[-1]
+
+
 def test_runner_stream_unknown_token():
     async def go():
         r = Runner()

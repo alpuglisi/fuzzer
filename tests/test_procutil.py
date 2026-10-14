@@ -107,7 +107,15 @@ def test_stop_server_takes_the_whole_tree_and_reaps() -> None:
 
 def test_stop_server_catches_a_grandchild_that_escaped_group_and_session() -> None:
     h = procutil.start_server([sys.executable, "-c", ESCAPING_PROGRAM],
-                              stdout=subprocess.PIPE, text=True)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _escaped_grandchild_checks(h)
+    except AssertionError as exc:
+        procutil.stop_server(h)
+        raise AssertionError(f"{exc}\n--- supervisor stderr ---\n{h.proc.stderr.read()}") from exc
+
+
+def _escaped_grandchild_checks(h: procutil.ServerHandle) -> None:
     pids: dict[str, int] = {}
     for _ in range(6):  # two processes share the pipe: parse tokens, not line shapes
         import re
@@ -121,7 +129,8 @@ def test_stop_server_catches_a_grandchild_that_escaped_group_and_session() -> No
     assert grand is not None and grand.sid != h.pid  # it really left the session
     targets = [(pids["CHILD"], procutil.read_stat(pids["CHILD"]).start), (grand.pid, grand.start)]
     procutil.stop_server(h)
-    assert _wait_gone(targets, bound=0.5) == []
+    # deterministic: the supervisor exits only once no descendant is left alive
+    assert [pid for pid, start in targets if _alive(pid, start)] == []
 
 
 def test_a_server_that_exits_on_its_own_is_collected_with_its_code() -> None:
@@ -501,6 +510,144 @@ def test_the_supervisor_signals_the_servers_group_only_while_its_leader_is_held(
     assert any(sig == str(int(signal.SIGKILL)) for _, sig, _ in calls), calls  # non-vacuous
     assert all(held == "1" for _, _, held in calls), f"killpg on a freed group id: {calls}"
     assert _wait_gone([(escaped, est.start)]) == []
+
+
+SLOW_READY = textwrap.dedent("""
+    import importlib.util, sys, time
+    delay, path = float(sys.argv[1]), sys.argv[2]
+    spec = importlib.util.spec_from_file_location("procutil_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    real_report = mod._Supervisor.report
+
+    def slow(self, line):
+        if line.startswith("ready"):
+            time.sleep(delay)  # the server is up, but its ready line is late
+        return real_report(self, line)
+
+    mod._Supervisor.report = slow
+    sys.exit(mod._supervisor_main(sys.argv[3:]))
+""")
+
+RECORDING_SERVER = textwrap.dedent("""
+    import os, sys, time
+
+    def record():
+        data = open("/proc/self/stat", "rb").read()
+        start = int(data[data.rindex(b")") + 2:].split()[19])
+        with open(sys.argv[1], "a") as fh:
+            fh.write(f"{os.getpid()} {start} {os.getsid(0)}\\n")
+
+    record()
+    if os.fork() == 0:  # stays in the session
+        record()
+        time.sleep(300)
+        os._exit(0)
+    if os.fork() == 0:  # escapes group and session
+        os.setsid()
+        record()
+        time.sleep(300)
+        os._exit(0)
+    time.sleep(300)
+""")
+
+
+def _wrap_supervisor(monkeypatch, wrapper: Path, *extra: str) -> None:
+    """Run the real supervisor entry point under ``wrapper`` (a test-only shim)."""
+    real_argv = procutil._supervisor_argv
+
+    def wrapped(argv, grace, status_w, control_r):
+        full = real_argv(argv, grace, status_w, control_r)
+        i = full.index(procutil._SUPERVISOR_SCRIPT)
+        return [*full[:i], str(wrapper), *extra, procutil._SUPERVISOR_SCRIPT, *full[i + 1:]]
+
+    monkeypatch.setattr(procutil, "_supervisor_argv", wrapped)
+
+
+def test_a_server_that_misses_its_ready_timeout_leaves_nothing(tmp_path: Path, monkeypatch) -> None:
+    """Review round 2 (A): a slow boot (artisan, ``go run``) whose ready line misses
+    ``ready_timeout`` after the server has forked: the failed start stops the whole
+    tree -- the in-session child and an escaped grandchild included -- sweeping the
+    session before it reaps the supervisor."""
+    shim, log = tmp_path / "slow_ready.py", tmp_path / "pids"
+    shim.write_text(SLOW_READY)
+    _wrap_supervisor(monkeypatch, shim, "2.0")
+    with pytest.raises(procutil.ProcUtilError, match="no ready line"):
+        procutil.start_server([sys.executable, "-c", RECORDING_SERVER, str(log)], ready_timeout=0.8)
+    monkeypatch.undo()
+    rows = [tuple(int(x) for x in line.split()) for line in log.read_text().splitlines()]
+    try:
+        assert len(rows) == 3, rows  # server, its in-session child, the escaped grandchild
+        assert _wait_gone([(pid, start) for pid, start, _ in rows]) == []
+        server_sid = rows[0][2]
+        assert raw_members("sid", server_sid, 0) == []
+    finally:
+        for pid, start, _ in rows:
+            procutil._signal_checked(pid, start, signal.SIGKILL)
+
+
+DYING_BEFORE_READY = textwrap.dedent("""
+    import importlib.util, os, signal, sys, time
+    path = sys.argv[1]
+    spec = importlib.util.spec_from_file_location("procutil_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    real_report = mod._Supervisor.report
+
+    def die(self, line):
+        if line.startswith("ready"):
+            time.sleep(0.5)  # let the server fork
+            os.kill(os.getpid(), signal.SIGKILL)  # killed from outside, no clean-up
+        return real_report(self, line)
+
+    mod._Supervisor.report = die
+    sys.exit(mod._supervisor_main(sys.argv[2:]))
+""")
+
+
+def test_a_supervisor_killed_before_ready_is_swept_before_it_is_reaped(tmp_path: Path, monkeypatch) -> None:
+    """Review round 2 (A): the failed-start path sweeps the supervisor's session
+    *before* reaping it. Here the supervisor is SIGKILLed after the server forked but
+    before its ready line: the server dies of its PDEATHSIG, its in-session child does
+    not -- only the sweep (the supervisor still held, unreaped) stops it."""
+    shim, log = tmp_path / "dying.py", tmp_path / "pids"
+    shim.write_text(DYING_BEFORE_READY)
+    _wrap_supervisor(monkeypatch, shim)
+    server = RECORDING_SERVER.split("if os.fork() == 0:  # escapes")[0] + "time.sleep(300)\n"
+    assert "setsid" not in server
+    with pytest.raises(procutil.ProcUtilError, match="no ready line"):
+        procutil.start_server([sys.executable, "-c", server, str(log)], ready_timeout=BOUND_S)
+    monkeypatch.undo()
+    rows = [tuple(int(x) for x in line.split()) for line in log.read_text().splitlines()]
+    try:
+        assert len(rows) == 2, rows  # the server and its in-session child
+        assert _wait_gone([(pid, start) for pid, start, _ in rows]) == []
+        assert raw_members("sid", rows[0][2], 0) == []
+    finally:
+        for pid, start, _ in rows:
+            procutil._signal_checked(pid, start, signal.SIGKILL)
+
+
+def test_an_async_wait_returns_when_the_supervisor_was_reaped_elsewhere() -> None:
+    """Review round 2 (B): a supervisor reaped behind its Popen's back must not leave
+    ``await handle.proc.wait()`` spinning forever."""
+    import asyncio
+
+    async def go():
+        h = await procutil.astart_server(["sleep", "300"], allow_thread=True)
+        child = (h.child_pid, h.child_start_time)
+        os.kill(h.pid, signal.SIGKILL)
+        os.waitpid(h.pid, 0)  # reaped out from under the handle
+        code = await asyncio.wait_for(h.proc.wait(), BOUND_S)
+        reason = await procutil.astop_server(h)
+        return code, reason, child
+
+    code, reason, child = asyncio.run(go())
+    assert code == procutil.CODE_UNKNOWN
+    assert reason == "killed"
+    assert _wait_gone([child]) == []  # the server died of its PDEATHSIG(SIGKILL)
 
 
 def test_kill_process_group_kills_exactly_the_recorded_group() -> None:

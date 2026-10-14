@@ -53,6 +53,23 @@ Newest first.
   start-0 guard (subsumed by A-M2(c)), the "no older than the leader" filter
   (unreachable while the leader is held), and A-S1 (a race; not deterministic). None
   lets a signal reach a process this run did not start.
+- Review round 2 (2026-10-14; A and B agreed on round 1, four items): **A** every failed
+  start (no ready line, an error line, an unrecordable identity) now stops the
+  supervisor in `_collect_locked`'s order -- request a stop, D15 fallback if needed,
+  wait without reaping, `_sweep_session`, then `proc.wait()` -- instead of SIGKILL and
+  reap; **B** `_peek_code` returns `CODE_UNKNOWN` (-256) for a supervisor reaped behind
+  its `Popen`'s back, so `_AsyncSupervisorProc.wait()` cannot spin, and the stop path
+  reports `killed`; **B nit** `Runner._pump` reads output in a task, waits for the
+  supervisor's exit, then drains for at most `Runner.DRAIN_S` (2 s) and says so if a
+  survivor still holds the pipe; **A ask** the escaped-grandchild test prints the
+  supervisor's stderr on failure and checks "nothing alive" right after `stop_server`
+  without waiting; its one intermittent failure was in pid parsing, not that check
+  (BUG-0125). New tests: `test_a_server_that_misses_its_ready_timeout_leaves_nothing`,
+  `test_a_supervisor_killed_before_ready_is_swept_before_it_is_reaped`,
+  `test_an_async_wait_returns_when_the_supervisor_was_reaped_elsewhere`,
+  `tests/test_web_runner.py::test_runner_stops_reading_output_a_survivor_holds_open`.
+  Effectiveness: **287 passed, 13 skipped** (same targeted offline run); mutation
+  **round 2: 4/4 killed**, all lists **26/30** (the same four survivors as round 1).
 
 ### CC-CORE-0048 — `procutil`: one owner for every child process tree (BUG-0125) (2026-10-14)
 - Change: new `fuzzlab/procutil.py` (FR-CORE-38), a stdlib-only leaf.

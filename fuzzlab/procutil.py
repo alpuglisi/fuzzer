@@ -83,6 +83,7 @@ __all__ = [
     "arun_bounded",
     "astart_server",
     "astop_server",
+    "CODE_UNKNOWN",
     "finish",
     "group_members",
     "kill_process_group",
@@ -708,15 +709,23 @@ def _exited(h: ServerHandle) -> bool:
     return info is not None
 
 
+#: The exit status of a supervisor that was reaped behind its ``Popen``'s back (code
+#: lost). Not a valid ``Popen.returncode`` (no signal is 256), so it cannot be mistaken
+#: for a real exit status or signal.
+CODE_UNKNOWN = -256
+
+
 def _peek_code(h: ServerHandle) -> int | None:
-    """The exited supervisor's status, without reaping it."""
+    """The exited supervisor's status, without reaping it; ``CODE_UNKNOWN`` if someone
+    else already reaped it (consistent with :func:`_exited`: it has exited), ``None``
+    while it runs."""
     p = _popen_of(h)
     if p is not None and p.returncode is not None:
         return p.returncode
     try:
         info = os.waitid(os.P_PID, h.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
     except ChildProcessError:
-        return p.returncode if p is not None else None
+        return CODE_UNKNOWN
     if info is None:
         return None
     return info.si_status if info.si_code == os.CLD_EXITED else -info.si_status
@@ -734,7 +743,7 @@ def _wait_exited(h: ServerHandle, timeout: float) -> bool:
 def _reap_supervisor(h: ServerHandle) -> None:
     p = _popen_of(h)
     if p is not None and p.returncode is None:
-        p.wait()
+        p.wait()  # Popen.wait maps an already-reaped child (ECHILD) to returncode 0
 
 
 def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | None = None,
@@ -773,19 +782,23 @@ def _spawn_supervisor(argv: Sequence[str], grace: float, **popen_kw: Any) -> tup
 
 
 def _start_failure_paths(h: ServerHandle, proc: subprocess.Popen):
-    def kill_supervisor() -> None:
-        _send(h, signal.SIGKILL)
-        proc.wait()
-        _close_fds(h)
+    """What a failed start does with the supervisor (no ready line in time, an error
+    line, or an identity that cannot be recorded). The server may already have forked
+    (a slow artisan or ``go run`` boot that missed ``ready_timeout``), so this is a full
+    stop in :func:`_collect_locked`'s order (review round 2): request a stop, fall back
+    if the supervisor does not exit, wait for it *without reaping*, sweep its session
+    while its pid is held, and only then reap."""
 
-    def abandon() -> None:  # a requested stop: the supervisor stops its own tree
+    def abandon() -> None:
         request_stop(h)
         if not _wait_exited(h, h.grace + STOP_MARGIN_S):
-            _send(h, signal.SIGKILL)
+            _fallback_kill(h)
+            _wait_exited(h, KILL_BOUND_S)
+        _sweep_session(h)
         proc.wait()
         _close_fds(h)
 
-    return kill_supervisor, abandon
+    return abandon, abandon
 
 
 def _open_pidfd(pid: int) -> int | None:

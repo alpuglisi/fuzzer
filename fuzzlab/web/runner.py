@@ -107,6 +107,9 @@ class _Run:
 class Runner:
     """Owns running child processes for one app instance (local, single-user)."""
 
+    #: Seconds to keep reading a job's output after its supervisor exited.
+    DRAIN_S = 2.0
+
     def __init__(self) -> None:
         self._runs: dict[str, _Run] = {}
 
@@ -132,9 +135,23 @@ class Runner:
 
     async def _pump(self, run: _Run) -> None:
         assert run.proc is not None and run.proc.stdout is not None and run.handle is not None
-        async for raw in run.proc.stdout:
-            await run.queue.put(("output", raw.decode(errors="replace").rstrip("\n")))
+
+        async def lines() -> None:
+            async for raw in run.proc.stdout:
+                await run.queue.put(("output", raw.decode(errors="replace").rstrip("\n")))
+
+        # The output pipe is inherited by the job's descendants, so EOF can lag the
+        # supervisor's exit -- forever if a descendant survives SIGKILL (D state).
+        # Read until the supervisor has exited, then drain for at most DRAIN_S
+        # (BUG-0125 review round 2).
+        reader = asyncio.ensure_future(lines())
         run.returncode = await run.proc.wait()
+        try:
+            await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
+        except asyncio.TimeoutError:
+            reader.cancel()
+            await run.queue.put(("output", "[fuzzlab] output still held open by a process that "
+                                           "outlived the job; stopped reading it"))
         try:
             await procutil.astop_server(run.handle)  # collects the exited supervisor
         except procutil.ServerLost as exc:  # stopped without a request: say so (loud)

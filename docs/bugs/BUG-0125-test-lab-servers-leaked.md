@@ -264,6 +264,57 @@ still held -- alive, or an unreaped zombie with the recorded start time.**
   (unreachable while the leader is held), and A-S1's race re-check (not deterministic).
   None of the survivors lets a signal reach a process this run did not start.
 
+### Review round 2 (CC-CORE-0050, 2026-10-14)
+Reviewers A and B agreed on round 1; four items followed.
+- **A (should-fix): a failed start reaped the supervisor without sweeping.**
+  `_start_failure_paths`' `kill_supervisor` (no ready line in time, or an error line)
+  SIGKILLed the supervisor and reaped it, and `abandon`'s SIGKILL branch did the same, so
+  anything the server had already forked -- a slow artisan or `go run` boot that missed
+  `ready_timeout` -- was orphaned. *Mechanism:* one failure path for every failed start,
+  in `_collect_locked`'s order: request a stop; if the supervisor does not exit within
+  its grace, the D15 fallback (inside its still-held session); wait for it **without
+  reaping** (`waitid(WNOWAIT)`); `_sweep_session`; then `proc.wait()`. *Test:*
+  `test_a_server_that_misses_its_ready_timeout_leaves_nothing` -- the supervisor runs
+  under a test shim that delays its `ready` line by 2 s (`ready_timeout=0.8`); the
+  server records itself, an in-session child and a setsid-escaped grandchild (pid and
+  `/proc` start time); after the `ProcUtilError`, none is alive and nothing is left in
+  the server's session (`raw_members`). That test passes even without the sweep (the
+  supervisor, asked to stop, cleans its own tree), so a second one isolates it:
+  `test_a_supervisor_killed_before_ready_is_swept_before_it_is_reaped` -- a shim
+  SIGKILLs the supervisor after the server forked but before its ready line; the server
+  dies of its PDEATHSIG, its in-session child survives, and only the failed-start
+  sweep (the supervisor still held, unreaped) stops it. Residual: a grandchild that had
+  already left the session of a supervisor killed from outside is re-parented to init
+  and cannot be reached by id (the supervisor's subreaper role died with it).
+- **B (should-fix): `_AsyncSupervisorProc.wait()` could spin forever.** `_peek_code`
+  returned `None` when the supervisor had been reaped behind its `Popen`'s back
+  (`ChildProcessError`), while `_exited` called that exited. *Mechanism:* `_peek_code`
+  returns `CODE_UNKNOWN` (-256: no signal is 256, so it cannot be mistaken for a real
+  status), consistent with `_exited`; the stop path then reports `killed` (no exit line
+  is read for it). *Test:* `test_an_async_wait_returns_when_the_supervisor_was_reaped_elsewhere`
+  -- the supervisor is SIGKILLed and reaped with `os.waitpid` behind the handle; `await
+  h.proc.wait()` returns `CODE_UNKNOWN` within the bound and `astop_server` reports
+  `killed`.
+- **B (nit): the launcher's output loop could wait forever for EOF.** The job's output
+  pipe is inherited by its descendants; one that survives SIGKILL (D state) would hold
+  it open. *Mechanism (the robust option, small):* `Runner._pump` reads the output in a
+  task, waits for the supervisor's exit, then drains for at most `Runner.DRAIN_S` (2 s);
+  past that it stops reading and says so on the job's stream. *Test:*
+  `test_runner_stops_reading_output_a_survivor_holds_open` (a stream that never reaches
+  EOF; the run still ends, with the notice).
+- **A (ask): the one intermittent failure of
+  `test_stop_server_catches_a_grandchild_that_escaped_group_and_session`.** It failed
+  in the **pid parsing**, not after `stop_server`: `ValueError: not enough values to
+  unpack (expected 2, got 1)` on the original line that split each output line into
+  `kind, pid` (a line from two processes sharing the pipe did not have that shape). It
+  never failed on the "nothing left alive after `stop_server`" check. Since round 1 the
+  test parses `CHILD <pid>` / `GRAND <pid>` tokens; now it also prints the supervisor's
+  stderr on any failure, and its final check is strict -- no wait: right after
+  `stop_server` returns, neither target may be alive (the supervisor exits only once no
+  descendant is left). 15 reruns under CPU load (three busy loops) passed.
+- **Mutation check (round 2): 4/4 killed** (each round-2 revert makes a test fail; all
+  lists 26/30, the same four survivors as round 1). Targeted run: 287 passed, 13 skipped.
+
 ## What was verified here (and what was not)
 - Real processes, offline: `tests/test_procutil.py` (22), `tests/test_live_boot_cleanup.py`
   (8: a real Laravel boot — composer offline from the local cache, `php -S` — and a
