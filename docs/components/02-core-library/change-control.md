@@ -3,6 +3,35 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
+- Change:
+  - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens
+    and pairs over a whole text, decoded the same way (`_text_tokens`: up to 3 rounds of
+    `unquote_plus`, camelCase split) but never parsed as a URL, so a `#` or `?` hides
+    nothing. Both rules share `_destructive_tokens`. The URL rule's behaviour is
+    unchanged.
+  - **`core/redaction.py`:** `SENSITIVE_TOKENS` gains `cvv`, `cvc`, `cvn`, `csc` (a
+    payment card's security code), for forms phase 4's G1b (never filled) -- and so
+    also for every redaction and import rule that uses `is_sensitive_name`.
+- Impact: CRAWL (`spa.form_refusal`, `formnav.option_refusal`, `spa.label_refusal`), AUD
+  (`store_adapter.entries_refusal`) use the text rule (BUG-0131 corrective action). The
+  new sensitive tokens add redaction and remove such fields from fuzzing (proxy history,
+  captured bodies, form import); no benign name in the existing tests collides.
+- Risk: low; both changes only add refusals / redactions. The text rule is checked
+  against the URL rule on every destructive token and pair and on ordinary texts
+  (identical where the old embedding read the text whole).
+- Deliverables:
+  - [x] code: `core/urls.py`, `core/redaction.py` — done
+  - [x] tests: `tests/test_forms_phase4.py::test_a_hash_in_a_label_name_value_or_option_hides_nothing`,
+    `::test_the_text_rule_agrees_with_the_url_rule_on_texts_without_a_hash`,
+    `::test_no_text_is_judged_through_a_url` (AST guard, PA-0131),
+    `::test_the_text_guard_catches_synthetic_offenders`,
+    `::test_g1_never_fills_a_sensitive_or_credential_control` (`cvv`, `cardCvc`);
+    `tests/test_proxy_redaction.py`, `tests/test_storage_redaction.py` still green — done
+  - [x] FR-CORE-28 and FR-CORE-25 text — done
+- Effectiveness (assessed 2026-10-14): the `#` cases are refused at all four sites; the
+  mutation that restores the old embedding at one site fails its test. Effective.
+
 ### CC-CORE-0051 — `procutil` reads a server tree's real listening sockets; exposure fails the stop (BUG-0130) (2026-10-14)
 - Change (`fuzzlab/procutil.py`): `listeners(h)` -> `Listener(pid, address, port)` for
   every TCP LISTEN socket held by the server's tree (the supervisor and its

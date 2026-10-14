@@ -4,6 +4,36 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (forms phase 4: constraint-aware filling and reveal navigation)
+- **The crawler can now submit Angular forms whose button stays disabled until their
+  validators pass, and finds what sits behind menus and dialogs** (Juice Shop's
+  `/profile` behind the account menu, product reviews in a dialog). Both run inside a
+  **reveal window** that lets only safe GETs through, aborts navigations (queuing their
+  targets), drops page-to-server WebSocket messages, closes with Escape and a reload, and
+  lifts only after a quiet period or for a named-route form's vetted final click; after a
+  reveal in an authenticated crawl the session is checked, re-adopted once, and reveals
+  stop on a second loss. Constraint-aware filling (named routes only) types only filler
+  values and refuses sensitive controls, object-selector or identifier options, gated
+  checkboxes and CAPTCHA forms. Reveals are on by default in the Playwright engine
+  (`--no-reveal`). Why: the authenticated Juice Shop crawl submitted none of its address,
+  contact or recycle forms and never reached `/profile` or the review dialog
+  (FR-CRAWL-15/16; CC-CRAWL-0023, CC-CRAWL-0024, CC-AUD-0039, CC-CORE-0052).
+- **BUG-0131 fixed:** a `#` in a button label, control name, entry or option hid the
+  destructive word after it, because those texts were judged by embedding them in a URL;
+  texts now have their own rule (`core.urls.text_destructive_reason`) and an AST guard
+  forbids the embedding (PA-0131).
+- **Review round 1 (reviewers A and B):** the reveal window's lift now covers one click
+  and its settle only (a click that raised no longer leaves later fills and menu clicks
+  unblocked), and a reveal stops after its first submission attempt; a failed close
+  also closes the window's popups; the own-reload exemption matches the exact URL and a
+  navigation's redirect hop counts as a navigation; GETs in the window are refused for
+  account actions and credentials only, so an app's own identity check
+  (`/rest/user/whoami`) passes; a re-adopted session is verified live
+  (CC-CRAWL-0023/0024).
+- **BUG-0131 follow-up:** point selection (`harness.auto`) also judges a SPA route's
+  fragment as a text, so `/#/a#/logout` is never fuzzed. The sweep's one residual is
+  closed and PA-0131's AST guard has no exception left (CC-FUZZ-0077).
+
 ## 2026-10-14 (SPA login detection: FR-SESS-19, FR-CRAWL-14)
 - **Review round 1 (reviewers A and B):** an abandoned browser login is cancelled at
   its deadline and can no longer send anything, and no second login starts beside it;

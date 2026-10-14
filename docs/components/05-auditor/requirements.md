@@ -196,7 +196,11 @@ budget where a vulnerability is plausible.
     header-point queries: any value with `://` (any scheme, any length) or starting
     with `//` → `http://127.0.0.1/`; an ip or host name, also with a port →
     `127.0.0.1`, and with a path after it → `http://127.0.0.1/`. Our own fillers (exact
-    match) are sent as they are. The fuzzer never sends a host name taken from the app's
+    match, `store_adapter.is_filler`; since CC-AUD-0039 also the crawler's
+    constraint-aware ladder values, `store_adapter.is_ladder_value`: repeated or
+    ascending digits of at most 15 digits, `fuzzlab` padded with `x` or cut to a
+    prefix of 3 or more, `Fuzzlab`, `FUZZLAB`, `2000`, FR-CRAWL-15) are sent as they
+    are. The fuzzer never sends a host name taken from the app's
     own defaults. Stated residual: an e-mail default (`user@mail.example.com`) is sent
     as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
     operator-approved 2026-10-14):** the open-redirect retry probe.
@@ -241,7 +245,8 @@ budget where a vulnerability is plausible.
     with a settings word (`formnav.settings_word`) on any key; a destructive name or
     value (`entries_refusal`, run with `credential_names=True` over the non-password
     leaves — every credential-named leaf is a password field, so that half is a second
-    check).
+    check; each name and value is judged as a text, `core.urls.text_destructive_reason`,
+    so a `#` in it hides nothing — CC-AUD-0039, BUG-0131).
   - **Stored.** A JSON body is a `form` row (`enctype` `application/json`, entries as
     FR-CORE-36). A form-encoded body is a `form` row (`enctype`
     `application/x-www-form-urlencoded`) and imports as today's form points (`body`).

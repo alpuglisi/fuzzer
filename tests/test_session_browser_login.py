@@ -141,7 +141,12 @@ LOGIN = [("email", "text"), ("password", "password"), ("rememberMe", "checkbox")
     (_form([("otp", "text"), ("password", "password")]), "login", "otp"),
     (_form([("email", "text"), ("confirmPassword", "password")]), "login", "confirm"),
     (_form(LOGIN, button="Log out", aria=""), "login", "destructive"),
-    (_form(LOGIN, button="", aria="", ), "login", None),
+    # forms phase 4 (G2d, CC-CRAWL-0024): ``exit_to_app`` is a destructive glyph, judged
+    # text-first on a form's submitter; a glyph-only one (no text, no aria-label) is
+    # refused. FORMS_JS never yields this shape from a page anyway: an icon-only button
+    # with no aria-label keeps its raw text, ``exit_to_app``, refused on ``exit``.
+    (_form(LOGIN, button="", aria="", ), "login", "destructive button icon"),
+    (_form(LOGIN, button="exit_to_app", aria="", ), "login", "destructive button"),
 ])
 def test_only_a_login_shaped_form_with_no_account_word_is_used(form, route, expect):
     why = login_form_refusal(form, route)

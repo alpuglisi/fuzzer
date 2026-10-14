@@ -81,10 +81,10 @@ def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
     tokenises destructive; with ``credential_names``, any name carries a credential
     token. The one check for forms and link sets (PA-0003)."""
     from fuzzlab.core.redaction import is_credential_name
-    from fuzzlab.core.urls import destructive_reason
+    from fuzzlab.core.urls import text_destructive_reason
     for name, value in entries:
         for text in (name, value):
-            reason = destructive_reason("/?x=" + (text or "").replace(" ", "+"))
+            reason = text_destructive_reason(text)          # never via a URL (BUG-0131)
             if reason:
                 return f"destructive entry {name}={value!r} ({reason!r})"
         if credential_names and is_credential_name(name):
@@ -203,10 +203,58 @@ _TEXT_FILLER = "fuzzlab"
 _FILLED_KINDS = frozenset({"text", "search", "textarea", *_FILLERS})
 
 
+# --- the constraint-aware ladder (FR-CRAWL-15, G1a; reviewer B7) --------------------
+#: Digit strings the crawler's constraint-aware filling may type: a run of one repeated
+#: digit (``7``, ``11``, ``5555555555``) or the ascending run ``1234567890…`` cut to a
+#: length, at most this many digits long. 16 or more digits would look like an
+#: identifier (`core.redaction.looks_like_identifier` R1), so the ladder stops at 15.
+LADDER_MAX_DIGITS = 15
+_LADDER_SEQUENCE = "1234567890" * 2
+#: Documented constants of the ladder: a year.
+LADDER_CONSTANTS = frozenset({"2000"})
+#: Text the ladder may type: the text filler, padded with ``x`` (lower case only, so
+#: never identifier-like), or cut to a prefix of at least `LADDER_MIN_PREFIX`
+#: characters; and two case variants (for a ``pattern``), never padded.
+LADDER_TEXT = _TEXT_FILLER
+LADDER_TEXT_VARIANTS = ("Fuzzlab", "FUZZLAB")
+LADDER_PAD = "x"
+LADDER_MIN_PREFIX = 3
+LADDER_MAX_TEXT = 64
+
+
+def ladder_digits(length: int) -> list[str]:
+    """The ladder's digit strings of ``length`` (1..`LADDER_MAX_DIGITS`): each repeated
+    digit (``1``…``9``, then ``0``), then the ascending run, deduplicated, in order."""
+    if not 1 <= length <= LADDER_MAX_DIGITS:
+        return []
+    out = [d * length for d in "1234567890"] + [_LADDER_SEQUENCE[:length]]
+    return list(dict.fromkeys(out))
+
+
+def is_ladder_value(value) -> bool:
+    """True when ``value`` is one the constraint-aware ladder generates (FR-CRAWL-15):
+    a ladder digit string (`ladder_digits`), a `LADDER_CONSTANTS` member, the text
+    filler padded with ``x`` or cut to a prefix, or a `LADDER_TEXT_VARIANTS` member.
+    Total: a non-string is False."""
+    if not isinstance(value, str) or not value or len(value) > LADDER_MAX_TEXT:
+        return False
+    if value.isascii() and value.isdigit():
+        return value in LADDER_CONSTANTS or (
+            len(value) <= LADDER_MAX_DIGITS
+            and (len(set(value)) == 1 or _LADDER_SEQUENCE.startswith(value)))
+    if value in LADDER_TEXT_VARIANTS:
+        return True
+    if value.startswith(LADDER_TEXT):
+        return set(value[len(LADDER_TEXT):]) <= {LADDER_PAD}
+    return len(value) >= LADDER_MIN_PREFIX and LADDER_TEXT.startswith(value)
+
+
 def is_filler(value) -> bool:
-    """True when ``value`` is exactly one of the importer's own fillers: it says
-    nothing about the app, and it is sent as is (its URL never resolves)."""
-    return value == _TEXT_FILLER or value in _FILLERS.values()
+    """True when ``value`` is one of the importer's own fillers, or a value of the
+    crawler's constraint-aware ladder (`is_ladder_value`, FR-CRAWL-15; the single
+    source, reviewer B7): it says nothing about the app, and it is sent as is (its URL
+    never resolves)."""
+    return value == _TEXT_FILLER or value in _FILLERS.values() or is_ladder_value(value)
 
 
 def _filled(entries, kinds) -> list:

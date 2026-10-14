@@ -1184,7 +1184,9 @@ tracked in the requirements files, not here.
   - `core/urls.destructive_reason` / `check_send_url`: the one destructive-URL rule
     (CC-CORE-0038, BUG-0111/0112). The crawler and auditor never queue, follow or
     browser-request such a URL (`tools/navguard.py`: hand-followed redirects and a
-    Playwright route guard).
+    Playwright route guard). Its twin for texts (labels, control names, entry values,
+    options) is `text_destructive_reason`: a text is never embedded in a URL to be
+    judged (CC-CORE-0052, BUG-0131; an AST guard, PA-0131).
   - `core/urls.in_origin_scope` / `origin_scope`: the one origin-scope predicate
     (CC-CORE-0044, BUG-0123). Every browser we launch (spider, auditor fetcher, M6
     executor) is confined to a scope fixed before it starts, at two layers, both in
@@ -1349,11 +1351,25 @@ tracked in the requirements files, not here.
   session before its context opens: a browser login's `storage_state` (in-scope
   origins only), and session headers added by the guarded route only, never
   `set_extra_http_headers` (FR-CRAWL-14, CC-CRAWL-0022; the auditor and the M6
-  executor use the same mechanism).
+  executor use the same mechanism). Forms phase 4 (CC-CRAWL-0023/0024): **the reveal
+  window** -- from just before a reveal click or the first constraint-aware
+  interaction until after the close (Escape, a reload of the route) and a quiet
+  period, the guarded route lets only safe GETs through (`spa.window_request_refusal`
+  through `navguard.guard_page(window=)`), aborts navigations and queues their targets,
+  and the WebSocket forwarding handler (`guard_page(ws_hold=)`) drops page-to-server
+  messages; only a named-route form's vetted final click lifts it. Inside it:
+  **constraint-aware filling** on named routes (a bounded ladder of filler values
+  until Angular-style validators pass; FR-CRAWL-15) and **reveal navigation** (menus,
+  dialogs, drawers and interactive cards opened, their links, routes and forms
+  collected, gated labels; FR-CRAWL-16, on by default in the Playwright engine,
+  `--no-reveal`). After a reveal in an authenticated crawl the session is checked
+  client-side, re-adopted once on a loss, and reveals stop on a second.
 - **Depends on (components):** `core/`, session manager, target lab.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
   from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,
-  `discovered_requests`, and `crawl_stats`, the last crawl's SPA counts).
+  `discovered_requests`, `revealed_forms` (the forms a reveal showed, route and
+  signature, for a later opt-in; forms phase 4), and `crawl_stats`, the last crawl's
+  SPA and reveal counts).
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,

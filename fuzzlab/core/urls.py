@@ -133,9 +133,36 @@ def destructive_reason(url: str) -> str | None:
 
     The one rule every crawl, audit and probe gate uses (PA-0003). It inspects only the
     URL's path and query, decoded and tokenised; it is deliberately conservative, since
-    skipping a harmless page costs only coverage.
+    skipping a harmless page costs only coverage. A **text** (a button label, a control
+    name, an entry value, an option) is judged with `text_destructive_reason`, never by
+    embedding it in a URL: a ``#`` in it would start a fragment this rule never reads
+    (BUG-0131).
     """
-    tokens = _url_tokens(url)
+    return _destructive_tokens(_url_tokens(url))
+
+
+def _text_tokens(text: str | None) -> list[str]:
+    """``text`` decoded as `_url_tokens` decodes a URL (``%xx`` and ``+``, at most three
+    rounds) and tokenised the same way, with every character kept: no URL parsing, so
+    no ``#`` or ``?`` can hide what follows it (BUG-0131)."""
+    text = text or ""
+    for _ in range(3):
+        decoded = unquote_plus(text)
+        if decoded == text:
+            break
+        text = decoded
+    return _TOKEN.findall(_CAMEL.sub(r"\1 \2", text).lower())
+
+
+def text_destructive_reason(text: str | None) -> str | None:
+    """`destructive_reason`'s tokens and pairs over a whole **text** -- a button label,
+    a control name, an entry value, an option -- or None (BUG-0131, PA-0131: the one
+    rule for texts, PA-0003). Unlike ``destructive_reason("/?x=" + text)``, a ``#``
+    in the text hides nothing."""
+    return _destructive_tokens(_text_tokens(text))
+
+
+def _destructive_tokens(tokens: list[str]) -> str | None:
     for tok in tokens:
         if tok in DESTRUCTIVE_TOKENS:
             return tok

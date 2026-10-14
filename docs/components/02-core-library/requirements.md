@@ -165,7 +165,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     used by obs and proxy redaction. *(CC-CORE-0035, BUG-0090:)* a trailing plural `s`
     is folded only when the folded form is sensitive (`passwords`, `secrets`,
     `apiKeys`; never `passes`, and never `pass` → `pas`). The whole names `codes` /
-    `pins` are accepted false redactions;
+    `pins` are accepted false redactions. *(CC-CORE-0052, forms phase 4:)* a payment
+    card's security code (`cvv`, `cvc`, `cvn`, `csc`) is sensitive too;
   - `core.secretfile`: secret files are created 0600 with `O_NOFOLLOW`. *(CC-CORE-0035,
     BUG-0096:)* every write is complete or raises (a loop over short writes, then
     `fsync`):
@@ -266,6 +267,12 @@ plugin registry. It is the layer that makes the store the integration bus.
     (up to 3 rounds), splits camelCase, tokenises, and matches `DESTRUCTIVE_TOKENS`
     or `DESTRUCTIVE_PAIRS`. `format` is deliberately absent, since it is the export
     selector. Accepted false positives include `password_reset` pages.
+  - **Texts** *(`CC-CORE-0052`, 2026-10-14, BUG-0131).* `text_destructive_reason(text)`
+    applies the same tokens and pairs to a whole **text** -- a button label, a control
+    name, an entry value, an option -- decoded the same way (up to 3 rounds of `%xx` and
+    `+`) but never parsed as a URL, so a `#` or `?` in it hides nothing. A text is never
+    judged by embedding it in a URL (`destructive_reason("/?x=" + text)`): enforced by
+    an AST guard over `fuzzlab/` (PA-0131).
   - **Helpers.** `url_key(url)` (canonical origin plus path) names an explicit
     allowance. `check_send_url(url, explicit)` raises `DestructiveUrlRefused`.
   - **Users:** the crawler and auditor (NFR-CRAWL-safe), every probe sender

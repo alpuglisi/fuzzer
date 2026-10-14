@@ -1646,3 +1646,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   through `importlib.import_module(...)` or bound to a variable first
   (`f = procutil.start_server; f(...)`) is not seen by the static pin rule. The
   boot-check lint and the runtime check still cover such a site.
+
+- **PA-0131** — Strengthens `PA-0083(3)` (a gate matches normalised forms as well as the
+  raw one), after BUG-0131: four gates judged a label, control name, entry or option by
+  embedding it in a URL (`destructive_reason("/?x=" + text)`), and a `#` in the text
+  hid everything after it. PA-0083(3) covered adding forms of the input, not a lossy
+  step that removes part of it before any rule runs.
+  1. **A gate judges its whole input in the input's own grammar:** a text by the text
+     rule (`core.urls.text_destructive_reason`), a URL by the URL rule. An input is
+     never embedded in another grammar's container (a text in a URL, a value in a query)
+     to reuse a rule.
+  2. **A gate's tests feed inputs carrying the structural characters** of every grammar
+     the input passes through (`#`, `?`, `&`, `%`, quotes) and assert the refusal.
+  3. **Enforced by an AST guard** (`tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`):
+     no URL-rule call in `fuzzlab/` takes an argument built with a `?`, except a listed,
+     reasoned allowance; proven on synthetic offenders (PA-0034(2)). (from BUG-0131)
