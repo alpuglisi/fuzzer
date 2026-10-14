@@ -202,7 +202,18 @@ def test_redirect_methods_follow_the_browser_rules():
     route = _Route(f"{H}/keep", site, method="POST", navigation=True)
     make_route_handler(in_scope=_scope(), api=api)(route)
     assert api.calls == [(f"{H}/again", "POST", b"body")]
-    assert route.fulfilled == (307, {"location": f"{H}/again"})
+    # a kept body is never sent twice: the landing response itself is the answer
+    assert route.fulfilled is site.get(f"{H}/again", route.fulfilled)
+    assert route.outcome == "fulfill" and not isinstance(route.fulfilled, tuple)
+
+
+def test_scope_is_checked_before_any_fetch():
+    """Routed requests are fetched by the Playwright driver, which Chromium's resolver
+    rules never confine (reviewer A, verified live): the predicate must run first."""
+    route = _Route("http://127.0.0.1:3000/x")
+    api = _Api({})
+    make_route_handler(in_scope=_scope(), api=api)(route)
+    assert route.fetched == [] and api.calls == [] and route.outcome == "abort"
 
 
 def test_without_a_request_client_a_redirect_is_aborted_not_followed():
@@ -528,6 +539,111 @@ def test_the_auditors_browser_never_leaves_the_target_origin(lab):
     assert status == 200 and 'id="js-built"' in html      # rendered, not a static fallback
     assert (sink.connections, sink.data) == (0, b"")
     assert fetcher.skipped_out_of_scope
+
+
+def test_the_auditors_scope_is_fixed_and_never_moves(lab):
+    """Reviewer A: the scope was re-derived from every fetched URL, and the driver's
+    fetches are not confined by the resolver rules. A later URL on another origin is
+    refused before anything is sent."""
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.fetcher import ContentFetcher
+    base, seen, sink = lab
+    fetcher = ContentFetcher(engine="playwright", timeout_ms=5000)
+    if fetcher.engine != "playwright":
+        skip_or_fail("playwright engine unavailable")
+    try:
+        with fetcher:
+            fetcher.fetch(base + "after")
+            refused = fetcher.fetch(f"http://127.0.0.1:{sink.port}/other")
+            refused_localhost = fetcher.fetch(f"http://localhost:{sink.port}/other")
+    except Exception as exc:  # noqa: BLE001
+        skip_or_fail(f"chromium could not launch: {exc}")
+    assert refused == refused_localhost == (0, "", "", [])
+    assert (sink.connections, sink.data) == (0, b"")
+    assert seen == ["/after"]
+
+
+def test_the_static_auditor_refuses_another_origin_too():
+    from fuzzlab.tools.fetcher import ContentFetcher
+    fetcher = ContentFetcher(engine="requests", auth_base_url="http://127.0.0.1:8090/app/")
+
+    class Boom:
+        def get(self, *a, **k):
+            raise AssertionError("an out-of-scope URL was fetched")
+    fetcher.session = Boom()
+    assert fetcher.fetch("http://127.0.0.1:3000/x") == (0, "", "", [])
+    assert fetcher.skipped_out_of_scope == {"127.0.0.1": 1}
+
+
+@pytest.mark.parametrize("code", [307, 308])
+def test_a_redirected_post_navigation_is_submitted_once(code, monkeypatch):
+    """Reviewer B's repro: an auto-submitted POST whose action 307/308-redirects. The
+    guard walks the hop (one POST); answering the navigation with a redirect made the
+    browser POST again, unrouted."""
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.navguard import guard_page, release
+    _chromium_or_skip(monkeypatch)
+    posts = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            body = (b"<form method=post action=/a><input name=q value=1></form>"
+                    b"<script>document.forms[0].submit()</script>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            posts.append(self.path)
+            if self.path == "/a":
+                self.send_response(code)
+                self.send_header("Location", "/b")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = b"<html><body>landed</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    kw = {"headless": True, "args": browser_launch_args([base])}
+    if os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
+        kw["executable_path"] = os.environ["PLAYWRIGHT_CHROMIUM_EXECUTABLE"]
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(**kw)
+            except Exception as exc:  # noqa: BLE001
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                context = browser.new_context(service_workers="block")
+                guard_page(context, in_scope=_scope(base))
+                page = context.new_page()
+                page.goto(base, timeout=5000)
+                page.wait_for_function("document.body && "
+                                       "document.body.innerText.includes('landed')",
+                                       timeout=5000)
+                release(context)
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+    assert posts == ["/a", "/b"]                       # each exactly once
 
 
 def test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin(lab):

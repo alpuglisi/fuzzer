@@ -5,22 +5,22 @@ Newest first.
 
 ### CC-AUD-0033 — The auditor's rendered fetcher is confined to the page's origin (BUG-0123) (2026-10-14)
 - Change:
-  - `tools/fetcher.py` `ContentFetcher`: the browser starts on the first `fetch`
-    (`_start_browser(first_url)`), launched with `browser_launch_args([first_url,
-    auth_base_url])` (resolver rules confine it to those origins), on a
+  - `tools/fetcher.py` `ContentFetcher`: the scope is fixed once, the auth base's
+    origin or else the first fetched URL's, and never re-derived. `fetch(url)` outside
+    it returns `(0, "", "", [])` before anything is sent, on both engines, and counts
+    the host in `skipped_out_of_scope`. The browser starts on the first `fetch`
+    (`_start_browser`), launched with `browser_launch_args` of the scope, on a
     `service_workers="block"` context guarded by `guard_page(context,
-    in_scope=self._in_scope)`. Each `fetch(url)` sets the scope to the origins of `url`
-    and `auth_base_url` (CC-CRAWL-0015's handler walks redirect chains within them). A
-    launch failure still raises, as before. Out-of-scope requests are counted by host
-    (`skipped_out_of_scope`); `release(context)` before close.
-- Impact: NFR-AUD-safe gains the browser scope clause. A page on another origin than
-  the first fetched cannot load in the browser (its resolver rules); it falls back to
-  the static fetch, which is same-origin by hand.
+    in_scope=self._in_scope)`. A launch failure still raises, as before.
+    `release(context)` before close.
+- Impact: NFR-AUD-safe gains the scope clause. A spider DB row on another origin than
+  the audit's (an old or foreign DB) is no longer fetched at all.
 - Risk: low.
 - Deliverables:
   - [x] code — done
-  - [x] tests: `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`
-    and the AST guard — done
+  - [x] tests: `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`,
+    `::test_the_auditors_scope_is_fixed_and_never_moves`,
+    `::test_the_static_auditor_refuses_another_origin_too`, and the AST guard — done
   - [x] NFR-AUD-safe — done
 - Review: with CC-CRAWL-0015.
 - Effectiveness: verified offline with a real Chromium.

@@ -102,14 +102,21 @@ origin; nothing traced each clause of a safety NFR to its own enforcing test.
   - The handler fetches every allowed request itself with `max_redirects=0` and walks
     a redirect chain hop by hop through the context's request client (sharing its
     cookies), each hop checked for scope and destructive tokens, at most
-    `MAX_REDIRECTS`. A redirected navigation is answered with one redirect to its
-    checked landing URL, so `page.url` and relative links stay right (the browser then
-    requests the landing page a second time); any other request gets the landing
-    response.
+    `MAX_REDIRECTS`. A redirected GET/HEAD navigation is answered with one redirect to
+    its checked landing URL, so `page.url` and relative links stay right (the browser
+    then requests the landing page a second time); a chain that keeps a body (307/308)
+    and any other request get the landing response itself, so no body is sent twice
+    (reviewer B's repro).
+  - **These fetches are made by the Playwright driver, not by Chromium** (reviewer A,
+    verified live): the resolver rules below never confine them. The route predicate,
+    checked before every fetch, is their only guard, so every caller fixes its scope
+    before the browser starts.
   - `browser_launch_args(scope_urls, any_port_hosts=())`: `--no-proxy-server`,
     `--host-resolver-rules` mapping each scope `host:port` to itself and everything
     else to `~NOTFOUND` (verified live: it applies to IP literals and other ports), plus
-    background networking, pings, DNS prefetch and network prediction off.
+    background networking, pings, DNS prefetch and network prediction off. It confines
+    what Chromium itself sends (preconnect, prefetch, re-requested landing pages,
+    background services, WebSockets), not the routed requests above.
   - `checked_api_request(in_scope, url)` before every API request; those requests pass
     `max_redirects=0`.
   - `release(context)` silences in-flight handlers at teardown.
@@ -117,9 +124,11 @@ origin; nothing traced each clause of a safety NFR to its own enforcing test.
   port is another service); an external start keeps BUG-0050's host rule. One
   predicate, `_in_scope`, gates the queue, redirects, the browser route and
   `_isolated_submit`. Out-of-scope browser requests are counted by host and summarised.
-- **Auditor (CC-AUD-0033):** `ContentFetcher` starts its browser on the first fetch,
-  with resolver rules for that URL's origin and the auth base's, and scopes each
-  navigation to them.
+- **Auditor (CC-AUD-0033):** `ContentFetcher`'s scope is fixed once (the auth base's
+  origin, else the first fetched URL's) and never re-derived (reviewer A: it moved with
+  every URL, and the driver's fetches are not resolver-confined). A fetch outside it is
+  refused before anything is sent, on both engines. The browser starts on the first
+  fetch, with resolver rules for that scope.
 - **M6 executor (CC-FUZZ-0066):** launched scoped to the observe and store origins; the
   stored plant is scope-checked and sent with `max_redirects=0`.
 
@@ -139,7 +148,10 @@ origin; nothing traced each clause of a safety NFR to its own enforcing test.
   localhost" was recorded as not enforced with a reason that named the probe senders
   only. PA-0112 traced NFRs, not each clause per sending layer.
 - **Wrong layer (BUG-0111's fix):** scope was a property of the link queue; the
-  browser's request path never consulted it.
+  browser's request path never consulted it. The first cut of this fix repeated the
+  pattern in miniature: the auditor's route scope moved with each fetched URL while
+  only the resolver rules were fixed, and those never confine the driver's fetches
+  (caught in review).
 - **Not tested where it matters:** BUG-0111's real-browser test had no redirect and no
   off-host resource, so neither gap could fail it.
 
@@ -183,10 +195,20 @@ proven on synthetic offenders (`test_the_browser_guard_catches_synthetic_offende
 with the launch sites pinned (`test_the_launch_sites_are_the_three_known_ones`).
 
 ## Residuals
-- **A redirected navigation's landing page is requested twice:** once while the chain
-  is checked, once by the browser. The second request is not routed; the resolver
-  rules confine it to scope, but if the server now redirects again the new hop is not
-  checked for destructive tokens.
+- **A redirected GET navigation's landing page is requested twice:** once while its
+  chain is checked, once by the browser. A one-time-token or other stateful GET landing
+  sees two requests.
+- **The browser's second request to that landing page is not routed.** The resolver
+  rules confine it to scope, but if the server now answers it with a redirect the new
+  hops are followed natively and not checked for destructive tokens.
+- **A 307/308 navigation's `page.url` stays the first URL** (its landing response is
+  served under it), so relative links on that page resolve against the first URL.
+- **Walked hops carry the context's headers and cookies, not the browser's request
+  headers** (only `content-type` is copied). A site whose hop needs `Accept` or a
+  custom header may answer differently: coverage, not safety.
+- **With `--no-proxy-server`, a browser in a container whose only egress is a proxy
+  cannot reach an external target at all.** It fails safe; the static engine is the
+  fallback.
 - **An external (non-loopback) crawl is scoped by host** (BUG-0050): any port, both
   schemes and `www.` stay in scope, at the queue, the route and the resolver.
 - **The scanner oracles' own redirects** (sqlmap, nuclei, ZAP subprocesses) are

@@ -1506,10 +1506,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      (`core.urls.in_origin_scope`). A host-only scope is a stated exception
      (BUG-0050's external crawl), never a default; another loopback port is another
      service.
-  3. **A browser is confined at two layers:** the route (the whole context, redirect
-     chains walked hop by hop, `in_scope` required, `allow` never lifting scope) and the
-     network (`navguard.browser_launch_args`: no proxy, resolver rules per
-     `host:port`). Both are enforced by an AST guard over every launch, guard and
+  3. **A browser is confined at two layers, each for what it actually sees:** the
+     route (the whole context, redirect chains walked hop by hop, `in_scope` required
+     and checked before every fetch, `allow` never lifting scope) is the only guard for
+     routed requests, which the Playwright driver fetches; the launch arguments
+     (`navguard.browser_launch_args`: no proxy, resolver rules per `host:port`) confine
+     only what Chromium itself sends. A scope is fixed before the browser starts and
+     never re-derived from a URL being fetched. Both are enforced by an AST guard over every launch, guard and
      API-request site, proven on synthetic offenders, and by real-browser tests that
      reach for another port and an off-host address and fail, never skip, under
      `FUZZLAB_REQUIRE_BROWSER=1`.

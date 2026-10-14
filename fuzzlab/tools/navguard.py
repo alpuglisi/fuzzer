@@ -3,18 +3,22 @@ BUG-0123).
 
 A headless browser sends requests no link queue controls: redirects, page scripts'
 ``fetch``/XHR, ``<img>``/``<iframe>`` subresources, popups, WebSockets, preconnects.
-Every one is confined at two layers, each checked where the request is made (PA-0123):
+Every one is checked where it is made (PA-0123):
 
 * **the route** -- ``guard_page`` routes the whole browser *context* (popups included):
   a request outside the scope origins (``core.urls.in_origin_scope``) or one
-  ``core.urls.destructive_reason`` flags is aborted before it leaves the browser,
-  unless, for the destructive rule only, that exact URL (by ``url_key``) is in
-  ``allow`` -- the operator's explicit input, which never lifts scope. Playwright never
-  routes a redirect's later hops, so the handler fetches each request itself without
-  following redirects and walks the chain, every hop checked the same way (below);
-* **the network** -- every launch takes ``browser_launch_args``: no proxy, and no
-  ``host:port`` resolvable outside scope (IP literals included), which also confines
-  what a route never sees (preconnect, DNS prefetch, a re-requested landing page).
+  ``core.urls.destructive_reason`` flags is aborted before it is sent, unless, for the
+  destructive rule only, that exact URL (by ``url_key``) is in ``allow`` -- the
+  operator's explicit input, which never lifts scope. Playwright never routes a
+  redirect's later hops, so the handler fetches each allowed request itself without
+  following redirects and walks the chain, every hop checked the same way. **Those
+  fetches are made by the Playwright driver, not by Chromium** (verified live), so for
+  every routed request this predicate is the only guard; it is checked before every
+  fetch, and the callers fix the scope before the browser starts;
+* **Chromium's own traffic** -- what the route never sees (a preconnect, a DNS
+  prefetch, a landing page the browser re-requests, background services, WebSocket
+  connections) is confined by ``browser_launch_args``: no proxy, and nothing resolvable
+  outside the scope ``host:port`` pairs, IP literals included.
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
 requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
@@ -105,11 +109,14 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             return
         if final is first:
             route.fulfill(response=first)
-        elif req.is_navigation_request():
-            status = 307 if method not in ("GET", "HEAD") else (
-                303 if req.method.upper() not in ("GET", "HEAD") else 302)
+        elif req.is_navigation_request() and method in ("GET", "HEAD"):
+            # the browser re-requests the (checked) landing URL itself, so page.url and
+            # relative links are right; a GET or HEAD only, never a body (reviewers)
+            status = 303 if req.method.upper() not in ("GET", "HEAD") else 302
             route.fulfill(status=status, headers={"location": final_url})
         else:
+            # a body kept through 307/308 is never sent twice: the landing response is
+            # the answer (a navigation's page.url stays the first URL)
             route.fulfill(response=final)
     return handler
 
@@ -169,8 +176,10 @@ def browser_launch_args(scope_urls, *, any_port_hosts=()) -> list[str]:
     name to ``~NOTFOUND``. Chromium applies the rules to IP literals and matches them on
     ``host:port`` (default ports included), so ``203.0.113.9``, ``127.0.0.2`` or another
     port on ``127.0.0.1`` fail with ``ERR_NAME_NOT_RESOLVED`` (verified live). This
-    confines what a route cannot see -- a preconnect, a DNS prefetch, a landing page the
-    browser re-requests. A loopback origin admits all three loopback spellings on its
+    confines what Chromium itself sends and a route cannot see -- a preconnect, a DNS
+    prefetch, a landing page the browser re-requests. It does **not** confine routed
+    requests, which the Playwright driver fetches (``guard_page``'s predicate is their
+    only guard). A loopback origin admits all three loopback spellings on its
     port. ``any_port_hosts`` are hosts admitted on every port (the crawler's
     host-scoped external target, BUG-0050)."""
     rules = []

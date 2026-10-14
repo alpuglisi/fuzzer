@@ -325,13 +325,14 @@ class ContentFetcher:
         self._context = None
         self._page = None
         self._xhr_urls = []
-        # BUG-0123: the browser reaches only the origin of the URL being fetched and
-        # the auth base's.
-        self._scope_origins = origin_scope(auth_base_url)
+        # BUG-0123: the scope is fixed once -- the auth base's origin, else the first
+        # fetched URL's -- and never re-derived from a later URL (reviewer A). A fetch
+        # outside it is refused, browser and static engine alike.
+        self._scope_origins = origin_scope(auth_base_url) or None
         self.skipped_out_of_scope: dict[str, int] = {}
 
     def _in_scope(self, url):
-        return in_origin_scope(url, self._scope_origins)
+        return in_origin_scope(url, self._scope_origins or frozenset())
 
     def _note_out_of_scope(self, url):
         host = urlparse(url).hostname or "?"
@@ -348,8 +349,8 @@ class ContentFetcher:
         self._pw = sync_playwright().start()
         launch_kwargs = {
             "headless": True,
-            # resolve no host but the target's and the auth base's (BUG-0123)
-            "args": browser_launch_args([first_url, self._auth_base_url]),
+            # resolve nothing but the fixed scope (BUG-0123)
+            "args": browser_launch_args(sorted(self._scope_origins)),
         }
         exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
         if exe:
@@ -358,7 +359,7 @@ class ContentFetcher:
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(service_workers="block")
         # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is
-        # confined to the origin being fetched (and the auth base's)
+        # confined to the fixed scope
         guard_page(context, in_scope=self._in_scope,
                    on_out_of_scope=self._note_out_of_scope)
         self._context = context
@@ -396,10 +397,17 @@ class ContentFetcher:
         """Returns (status_code, content_type, html, xhr_urls). html is the
         RENDERED DOM when the Playwright engine is active, otherwise the raw
         response body. xhr_urls are the fetch/XHR calls the page made while
-        rendering (always empty for the static engine)."""
+        rendering (always empty for the static engine). A URL outside the fixed scope
+        is refused before anything is sent: ``(0, "", "", [])`` (BUG-0123)."""
+        if self._scope_origins is None:
+            self._scope_origins = origin_scope(url)
+        if not self._in_scope(url):
+            logging.info(f"    not fetching {url}: outside the audit scope "
+                         f"{sorted(self._scope_origins)} (BUG-0123)")
+            self._note_out_of_scope(url)
+            return 0, "", "", []
         if self.engine == "playwright":
             self._xhr_urls = []
-            self._scope_origins = origin_scope(url, self._auth_base_url)   # BUG-0123
             if self._pw is None:
                 self._start_browser(url)        # a launch failure is an error, as before
             try:

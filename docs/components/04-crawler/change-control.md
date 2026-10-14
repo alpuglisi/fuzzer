@@ -15,10 +15,12 @@ Newest first.
       with `route.fetch(max_redirects=0)`; a redirect chain is walked through `api`
       (the context's request client), each hop checked, at most `MAX_REDIRECTS`, with
       301/302/303 turning a POST into a GET and 307/308 keeping it. A redirected
-      navigation is fulfilled with one redirect to the checked landing URL (`page.url`
-      and relative links stay right; the landing page is requested twice); another
-      request with the landing response. No `api`, a failed fetch or too many hops:
-      abort.
+      GET/HEAD navigation is fulfilled with one redirect to the checked landing URL
+      (`page.url` and relative links stay right; the landing page is requested twice);
+      a body-keeping chain and any other request with the landing response itself, so
+      no body is sent twice. No `api`, a failed fetch or too many hops: abort. The
+      fetches are the Playwright driver's, so this predicate, run before each, is their
+      only guard (the resolver rules confine Chromium's own traffic only).
     - `browser_launch_args(scope_urls, *, any_port_hosts=())`: `--no-proxy-server`,
       `--host-resolver-rules` (`MAP host:port host:port` per scope origin, the three
       loopback spellings for a loopback one, `EXCLUDE host` for `any_port_hosts`, then
@@ -50,9 +52,13 @@ Newest first.
     second loopback port and an off-host address, the AST guard and its offenders);
     `tests/test_spider_scope.py`, `tests/test_destructive_urls.py` updated — done
   - [x] FR-CRAWL-11; NFR-CRAWL-safe — done
-- Review: design agreed by reviewers A and B (consolidated requirements); the
-  implementation's deviations (redirect walking, port-aware resolver rules, sockets
-  never connected, the fetcher's lazy launch) sent back for code review (PA-0093(2)).
+- Review: design agreed by reviewers A and B (consolidated requirements). Code review of
+  the deviations (redirect walking, port-aware resolver rules, sockets never connected,
+  the fetcher's lazy launch): all four agreed, with must-fixes adopted: the auditor's
+  scope fixed once (A, who showed the driver's fetches bypass the resolver rules), a
+  body-keeping navigation answered with its landing response (A, B: it was POSTed
+  twice), the docs' two-layer claim corrected and the check-before-fetch order pinned
+  (A); residuals stated (A, B).
 - Effectiveness: verified offline with a real Chromium (zero connections to the second
   port); the Juice Shop re-crawl is the live check.
 
