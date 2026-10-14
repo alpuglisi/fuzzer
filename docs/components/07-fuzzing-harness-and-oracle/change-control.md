@@ -22,6 +22,27 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0067 — Open-redirect confirmation passes containment allowlists; host-based (BUG-0124) (2026-10-14)
+- Change:
+  - `oracle/strategies.py` `OpenRedirectStrategy`: `_lands_on` (urljoin + urlsplit:
+    http/https, our token host, path `/cb`) replaces the prefix test on both probes;
+    `confirm` sends the plain canary, then, only if it did not land and
+    `candidate.redirect_seed` is set, `https://oracle<tok2>.example/cb?fzlb=<seed>`;
+    the verdict records `variant: allowlist-containment` and the probe.
+  - `oracle/probe.py` `Candidate.redirect_seed`; `harness/pipeline._candidate_of`
+    carries it from evidence.
+- Impact: FR-FUZZ-46 (new). Juice Shop's `/redirect?to=` becomes confirmable. +1
+  request per seeded open-redirect candidate whose plain probe failed.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_open_redirect_seed.py` (unconditional, containment and
+    exact-match apps; host-not-prefix cases including scheme-relative, downgraded,
+    `javascript:`/`data:`; meta refresh) — done
+  - [x] FR-FUZZ-46 — done
+- Review: with CC-AUD-0034.
+- Effectiveness: verified offline; the live Juice Shop run is the check.
+
 ### CC-FUZZ-0066 — The M6 browser executor is confined to its observe and store origins (BUG-0123) (2026-10-14)
 - Change:
   - `tools/browserexec.py` `PlaywrightBrowserExecutor.run`: the scope is

@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0124: allowlist-gated open redirects detected; URL values imply open redirect and SSRF)
+- **Why:** Juice Shop's `/redirect?to=` open redirect was missed: the rule selected by
+  name only, and the confirmer's single canary is refused by an allowlist that checks
+  containment.
+- **What:** a URL-valued crawl parameter now becomes an open-redirect and an SSRF
+  candidate whatever its name (one shape → categories table, PA-0124); the open-redirect
+  confirmer checks the redirect target's host, and after a refused plain canary sends
+  one more embedding the crawled URL's `scheme://host/path` — a narrow, guarded
+  FR-AUD-20 exception the operator approved with its reach stated. BUG-0124, PA-0124,
+  CC-AUD-0034, CC-FUZZ-0067, CC-ML-0029.
+
 ## 2026-10-14 (BUG-0123: every browser request confined to the target origin)
 - **Why:** the first Juice Shop crawl's browser followed the app's open redirect to
   github.com, and two earlier bWAPP crawls rendered a public blog the same way. Scope

@@ -1198,7 +1198,9 @@ tracked in the requirements files, not here.
       listener, FR-SESS-16) stops header probing when it logs the session out;
     - `audit/value_shape.py` classifies example values for the `value_shape_in`
       rules; ip/host/url defaults are sent as loopback; `origin_in` keeps the header
-      rules off ground truth;
+      rules off ground truth. `SHAPE_CATEGORIES` is the one shape → categories table
+      (url → open-redirect, ssrf; BUG-0124), and `redirect_seed` is the one stated
+      exception to sending app-supplied hosts (the open-redirect retry, FR-AUD-21);
     - POST selector forms are fuzzed unless settings-like; the spider's
       `selector_verdicts` records what a submitted picker did;
     - BUG-0115: placement is a conformance contract (`UnplaceableLocation`);

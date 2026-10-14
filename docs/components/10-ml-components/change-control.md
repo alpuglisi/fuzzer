@@ -3,6 +3,18 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0029 — Note: `rules_fired` counts the url value-shape rules on crawl runs (BUG-0124; documentation only) (2026-10-14)
+- Change: FR-ML-5 gains a dated note: `rules_fired` also counts `R-OPEN-REDIRECT-VALUE`
+  and `R-SSRF-VALUE` (CC-AUD-0034), crawl points only. `redirect_seed` is not a feature
+  key. No ML code changes; `CANDIDATE_FEATURE_VERSION` is not bumped.
+- Impact: crawl-run training rows recorded after CC-AUD-0034 are not comparable with
+  earlier ones; ground-truth runs are unchanged.
+- Risk: low (documented drift).
+- Deliverables:
+  - [x] FR-ML-5 note — done
+- Review: reviewers A and B (BUG-0124 design, A item 5).
+- Effectiveness: n/a (documentation).
+
 ### CC-ML-0027 — Note: `rules_fired` counts the forms-phase-2 rules on crawl runs (documentation only) (2026-10-14)
 - Change: FR-ML-5 gains a dated note. The candidate feature `rules_fired` now also counts
   `R-COMMAND-INJECTION-VALUE`, `R-FILE-INCLUSION-VALUE`, `R-SQLI-HEADER` and

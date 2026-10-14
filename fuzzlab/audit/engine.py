@@ -46,6 +46,9 @@ class InjectionPoint:
     # The value a command-injection probe starts from in place of an ip/host-shaped
     # default (`value_shape.SAFE_HOST`), so the app's own host is never sent.
     base_value: str | None = None
+    # A crawled URL-shaped example's `value_shape.redirect_seed` (BUG-0124): written to
+    # an open-redirect candidate's evidence only (the stated FR-AUD-20 exception).
+    redirect_seed: str | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -99,6 +102,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                     evidence["entries"] = [list(e) for e in point.base_entries]
                 if point.base_value is not None:
                     evidence["base_value"] = point.base_value
+                if point.redirect_seed is not None and rule.category == "open-redirect":
+                    evidence["redirect_seed"] = point.redirect_seed     # FR-AUD-21
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",

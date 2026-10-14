@@ -3,6 +3,33 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0034 — URL-valued parameters imply open redirect and SSRF; the redirect seed (BUG-0124) (2026-10-14)
+- Change:
+  - `audit/value_shape.py`: `SHAPE_CATEGORIES` (the one shape → categories table) and
+    `SHAPE_EXCLUSIONS` (url → file-inclusion, with its reason); `redirect_seed(value)`
+    (http/https only, sliced from the original text up to `?`/`#`, userinfo cut, `None`
+    for an identifier-like path piece).
+  - `default_rules.json`: `R-OPEN-REDIRECT-VALUE` and `R-SSRF-VALUE`
+    (`value_shape_in: ["url"]`).
+  - `audit/engine.py`: `InjectionPoint.redirect_seed`; `evaluate` writes it to the
+    evidence of an open-redirect candidate only.
+  - `harness/auto.py` (`injection_points_from_store`): crawl points carry
+    `redirect_seed(example)`.
+- Impact: FR-AUD-21 (new); FR-AUD-20 gains its one stated exception, with its reach
+  (operator-approved). A URL-valued crawl parameter becomes an open-redirect and an
+  SSRF candidate whatever its name. All-category crawl runs gain those candidates (and
+  their negatives); the sqli/xss `auto_summary` goldens are unchanged (ground-truth
+  points have no shapes), asserted by the existing golden tests.
+- Risk: low; the exception is narrow and guarded.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_open_redirect_seed.py` (the shape table, the seed, the
+    end-to-end Juice-like app, the category-gated evidence write, the AST guard and
+    its offender) — done
+  - [x] FR-AUD-20 amended, FR-AUD-21 — done
+- Review: design agreed by reviewers A and B (revisions 1–3); code review pending.
+- Effectiveness: verified offline; the live Juice Shop run is the check.
+
 ### CC-AUD-0033 — The auditor's rendered fetcher is confined to the page's origin (BUG-0123) (2026-10-14)
 - Change:
   - `tools/fetcher.py` `ContentFetcher`: the scope is fixed once, the auth base's

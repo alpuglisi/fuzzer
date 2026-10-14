@@ -601,18 +601,46 @@ class OpenRedirectStrategy(ConfirmationStrategy):
     def _header(probe, name):
         return next((v for k, v in probe.headers.items() if k.lower() == name), "")
 
-    def confirm(self, candidate, sender):
-        canary = f"https://oracle{_token()}.example/cb"
-        probe = self._send(sender, candidate, canary)
+    @staticmethod
+    def _lands_on(target, page_url, host) -> bool:
+        """Does a redirect target lead to our canary? Parsed, never a prefix test
+        (PA-0122): resolved against the probed URL (scheme-relative included), an http(s)
+        URL whose host is our token host and whose path is ``/cb``. The host is the
+        signal; ``https://github.com/x?u=https://oracle….example/cb`` is not."""
+        from urllib.parse import urljoin, urlsplit
+        try:
+            parts = urlsplit(urljoin(page_url, (target or "").strip()))
+        except ValueError:
+            return False
+        return (parts.scheme.lower() in ("http", "https")
+                and (parts.hostname or "") == host and parts.path == "/cb")
+
+    def _probe(self, sender, candidate, value, host):
+        probe = self._send(sender, candidate, value)
         location = self._header(probe, "location")
-        if location.startswith(canary):
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"sink": "location-header", "location": location[:200]})
+        if location and self._lands_on(location, candidate.url, host):
+            return {"sink": "location-header", "location": location[:200]}
         m = _META_REFRESH.search(probe.text or "")
-        if m and m.group(1).startswith(canary):
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"sink": "meta-refresh", "url": m.group(1)[:200]})
+        if m and self._lands_on(m.group(1), candidate.url, host):
+            return {"sink": "meta-refresh", "url": m.group(1)[:200]}
         return None
+
+    def confirm(self, candidate, sender):
+        """A plain canary first. Only when it did not land and the candidate carries a
+        crawled URL seed (FR-AUD-21): one more probe whose canary embeds the seed in its
+        query, for an allowlist that checks containment (BUG-0124). The seed's host is
+        never a request host, and probes never follow redirects."""
+        host = f"oracle{_token()}.example"
+        hit = self._probe(sender, candidate, f"https://{host}/cb", host)
+        if hit is None and candidate.redirect_seed:
+            host = f"oracle{_token()}.example"
+            value = f"https://{host}/cb?fzlb={candidate.redirect_seed}"
+            hit = self._probe(sender, candidate, value, host)
+            if hit is not None:
+                hit = {**hit, "variant": "allowlist-containment", "probe": value[:300]}
+        if hit is None:
+            return None
+        return Verdict(True, self.vuln_class, self.mechanism, hit)
 
 
 class SstiStrategy(ConfirmationStrategy):

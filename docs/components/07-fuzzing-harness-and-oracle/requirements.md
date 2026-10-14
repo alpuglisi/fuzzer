@@ -1100,6 +1100,15 @@ rewards) derives from it.
   - Attempt writers name their own feature schema inside `features_json` (`_schema`:
     `greybox/1`, `fuzz-csv/1`); `attempt.feature_version` stays NULL (BUG-0069 sweep).
 
+- **FR-FUZZ-46** *(open-redirect confirmation; `CC-FUZZ-0067`, 2026-10-14, BUG-0124).*
+  `OpenRedirectStrategy` sends a plain canary `https://oracle<tok>.example/cb`. Only
+  when it does not land and the candidate carries a redirect seed (FR-AUD-21) does it
+  send one more, `https://oracle<tok2>.example/cb?fzlb=<seed>`, for an allowlist that
+  checks containment (Juice Shop's `/redirect`). A probe confirms when its `Location`
+  or meta-refresh target, resolved against the probed URL (scheme-relative included),
+  is `http`/`https` with our token host and path `/cb`: the host is the signal, never a
+  prefix (PA-0122). Cost: +1 request per seeded candidate whose plain probe failed.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

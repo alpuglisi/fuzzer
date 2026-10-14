@@ -24,6 +24,21 @@ import string
 
 #: Every shape a rule may name (``value_shape_in``).
 SHAPES = ("ip", "hostname", "filename", "path", "url")
+#: The categories each shape implies (PA-0124): the default rules carry exactly one
+#: ``R-*-VALUE`` rule per pair, and a test keeps every shape in this table.
+SHAPE_CATEGORIES = {
+    "ip": ("command-injection",),
+    "hostname": ("command-injection",),
+    "filename": ("file-inclusion",),
+    "path": ("file-inclusion",),
+    "url": ("open-redirect", "ssrf"),
+}
+#: Pairs deliberately left out, with the reason (PA-0124: the table is never silent).
+SHAPE_EXCLUSIONS = {
+    ("url", "file-inclusion"): "remote file inclusion from a crawled URL value would "
+                               "send the app a third-party URL to load (forms phase 2, "
+                               "lane A, Q5)",
+}
 #: Longer values are not classified (and not scanned).
 MAX_LEN = 2048
 #: A file name ends in one of these. A closed set: a dotted word with any other last
@@ -143,6 +158,38 @@ def _host_prefix(value: str) -> tuple[str, str]:
     if not cuts:
         return value, ""
     return value[:min(cuts)], value[min(cuts):]
+
+
+def redirect_seed(value):
+    """What an open-redirect probe may embed for an allowlist that checks containment
+    (BUG-0124; the stated FR-AUD-20 exception, FR-AUD-21): an ``http``/``https`` example
+    sliced from the original text -- its case, explicit port and trailing slash exactly
+    as the app wrote them -- up to its query or fragment, with any userinfo cut out.
+    ``None`` for anything else, and for a path with an identifier-like piece (a token in
+    the path never leaves; BUG-0120 class)."""
+    from urllib.parse import unquote, urlsplit
+
+    from fuzzlab.core.redaction import looks_like_identifier
+    if not isinstance(value, str) or value_shape(value) != "url":
+        return None
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return None
+    if any(piece and looks_like_identifier(unquote(piece))
+           for piece in parts.path.split("/")):
+        return None
+    cuts = [i for i in (value.find("?"), value.find("#")) if i >= 0]
+    seed = value[:min(cuts)] if cuts else value
+    scheme_end = seed.index("://") + 3
+    authority_end = seed.find("/", scheme_end)
+    authority_end = len(seed) if authority_end < 0 else authority_end
+    authority = seed[scheme_end:authority_end]
+    if "@" in authority:
+        seed = seed[:scheme_end] + authority.rsplit("@", 1)[1] + seed[authority_end:]
+    return seed
 
 
 def neutral_value(value):

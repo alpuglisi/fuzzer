@@ -198,7 +198,31 @@ budget where a vulnerability is plausible.
     `127.0.0.1`, and with a path after it → `http://127.0.0.1/`. Our own fillers (exact
     match) are sent as they are. The fuzzer never sends a host name taken from the app's
     own defaults. Stated residual: an e-mail default (`user@mail.example.com`) is sent
-    as is and may trigger mail.
+    as is and may trigger mail. **Stated exception (FR-AUD-21, BUG-0124,
+    operator-approved 2026-10-14):** the open-redirect retry probe.
+- **FR-AUD-21** *(open redirect and SSRF by value; `CC-AUD-0034`, 2026-10-14,
+  BUG-0124).*
+  - **Shape → categories.** `audit/value_shape.SHAPE_CATEGORIES` is the one table of
+    the categories each shape implies (ip, hostname → command-injection; filename,
+    path → file-inclusion; url → open-redirect, ssrf). The default rules carry exactly
+    one `R-*-VALUE` rule per pair (`R-OPEN-REDIRECT-VALUE`, `R-SSRF-VALUE` new), and
+    `SHAPE_EXCLUSIONS` records the pairs left out with a reason (url → file-inclusion).
+  - **The redirect seed.** `value_shape.redirect_seed(example)` is an `http`/`https`
+    crawled example sliced from its original text up to its query or fragment, userinfo
+    cut out; `None` for any other scheme and for a path with an identifier-like piece.
+    `harness/auto` sets it on crawl points; `audit/engine.evaluate` writes it to an
+    **open-redirect** candidate's evidence only. An AST guard limits where
+    `redirect_seed` is set, carried and read.
+  - **The FR-AUD-20 exception and its reach.** The open-redirect confirmer may send the
+    seed, after its plain canary failed, as text in the query of a reserved `.example`
+    canary (FR-FUZZ-46). fuzzlab never sends a request to the seed's host (it is never
+    a request host) and never follows the redirect. **A target that extracts and
+    fetches URLs embedded in a parameter could contact the seed's host** (a third
+    party): the operator accepted this residual explicitly. Every other category keeps
+    FR-AUD-20 as written.
+  - **Stated gaps:** a protocol-relative example (`//host/x`, shape `path`) gets no
+    rule and no seed; an allowlist keyed on a query string is not matched (the seed
+    drops the query).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

@@ -1519,3 +1519,17 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Each clause of a safety NFR is traced on its own, per sending layer** (queue,
      static redirects, browser, API requests). A clause traced at one layer is not
      traced at the others. (from BUG-0123)
+
+- **PA-0124** — Strengthens `PA-0002` (for classifiers) and `PA-0117` (for
+  confirmers), after BUG-0124: Juice Shop's open redirect (`/redirect?to=`) was never
+  a candidate (a name-only rule; the value-shape rules came from a per-lane sweep that
+  mapped only that lane's shapes) and would not have confirmed (one canary form,
+  refused by a containment allowlist).
+  1. **A classifier whose outputs select categories maps every output in one table**
+     (`audit/value_shape.SHAPE_CATEGORIES`), with deliberate exclusions recorded with a
+     reason (`SHAPE_EXCLUSIONS`). A test fails on a shape without a row and on rules
+     that differ from the table. A sweep over such a classifier is by output, never by
+     the lane's own categories.
+  2. **A confirmer that relies on one probe form states the server-side filters it
+     cannot pass, or carries a stated second form** (here: a seeded canary for
+     containment allowlists, sent only after the plain one fails). (from BUG-0124)

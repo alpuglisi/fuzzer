@@ -75,7 +75,8 @@ def _candidate_of(ev: dict) -> Candidate:
                      content_type=ev.get("body_content_type"),
                      base_entries=(tuple(tuple(e) for e in ev["entries"])
                                    if ev.get("entries") else None),
-                     base_value=ev.get("base_value"))
+                     base_value=ev.get("base_value"),
+                     redirect_seed=ev.get("redirect_seed"))
 
 
 def _fingerprint_point(points: list[InjectionPoint]) -> InjectionPoint | None:

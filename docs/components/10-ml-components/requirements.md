@@ -62,6 +62,10 @@ the oracle owns truth (the oracle/advisory split).
   training rows recorded after this change are therefore not comparable with earlier
   ones. Ground-truth runs are unchanged. `CANDIDATE_FEATURE_VERSION` is deliberately not
   bumped (documented only, reviewers' Q8).
+  *(CC-ML-0029 note, BUG-0124, 2026-10-14:)* `rules_fired` also counts
+  `R-OPEN-REDIRECT-VALUE` and `R-SSRF-VALUE`, crawl points only; the same
+  non-comparability holds. The evidence key `redirect_seed` is not a feature
+  (`core/features` reads named keys only).
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
   config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
   CC-FUZZ-0050 / CC-UI-0041.)*

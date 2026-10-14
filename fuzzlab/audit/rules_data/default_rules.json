@@ -163,6 +163,20 @@
       "reference": "command-injection"
     },
     {
+      "id": "R-OPEN-REDIRECT-VALUE",
+      "category": "open-redirect",
+      "transaction_type": "Open Redirect",
+      "when": { "value_shape_in": ["url"] },
+      "reference": "open-redirect"
+    },
+    {
+      "id": "R-SSRF-VALUE",
+      "category": "ssrf",
+      "transaction_type": "Server-Side Request Forgery",
+      "when": { "value_shape_in": ["url"] },
+      "reference": "ssrf"
+    },
+    {
       "id": "R-FILE-INCLUSION-VALUE",
       "category": "file-inclusion",
       "transaction_type": "File Inclusion / Traversal",

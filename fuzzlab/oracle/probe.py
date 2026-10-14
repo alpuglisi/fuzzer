@@ -41,6 +41,9 @@ class Candidate:
     # What a command-injection probe starts from in place of the app's own ip/host
     # default (`audit.value_shape.SAFE_HOST`; FR-AUD-20). None: the strategies' own.
     base_value: str | None = None
+    # An open-redirect candidate's crawled URL seed (FR-AUD-21, BUG-0124): read only by
+    # `OpenRedirectStrategy`'s second probe.
+    redirect_seed: str | None = None
 
 
 @dataclass

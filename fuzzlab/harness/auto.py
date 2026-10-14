@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 
 from fuzzlab.audit import InjectionPoint, known_categories
-from fuzzlab.audit.value_shape import SAFE_HOST, neutral_value, value_shape
+from fuzzlab.audit.value_shape import SAFE_HOST, neutral_value, redirect_seed, value_shape
 from fuzzlab.core.redaction import is_credential_name
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
@@ -281,7 +281,8 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                                      base_entries=entries, origin="crawl",
                                      value_shapes=shapes,
                                      base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
-                                                 else None)))
+                                                 else None),
+                                     redirect_seed=redirect_seed(example)))
     return points
 
 

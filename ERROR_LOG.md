@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Fuzzer: Juice Shop's allowlist-gated open redirect never detected (fixed, BUG-0124/PA-0124)
+- **Symptom:** `fuzzlab auto` over all categories missed Juice Shop's open redirect (`/redirect?to=` redirects when the target contains an allowlisted URL).
+- **Root cause:** the open-redirect rule selected by parameter name only (`to` is not in it); the value-shape rules mapped only the categories one lane needed; the confirmer sent one plain canary, which a containment allowlist refuses.
+- **Remediation:** one shape → categories table with `R-OPEN-REDIRECT-VALUE` / `R-SSRF-VALUE`; a redirect seed (http/https, no query, no identifier-like path piece) sent only in a second `.example` canary after the plain one fails, a stated FR-AUD-20 exception the operator approved; host-based confirmation. CC-AUD-0034, CC-FUZZ-0067, CC-ML-0029. `docs/bugs/BUG-0124-allowlist-gated-open-redirect-missed.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Crawler/auditor/M6 browser: requests left the target origin (fixed, BUG-0123/PA-0123)
 - **Symptom:** the first Juice Shop crawl's browser followed `/redirect?to=https://github.com/...` and rendered github.com; the forms phase 1/2 bWAPP crawls likewise rendered `itsecgames.blogspot.com` through `http_response_splitting.php?url=`. No cookie or credential left the lab.
 - **Root cause:** scope was enforced at the link queue only; `navguard.guard_page` checked destructive URLs only, Playwright never routes a redirect's later hops, launches did not confine name resolution, API-request clients were unchecked, and a loopback start admitted every loopback port.
