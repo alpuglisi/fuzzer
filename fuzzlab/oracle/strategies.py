@@ -181,10 +181,27 @@ class _Family:
     strings: bool                       # a string-literal probe (skipped on raw bodies)
 
 
+def _observed(probe) -> Probe:
+    """The response an opt-in strategy judges (FR-FUZZ-49, P4): the probe's PRG
+    follow-up when the sender made one, **whole** (status, headers, body), else the
+    probe itself. Never a mix of the two."""
+    followed = getattr(probe, "followed", None)
+    return followed if followed is not None else probe
+
+
+def _via_prg(probe) -> bool:
+    return getattr(probe, "followed", None) is not None
+
+
 class ConfirmationStrategy:
     vuln_class: str = ""
     mechanism: str = ""
     category: str = ""
+    #: FR-FUZZ-49 (P1): this strategy's whole run asks for post/redirect/get
+    #: observation and reads `_observed(probe)`. Opt-in only: a strategy reading the
+    #: raw 3xx (open redirect, header injection), timing or a differential engine never
+    #: sets it (P7).
+    prg: bool = False
 
     @property
     def arm(self) -> str:
@@ -373,28 +390,40 @@ class SqliErrorStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
     mechanism = "error-signature"
     category = "sql-injection"
+    prg = True                                       # FR-FUZZ-49
     _probes = ("'", '"', "')", "1'")
     MAX_REQUESTS = len(_probes) + 2
 
     def confirm(self, candidate, sender):
-        controls: dict[str, bool] = {}               # value -> shows a signature
+        """FR-FUZZ-49: each response is read as observed (`_observed`). A signature seen
+        only through a PRG follow-up needs every control observed through its own
+        follow-up too, without the signature: a control the app rejected (no
+        follow-up) or a page that still shows it after the control is a refusal, and
+        the verdict is flagged second-order."""
+        controls: dict[str, tuple[bool, bool]] = {}  # value -> (signature, via PRG)
         token = _sqli_token()
         for payload in self._probes:
             probe = self._send(sender, candidate, payload)
-            found = _signature(probe.text)
+            found = _signature(_observed(probe).text)
             if found is None:
                 continue
             needed = [token] + ([f"1{token}"] if payload[:1].isdigit() else [])
             for value in needed:
                 if value not in controls:
-                    controls[value] = _signature(
-                        self._send(sender, candidate, value).text) is not None
-            if any(controls[v] for v in needed):
+                    control = self._send(sender, candidate, value)
+                    controls[value] = (_signature(_observed(control).text) is not None,
+                                       _via_prg(control))
+            if any(controls[v][0] for v in needed):
                 return None                          # the signature is not the quote's
+            prg = _via_prg(probe)
+            if prg and not all(controls[v][1] for v in needed):
+                return None                          # a control without its follow-up
             match, dbms = found
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"dbms": dbms, "payload": payload,
-                            "match": match.group(0)[:120], "controls": needed})
+            evidence = {"dbms": dbms, "payload": payload,
+                        "match": match.group(0)[:120], "controls": needed}
+            if prg:
+                evidence.update(observation="prg", second_order=True)
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -569,6 +598,7 @@ class ReflectedXssStrategy(ConfirmationStrategy):
     vuln_class = "xss-reflected"
     mechanism = "reflected-context"
     category = "xss"
+    prg = True                                       # FR-FUZZ-49
 
     def confirm(self, candidate, sender):
         """Type where a marker reflects, then try the break-outs that context allows
@@ -578,20 +608,30 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         renders as HTML (`_renders_as_html`, BUG-0127). The context is always
         observed: no strategy reads the auditor's coarse ``sink_context`` (``html``,
         ``sql``, …), which keeps one confirmation per key sound (BUG-0072; guarded by
-        ``tests/test_oracle_xss_structural.py``)."""
+        ``tests/test_oracle_xss_structural.py``).
+
+        FR-FUZZ-49: each response is read as observed (`_observed`, whole: the HTML
+        check and the structure from the same response). A break-out confirmed only
+        in a PRG follow-up is the stored value rendered on another request: recorded
+        as ``xss-stored`` with ``observation: "prg"``."""
         token = _token()
         marker = f"zqxm{token}"
-        first = self._send(sender, candidate, marker)
+        first = _observed(self._send(sender, candidate, marker))
         ref = locate_reflection(first.text, marker)
         if ref is None:
             return None
         probe_token = f"zqxb{token}"
         for kind, fragment, check in xss_breakouts(ref, probe_token):
-            second = self._send(sender, candidate, fragment)
+            probe = self._send(sender, candidate, fragment)
+            second = _observed(probe)
             if check(second.text) and _renders_as_html(second):        # BUG-0127
-                return Verdict(True, self.vuln_class, self.mechanism,
-                               {"context": ref.context, "breakout": kind,
-                                "signature": fragment})
+                evidence = {"context": ref.context, "breakout": kind,
+                            "signature": fragment}
+                if _via_prg(probe):
+                    evidence["observation"] = "prg"
+                    return Verdict(True, StoredXssStrategy.vuln_class, self.mechanism,
+                                   evidence)
+                return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -679,6 +719,7 @@ class SstiStrategy(ConfirmationStrategy):
     vuln_class = "ssti"
     mechanism = "evaluation-marker"
     category = "server-side-template-injection"
+    prg = True                                       # FR-FUZZ-49
 
     @staticmethod
     def _draw() -> tuple[int, int]:
@@ -689,11 +730,16 @@ class SstiStrategy(ConfirmationStrategy):
         then the same template with a second product, absent from the first response,
         must appear in the response to the probe that computed it (BUG-0117 sweep: a
         page full of numbers is not an evaluator). Response 2 may still show product 1
-        (a stored listing). +1 request, only after a match."""
+        (a stored listing). +1 request, only after a match.
+
+        FR-FUZZ-49: each response is read as observed (`_observed`). When response 2 is
+        a PRG follow-up, product 1 must be absent from it (each POST overwrote the
+        value: product 2 is attributed to its own probe, P5)."""
         a, b = self._draw()
         expr = f"{a}*{b}"
         for index, payload in enumerate(_ssti_payloads(expr)):
-            text = self._send(sender, candidate, payload).text or ""
+            first = self._send(sender, candidate, payload)
+            text = _observed(first).text or ""
             if not _contains_number(text, a * b) or expr in text:
                 continue
             for _ in range(32):                     # a product absent from response 1
@@ -704,11 +750,16 @@ class SstiStrategy(ConfirmationStrategy):
                 return None                         # a page full of numbers
             expr2 = f"{c}*{d}"
             payload2 = _ssti_payloads(expr2)[index]
-            text2 = self._send(sender, candidate, payload2).text or ""
+            second = self._send(sender, candidate, payload2)
+            text2 = _observed(second).text or ""
+            if _via_prg(second) and _contains_number(text2, a * b):
+                return None                         # product 1 still shown: no attribution
             if _contains_number(text2, c * d) and expr2 not in text2:
-                return Verdict(True, self.vuln_class, self.mechanism,
-                               {"payload": payload, "product": str(a * b),
-                                "cross_check": [payload2, str(c * d)]})
+                evidence = {"payload": payload, "product": str(a * b),
+                            "cross_check": [payload2, str(c * d)]}
+                if _via_prg(first) or _via_prg(second):
+                    evidence["observation"] = "prg"
+                return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -734,14 +785,17 @@ class SpelInjectionStrategy(ConfirmationStrategy):
     vuln_class = "spel_injection"
     mechanism = "type-reference-evaluation"
     category = "spel-injection"
+    prg = True                                       # FR-FUZZ-49
 
     def confirm(self, candidate, sender):
         """Two independent canaries, the second absent from the first response, each
         seen (digit-bounded) in the response to its own probe and never reflected
-        (BUG-0117 sweep). +1 request, only after a match."""
+        (BUG-0117 sweep). +1 request, only after a match. FR-FUZZ-49: read as observed;
+        a PRG follow-up of probe 2 must not still show canary 1 (P5)."""
         n = secrets.randbelow(900) + 100
         payload = f"T(java.lang.Math).abs(-{n})"
-        text = self._send(sender, candidate, payload).text or ""
+        first = self._send(sender, candidate, payload)
+        text = _observed(first).text or ""
         if not _contains_number(text, n) or payload in text:
             return None
         for _ in range(32):                         # a canary absent from response 1
@@ -751,11 +805,16 @@ class SpelInjectionStrategy(ConfirmationStrategy):
         else:
             return None                             # a page full of numbers
         payload2 = f"T(java.lang.Math).abs(-{m})"
-        text2 = self._send(sender, candidate, payload2).text or ""
+        second = self._send(sender, candidate, payload2)
+        text2 = _observed(second).text or ""
+        if _via_prg(second) and _contains_number(text2, n):
+            return None                             # canary 1 still shown: no attribution
         if _contains_number(text2, m) and payload2 not in text2:
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"payload": payload, "result": str(n),
-                            "cross_check": [payload2, str(m)]})
+            evidence = {"payload": payload, "result": str(n),
+                        "cross_check": [payload2, str(m)]}
+            if _via_prg(first) or _via_prg(second):
+                evidence["observation"] = "prg"
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -947,6 +1006,7 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
     vuln_class = "ssti"
     mechanism = "go-template-len-marker"
     category = "server-side-template-injection"
+    prg = True                                       # FR-FUZZ-49 (an M4 marker)
 
     _LEN_RANGE = 900   # 3-digit lengths (100-999), matching SstiStrategy's own range
 
@@ -991,15 +1051,19 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
             n2 = self._random_length()
         expr1, expr2 = self._expr(n1), self._expr(n2)
         payload1, payload2 = self._payload(candidate, n1), self._payload(candidate, n2)
-        text1 = self._send(sender, candidate, payload1).text or ""
-        text2 = self._send(sender, candidate, payload2).text or ""
+        first = self._send(sender, candidate, payload1)
+        text1 = _observed(first).text or ""
+        second = self._send(sender, candidate, payload2)
+        text2 = _observed(second).text or ""          # FR-FUZZ-49: as observed
         if expr1 in text1 or expr2 in text2:
             return None                            # literal reflection, not evaluation
         own1, own2 = self._contains_token(text1, n1), self._contains_token(text2, n2)
         cross1, cross2 = self._contains_token(text1, n2), self._contains_token(text2, n1)
         if own1 and own2 and not cross1 and not cross2:
-            return Verdict(True, self.vuln_class, self.mechanism,
-                           {"lengths": [n1, n2], "payloads": [payload1, payload2]})
+            evidence = {"lengths": [n1, n2], "payloads": [payload1, payload2]}
+            if _via_prg(first) or _via_prg(second):
+                evidence["observation"] = "prg"
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -1011,15 +1075,24 @@ class PathTraversalStrategy(ConfirmationStrategy):
     vuln_class = "file-inclusion"
     mechanism = "file-content-marker"
     category = "file-inclusion"
+    prg = True                                       # FR-FUZZ-49
     _CONTROL_VALUE = "passwd"
 
     def confirm(self, candidate, sender):
+        """FR-FUZZ-49: read as observed; a marker seen only through a PRG follow-up
+        needs the control observed through its own follow-up, without it."""
         for payload in _TRAVERSAL_PAYLOADS:
-            if _PASSWD_MARKER.search(self._send(sender, candidate, payload).text or ""):
+            probe = self._send(sender, candidate, payload)
+            if _PASSWD_MARKER.search(_observed(probe).text or ""):
                 control = self._send(sender, candidate, self._CONTROL_VALUE)
-                if _PASSWD_MARKER.search(control.text or ""):
+                if _PASSWD_MARKER.search(_observed(control).text or ""):
                     return None                     # shown without traversal
-                return Verdict(True, self.vuln_class, self.mechanism, {"payload": payload})
+                if _via_prg(probe) and not _via_prg(control):
+                    return None                     # the control was not observed alike
+                evidence = {"payload": payload}
+                if _via_prg(probe):
+                    evidence["observation"] = "prg"
+                return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 
@@ -1080,6 +1153,7 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
     vuln_class = "path_traversal"
     mechanism = "passwd-file-content-marker-differential"
     category = "path-traversal"
+    prg = True                                       # FR-FUZZ-49
 
     _CONTROL_VALUE = "passwd"    # no traversal separators -- rules out an
                                   # always-echoes-marker-content target
@@ -1087,12 +1161,17 @@ class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
     def confirm(self, candidate, sender):
         for payload in _TRAVERSAL_PAYLOADS:
             probe = self._send(sender, candidate, payload)
-            if not _PASSWD_MARKER.search(probe.text or ""):
+            if not _PASSWD_MARKER.search(_observed(probe).text or ""):   # FR-FUZZ-49
                 continue
             control = self._send(sender, candidate, self._CONTROL_VALUE)
-            if _PASSWD_MARKER.search(control.text or ""):
+            if _PASSWD_MARKER.search(_observed(control).text or ""):
                 continue    # marker present even without traversal -- not attributable, try next payload
-            return Verdict(True, self.vuln_class, self.mechanism, {"payload": payload})
+            if _via_prg(probe) and not _via_prg(control):
+                continue    # the control was not observed alike (FR-FUZZ-49)
+            evidence = {"payload": payload}
+            if _via_prg(probe):
+                evidence["observation"] = "prg"
+            return Verdict(True, self.vuln_class, self.mechanism, evidence)
         return None
 
 

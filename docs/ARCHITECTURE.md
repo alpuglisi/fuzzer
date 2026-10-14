@@ -1230,6 +1230,14 @@ tracked in the requirements files, not here.
     - POST selector forms are fuzzed unless settings-like; the spider's
       `selector_verdicts` records what a submitted picker did;
     - BUG-0115: placement is a conformance contract (`UnplaceableLocation`);
+  - **Post/redirect/get observation (CC-FUZZ-0078, FR-FUZZ-49):** the `Sender` seam
+    takes `prg` (a property `Oracle` sets on every send of an opt-in strategy's run,
+    via `oracle._PrgRun`, when the sender declares `prg_capable`, which every wrapper
+    delegates). A probe sender answering a PRG redirect makes one plain GET of the
+    same-origin target through every send gate (`probesender.prg_target`, plus the
+    session's auth-endpoint, isolation and header-breaker gates) on the probe's own
+    route, and attaches it as `Probe.followed`; the raw 3xx stays the probe.
+    Follow-ups are counted in `requests` and budgeted (`prg_*` run metrics);
   - **Forms phase 3, lane J — JSON body points (CC-AUD-0035 / CC-FUZZ-0068 /
     CC-CORE-0046 / CC-ML-0030, no migration):**
     - a new point location, `json` (`core/jsonbody.py`, FR-CORE-36): one leaf of a JSON

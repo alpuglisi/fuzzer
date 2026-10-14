@@ -1190,6 +1190,84 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
     `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
+- **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
+  server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
+  `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`
+  shows `143`) observes that page.
+  - **Opt-in, per strategy run (P1).** `ConfirmationStrategy.prg` marks the strategies
+    that read the observed page: `SstiStrategy`, `GoTemplateSstiStrategy` (M4),
+    `SpelInjectionStrategy`, `ReflectedXssStrategy` (M5), `SqliErrorStrategy` (M2),
+    `PathTraversalStrategy` and `PathTraversalFsPathReadStrategy` (the passwd marker).
+    For each such strategy's run `Oracle.confirm_outcome` wraps the sender in
+    `oracle._PrgRun`, which sets the `Sender` property `prg=True` on **every** send of
+    the run (probes, controls, baselines, second samples), only when the sender says
+    it can (`probe.accepts_prg`: `prg_capable`, delegated by every wrapper). Never
+    opted in (P7): `SqliTimingStrategy`, `SqliBooleanStrategy`, the differential
+    engines, `OpenRedirectStrategy`, header injection, timing; a timing send never
+    follows, whatever it asks.
+  - **Trigger (P2).** A 301/302/303 after any method, or a 307/308 after a GET only (a
+    307/308 re-sends a POST body: not followed, no observation). One hop: a follow-up
+    answered with a redirect (or a timeout) is no observation.
+  - **The follow-up (P3)** is the sender's own plain GET of the `Location` (resolved
+    against the probed URL, fragment dropped; no payload, no siblings, no
+    `_FormBoundSender` binding) through every gate: the probed URL's own origin
+    (`canonical_origin`), `check_send_url`, `transaction_reason`,
+    `account_endpoint_reason`, not a login page (`redirect_is_logout`: normal 3xx
+    handling applies), not an auth endpoint, not an isolated path from the run's
+    session, not once the header breaker stopped a header probe's run
+    (`probesender.prg_target`, the one rule; `SeamProbeSender._prg_session_gate`). It
+    goes on the probe's own route: the run's session, the path's isolated copy (a copy
+    that cannot re-log in gives no observation), or anonymous; through the client
+    (scope, `RequestBudget`, session `observe`) and the header breaker as part of its
+    probe. The emulated redirect rules are listed with their Fetch / RFC 9110 steps in
+    `probesender.PRG_RULES`, each with a fixture (PA-0111).
+  - **Representation (P4).** The raw 3xx stays the probe (`status`, `headers`,
+    `text`); the follow-up is a separate whole `Probe` in `probe.followed` (with its
+    `url`); `probe.prg` says `observed`, `unobserved` or `skipped: <reason>`. Opt-in
+    strategies judge `strategies._observed(probe)` (= `probe.followed or probe`)
+    whole: `_renders_as_html`, signatures and markers from one response. Open
+    redirect (`_lands_on`), header injection and timing read the raw probe.
+  - **Attribution (P5).** Each follow-up is read right after its own send. M4/SpEL:
+    when response 2 is a follow-up, product (canary) 1 must be absent from it. M2 and
+    the passwd markers: a signature seen only through a follow-up needs every control
+    observed through its own follow-up without it; a control the app rejected (no
+    follow-up) is a refusal.
+  - **Classification (P6).** A reflection confirmed only through a follow-up is
+    recorded `xss-stored` (evidence `observation: "prg"`); an M2 confirmation only
+    through a follow-up carries `observation: "prg"`, `second_order: true`; other
+    strategies add `observation: "prg"`.
+  - **Cost (P8).** A follow-up is one more request of its probe
+    (`Probe.follow_up_sends`): counted by `_CountingSender` (the run's `requests`) and
+    `_CostCounter` (the bandit's cost), spent from the client's `RequestBudget`. The
+    pipeline reports `prg_follow_ups` (after a POST-family probe), `prg_follow_ups_get`,
+    `prg_unobserved` and `prg_restores` when non-zero; `fuzzlab auto` prints them on
+    one line only then. A run with no PRG redirect keeps its metrics (the
+    `score_only` golden summary is byte-identical with a PRG-capable sender).
+  - **Stored state (P9).** After a candidate's run that made a follow-up after a
+    POST-family probe, one benign send of the form's own default for the field (or the
+    importer's text filler) at the point, without PRG (counted `prg_restores`; not for
+    a raw whole body or a header point).
+  - **Residuals (stated):** the last payload (or the restore value) stays in the lab
+    account; a payload that breaks the page makes later checks of that page false
+    negatives; history pages hold earlier tokens (fresh tokens and P5 reject them, at
+    the cost of a false negative); a 307/308 after a POST is never observed; an
+    anonymous follow-up carries no cookie the 3xx set, so an anonymous flow keeping
+    the value in a session the POST just created is not observed; a GET probe whose
+    redirect target carries the payload is still recorded `xss-stored` when confirmed
+    only through the follow-up (P6 as agreed); `SqliEvaluationMarkerStrategy` is not
+    opted in (not in the agreed list).
+  - Enforced by: `tests/test_prg_observation.py::test_prg_ssti_confirms_only_through_the_follow_up`,
+    `tests/test_prg_observation.py::test_every_send_of_a_prg_run_asks_for_the_follow_up`,
+    `tests/test_prg_observation.py::test_a_reflection_confirmed_only_through_the_follow_up_is_stored_xss`,
+    `tests/test_prg_observation.py::test_a_json_follow_up_echoing_the_payload_never_confirms_m5`,
+    `tests/test_prg_observation.py::test_a_rejected_control_refuses_m2`,
+    `tests/test_prg_observation.py::test_a_history_page_still_showing_product_1_is_no_attribution`,
+    `tests/test_prg_observation.py::test_a_stored_quote_from_an_earlier_strategy_never_confirms_m4_m5_m2`,
+    `tests/test_prg_observation.py::test_payload_independent_follow_ups_never_confirm_an_opt_in_strategy`,
+    `tests/test_prg_observation.py::test_golden_impact_is_zero_with_prg_enabled`,
+    `tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument`,
+    `tests/test_sender_conformance.py::test_every_wrapper_reports_its_inner_senders_prg_capability`,
+    `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -1215,6 +1293,13 @@ rewards) derives from it.
   - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`, `tests/test_forms_phase2.py::test_a_header_point_url_never_carries_the_apps_own_host`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
   - Enforced by (forms phase 3, captured JSON requests; CC-AUD-0035 / CC-FUZZ-0068): DELETE, unflagged PUT/PATCH, destructive, transaction, cross-origin, credential-change and settings requests never imported (`store_adapter.captured_request`); a JSON login body probed only on an isolated or anonymous session, its password never a point and sent empty; siblings redacted and neutral; a DELETE refused again at every sender; a crawled fragment payload never sent over HTTP; greybox never sent a JSON point — `tests/test_json_points.py::test_each_refusal_is_never_imported`, `tests/test_json_points.py::test_put_and_patch_import_only_with_the_flag_and_a_safe_url`, `tests/test_json_points.py::test_malformed_unsupported_and_cross_origin_requests_are_refused`, `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms`, `tests/test_json_points.py::test_a_password_leaf_on_any_segment_is_isolated_sent_empty_and_never_a_point`, `tests/test_json_points.py::test_the_password_gate_holds_without_the_sensitive_name_pin`, `tests/test_json_points.py::test_object_selectors_sensitive_and_identifier_leaves_are_pinned`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_anonymously_by_the_plain_sender`, `tests/test_json_points.py::test_json_siblings_are_redacted_and_neutral_when_a_third_leaf_is_probed`, `tests/test_json_points.py::test_every_sender_refuses_a_crawl_sourced_delete_at_send_time`, `tests/test_json_points.py::test_a_crawled_fragment_payload_never_reaches_the_server`, `tests/test_json_points.py::test_a_destructive_spa_route_is_never_a_point`, `tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`, `tests/test_json_points.py::test_a_destructive_route_behind_a_second_hash_is_never_a_point`, `tests/test_json_points.py::test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store`, `tests/test_sender_conformance.py::test_every_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_sender_conformance.py::test_the_form_bound_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_json_points.py::test_a_leaf_absent_from_a_captured_body_is_refused_never_appended`, `tests/test_json_points.py::test_server_side_rules_never_fire_on_a_fragment_point`, `tests/test_json_points.py::test_no_strategy_masks_an_unplaceable_send`, `tests/test_json_points.py::test_the_masking_guard_catches_a_synthetic_offender`, `tests/test_json_points.py::test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative`
   - Enforced by (the M6 executor's storage headers go through its guarded route only, in scope; CC-FUZZ-0076, FR-CRAWL-14's mechanism): `PlaywrightBrowserExecutor.run` → `navguard.guard_page(headers=)` — `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`
+  - Clause (PRG follow-ups; FR-FUZZ-49, CC-FUZZ-0078): a post/redirect/get follow-up
+    is one plain GET, never a re-sent body or payload, only to the probed URL's own
+    origin, never to a destructive, transaction, account, login-page or auth-endpoint
+    target, never from the run's session to an isolated path, always on the probe's
+    own session route, never on a timing send, one hop.
+  - Enforced by (PRG follow-ups): `probesender.prg_target` and
+    `SeamProbeSender._prg_session_gate` at the send — `tests/test_prg_observation.py::test_a_refused_target_is_never_fetched`, `tests/test_prg_observation.py::test_a_307_after_post_is_not_followed_but_after_get_it_is`, `tests/test_prg_observation.py::test_a_second_redirect_is_no_observation`, `tests/test_prg_observation.py::test_a_redirect_to_the_login_page_is_not_followed`, `tests/test_prg_observation.py::test_a_redirect_to_an_auth_endpoint_is_not_followed`, `tests/test_prg_observation.py::test_a_main_session_probe_redirected_to_an_isolated_path_is_not_followed`, `tests/test_prg_observation.py::test_an_isolated_post_is_followed_on_the_same_copy`, `tests/test_prg_observation.py::test_an_anonymous_probe_follows_anonymously`, `tests/test_prg_observation.py::test_no_follow_up_once_the_header_breaker_stopped_header_probes`, `tests/test_prg_observation.py::test_a_timing_send_never_follows`, `tests/test_prg_observation.py::test_sqli_timing_and_boolean_never_cause_a_follow_up`, `tests/test_prg_observation.py::test_prg_rule`
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" for the probe senders (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate; the browser part is enforced above, BUG-0123); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
@@ -1255,6 +1340,10 @@ rewards) derives from it.
   discovering pages) is explicitly NOT covered by this requirement —
   the discriminator is whether the caller is a confirmation/timing
   oracle that needs the un-followed response.
+  The PRG follow-up (FR-FUZZ-49, `CC-FUZZ-0078`) keeps this: the probe is still
+  the un-followed response, untouched; the follow-up is a separate request
+  made only when a strategy run asks for it, kept as a separate `Probe`
+  (`probe.followed`), one hop, never a client library default.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,

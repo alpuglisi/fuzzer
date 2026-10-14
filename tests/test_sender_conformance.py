@@ -64,24 +64,30 @@ def signature_problems(cls) -> list[str]:
 
 
 class _Recorder:
+    prg_capable = True                               # FR-FUZZ-49
+
     def __init__(self):
         self.calls = []
 
     def send(self, url, param, value, timing=False, method="GET", location="query",
-             content_type=None, entries=None):
+             content_type=None, entries=None, prg=False):
         self.calls.append(dict(url=url, param=param, value=value, timing=timing,
                                method=method, location=location,
-                               content_type=content_type, entries=entries))
+                               content_type=content_type, entries=entries, prg=prg))
         return Probe(200, "ok", headers={})
 
 
 def _wrap(cls, inner):
     """Build a wrapper around ``inner``. `_FormBoundSender` also takes its candidate
-    (a form point on another URL, so this send passes through unbound)."""
+    (a form point on another URL, so this send passes through unbound); `_PrgRun` its
+    run's counters (FR-FUZZ-49)."""
     if cls.__name__ == "_FormBoundSender":
         from fuzzlab.oracle.probe import Candidate
         return cls(inner, Candidate(url="http://other/f", param="p",
                                     base_entries=(("p", ""),)))
+    if cls.__name__ == "_PrgRun":
+        from fuzzlab.oracle.oracle import PRG_COUNTERS
+        return cls(inner, dict.fromkeys(PRG_COUNTERS, 0))
     return cls(inner)
 
 
@@ -94,7 +100,12 @@ def forwarding_problems(cls) -> list[str]:
     for sent in (dict(timing=True, method="POST", location="body",
                       content_type="application/json"),
                  dict(timing=True, method="POST", location="body",
-                      entries=[("body", "{}"), ("form", "submit")])):
+                      entries=[("body", "{}"), ("form", "submit")]),
+                 # the strategy run's PRG property (FR-FUZZ-49, P8)
+                 dict(method="POST", location="body", entries=[("body", "{}")],
+                      prg=True),
+                 dict(method="POST", location="body", content_type="application/json",
+                      prg=True)):
         inner = _Recorder()
         try:
             _wrap(cls, inner).send("http://h/x", "body", "{}", **sent)
@@ -105,6 +116,20 @@ def forwarding_problems(cls) -> list[str]:
         got = inner.calls[0]
         out += [f"{k}: sent {v!r}, inner got {got[k]!r}" for k, v in sent.items()
                 if got[k] != v]
+    return out
+
+
+def prg_capability_problems(cls) -> list[str]:
+    """A wrapper reports its inner sender's PRG capability (FR-FUZZ-49): the oracle asks
+    for PRG observation only from a sender that can make it."""
+    from fuzzlab.oracle.probe import accepts_prg
+    out = []
+    capable, plain = _Recorder(), _Recorder()
+    plain.prg_capable = False
+    if not accepts_prg(_wrap(cls, capable)):
+        out.append("hides a capable inner sender's prg_capable")
+    if accepts_prg(_wrap(cls, plain)):
+        out.append("claims prg_capable over an incapable inner sender")
     return out
 
 
@@ -122,7 +147,9 @@ def test_the_scan_finds_the_known_implementations():
     wrappers = {(m, c) for m, c, w in _seam_classes() if w}
     assert {("fuzzlab.oracle.oracle", "_CostCounter"),
             ("fuzzlab.harness.auto", "_CountingSender"),
-            ("fuzzlab.harness.auto", "_FragmentGuard")} <= wrappers   # forms phase 3
+            ("fuzzlab.harness.auto", "_FragmentGuard"),               # forms phase 3
+            ("fuzzlab.oracle.oracle", "_FormBoundSender"),
+            ("fuzzlab.oracle.oracle", "_PrgRun")} <= wrappers         # FR-FUZZ-49
 
 
 def test_every_seam_class_accepts_the_full_protocol_signature():
@@ -135,6 +162,18 @@ def test_every_wrapper_forwards_every_protocol_argument():
     problems = {f"{m}.{c}": forwarding_problems(_load(m, c))
                 for m, c, w in _seam_classes() if w}
     assert problems and {k: v for k, v in problems.items() if v} == {}
+
+
+def test_every_wrapper_reports_its_inner_senders_prg_capability():
+    problems = {f"{m}.{c}": prg_capability_problems(_load(m, c))
+                for m, c, w in _seam_classes() if w}
+    assert problems and {k: v for k, v in problems.items() if v} == {}
+
+
+def test_every_concrete_sender_declares_prg_capable():
+    concrete = {(m, c) for m, c, w in _seam_classes()
+                if not w and (m, c) != ("fuzzlab.oracle.probe", "Sender")}
+    assert concrete and all(_load(m, c).prg_capable is True for m, c in concrete)
 
 
 # --- the guards themselves catch the defect (PA-0034(2)) -----------------------
@@ -164,11 +203,34 @@ class _Dropper:
 
 def test_the_guards_catch_a_missing_or_dropped_content_type():
     assert signature_problems(_OldCostCounter) == ["missing parameter 'content_type'",
-                                                   "missing parameter 'entries'"]
+                                                   "missing parameter 'entries'",
+                                                   "missing parameter 'prg'"]
     assert forwarding_problems(_OldCostCounter)[0].startswith("rejects a protocol argument")
-    assert signature_problems(_Dropper) == ["missing parameter 'entries'"]
+    assert signature_problems(_Dropper) == ["missing parameter 'entries'",
+                                            "missing parameter 'prg'"]
     assert forwarding_problems(_Dropper)[0] == (
         "content_type: sent 'application/json', inner got None")
+
+
+class _PrgDropper:
+    """Accepts the whole protocol (FR-FUZZ-49) but drops ``prg``, and does not report
+    its inner sender's capability."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None, entries=None, prg=False):
+        return self._inner.send(url, param, value, timing=timing, method=method,
+                                location=location, content_type=content_type,
+                                entries=entries)
+
+
+def test_the_guards_catch_a_dropped_prg_property():
+    assert signature_problems(_PrgDropper) == []
+    assert "prg: sent True, inner got False" in forwarding_problems(_PrgDropper)
+    assert prg_capability_problems(_PrgDropper) == [
+        "hides a capable inner sender's prg_capable"]
 
 
 # --- placement: a payload lands exactly where the point says (BUG-0115, PA-0115) ------
@@ -426,3 +488,60 @@ def test_senders_refuse_an_unplaceable_location(key):
     with pytest.raises(UnplaceableLocation):
         PLACEMENT_FACTORIES[key](_Wire()).send("http://h/a.php", "p", "v",
                                                location="fragment")
+
+
+# --- FR-FUZZ-49: a probe asking for PRG observation is placed exactly as any other ------
+def _via_prg(factory):
+    def send(wire, location):
+        factory(wire).send("http://h/a.php", "X-Probe", "zqmark",
+                           method="POST" if location in ("body", "json") else "GET",
+                           location=location, prg=True)
+    return send
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_every_sender_places_a_prg_probe_where_the_point_says(key):
+    assert placement_problems(_via_prg(PLACEMENT_FACTORIES[key])) == []
+
+
+class _PrgWire(_Wire):
+    """A POST is answered ``303 Location: /show``; any GET with a page."""
+
+    def _answer(self, method, url):
+        self.sent[-1].update(method=method, url=url)
+        if method == "POST":
+            return 303, {"Location": "/show"}, b""
+        return 200, {"Content-Type": "text/html"}, b"shown"
+
+    def request(self, method, url, **kw):
+        super().request(method, url, **kw)
+        status, headers, body = self._answer(method, url)
+
+        class R:
+            status_code, text = status, body.decode()
+        R.headers = headers
+        return R()
+
+    def transport(self, method, url, headers, body, timeout):
+        super().transport(method, url, headers, body, timeout)
+        return self._answer(method, url)
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_every_sender_that_declares_prg_makes_the_follow_up(key):
+    """PA-0035: the declared capability is checked on the sender's real send path: a
+    plain GET of the redirect target, no payload, attached as ``probe.followed``."""
+    wire = _PrgWire()
+    sender = PLACEMENT_FACTORIES[key](wire)
+    assert sender.prg_capable is True
+    probe = sender.send("http://h/a.php", "p", "zqmark", method="POST", location="body",
+                        prg=True)
+    assert probe.status == 303 and probe.followed is not None
+    assert probe.followed.text == "shown" and probe.followed.url == "http://h/show"
+    assert [(s["method"], s["url"]) for s in wire.sent] == [("POST", "http://h/a.php"),
+                                                            ("GET", "http://h/show")]
+    assert wire.sent[1]["query"] == {} and wire.sent[1]["body"] == {}
+    wire = _PrgWire()
+    PLACEMENT_FACTORIES[key](wire).send("http://h/a.php", "p", "zqmark", method="POST",
+                                        location="body")
+    assert len(wire.sent) == 1                        # not asked: never follows

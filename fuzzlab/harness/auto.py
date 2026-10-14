@@ -436,21 +436,37 @@ class _CountingSender:
         self._inner = inner
         self.count = 0
 
+    @property
+    def prg_capable(self) -> bool:
+        from fuzzlab.oracle.probe import accepts_prg
+        return accepts_prg(self._inner)
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None):
+             content_type: str | None = None, entries=None, prg: bool = False):
+        from fuzzlab.oracle.probe import Probe
         self.count += 1
-        if entries is not None:
-            return self._inner.send(url, param, value, timing=timing, method=method,
-                                    location=location, entries=entries)
-        if method == "GET" and location == "query":
-            return self._inner.send(url, param, value, timing=timing)
-        if content_type:
-            return self._inner.send(url, param, value, timing=timing,
-                                    method=method, location=location,
-                                    content_type=content_type)
-        return self._inner.send(url, param, value, timing=timing,
-                                method=method, location=location)
+        if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
+            probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                     location=location, content_type=content_type,
+                                     entries=entries, prg=True)
+        elif entries is not None:
+            probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                     location=location, entries=entries)
+        elif method == "GET" and location == "query":
+            probe = self._inner.send(url, param, value, timing=timing)
+        elif content_type:
+            probe = self._inner.send(url, param, value, timing=timing,
+                                     method=method, location=location,
+                                     content_type=content_type)
+        else:
+            probe = self._inner.send(url, param, value, timing=timing,
+                                     method=method, location=location)
+        if isinstance(probe, Probe):
+            # a PRG follow-up the sender made for this probe is a request of the run
+            # too (FR-FUZZ-49, P8)
+            self.count += probe.follow_up_sends
+        return probe
 
     def used(self, component: str | None = None) -> int:
         return self.count
@@ -467,12 +483,21 @@ class _FragmentGuard:
     def __init__(self, inner):
         self._inner = inner
 
+    @property
+    def prg_capable(self) -> bool:
+        from fuzzlab.oracle.probe import accepts_prg
+        return accepts_prg(self._inner)
+
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
-             content_type: str | None = None, entries=None):
+             content_type: str | None = None, entries=None, prg: bool = False):
         if location == "fragment":
             from fuzzlab.oracle.probe import UnplaceableLocation
             raise UnplaceableLocation("a fragment point is placed by the browser only")
+        if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
+            return self._inner.send(url, param, value, timing=timing, method=method,
+                                    location=location, content_type=content_type,
+                                    entries=entries, prg=True)
         if entries is not None:
             return self._inner.send(url, param, value, timing=timing, method=method,
                                     location=location, entries=entries)

@@ -325,6 +325,10 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         metrics[f"oracle_inconclusive_{mech}"] = n
     if counts.get("invalid_plugin_rules"):
         metrics["invalid_plugin_rules"] = counts["invalid_plugin_rules"]
+    # PRG observation (FR-FUZZ-49): reported only when it did something, so a run with
+    # no PRG redirect keeps exactly its earlier metrics (its follow-ups are already in
+    # `requests`)
+    metrics.update({k: n for k, n in oracle.prg_counts.items() if n})
     if not breaker:
         # a trip on the last header probe (or the main send after it) raises nothing:
         # read the reason the sender recorded (reviewer A)

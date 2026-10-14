@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-FUZZ-49: post/redirect/get observation for the server-side confirmers)
+- **Why:** Juice Shop answers `POST /profile username=#{11*13}` with `302 /profile` and no
+  `143`; only `GET /profile` shows it. The confirmers read the probe's own response and
+  probes never follow redirects, so a POST/redirect/GET app's SSTI, reflected XSS or SQL
+  error was never confirmed.
+- **What:** an opt-in strategy's whole run (M4 SSTI/SpEL, M5, M2, the passwd markers)
+  asks its sender for PRG observation; the sender makes one plain GET of a same-origin
+  redirect target that passes every send gate, on the probe's own session route, and
+  attaches it as the separate `probe.followed`; the raw 3xx stays the probe. Controls are
+  observed alike, follow-ups are counted in `requests` and the budget, a reflection seen
+  only after the redirect is `xss-stored`, and a benign restore follows a candidate's PRG
+  run. Timing and differential engines never follow (CC-FUZZ-0078).
+
 ## 2026-10-14 (BUG-0132: a browser login's senders now carry the cookie its app set)
 - **Why:** after a browser login on Juice Shop the requests-based senders sent only the
   bearer from the login response; the `token` cookie the app's JS sets was never seen,
