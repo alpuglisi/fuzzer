@@ -228,9 +228,9 @@ class StorageManager:
         self.conn.close()
 
 
-def _covered(exc) -> bool:
-    """Did a click fail because another element covers the target (an overlay)?"""
-    return "intercepts pointer events" in str(exc)
+#: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).
+_LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
+                     "[n, window.localStorage.getItem(n)]))")
 
 
 class LocalSpider:
@@ -314,6 +314,11 @@ class LocalSpider:
         self._selector_forms = None if selector_forms is None else frozenset(selector_forms)
         self._enumerated: set = set()
         self._auth_headers: dict = {}
+        #: where the session's headers may go (FR-CRAWL-14; set with the session)
+        self._header_scope = self._in_scope
+        #: the in-scope localStorage entries the crawl adopted, ``{origin: {name:
+        #: value}}``, checked after each authenticated submission (FR-CRAWL-14)
+        self._adopted_storage: dict = {}
         self._last_final_url = None
         self._last_html = None
         # --- single-page apps (forms phase 3) ---
@@ -401,31 +406,49 @@ class LocalSpider:
         # the one launch configuration, the operator's binary included (BUG-0126)
         from fuzzlab.tools.navguard import chromium_launch_kwargs
         self._browser = self._pw.chromium.launch(**chromium_launch_kwargs(args))
+        # FR-CRAWL-14: the session is ensured BEFORE the crawl context opens (a browser
+        # login, FR-SESS-19, runs and closes its own context on its own thread); the
+        # context adopts its storage_state (in-scope origins only), and its headers are
+        # added by the guarded route only (never set_extra_http_headers).
+        session = None
+        if self._session_manager and self._identity:
+            from fuzzlab.tools import browserauth
+            session = browserauth.browser_session(
+                self._session_manager, self._identity, self._auth_base_url,
+                in_scope=self._in_scope, scope_urls=[self.start_url])
+            self._auth_headers = dict(session.headers)
+            self._header_scope = session.header_scope
+            self._adopted_storage = dict(session.local_storage)
         # service workers would fetch outside page.route (BUG-0111)
-        context = self._browser.new_context(service_workers="block")
+        context = self._browser.new_context(
+            service_workers="block",
+            **({"storage_state": session.storage_state}
+               if session is not None and session.storage_state else {}))
         # guard the context, not the page, so popups are confined too (BUG-0123)
-        self._guard(context, scripts=True)
+        self._guard(context, scripts=True, session=session is not None)
         self._context = context
         self._page = context.new_page()
         self._track(self._page)
-        if self._session_manager and self._identity:
+        if session is not None:
             from fuzzlab.tools import browserauth
-            cookies, headers = browserauth.playwright_auth(
-                self._session_manager, self._identity, self._auth_base_url)
-            browserauth.apply_to_context(self._page.context, cookies, headers)
-            self._auth_headers = dict(headers or {})
-            self._injected_cookies = [(c["name"], c["value"]) for c in cookies]
+            browserauth.apply_to_context(context, session.cookies)
+            self._injected_cookies = [(c["name"], c["value"]) for c in session.cookies]
             logging.info(f"Crawler authenticated as {self._identity} "
-                         f"({len(cookies)} cookie(s))")
+                         f"({len(session.cookies)} cookie(s), "
+                         f"{sum(map(len, self._adopted_storage.values()))} localStorage "
+                         f"entr(ies))")
         # Record fetch()/XMLHttpRequest targets. These endpoints are where a
         # JavaScript-rendered page actually gets its data, and they never appear
         # as <a href> anywhere, so link-following alone can never reach them.
         self._page.on("request", self._on_request)
 
-    def _guard(self, context, *, scripts):
+    def _guard(self, context, *, scripts, session=False):
         """The one guard every context this crawl opens gets (BUG-0123, FR-CRAWL-12/13):
         scope, the destructive rule, the DELETE rule and the passive observer (which
-        reads script bodies only in the crawl's own context)."""
+        reads script bodies only in the crawl's own context). ``session``: the crawl's
+        own authenticated context, whose route adds the session's headers to in-scope
+        requests on the session's host (FR-CRAWL-14); an unauthenticated context gets
+        none."""
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
                    on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
@@ -433,7 +456,9 @@ class LocalSpider:
                    method_refusal=functools.partial(self._method_refusal,
                                                     context=context),
                    observe=functools.partial(self._observe,
-                                             scripts=scripts and self._spa_on))
+                                             scripts=scripts and self._spa_on),
+                   headers=(self._auth_headers or None) if session else None,
+                   header_scope=self._header_scope if session else None)
 
     def _track(self, page):
         """Count a page's requests in flight, so a settle waits for the app's own XHRs
@@ -865,40 +890,12 @@ class LocalSpider:
             self._delete_ok_for = None
 
     def _click_vetted(self, page, selector, vetted):
-        """Click the button the gate already vetted, exactly once (live-run fix). A
-        trial click (actionability only, nothing is clicked) comes first. Only if
-        something **covers** the button (Playwright: "intercepts pointer events") -- a
-        first-visit welcome dialog, a cookie bar -- is ``Escape`` pressed once and the
-        trial repeated; if it is still covered, its own ``click()`` is run on the element
-        (``clicks_dispatched``). A hidden, detached or never-actionable button raises
-        (not submittable): a user could not click it either. Right before the click the
-        button's labels are read again and must equal ``vetted`` (`spa.LABELS_JS`; an app
-        may re-render after Escape and reuse the marked node); otherwise nothing is
-        clicked (``forms_label_changed``). An overlay's own buttons are never clicked.
-        Returns ``"clicked"``, ``"dispatched"`` or None (labels changed)."""
-        probe = min(self.timeout_ms, 5000)
-        dispatch = False
-        try:
-            page.click(selector, trial=True, timeout=probe)
-        except PlaywrightError as exc:
-            if not _covered(exc):
-                raise
-            page.keyboard.press("Escape")
-            try:
-                page.click(selector, trial=True, timeout=probe)
-            except PlaywrightError as again:
-                if not _covered(again):
-                    raise
-                dispatch = True
-        if list(page.eval_on_selector(selector, spa.LABELS_JS)) != list(vetted):
-            self.spa_counts["forms_label_changed"] += 1
-            return None
-        if dispatch:
-            page.eval_on_selector(selector, "el => el.click()")
-            self.spa_counts["clicks_dispatched"] += 1
-            return "dispatched"
-        page.click(selector, timeout=self.timeout_ms)
-        return "clicked"
+        """Click the button the gate already vetted, exactly once: `spa.click_vetted`
+        (the one implementation, shared with the session manager's browser login),
+        counting ``clicks_dispatched`` and ``forms_label_changed`` here. Returns
+        ``"clicked"``, ``"dispatched"`` or None (labels changed)."""
+        return spa.click_vetted(page, selector, vetted, timeout_ms=self.timeout_ms,
+                                counts=self.spa_counts)
 
     def _submit_anonymously(self, page_url, sig, explicit):
         """Load the route in a fresh unauthenticated context (same browser, so the same
@@ -930,13 +927,28 @@ class LocalSpider:
 
     def _session_intact(self):
         """Is the crawl's own session still there after a submission (Revision 1)? Each
-        cookie we injected must still hold its value in the crawl's context, and the
-        session manager must still find the session live (`verify_live`). Returns
-        ``(ok, why)``; anything that cannot be verified is a loss (fail closed)."""
+        cookie we injected must still hold its value in the crawl's context, each
+        localStorage entry the crawl adopted from a browser login must still hold its
+        value (read with ``page.evaluate`` on a page of its origin, FR-CRAWL-14), and the
+        session manager must still find the session live (`verify_live`; a browser
+        login's protected probe). Returns ``(ok, why)``; anything that cannot be
+        verified is a loss (fail closed)."""
         jar = {c["name"]: c["value"] for c in self._context.cookies()}
         for name, value in self._injected_cookies:
             if jar.get(name) != value:
                 return False, f"cookie {name!r} was changed or cleared"
+        for origin, entries in self._adopted_storage.items():
+            page = next((p for p in self._context.pages
+                         if canonical_origin(p.url) == canonical_origin(origin)), None)
+            if page is None:
+                return False, f"the localStorage of {origin} cannot be read (no page)"
+            try:
+                now = page.evaluate(_LOCAL_STORAGE_JS, sorted(entries))
+            except PlaywrightError as exc:
+                return False, f"localStorage could not be read ({type(exc).__name__})"
+            for name, value in entries.items():
+                if now.get(name) != value:
+                    return False, f"localStorage entry {name!r} was changed or cleared"
         verify = getattr(self._session_manager, "verify_live", None)
         if verify is not None:
             host = urlparse(self._auth_base_url).hostname or ""
@@ -956,9 +968,13 @@ class LocalSpider:
         from fuzzlab.tools.navguard import checked_api_request
         checked_api_request(self._in_scope, action_url)          # BUG-0123
         if self.engine == "playwright" and self._pw is not None:
+            # one scope-checked request, no redirects: the session's headers only when
+            # the action is on the session's host over its transport (FR-CRAWL-14)
+            headers = self._auth_headers if self._auth_headers and \
+                self._header_scope(action_url) else None
             ctx = self._pw.request.new_context(
                 storage_state=self._page.context.storage_state(),
-                extra_http_headers=self._auth_headers or None)
+                extra_http_headers=headers)
             try:
                 if method == "POST":
                     resp = ctx.fetch(action_url, method="POST", data=urlencode(pairs),

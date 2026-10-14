@@ -1289,6 +1289,15 @@ tracked in the requirements files, not here.
   re-auth macro with single-flight lock; a **per-host credential vault** via the
   `core/` credential store (OS keyring + encrypted-file headless fallback, D12).
   Detection-only: no hand-written per-host profiles; unparseable logins fail loud.
+  A **browser login fallback for single-page apps** (`session/browserlogin.py`,
+  FR-SESS-19, CC-SESS-0021): with no server-rendered form and no Basic challenge, the
+  login form is found and clicked in its own scoped Chromium on a worker thread (login
+  scope = base origin + `auth_origins`; a credential-destination window from the first
+  fill; login-shaped forms only; a request-side account-endpoint gate; nothing
+  recorded), the credential is detected from the app's own login response, and success
+  is confirmed by a differential on a request the app made after the click (kept as
+  the session's protected probe for `verify_live`). The context's `storage_state` is
+  kept in memory only (`SessionState.browser_state`).
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
   identity)`, `ensure(identity)`, resolved by the request's host. `authorize(request,
   identity, prepared_host)` re-checks a request after a plugin edits it. Login
@@ -1307,7 +1316,12 @@ tracked in the requirements files, not here.
   from a manual browser login** (FR-SESS-11), still without per-host config.
 - **Depends on (components):** `core/` (config, store, HTTP seam, credential
   store); crawler (discovered forms help locate the login); proxy (post-Phase 6,
-  for manual-login session capture).
+  for manual-login session capture). The browser login (FR-SESS-19) reuses the
+  crawler's browser machinery: `tools/navguard.py` (the one launch helper, the route
+  guard, `release`), `tools/spa.py` (`FORMS_JS`, `form_refusal`, `click_vetted`) and
+  `tools/store_adapter.py` (`login_shaped`, `credential_change_reason`), plus
+  Playwright (optional: without it, an SPA login fails loudly naming the missing
+  browser).
 - **Consumed by:** crawler, auditor, fuzzer, and the proxy (as an addon). This is
   the most load-bearing dependency; everything authenticated flows through it, on
   every host — the Puppy Fort Factory and the external validation labs (D10).
@@ -1318,7 +1332,11 @@ tracked in the requirements files, not here.
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
   mode), canonical page keys, request-body capture (`discovered_requests`) and opt-in
-  SPA form submission (FR-CRAWL-12/13).
+  SPA form submission (FR-CRAWL-12/13). An authenticated Playwright crawl adopts the
+  session before its context opens: a browser login's `storage_state` (in-scope
+  origins only), and session headers added by the guarded route only, never
+  `set_extra_http_headers` (FR-CRAWL-14, CC-CRAWL-0022; the auditor and the M6
+  executor use the same mechanism).
 - **Depends on (components):** `core/`, session manager, target lab.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows (through the importer,
   from its own spider DB: `discovered_pages`, `discovered_forms`, `selector_verdicts`,

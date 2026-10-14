@@ -6,9 +6,11 @@ uses — ``prepare(request, identity)`` / ``observe(request, response, identity)
 plus ``ensure(host, identity, base_url)`` for explicit/standalone use.
 
 Login handshakes use an injected fetcher (its own cookie jar), separate from the
-HTTP seam, so authenticating never recurses through session handling. A login the
-detector cannot parse fails loudly (``SessionAuthError``) — never a silent
-unauthenticated run.
+HTTP seam, so authenticating never recurses through session handling. With no
+server-rendered login form and no Basic challenge, a single-page app's login is found
+and performed in a scoped browser on a worker thread (`session.browserlogin`,
+FR-SESS-19). A login the detector cannot parse fails loudly (``SessionAuthError``) —
+never a silent unauthenticated run.
 """
 
 from __future__ import annotations
@@ -123,8 +125,13 @@ class SessionManager:
                  fetch_factory: Callable[[], Fetcher] | None = None,
                  identities: list[str] | None = None, max_reauth: int = 3,
                  logger=None, store=None, auth_origins: list[str] | None = None,
-                 max_logins: int | None = None):
+                 max_logins: int | None = None, browser_login: bool | None = None):
         self._creds = credentials
+        # FR-SESS-19: the browser login fallback for single-page apps. Default: on when
+        # the manager's fetches go to the network (the default fetcher), off when a
+        # fetcher double stands in for the site (a browser would not see that site).
+        self._browser_login = (fetch_factory is None) if browser_login is None \
+            else bool(browser_login)
         self._scope = set(scope_hosts or [])
         # extra origins credentials may be sent to (an auth service elsewhere), beyond
         # the login page's own origin and in-scope hosts (BUG-0081)
@@ -365,7 +372,7 @@ class SessionManager:
                               fetch_factory=self._fetch_factory,
                               identities=list(self._identities),
                               max_reauth=self._max_reauth, logger=self._log, store=None,
-                              max_logins=max_logins)
+                              max_logins=max_logins, browser_login=self._browser_login)
         copy._auth_origins = set(self._auth_origins)
         copy._bases = dict(self._bases)
         copy._operator_bases = set(self._operator_bases)
@@ -429,17 +436,29 @@ class SessionManager:
         once; listeners are not told (the caller decides). The session's cookies and
         headers go only to the session's own host: a hop to any other host — even an
         approved one — is never fetched and raises `SessionAuthError`, as does an
-        unapproved hop (the caller treats both as "cannot verify")."""
+        unapproved hop (the caller treats both as "cannot verify"). A browser-login
+        session (FR-SESS-19) is checked on its protected probe instead of the base URL:
+        2xx with the credential, and not the anonymous body when that was 2xx too."""
         state = self._state.get((host, identity))
         if state is None or not state.valid:
             return False
         fetcher = self._fetch_factory()
         floor = bool(state.secure_only) or urlparse(base_url).scheme.lower() == "https"
-        probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
-                                             headers=state.apply({}), session_host=host)
-        ok = probe.status not in (401, 403) and (
-            state.kind == "basic" or not detect.shows_login_form(
-                probe.text, page, state.login_url, state.login_fields))
+        if state.protected_probe:
+            # a browser login's protected probe (FR-SESS-19): the app's own shell is
+            # public, so only the probe tells a live session from a revoked one
+            probe, _page, _floor = self._navigate(fetcher, state.protected_probe, base_url,
+                                                  floor, headers=state.apply({}),
+                                                  session_host=host)
+            ok = 200 <= probe.status < 300 and (
+                state.probe_anon_digest is None
+                or _digest(probe.text) != state.probe_anon_digest)
+        else:
+            probe, page, _floor = self._navigate(fetcher, base_url, base_url, floor,
+                                                 headers=state.apply({}), session_host=host)
+            ok = probe.status not in (401, 403) and (
+                state.kind == "basic" or not detect.shows_login_form(
+                    probe.text, page, state.login_url, state.login_fields))
         if not ok:
             with self._observe_guard:
                 state.valid = False
@@ -479,11 +498,13 @@ class SessionManager:
             return self._basic_login(fetcher, host, identity, base_url, cred,
                                      secure_only=floor_https)
         if form is None:
-            raise SessionAuthError(
-                f"could not detect a login for {identity}@{host}: no login form found "
-                f"from {base_url} (multi-step/CAPTCHA/SPA logins are not auto-detected; "
-                f"capture via the proxy post-Phase 6)"
-            )
+            if not self._browser_login:
+                raise SessionAuthError(
+                    f"could not detect a login for {identity}@{host}: no login form "
+                    f"found from {base_url} (multi-step/CAPTCHA logins are not "
+                    f"auto-detected, and the browser login fallback, FR-SESS-19, is off "
+                    f"for this manager; capture via the proxy post-Phase 6)")
+            return self._browser_login_state(host, identity, base_url, cred)
         if not self._transport_ok(login_page_url, floor_https):
             raise SessionAuthError(
                 f"refusing to log {identity}@{host} in: the login page {login_page_url} "
@@ -555,6 +576,108 @@ class SessionManager:
         if self._log:
             self._log.info("authenticated", extra=state.redacted())
         return state
+
+    # -- browser login for single-page apps (FR-SESS-19, CC-SESS-0021) -------------
+    def _browser_login_state(self, host: str, identity: str, base_url: str,
+                             cred) -> SessionState:
+        """No server-rendered form and no Basic challenge: find and perform the login in
+        a browser (`session.browserlogin`), detect the credential from the login
+        request's own response (`detect.detect_session_credential`), and confirm it by
+        a differential on a request the app made after the click (`_spa_probe`). Every
+        failure is a loud `SessionAuthError` (FR-SESS-6)."""
+        from fuzzlab.session import browserlogin
+        try:
+            obs = browserlogin.run(self._credential_destination_ok, base_url, cred,
+                                   auth_origins=sorted(self._auth_origins))
+        except browserlogin.BrowserLoginError as exc:
+            raise SessionAuthError(
+                f"could not log {identity}@{host} in: no server-rendered login form or "
+                f"Basic challenge at {base_url}, and the browser login failed: {exc}"
+            ) from None
+        if not self._credential_destination_ok(obs.login_url, base_url,
+                                               floor_https=obs.floor_https):
+            raise SessionAuthError(                    # the route refused it already
+                f"refusing {identity}@{host}'s browser login: its request went to "
+                f"{canonical_origin(obs.login_url)}")
+        if not 200 <= obs.status < 300:
+            raise SessionAuthError(
+                f"login for {identity}@{host} was rejected: the app's login request "
+                f"answered {obs.status} (credentials wrong?)")
+        # the credential the login response itself established: a cookie it set, then
+        # a token in its JSON body; the first one the differential confirms is kept
+        found = [detect.detect_session_credential(obs.status, obs.headers, obs.body,
+                                                  cookies=obs.cookies or None),
+                 detect.detect_session_credential(obs.status, obs.headers, obs.body)]
+        tried = []
+        for detected in found:
+            if detected is None or detected.kind not in ("cookie", "bearer") or \
+                    detected.kind in tried:
+                continue
+            tried.append(detected.kind)
+            state = SessionState(host=host, identity=identity, kind=detected.kind,
+                                 cookies=dict(detected.cookies),
+                                 headers=dict(detected.headers),
+                                 token_exp=detected.token_exp, login_url=obs.login_url,
+                                 logout_url=urljoin(base_url, "logout"),
+                                 secure_only=obs.floor_https,
+                                 browser_state=obs.storage_state)
+            probe, anon_digest = self._spa_probe(host, base_url, state, obs.probes)
+            if probe is None:
+                continue
+            state.protected_probe, state.probe_anon_digest = probe, anon_digest
+            state.valid = True
+            self._auth_endpoints.setdefault(host, set()).update(
+                {obs.login_url, state.logout_url})
+            self._persist(state)   # NON-SECRET metadata only
+            if self._log:
+                self._log.info("authenticated (browser login)", extra=state.redacted())
+            return state
+        if not tried:
+            raise SessionAuthError(
+                f"login for {identity}@{host} submitted in the browser but no session "
+                f"credential was detected in the login response (status {obs.status})")
+        raise SessionAuthError(
+            f"login for {identity}@{host} did not result in an authenticated session: "
+            f"no request the app made after the login click answers differently without "
+            f"the credential ({len(obs.probes)} candidate(s); FR-SESS-5)")
+
+    def _spa_probe(self, host: str, base_url: str, state: SessionState,
+                   candidates) -> tuple[str | None, str | None]:
+        """FR-SESS-5's differential for a browser login (reviewer A3): the first
+        in-scope GET the app made after the click (already scope- and
+        destructive-checked; 2xx in the browser) that answers 2xx when replayed with the
+        credential and, replayed without it, 401/403, another non-5xx status, or a
+        body that differs from the credentialed one while both are stable over two
+        fetches. Returns ``(url, sha256 of the anonymous body when it was 2xx)`` or
+        ``(None, None)``. Each replay uses a fresh fetcher, walked by `_navigate` to this
+        host only."""
+        floor = bool(state.secure_only)
+        for url in list(candidates)[:8]:
+            if (urlparse(url).hostname or "") != host or \
+                    not self._navigation_ok(url, base_url, floor):
+                continue
+            try:
+                authed = self._probe_fetch(url, base_url, floor, host, state.apply({}))
+                if not 200 <= authed.status < 300:
+                    continue
+                anon = self._probe_fetch(url, base_url, floor, host, None)
+                if anon.status >= 500:
+                    continue
+                if not 200 <= anon.status < 300:
+                    return url, None
+                again = self._probe_fetch(url, base_url, floor, host, None)
+                authed2 = self._probe_fetch(url, base_url, floor, host, state.apply({}))
+            except SessionAuthError:
+                continue                                  # an unapproved hop: not this one
+            if anon.text == again.text and authed.text == authed2.text and \
+                    anon.text != authed.text and 200 <= authed2.status < 300:
+                return url, _digest(anon.text)
+        return None, None
+
+    def _probe_fetch(self, url: str, base_url: str, floor: bool, host: str, headers):
+        resp, _page, _floor = self._navigate(self._fetch_factory(), url, base_url, floor,
+                                             headers=headers, session_host=host)
+        return resp
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str):
         """Look for a login form from the base URL and a few common login paths.
@@ -820,6 +943,11 @@ def _directory(url: str) -> str:
     parts = urlparse(url)
     path = parts.path or "/"
     return f"{parts.scheme}://{parts.netloc}{path[:path.rfind('/') + 1]}"
+
+
+def _digest(text: str | None) -> str:
+    import hashlib
+    return hashlib.sha256((text or "").encode("utf-8", "replace")).hexdigest()
 
 
 def _text(body) -> str:

@@ -17,8 +17,9 @@ class SessionState:
     host: str
     identity: str
     kind: str = "none"                       # 'cookie' | 'bearer' | 'basic' | 'none'
-    cookies: dict[str, str] = field(default_factory=dict)
-    headers: dict[str, str] = field(default_factory=dict)   # e.g. Authorization
+    # secrets: never in repr/str (FR-SESS-19, reviewer B6)
+    cookies: dict[str, str] = field(default_factory=dict, repr=False)
+    headers: dict[str, str] = field(default_factory=dict, repr=False)  # e.g. Authorization
     login_url: str | None = None
     logout_url: str | None = None
     token_exp: float | None = None           # unix ts, for JWT proactive refresh
@@ -31,6 +32,18 @@ class SessionState:
     #: password form with exactly these names is the login form re-rendered in place,
     #: wherever it posts (BUG-0113).
     login_fields: tuple[str, ...] | None = None
+    #: A browser login's ``storage_state()`` (cookies and per-origin localStorage), for
+    #: an authenticated Playwright crawl to adopt (FR-SESS-19, FR-CRAWL-14). In memory
+    #: only: never persisted, never in repr/str, never compared.
+    browser_state: dict | None = field(default=None, repr=False, compare=False)
+    #: A browser login's protected probe (FR-SESS-19): an in-scope GET the app made
+    #: after the login click that answers 2xx with the credential and 401/403 (or a
+    #: materially different body) without it. ``verify_live`` and the crawler's session
+    #: check re-fetch it. In memory only.
+    protected_probe: str | None = field(default=None, repr=False)
+    #: sha256 of the probe's anonymous body when that was 2xx too (the differential was
+    #: the body): a live session's probe must answer something else. In memory only.
+    probe_anon_digest: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.secure_only is None:

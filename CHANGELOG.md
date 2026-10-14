@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (SPA login detection: FR-SESS-19, FR-CRAWL-14)
+- **Why:** `--identity` runs were impossible on single-page apps: the session manager
+  only detected server-rendered login forms and HTTP Basic ("SPA logins are not
+  auto-detected"), and most of Juice Shop's remaining in-class flaws sit behind its JSON
+  login. Built Revision 2 of the reviewed design (reviewers A and B).
+- **What:** a browser login fallback (`session/browserlogin.py`): a scoped Chromium on
+  its own worker thread finds a login-shaped form (no account words, not a
+  credential-change form), fills it and clicks once; from the first fill every request
+  must be a credential destination and a password sent to an account endpoint is
+  aborted; nothing is recorded and the context closes before anything else; the
+  credential comes from the app's own login response and is confirmed by a protected
+  probe that `verify_live` re-checks (CC-SESS-0021). An authenticated crawl adopts the
+  login's in-scope `storage_state`, checks its localStorage after submissions, and gets
+  session headers through the guarded route only; the auditor and M6 executor stopped
+  using `set_extra_http_headers` (CC-CRAWL-0022, CC-AUD-0038, CC-FUZZ-0076).
+
 ## 2026-10-14 (Forms phase 3 review round; BUG-0128)
 - **Why:** reviewers A and B reviewed the phase 3 integration. B's must-fix was a gate
   bypass: stripping `aria-hidden` text let a "Delete" button pass. A found browser XSS

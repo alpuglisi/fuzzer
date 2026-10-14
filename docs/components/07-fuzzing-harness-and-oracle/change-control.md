@@ -22,6 +22,21 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0076 — The M6 executor's storage headers go through its route only (FR-CRAWL-14 sweep) (2026-10-14)
+- Change: `tools/browserexec.py` `PlaywrightBrowserExecutor.run` passes
+  `storage_headers` to `guard_page(headers=...)` (added by the route to in-scope
+  requests only) instead of `context.set_extra_http_headers` (CC-CRAWL-0022's PA-0002
+  sweep). No caller sets `storage_headers` today.
+- Impact: none on current runs; the headers can no longer reach an out-of-scope request.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: the header AST guard (`tests/test_browser_scope.py`); the M6 executor's
+    fake-Playwright wiring test still passes — done
+  - [x] NFR-FUZZ-safe traced — done
+- Review: with CC-SESS-0021 / CC-CRAWL-0022 (reviewers A and B, Revision 2 item 6).
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`): the targeted run (every touched test file, the session-manager tests, the browser-scope, SPA, sub-path, destructive-URL, lint, traceability and loopback-listener guards) gave 739 passed, 2 xfailed, 0 skipped, 1 failed -- `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, which fails identically on the unmodified base 2150bf8 (`labgen/conformance/*_live_boot.py` `start_server` sites, outside this change; flagged, not fixed here).
+
 ### CC-FUZZ-0075 — The OOB listener serves each connection on its own thread (reviewer A, round 2 nit) (2026-10-14)
 - Change: `oracle/oob.OobListener` uses `ThreadingHTTPServer` (daemon threads, never
   joined at close) instead of a one-connection-at-a-time `HTTPServer`. An idle or slow

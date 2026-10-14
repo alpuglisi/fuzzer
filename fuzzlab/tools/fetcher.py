@@ -351,22 +351,31 @@ class ContentFetcher:
         from fuzzlab.tools.navguard import chromium_launch_kwargs
         self._browser = self._pw.chromium.launch(**chromium_launch_kwargs(
             browser_launch_args(sorted(self._scope_origins))))
+        # The session first (a browser login, FR-SESS-19, runs on its own thread): its
+        # headers go through the guarded route only, never set_extra_http_headers
+        # (FR-CRAWL-14's mechanism, CC-AUD-0038).
+        session = None
+        if self._session_manager and self._identity and self._auth_base_url:
+            from fuzzlab.tools import browserauth
+            session = browserauth.browser_session(
+                self._session_manager, self._identity, self._auth_base_url,
+                in_scope=self._in_scope)
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(service_workers="block")
         # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is
         # confined to the fixed scope
         guard_page(context, in_scope=self._in_scope,
-                   on_out_of_scope=self._note_out_of_scope)
+                   on_out_of_scope=self._note_out_of_scope,
+                   headers=session.headers if session else None,
+                   header_scope=session.header_scope if session else None)
         self._context = context
         self._page = context.new_page()
         self._page.on("request", self._on_request)
-        if self._session_manager and self._identity and self._auth_base_url:
+        if session is not None:
             from fuzzlab.tools import browserauth
-            cookies, headers = browserauth.playwright_auth(
-                self._session_manager, self._identity, self._auth_base_url)
-            browserauth.apply_to_context(self._page.context, cookies, headers)
+            browserauth.apply_to_context(context, session.cookies)
             logging.info(f"Auditor authenticated as {self._identity} "
-                         f"({len(cookies)} cookie(s))")
+                         f"({len(session.cookies)} cookie(s))")
 
     def _on_request(self, request):
         try:

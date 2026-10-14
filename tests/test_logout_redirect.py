@@ -109,6 +109,7 @@ _AUTH_WORDS = re.compile(r"login|logon|sign_?in|logout|sign_?out|auth|session|ss
 #: oracle's vulnerability detectors are out of scope by design.
 _SCOPE = ["fuzzlab/session/manager.py", "fuzzlab/session/detect.py",
           "fuzzlab/session/state.py", "fuzzlab/session/cli.py",
+          "fuzzlab/session/browserlogin.py",   # SPA login detection (CC-SESS-0021)
           "fuzzlab/tools/probesender.py", "fuzzlab/tools/authhttp.py",
           "fuzzlab/tools/browserauth.py", "fuzzlab/tools/formnav.py",
           "fuzzlab/tools/navguard.py", "fuzzlab/tools/spider.py",

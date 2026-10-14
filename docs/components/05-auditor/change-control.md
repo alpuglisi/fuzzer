@@ -3,6 +3,25 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0038 — The auditor's browser sends session headers through its route only (FR-CRAWL-14 sweep) (2026-10-14)
+- Change: `tools/fetcher.py` `_start_browser` ensures the session first
+  (`browserauth.browser_session`), then guards the context with
+  `guard_page(headers=session.headers, header_scope=session.header_scope)` and adds only
+  cookies to the context (`apply_to_context`, which now refuses headers). It used
+  `set_extra_http_headers`, which would send a bearer with every request the browser
+  made (CC-CRAWL-0022's PA-0002 sweep).
+- Impact: none for cookie sessions; a bearer goes only to in-scope requests on the
+  session's host over its transport. A browser login (FR-SESS-19) triggered here runs on
+  its own thread, so it does not nest in the auditor's Playwright.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: the header AST guard and route unit tests in `tests/test_browser_scope.py`;
+    the auditor's real-browser scope tests still pass — done
+  - [x] NFR-AUD-safe traced — done
+- Review: with CC-SESS-0021 / CC-CRAWL-0022 (reviewers A and B, Revision 2 item 6).
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`): the targeted run (every touched test file, the session-manager tests, the browser-scope, SPA, sub-path, destructive-URL, lint, traceability and loopback-listener guards) gave 739 passed, 2 xfailed, 0 skipped, 1 failed -- `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, which fails identically on the unmodified base 2150bf8 (`labgen/conformance/*_live_boot.py` `start_server` sites, outside this change; flagged, not fixed here).
+
 ### CC-AUD-0037 — The auditor's browser launches with the shared configuration (BUG-0126) (2026-10-14)
 - Change: `tools/fetcher.py` `_start_browser` launches with
   `navguard.chromium_launch_kwargs` (CC-CRAWL-0018) instead of its own copy; the unused
