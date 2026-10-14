@@ -102,7 +102,7 @@ def boot(root: Path) -> Iterator[str]:
     """Run `node app.js` on a free loopback port; yield its base URL."""
     port = _free_port()
     server = procutil.start_server(
-        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port)},
+        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc

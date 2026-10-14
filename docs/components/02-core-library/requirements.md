@@ -362,6 +362,12 @@ plugin registry. It is the layer that makes the store the integration bus.
     nothing is signalled, `start_server` refuses such a server, and the safety net
     reports such a record. Nothing is killed by name or pattern (`kill_process_group`,
     `group_members`, `session_members`, `read_stat`).
+  - Listening sockets *(BUG-0130, CC-CORE-0051)*: `listeners(handle)` returns every TCP
+    LISTEN socket held by the server's tree (`/proc/<pid>/fd` inodes mapped to
+    `/proc/<pid>/net/tcp{,6}` LISTEN rows), only while the supervisor pid is held;
+    `exposed_listeners` / `assert_loopback_only` (raises `NonLoopbackListener`). Every
+    stop (`stop_server`, `astop_server`, the safety net) checks them while the server is
+    still up and, after stopping the tree, raises `NonLoopbackListener` on exposure.
   - A registry of what this process started (`registered()`); `reap_registered()` stops
     every live entry and returns `Leak(argv, pid, age_s, note)` records, dropping a
     record whose pid now names another process.

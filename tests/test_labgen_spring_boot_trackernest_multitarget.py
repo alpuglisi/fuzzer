@@ -132,7 +132,7 @@ def live_base_url(app_dir: Path):
     port = _free_port()
     jar_path = app_dir / "target" / "trackernest.jar"
     server = procutil.start_server(
-        ["java", "-jar", str(jar_path), f"--server.port={port}"],
+        ["java", "-jar", str(jar_path), f"--server.port={port}", "--server.address=127.0.0.1"],
         cwd=app_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc

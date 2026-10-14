@@ -320,6 +320,7 @@ class RailsLiveBootHarness:
         )
         self._proc = self._server.proc
         self._wait_for_boot()
+        procutil.assert_loopback_only(self._server)  # BUG-0130: never exposed
 
     def _wait_for_boot(self) -> None:
         assert self._port is not None

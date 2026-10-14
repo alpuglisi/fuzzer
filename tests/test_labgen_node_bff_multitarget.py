@@ -134,7 +134,7 @@ def live_base_url(app_dir: Path, tmp_path_factory: pytest.TempPathFactory):
 
     port = _free_port()
     server = procutil.start_server(
-        ["node", "app.js"], cwd=app_dir, env={**os.environ, "PORT": str(port)},
+        ["node", "app.js"], cwd=app_dir, env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     proc = server.proc

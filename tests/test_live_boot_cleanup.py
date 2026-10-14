@@ -80,6 +80,8 @@ def test_laravel_harness_close_leaves_no_process_and_frees_the_port(offline) -> 
         assert argv[:2] == ["php", "-S"] and "artisan" not in " ".join(argv), argv
         assert harness.get(served_url_for(cells[0])).status < 600  # it really serves
         assert procutil.group_members(server.child_pid, server.child_start_time)
+        # BUG-0130: the real listening sockets, loopback only (non-vacuous: it is found)
+        assert [(lst.address, lst.port) for lst in procutil.assert_loopback_only(server)] == [("127.0.0.1", port)]
     finally:
         harness.close()
     _assert_nothing_left(server, port)
@@ -93,10 +95,26 @@ def test_go_harness_close_leaves_no_process_and_frees_the_port(offline) -> None:
     try:
         server, port = harness._server, harness._port
         assert procutil.group_members(server.child_pid, server.child_start_time)
+        assert [(lst.address, lst.port) for lst in procutil.assert_loopback_only(server)] == [("127.0.0.1", port)]
     finally:
         harness.close()
     _assert_nothing_left(server, port)
     harness.close()  # idempotent
+
+
+@pytest.mark.skipif(shutil.which("go") is None, reason="go toolchain required")
+def test_the_go_harness_ignores_an_inherited_wildcard_host(offline, monkeypatch) -> None:
+    """BUG-0130: the generated ``main.go`` binds ``$HOST``; the harness passes the
+    whole environment, so an inherited ``HOST=0.0.0.0`` must not reach it."""
+    monkeypatch.setenv("HOST", "0.0.0.0")
+    manifest = load_manifest("lab/manifests/webhook_signature_go_sample.yaml")
+    harness = GoLiveBootHarness(GoEmitter(), manifest.cells)
+    _build_or_skip_offline(harness, GoLiveBootError, "go build")
+    try:
+        server, port = harness._server, harness._port
+        assert [(lst.address, lst.port) for lst in procutil.listeners(server)] == [("127.0.0.1", port)]
+    finally:
+        harness.close()
 
 
 @pytest.mark.skipif(shutil.which("go") is None, reason="go toolchain required")
@@ -138,6 +156,7 @@ def test_every_harness_starts_through_procutil_and_closes_on_a_failed_enter(modu
 
     harness = getattr(importlib.import_module(f"fuzzlab.labgen.conformance.{module}"), cls)
     assert "procutil.start_server(" in inspect.getsource(harness.build)
+    assert "procutil.assert_loopback_only(self._server)" in inspect.getsource(harness.build)  # BUG-0130
     assert "procutil.stop_server(" in inspect.getsource(harness.close)
     enter = inspect.getsource(harness.__enter__)
     assert "except BaseException" in enter and "self.close()" in enter

@@ -81,15 +81,16 @@ _RAW_SOCKET_RESPONDER_PHP = r"""<?php
 // test to prove a genuine, real, executed response-splitting differential.
 // Never part of the generated CircleFeed app itself.
 //
-// Usage: php raw_socket_redirect_responder.php <port> <mode>
+// Usage: php raw_socket_redirect_responder.php <host> <port> <mode>
 // <mode> is "vulnerable" (raw_socket_response_write) or "secure"
 // (allowlist_and_runtime_crlf_rejection). Accepts exactly ONE connection,
 // handles ONE request, then exits.
 
-$port = (int) $argv[1];
-$mode = $argv[2];
+$host = $argv[1];
+$port = (int) $argv[2];
+$mode = $argv[3];
 
-$server = stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr);
+$server = stream_socket_server("tcp://{$host}:{$port}", $errno, $errstr);
 if ($server === false) {
     fwrite(STDERR, "listen failed: {$errstr}\n");
     exit(1);
@@ -171,7 +172,7 @@ class _RawSocketResponder:
         script_path.write_text(_RAW_SOCKET_RESPONDER_PHP)
         self.port = _find_free_port()
         self._server = procutil.start_server(
-            [shutil.which("php"), str(script_path), str(self.port), mode],
+            [shutil.which("php"), str(script_path), "127.0.0.1", str(self.port), mode],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

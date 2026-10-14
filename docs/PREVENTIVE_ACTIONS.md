@@ -1562,3 +1562,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      whose leader is gone is signalled only inside a still-held session, and an unknown
      start time (0) matches nothing. Each such kill path has a test that fakes a reused
      id and shows nothing is signalled. (from BUG-0125)
+
+- **PA-0130** — Strengthens `PA-0081` (one loopback gate, guarded by call shape) from
+  fuzzlab's own listener calls to **every server it or its tests launch**, after
+  BUG-0130: Spring Boot test servers listened on 0.0.0.0 (port flag only) and Go/Node
+  servers took `HOST` from the inherited environment. PA-0081's guard could not see a
+  bind address that is another program's argv flag, env variable or framework default.
+  1. **A launched server binds loopback explicitly at its launch site** -- an argv flag
+     or an env value set there (`--server.address=127.0.0.1`, `HOST=127.0.0.1`, a host
+     argument) -- never a framework default or an inherited variable, even one whose
+     default is safe.
+  2. **The real sockets are checked** (`PA-0035`): `procutil.listeners` reads the LISTEN
+     sockets of the server's process tree from `/proc`; `stop_server` -- the choke point
+     every site goes through -- fails on a non-loopback listener, and the harnesses also
+     check right after boot.
+  3. **Enforced in source over `fuzzlab/` and `tests/`:** the static pin rule
+     (`tests/test_loopback_listeners.py::test_every_server_launched_through_procutil_pins_loopback`)
+     and the listener guard (now over tests/ too), each proven on synthetic offenders
+     (PA-0034(2)); a process launcher is not mistaken for a listener. (from BUG-0130)

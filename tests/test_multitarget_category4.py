@@ -903,7 +903,7 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     port = _free_port()
     jar_path = root / "target" / "trackernest.jar"
     server = procutil.start_server(
-        ["java", "-jar", str(jar_path), f"--server.port={port}"],
+        ["java", "-jar", str(jar_path), f"--server.port={port}", "--server.address=127.0.0.1"],
         cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc

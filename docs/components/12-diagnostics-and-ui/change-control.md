@@ -30,6 +30,12 @@ Newest first.
     `tests/test_web_lab.py::test_fetch_states_timeout_stops_labctls_whole_tree` — done
 - Effectiveness (assessed 2026-10-14): `test_web_runner.py` 14 passed, `test_web_lab.py`
   42 passed (offline; a stand-in `labctl.sh`, no engine, no traffic).
+- BUG-0130 note (2026-10-14, with CC-CORE-0051): `Runner.stop` reports on the job's
+  stream any socket of its tree listening beyond loopback (checked while it still runs;
+  the tools gate their own listeners), and the stop watchdog and `shutdown` report a
+  `NonLoopbackListener` / `ServerLost` on the stream instead of dropping it. Test:
+  `tests/test_web_runner.py::test_runner_stop_reports_a_job_listening_beyond_loopback`
+  (19 passed in that file). No template or JS change.
 - BUG-0125 review rounds 2-3 (2026-10-14, with CC-CORE-0050): `Runner._pump` reads output
   in a task, waits for the supervisor's exit, then drains for at most `Runner.DRAIN_S`
   (a descendant that outlives the job cannot hold the stream open); a run's end is its

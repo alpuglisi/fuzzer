@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0130: every launched lab server binds loopback, checked on its real sockets)
+- **Why:** Spring Boot test servers listened on 0.0.0.0 (port flag only) and Go/Node
+  servers took their bind host from the inherited environment; the loopback rule
+  (PA-0081) covered only fuzzlab's own Python listener calls.
+- **What:** every launch site pins `127.0.0.1` explicitly; `procutil` reads the real
+  LISTEN sockets of each server's process tree and `stop_server` fails on exposure (the
+  harnesses also check after boot); the listener guard no longer mistakes procutil
+  launches for listeners and now scans tests/; a static pin rule (PA-0130). CC-LAB-0255,
+  CC-CORE-0051.
+
 ## 2026-10-14 (BUG-0125 review fixes: a process id is trusted only while its leader is held)
 - **Why:** review found kill paths that could signal processes this run did not start
   once pids wrap (the supervisor reaped its server before its last group kill; the

@@ -210,7 +210,7 @@ def live_app(npm_installed: Path):
     server = procutil.start_server(
         ["node", "app.js"],
         cwd=npm_installed,
-        env={**os.environ, "PORT": str(port)},
+        env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     proc = server.proc

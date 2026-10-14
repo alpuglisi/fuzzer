@@ -122,7 +122,7 @@ def _boot_meadowmart(tmp_path_factory: pytest.TempPathFactory):
 
     port = _free_port()
     server = procutil.start_server(
-        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port)},
+        ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     _wait_until_listening(port)

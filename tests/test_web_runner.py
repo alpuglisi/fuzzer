@@ -196,6 +196,29 @@ def test_lab_states_report_an_unknown_exit_status_plainly(monkeypatch):
     assert states == {} and "exit status unknown" in error and "-256" not in error
 
 
+def test_runner_stop_reports_a_job_listening_beyond_loopback():
+    """BUG-0130: a job whose tree listens on all interfaces is reported on its stream
+    when it is stopped (checked while it still runs)."""
+    prog = ("import socket, time; s = socket.socket(); s.bind(('0.0.0.0', 0)); s.listen(); "
+            "print(s.getsockname()[1], flush=True); time.sleep(30)")
+
+    async def go():
+        r = Runner()
+        token = await r.launch([sys.executable, "-c", prog])
+        run = r._runs[token]
+        kind, port = await asyncio.wait_for(run.queue.get(), 10)
+        assert kind == "output"
+        assert r.stop(token) is True
+        events = await asyncio.wait_for(_events(r.stream(token)), 10)
+        return port, events
+
+    async def _events(gen):
+        return [ev async for ev in gen]
+
+    port, events = asyncio.run(go())
+    assert any("exposed beyond loopback" in e and f"0.0.0.0:{port}" in e for e in events), events
+
+
 def test_runner_stream_unknown_token():
     async def go():
         r = Runner()

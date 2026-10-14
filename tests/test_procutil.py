@@ -703,6 +703,82 @@ def test_a_failed_start_that_cannot_reap_leaves_the_handle_for_the_safety_net(mo
         stuck.wait()
 
 
+#: Binds HOST:0, prints the port, never accepts (nothing is served), and -- with
+#: "fork" -- does it in a forked grandchild-level process instead of the server itself.
+LISTENING_PROGRAM = textwrap.dedent("""
+    import os, socket, sys, time
+    host, where = sys.argv[1], sys.argv[2]
+    if where == "fork" and os.fork() != 0:
+        time.sleep(30)
+        sys.exit(0)
+    s = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET)
+    s.bind((host, 0))
+    s.listen()
+    print(s.getsockname()[1], flush=True)
+    time.sleep(30)
+""")
+
+
+def _listening_server(host: str, where: str = "self") -> tuple[procutil.ServerHandle, int]:
+    h = procutil.start_server([sys.executable, "-c", LISTENING_PROGRAM, host, where],
+                              stdout=subprocess.PIPE, text=True)
+    return h, int(h.proc.stdout.readline())
+
+
+@pytest.mark.parametrize("where", ["self", "fork"])
+def test_a_server_listening_beyond_loopback_is_caught(where: str) -> None:
+    """BUG-0130 (PA-0035: probe the real sockets): a server tree that listens on all
+    interfaces -- itself or a process it forked -- is caught by the listener check and
+    by stop_server, which stops the tree first and then raises."""
+    h, port = _listening_server("0.0.0.0", where)
+    tree = _tree(h)
+    found = procutil.listeners(h)
+    assert [(lst.address, lst.port) for lst in found] == [("0.0.0.0", port)]
+    assert found[0].pid != h.pid and not found[0].is_loopback()
+    with pytest.raises(procutil.NonLoopbackListener, match=f"0.0.0.0:{port}"):
+        procutil.assert_loopback_only(h)
+    with pytest.raises(procutil.NonLoopbackListener, match="stopped now"):
+        procutil.stop_server(h)
+    assert [pid for pid, start in tree if _alive(pid, start)] == []
+    assert h not in procutil.registered()
+
+
+def test_a_loopback_only_server_passes() -> None:
+    h, port = _listening_server("127.0.0.1")
+    found = procutil.assert_loopback_only(h)
+    assert [(lst.address, lst.port, lst.is_loopback()) for lst in found] == [("127.0.0.1", port, True)]
+    assert procutil.stop_server(h) == "stop"
+
+
+def test_the_safety_net_reports_an_exposed_server() -> None:
+    h, port = _listening_server("0.0.0.0")
+    leaks = procutil.reap_registered()
+    assert [leak.pid for leak in leaks] == [h.pid]
+    assert f"0.0.0.0:{port}" in leaks[0].note
+
+
+def test_proc_net_tcp_decoding_covers_ipv4_and_ipv6() -> None:
+    """``/proc/net/tcp{,6}`` addresses (host-order 32-bit words). IPv6 is decoded from
+    synthetic rows: this sandbox has no ``/proc/net/tcp6``."""
+    decode = procutil._decode_proc_net_address
+    assert decode("0100007F:1F90") == ("127.0.0.1", 8080)
+    assert decode("00000000:0050") == ("0.0.0.0", 80)
+    assert decode("00000000000000000000000001000000:0050") == ("::1", 80)
+    assert decode("00000000000000000000000000000000:0050") == ("::", 80)
+    assert decode("0000000000000000FFFF00000100007F:0050") == ("::ffff:127.0.0.1", 80)
+    # only LISTEN rows count: an established connection bound to a non-loopback
+    # address (a server's outbound fetch) is not a listener
+    table = procutil._parse_tcp_table(
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+        "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 111 1\n"
+        "   1: 0201A8C0:C350 0101A8C0:0050 01 00000000:00000000 00:00000000 00000000     0        0 222 1\n")
+    assert table == {111: ("127.0.0.1", 8080)}
+    loop = procutil.Listener(pid=1, address="::ffff:127.0.0.1", port=1)
+    assert loop.is_loopback()
+    assert not procutil.Listener(pid=1, address="::", port=1).is_loopback()
+    assert procutil.Listener(pid=1, address="127.0.0.2", port=1).is_loopback()
+
+
 def test_kill_process_group_kills_exactly_the_recorded_group() -> None:
     """The mechanism the corpus sandbox's timeout uses (BUG-0125 D14): every member of the
     recorded group, identity-checked, and nothing else."""

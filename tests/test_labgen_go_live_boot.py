@@ -1497,7 +1497,7 @@ func main() {
 		w.Header().Set("Location", r.URL.Query().Get("destination"))
 		w.WriteHeader(http.StatusFound)
 	})
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", os.Args[1]+":0")
 	if err != nil {
 		panic(err)
 	}
@@ -1510,7 +1510,7 @@ func main() {
         main_go = _Path(tmp) / "main.go"
         main_go.write_text(go_src)
         server = procutil.start_server(
-            ["go", "run", str(main_go)],
+            ["go", "run", str(main_go), "127.0.0.1"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         proc = server.proc

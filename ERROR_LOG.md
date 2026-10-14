@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Lab servers launched by harnesses/tests not pinned to loopback (fixed, BUG-0130/PA-0130)
+- **Symptom:** the integration full suite (p3-int + bug-0125 at 83650d6) failed `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`: it read the five harnesses' `procutil.start_server` calls (and `run_bounded`'s) as `asyncio.start_server`. Checking what those launched servers bind found real exposure: Spring Boot (harness + 4 tests) started with `--server.port` only, i.e. on 0.0.0.0; Go and Node servers took `HOST` from the inherited environment.
+- **Root cause:** loopback-only was enforced at fuzzlab's own Python listener calls (PA-0081) and the compose port binds, never at the real sockets of servers launched as other programs; launch sites left the bind address to framework defaults and inherited env.
+- **Remediation:** every launch site pins loopback explicitly (`--server.address=127.0.0.1`, `HOST=127.0.0.1`, host in argv); `procutil.listeners` reads the tree's real LISTEN sockets from /proc and `stop_server` (every site) raises `NonLoopbackListener`, the harnesses also check right after boot; the listener guard exempts procutil launches and scans tests/ too; a static pin rule over fuzzlab/ and tests/. CC-LAB-0255, CC-CORE-0051. `docs/bugs/BUG-0130-lab-servers-not-pinned-to-loopback.md`.
+- **Status:** Fixed (Spring/Node/Rails/Django pins verified statically only: no network installs here)
+
 ## 2026-10-14 — Test infrastructure: leaked lab servers OOM-killed the suite (fixed, BUG-0125/PA-0125)
 - **Symptom:** full-suite runs were OOM-killed (memory cgroup; Chrome and pytest killed). 429 orphaned `php8.3 -S 127.0.0.1:<port> /tmp/fuzzlab-php-laravel-live-boot-*/…/server.php` processes (ages 1–10 h), ~15 orphaned `/tmp/go-build…/exe/main` and a `puma`, parent PID 1, held ~14 GB. One passing run of `tests/test_labgen_php_laravel_access_control_live_boot.py` left 3 new orphans.
 - **Root cause:** `LiveBootHarness` started `php artisan serve`, whose child `php -S` survived `close()` (it terminated only `artisan`); `go run`, `bundle exec`/puma and `mvn` have the same launcher shape; nothing tied any test-launched server to its owner's life, a forking tool's `subprocess.run` timeout killed only the direct child, and a harness whose build failed after the server started never closed it.
