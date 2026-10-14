@@ -151,11 +151,17 @@ def release(target) -> None:
     ``TargetClosedError`` futures at teardown. Unrouting while a page navigates could
     leave the driver never answering (seen: ``unroute_all`` hung after an app
     navigated during the M6 settle wait, 1 run in ~9)."""
-    for page in list(getattr(target, "pages", None) or []):
-        try:
-            page.close()
-        except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
-            pass
+    # until no page is left (bounded): a page may open a popup while another closes,
+    # and a popup missed here would be unrouted before its context closes (reviewer B)
+    for _ in range(3):
+        pages = list(getattr(target, "pages", None) or [])
+        if not pages:
+            break
+        for page in pages:
+            try:
+                page.close()
+            except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
+                pass
     try:
         target.unroute_all(behavior="ignoreErrors")
     except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway

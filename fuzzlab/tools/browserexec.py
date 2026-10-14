@@ -123,7 +123,10 @@ class PlaywrightBrowserExecutor:
                 if request.store is not None:
                     allowed.add(url_key(request.store.url))
                 guard_page(context, allow=frozenset(allowed), in_scope=in_scope)
-                page.on("dialog", lambda d: (hits.add(token), d.dismiss()))
+                # a dialog is dismissed and never counted: the payloads call the
+                # sentinel, and an app's own alert/confirm is not the probe's doing
+                # (BUG-0129)
+                page.on("dialog", lambda d: d.dismiss())
 
                 if request.store is not None:                 # stored XSS: plant first
                     s = request.store

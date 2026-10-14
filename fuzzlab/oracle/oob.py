@@ -141,6 +141,11 @@ class OobListener:
 
 def _make_handler(listener: OobListener):
     class _Handler(BaseHTTPRequestHandler):
+        #: per-connection socket timeout: the listener serves one connection at a time,
+        #: so an idle connection (connected, never sending) would otherwise block the
+        #: serve loop and `OobListener.stop` forever (BUG-0128 sweep, PA-0128)
+        timeout = 5
+
         def _handle(self, *, write_body: bool) -> None:
             m = _TOKEN_RE.search(self.path)
             body = b""

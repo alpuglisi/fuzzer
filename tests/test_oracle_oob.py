@@ -332,3 +332,27 @@ def test_the_callback_serves_a_proof_absent_from_its_url():
         assert OobListener().proof(token) != body             # keyed per listener
     finally:
         listener.stop()
+
+
+def test_stop_returns_while_a_connection_sits_idle():
+    """BUG-0128 sweep (PA-0128, reviewer A): the listener serves one connection at a
+    time. A client that connects and never sends used to block its serve loop, and
+    with it ``stop()`` (``HTTPServer.shutdown`` waits for that loop), forever. Each
+    connection now has a socket timeout, so stop is bounded."""
+    import socket
+    import threading
+    import time
+
+    listener = OobListener(port=0)
+    listener.start()
+    idle = socket.create_connection(("127.0.0.1", listener.port))
+    try:
+        time.sleep(0.2)                                  # the loop is now reading it
+        stopper = threading.Thread(target=listener.stop, daemon=True)
+        started = time.monotonic()
+        stopper.start()
+        stopper.join(timeout=15)
+        assert not stopper.is_alive(), "OobListener.stop() blocked on an idle connection"
+        assert time.monotonic() - started < 15
+    finally:
+        idle.close()

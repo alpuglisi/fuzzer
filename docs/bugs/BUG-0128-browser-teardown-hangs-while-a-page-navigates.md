@@ -47,8 +47,9 @@ bounded the wait.
 before an operation that waits on that work.
 
 ## Corrective action
-- `navguard.release` closes every page of the context first, each failure ignored,
-  then calls `unroute_all(behavior="ignoreErrors")`. Closing the pages ends their
+- `navguard.release` closes every page of the context first, each failure ignored, and
+  repeats (at most 3 passes) while pages remain, so a popup opened during the closing is
+  closed too (reviewer B); then it calls `unroute_all(behavior="ignoreErrors")`. Closing the pages ends their
   navigations and requests, so the unroute has nothing in flight. All four teardown
   sites already go through `release`: `spider.py` (crawl and the anonymous submission
   context), `fetcher.py` and `browserexec.py`.
@@ -90,8 +91,12 @@ flight.
 | `spider.py` crawl end, `_submit_anonymously` | through `release` | fixed (by `release`) |
 | `fetcher.py` | through `release` | fixed (by `release`) |
 | `browserexec.py` | through `release` | fixed (by `release`) |
+| `browserexec.py` `browser.close()`, `manager.__exit__` (after `release`) | pages already closed, nothing in flight | cleared (quiesced by `release`) |
+| `oracle/oob.OobListener.stop` | `HTTPServer.shutdown()` waits for a one-connection-at-a-time serve loop; an idle connection blocked it forever (reproduced) | fixed: per-connection socket timeout (5 s); `tests/test_oracle_oob.py::test_stop_returns_while_a_connection_sits_idle` (fails on the old code) — CC-FUZZ-0074 |
 | `proxy/AsyncProxyServer.stop` | cancels connections, bounded `wait_closed` (BUG-0011) | cleared |
+| `web/app.py` lifespan (proxy stop; web jobs, BUG-0125 D18) | proxy stop bounded (BUG-0011); jobs stopped through `procutil.stop_server` | cleared |
 | `procutil` / BUG-0125 supervisors | stop, then wait, bounded (BUG-0125) | cleared |
+*(Sweep widened in review: reviewer A's S1, "every teardown", not only the browser.)*
 
 ## Residuals
 - `release` cannot bound a driver that stalls for another reason (a sync Playwright

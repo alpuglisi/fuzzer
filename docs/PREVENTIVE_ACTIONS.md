@@ -1570,3 +1570,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A teardown has a test that starts it with work still in flight**, and a race
      that shows up intermittently is measured over enough runs to tell (here 80)
      before it is called fixed. (from BUG-0128)
+
+- **PA-0129** — Strengthens `PA-0117` at the executor layer, after BUG-0129: the M6
+  browser executor counted any page dialog as the probe's hit, so an app's own `alert`
+  confirmed DOM / stored XSS. PA-0117's noise guard ran strategies with fake executors,
+  so the executor's own evidence channels were never fed noise.
+  1. **An execution signal counts only when it carries the probe's own fresh token.** A
+     channel that cannot carry it (dialogs, console messages, a generic navigation)
+     is never evidence: it is handled (dismissed) and ignored.
+  2. **Each executor evidence channel has a real-page test producing that channel's
+     noise with an inert payload**, which must not confirm. (from BUG-0129)

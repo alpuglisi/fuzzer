@@ -1171,7 +1171,9 @@ rewards) derives from it.
   cannot start is no verdict from the browser mechanisms (`UnplaceableLocation`); after
   `MAX_LAUNCH_FAILURES` (2) in a row it is remembered for the run: never a crash, never
   a negative; other mechanisms still decide. The sentinel is a context binding, so a
-  hit is kept when the page navigates afterwards. After `load` the executor waits up
+  hit is kept when the page navigates afterwards; it is the only evidence, called with
+  the probe's fresh token. A dialog is dismissed and never counted (CC-FUZZ-0074,
+  BUG-0129). After `load` the executor waits up
   to `SETTLE_MS` (4 s), ending on the hit, so a sink that a single-page app renders
   after its own API calls is seen; a page that closes under the wait is "not yet",
   never an error. **Cost:** a negative waits the full window per payload, about 16 s
@@ -1186,7 +1188,8 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_a_driver_that_cannot_start_is_no_verdict_too`,
     `tests/test_browser_scope.py::test_browser_xss_without_a_browser_is_no_verdict_at_any_location`,
     `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
-    `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`
+    `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
+    `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

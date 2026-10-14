@@ -1040,10 +1040,71 @@ def test_release_closes_every_page_before_unrouting():
                 raise RuntimeError("Target closed")
 
     class Context:
-        pages = [Page("a", fails=True), Page("b")]
+        def __init__(self):
+            self.passes = [[Page("a", fails=True), Page("b")],
+                           [Page("popup")],                 # opened while closing (B)
+                           []]
+
+        @property
+        def pages(self):
+            return self.passes.pop(0) if self.passes else []
 
         def unroute_all(self, behavior=None):
             calls.append(("unroute_all", behavior))
 
     release(Context())
-    assert calls == [("close", "a"), ("close", "b"), ("unroute_all", "ignoreErrors")]
+    assert calls == [("close", "a"), ("close", "b"), ("close", "popup"),
+                     ("unroute_all", "ignoreErrors")]
+
+    class Stubborn:                                        # never empties: bounded
+        pages = property(lambda self: [Page("x")])
+
+        def unroute_all(self, behavior=None):
+            calls.append(("unroute_all", behavior))
+
+    calls.clear()
+    release(Stubborn())
+    assert calls == [("close", "x")] * 3 + [("unroute_all", "ignoreErrors")]
+
+
+def test_an_apps_own_dialog_is_never_a_hit(monkeypatch):
+    """BUG-0129 (reviewer A): any dialog used to count as the probe's hit, so an app's
+    own ``alert("hello")`` confirmed DOM / stored XSS for whatever was probed. Dialogs are
+    dismissed and never counted; only the payload's sentinel call is evidence."""
+    from tests._browser import skip_or_fail
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    from fuzzlab.oracle.strategies import _xss_exec_payloads
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    _chromium_or_skip(monkeypatch)
+    page = ("<html><body><div id=out></div><script>alert('hello');"
+            "setTimeout(function(){confirm('are you sure?');},300);"
+            "var m=location.search.match(/[?&]q=([^&]*)/);"
+            "if(m){document.getElementById('out').textContent="       # escaped: inert
+            "decodeURIComponent(m[1].replace(/\\+/g,' '));}</script></body></html>")
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            body = page.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/"
+    try:
+        executor = PlaywrightBrowserExecutor(timeout_ms=10000)
+        try:
+            obs = executor.run(ExecRequest(url=base, param="q",
+                                           value=_xss_exec_payloads("tok4")[0]), "tok4")
+        except UnplaceableLocation as exc:
+            skip_or_fail(f"chromium could not launch: {exc}")
+        assert obs.executed is False
+    finally:
+        server.shutdown()

@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Fuzzer: any page dialog confirmed browser XSS (fixed, BUG-0129/PA-0129)
+- **Symptom:** in code review (reviewers A and B), and reproduced on a real browser: a page that shows its own `alert` on load, with an inert reflection, was reported as executing the DOM-XSS payload.
+- **Root cause:** the M6 executor recorded the probe's token on any dialog; the payloads never open one (they call the tokened sentinel). PA-0117's noise guard never reached the executor's own channels.
+- **Remediation:** dialogs are dismissed and never counted; the tokened sentinel binding is the only evidence. CC-FUZZ-0074. `docs/bugs/BUG-0129-any-dialog-confirmed-browser-xss.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Crawler/auditor/fuzzer: browser teardown hung while a page navigated (fixed, BUG-0128/PA-0128)
 - **Symptom:** a real-browser M6 test whose page navigates right after the payload fires hung in about 1 run in 9; a call trace showed `BrowserContext.unroute_all` never returning.
 - **Root cause:** `navguard.release` unrouted before the context's pages were closed, so a navigation's paused requests were still in flight and the driver never answered the interception change. All browser teardowns use `release`.

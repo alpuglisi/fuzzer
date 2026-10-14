@@ -18,7 +18,9 @@ changed, and the reason. Reference the commit hash where useful.
     attachment responses are not rendered (CC-FUZZ-0073);
   - BUG-0127's recurrence of BUG-0093 (PA-0094) is recorded;
   - browser teardown closes pages before unrouting (BUG-0128, PA-0128,
-    CC-CRAWL-0020).
+    CC-CRAWL-0020, CC-CRAWL-0021);
+  - round 2: a page's own dialog no longer confirms browser XSS (BUG-0129, PA-0129),
+    and the OOB listener's stop is bounded (BUG-0128 sweep) (CC-FUZZ-0074).
 
 ## 2026-10-14 (Juice Shop live run: BUG-0126, BUG-0127)
 - **Why:** the first live `fuzzlab auto --browser` run on Juice Shop aborted at the first

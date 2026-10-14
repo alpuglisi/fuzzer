@@ -22,6 +22,27 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0074 — Dialogs are never a browser-XSS hit (BUG-0129); OOB listener stop is bounded (BUG-0128 sweep) (2026-10-14)
+- Change:
+  - `tools/browserexec.py`: the dialog handler only dismisses. It recorded the probe's
+    token for any dialog, so an app's own `alert` confirmed DOM / stored XSS (BUG-0129,
+    reviewers A and B, round 2).
+  - `oracle/oob.py`: the listener's request handler has a 5 s socket timeout. The
+    listener serves one connection at a time, so an idle connection blocked the serve
+    loop and `OobListener.stop()` forever (BUG-0128 sweep, reviewer A's S1).
+- Impact: FR-FUZZ-48 amended (evidence is the tokened sentinel only). OOB callbacks
+  are unchanged; only a connection idle for 5 s is dropped.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
+    (real Chromium; fails on the old code) and
+    `tests/test_oracle_oob.py::test_stop_returns_while_a_connection_sits_idle` (fails
+    on the old code) — done
+  - [x] BUG-0129, PA-0129, ERROR_LOG; BUG-0128 sweep widened — done
+- Review: reviewers A and B, round 2 of the forms phase 3 review.
+- Effectiveness (assessed 2026-10-14): verified offline on real Chromium.
+
 ### CC-FUZZ-0073 — Forms phase 3 review: browser mechanisms give no verdict when they observe nothing; executor robustness (reviewers A, B) (2026-10-14)
 - Change:
   - `oracle/strategies.py`:

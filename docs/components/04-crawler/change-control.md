@@ -3,6 +3,22 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0021 — `release` closes pages until none remain (reviewer B, BUG-0128 follow-up) (2026-10-14)
+- Change: `navguard.release` repeats its page-closing pass, at most 3 passes, while the
+  context still has pages, and only then unroutes. A popup opened by one page while
+  another was closing was missed by the single snapshot and would have been unrouted
+  for the moment before its context closed: still held in scope by Chromium's resolver
+  rules, but not by the destructive and DELETE checks.
+- Impact: FR-CRAWL-11 text unchanged in substance ("closes the context's pages").
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting`
+    (a popup on the second pass; a context that never empties stops after 3 passes) —
+    done
+- Review: reviewer B, round 2 nit.
+- Effectiveness (assessed 2026-10-14): verified offline.
+
 ### CC-CRAWL-0020 — Browser teardown closes pages before unrouting (BUG-0128) (2026-10-14)
 - Change: `tools/navguard.release(context)` closes every page of the context first
   (each failure ignored), then calls `unroute_all(behavior="ignoreErrors")`. Before,
