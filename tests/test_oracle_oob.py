@@ -356,3 +356,25 @@ def test_stop_returns_while_a_connection_sits_idle():
         assert time.monotonic() - started < 15
     finally:
         idle.close()
+
+
+def test_a_callback_is_recorded_while_another_connection_sits_idle():
+    """Reviewer A (round 2): an idle connection must not delay a real callback, which a
+    strategy's short ``wait_for`` would then miss (a false negative)."""
+    import socket
+    import time
+    import urllib.request
+
+    listener = OobListener(port=0)
+    listener.start()
+    idle = socket.create_connection(("127.0.0.1", listener.port))
+    try:
+        time.sleep(0.2)
+        token = listener.register()
+        started = time.monotonic()
+        urllib.request.urlopen(listener.callback_url(token), timeout=3).read()
+        assert listener.wait_for(token, timeout=1.0) is not None
+        assert time.monotonic() - started < 2
+    finally:
+        idle.close()
+        listener.stop()

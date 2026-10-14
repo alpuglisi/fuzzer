@@ -22,6 +22,23 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0075 — The OOB listener serves each connection on its own thread (reviewer A, round 2 nit) (2026-10-14)
+- Change: `oracle/oob.OobListener` uses `ThreadingHTTPServer` (daemon threads, never
+  joined at close) instead of a one-connection-at-a-time `HTTPServer`. An idle or slow
+  connection (a port probe, a keep-alive, a partial request) delayed every other
+  callback by up to the handler's 5 s timeout (CC-FUZZ-0074), long enough to outlast a
+  strategy's `wait_for` and miss a real callback (a false negative). `stop()` stays
+  bounded; the handler timeout still ends idle threads; `record` was already locked.
+- Impact: none on confirmation semantics (hits are still keyed by minted token).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_oracle_oob.py::test_a_callback_is_recorded_while_another_connection_sits_idle`
+    (fails on the single-threaded listener), `::test_stop_returns_while_a_connection_sits_idle`
+    — done
+- Review: reviewer A's round-2 nit; implemented rather than stated as a residual.
+- Effectiveness (assessed 2026-10-14): verified offline.
+
 ### CC-FUZZ-0074 — Dialogs are never a browser-XSS hit (BUG-0129); OOB listener stop is bounded (BUG-0128 sweep) (2026-10-14)
 - Change:
   - `tools/browserexec.py`: the dialog handler only dismisses. It recorded the probe's

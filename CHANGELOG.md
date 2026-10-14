@@ -20,7 +20,9 @@ changed, and the reason. Reference the commit hash where useful.
   - browser teardown closes pages before unrouting (BUG-0128, PA-0128,
     CC-CRAWL-0020, CC-CRAWL-0021);
   - round 2: a page's own dialog no longer confirms browser XSS (BUG-0129, PA-0129),
-    and the OOB listener's stop is bounded (BUG-0128 sweep) (CC-FUZZ-0074).
+    and the OOB listener's stop is bounded (BUG-0128 sweep) (CC-FUZZ-0074); the
+    listener serves each connection on its own thread, so an idle one cannot delay a
+    real callback (CC-FUZZ-0075).
 
 ## 2026-10-14 (Juice Shop live run: BUG-0126, BUG-0127)
 - **Why:** the first live `fuzzlab auto --browser` run on Juice Shop aborted at the first

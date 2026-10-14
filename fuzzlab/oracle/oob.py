@@ -29,7 +29,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _TOKEN_RE = re.compile(r"/cb/([0-9a-f]+)")
 
@@ -59,7 +59,7 @@ class OobListener:
                 f"OobListener is loopback-only (lab-only); refusing host={host!r}")
         self._host = host
         self._requested_port = port
-        self._server: HTTPServer | None = None
+        self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._hits: dict[str, list[OobHit]] = {}
@@ -83,7 +83,10 @@ class OobListener:
         if self._server is not None:
             return
         handler = _make_handler(self)
-        self._server = HTTPServer((self._host, self._requested_port), handler)
+        # one thread per connection (daemon, never joined at close): an idle or slow
+        # connection cannot delay a real callback (reviewer A, round 2), and `stop` stays
+        # bounded by the handler's socket timeout
+        self._server = ThreadingHTTPServer((self._host, self._requested_port), handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
@@ -141,9 +144,9 @@ class OobListener:
 
 def _make_handler(listener: OobListener):
     class _Handler(BaseHTTPRequestHandler):
-        #: per-connection socket timeout: the listener serves one connection at a time,
-        #: so an idle connection (connected, never sending) would otherwise block the
-        #: serve loop and `OobListener.stop` forever (BUG-0128 sweep, PA-0128)
+        #: per-connection socket timeout: an idle connection (connected, never sending)
+        #: blocked the old one-at-a-time serve loop and `OobListener.stop` forever
+        #: (BUG-0128 sweep, PA-0128); it still ends idle handler threads
         timeout = 5
 
         def _handle(self, *, write_body: bool) -> None:
