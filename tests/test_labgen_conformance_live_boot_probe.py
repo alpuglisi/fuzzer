@@ -7,7 +7,8 @@ enforce its own bounded timeout independently of the probe.
 Deliberately **not** skip-guarded on `live_boot_available()` itself (unlike
 every other `test_labgen_conformance_live_boot*` module) -- these tests
 exercise the probe's and `_run`'s own failure-handling code paths via
-monkeypatched `subprocess.run`, so they must run everywhere, including a host
+monkeypatched `procutil.run_bounded` (the bounded, whole-tree runner every
+live-boot subprocess step goes through since BUG-0125), so they must run everywhere, including a host
 with no composer/php/network at all: that is exactly the case this bug was
 about (a bounded, honest answer, never a hang), and it must be tested without
 itself depending on the thing it is testing the absence of.
@@ -32,7 +33,7 @@ def test_composer_network_probe_returns_false_on_timeout_never_raises(monkeypatc
     def _raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 20.0))
 
-    monkeypatch.setattr(live_boot.subprocess, "run", _raise_timeout)
+    monkeypatch.setattr(live_boot.procutil, "run_bounded", _raise_timeout)
     assert live_boot._composer_network_probe(timeout=1.0) is False
 
 
@@ -48,8 +49,8 @@ def test_composer_network_probe_returns_false_on_nonzero_exit(monkeypatch) -> No
     run"."""
     monkeypatch.setattr(live_boot.shutil, "which", lambda name: "/usr/local/bin/composer")
     monkeypatch.setattr(
-        live_boot.subprocess,
-        "run",
+        live_boot.procutil,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(args=a[0], returncode=1, stdout="", stderr="boom"),
     )
     assert live_boot._composer_network_probe() is False
@@ -58,15 +59,15 @@ def test_composer_network_probe_returns_false_on_nonzero_exit(monkeypatch) -> No
 def test_composer_network_probe_returns_true_on_success(monkeypatch) -> None:
     monkeypatch.setattr(live_boot.shutil, "which", lambda name: "/usr/local/bin/composer")
     monkeypatch.setattr(
-        live_boot.subprocess,
-        "run",
+        live_boot.procutil,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(args=a[0], returncode=0, stdout="ok", stderr=""),
     )
     assert live_boot._composer_network_probe() is True
 
 
 def test_composer_network_probe_enforces_a_bounded_timeout(monkeypatch) -> None:
-    """The probe must actually pass a `timeout=` through to `subprocess.run`
+    """The probe must actually pass a `timeout=` through to `procutil.run_bounded`
     -- never rely on composer's own internal timeouts, which is exactly the
     "assume the later real operation is bounded because the probe passed"
     gap `PA-0035` closes."""
@@ -77,7 +78,7 @@ def test_composer_network_probe_enforces_a_bounded_timeout(monkeypatch) -> None:
         captured.update(kwargs)
         return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(live_boot.subprocess, "run", _capture)
+    monkeypatch.setattr(live_boot.procutil, "run_bounded", _capture)
     live_boot._composer_network_probe(timeout=3.5)
     assert captured.get("timeout") == 3.5
 
@@ -93,15 +94,15 @@ def test_run_wraps_subprocess_timeout_in_live_boot_error_not_a_hang(monkeypatch)
     def _raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"), output="partial-out", stderr="partial-err")
 
-    monkeypatch.setattr(live_boot.subprocess, "run", _raise_timeout)
+    monkeypatch.setattr(live_boot.procutil, "run_bounded", _raise_timeout)
     with pytest.raises(live_boot.LiveBootError, match="did not complete within"):
         live_boot._run(["composer", "install"], cwd=Path("/tmp"), timeout=5.0)
 
 
 def test_run_passes_through_a_normal_completed_process(monkeypatch) -> None:
     monkeypatch.setattr(
-        live_boot.subprocess,
-        "run",
+        live_boot.procutil,
+        "run_bounded",
         lambda *a, **k: subprocess.CompletedProcess(args=a[0], returncode=0, stdout="ok", stderr=""),
     )
     result = live_boot._run(["php", "-v"], cwd=Path("/tmp"), timeout=5.0)

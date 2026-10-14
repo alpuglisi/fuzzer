@@ -17,7 +17,7 @@ convention:**
    currently has a real Tier1Client: `run_tier1_case`/`build_tier1_case`/
    `evaluate_tier1_response` are run against
    `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` -- a real,
-   in-process Laravel build, booted for real with `php artisan serve`,
+   in-process Laravel build, booted for real with `php -S` (what `php artisan serve` runs),
    answering real HTTP requests. This *is* a genuine Tier-1 result (a real
    app's observed behavior), though, per T-LAB0.7's own rule (restated in
    tier1.py's module docstring), it is still never Tier-2 oracle

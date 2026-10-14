@@ -502,6 +502,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         try:
             yield
         finally:
+            await runner.shutdown()  # BUG-0125 D18: launched jobs are tied to the UI's life
             if proxy is not None:
                 await proxy.stop()
 

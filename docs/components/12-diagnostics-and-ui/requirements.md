@@ -73,6 +73,11 @@ bugs — the research-platform diagnostics of decision D2.
   *(Realized: Phase 0.1 the command-spec registry, Phase 0.3 the dry-run/gated-run/SSE
   runner, Phase 1 the launcher UI — per-tool forms, dry-run preview, live output, the D14
   category picker, and the plugins panel.)*
+  **Job lifetime** *(CC-UI-0053, 2026-10-14, BUG-0125 D18)*: a launched job (and the Lab
+  page's `labctl.sh` calls) runs under `fuzzlab.procutil`'s supervisor and is tied to
+  the UI's life: *Stop* ends its whole process tree, the UI's shutdown stops every live
+  job, and the job stops if the UI process dies. An unrequested stop is reported on the
+  job's stream. To outlive the UI, run the previewed command from the CLI.
 - **FR-UI-7** The panel is organized as a **multi-page app with real per-section
   routes**: **Overview** (`/`, the landing dashboard), **Launcher** (`/launcher`, run
   controls), **Proxy** (`/proxy`, traffic review/edit/drop/forward/repeat),

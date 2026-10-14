@@ -59,6 +59,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from fuzzlab import procutil
 from fuzzlab.labgen.conformance.tier1 import Tier1Case
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.schema import Cell
@@ -128,10 +129,8 @@ def _bundle_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
             # as a fresh network round trip) -- resolving it for real forces an
             # actual RubyGems compact-index fetch.
             gemfile.write_text('source "https://rubygems.org"\ngem "power_assert"\n', encoding="utf-8")
-            result = subprocess.run(
+            result = procutil.run_bounded(
                 ["bundle", "lock", "--gemfile", str(gemfile)],
-                capture_output=True,
-                text=True,
                 timeout=timeout,
                 cwd=scratch,
             )
@@ -189,9 +188,7 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
     for every later real network/subprocess operation also being bounded on
     its own)."""
     try:
-        return subprocess.run(
-            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
-        )
+        return procutil.run_bounded(cmd, cwd=cwd, timeout=timeout, env=env)
     except subprocess.TimeoutExpired as exc:
         raise RailsLiveBootError(
             f"{cmd[0]} did not complete within {timeout}s (cmd={cmd!r}): "
@@ -233,6 +230,7 @@ class RailsLiveBootHarness:
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
         self._proc: subprocess.Popen | None = None
+        self._server: procutil.ServerHandle | None = None
         self._port: int | None = None
 
     # -- assembly ------------------------------------------------------------
@@ -312,7 +310,7 @@ class RailsLiveBootHarness:
             )
 
         self._port = _find_free_port()
-        self._proc = subprocess.Popen(
+        self._server = procutil.start_server(
             [str(self._app_dir / "bin" / "rails"), "server", "-b", "127.0.0.1", "-p", str(self._port)],
             cwd=self._app_dir,
             stdout=subprocess.PIPE,
@@ -320,6 +318,7 @@ class RailsLiveBootHarness:
             text=True,
             env=env,
         )
+        self._proc = self._server.proc
         self._wait_for_boot()
 
     def _wait_for_boot(self) -> None:
@@ -444,20 +443,28 @@ class RailsLiveBootHarness:
     # -- lifecycle --------------------------------------------------------------
 
     def close(self) -> None:
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-                self._proc.wait(timeout=5.0)
-        self._proc = None
+        """Stop the server's whole process tree (BUG-0125: ``procutil.stop_server``
+        signals the server's supervisor, which stops its process group and every
+        re-parented descendant, then reaps) and remove the temp tree. Idempotent; the
+        temp tree is removed even if the stop raises."""
+        server, self._server, self._proc = self._server, None, None
+        try:
+            if server is not None:
+                procutil.stop_server(server)
+        finally:
+            self._cleanup_tmp()
+
+    def _cleanup_tmp(self) -> None:
         if self._tmp is not None:
             self._tmp.cleanup()
             self._tmp = None
 
     def __enter__(self) -> "RailsLiveBootHarness":
-        self.build()
+        try:
+            self.build()
+        except BaseException:
+            self.close()  # BUG-0125: __exit__ never runs when __enter__ raises
+            raise
         return self
 
     def __exit__(self, *exc_info: object) -> None:

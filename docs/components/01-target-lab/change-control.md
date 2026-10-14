@@ -3,6 +3,69 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0254 — Live-boot harnesses and test servers own their whole process tree (BUG-0125) (2026-10-14)
+- Change:
+  - **The five harnesses** (`labgen/conformance/live_boot.py`, `rails_live_boot.py`,
+    `live_boot_spring_boot.py`, `go_live_boot.py`, `django_live_boot.py`): the server is
+    started with `fuzzlab.procutil.start_server` (supervisor, own session, tied to the
+    owner) and `close()` stops it with `procutil.stop_server` (whole tree, reaped),
+    removing the temp tree even if the stop raises; `close()` is idempotent.
+    `__enter__` now closes when `build()` raises (a second leak path: `__exit__` never
+    runs then). Every `_run` step and network probe (composer, bundle, mvn, go, pip)
+    goes through `procutil.run_bounded`, so a timeout stops the tool's tree.
+  - **Laravel:** `php -S 127.0.0.1:<port> -t <app>/public <router>` in `public/` --
+    the exact command `artisan serve` runs (`ServeCommand`: the app's `server.php`
+    if present, else the framework's bundled router) -- replaces `php artisan serve`,
+    so the server is the supervisor's direct child (`_php_server_argv`).
+  - **labgen sweep sites:** `oracle_wrapper.default_runner` and
+    `nuclei_oracle.default_nuclei_runner` use `run_bounded`; `secret_scanner` (gitleaks,
+    no timeout, non-forking) unchanged. **Tools:** `corpus_validation_sandbox` keeps
+    runsc's lifecycle; its timeout now kills runsc's whole group,
+    identity-checked (`procutil.kill_process_group`; BUG-0125 D14);
+    `pattern_corpus_sourcing.default_git_runner` uses `run_bounded`.
+  - **Tests:** 11 test files that started servers with `subprocess.Popen` use
+    `start_server`/`stop_server`; 8 files' forking-tool `subprocess.run(timeout=)`
+    (npm install, `go run`, `go vet`, mvn) use `run_bounded`; docstrings that said
+    "`php artisan serve`" now say `php -S`. `tests/conftest.py` + `tests/_leak_guard.py`:
+    the session-end safety net (stop and fail on a leaked registered server).
+  - New tests: `tests/test_live_boot_cleanup.py` (real Laravel and Go boots, offline),
+    `tests/test_procutil.py`, `tests/test_procutil_guard.py` (AST guard; labgen import
+    guard allowing exactly `fuzzlab.labgen`, `fuzzlab.labels` -- pre-existing -- and
+    `fuzzlab.procutil`).
+  - Spec: **NFR-LAB-cleanup** (new, SAFETY, traced); the Laravel live-boot paragraph of
+    `requirements.md` and `docs/ARCHITECTURE.md` updated in place.
+- Impact (other components / project): CORE gains `procutil` (CC-CORE-0048); UI's
+  launcher uses it (CC-UI-0053). Harness behavior seen by tests is unchanged except
+  that nothing survives `close()`; `handle.proc` keeps `poll()`/`stdout` for the
+  harnesses' boot checks. Every full-suite run now fails if it leaks a server.
+- Risk (level; mitigation): **medium** (shared test infrastructure). Mitigations: the
+  supervisor and identity gates are mutation-tested (17/18 killed; the survivor is an
+  equivalent defense-in-depth filter); every kill is identity-checked and never by
+  pattern, so the operator's labs cannot be hit; the Laravel `php -S` command is the
+  one `artisan serve` itself runs. Accepted: the Rails, Spring Boot and Django harnesses
+  were not booted here (network installs) -- same code path, checked by source, run in
+  the orchestrator's full suite. Linux-only (`prctl`); elsewhere `start_server` raises
+  `SupervisorUnavailable`.
+- Design decisions (BUG-0125, local numbering): D12 thread rule; D13 SIGTERM as the
+  supervisor's death signal; D14 sandbox keeps runsc's lifecycle; **D15** wedged-
+  supervisor fallback (direct, identity-checked group kill); **D16** server
+  `oom_score_adj` raised above the supervisor's (+500, capped; residual: a supervisor
+  at 1000); **D17** `allow_thread=True` documented and loud (`ServerLost`, stderr line);
+  D18 web-runner jobs tied to the UI (CC-UI-0053).
+- Deliverables:
+  - [x] harnesses, sweep sites, test servers converted — done
+  - [x] safety net + AST guard + labgen import guard (synthetic offenders) — done
+  - [x] NFR-LAB-cleanup with `Enforced by:` lines — done
+  - [x] BUG-0125, PA-0125, ERROR_LOG, CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): one offline pytest process over the targeted
+  files: **275 passed, 13 skipped** (13 = runsc/cgroup v1 absent, github unreachable by
+  design); per file `test_procutil.py` 22 passed, `test_procutil_guard.py` 24,
+  `test_live_boot_cleanup.py` 8 (real Laravel boot from the local composer cache, real
+  Go boot; port refuses and no group/session member remains after `close()`),
+  `test_web_runner.py` 14, `test_web_lab.py` 42, `test_lint.py` with
+  `FUZZLAB_REQUIRE_LINT=1`. After the runs: zero `php -S` left by this work. Mutation
+  check: 17/18 mutants of the supervisor and identity gates killed.
+
 ### CC-LAB-0253 — The identifier-SQLi oracle's runner stays on its target origin (BUG-0123 sweep) (2026-10-14)
 - Change:
   - `labgen/identifier_sqli_oracle.py`: `default_http_runner` sends with

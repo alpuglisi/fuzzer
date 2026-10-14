@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.labgen.conformance.live_boot_spring_boot import (
     SKELETON_DIR,
     spring_boot_boot_available,
@@ -110,11 +111,9 @@ def test_tier0_mvn_compile_passes_for_each_cell(manifest_path: str, cell_id: str
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(emitted.content)
 
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["mvn", "-q", "-B", "compile"],
             cwd=app_dir,
-            capture_output=True,
-            text=True,
             timeout=120.0,
         )
         assert result.returncode == 0, f"mvn compile failed:\nstdout={result.stdout}\nstderr={result.stderr}"

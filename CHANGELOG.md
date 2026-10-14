@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0125: test-launched servers own their whole process tree)
+- **Why:** 429 orphaned `php -S` servers (each a stopped `artisan serve`'s child), `go
+  run` binaries and a puma (~14 GB) OOM-killed full-suite runs; nothing tied a server or
+  its grandchildren to its owner.
+- **What:** `fuzzlab/procutil.py` starts every long-lived child under a supervisor (own
+  session, parent-death signal, subreaper; group stop with an identity-checked
+  fallback; never kill by pattern) and `run_bounded` for forking tools; the five
+  live-boot harnesses, the test servers, the web launcher and the PA-0002 sweep sites
+  use it; Laravel boots `php -S` directly; a session-end safety net fails a run that
+  leaks a server; an AST guard (PA-0125). CC-CORE-0048, CC-LAB-0254, CC-UI-0053.
+
 ## 2026-10-14 (Forms phase 3 prerequisite: one transaction-word rule)
 - **Why:** forms phase 3 (SPA routes and JSON APIs) submits SPA forms and imports the
   app's own captured requests; the reviewers required one shared list of transaction

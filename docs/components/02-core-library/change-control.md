@@ -3,6 +3,40 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0048 — `procutil`: one owner for every child process tree (BUG-0125) (2026-10-14)
+- Change: new `fuzzlab/procutil.py` (FR-CORE-38), a stdlib-only leaf.
+  `start_server` launches a supervisor (`sys.executable -I -S fuzzlab/procutil.py`) in a
+  new session; the supervisor sets `PR_SET_PDEATHSIG(SIGTERM)` and
+  `PR_SET_CHILD_SUBREAPER` (ctypes `prctl`), re-checks `getppid()` against the owner,
+  starts the server in a new process group (`PDEATHSIG(SIGKILL)`, `oom_score_adj`
+  +500), reports `ready child=… start=… oom_*=…` on a status pipe, and on a stop request
+  (stop token on a control pipe + SIGTERM), an unrequested SIGTERM (counted, acted on
+  once), owner death (PDEATHSIG, changed parent, control-pipe EOF) or the server's
+  exit: SIGTERMs the group and each re-parented descendant once, waits the grace,
+  SIGKILLs, reaps, reports `exit reason=… code=… signals=…`, and exits with the
+  server's code. No `preexec_fn` in the owner (the single-threaded supervisor uses one
+  for the server). `stop_server` / `finish` / `request_stop`, `run_bounded`, asyncio
+  `astart_server` / `astop_server` / `arun_bounded`, `kill_process_group`,
+  `group_members` / `session_members` / `read_stat`, the registry and
+  `reap_registered`. Identity: pidfd + `/proc` start time on every signal; groups and
+  sessions member by member, only under a matching or absent leader.
+- Impact: LAB (CC-LAB-0254) and UI (CC-UI-0053) use it; labgen's import guard allows it.
+- Risk: **medium** (every long-lived child depends on it). Mitigation: real-process
+  tests for each property, a mutation check (17/18 killed), loud failure where a
+  capability is missing (`SupervisorUnavailable`) or a server is lost (`ServerLost`).
+- Design decisions (BUG-0125): D12 thread rule (`allow_thread`), D13 SIGTERM death
+  signal, D15 wedged-supervisor fallback, D16 `oom_score_adj`, D17 `allow_thread`
+  documented and loud. Deviation from the draft: the supervisor runs by file path with
+  `-I -S`, not `-m fuzzlab.procutil` (no dependency on `fuzzlab` being importable from
+  the server's cwd; isolated from `PYTHON*` variables).
+- Deliverables:
+  - [x] `fuzzlab/procutil.py` — done
+  - [x] `tests/test_procutil.py` (22), `tests/test_procutil_guard.py` (24) — done
+  - [x] FR-CORE-38; ARCHITECTURE (core section, cross-cutting testing) — done
+- Effectiveness (assessed 2026-10-14): 22 + 24 passed; owner SIGKILLed with a
+  grandchild that escaped group and session (and with `go run` + its binary): nothing
+  survives within 10 s; a reused pid is never signalled; mutation 17/18 killed.
+
 ### CC-CORE-0045 — One transaction-word rule (forms phase 3, shared prerequisite) (2026-10-14)
 - Change:
   - `core/urls.py`: `TRANSACTION_TOKENS` (checkout, purchase, pay/payment, order,

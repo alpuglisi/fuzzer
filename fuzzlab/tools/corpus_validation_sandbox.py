@@ -88,11 +88,14 @@ import dataclasses
 import json
 import os
 import shutil
+import signal
 import subprocess
 import time
 import uuid
 from pathlib import Path
 from typing import Optional
+
+from fuzzlab import procutil
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AUDIT_LOG_PATH = REPO_ROOT / "docs" / "research" / "corpus-validation-audit.jsonl"
@@ -347,6 +350,8 @@ def run_in_sandbox(
             text=True,
             start_new_session=True,
         )
+        # BUG-0125: recorded so a timeout kills runsc's whole group, identity-checked.
+        proc_stat = procutil.read_stat(proc.pid)
         # Attach the runsc process (and thus everything it spawns) to the
         # resource-limited cgroups before it gets far enough to fork the
         # sandboxed workload.
@@ -359,6 +364,10 @@ def run_in_sandbox(
             stdout, stderr = proc.communicate(timeout=timeout_s + 5)
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
+            # Kill runsc's whole process group (it was started in its own session),
+            # not only the direct `timeout(1)` child (BUG-0125 D14).
+            if proc_stat is not None:
+                procutil.kill_process_group(proc.pid, proc_stat.start, signal.SIGKILL)
             proc.kill()
             stdout, stderr = proc.communicate()
             timed_out = True

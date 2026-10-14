@@ -13,6 +13,17 @@ SSE. Two safety properties by construction:
 
 Traffic gating (``authorized`` / ``sends_traffic``) is enforced by the caller (the
 route), mirroring automatic mode; a dry run builds the argv but never executes.
+
+**Lifetime (BUG-0125, CC-UI-0053; decision BUG-0125 D18).** A launched job is tied to the UI's
+life. Each child runs under :mod:`fuzzlab.procutil`'s supervisor in its own session,
+so *Stop* takes its whole tree (a crawl's Playwright driver and browser, a
+``labctl.sh`` compose call) and not only the direct child; the UI's shutdown stops
+every live job (:meth:`Runner.shutdown`); and if the UI process dies, the supervisor
+(PR_SET_PDEATHSIG, a changed parent, EOF on its control pipe) stops the job too. The
+job's output is streamed to the UI over a pipe, so a job that outlived its UI would
+run blind and die on its next write; an operator who wants a job to outlive the UI
+runs the same command from the CLI (the dry-run preview shows it). The spawn runs on
+the event-loop thread, which lives as long as the UI does, hence ``allow_thread``.
 """
 
 from __future__ import annotations
@@ -22,6 +33,7 @@ import secrets
 import sys
 from typing import TYPE_CHECKING, Any
 
+from fuzzlab import procutil
 from fuzzlab.web.sse import format_event
 
 if TYPE_CHECKING:
@@ -79,6 +91,8 @@ class _Run:
         self.token = token
         self.argv = argv
         self.proc: asyncio.subprocess.Process | None = None
+        self.handle: procutil.ServerHandle | None = None
+        self.stopping = False
         self.queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
         self.returncode: int | None = None
 
@@ -98,20 +112,26 @@ class Runner:
         token = secrets.token_hex(8)
         run = _Run(token, argv)
         self._runs[token] = run
-        run.proc = await asyncio.create_subprocess_exec(
-            *argv,
+        run.handle = await procutil.astart_server(
+            argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=env,
+            allow_thread=True,  # the event-loop thread: lives as long as the UI (BUG-0125 D18)
         )
+        run.proc = run.handle.proc
         asyncio.create_task(self._pump(run))
         return token
 
     async def _pump(self, run: _Run) -> None:
-        assert run.proc is not None and run.proc.stdout is not None
+        assert run.proc is not None and run.proc.stdout is not None and run.handle is not None
         async for raw in run.proc.stdout:
             await run.queue.put(("output", raw.decode(errors="replace").rstrip("\n")))
         run.returncode = await run.proc.wait()
+        try:
+            await procutil.astop_server(run.handle)  # collects the exited supervisor
+        except procutil.ServerLost as exc:  # stopped without a request: say so (loud)
+            await run.queue.put(("output", f"[fuzzlab] {exc}"))
         await run.queue.put(("done", run.returncode))
 
     async def stream(self, token: str):
@@ -129,12 +149,33 @@ class Runner:
                 return
 
     def stop(self, token: str) -> bool:
-        """Terminate a still-running child; return whether a signal was sent."""
+        """Stop a still-running child's whole process tree; return whether a stop
+        was requested. Non-blocking: the supervisor stops the tree, and a watchdog
+        task falls back to a direct, identity-checked group kill if it does not."""
         run = self._runs.get(token)
-        if run and run.proc is not None and run.returncode is None:
-            run.proc.terminate()
+        if run and run.handle is not None and run.returncode is None and not run.stopping:
+            run.stopping = True
+            procutil.request_stop(run.handle)
+            asyncio.get_running_loop().create_task(self._enforce_stop(run))
             return True
         return False
+
+    async def _enforce_stop(self, run: _Run) -> None:
+        assert run.handle is not None and run.proc is not None
+        try:
+            await asyncio.wait_for(asyncio.shield(run.proc.wait()),
+                                   run.handle.grace + procutil.STOP_MARGIN_S)
+        except asyncio.TimeoutError:
+            await procutil.astop_server(run.handle, timeout=0.1)
+
+    async def shutdown(self) -> None:
+        """Stop every live job (the UI is shutting down; BUG-0125 D18)."""
+        for run in list(self._runs.values()):
+            if run.handle is not None and run.returncode is None:
+                try:
+                    await procutil.astop_server(run.handle)
+                except procutil.ServerLost:
+                    pass  # already stopped without a request; reported on its stream
 
     def known(self, token: str) -> bool:
         return token in self._runs

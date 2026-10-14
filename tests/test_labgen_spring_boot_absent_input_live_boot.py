@@ -42,6 +42,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.labgen.conformance.live_boot_spring_boot import (
     _NO_REDIRECT_OPENER,
     SKELETON_DIR,
@@ -132,14 +133,15 @@ def booted_group(request, tmp_path_factory):
             dest.write_bytes(emitted.content)
     proc = None
     try:
-        built = subprocess.run(["mvn", "-q", "-B", "package", "-DskipTests"], cwd=app,
-                               capture_output=True, text=True, timeout=BUILD_TIMEOUT_S)
+        built = procutil.run_bounded(["mvn", "-q", "-B", "package", "-DskipTests"], cwd=app,
+                               timeout=BUILD_TIMEOUT_S)
         assert built.returncode == 0, built.stdout[-4000:] + built.stderr[-4000:]
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
-        proc = subprocess.Popen(["java", "-jar", "target/trackernest.jar", f"--server.port={port}"],
-                                cwd=app, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        server = procutil.start_server(["java", "-jar", "target/trackernest.jar", f"--server.port={port}"],
+                                       cwd=app, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = server.proc
         deadline = time.monotonic() + BOOT_TIMEOUT_S
         while True:
             try:
@@ -151,11 +153,7 @@ def booted_group(request, tmp_path_factory):
         yield label, cells, f"http://127.0.0.1:{port}"
     finally:
         if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            procutil.stop_server(server)
         shutil.rmtree(tmp, ignore_errors=True)
 
 

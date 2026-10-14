@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.labgen.emitters.go_net_http import GoEmitter
 from fuzzlab.labgen.schema import Cell, Pipeline, Route, SinkContext
 
@@ -183,11 +184,9 @@ def test_rendered_handler_passes_go_vet() -> None:
         accumulator = em.render_route_accumulator(list(ALL_CELLS))
         (app_dir / accumulator.path).write_bytes(accumulator.content)
 
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["go", "vet", "./..."],
             cwd=app_dir,
-            capture_output=True,
-            text=True,
             timeout=60.0,
         )
         assert result.returncode == 0, f"go vet failed:\nstdout={result.stdout}\nstderr={result.stderr}"

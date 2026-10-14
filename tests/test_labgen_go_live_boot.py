@@ -35,6 +35,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.labgen.conformance.go_live_boot import GoLiveBootHarness, go_boot_available
 from fuzzlab.labgen.emitters.go_net_http import GoEmitter
 from fuzzlab.labgen.schema import load_manifest
@@ -1436,9 +1437,9 @@ func main() {
         main_go = _Path(tmp) / "main.go"
         main_go.write_text(go_src)
         for payload in payloads:
-            result = subprocess.run(
+            result = procutil.run_bounded(
                 ["go", "run", str(main_go), payload],
-                capture_output=True, text=True, timeout=30.0,
+                timeout=30.0,
             )
             output = result.stdout.strip()
             if "{{" in payload:
@@ -1508,10 +1509,11 @@ func main() {
     with tempfile.TemporaryDirectory(prefix="fuzzlab-header-injection-syntax-check-") as tmp:
         main_go = _Path(tmp) / "main.go"
         main_go.write_text(go_src)
-        proc = subprocess.Popen(
+        server = procutil.start_server(
             ["go", "run", str(main_go)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
+        proc = server.proc
         try:
             addr_line = proc.stdout.readline().strip()
             assert addr_line, "go program produced no listen-address line"
@@ -1531,11 +1533,7 @@ func main() {
                     chunks.append(chunk)
                 raw_response = b"".join(chunks).decode("latin-1")
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            procutil.stop_server(server)
 
     # The CR/LF bytes reached w.Header().Set() as literal text, but
     # net/http's own transfer-writer replaced them with spaces before

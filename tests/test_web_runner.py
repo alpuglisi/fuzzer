@@ -60,6 +60,59 @@ def test_runner_streams_output_and_exit_code():
     assert done and '"returncode":3' in done[-1]
 
 
+def _gone(pid: int, start: int, bound: float = 10.0) -> bool:
+    import time
+
+    from fuzzlab import procutil
+    deadline = time.monotonic() + bound
+    while time.monotonic() < deadline:
+        st = procutil.read_stat(pid)
+        if st is None or st.start != start or st.state == "Z":
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_runner_stop_takes_the_jobs_whole_tree():
+    """BUG-0125 / D17: Stop ends the job's grandchildren too (a crawl's browser, a
+    compose call), not only the direct child."""
+    from fuzzlab import procutil
+
+    async def go():
+        r = Runner()
+        token = await r.launch(["sh", "-c", "sleep 300 & echo $!; wait"])
+        run = r._runs[token]
+        kind, line = await asyncio.wait_for(run.queue.get(), 10)
+        assert kind == "output"
+        grand = procutil.read_stat(int(line))
+        assert r.stop(token) is True
+        assert r.stop(token) is False  # one stop request per run
+        events = [ev async for ev in r.stream(token)]
+        return grand, events, run.handle
+
+    grand, events, handle = asyncio.run(go())
+    assert grand is not None and _gone(grand.pid, grand.start)
+    assert any("event: done" in e for e in events)
+    assert handle.exit_reason == "stop"
+    assert handle not in procutil.registered()
+
+
+def test_runner_shutdown_stops_every_live_job():
+    from fuzzlab import procutil
+
+    async def go():
+        r = Runner()
+        tokens = [await r.launch(["sleep", "300"]) for _ in range(2)]
+        handles = [r._runs[t].handle for t in tokens]
+        await r.shutdown()
+        return handles
+
+    handles = asyncio.run(go())
+    for h in handles:
+        assert _gone(h.child_pid, h.child_start_time)
+        assert h not in procutil.registered()
+
+
 def test_runner_stream_unknown_token():
     async def go():
         r = Runner()

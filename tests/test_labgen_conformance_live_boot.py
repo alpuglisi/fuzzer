@@ -5,7 +5,7 @@ Unlike every other `tests/test_labgen_*` module, this one is a **real,
 on-host integration test**: it assembles a real Laravel 13 project from the
 checked-in skeleton plus a real manifest's real `LaravelEmitter` output, runs
 a real `composer install --no-dev` against Packagist, seeds a real SQLite
-database, boots a real `php artisan serve` process, and makes real HTTP
+database, boots a real `php -S` server (what `php artisan serve` runs; BUG-0125) process, and makes real HTTP
 requests against it -- entirely within this test run, with its own temp
 directory, port, and process torn down on every exit path (`finally`/context
 manager), never left running or leaked (per this task's own requirement and

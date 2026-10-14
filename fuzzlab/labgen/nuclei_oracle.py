@@ -77,6 +77,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
+from fuzzlab import procutil
 from .oracle_wrapper import assert_loopback, locate_tool
 # Note: `locate_tool` raises `oracle_wrapper.ToolNotFoundError` on a missing
 # binary; callers that want to catch it import it from `oracle_wrapper` (or
@@ -142,15 +143,12 @@ NucleiRunner = Callable[[Sequence[str], float], NucleiRunResult]
 
 
 def default_nuclei_runner(argv: Sequence[str], timeout_s: float) -> NucleiRunResult:
-    """The real runner: shells out via `subprocess.run` under a hard timeout."""
+    """The real runner: shells out under a hard timeout, through
+    :func:`fuzzlab.procutil.run_bounded` so a timeout stops the tool's whole
+    process tree, not only its direct child (BUG-0125)."""
     start = time.monotonic()
     try:
-        proc = subprocess.run(
-            list(argv),
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
+        proc = procutil.run_bounded(list(argv), timeout=timeout_s)
         return NucleiRunResult(
             argv=list(argv),
             returncode=proc.returncode,

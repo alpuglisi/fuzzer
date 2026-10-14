@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Test infrastructure: leaked lab servers OOM-killed the suite (fixed, BUG-0125/PA-0125)
+- **Symptom:** full-suite runs were OOM-killed (memory cgroup; Chrome and pytest killed). 429 orphaned `php8.3 -S 127.0.0.1:<port> /tmp/fuzzlab-php-laravel-live-boot-*/…/server.php` processes (ages 1–10 h), ~15 orphaned `/tmp/go-build…/exe/main` and a `puma`, parent PID 1, held ~14 GB. One passing run of `tests/test_labgen_php_laravel_access_control_live_boot.py` left 3 new orphans.
+- **Root cause:** `LiveBootHarness` started `php artisan serve`, whose child `php -S` survived `close()` (it terminated only `artisan`); `go run`, `bundle exec`/puma and `mvn` have the same launcher shape; nothing tied any test-launched server to its owner's life, a forking tool's `subprocess.run` timeout killed only the direct child, and a harness whose build failed after the server started never closed it.
+- **Remediation:** the orchestrator stopped the orphans by PID (each command line read first; the operator's bWAPP and Juice Shop labs untouched), freeing 12.7 GB. Fix: `fuzzlab/procutil.py` — a supervisor per server (own session, PDEATHSIG + subreaper, group stop, identity-checked by pidfd and start time, never by pattern), `run_bounded` for forking tools; all five harnesses, the test servers, the web runner and the sweep sites use it; Laravel runs `php -S` directly; a session-end safety net fails any run that leaks a server; an AST guard. CC-CORE-0048, CC-LAB-0254, CC-UI-0053. `docs/bugs/BUG-0125-test-lab-servers-leaked.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Fuzzer: Juice Shop's allowlist-gated open redirect never detected (fixed, BUG-0124/PA-0124)
 - **Symptom:** `fuzzlab auto` over all categories missed Juice Shop's open redirect (`/redirect?to=` redirects when the target contains an allowlisted URL).
 - **Root cause:** the open-redirect rule selected by parameter name only (`to` is not in it); the value-shape rules mapped only the categories one lane needed; the confirmer sent one plain canary, which a containment allowlist refuses.

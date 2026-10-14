@@ -260,3 +260,27 @@ def test_labctl_accepts_plain_service_names(name):
 @pytest.mark.parametrize("name", ["web; rm -rf /", "../web", "$(id)", "Web", "", "-f"])
 def test_labctl_rejects_anything_but_a_plain_service_name(name):
     assert _run_name_check(name) != 0
+
+
+def test_fetch_states_timeout_stops_labctls_whole_tree(monkeypatch, tmp_path):
+    """BUG-0125 sweep: a `labctl.sh ps` that hangs is stopped with its children (the
+    container engine it forks), not only `bash`. A stand-in script; no engine, no
+    traffic."""
+    import asyncio
+    import time
+
+    from fuzzlab import procutil
+
+    pidfile = tmp_path / "engine.pid"
+    script = tmp_path / "labctl.sh"
+    script.write_text(f"sleep 300 &\necho $! > {pidfile}\nwait\n")
+    monkeypatch.setattr(labcontrol, "LABCTL_PATH", script)
+    monkeypatch.setattr(labcontrol, "available", lambda: True)
+    states, error = asyncio.run(labcontrol.fetch_states(timeout=1.0))
+    assert states == {} and "did not answer within 1s" in error
+    st = procutil.read_stat(int(pidfile.read_text()))
+    deadline = time.monotonic() + 10
+    while st is not None and st.state != "Z" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        st = procutil.read_stat(st.pid)
+    assert st is None or st.state == "Z", "labctl.sh's child outlived the timeout"

@@ -324,6 +324,40 @@ plugin registry. It is the layer that makes the store the integration bus.
   path, query and SPA fragment, a route path or a button label (tokenised like
   `destructive_reason`, plural folded). Such a page may be visited; its form is never
   submitted by the crawler and a captured request to it is never imported for fuzzing.
+- **FR-CORE-38** *(process trees; `CC-CORE-0048`, 2026-10-14, BUG-0125).*
+  `fuzzlab/procutil.py` is the one way the toolkit and its tests start a long-lived
+  child process or a forking tool. It is a **stdlib-only leaf** (imports nothing from
+  `fuzzlab`), so `fuzzlab.labgen` may use it. Contract:
+  - `start_server(argv, *, cwd, env, stdin, stdout, stderr, text, grace, allow_thread,
+    ready_timeout) -> ServerHandle` starts a supervisor (this file run by
+    `sys.executable -I -S`) in a new session; the supervisor sets
+    `PR_SET_PDEATHSIG(SIGTERM)` and `PR_SET_CHILD_SUBREAPER` on itself, exits if its
+    parent is not the owner pid, starts `argv` in a new process group (server
+    `PDEATHSIG(SIGKILL)`, `oom_score_adj` raised by 500, capped at 1000), and on a stop
+    request, an unrequested SIGTERM (handled once), the owner's death or the server's
+    exit stops the group and every re-parented descendant (SIGTERM, grace, SIGKILL),
+    reaps, and exits with the server's exit code. `handle.proc` is the supervisor's
+    `Popen`; its stdout/stderr carry the server's. Exec failure raises the real
+    `OSError`; a missing `prctl` raises `SupervisorUnavailable` (never a silent
+    downgrade). Off the main thread it raises unless `allow_thread=True`, with which the
+    server dies when the forking thread ends -- loudly (`ServerLost`, a stderr line).
+  - `stop_server(handle, *, timeout)` requests a stop (control pipe + pidfd SIGTERM),
+    waits, and if the supervisor is wedged kills the server's own group directly,
+    identity-checked, then the supervisor; then sweeps the supervisor's session.
+    Idempotent; returns the exit reason (`stop`, `child`, `owner`, `killed`); raises
+    `ServerLost` for `signal`. `finish(handle)` collects an exited one.
+  - `run_bounded(argv, *, timeout, cwd, env, input, text)` behaves like
+    `subprocess.run(capture_output=True, timeout=)` but stops the tool's whole tree on
+    timeout and on its exit. `astart_server` / `astop_server` / `arun_bounded` are the
+    asyncio forms; `request_stop` is the non-blocking stop.
+  - Identity: every signal goes through a pidfd (where available) after the target's
+    `/proc/<pid>/stat` start time (field 22) matches the recorded one; groups and
+    sessions are signalled member by member only when their leader pid is absent or
+    still has the recorded start time. Nothing is killed by name or pattern
+    (`kill_process_group`, `group_members`, `session_members`, `read_stat`).
+  - A registry of what this process started (`registered()`); `reap_registered()` stops
+    every live entry and returns `Leak(argv, pid, age_s)` records, dropping a record
+    whose pid now names another process.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

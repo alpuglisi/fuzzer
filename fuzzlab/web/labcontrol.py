@@ -36,7 +36,6 @@ process (and is what the route tests replace).
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 from dataclasses import dataclass
@@ -44,6 +43,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
+
+from fuzzlab import procutil
 
 _HERE = Path(__file__).resolve().parent
 REPO_ROOT = _HERE.parents[1]                 # fuzzlab/web -> fuzzlab -> <repo>
@@ -238,20 +239,18 @@ async def fetch_states(timeout: float = 20.0) -> tuple[dict[str, dict[str, str]]
     then shows every service as unknown rather than guessing."""
     if not available():
         return {}, "lab/compose.yaml or lab/labctl.sh not found in this checkout"
+    # BUG-0125 sweep: `labctl.sh ps` forks the container engine; a timeout stops the
+    # whole tree through procutil's supervisor, not only `bash` (whose child would
+    # otherwise be left running).
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "bash", str(LABCTL_PATH), "ps",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
+        returncode, out, err, timed_out = await procutil.arun_bounded(
+            ["bash", str(LABCTL_PATH), "ps"], timeout=timeout)
     except OSError as e:  # bash missing, permissions
         return {}, f"could not run labctl.sh: {e}"
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
+    if timed_out:
         return {}, f"labctl.sh ps did not answer within {timeout:g}s"
-    if proc.returncode != 0:
-        msg = err.decode(errors="replace").strip() or f"labctl.sh ps exited {proc.returncode}"
+    if returncode != 0:
+        msg = err.decode(errors="replace").strip() or f"labctl.sh ps exited {returncode}"
         return {}, msg
     known = {s.name for s in services()}
     return parse_ps(out.decode(errors="replace"), project_name(), known), None

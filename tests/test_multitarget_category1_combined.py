@@ -39,6 +39,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from fuzzlab.harness.multitarget import TargetSpec, format_transfer, run_targets, transfer_summary
 from fuzzlab.labels import contract
@@ -66,9 +67,9 @@ def _npm_registry_reachable(probe_dir: Path) -> bool:
         json.dumps({"name": "probe", "version": "1.0.0", "private": True}), encoding="utf-8"
     )
     try:
-        result = subprocess.run(
+        result = procutil.run_bounded(
             ["npm", "install", "--no-audit", "--no-fund", "express@4.22.3"],
-            cwd=probe_dir, capture_output=True, text=True, timeout=60,
+            cwd=probe_dir, timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError):
         return False
@@ -113,19 +114,19 @@ def _boot_meadowmart(tmp_path_factory: pytest.TempPathFactory):
     accumulator = emitter.render_route_accumulator(cells)
     (root / accumulator.path).write_bytes(accumulator.content)
 
-    result = subprocess.run(
+    result = procutil.run_bounded(
         ["npm", "install", "--no-audit", "--no-fund"],
-        cwd=root, capture_output=True, text=True, timeout=120,
+        cwd=root, timeout=120,
     )
     assert result.returncode == 0, f"npm install failed:\nstdout={result.stdout}\nstderr={result.stderr}"
 
     port = _free_port()
-    proc = subprocess.Popen(
+    server = procutil.start_server(
         ["node", "app.js"], cwd=root, env={**os.environ, "PORT": str(port)},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     _wait_until_listening(port)
-    return proc, f"http://127.0.0.1:{port}"
+    return server, f"http://127.0.0.1:{port}"
 
 
 @pytest.mark.slow
@@ -201,9 +202,4 @@ def test_run_targets_combines_forgecart_and_meadowmart_in_one_call(tmp_path_fact
             assert "node_express_meadowmart_bff: tp=" in text
     finally:
         if node_proc is not None:
-            node_proc.terminate()
-            try:
-                node_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                node_proc.kill()
-                node_proc.wait(timeout=5)
+            procutil.stop_server(node_proc)

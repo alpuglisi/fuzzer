@@ -1533,3 +1533,23 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A confirmer that relies on one probe form states the server-side filters it
      cannot pass, or carries a stated second form** (here: a seeded canary for
      containment allowlists, sent only after the plain one fails). (from BUG-0124)
+
+- **PA-0125** — Strengthens `PA-0012` (teardown is bounded) and `PA-0035` (every
+  subprocess step is bounded) from *bounded* to *complete*, after BUG-0125: 429 orphaned
+  `php -S` servers (a stopped `artisan serve`'s child), `go run` binaries and a puma
+  (~14 GB) OOM-killed the suite. Both rules were followed by the leaking code.
+  1. **A process the toolkit or its tests start owns its whole process tree,
+     grandchildren included:** started in its own session under a supervisor tied to
+     its owner's life (`fuzzlab.procutil.start_server`; `run_bounded` for a tool that
+     forks), stopped as a group, identity-checked (pidfd plus `/proc` start time),
+     never killed by name or pattern.
+  2. **A real-process test proves nothing survives `close()` or the owner's death** --
+     the port refuses and no process remains in the server's group or session, and an
+     owner SIGKILLed with a grandchild-forking server leaves nothing.
+  3. **Enforced, not remembered:** `tests/test_procutil_guard.py` fails on any spawn
+     outside `procutil` (AST, proven on synthetic offenders), and the session-end
+     safety net (`tests/_leak_guard.py`) stops any registered server still live and
+     fails the run, naming argv, pid and age.
+  4. **A "bounded" stop is checked for completeness:** a timeout, `terminate()` or
+     `kill()` on one pid is not a stop of a launcher (`artisan`, `go run`,
+     `bundle exec`, `mvn`, `npm`). (from BUG-0125)

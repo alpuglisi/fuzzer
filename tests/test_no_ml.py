@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from fuzzlab import procutil
 from fuzzlab.core.store import Store
 from tests._browser import free_port, launch_browser_or_skip, require_modules
 from tests.test_auto_budget import _main
@@ -163,9 +164,10 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
     from tests.test_web_pages_browser import _Page
     db, run_id, _ = seeded
     port = free_port()
-    server = subprocess.Popen([sys.executable, str(CHILD), "serve", str(db), str(port)],
+    server_handle = procutil.start_server([sys.executable, str(CHILD), "serve", str(db), str(port)],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                               env=_env(), cwd=str(REPO))
+    server = server_handle.proc
     try:
         assert server.stdout.readline().strip() == "ML_BLOCKED"
         import urllib.request
@@ -193,5 +195,4 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
             finally:
                 browser.close()
     finally:
-        server.terminate()
-        server.wait(timeout=10)
+        procutil.stop_server(server_handle)

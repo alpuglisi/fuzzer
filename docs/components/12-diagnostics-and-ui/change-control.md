@@ -3,6 +3,34 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0053 — Launcher jobs are tied to the UI and stopped as a whole tree (BUG-0125) (2026-10-14)
+- Change: `web/runner.py`: `Runner.launch` starts each job with
+  `procutil.astart_server(..., allow_thread=True)` (the event-loop thread lives as long
+  as the UI); `stop()` requests a stop (non-blocking) and a watchdog falls back to an
+  identity-checked group kill; the pump collects the supervisor and reports an
+  unrequested stop on the job's stream; new `Runner.shutdown()` stops every live job,
+  called from the app's lifespan shutdown (`web/app.py`). `web/labcontrol.py`:
+  `fetch_states` runs `labctl.sh ps` through `procutil.arun_bounded`, so a timeout
+  stops the container-engine child too, not only `bash`. FR-UI-6 gains the job-lifetime
+  sentence.
+- Decision (BUG-0125 D18, the coordinator's rule "keep the most operator
+  flexibility"): **tied to the UI's life**, not "outlive it with a stop path". A job's
+  output streams to the UI over a pipe, so a job that outlived its UI would run blind
+  and die on its next write; tying it gives a deterministic whole-tree stop, and the
+  operator keeps the other option by running the previewed command from the CLI.
+- Impact: Stop now ends a crawl's browser and a `labctl.sh` compose call too; closing
+  the UI ends its jobs.
+- Risk: low. A `labctl.sh` action stopped mid-way by a UI shutdown leaves what the
+  compose provider leaves; `labctl.sh`'s own self-heal (PA-0018/PA-0059) handles the
+  next call.
+- Deliverables:
+  - [x] runner, app lifespan, labcontrol — done
+  - [x] tests: `tests/test_web_runner.py::test_runner_stop_takes_the_jobs_whole_tree`,
+    `::test_runner_shutdown_stops_every_live_job`,
+    `tests/test_web_lab.py::test_fetch_states_timeout_stops_labctls_whole_tree` — done
+- Effectiveness (assessed 2026-10-14): `test_web_runner.py` 14 passed, `test_web_lab.py`
+  42 passed (offline; a stand-in `labctl.sh`, no engine, no traffic).
+
 ### CC-UI-0052 — Run page: `inconclusive` oracle coverage; `pending` reworded (2026-10-14)
 - Change:
   - **`web/results._ml_context`:** counts `inconclusive` (CC-CORE-0043) as its own

@@ -14,7 +14,7 @@ wrapping/quoting a dynamic column name before it reaches SQL text, which is
 true of real Laravel (`Illuminate\\Database\\Query\\Grammars\\Grammar::wrap()`)
 but was never actually exercised against the real framework by this
 codebase. This module closes that gap: it boots the real generated Laravel
-app (`LiveBootHarness`, real `composer install`, real `php artisan serve`,
+app (`LiveBootHarness`, real `composer install`, real `php -S` server,
 a real per-run SQLite database) and sends a real HTTP POST whose body
 carries a syntax-injection-shaped field name alongside a legitimate one,
 then reads the real database back to confirm the legitimate field applied
