@@ -136,6 +136,37 @@ def destructive_reason(url: str) -> str | None:
     return None
 
 
+#: Words that name a transaction: submitting it spends, buys, moves or subscribes
+#: (forms phase 3). Separate from DESTRUCTIVE_TOKENS: such a page may be *visited*, but
+#: its form is never submitted and a captured request to it is never fuzzed.
+TRANSACTION_TOKENS = frozenset({
+    "checkout", "purchase", "pay", "payment", "order", "transfer", "redeem", "wallet",
+    "membership", "subscribe", "subscription", "buy", "donate", "donation", "deposit",
+    "withdraw", "withdrawal", "topup",
+})
+#: Two adjacent tokens that together name one (``top-up``, ``check out``).
+TRANSACTION_PAIRS = frozenset({("top", "up"), ("check", "out")})
+
+
+def transaction_reason(text: str | None) -> str | None:
+    """The token (or pair) that marks ``text`` -- a URL, a route path or a button label
+    -- as a transaction, or None (CC-CORE-0045). Tokenised like `destructive_reason`
+    (decoded, camelCase split); a trailing plural ``s`` is folded (``orders``,
+    ``payments``)."""
+    if text and ("://" in text or text.startswith("/")):
+        tokens = _url_tokens(text) + _url_tokens(urlsplit(text).fragment)   # SPA route
+    else:
+        tokens = _TOKEN.findall(_CAMEL.sub(r"\1 \2", text or "").lower())
+    for tok in tokens:
+        stem = tok[:-1] if len(tok) > 3 and tok.endswith("s") else tok
+        if tok in TRANSACTION_TOKENS or stem in TRANSACTION_TOKENS:
+            return stem if stem in TRANSACTION_TOKENS else tok
+    for pair in zip(tokens, tokens[1:]):
+        if pair in TRANSACTION_PAIRS:
+            return " ".join(pair)
+    return None
+
+
 def origin_scope(*urls: str | None) -> frozenset[str]:
     """The canonical origins (scheme, host, port) of ``urls`` -- what a browser may
     reach (BUG-0123). Loopback aliases on the same port are one origin, by

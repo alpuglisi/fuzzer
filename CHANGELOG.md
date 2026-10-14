@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Forms phase 3 prerequisite: one transaction-word rule)
+- **Why:** forms phase 3 (SPA routes and JSON APIs) submits SPA forms and imports the
+  app's own captured requests; the reviewers required one shared list of transaction
+  words (checkout, pay, wallet, membership, top-up, …) so neither a crawl nor a fuzz
+  run buys, pays or moves anything on the lab.
+- **What:** `core.urls.transaction_reason` and its word lists, tested (CC-CORE-0045,
+  FR-CORE-35). No caller yet; the phase 3 lanes use it.
+
 ## 2026-10-14 (BUG-0124: allowlist-gated open redirects detected; URL values imply open redirect and SSRF)
 - **Why:** Juice Shop's `/redirect?to=` open redirect was missed: the rule selected by
   name only, and the confirmer's single canary is refused by an allowlist that checks

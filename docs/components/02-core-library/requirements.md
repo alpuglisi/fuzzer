@@ -318,6 +318,12 @@ plugin registry. It is the layer that makes the store the integration bus.
   origin, other 127/8 addresses distinct), `ws`/`wss` compared as `http`/`https`, and a
   URL without `://` never in scope. **Users:** the spider, the auditor's fetcher, the
   M6 browser executor and `tools/navguard`.
+- **FR-CORE-35** *(transactions; `CC-CORE-0045`, 2026-10-14, forms phase 3).*
+  `core/urls.transaction_reason(text)` is the one rule for "submitting this spends,
+  buys, moves or subscribes": `TRANSACTION_TOKENS` / `TRANSACTION_PAIRS` over a URL's
+  path, query and SPA fragment, a route path or a button label (tokenised like
+  `destructive_reason`, plural folded). Such a page may be visited; its form is never
+  submitted by the crawler and a captured request to it is never imported for fuzzing.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

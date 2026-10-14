@@ -3,6 +3,26 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0045 — One transaction-word rule (forms phase 3, shared prerequisite) (2026-10-14)
+- Change:
+  - `core/urls.py`: `TRANSACTION_TOKENS` (checkout, purchase, pay/payment, order,
+    transfer, redeem, wallet, membership, subscribe/subscription, buy, donate/donation,
+    deposit, withdraw/withdrawal, topup), `TRANSACTION_PAIRS` (top up, check out) and
+    `transaction_reason(text)`: a URL (path, query and SPA fragment), a route path or a
+    button label, tokenised like `destructive_reason`, a trailing plural folded.
+- Impact: FR-CORE-35 (new). Used by forms phase 3: lane I refuses to submit such a form
+  (route, label), lane J never imports a captured request to one (URL). Visiting such a
+  page is not refused; nothing else changes.
+- Risk: low (a new predicate; no caller yet).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_transaction_words.py` (every word as label, route, URL and
+    plural; pairs; decoded and camelCase; ordinary words) — done
+  - [x] FR-CORE-35 — done
+- Review: phase 3 design, reviewer B must-fix 2 (one shared list next to
+  `DESTRUCTIVE_TOKENS`, PA-0003); agreed by reviewers A and B.
+- Effectiveness: verified offline.
+
 ### CC-CORE-0044 — One origin-scope predicate (BUG-0123) (2026-10-14)
 - Change:
   - `core/urls.py`: `origin_scope(*urls)` (the canonical origins of the non-empty
