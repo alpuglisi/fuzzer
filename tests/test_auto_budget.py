@@ -26,14 +26,14 @@ BASE = "http://127.0.0.1:8080"
 def confirm_calls(monkeypatch):
     """Record every candidate the oracle is asked to confirm (key + whether it confirmed)."""
     calls = []
-    real = Oracle.confirm
+    real = Oracle.confirm_outcome          # what the pipeline calls (FR-FUZZ-45)
 
     def recording(self, candidate, sender):
-        verdict = real(self, candidate, sender)
+        verdict, inconclusive = real(self, candidate, sender)
         calls.append(_Call((candidate.url, candidate.param, candidate.method,
                             candidate.location, candidate.category), verdict is not None))
-        return verdict
-    monkeypatch.setattr(Oracle, "confirm", recording)
+        return verdict, inconclusive
+    monkeypatch.setattr(Oracle, "confirm_outcome", recording)
     return calls
 
 

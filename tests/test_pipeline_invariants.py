@@ -44,13 +44,13 @@ def _seed(store, run_id, rows):
 @pytest.fixture
 def calls(monkeypatch):
     seen = []
-    real = Oracle.confirm
+    real = Oracle.confirm_outcome          # what the pipeline calls (FR-FUZZ-45)
 
     def recording(self, candidate, sender):
         seen.append((candidate.url, candidate.param, candidate.method, candidate.location,
                      candidate.category))
         return real(self, candidate, sender)
-    monkeypatch.setattr(Oracle, "confirm", recording)
+    monkeypatch.setattr(Oracle, "confirm_outcome", recording)
     return seen
 
 
@@ -91,7 +91,7 @@ class _Boom(RuntimeError):
 
 def test_a_crash_mid_loop_leaves_reached_rows_checked_and_the_rest_pending(
         tmp_path, monkeypatch):
-    real = Oracle.confirm
+    real = Oracle.confirm_outcome
     n = {"calls": 0}
 
     def flaky(self, candidate, sender):
@@ -99,7 +99,7 @@ def test_a_crash_mid_loop_leaves_reached_rows_checked_and_the_rest_pending(
         if n["calls"] == 2:
             raise _Boom("sender died")
         return real(self, candidate, sender)
-    monkeypatch.setattr(Oracle, "confirm", flaky)
+    monkeypatch.setattr(Oracle, "confirm_outcome", flaky)
     with Store(tmp_path / "a.db") as store:
         run_id = store.start_run("auto", "127.0.0.1:8080")
         _seed(store, run_id, [("product.php", "id", "sql-injection"),   # reached
@@ -119,7 +119,8 @@ def test_a_crash_mid_loop_leaves_reached_rows_checked_and_the_rest_pending(
 
 
 def test_a_budgeted_crash_leaves_unreached_and_unchosen_rows_pending(tmp_path, monkeypatch):
-    monkeypatch.setattr(Oracle, "confirm", lambda self, c, s: (_ for _ in ()).throw(_Boom()))
+    monkeypatch.setattr(Oracle, "confirm_outcome",
+                        lambda self, c, s: (_ for _ in ()).throw(_Boom()))
     with Store(tmp_path / "a.db") as store:
         run_id = store.start_run("auto", "127.0.0.1:8080")
         _seed(store, run_id, _ROWS[:2])

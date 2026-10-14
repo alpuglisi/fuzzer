@@ -45,6 +45,10 @@ class Verdict:
     vuln_class: str
     mechanism: str
     evidence: dict[str, Any] = field(default_factory=dict)
+    # A check that started but could not decide within its cost cap (FR-FUZZ-45):
+    # never a confirmation, and never a negative -- the pipeline records the
+    # candidate `inconclusive` (unlabelled) unless another strategy confirms.
+    inconclusive: bool = False
 
 
 class Sender:

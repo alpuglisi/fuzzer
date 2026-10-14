@@ -27,8 +27,8 @@ from urllib.parse import urlparse
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core.dedup import TemplateClusterer
 from fuzzlab.core.fingerprint import fingerprint
-from fuzzlab.core.oracle_status import (CHECKED, NO_CONFIRMER, PENDING,  # migration 13
-                                         SKIPPED_BUDGET)
+from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE,  # migration 13
+                                         NO_CONFIRMER, PENDING, SKIPPED_BUDGET)
 from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
@@ -45,6 +45,9 @@ class PipelineResult:
     report: ScoreReport | None = None      # None when the run is unscored (D15)
     metrics: dict = field(default_factory=dict)
     plugin_outcomes: list = field(default_factory=list)   # `after_run` results (FR-PLUG-7)
+    # keys a confirmer could not decide within its cap (FR-FUZZ-45): url, param,
+    # location, mechanism, families not started -- no values; never in the store row
+    inconclusive: list = field(default_factory=list)
 
 
 def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[InjectionPoint]:
@@ -168,6 +171,25 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     store.conn.commit()
 
     confirmed_keys: set[tuple] = set()
+    inconclusive_keys: set[tuple] = set()
+    inconclusive_detail: list[dict] = []
+
+    def _confirm(key, ev) -> None:
+        candidate = _candidate_of(ev)
+        verdict, unsure = oracle.confirm_outcome(candidate, sender)
+        if verdict is not None:
+            confirmed_keys.add(key)
+        elif unsure is not None:                         # FR-FUZZ-45: never a negative
+            inconclusive_keys.add(key)
+            inconclusive_detail.append({
+                "url": candidate.url, "param": candidate.param,
+                "location": candidate.location, "mechanism": unsure.mechanism,
+                "families_not_started": list(
+                    unsure.evidence.get("families_not_started", []))})
+
+    def _checked(key) -> str:
+        return INCONCLUSIVE if key in inconclusive_keys else CHECKED
+
     try:
         if selected is None:
             # Unbudgeted (or fallback): one confirmation per key, on its first row, in
@@ -178,19 +200,17 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             for key, cid, ev in confirmable:
                 if key not in confirmed_or_tried:
                     confirmed_or_tried.add(key)
-                    if oracle.confirm(_candidate_of(ev), sender) is not None:
-                        confirmed_keys.add(key)
-                status[cid] = CHECKED
+                    _confirm(key, ev)
+                status[cid] = _checked(key)
         else:
             chosen = set(selected)
             for key in selected:                             # one confirmation per key
-                if oracle.confirm(_candidate_of(keyed[key][0][1]), sender) is not None:
-                    confirmed_keys.add(key)
+                _confirm(key, keyed[key][0][1])
                 for cid, _ev in keyed[key]:
-                    status[cid] = CHECKED
+                    status[cid] = _checked(key)
             for key, members in keyed.items():
                 for cid, _ev in members:
-                    status[cid] = CHECKED if key in chosen else SKIPPED_BUDGET
+                    status[cid] = _checked(key) if key in chosen else SKIPPED_BUDGET
     finally:
         # the statuses gathered so far, even when the loop raised (rows never reached
         # keep `pending`)
@@ -211,7 +231,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     # not fire, AND candidates the oracle checked but did not confirm (fail-closed).
     # Counted per confirmation key; candidates the oracle never looked at (skipped by
     # the budget, or with no confirmer) are not rejections.
-    rejected = checked_keys - len(confirmed_keys)
+    rejected = checked_keys - len(confirmed_keys) - len(inconclusive_keys)
     negatives = counts["negative"] + rejected
     statuses = list(status.values())
     metrics = {"candidates": counts["candidate"], "negatives": negatives,
@@ -219,6 +239,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                "oracle_checked": statuses.count(CHECKED),
                "oracle_skipped": statuses.count(SKIPPED_BUDGET),
                "oracle_no_confirmer": statuses.count(NO_CONFIRMER),
+               "oracle_inconclusive": statuses.count(INCONCLUSIVE),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}
     if budget is not None:
@@ -234,4 +255,5 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
 
     return PipelineResult(plan=plan, points_audited=len(points),
                           candidates=counts["candidate"], negatives=negatives,
-                          findings=findings, report=report, metrics=metrics)
+                          findings=findings, report=report, metrics=metrics,
+                          inconclusive=inconclusive_detail)

@@ -343,8 +343,10 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
     the stored anomaly flags, and the plugins (ML stages included) that were attached —
     all plain per-run store reads, so they show without the ML package."""
     from fuzzlab.core.anomaly_flags import flag_note, top_flagged
-    from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, PENDING, SKIPPED_BUDGET
-    counts = dict.fromkeys((CHECKED, SKIPPED_BUDGET, NO_CONFIRMER, PENDING, None), 0)
+    from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE, NO_CONFIRMER, PENDING,
+                                             SKIPPED_BUDGET)
+    counts = dict.fromkeys((CHECKED, SKIPPED_BUDGET, NO_CONFIRMER, PENDING, INCONCLUSIVE,
+                            None), 0)
     for r in store.conn.execute(
             "SELECT oracle_status s, COUNT(*) c FROM candidate WHERE run_id=? "
             "GROUP BY oracle_status", (run_id,)).fetchall():
@@ -371,8 +373,11 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
     return {
         "oracle_status": {"checked": counts[CHECKED], "skipped_budget": counts[SKIPPED_BUDGET],
                           "no_confirmer": counts[NO_CONFIRMER], "unrecorded": counts[None],
-                          # never reached: the run stopped mid-oracle (BUG-0071)
-                          "pending": counts[PENDING]},
+                          # not reached: the run stopped mid-oracle (BUG-0071), or a
+                          # safety breaker stopped those points
+                          "pending": counts[PENDING],
+                          # a check started but its cost cap stopped it (FR-FUZZ-45)
+                          "inconclusive": counts[INCONCLUSIVE]},
         "anomaly": {"top": top_flagged(store, run_id, limit=10),
                     "flagged": metrics.get("anomaly_flagged"),
                     "budget": metrics.get("anomaly_flag_budget"),

@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (String-context SQLi confirmation; probes must cause their evidence; BUG-0117)
+- **Why:**
+  - bWAPP's SQLite pages (sqli_11, sqli_14, sqli_12) and its masked-blind MySQL page
+    (sqli_4) could not be confirmed, because the boolean probes were numeric only.
+  - Reading the strategies also found four that confirmed on evidence the probe had
+    not caused (BUG-0117).
+- **What:**
+  - **String families:** `SqliBooleanStrategy` gains string-grammar and
+    string-evaluation families. All its families now run on one bracketed, replicated
+    engine, with a proven 1/1458 noise bound and a 30-request cap.
+  - **Stored sinks:** a new `SqliEvaluationMarkerStrategy`.
+  - **BUG-0117 fixes:** controls or cross-checks for SqliError, PathTraversal, SSTI and
+    SpEL.
+  - **New `inconclusive` oracle status** (unlabelled), for a check its cap stopped. It
+    is shown on the run page, where `pending` is reworded to include safety breakers.
+  - **Goldens:** the auto goldens' request counts are re-derived (306 → 448,
+    29 → 43); tp/fp are unchanged.
+- **Records:** CC-FUZZ-0065, CC-CORE-0043, CC-ML-0028, CC-UI-0052, FR-FUZZ-45,
+  FR-CORE-33, PA-0117.
+
 ## 2026-10-14 (Forms phase 2, lane B: in-app login forms probed on an isolated session; CC-FUZZ-0064, CC-SESS-0018, CC-CORE-0041)
 - **What:** crawled in-app login forms (one password control, one user field) are now
   imported and fuzzed; every send to such a page goes on a separate, throwaway login

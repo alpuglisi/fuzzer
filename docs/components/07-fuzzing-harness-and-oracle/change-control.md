@@ -22,6 +22,102 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0065 — String-context SQLi confirmation; probes must cause their evidence (BUG-0117) (2026-10-14)
+- Change:
+  - **One engine** (`ConfirmationStrategy._differential`, FR-FUZZ-45 (a)):
+    - B0, then a screen (V and D in a drawn order), then 6 rounds of (V, D, B) in a
+      drawn permutation, with fresh tokens each round;
+    - one draw per round from fixed tables; each round is judged once all of it is
+      sent;
+    - confirms only if every V and B equals B0, every D differs, and every D equals
+      the first D;
+    - P[confirm] ≤ 1/1458 per family for any probe-independent response sequence and
+      any predicate.
+  - **`SqliBooleanStrategy` runs three families on that engine** (numeric, unchanged
+    probes; string-grammar `v' AND 't' LIKE 't` / `… LIKE t'`; string-evaluation
+    `1' AND 't' LIKE 't` / `1' AND 'u' LIKE 't`):
+    - the exact families compare status plus the body with every sent value's
+      reflections stripped;
+    - `HARD_CAP` is 30 and a family starts only with 21 left;
+    - an exhausted cap returns an **inconclusive** verdict;
+    - string families are skipped on raw whole-body points;
+    - `HY000`/`SQLSTATE[…]` appear only as corroboration.
+  - **New `SqliEvaluationMarkerStrategy`** (`0'+(SELECT a*b)+'0`, FR-FUZZ-45 (c)): two
+    products, each digit-bounded in the response to the probe that computed it, with
+    the literal absent. Arm `sqli:evaluation-marker`, registered between Boolean and
+    Timing.
+  - **BUG-0117 fixes:**
+    - `SqliErrorStrategy` confirms a signature only when it is absent from the controls
+      `fz…` (and `1fz…` for a digit-led probe);
+    - `PathTraversalStrategy` sends a `passwd` control;
+    - `SstiStrategy` and `SpelInjectionStrategy` need a second, cross-checked sample.
+  - **`Verdict.inconclusive` and `Oracle.confirm_outcome`:**
+    - `confirm()` is a thin wrapper, so greybox and other callers are unchanged;
+    - the pipeline writes `inconclusive` (CC-CORE-0043) for every row of such a key,
+      excludes it from `oracle_rejected`, counts `oracle_inconclusive`, and lists the
+      key (no values) in `PipelineResult.inconclusive`;
+    - `fuzzlab auto` prints that list only when it is non-empty.
+- Impact:
+  - **Behaviour:**
+    - more requests per sqli candidate: 9 + 1 when the screens fail (was 3);
+    - at most SqliError 6, Boolean 30, C 2;
+    - under the scheduler, an inconclusive arm gets reward 0 and its real cost.
+  - **Goldens** (`tests/data/auto_summary`), re-derived per strategy (PA-0073(3)).
+    tp/fp/fn/tn and findings are unchanged:
+    - `score_only` / `budget_fallback_nolabels`: requests 306 → 448
+      (requests/finding 102.0 → 149.333). Boolean 60 → 180 (20 candidates, 3 → 9),
+      C +20, SqliError +2 (the controls of the 2 confirmations).
+    - `run` / `earlier`: 29 → 43 (2 budget-checked sqli keys × 7).
+  - **Residuals:**
+    - value contexts write coerced values to the baseline's own row: about 11 rows on
+      sqli_12, at most 38 from these strategies. Reset the lab between benchmark runs;
+    - pages that change on every request give false negatives;
+    - inconclusive keys are no longer training negatives (CC-ML-0028);
+    - the string families' MySQL semantics are unproven on host.
+- Risk: medium (more traffic; live MySQL unproven). Mitigations: the AND-only closed
+  templates test, the noise guard, the cost tests, and the secure twins.
+- Deliverables:
+  - [x] code — done
+  - [x] tests:
+    - `tests/test_oracle_sqli_string.py` (58): TP and secure twin per shape on
+      in-memory sqlite3 (bWAPP sqli_11/14/12, sqli_4 text, lab LIKE/login, a
+      code lookup);
+    - FP classes: escaping, a quote validator, reflection, shell, XPath, hash, a growing
+      guestbook, 429;
+    - the exact bound by DFS over the engine's draws;
+    - noise discovery with offender proofs;
+    - closed templates and the sqlite compile check;
+    - cost and cap, `inconclusive` end to end, the sqli_12 form, and `%2B` on the
+      wire;
+    - `tests/test_auto_plugins.py`: the drawn-order determinism guard;
+    - existing fakes and patches, adjusted:
+      - `tests/test_scheduler_backoff.py`'s fake showed the SQL signature on every
+        request, the very false-positive class BUG-0117 refuses. It now errors on a
+        quote only;
+      - `tests/test_auto_budget.py` and `tests/test_pipeline_invariants.py` patch
+        `Oracle.confirm_outcome`, which the pipeline now calls;
+      - `tests/test_web_ml_context.py` seeds and expects `inconclusive` rows
+        (CC-UI-0052);
+      - `tests/test_oracle_scheduler.py` derives its SQLi arms from the registry
+        (PA-0001).
+  - [x] mutation check: 22/22 killed (engine checks, draws, cap, inconclusive path,
+        controls, stripping, status, C's literal/second-sample checks, the sweep
+        fixes, the pipeline status and rejected count, the web count). The first run
+        left 7 survivors, which gained the tests "reflecting page confirms",
+        "status-only differential", "drifting baseline", "D responses agree",
+        "corroboration filter" and "cache / literal-once" — done
+  - [x] FR-FUZZ-45; NFR-FUZZ-safe `Enforced by` line — done
+  - [x] BUG-0117 / PA-0117 / ERROR_LOG — done
+- Review:
+  - **Design gate:** reviewers A and B, lane C draft v1 → v2 → v3 (AGREED).
+  - **Cap exhaustion:** a new `inconclusive` status (B required it; A agreed).
+  - **Implementation:** by the orchestrator. The lane agent stopped before writing code.
+  - **Deviations:** C is skipped on raw whole-body points, like the string families.
+    The redraw of C's second product is bounded (32 tries).
+- Effectiveness: effective in tests (counts above). Live pending: the bWAPP sandbox
+  check of sqli_4/11/12/14, and the PFF scored run (a possible +1 tp on
+  `/login.php [username]`, fp=0 expected).
+
 ### CC-FUZZ-0064 — In-app login forms probed on an isolated session (forms phase 2, lane B) (2026-10-14)
 - Merge note: CC numbers land out of numeric order here (0064 above 0062; lane A's 0063
   lands above 0064). That is intended: "newest first" means landing order.

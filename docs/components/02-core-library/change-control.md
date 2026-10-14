@@ -3,6 +3,28 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0043 — `inconclusive` oracle status (FR-FUZZ-45) (2026-10-14)
+- Change: `core/oracle_status.INCONCLUSIVE = "inconclusive"`, in `UNLABELLED`. It means
+  a confirmer started a check but could not decide within its cost cap. FR-CORE-14
+  and FR-CORE-17 are amended, and FR-CORE-33 is added.
+- Impact:
+  - **ML:** every consumer reads labelled vs unlabelled from `UNLABELLED` alone
+    (`ml/dataset`, `ml/train` gate and metric inputs, `web/mlview`), so these rows
+    are never training labels, with no consumer edit.
+  - **Other paths:** `forward_skip_reason` and `oracle_skipped` key on
+    `SKIPPED_BUDGET` only and are unaffected.
+  - **Schema:** none (migration 13's column has no CHECK).
+  - **History:** the migration-13 comment is left as history; `oracle_status.py` is
+    the single definition.
+- Risk: low.
+- Deliverables:
+  - [x] constant — done
+  - [x] tests: `tests/test_oracle_sqli_string.py::test_cap_exhaustion_is_inconclusive_never_a_negative`
+        (status, dataset exclusion, metrics) — done
+  - [x] FR-CORE-33 — done
+- Review: reviewers A and B (lane C cap-exhaustion decision: B required a status; A
+  agreed).
+
 ### CC-CORE-0041 — Migration 21: `form.password_fields` (forms phase 2, lane B) (2026-10-14)
 - Change:
   - **Migration 21:** `ALTER TABLE form ADD COLUMN password_fields TEXT NOT NULL

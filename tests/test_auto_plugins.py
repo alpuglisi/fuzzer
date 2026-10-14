@@ -232,3 +232,31 @@ def test_run_targets_dispatches_post_run_plugins_per_target_run(tmp_path):
         rows = {r["run_id"]: r["status"] for r in store.conn.execute(
             "SELECT run_id, status FROM run_plugin WHERE name='flaky'")}
         assert rows == {outcomes[0].run_id: "failed", outcomes[1].run_id: "ok"}
+
+
+class _PickOne:
+    """A scripted engine rng: always the first (or last) order (FR-FUZZ-45)."""
+
+    def __init__(self, index):
+        self.index = index
+
+    def choice(self, seq):
+        return seq[self.index]
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_request_counts_do_not_depend_on_the_drawn_order(tmp_path, monkeypatch, capsys,
+                                                         name):
+    """On targets whose responses do not depend on earlier probes, the SQLi engine's
+    drawn probe order never changes a summary: the goldens stay deterministic."""
+    from fuzzlab.oracle import strategies
+
+    outputs = []
+    for index in (0, -1):
+        monkeypatch.setattr(strategies, "_engine_rng", lambda i=index: _PickOne(i))
+        sub = tmp_path / f"order{index}"
+        sub.mkdir()
+        rc, out = _run(sub, monkeypatch, capsys, *CASES[name],
+                       earlier=name != "budget_fallback_nolabels")
+        outputs.append((f"rc={rc}\n" + out).replace(str(sub), "<TMP>"))
+    assert outputs[0] == outputs[1] == (GOLDEN / f"{name}.txt").read_text()

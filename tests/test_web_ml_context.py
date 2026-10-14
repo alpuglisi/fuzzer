@@ -19,7 +19,8 @@ from playwright.sync_api import sync_playwright  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.core.anomaly_flags import flag_note  # noqa: E402
-from fuzzlab.core.oracle_status import CHECKED, NO_CONFIRMER, SKIPPED_BUDGET  # noqa: E402
+from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE, NO_CONFIRMER,  # noqa: E402
+                                         SKIPPED_BUDGET)
 from fuzzlab.core.store import Store  # noqa: E402
 from fuzzlab.ml.anomaly import detect_anomalies  # noqa: E402
 from fuzzlab.ml.rank_train import train_and_rank  # noqa: E402
@@ -44,7 +45,8 @@ def _seed(path) -> dict:
         detect_anomalies(store, trained, contamination=0.2)
         store.conn.execute("UPDATE candidate SET anomaly_flag=1, anomaly_score=99.0 "
                            "WHERE id=?", (bad,))
-        statuses = [CHECKED] * 12 + [SKIPPED_BUDGET] * 5 + [NO_CONFIRMER] * 3
+        statuses = ([CHECKED] * 10 + [INCONCLUSIVE] * 2 + [SKIPPED_BUDGET] * 5
+                    + [NO_CONFIRMER] * 3)
         ids = [r[0] for r in store.conn.execute(
             "SELECT id FROM candidate WHERE run_id=? ORDER BY id", (trained,))]
         for cid, st in zip(ids, statuses):
@@ -81,8 +83,8 @@ def test_run_detail_carries_the_runs_ml_context(tmp_path):
     seeded = _seed(tmp_path / "s.db")
     with Store(tmp_path / "s.db") as store:
         d = run_detail(store, seeded["trained"])
-    assert d["oracle_status"] == {"checked": 12, "skipped_budget": 5, "no_confirmer": 3,
-                                  "unrecorded": 1, "pending": 0}
+    assert d["oracle_status"] == {"checked": 10, "skipped_budget": 5, "no_confirmer": 3,
+                                  "unrecorded": 1, "pending": 0, "inconclusive": 2}
     assert d["anomaly"]["flagged"] == 5.0
     assert d["anomaly"]["top"][0]["param"] == HOSTILE        # highest stored score first
     assert len(d["anomaly"]["top"]) <= 10
@@ -230,8 +232,12 @@ def test_run_query_restores_the_choice(site, tab):
 def test_run_page_shows_oracle_coverage_anomalies_and_plugins_as_text(site, tab):
     page = tab.open(f"/runs/{site['trained']}")
     coverage = page.inner_text("#run-oracle-status")
-    assert "checked 12" in coverage and "skipped (budget) 5" in coverage
+    assert "checked 10" in coverage and "skipped (budget) 5" in coverage
     assert "no confirmer 3" in coverage
+    # CC-UI-0052: a known status, shown by name, never counted as "unrecorded" twice
+    assert "inconclusive 2 (a cost cap stopped a check that had started)" in " ".join(
+        coverage.split())
+    assert "unrecorded 1" in coverage
     anomaly = page.inner_text("#run-anomaly")
     assert HOSTILE in anomaly and "Flagged on this run: 5" in anomaly
     plugins = page.inner_text("#run-plugins")

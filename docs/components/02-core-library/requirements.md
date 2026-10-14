@@ -124,6 +124,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     - `pending` *(CC-CORE-0033, BUG-0071)*: written before the oracle loop and
       overwritten as the oracle reaches the row. It survives only when a run crashed
       mid-loop, and is unlabelled (in `UNLABELLED`);
+    - `inconclusive` *(CC-CORE-0043)*: a confirmer started a check but its cost cap
+      stopped it before a decision. Unlabelled (in `UNLABELLED`);
     - NULL: written before migration 13 or by a writer outside the pipeline, with the
       old meaning (treated as oracle-labelled).
   - `anomaly_score` / `anomaly_flag`: the ECOD tripwire's advisory output.
@@ -136,8 +138,13 @@ plugin registry. It is the layer that makes the store the integration bus.
   exact text). Only the ML trainers write them, through `fuzzlab.ml.persist`; rows
   from before migration 14 read NULL and are not reloadable.
 - **FR-CORE-17** *(`CC-CORE-0029`, 2026-10-13).* The `candidate.oracle_status`
-  vocabulary (`checked`, `skipped_budget`, `no_confirmer`, and the `UNLABELLED` set)
-  is defined once in `core/oracle_status.py`.
+  vocabulary (`checked`, `skipped_budget`, `no_confirmer`, `pending`, `inconclusive`,
+  and the `UNLABELLED` set) is defined once in `core/oracle_status.py`.
+- **FR-CORE-33** *(`CC-CORE-0043`, 2026-10-14).*
+  - `inconclusive` is a member of `UNLABELLED`, so a check that could not decide is
+    never a negative label.
+  - The pipeline writes it for every row of a key whose confirmation returned an
+    inconclusive verdict and nothing confirmed (FR-FUZZ-45).
 - **FR-CORE-24** *(atomic migrations; `CC-CORE-0034`, 2026-10-13, BUG-0087).*
   - **Each migration is atomic.** It runs in one `BEGIN IMMEDIATE` transaction,
     statement by statement (`split_statements`), with its version row: `COMMIT`, or

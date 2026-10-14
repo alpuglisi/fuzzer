@@ -9,7 +9,9 @@ from fuzzlab.oracle.strategies import default_strategies
 from fuzzlab.scheduler import ThompsonBandit, arm_priors
 
 _CTX = "sql-injection:query"
-_ARMS = ("sqli:error-signature", "sqli:boolean-differential", "sqli:differential-timing")
+#: every sql-injection arm the registry has, derived (PA-0001): adding a strategy
+#: (FR-FUZZ-45's evaluation marker) never leaves an untrained arm in this test
+_ARMS = tuple(s.arm for s in default_strategies() if s.category == "sql-injection")
 
 
 def _cand():
@@ -32,9 +34,8 @@ class TimingOnlySender:
 def _trained_timing_bandit(seed):
     bandit = ThompsonBandit(rng=random.Random(seed), priors=arm_priors(default_strategies()))
     for _ in range(40):
-        bandit.update(_CTX, "sqli:differential-timing", 1.0)
-        bandit.update(_CTX, "sqli:error-signature", 0.0)
-        bandit.update(_CTX, "sqli:boolean-differential", 0.0)
+        for arm in _ARMS:
+            bandit.update(_CTX, arm, 1.0 if arm == "sqli:differential-timing" else 0.0)
     return bandit
 
 

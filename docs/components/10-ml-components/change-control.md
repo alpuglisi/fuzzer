@@ -3,6 +3,23 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0028 — Training labels: `inconclusive` rows are unlabelled (FR-FUZZ-45; documentation) (2026-10-14)
+- Change: no ML code change. A new oracle status, `inconclusive` (CC-CORE-0043), joins
+  `UNLABELLED`, which every ML consumer reads. A candidate whose SQLi check was
+  stopped by its cost cap is therefore never a training negative. FR-ML-5 gets a dated
+  note.
+- Impact:
+  - **Comparability:** training rows recorded after this change are not comparable
+    with earlier ones. Before it, such candidates (rare: a screen passed, then the
+    family failed late) were written `checked`, and counted as negatives.
+  - **Models:** saved models are still loadable. The feature version is unchanged.
+- Risk: none (label hygiene only).
+- Deliverables:
+  - [x] FR-ML-5 note — done
+  - [x] tested through `tests/test_oracle_sqli_string.py::test_cap_exhaustion_is_inconclusive_never_a_negative`
+        (`build_dataset` excludes the rows) — done
+- Review: reviewers A and B (lane C cap-exhaustion decision).
+
 ### CC-ML-0026 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-ML-advisory (classified SAFETY at reviewer A's request), naming the enforcing code and the test functions that fail without it

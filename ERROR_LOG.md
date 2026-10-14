@@ -18,6 +18,23 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Oracle: SQLi, file-inclusion, SSTI and SpEL strategies confirmed on evidence the probe did not cause (fixed, BUG-0117/PA-0117)
+- **Symptom:** these pages were all "confirmed" (tests T7/T7b/T8/T12/T27 fail on `ad352db`):
+  - a page that always prints a MySQL warning;
+  - a strict INT column that errors on any non-numeric input;
+  - a page alternating A, A, B;
+  - a page that always shows `root:x:0:0:`;
+  - a page full of numbers.
+- **Root cause:** the "control or replicate" rule (PA-0084/0090/0094) was enforced per mechanism by fixtures, never across a category by discovery, so the older strategies were never swept.
+- **Remediation:**
+  - controls for SqliError and PathTraversal;
+  - a bracketed, replicated differential engine for SqliBoolean (bound 1/1458 per family, proven exactly);
+  - two-sample cross-checks for SSTI and SpEL;
+  - a noise-discovery guard, proven on offenders.
+
+  CC-FUZZ-0065. `docs/bugs/BUG-0117-sqli-evidence-not-caused-by-the-probe.md`.
+- **Status:** Fixed
+
 ## 2026-10-13 — Crawler/fuzzer: the destructive-URL rule missed `update` / `insert` (fixed, BUG-0114/PA-0114)
 - **Symptom:** bWAPP's `update.php` rebuilds its database on a plain GET, and the deny rule allowed it (latent: nothing linked to it yet).
 - **Root cause:** BUG-0111's token list was never checked against the target's own destructive endpoints.

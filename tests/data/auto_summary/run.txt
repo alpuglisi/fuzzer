@@ -7,7 +7,7 @@ auto run (automatic, scored; categories=['sql-injection', 'xss']; source=ground-
   oracle budget: checked 2 of 44 confirmable candidate(s); 42 skipped (ordered by score, trained on 40 earlier labelled candidate(s) from this target; model 184ee66b22cc)
     skipped candidates count as misses in the score
   score vs ground truth: tp=0 fp=0 fn=8 tn=8
-  requests: 29
+  requests: 43
   not audited (3 enumerated point(s) — scoped as future capability; they score as false negatives):
     - GET /reviews.php [author]: client-only/DOM (needs browser execution, M6)
     - GET /feedback.php [ref]: client-only/DOM (needs browser execution, M6)

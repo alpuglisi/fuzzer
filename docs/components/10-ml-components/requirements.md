@@ -46,7 +46,10 @@ the oracle owns truth (the oracle/advisory split).
   — FR-ML-11. The user chose `score`, most-likely-first, as the default, because it
   maximises findings per confirmation; uncertainty and committee remain available.)*
 - **FR-ML-5** Read features via the `core/` versioned feature store; a model
-  records the `feature_version` it was trained against. *(Partially met, CC-ML-0021 /
+  records the `feature_version` it was trained against. *(2026-10-14, CC-ML-0028: a
+  candidate whose SQLi check was stopped by its cost cap is `inconclusive`, unlabelled,
+  and never a training negative. Training rows recorded after this are not comparable
+  with earlier ones, where such rows were `checked` negatives.)* *(Partially met, CC-ML-0021 /
   CC-CORE-0031: the candidate vector is computed by `core/features.extract_candidate_v1`
   (versioned, golden-pinned) and **recomputed on read**; `candidate.features_json` /
   `feature_version` stay unwritten. Flagged.)* *(CC-ML-0023 note:)* the `rules_fired`
