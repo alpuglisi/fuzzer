@@ -38,6 +38,13 @@ changed, and the reason. Reference the commit hash where useful.
   refused again at send; SPA route queries are `fragment` points placed by M6 inside the
   route (CC-AUD-0035, CC-FUZZ-0068, CC-CORE-0046, CC-ML-0030; FR-AUD-22, FR-FUZZ-47,
   FR-CORE-36). No migration.
+## 2026-10-14 (Forms phase 3, lane S: live-run fix 2, buttons behind overlays)
+- **Why:** the live re-crawl's login click timed out: in the fresh unauthenticated
+  context Juice Shop's first-visit welcome dialog intercepts pointer events.
+- **What:** a vetted SPA button that is covered gets Escape once, then its own click()
+  on the element (counted as `clicks_dispatched`); overlay buttons are never clicked and
+  the gate still runs first. CC-CRAWL-0017, FR-CRAWL-13.
+
 ## 2026-10-14 (Forms phase 3, lane S: live-run fix, icon text in button labels)
 - **Why:** the interim live Juice Shop crawl submitted no form: the login button's
   Material icon ligature (`exit_to_app`) was read into its label and refused as the
