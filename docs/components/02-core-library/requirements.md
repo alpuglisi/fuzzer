@@ -285,6 +285,20 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **No second definition:** nothing else in `fuzzlab/` defines its own entropy or
     identifier test.
 
+- **FR-CORE-32** *(forms phase 2, lane A; `CC-CORE-0042`, 2026-10-14; no schema change).*
+  - **The `form` table** is a request's default sibling entry list: a crawled form's
+    (`enctype` set, possibly `""`) or a crawled link's query (`enctype` NULL). Only
+    `core.forms.is_link_set` tells them apart, and `core.forms.first_link_set` is the
+    one store reader of `form.enctype` (a guard test keeps it so).
+  - **Header-point names:** `core.http.header_point_refusal` is the one rule
+    (framing, routing, method-override and credential headers, and any name
+    `is_sensitive_name` flags; whole names, case-insensitive). `check_send_header`
+    applies it at send, except for explicitly enumerated (ground-truth) URLs.
+  - **Credential names:** `core.redaction.is_credential_name` is the one predicate for
+    the importer and the point builder.
+  - **`oracle_status`:** `pending` also covers rows a safety breaker stopped before
+    the oracle reached them; the reason is in the run's metrics.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

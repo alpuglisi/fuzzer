@@ -22,8 +22,9 @@ import csv
 import json
 import sqlite3
 from pathlib import Path
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
 
+from fuzzlab.core.forms import LINK_SET_ENCTYPE
 from fuzzlab.core.store import Store
 from fuzzlab.core.urls import to_path
 
@@ -51,15 +52,58 @@ def _get_parameter(store: Store, run_id: int, endpoint_id: int, name: str) -> in
     return int(row["id"]) if row else None
 
 
+def query_pairs(raw_query: str) -> list[tuple[str, str, str]]:
+    """``(name, raw value, value)`` for each pair of a URL's raw query, in order,
+    blanks kept. *raw value* is percent-decoded only -- what
+    `core.redaction.looks_like_identifier` must be given (form decoding turns base64's
+    ``+`` into a space); *value* is form-decoded, as `parse_qsl` and a server see it."""
+    out = []
+    for part in (raw_query or "").split("&"):
+        if not part:
+            continue
+        name, _eq, raw = part.partition("=")
+        out.append((unquote_plus(name), unquote(raw), unquote_plus(raw)))
+    return out
+
+
+def redact_sibling(name: str, raw_value: str, value: str) -> str:
+    """A crawled link's sibling value as it may be stored and sent: ``""`` when its
+    name is sensitive or its raw value looks like an identifier (a token, an id), else
+    ``value`` (forms phase 2, FR-FUZZ-43; PA-0100)."""
+    from fuzzlab.core.redaction import is_sensitive_name, looks_like_identifier
+    if is_sensitive_name(name) or looks_like_identifier(raw_value):
+        return ""
+    return value
+
+
+def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
+    """Why an entry list must never be sent as siblings, or None: any name or value
+    tokenises destructive; with ``credential_names``, any name carries a credential
+    token. The one check for forms and link sets (PA-0003)."""
+    from fuzzlab.core.redaction import is_credential_name
+    from fuzzlab.core.urls import destructive_reason
+    for name, value in entries:
+        for text in (name, value):
+            reason = destructive_reason("/?x=" + (text or "").replace(" ", "+"))
+            if reason:
+                return f"destructive entry {name}={value!r} ({reason!r})"
+        if credential_names and is_credential_name(name):
+            return f"credential entry {name!r}"
+    return None
+
+
 def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str, int]:
-    """Import discovered pages -> page/endpoint/parameter rows."""
+    """Import discovered pages -> page/endpoint/parameter rows, crawled forms, and each
+    query-bearing URL's query as a link set (forms phase 2)."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
     seen_pages: set[tuple[str, str]] = set()
+    link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
     try:
+        # crawl order is the tie-break: the first crawled link wins (FR-FUZZ-43)
         rows = src.execute(
-            "SELECT url, status_code, source FROM discovered_pages"
+            "SELECT url, status_code, source FROM discovered_pages ORDER BY rowid"
         ).fetchall()
     except sqlite3.Error:
         rows = []
@@ -88,10 +132,46 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str,
                         (run_id, endpoint_id, name, "query", value),
                     )
                     counts["parameter"] += 1
+            link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
     _import_forms(src, store, run_id, counts)
+    _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
     src.close()
     return counts
+
+
+def _import_link_sets(store: Store, run_id: int, link_sets, counts: dict) -> None:
+    """Each crawled link's query becomes a `form` row with ``enctype`` NULL
+    (`core.forms.LINK_SET_ENCTYPE`): its values pass `redact_sibling`, and a set with a
+    destructive or credential entry is refused (not stored). A set with two or more
+    names is bound to its parameters that no form already binds, the first crawled
+    link winning; a one-name set is kept only as the page's representative query for
+    header points (FR-FUZZ-43)."""
+    counts.setdefault("link_set", 0)
+    counts.setdefault("link_set_refused", 0)
+    counts.setdefault("link_set_bound", 0)
+    stored_ids: dict[tuple[int, str], int] = {}
+    for endpoint_id, pairs in link_sets:
+        if entries_refusal([(n, v) for n, _r, v in pairs], credential_names=True):
+            counts["link_set_refused"] += 1
+            continue
+        entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
+        key = (endpoint_id, json.dumps(entries))
+        form_id = stored_ids.get(key)
+        if form_id is None:
+            cur = store.conn.execute(
+                "INSERT INTO form (run_id, endpoint_id, enctype, entries) VALUES (?,?,?,?)",
+                (run_id, endpoint_id, LINK_SET_ENCTYPE, key[1]))
+            form_id = stored_ids[key] = int(cur.lastrowid)
+            counts["link_set"] += 1
+        names = list(dict.fromkeys(name for name, _v in entries))
+        if len(names) < 2:
+            continue
+        for name in names:
+            cur = store.conn.execute(
+                "UPDATE parameter SET form_id=? WHERE run_id=? AND endpoint_id=? AND "
+                "name=? AND form_id IS NULL", (form_id, run_id, endpoint_id, name))
+            counts["link_set_bound"] += cur.rowcount
 
 
 #: Hidden fields that pick an object or a user (``login``, ``user_id``): never fuzzed,
@@ -114,7 +194,14 @@ _FILLERS = {"email": "fuzzlab@example.invalid", "number": "1", "range": "1",
             "tel": "5555550100", "url": "http://fuzzlab.invalid/", "date": "2020-01-01",
             "datetime-local": "2020-01-01T00:00", "month": "2020-01", "week": "2020-W01",
             "time": "12:00", "color": "#000000"}
+_TEXT_FILLER = "fuzzlab"
 _FILLED_KINDS = frozenset({"text", "search", "textarea", *_FILLERS})
+
+
+def is_filler(value) -> bool:
+    """True when ``value`` is exactly one of the importer's own fillers: it says
+    nothing about the app, and it is sent as is (its URL never resolves)."""
+    return value == _TEXT_FILLER or value in _FILLERS.values()
 
 
 def _filled(entries, kinds) -> list:
@@ -125,32 +212,47 @@ def _filled(entries, kinds) -> list:
     for name, value in entries:
         kind = kinds.get(name)
         if value == "" and kind in _FILLED_KINDS and not is_sensitive_name(name):
-            value = _FILLERS.get(kind, "fuzzlab")
+            value = _FILLERS.get(kind, _TEXT_FILLER)
         out.append((name, value))
     return out
+
+
+#: A POST selector whose select name is this short or shorter cannot be judged by its
+#: name (``t``, ``v``, ``tz``): it is skipped (forms phase 2, reviewer B-R4).
+MIN_JUDGEABLE_SELECT_NAME = 3
 
 
 def form_skip_reason(form: dict) -> str | None:
     """Why a crawled form is never fuzzed (reported), or None. The whole form is
     skipped when submitting it could change a credential, the session's identity, or
-    something destructive (forms phase 1, reviewers A/B)."""
+    something destructive (forms phase 1, reviewers A/B).
+
+    A **POST selector** form (one ``<select>`` and buttons) is fuzzed since forms phase
+    2 (FR-FUZZ-43) unless a control name carries a settings word
+    (`formnav.settings_word`), its select name is too short to judge, or the crawler
+    saw it act as a settings form (``form["verdict"]``, FR-CRAWL-10). GET selector
+    forms are not subject to that rule (GET is safe)."""
     from fuzzlab.core.urls import destructive_reason
+    from fuzzlab.tools.formnav import VERDICT_SETTINGS, settings_word
     kinds = [k for _n, k in form["controls"]]
-    if form["enctype"].startswith("multipart/"):
+    if (form.get("enctype") or "").startswith("multipart/"):
         return "multipart form (not sent as multipart in phase 1)"
     if form["selector"] and form["method"] == "POST":
-        return "POST selector form (navigation or settings, never an injection target)"
+        for name, _kind in form["controls"]:
+            word = settings_word(name)
+            if word:
+                return f"POST selector with a settings control {name!r} ({word!r})"
+        select = next((n for n, k in form["controls"] if k == "select"), "")
+        if len(select) < MIN_JUDGEABLE_SELECT_NAME:
+            return f"POST selector named {select!r}: too short to tell it from a setting"
+        if form.get("verdict") == VERDICT_SETTINGS:
+            return "POST selector the crawler saw act as a settings form"
     if "password" in kinds:
         return "has a password control (login or credential form; phase 2)"
     reason = destructive_reason(form["action_url"])
     if reason:
         return f"destructive action ({reason!r})"
-    for name, value in form["entries"]:
-        for text in (name, value):
-            reason = destructive_reason("/?x=" + (text or "").replace(" ", "+"))
-            if reason:
-                return f"destructive entry {name}={value!r} ({reason!r})"
-    return None
+    return entries_refusal(form["entries"])
 
 
 def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
@@ -159,21 +261,40 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
     replaces it); POST forms keep it on the endpoint URL (reviewer A4)."""
     try:
         rows = src.execute("SELECT action_url, method, enctype, entries, controls, "
-                           "selector FROM discovered_forms").fetchall()
+                           "selector, options FROM discovered_forms ORDER BY rowid").fetchall()
     except sqlite3.Error:
         return                                   # an older spider DB: no forms
+    try:
+        verdicts = dict(src.execute("SELECT sig, verdict FROM selector_verdicts").fetchall())
+    except sqlite3.Error:
+        verdicts = {}                            # a spider DB from before FR-CRAWL-10
     from fuzzlab.core.redaction import is_sensitive_name
+    from fuzzlab.tools.formnav import signature_key
     counts.setdefault("form", 0)
     counts.setdefault("form_skipped", 0)
+    counts.setdefault("form_duplicate_selector", 0)
+    seen_selectors: set[tuple] = set()
     for row in rows:
         form = {"action_url": row["action_url"], "method": row["method"] or "GET",
                 "enctype": (row["enctype"] or "").lower(),
                 "entries": [tuple(e) for e in json.loads(row["entries"] or "[]")],
                 "controls": [tuple(c) for c in json.loads(row["controls"] or "[]")],
-                "selector": bool(row["selector"])}
+                "selector": bool(row["selector"]),
+                "options": json.loads(row["options"] or "[]")}
+        if form["selector"]:
+            form["verdict"] = verdicts.get(signature_key(form))
         if form_skip_reason(form):
             counts["form_skipped"] += 1
             continue
+        if form["selector"] and form["method"] == "POST":
+            # a picker repeated on many pages (a site-wide header form) is fuzzed once,
+            # at the first action crawled (forms phase 2, FR-FUZZ-43)
+            same = (signature_key(form), tuple(sorted(n for n, _k in form["controls"])))
+            if same in seen_selectors:
+                counts["form_skipped"] += 1
+                counts["form_duplicate_selector"] += 1
+                continue
+            seen_selectors.add(same)
         kinds = dict(form["controls"])
         form["entries"] = _filled(form["entries"], kinds)
         path = to_path(form["action_url"])

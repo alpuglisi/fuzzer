@@ -304,7 +304,13 @@ def test_post_and_get_forms_become_points_with_their_siblings(tmp_path):
      "password"),
     ("<form method=post enctype='multipart/form-data'><input type=file name=f>"
      "<input name=t></form>", "multipart"),
-    ("<form method=post>" + PICKER[PICKER.index("<select"):], "selector"),
+    # FR-FUZZ-42's "never a POST selector" is superseded by FR-FUZZ-43 (forms phase 2):
+    # a POST picker is skipped only when a control name is a settings word -- the
+    # select's, or only the submitter's
+    (LEVEL, "settings"),
+    ("<form method=post action='/app/p.php'><select name=movie><option value=1>A"
+     "</option></select><button name=set_default value=go>Go</button></form>",
+     "settings"),
     ("<form method=post action='/app/blog.php'><textarea name=entry></textarea>"
      "<button name=entry_delete value=del>Delete</button>"
      "<button name=entry_add value=add>Add</button></form>", "destructive"),

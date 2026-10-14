@@ -3,6 +3,19 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0027 — Note: `rules_fired` counts the forms-phase-2 rules on crawl runs (documentation only) (2026-10-14)
+- Change: FR-ML-5 gains a dated note. The candidate feature `rules_fired` now also counts
+  `R-COMMAND-INJECTION-VALUE`, `R-FILE-INCLUSION-VALUE`, `R-SQLI-HEADER` and
+  `R-XSS-HEADER` (CC-AUD-0032), which fire only on crawl points. No ML code changes, and
+  `CANDIDATE_FEATURE_VERSION` is not bumped (reviewers' Q8).
+- Impact: crawl-run training rows recorded after CC-FUZZ-0063 are not comparable with
+  earlier ones; ground-truth runs are unchanged.
+- Risk: low (documented drift).
+- Deliverables:
+  - [x] FR-ML-5 note — done
+- Review: reviewers A and B (Q8, should-fix 6).
+- Effectiveness: n/a (documentation).
+
 ### CC-ML-0026 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-ML-advisory (classified SAFETY at reviewer A's request), naming the enforcing code and the test functions that fail without it

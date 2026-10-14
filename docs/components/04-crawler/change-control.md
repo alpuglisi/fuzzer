@@ -3,6 +3,31 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0014 — Shared, extended settings words; the spider records what a picker did (forms phase 2, lane A) (2026-10-14)
+- Change:
+  - `formnav.settings_word` (public, replaces `_settings_word`) is shared by navigation
+    and the importer. `SETTINGS_WORDS` gains `sort`, `tz`, `currency`, `country`,
+    `region`, `layout`, `skin`, `view`, `display`, `default`, `notify`, `privacy`,
+    `visibility`; `SETTINGS_PAIRS` adds `per page`. `t` is deliberately absent ("Don't").
+  - `enumerate_form(on_verdict=)` reports `settings` (stopped on a cookie or the
+    self-redirect run) or `navigation`; what is submitted is unchanged.
+    `formnav.signature_key` is the one key. The spider stores it in a new spider-DB
+    table, `selector_verdicts` (settings wins), cleared on reset.
+- Impact: FR-CRAWL-8 amended: navigation refuses pickers and options so named.
+  Measured offline over all 159 option values and labels of the local bWAPP build
+  (outside the repo; no bWAPP file is committed): the final set refuses exactly the six
+  labels Phase 1 refused (rows 58, 73, 103, 127, 150, 155) and adds none; the `bug` /
+  `form_bug` / `form` controls are not hit; `security_level` and `form_security_level`
+  are, as before.
+- Risk: low (refuses more, never less).
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase2.py`: the inlined six-label pin, `page` /
+    "Don't" not settings words, a cookie-setting picker recorded and never fuzzed) — done
+  - [x] FR-CRAWL-10; FR-CRAWL-8 amended — done
+- Review: as CC-FUZZ-0063 (reviewers' should-fix 1).
+- Effectiveness: verified offline.
+
 ### CC-CRAWL-0013 — Selector-form navigation; landing URLs and forms recorded (forms phase 1) (2026-10-13)
 - Change: `tools/spider.py` and new `tools/formnav.py`.
   - **Navigation.** `--follow-selector-forms [names]`, off by default.

@@ -71,6 +71,18 @@ def _fold(token: str) -> str:
     return token
 
 
+#: A crawl- or form-sourced parameter, or a link's query, with one of these name tokens
+#: carries a credential: never fuzzed, and a link set holding one is never bound (it
+#: could change or re-bind the operator's identity). Moved here from `harness.auto`
+#: (forms phase 2, CC-CORE-0042) so the importer and the point builder share it.
+CREDENTIAL_TOKENS = frozenset({"password", "passwd", "pwd", "pass", "secret"})
+
+
+def is_credential_name(name: str) -> bool:
+    """True when the parameter ``name`` has a credential token (``password_new``)."""
+    return bool(set(name_tokens(name)) & CREDENTIAL_TOKENS)
+
+
 def is_sensitive_name(name: str) -> bool:
     """True when the field or parameter ``name`` holds a secret."""
     tokens = [_fold(t) for t in name_tokens(name)]

@@ -34,21 +34,36 @@ from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.redaction import name_tokens
 from fuzzlab.core.urls import destructive_reason, url_key
 
-#: A select or control named with one of these words configures something.
+#: A select or control named with one of these words configures something. Shared by
+#: navigation (`refusal`, `option_refusal`) and the importer's POST-selector rule
+#: (forms phase 2, FR-CRAWL-10 / FR-FUZZ-43). ``t`` is deliberately absent: a lone
+#: ``t`` token comes from contractions ("Don't").
 SETTINGS_WORDS = frozenset({
     "level", "security", "role", "status", "permission", "permissions", "admin",
     "enable", "disable", "active", "lang", "language", "theme", "mode",
+    # forms phase 2 (reviewer B-R4)
+    "sort", "tz", "currency", "country", "region", "layout", "skin", "view", "display",
+    "default", "notify", "privacy", "visibility",
 })
+#: Adjacent tokens that together are a settings word (``per_page`` tokenises to
+#: ``per``, ``page``; ``page`` alone must not count: it is a common content parameter).
+SETTINGS_PAIRS = frozenset({("per", "page")})
 #: This many self-redirects in a row, before any real navigation: a settings form.
 MAX_SELF_REDIRECTS = 5
 #: At most this many options of one form are submitted.
 MAX_OPTIONS = 500
 
 
-def _settings_word(text: str) -> str | None:
-    for tok in name_tokens(text or ""):
-        if tok.lower() in SETTINGS_WORDS:
-            return tok.lower()
+def settings_word(text: str) -> str | None:
+    """The settings word (or pair, as ``per_page``) in a control name, option value
+    or label, matched by whole token; None when there is none."""
+    toks = [t.lower() for t in name_tokens(text or "")]
+    for tok in toks:
+        if tok in SETTINGS_WORDS:
+            return tok
+    for pair in zip(toks, toks[1:]):
+        if pair in SETTINGS_PAIRS:
+            return "_".join(pair)
     return None
 
 
@@ -58,6 +73,13 @@ def signature(record: dict) -> tuple:
     opts = record.get("options") or []
     name = opts[0][0] if opts else ""
     return (record["method"], name, tuple(sorted(v for _n, v, _l in opts)))
+
+
+def signature_key(record: dict) -> str:
+    """`signature` as text: how the spider files a picker's verdict and the importer
+    finds it again (one derivation, PA-0003)."""
+    import json
+    return json.dumps(signature(record))
 
 
 def refusal(record: dict, named: frozenset[str], allow_get: bool,
@@ -71,7 +93,7 @@ def refusal(record: dict, named: frozenset[str], allow_get: bool,
     if record["method"] == "GET" and not allow_get and select not in named:
         return "GET selector forms not enabled"
     for name, _kind in record.get("controls") or []:
-        word = _settings_word(name)
+        word = settings_word(name)
         if word:
             return f"control {name!r} is a settings control ({word!r})"
     action = record["action_url"]
@@ -86,7 +108,7 @@ def refusal(record: dict, named: frozenset[str], allow_get: bool,
 def option_refusal(value: str, label: str) -> str | None:
     """Why one option must not be submitted (it is skipped, the form continues)."""
     for text in (value, label):
-        word = _settings_word(text)
+        word = settings_word(text)
         if word:
             return f"settings word {word!r}"
         reason = destructive_reason("/?" + "x=" + (text or "").replace(" ", "+"))
@@ -95,15 +117,27 @@ def option_refusal(value: str, label: str) -> str | None:
     return None
 
 
+#: What a submitted picker did (FR-CRAWL-10): recorded so the importer never fuzzes a
+#: picker the crawler saw act as a settings form.
+VERDICT_NAVIGATION = "navigation"
+VERDICT_SETTINGS = "settings"
+
+
 def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
-                   log: Callable[[str], None] = logging.info) -> list[str]:
+                   log: Callable[[str], None] = logging.info,
+                   on_verdict: Callable[[str], None] | None = None) -> list[str]:
     """Submit each allowed option of a gated selector form; return the in-scope,
-    non-destructive URLs it redirects to (to crawl as ordinary GET links)."""
+    non-destructive URLs it redirects to (to crawl as ordinary GET links).
+
+    ``on_verdict`` (forms phase 2) is told ``"settings"`` when enumeration stops on a
+    cookie or on the self-redirect run, else ``"navigation"`` when a redirect was found.
+    It only reports; what is submitted is unchanged."""
     base = FormEntries(tuple(e) for e in record["entries"])
     select = record["options"][0][0]
     own = {url_key(record["page_url"]), url_key(record["action_url"])}
     found: list[str] = []
     self_run = 0
+    settings = False
     for _name, value, label in (record["options"] or [])[:MAX_OPTIONS]:
         why = option_refusal(value, label)
         if why:
@@ -115,6 +149,7 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
         location = low.get("location")
         if "set-cookie" in low:
             log(f"selector {select!r}: response set a cookie; stopped (settings form)")
+            settings = True
             break
         if not (300 <= status < 400) or not location:
             log(f"selector {select!r}: non-redirect response {status}; stopped")
@@ -127,9 +162,12 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
             self_run += 1
             if self_run >= MAX_SELF_REDIRECTS and not found:
                 log(f"selector {select!r}: redirects back to itself; stopped (settings form)")
+                settings = True
                 break
             continue
         self_run = 0
         if target not in found:
             found.append(target)
+    if on_verdict is not None and (settings or found):
+        on_verdict(VERDICT_SETTINGS if settings else VERDICT_NAVIGATION)
     return found

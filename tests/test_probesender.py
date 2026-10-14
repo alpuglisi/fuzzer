@@ -80,7 +80,11 @@ def test_requests_probe_sender_header_location():
     # CC-FUZZ-0032/FR-FUZZ-19: a header-carried candidate sends `value` as a
     # request header named the literal `param`, no query/body change.
     session = _FakeSession()
-    RequestsProbeSender(session=session).send(
+    sender = RequestsProbeSender(session=session)
+    # a ground-truth header point is explicit (run_auto allows it); a crawl-sourced one
+    # naming a credential header is refused at send (FR-FUZZ-43)
+    sender.allow_explicit(["http://localhost/webhooks/eventsub"])
+    sender.send(
         "http://localhost/webhooks/eventsub", "X-Signature-256", "deadbeef",
         method="POST", location="header")
     call = session.calls[0]
@@ -123,7 +127,9 @@ def test_seam_probe_sender_header_location():
     mgr = SessionManager(_store(), scope_hosts=["localhost"],
                          fetch_factory=_factory(CookieLoginFetcher()))
     client = HttpClient(RequestBudget(50), ["localhost"], session=mgr, transport=transport)
-    SeamProbeSender(client, "admin").send(
+    sender = SeamProbeSender(client, "admin")
+    sender.allow_explicit(["http://localhost/webhooks/eventsub"])   # ground truth's
+    sender.send(
         "http://localhost/webhooks/eventsub", "X-Signature-256", "deadbeef",
         method="POST", location="header")
     assert captured["method"] == "POST"

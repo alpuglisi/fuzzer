@@ -9,9 +9,12 @@ filter scopes which rules run (used by category selection, D14 / T2.9).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
-from fuzzlab.audit.rules import Rule, load_rules, matches
+from fuzzlab.audit.rules import Rule, RuleError, load_rules, matches, validate_rule
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,9 +33,19 @@ class InjectionPoint:
     # binary-serialized, e.g. TrackerNest's XXE/insecure-deserialization
     # cases), so this is `None` unless the caller positively knows the format.
     body_content_type: str | None = None
-    # A crawled form's default entry list (forms phase 1, FR-FUZZ-42): every probe of
-    # `param` sends the other fields with it. None for a lone parameter.
+    # A crawled form's default entry list (forms phase 1, FR-FUZZ-42), or a crawled
+    # link's query (forms phase 2, FR-FUZZ-43): every probe of `param` sends the other
+    # fields with it. None for a lone parameter.
     base_entries: tuple[tuple[str, str], ...] | None = None
+    # Forms phase 2 (FR-AUD-20). Where the point came from ("crawl" / "ground-truth");
+    # read only by the `origin_in` predicate, never written to evidence.
+    origin: str | None = None
+    # The shapes of the point's example value (`audit.value_shape.SHAPES`), for the
+    # `value_shape_in` predicate. Empty for ground-truth and header points.
+    value_shapes: frozenset[str] = frozenset()
+    # The value a command-injection probe starts from in place of an ip/host-shaped
+    # default (`value_shape.SAFE_HOST`), so the app's own host is never sent.
+    base_value: str | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -45,10 +58,21 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
     (``register_rules``) and is notified of each emitted candidate (``on_candidate``).
     """
     rules = load_rules() if rules is None else rules
-    if plugins is not None:
-        rules = list(rules) + list(plugins.rules())        # register_rules
-    active = [r for r in rules if categories is None or r.category in categories]
     counts = {"evaluation": 0, "candidate": 0, "negative": 0}
+    if plugins is not None:
+        # register_rules; a plugin rule is checked like the bundled file's (PA-0086(1)):
+        # an invalid one is left out and counted, never evaluated, never fatal
+        valid = []
+        for rule in plugins.rules():
+            try:
+                validate_rule(rule)
+            except RuleError as exc:
+                counts["invalid_plugin_rules"] = counts.get("invalid_plugin_rules", 0) + 1
+                _log.warning("plugin rule left out: %s", exc)
+                continue
+            valid.append(rule)
+        rules = list(rules) + valid
+    active = [r for r in rules if categories is None or r.category in categories]
 
     for point in points:
         for rule in active:
@@ -73,6 +97,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                     evidence["body_content_type"] = point.body_content_type
                 if point.base_entries is not None:
                     evidence["entries"] = [list(e) for e in point.base_entries]
+                if point.base_value is not None:
+                    evidence["base_value"] = point.base_value
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",

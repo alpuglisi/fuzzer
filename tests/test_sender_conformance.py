@@ -168,3 +168,132 @@ def test_the_guards_catch_a_missing_or_dropped_content_type():
     assert signature_problems(_Dropper) == ["missing parameter 'entries'"]
     assert forwarding_problems(_Dropper)[0] == (
         "content_type: sent 'application/json', inner got None")
+
+
+# --- placement: a payload lands exactly where the point says (BUG-0115, PA-0115) ------
+import pytest                                               # noqa: E402
+
+from fuzzlab.oracle.probe import UnplaceableLocation        # noqa: E402
+
+
+class _Wire:
+    """What reached the wire, in one shape for every sender."""
+
+    def __init__(self):
+        self.sent = []
+
+    # requests-style session (RequestsProbeSender, RequestsCorrelatingSender)
+    cookies: dict = {}
+
+    def request(self, method, url, **kw):
+        from urllib.parse import parse_qsl, urlsplit
+        query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+        params = kw.get("params")
+        query.update(dict(params) if isinstance(params, (dict, list)) else {})
+        data = kw.get("data")
+        body = dict(data) if isinstance(data, (dict, list)) else {}
+        self.sent.append({"query": query, "body": body, "headers": dict(kw.get("headers")
+                                                                        or {})})
+
+        class R:
+            status_code, text, headers = 200, "ok", {}
+        return R()
+
+    # core seam transport (SeamProbeSender)
+    def transport(self, method, url, headers, body, timeout):
+        from urllib.parse import parse_qsl, urlsplit
+        self.sent.append({"query": dict(parse_qsl(urlsplit(url).query)),
+                          "body": dict(parse_qsl((body or b"").decode())),
+                          "headers": dict(headers)})
+        return 200, {}, b"ok"
+
+
+def _seam_factory(wire):
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.http import HttpClient
+    from fuzzlab.tools.probesender import SeamProbeSender
+    return SeamProbeSender(HttpClient(RequestBudget(100), ["h"], transport=wire.transport))
+
+
+def _requests_factory(wire):
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    return RequestsProbeSender(session=wire)
+
+
+#: Every concrete (non-wrapper, non-abstract) seam class, with how to build it over a
+#: recording wire. A new sender found by `_seam_classes` must be added here.
+PLACEMENT_FACTORIES = {
+    ("fuzzlab.tools.probesender", "SeamProbeSender"): _seam_factory,
+    ("fuzzlab.tools.probesender", "RequestsProbeSender"): _requests_factory,
+}
+
+
+def placement_problems(send) -> list[str]:
+    """Send a marked value at each placeable location; it must arrive there only."""
+    out = []
+    for location in ("query", "body", "header"):
+        wire = _Wire()
+        try:
+            send(wire, location)
+        except Exception as exc:                          # noqa: BLE001 (reported)
+            out.append(f"{location}: raised {exc!r}")
+            continue
+        got = wire.sent[-1]
+        where = [k for k in ("query", "body", "headers")
+                 if got[k].get("X-Probe") == "zqmark"]
+        if where != [{"header": "headers"}.get(location, location)]:
+            out.append(f"{location}: landed in {where}")
+    return out
+
+
+def _via(factory):
+    def send(wire, location):
+        factory(wire).send("http://h/a.php", "X-Probe", "zqmark",
+                           method="POST" if location == "body" else "GET",
+                           location=location)
+    return send
+
+
+def test_every_concrete_sender_has_a_placement_factory():
+    concrete = {(m, c) for m, c, w in _seam_classes()
+                if not w and (m, c) != ("fuzzlab.oracle.probe", "Sender")}
+    assert concrete == set(PLACEMENT_FACTORIES)
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_every_sender_places_a_probe_where_the_point_says(key):
+    assert placement_problems(_via(PLACEMENT_FACTORIES[key])) == []
+
+
+def test_the_greybox_sender_places_a_probe_where_the_point_says():
+    from fuzzlab.greybox.run import RequestsCorrelatingSender
+
+    def send(wire, location):
+        RequestsCorrelatingSender(session=wire, id_factory=lambda: "c").send_correlated(
+            "http://h/a.php", "X-Probe", "zqmark", location=location)
+    assert placement_problems(send) == []
+    with pytest.raises(UnplaceableLocation):
+        send(_Wire(), "fragment")
+
+
+def test_the_placement_check_catches_a_relocating_sender():
+    class Relocating:                           # BUG-0115's shape: header -> query
+        def __init__(self, wire):
+            self._wire = wire
+
+        def send(self, url, param, value, timing=False, method="GET", location="query",
+                 content_type=None, entries=None):
+            key = "data" if location == "body" else "params"
+            return self._wire.request(method, url, **{key: {param: value}})
+    assert placement_problems(_via(Relocating)) == ["header: landed in ['query']"]
+
+
+@pytest.mark.xfail(strict=True, reason="BUG-0115 instance 4, pinned not fixed: the probe "
+                   "senders' last branch still sends an unknown location (e.g. fragment) "
+                   "as query. Fixing it can move scored ground-truth results and needs a "
+                   "live scored multitarget run (PA-0042/0047); flagged to the orchestrator")
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_senders_refuse_an_unplaceable_location(key):
+    with pytest.raises(UnplaceableLocation):
+        PLACEMENT_FACTORIES[key](_Wire()).send("http://h/a.php", "p", "v",
+                                               location="fragment")

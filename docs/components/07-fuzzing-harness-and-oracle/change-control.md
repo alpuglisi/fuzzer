@@ -22,6 +22,84 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0063 — Link siblings, header points with a session breaker, POST selectors, neutral host values; BUG-0115 (forms phase 2, lane A) (2026-10-14)
+- Change:
+  - **Link siblings (`store_adapter`):** every query-bearing crawled URL's query becomes
+    a `form` row with `enctype` NULL (`_import_link_sets`, after forms, so forms win;
+    the first crawled link wins, `ORDER BY rowid`). Values pass `redact_sibling`
+    (sensitive name or identifier-like raw value → `""`; raw value from
+    `query_pairs`, percent-decoded only). `entries_refusal` (one check for forms and
+    link sets) refuses a set with a destructive or credential entry. Sets with two or
+    more names are bound; one-name sets only give header points their query.
+  - **POST selectors (`form_skip_reason`):** fuzzed unless a control name is a
+    `formnav.settings_word`, the select name is shorter than 3, or the crawler's
+    verdict is `settings`; GET selectors unaffected. `_import_forms` fuzzes a POST
+    picker repeated at several actions once. `enctype` read NULL-safe.
+  - **Points (`harness/auto`):** crawl points carry `origin="crawl"`, their example's
+    `value_shapes` (inherited by name when the example is empty or a filler, one pass)
+    and `base_value=127.0.0.1` for ip/host shapes; siblings are sent through
+    `_send_value` (loopback for ip/host/url defaults, fillers as they are).
+    Ground-truth points carry `origin="ground-truth"`.
+  - **Header points:** `header_points_from_store` (2xx GET pages, representative query
+    from `core.forms.first_link_set` only, destructive pages skipped and reported,
+    appended last); `run_auto(header_names=)`; `plan_run(header_points=)` refuses them
+    with ground-truth points; `fuzzlab auto --header-points [NAMES]` (off by default),
+    names checked before the store opens, and with an identity the lower-bound cost
+    (`header_point_cost`, derived from the strategies) is refused over `budget_total`.
+  - **Header breaker (`SeamProbeSender`):** registers `add_logout_listener` on its main
+    manager; a logout seen on a header probe's response, or on the first main send
+    after one, sets `header_stop_reason` unless `isolated_copy_logins()` (lane B; read
+    with `getattr(self, "isolated_copy_logins", lambda: 0)()` until lane B merges)
+    rose since; later header sends raise `HeaderPointsStopped` before the gate. The
+    pipeline leaves the remaining header keys `pending`, subtracts them from checked
+    keys, and reports `metrics["header_breaker"]` and `skipped_points`.
+  - **Senders:** `check_send_header` in the Seam, Requests and greybox header branches.
+  - **Strategies:** the command-injection timing and OOB strategies start from
+    `Candidate.base_value` (baselines and a payload prefix) when set (CC-AUD-0032 refers
+    here); `SqliBooleanStrategy.probes` named for the cost estimate.
+  - **BUG-0115:** greybox `send_correlated` places header probes in headers and refuses
+    any other unplaceable location (`UnplaceableLocation`); `DomXssStrategy` applies only
+    to query/fragment points and never relocates; the browser executor refuses an
+    unplaceable observe or store location before starting a browser. The probe senders'
+    unknown-location fallback is pinned by a strict xfail (not fixed).
+  - **Supersedes** CC-FUZZ-0062's binding where FR-FUZZ-42's "Siblings" clause was
+    amended (link queries; neutral host values; blank identifiers) and its "never a POST
+    selector" rule.
+- Impact:
+  - **Behaviour:** crawl-sourced runs bind link siblings, fuzz POST pickers, and (opt-in)
+    probe request headers; hostname-shaped form defaults are now sent as `127.0.0.1`.
+    Ground-truth runs gain no candidate (tested per real contract); their evaluation
+    rows grow by the four new rules (`R-SQLI-HEADER`/`R-XSS-HEADER` within sqli/xss
+    plans): the four `tests/data/auto_summary/*` goldens' "negatives" were re-derived,
+    not regenerated (PA-0073(3)): 41→87 and 2→48, i.e. +2 rules × 23 points.
+  - **Changed existing tests** (requirement changes, not silent edits): the POST-picker
+    case of `test_unsafe_forms_are_never_imported` now expects a settings-named picker
+    (FR-FUZZ-42 superseded); `test_evaluate_category_filter_scopes_rules` derives its
+    sqli rule count from the rule set (PA-0001); the two ground-truth header-location
+    sender tests now mark their URL explicit, as `run_auto` does.
+  - **ML:** `rules_fired` drifts on crawl runs (CC-ML-0027).
+  - **Residuals:** header-logging pages grow the lab DB per probe; state-changing
+    plain visits repeat per header probe; a site-wide picker is probed at one action;
+    an identifier-like sibling is sent blank (a gate needing it does not confirm); the
+    pipeline's fingerprint probe has no siblings (as before); the web page shows breaker
+    stops as "pending" without the reason (lane C rewords that text).
+- Risk: medium (more traffic and real submissions), within the gates above; header
+  points are opt-in and budget-checked.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase2.py`, 237 passed + 1 skipped joint test until
+    lane B merges; `tests/test_sender_conformance.py`, 9 passed + 2 strict xfail) — done
+  - [x] FR-FUZZ-43; FR-FUZZ-42 amended in place; NFR-FUZZ-safe `Enforced by:` — done
+  - [x] BUG-0115 / PA-0115 / ERROR_LOG — done
+- Review: reviewers A and B, draft v1–v3 (scratchpad `p2-a-draft.md`), with two agreed
+  deviations (`.invalid` filler exempt from neutral values; header representative
+  queries from link-set rows only).
+- Effectiveness: verified offline (the tests above; mutation check 40/40 killed over
+  the new logic). Live bWAPP verification (`[design]`, PA-0015): crawl from
+  `portal.php` with `--follow-selector-forms bug`, then `auto --points crawl --identity
+  … --header-points User-Agent,Referer,bWAPP` with `budget_total` raised; expected new
+  confirmations: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37, #43, #44, #48.
+
 ### CC-FUZZ-0062 — Forms as injection points, probed with their sibling fields (forms phase 1) (2026-10-13)
 - Change:
   - **`store_adapter.import_spider`:**

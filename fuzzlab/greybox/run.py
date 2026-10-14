@@ -38,7 +38,7 @@ from fuzzlab.greybox.reward import GreyboxSignal, shaped_reward
 from fuzzlab.mutation.catalog import record_variant, refuse_destructive
 from fuzzlab.mutation.operators import default_operators
 from fuzzlab.mutation.semantics import SemanticsValidator
-from fuzzlab.oracle.probe import Probe
+from fuzzlab.oracle.probe import Probe, UnplaceableLocation
 
 DEFAULT_APP_ROOT = "/var/www/html"
 _SQL_ERR = re.compile(
@@ -160,7 +160,14 @@ class RequestsCorrelatingSender:
         # silently following a redirect would report the wrong response
         # (and can crash outright on a self-referencing Location value).
         kwargs = {"timeout": self._timeout, "headers": headers, "allow_redirects": False}
-        if entries is not None:                   # a form point's full entry list
+        if location not in ("query", "body", "header"):
+            # refuse, never relocate (BUG-0115, PA-0115)
+            raise UnplaceableLocation(f"cannot place a probe at location {location!r}")
+        if location == "header":
+            from fuzzlab.core.http import check_send_header
+            check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
+            headers[param] = value                # BUG-0115: it went into the query
+        elif entries is not None:                 # a form point's full entry list
             kwargs["data" if location == "body" else "params"] = list(entries)
         elif location == "body":
             kwargs["data"] = {param: value}

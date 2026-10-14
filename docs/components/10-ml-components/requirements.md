@@ -54,6 +54,11 @@ the oracle owns truth (the oracle/advisory split).
   method (BUG-0075's label fix) would change a feature's meaning, so it needs a
   `FEATURE_VERSION` bump. It is flagged as a versioned follow-up. Labels and seen keys
   are method-aware already (FR-ML-17).
+  *(CC-ML-0027 note, forms phase 2, 2026-10-14:)* `rules_fired` now also counts the
+  new value-shape and header rules (FR-AUD-20), which fire only on crawl points. Crawl-run
+  training rows recorded after this change are therefore not comparable with earlier
+  ones. Ground-truth runs are unchanged. `CANDIDATE_FEATURE_VERSION` is deliberately not
+  bumped (documented only, reviewers' Q8).
 - **FR-ML-6** Attach as **plugins** on `core/` hooks; shipping without ML is a
   config change, not a code change. *(Implemented CC-ML-0017 / CC-PLUG-0005 /
   CC-FUZZ-0050 / CC-UI-0041.)*

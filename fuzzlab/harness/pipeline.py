@@ -33,6 +33,7 @@ from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
 from fuzzlab.oracle import Candidate, Oracle, category_to_oracle_class
+from fuzzlab.oracle.probe import HeaderPointsStopped
 
 
 @dataclass
@@ -70,7 +71,8 @@ def _candidate_of(ev: dict) -> Candidate:
                      store_url=ev.get("store_url"), store_param=ev.get("store_param"),
                      content_type=ev.get("body_content_type"),
                      base_entries=(tuple(tuple(e) for e in ev["entries"])
-                                   if ev.get("entries") else None))
+                                   if ev.get("entries") else None),
+                     base_value=ev.get("base_value"))
 
 
 def _confirmation_key(ev: dict) -> tuple:
@@ -168,6 +170,23 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     store.conn.commit()
 
     confirmed_keys: set[tuple] = set()
+    # Forms phase 2 (FR-FUZZ-43): once a sender stops header probing (the main session
+    # was logged out right after one), every remaining header key is left unconfirmed:
+    # its rows keep `pending` (unlabelled) and the reason goes to the metrics.
+    stopped_keys: set[tuple] = set()
+    breaker: list[str] = []
+
+    def _confirm(key: tuple, ev: dict) -> None:
+        if breaker and ev.get("location") == "header":
+            stopped_keys.add(key)
+            return
+        try:
+            if oracle.confirm(_candidate_of(ev), sender) is not None:
+                confirmed_keys.add(key)
+        except HeaderPointsStopped as exc:
+            breaker.append(str(exc))
+            stopped_keys.add(key)
+
     try:
         if selected is None:
             # Unbudgeted (or fallback): one confirmation per key, on its first row, in
@@ -178,17 +197,19 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             for key, cid, ev in confirmable:
                 if key not in confirmed_or_tried:
                     confirmed_or_tried.add(key)
-                    if oracle.confirm(_candidate_of(ev), sender) is not None:
-                        confirmed_keys.add(key)
-                status[cid] = CHECKED
+                    _confirm(key, ev)
+                if key not in stopped_keys:
+                    status[cid] = CHECKED
         else:
             chosen = set(selected)
             for key in selected:                             # one confirmation per key
-                if oracle.confirm(_candidate_of(keyed[key][0][1]), sender) is not None:
-                    confirmed_keys.add(key)
-                for cid, _ev in keyed[key]:
-                    status[cid] = CHECKED
+                _confirm(key, keyed[key][0][1])
+                if key not in stopped_keys:
+                    for cid, _ev in keyed[key]:
+                        status[cid] = CHECKED
             for key, members in keyed.items():
+                if key in stopped_keys:
+                    continue
                 for cid, _ev in members:
                     status[cid] = CHECKED if key in chosen else SKIPPED_BUDGET
     finally:
@@ -197,7 +218,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         store.conn.executemany("UPDATE candidate SET oracle_status=? WHERE id=?",
                                [(st, cid) for cid, st in status.items()])
         store.conn.commit()
-    checked_keys = len(keyed) if selected is None else len(selected)
+    checked_keys = (len(keyed) if selected is None else len(selected)) - len(stopped_keys)
 
     findings = store.conn.execute(
         "SELECT COUNT(*) c FROM finding WHERE run_id=?", (run_id,)).fetchone()["c"]
@@ -221,6 +242,11 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                "oracle_no_confirmer": statuses.count(NO_CONFIRMER),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}
+    if breaker:
+        # one entry per header point left unconfirmed, for `skipped_points`
+        metrics["header_breaker"] = breaker[0]
+        metrics["header_breaker_skipped"] = sorted(
+            {(urlparse(k[0]).path or "/", k[2], k[1], breaker[0]) for k in stopped_keys})
     if budget is not None:
         used = budget.used()
         metrics["requests"] = used

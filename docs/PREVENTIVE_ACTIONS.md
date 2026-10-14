@@ -1445,3 +1445,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      against `core.urls.destructive_reason` in a test.
   2. **An endpoint the rule cannot catch is listed with its compensating control, or as
      a stated residual,** never silently. (from BUG-0114)
+
+- **PA-0115** — Strengthens `PA-0041` and `PA-0072`, after BUG-0115: greybox sent header
+  payloads in the query, and DOM XSS moved body payloads into the URL. Those rules
+  covered a seam's transport settings and signature, not where a payload lands.
+  1. **Refuse, never relocate.** A sender, strategy or executor that cannot place a
+     payload at the point's location raises (`UnplaceableLocation`) or gives no verdict.
+     It never sends it somewhere else.
+  2. **Placement is enforced by discovery.** `tests/test_sender_conformance.py` sends a
+     marked value at each placeable location through every concrete seam class (a new
+     one must register a factory) and asserts it lands there only; it is proven on a
+     synthetic relocating sender.
+  3. **The sweep is by mechanism:** every location branch of every component that
+     builds its own request. A known instance not fixed is pinned with a strict xfail
+     in the same change (`PA-0054(3)`). (from BUG-0115)
+

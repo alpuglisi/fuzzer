@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 
 from fuzzlab.audit import InjectionPoint, known_categories
+from fuzzlab.audit.value_shape import SAFE_HOST, neutral_value, value_shape
+from fuzzlab.core.redaction import is_credential_name
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
@@ -103,11 +105,15 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 points.append(InjectionPoint(url=base + path, param=gp.param,
                                              method=gp.method.upper(), location=gp.location,
                                              body_content_type=body_content_type,
-                                             sink_context=sink_context))
+                                             sink_context=sink_context,
+                                             origin="ground-truth"))
         elif is_dom and browser_available:
+            # BUG-0115 sweep: no ground-truth DOM point has another location today
+            # (pinned by tests/test_forms_phase2.py); the rewrite is left as is
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=base + path, param=gp.param,
-                                         method="GET", location=loc))
+                                         method="GET", location=loc,
+                                         origin="ground-truth"))
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))
@@ -122,20 +128,29 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         if browser_available:
             points.append(InjectionPoint(
                 url=base + opath, param=case.param, method=case.method,
-                location=case.location, store_url=base + spath, store_param=case.param))
+                location=case.location, store_url=base + spath, store_param=case.param,
+                origin="ground-truth"))
         else:
             skipped.append((opath, case.method, case.param,
                             "stored XSS (needs browser execution, M6)"))
     return points, skipped
 
 
-#: A crawl- or form-sourced parameter with one of these name tokens is never fuzzed.
-_CREDENTIAL_TOKENS = frozenset({"password", "passwd", "pwd", "pass", "secret"})
+#: A crawl- or form-sourced parameter with a credential name token is never fuzzed (the
+#: one predicate lives in `core.redaction` since forms phase 2, CC-CORE-0042).
+_credential_name = is_credential_name
 
 
-def _credential_name(name: str) -> bool:
-    from fuzzlab.core.redaction import name_tokens
-    return bool({t.lower() for t in name_tokens(name)} & _CREDENTIAL_TOKENS)
+def _send_value(value):
+    """What the fuzzer sends for an app-supplied default: loopback in place of an ip-,
+    host- or url-shaped one (FR-AUD-20), the importer's own fillers as they are."""
+    from fuzzlab.tools.store_adapter import is_filler
+    return value if is_filler(value) else neutral_value(value)
+
+
+def _shapes(example) -> frozenset[str]:
+    shape = value_shape(example)
+    return frozenset() if shape is None else frozenset({shape})
 
 
 def injection_points_from_store(store, run_id: int, base_url: str,
@@ -154,14 +169,20 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     # (BUG-0113).
     parts = urlsplit(base_url)
     base = f"{parts.scheme}://{parts.netloc}"
+    from fuzzlab.tools.store_adapter import is_filler
     rows = store.conn.execute(
         "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
-        "f.entries AS entries "
+        "p.example AS example, f.entries AS entries "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
         "WHERE p.run_id = ?",
         (run_id,),
     ).fetchall()
+    # (c2) a field whose own example says nothing ("" or our filler) takes the shapes
+    # its name has elsewhere in the run: one pass over the rows (PA-0095)
+    shapes_by_name: dict[str, set[str]] = {}
+    for r in rows:
+        shapes_by_name.setdefault(r["name"], set()).update(_shapes(r["example"]))
     points: list[InjectionPoint] = []
     seen: set[tuple[str, str, str]] = set()
     for r in rows:
@@ -185,13 +206,102 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         entries = None
         if r["entries"]:
             try:
-                entries = tuple(tuple(e) for e in json.loads(r["entries"]))
+                entries = tuple((n, _send_value(v)) for n, v in json.loads(r["entries"]))
             except (ValueError, TypeError):
                 entries = None
+        example = r["example"]
+        shapes = _shapes(example)
+        if example in (None, "") or is_filler(example):
+            shapes = frozenset(shapes_by_name.get(r["name"], ()))
         points.append(InjectionPoint(url=base + path, param=r["name"],
                                      method=method, location=r["location"] or "query",
-                                     base_entries=entries))
+                                     base_entries=entries, origin="crawl",
+                                     value_shapes=shapes,
+                                     base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
+                                                 else None)))
     return points
+
+
+#: Header points' names when ``--header-points`` is given bare.
+DEFAULT_HEADER_POINTS = ("User-Agent", "Referer")
+
+
+def header_point_cost() -> int:
+    """A lower bound on the requests one header point costs when nothing is found:
+    the sqli and xss confirmers' fixed probes, derived from the strategies themselves
+    (PA-0001)."""
+    from fuzzlab.oracle.strategies import (_TIMING_TEMPLATES, SqliBooleanStrategy,
+                                           SqliErrorStrategy, SqliTimingStrategy)
+    return (len(SqliErrorStrategy._probes) + len(SqliBooleanStrategy.probes)
+            + SqliTimingStrategy.baseline_samples + len(_TIMING_TEMPLATES)
+            + 1)                                   # the reflected-XSS marker
+
+
+def _header_page(status) -> bool:
+    return status is not None and 200 <= int(status) <= 299
+
+
+def header_points_from_store(store, run_id: int, base_url: str, names,
+                             skipped: list | None = None) -> list[InjectionPoint]:
+    """One header point per crawled 2xx GET page and header name (forms phase 2,
+    FR-FUZZ-43). The URL carries the page's representative query -- the first crawled
+    link set for that path (`core.forms.first_link_set`, already redacted), its ip/host/
+    url values sent neutral -- so the page runs as on a visit. A destructive page is
+    left out and reported. ``names`` are already checked
+    (`core.http.header_point_refusal`)."""
+    from urllib.parse import urlencode, urlsplit
+
+    from fuzzlab.core.forms import first_link_set
+    from fuzzlab.core.urls import destructive_reason
+    parts = urlsplit(base_url)
+    origin = f"{parts.scheme}://{parts.netloc}"
+    rows = store.conn.execute(
+        "SELECT url, status FROM page WHERE run_id = ? AND method = 'GET' ORDER BY id",
+        (run_id,)).fetchall()
+    points: list[InjectionPoint] = []
+    seen: set[str] = set()
+    for r in rows:
+        path = r["url"] if r["url"].startswith("/") else "/" + r["url"]
+        if path in seen or not _header_page(r["status"]):
+            continue
+        seen.add(path)
+        reason = destructive_reason(origin + path)
+        if reason is not None:
+            if skipped is not None:
+                skipped.extend((path, "GET", name, f"destructive URL ({reason!r})")
+                               for name in names)
+            continue
+        query = first_link_set(store.conn, run_id, path)
+        url = origin + path
+        if query:
+            url += "?" + urlencode([(n, _send_value(v)) for n, v in query])
+        points.extend(InjectionPoint(url=url, param=name, method="GET", location="header",
+                                     origin="crawl") for name in names)
+    return points
+
+
+def header_point_estimate(spider_db, names) -> tuple[int, int]:
+    """``(pages, requests)``: how many crawled 2xx GET pages would get header points
+    and a lower bound on their request cost. Reads the spider DB read-only, before any
+    store is opened (PA-0079)."""
+    import sqlite3
+    from pathlib import Path
+    from urllib.parse import quote
+
+    from fuzzlab.core.urls import destructive_reason, to_path
+    path = Path(spider_db)
+    if not path.exists():
+        return 0, 0
+    conn = sqlite3.connect(f"file:{quote(str(path.resolve()))}?mode=ro", uri=True)
+    try:
+        rows = conn.execute("SELECT url, status_code FROM discovered_pages").fetchall()
+    except sqlite3.Error:
+        rows = []
+    finally:
+        conn.close()
+    pages = {to_path(url) for url, status in rows if _header_page(status)}
+    pages = {p for p in pages if destructive_reason(p) is None}   # as the builder checks
+    return len(pages), len(pages) * len(names) * header_point_cost()
 
 
 class _CountingSender:
@@ -225,7 +335,8 @@ class _CountingSender:
 
 
 def plan_run(*, mode: str, ground_truth, selected_categories,
-             points_source: str = "auto") -> tuple[str, RunPlan]:
+             points_source: str = "auto",
+             header_points: bool = False) -> tuple[str, RunPlan]:
     """``(points source, run plan)`` for a run — pure, no store, no traffic. The one
     usage-level resolution (PA-0003): `run_auto` calls it, and `fuzzlab auto` calls it
     **before opening the store**, so a D15 fail-safe or a ground-truth source without a
@@ -235,6 +346,9 @@ def plan_run(*, mode: str, ground_truth, selected_categories,
         source = "ground-truth" if ground_truth is not None else "crawl"
     if source == "ground-truth" and ground_truth is None:
         raise RunModeError("points_source='ground-truth' requires a ground-truth contract")
+    if header_points and source != "crawl":
+        raise RunModeError("header points come from a crawl: use them with crawl points "
+                           "(--points crawl), not ground truth")
     gt_categories = None
     if ground_truth is not None:
         gt_categories = categories_from_vuln_classes(
@@ -250,7 +364,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
-             prioritizer=None) -> PipelineResult:
+             prioritizer=None, header_names=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -270,7 +384,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
-                            points_source=points_source)
+                            points_source=points_source,
+                            header_points=bool(header_names))
 
     skipped: list[tuple[str, str, str, str]] = []
     if source == "ground-truth":
@@ -282,6 +397,10 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
             sender.allow_explicit([u for p in points for u in (p.url, p.store_url)])
     else:
         points = injection_points_from_store(store, run_id, base_url, skipped=skipped)
+        if header_names:
+            # last, so they are confirmed last and a budget runs out on them first
+            points += header_points_from_store(store, run_id, base_url,
+                                               list(header_names), skipped=skipped)
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
@@ -298,6 +417,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                           plugins=plugins, confirm_budget=confirm_budget,
                           prioritizer=prioritizer)
     result.metrics["points_source"] = source
+    result.metrics["header_points"] = sum(1 for p in points if p.location == "header"
+                                          and p.origin == "crawl")
+    skipped += result.metrics.pop("header_breaker_skipped", [])
     result.metrics["skipped_points"] = skipped
     anonymous = getattr(sender, "auth_endpoint_anonymous_sends", None)
     if anonymous is not None:

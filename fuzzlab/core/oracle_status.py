@@ -12,7 +12,10 @@ SKIPPED_BUDGET = "skipped_budget"    # the confirmation budget ran out before it
 NO_CONFIRMER = "no_confirmer"        # its category has no oracle confirmer yet
 #: Written for every confirmable row before the oracle loop starts, then overwritten as
 #: the oracle reaches it (CC-CORE-0033, BUG-0071): a run that crashes mid-loop leaves its
-#: unreached rows `pending` — unlabelled — never NULL (which reads as labelled).
+#: unreached rows `pending` — unlabelled — never NULL (which reads as labelled). Also left
+#: on rows a safety breaker stopped before the oracle reached them (forms phase 2: the
+#: header-point breaker, CC-CORE-0042); the reason is in the run's ``metrics`` /
+#: ``skipped_points``, not in this column.
 PENDING = "pending"
 
 #: Statuses whose "no finding" is not a negative — nobody checked. Never trained on as

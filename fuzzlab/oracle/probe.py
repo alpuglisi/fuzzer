@@ -34,9 +34,13 @@ class Candidate:
     # `fuzzlab.audit.engine.InjectionPoint.body_content_type` -- `None` unless
     # the ground truth positively declared the format (CC-FUZZ-0032/FR-FUZZ-19).
     content_type: str | None = None
-    # A crawled form's default entry list: every probe of `param` sends the other
-    # fields too (forms phase 1, FR-FUZZ-42); bound by `Oracle.confirm`.
+    # A crawled form's default entry list (or a crawled link's query, forms phase 2):
+    # every probe of `param` sends the other fields too (FR-FUZZ-42/43); bound by
+    # `Oracle.confirm`.
     base_entries: tuple[tuple[str, str], ...] | None = None
+    # What a command-injection probe starts from in place of the app's own ip/host
+    # default (`audit.value_shape.SAFE_HOST`; FR-AUD-20). None: the strategies' own.
+    base_value: str | None = None
 
 
 @dataclass
@@ -45,6 +49,18 @@ class Verdict:
     vuln_class: str
     mechanism: str
     evidence: dict[str, Any] = field(default_factory=dict)
+
+
+class HeaderPointsStopped(RuntimeError):
+    """A sender refuses every further header probe of this run: the main session was
+    logged out right after one (it is bound to a probed header). Raised before the
+    send; the pipeline leaves the remaining header points unconfirmed and reports the
+    reason (forms phase 2, FR-FUZZ-43)."""
+
+
+class UnplaceableLocation(ValueError):
+    """A sender or executor cannot put a payload where the point says it goes. It
+    refuses instead of sending it somewhere else (BUG-0115, PA-0115)."""
 
 
 class Sender:

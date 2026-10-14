@@ -3,6 +3,30 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0042 — Link sets in `form`; one header-point name rule; credential-name predicate (forms phase 2, lane A) (2026-10-14)
+- Change:
+  - `core/forms.py`: `LINK_SET_ENCTYPE` (NULL), `is_link_set(row)`,
+    `first_link_set(conn, run_id, path)` — the one store reader of `form.enctype`
+    (guard test: no other module selects it). The migration-20 comment states the
+    widened meaning. No schema change, no migration.
+  - `core/http.py`: `HEADER_POINT_DENY` (framing, routing incl. `x-forwarded-proto/
+    scheme/ssl/port/prefix/server/uri`, `x-original-host`, `x-http-host-override`,
+    method override, credential), `header_point_refusal`, `HeaderPointRefused`,
+    `check_send_header`. `X-Forwarded-For`, `X-Real-IP` and `Client-IP` are allowed.
+  - `core/redaction.py`: `CREDENTIAL_TOKENS` / `is_credential_name` (moved from
+    `harness.auto`, which keeps `_credential_name` as an alias).
+  - `core/oracle_status.py`: `PENDING`'s definition also covers rows a safety breaker
+    stopped (reason in metrics); no value or set changes.
+- Impact: as FR-CORE-32. Existing stores are read unchanged: every Phase-1 `form` row
+  has a non-NULL `enctype`.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_forms_phase2.py`) — done
+  - [x] FR-CORE-32 — done
+- Review: as CC-FUZZ-0063 (item 3: one predicate; item 2: deny-list; should-fix 2).
+- Effectiveness: verified offline.
+
 ### CC-CORE-0040 — Shared identifier-like value predicate (`looks_like_identifier`) (2026-10-14)
 - Change:
   - **`core/redaction.looks_like_identifier(value)`:** one total predicate (PA-0096)

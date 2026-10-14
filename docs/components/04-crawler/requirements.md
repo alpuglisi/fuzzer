@@ -44,9 +44,21 @@ fuzzer.
   - the gate, per-option checks, fail-safes and cookie isolation are as in
     `tools/formnav.py`;
   - redirects found this way are crawled as ordinary links.
+  - *(Amended in place, CC-CRAWL-0014, 2026-10-14.)* The settings words are the one
+    shared `formnav.settings_word`, extended with `sort`, `tz`, `currency`, `country`,
+    `region`, `layout`, `skin`, `view`, `display`, `default`, `notify`, `privacy`,
+    `visibility` and the token pair `per page` (`t` deliberately not: "Don't"). It
+    governs navigation too, so a picker or option so named is no longer submitted.
+    On bWAPP this refuses exactly the six option labels Phase 1 refused (measured over
+    all 159 options of the local build).
 - **FR-CRAWL-9 (landings and forms recorded, CC-CRAWL-0013)** A redirect's landing URL
   is recorded with its query (redacted). Every form seen is recorded in
   `discovered_forms` (redacted).
+- **FR-CRAWL-10 (what a picker did, CC-CRAWL-0014)** When selector navigation submits a
+  picker, the spider records its verdict in `selector_verdicts`, keyed by
+  `formnav.signature_key`: `settings` (it set a cookie, or kept redirecting to itself)
+  or `navigation`. What is submitted is unchanged. The importer never fuzzes a POST
+  picker seen as `settings` (FR-FUZZ-43).
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

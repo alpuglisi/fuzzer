@@ -60,6 +60,14 @@ class StorageManager:
                 sig TEXT UNIQUE
             )
         ''')
+        # What each submitted selector form did (forms phase 2, FR-CRAWL-10), keyed by
+        # `formnav.signature_key`: "navigation" or "settings".
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS selector_verdicts (
+                sig TEXT PRIMARY KEY,
+                verdict TEXT
+            )
+        ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -73,6 +81,17 @@ class StorageManager:
         """Clears previous results so a fresh crawl starts from an empty map."""
         self.cursor.execute('DELETE FROM discovered_pages')
         self.cursor.execute('DELETE FROM discovered_forms')
+        self.cursor.execute('DELETE FROM selector_verdicts')
+        self.conn.commit()
+
+    def record_verdict(self, sig, verdict):
+        """File what a submitted selector form did (``settings`` wins over
+        ``navigation`` for the same signature)."""
+        self.cursor.execute(
+            "INSERT INTO selector_verdicts (sig, verdict) VALUES (?, ?) "
+            "ON CONFLICT(sig) DO UPDATE SET verdict = CASE WHEN excluded.verdict = "
+            "'settings' THEN 'settings' ELSE selector_verdicts.verdict END",
+            (sig, verdict))
         self.conn.commit()
 
     def record_form(self, record):
@@ -383,8 +402,10 @@ class LocalSpider:
             if why:
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
-            for target in formnav.enumerate_form(record, self._isolated_submit,
-                                                 self._in_scope):
+            key = formnav.signature_key(record)
+            for target in formnav.enumerate_form(
+                    record, self._isolated_submit, self._in_scope,
+                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v)):
                 if not self._destructive(target) and not self.storage.is_visited(target):
                     more.append((target, depth + 1, 'form'))
         return more

@@ -155,7 +155,7 @@ class ConfirmationStrategy:
     tolerance = 0.6       # measured latency may fall this far short of the request
 
     def _confirm_timing(self, candidate: Candidate, sender: Sender,
-                        templates: list[str]) -> Verdict | None:
+                        templates: list[str], baseline_value: str = "1") -> Verdict | None:
         """Confirm a time-based injection: latency must rise with the requested delay.
 
         Shared by SQLi (SQL SLEEP) and command injection (shell sleep). Robust
@@ -163,7 +163,7 @@ class ConfirmationStrategy:
         two requested delays — never one slow response.
         """
         base = build_baseline([
-            self._send(sender, candidate, "1", timing=True).elapsed
+            self._send(sender, candidate, baseline_value, timing=True).elapsed
             for _ in range(self.baseline_samples)
         ])
         for template in templates:
@@ -212,10 +212,13 @@ class SqliBooleanStrategy(ConfirmationStrategy):
     def _similar(a: str, b: str, rel: float = 0.05, absolute: int = 24) -> bool:
         return abs(len(a) - len(b)) <= max(absolute, rel * max(len(a), len(b), 1))
 
+    #: benign, true, false (in that order)
+    probes = ("1", "1 AND 1=1", "1 AND 1=2")
+
     def confirm(self, candidate, sender):
-        benign = self._send(sender, candidate, "1")
-        true_p = self._send(sender, candidate, "1 AND 1=1")
-        false_p = self._send(sender, candidate, "1 AND 1=2")
+        benign = self._send(sender, candidate, self.probes[0])
+        true_p = self._send(sender, candidate, self.probes[1])
+        false_p = self._send(sender, candidate, self.probes[2])
         # A true condition looks like the benign page; a false condition does not.
         if self._similar(benign.text, true_p.text) and not self._similar(true_p.text, false_p.text):
             return Verdict(True, self.vuln_class, self.mechanism,
@@ -692,7 +695,14 @@ class CommandInjectionStrategy(ConfirmationStrategy):
     category = "command-injection"
 
     def confirm(self, candidate, sender):
-        return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
+        # FR-AUD-20: a point whose default was a host starts from loopback, so the app
+        # never receives its own (third-party) host from us
+        base = candidate.base_value
+        if base is None:
+            return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
+        return self._confirm_timing(candidate, sender,
+                                    [base + t for t in _CMDI_TIMING_TEMPLATES],
+                                    baseline_value=base)
 
 
 class RegexDosStrategy(ConfirmationStrategy):
@@ -807,7 +817,8 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
         for template in _CMDI_OOB_TEMPLATES:
             token = self._listener.register()
             canary = self._listener.callback_url(token)
-            self._send(sender, candidate, template.format(url=canary))
+            self._send(sender, candidate,
+                       (candidate.base_value or "") + template.format(url=canary))
             hit = self._listener.wait_for(token, timeout=self._timeout)
             if hit is not None:
                 return Verdict(True, self.vuln_class, self.mechanism,
@@ -1636,15 +1647,24 @@ class _BrowserXssStrategy(ConfirmationStrategy):
 
 
 class DomXssStrategy(_BrowserXssStrategy):
-    """M6: payload in the URL (query/fragment) executes client-side (no server round-trip)."""
+    """M6: payload in the URL (query/fragment) executes client-side (no server round-trip).
+
+    Only a query or fragment point applies: a body or header payload is never moved
+    into the URL (BUG-0115, PA-0115) -- that would record a URL-borne DOM XSS against
+    a POST field or a header, and cost a browser load per probe for nothing."""
     vuln_class = "xss-dom"
     mechanism = "browser-execution"
+    _PLACEABLE = ("query", "fragment")
+
+    def applies(self, candidate: Candidate) -> bool:
+        return super().applies(candidate) and candidate.location in self._PLACEABLE
 
     def _observe(self, candidate, payload, token):
-        location = candidate.location if candidate.location in ("query", "fragment") else "query"
+        if candidate.location not in self._PLACEABLE:     # refuse, never relocate
+            return ExecObservation(False)
         return self._executor.run(
             ExecRequest(url=candidate.url, param=candidate.param, value=payload,
-                        location=location), token)
+                        location=candidate.location), token)
 
 
 class StoredXssStrategy(_BrowserXssStrategy):

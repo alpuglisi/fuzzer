@@ -140,6 +140,34 @@
       "transaction_type": "Path Traversal / Unconfined File Read",
       "when": { "location_in": ["query", "body"], "sink_context_in": ["fs_path_read"] },
       "reference": "directory-traversal"
+    },
+    {
+      "id": "R-SQLI-HEADER",
+      "category": "sql-injection",
+      "transaction_type": "SQL Injection",
+      "when": { "location_in": ["header"], "origin_in": ["crawl"] },
+      "reference": "sql-injection"
+    },
+    {
+      "id": "R-XSS-HEADER",
+      "category": "xss",
+      "transaction_type": "Reflected Input",
+      "when": { "location_in": ["header"], "origin_in": ["crawl"] },
+      "reference": "xss"
+    },
+    {
+      "id": "R-COMMAND-INJECTION-VALUE",
+      "category": "command-injection",
+      "transaction_type": "Command Injection",
+      "when": { "value_shape_in": ["ip", "hostname"] },
+      "reference": "command-injection"
+    },
+    {
+      "id": "R-FILE-INCLUSION-VALUE",
+      "category": "file-inclusion",
+      "transaction_type": "File Inclusion / Traversal",
+      "when": { "value_shape_in": ["filename", "path"] },
+      "reference": "file-inclusion"
     }
   ]
 }
