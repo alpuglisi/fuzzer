@@ -14,7 +14,15 @@ changed, and the reason. Reference the commit hash where useful.
   every header; the crawler's cookie check covers credential cookies only (CC-SESS-0022,
   CC-CRAWL-0025, PA-0132). The sweep's one gap, the auditor's browser not adopting a
   browser login's localStorage (so an SPA rendered logged out there), is fixed too: it
-  adopts the in-scope `storage_state` through the crawl's helper (CC-AUD-0040).
+  adopts the in-scope `storage_state` through the crawl's helper (CC-AUD-0040). Review
+  of 26507a1:
+  - one `credential_cookie` predicate, so the crawl notices the JS-set `token` cookie
+    being cleared, while a rotated one is re-adopted;
+  - the anonymous probe arm carries the ambient cookies;
+  - an IP host takes only exact-domain cookies;
+  - the login waits for the app's follow-up requests by condition, not by a quiet gap.
+  The reported flaky run was traced to a tree caught mid-edit (a strict xfail turning
+  XPASS); 24 loaded runs showed no flake.
 
 ## 2026-10-14 (forms phase 4: constraint-aware filling and reveal navigation)
 - **The crawler can now submit Angular forms whose button stays disabled until their

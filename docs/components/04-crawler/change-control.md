@@ -22,6 +22,18 @@ Newest first.
     (the fixture now rewrites the cookie with the localStorage token); the mutation that
     checks every cookie fails it — done
   - [x] FR-CRAWL-14 in place — done
+- Review of 26507a1 (reviewer B; a follow-up commit):
+  - `BrowserSession.checked_cookies` now uses `session.manager.credential_cookie`:
+    every login-response cookie, and a jar cookie that copies the token or looks like
+    an identifier. Only an ambient jar cookie is skipped. Before, a submission deleting
+    only the JS-set `token` cookie went unseen (must-fix 1; test: the fixture's notes
+    form deletes only that cookie and the crawl stops).
+  - `BrowserSession.rotating_cookies` names the jar ones. `_client_session_intact`
+    applies `_storage_rotated` to them: a new identifier-like value is re-adopted;
+    cleared, empty, `"null"` or `"undefined"` is a loss. A login-response cookie keeps
+    strict equality (should-fix 2; a parametrised unit, and the rotation crawl test,
+    whose fixture rotates the cookie with localStorage).
+  - `_readopt_session` resets the checked cookies to their adopted values.
 - Follow-up (same branch, with CC-AUD-0040): `_start_browser` creates its context through
   `browserauth.context_options(session)`, the one adoption helper the auditor now shares.
   The crawl's behaviour is unchanged.

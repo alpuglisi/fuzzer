@@ -85,8 +85,21 @@ CC-SESS-0022 (and CC-CRAWL-0025 for the crawler's session check):
   `fuzzlab session print` prints each. `session_header` keeps its rule (the Cookie first),
   so for a browser login it now returns the cookie, and greybox gets it.
 - The crawler's cookie check covers the session's credential cookies only
-  (`BrowserSession.checked_cookies`): a jar cookie is the app's to change, like its
-  localStorage (it is adopted through `storage_state` already).
+  (`BrowserSession.checked_cookies`). *(Review of 26507a1, reviewer B, must-fix 1:)*
+  the first version left out every jar cookie, the JS-set `token` included, so a
+  submission that deleted only that cookie went unseen. That was BUG-0132's symptom
+  back in the crawler. One predicate, `manager.credential_cookie` (PA-0003), now decides
+  for both `_corrupted` and `checked_cookies`. These are credentials: a login-response
+  cookie; a jar cookie equal to a detected token; a jar cookie that looks like an
+  identifier. Only an ambient jar cookie is skipped. A credential jar cookie may rotate
+  to a new identifier-like value (re-adopted; should-fix 2), while cleared, empty,
+  `"null"` or `"undefined"` is a loss. A login-response cookie must keep its value.
+- Review of 26507a1, reviewer A:
+  - the anonymous arm of the differential carries the ambient jar cookies the corrupted
+    arm keeps, so the arms differ only by the credential (A-S1);
+  - an IP host takes no parent-domain cookie (A-N2);
+  - residuals stated in FR-SESS-19: host-level port scope, as PA-0123 states it, and a
+    cookie's `path` not kept (A-S2, A-N2).
 - Tests (`tests/test_session_browser_login.py`): a fixture page `/profile` that answers 200
   only with the JS-set cookie, reached through the real seam (`HttpClient` with the
   manager) and through `session_headers` (it fails before the fix); the bearer alone
@@ -167,6 +180,7 @@ PA-0002 sweep (every place a session moves from one client to another; dispositi
   every header (`session_headers`).
 - session → greybox (`greybox_cli`, `session_header`): carries a Cookie only, by design
   (greybox's targets are the generated labs, cookie sessions). It now receives the
-  JS-set cookie; a bearer is not carried. This is pre-existing, recorded, and not in this
-  class's reach for greybox's targets.
+  JS-set cookie; a bearer is not carried. **Remaining gap, not built here (reviewer
+  A-N1):** greybox should eventually take `session_headers()` (all headers) so it can
+  carry a bearer.
 - session → M6 executor (`browserexec` `storage_headers`): no caller passes a session.

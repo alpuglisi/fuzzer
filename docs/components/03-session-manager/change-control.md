@@ -53,6 +53,41 @@ Newest first.
     real-path send, the cookie-only probe, re-login and the isolated copy); the cookie
     copy of the bearer left uncorrupted (the corrupted-arm unit, the cookie-only probe);
     `secure`, host scope or expiry ignored (the `_jar_cookies` table) — done
+- Review of 26507a1 (reviewers A and B; a follow-up commit on the same branch):
+  - **B must-fix 1:** `manager.credential_cookie(name, value, state)`, one predicate
+    (PA-0003) for `_corrupted` and the crawler's `checked_cookies`. These are
+    credentials: a login-response cookie; a jar cookie equal to a detected token; a jar
+    cookie that `_identifier_like` holds for. Before, every jar cookie, the JS-set
+    `token` included, was skipped by the crawler's check.
+  - **B should-fix 2:** a credential jar cookie may rotate (CC-CRAWL-0025).
+  - **A-S1:** `_spa_probe`'s anonymous arm carries the ambient jar cookies the
+    corrupted arm keeps.
+  - **A-N2:** `_jar_cookies` matches an IP host exactly, never a parent domain.
+  - **A-S2, A-N2 residuals** in FR-SESS-19: host-level port scope (PA-0123's exception)
+    and the cookie `path` not kept. A-N1, the greybox remaining gap, is in BUG-0132's
+    sweep.
+  - **A, PA-0128(2), the reported flaky run:**
+    - the file looped under load gave **0 failures in 24 runs** before the change below
+      (20 runs with 4 busy loops on the 4 CPUs, 4 runs pinned with `taskset` to one CPU
+      shared with 2 busy loops; 105 tests each);
+    - the reported "1 failed, 92 passed" with 93 collected, then 94, is reproduced
+      exactly: 26507a1's test file against 574902d's fetcher makes the strict xfail
+      XPASS (`FAILED [XPASS(strict)]`), i.e. a tree caught between the CC-AUD-0040 code
+      edit and its test conversion;
+    - the count is not nondeterministic: 93 collected at 26507a1 on every run, 94 after
+      CC-AUD-0040.
+    - One latent timing assumption was fixed anyway, by a condition: after a 2xx login
+      answer, `browserlogin._settle` now waits until a probe candidate was seen as well
+      as 3 quiet polls, within the same budget. Before, a quiet gap of 300 ms ended it,
+      so an app slow to start its follow-up GETs failed the login. Test: the fixture
+      app starts them 1.5 s after the answer.
+  - Mutation checks, each reverted and failing its tests:
+    - jar cookies never checked;
+    - no cookie rotation;
+    - login-response cookies rotating too;
+    - the anonymous arm without the ambient cookies;
+    - IP parent-domain matching;
+    - the settle trusting quiet alone.
 - Follow-up (same branch): the sweep's pinned gap is fixed by CC-AUD-0040. The auditor's
   browser now adopts the in-scope `storage_state` through `browserauth.context_options`,
   and the xfail is a passing test.

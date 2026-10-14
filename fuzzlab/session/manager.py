@@ -663,8 +663,9 @@ class SessionManager:
         """FR-SESS-5's differential for a browser login (reviewers A3, A-M1): the first
         in-scope GET the app made after the click (already scope- and
         destructive-checked; 2xx in the browser, no password in its URL) that answers
-        2xx when replayed with the credential, and whose answers **without** it and with
-        a **corrupted** credential (`_corrupted`) agree with each other and not with the
+        2xx when replayed with the credential, and whose answers **without** it (only the
+        ambient jar cookies, reviewer A-S1) and with a **corrupted** credential
+        (`_corrupted`) agree with each other and not with the
         credentialed one: the same non-2xx (non-5xx) status, or the same body, stable
         over two fetches each, that differs from the credentialed body (also stable).
         The corrupted arm keeps an endpoint that only reacts to the *presence* of an
@@ -675,6 +676,11 @@ class SessionManager:
         `_navigate` to this host only."""
         floor = bool(state.secure_only)
         good, bad_headers = state.apply({}), _corrupted(state).apply({})
+        # the anonymous arm carries the same ambient jar cookies the corrupted arm
+        # keeps (reviewer A-S1), so the two differ only by the credential
+        ambient = SessionState(state.host, state.identity, cookies={
+            n: v for n, v in (state.cookies or {}).items()
+            if not credential_cookie(n, str(v), state)}).apply({}) or None
 
         def ok(resp) -> bool:
             return 200 <= resp.status < 300
@@ -686,7 +692,7 @@ class SessionManager:
                 authed = self._probe_fetch(url, base_url, floor, host, good)
                 if not ok(authed):
                     continue
-                anon = self._probe_fetch(url, base_url, floor, host, None)
+                anon = self._probe_fetch(url, base_url, floor, host, ambient)
                 bad = self._probe_fetch(url, base_url, floor, host, bad_headers)
                 if anon.status >= 500 or bad.status >= 500:
                     continue
@@ -694,7 +700,7 @@ class SessionManager:
                     if anon.status == bad.status:
                         return url, None                  # e.g. 401 both ways
                     continue
-                anon2 = self._probe_fetch(url, base_url, floor, host, None)
+                anon2 = self._probe_fetch(url, base_url, floor, host, ambient)
                 bad2 = self._probe_fetch(url, base_url, floor, host, bad_headers)
                 authed2 = self._probe_fetch(url, base_url, floor, host, good)
             except SessionAuthError:
@@ -1011,18 +1017,43 @@ def _corrupted(state: SessionState) -> SessionState:
         bad = _corrupt_token(token if sep else str(value))
         headers[name] = f"{scheme} {bad}" if sep else bad
         tokens[token if sep else str(value)] = bad
-    jar = set(state.browser_cookies or ())
     cookies = {}
     for name, value in (state.cookies or {}).items():
         value = str(value)
         if value in tokens:
             cookies[name] = tokens[value]
-        elif name not in jar or _identifier_like(name, value):
+        elif credential_cookie(name, value, state):
             cookies[name] = secrets.token_hex(max(8, len(value) // 2))
         else:
             cookies[name] = value
     return dataclasses.replace(state, headers=headers, cookies=cookies,
                                browser_state=None)
+
+
+def _header_tokens(state: SessionState) -> set[str]:
+    """The credential values of ``state``'s headers (a bearer's token, a whole header
+    value when it has no scheme)."""
+    out = set()
+    for value in (state.headers or {}).values():
+        _scheme, sep, token = str(value).partition(" ")
+        out.add(token if sep else str(value))
+    return out
+
+
+def credential_cookie(name: str, value: str, state: SessionState) -> bool:
+    """Is cookie ``name=value`` of ``state`` a credential (BUG-0132, reviewer B)? The one
+    predicate (PA-0003) the corrupted arm (`_corrupted`) and the crawler's session check
+    (`browserauth.BrowserSession.checked_cookies`) share. A cookie the login response
+    set is one. A cookie a browser login took from the app's jar
+    (`SessionState.browser_cookies`) is one when its value equals a detected credential
+    token (the app's copy of the bearer, Juice Shop's ``token``), or it looks like an
+    identifier (`_identifier_like`: a sensitive name, an identifier-like or a long
+    value). Only an ambient jar cookie (short and plain, e.g. a language choice) is
+    not."""
+    value = str(value)
+    if name not in set(state.browser_cookies or ()):
+        return True
+    return value in _header_tokens(state) or _identifier_like(name, value)
 
 
 def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
@@ -1034,16 +1065,25 @@ def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
     host), not expired, and not ``secure`` unless the session is https-only
     (``secure_ok``: then every send of it is over https, FR-SESS-13). They then go
     through the session's one cookie path (`SessionState.apply`, sent only to the
-    session's host by `prepare`, under its transport floor)."""
+    session's host by `prepare`, under its transport floor). An IP host matches only
+    its own address (no parent domain, reviewer A-N2). A cookie's ``path`` is not kept:
+    it is sent host-wide (a stated residual, FR-SESS-19)."""
     import time
 
     from fuzzlab.session.browserlogin import canonical_host
+    import ipaddress
     now = time.time() if now is None else now
     mine = canonical_host(f"http://{host}/")
+    try:                    # an IP host has no parent domain: exact match only (A-N2)
+        ipaddress.ip_address((mine or "").strip("[]"))
+        is_ip = True
+    except ValueError:
+        is_ip = False
     out: dict[str, str] = {}
     for c in (storage or {}).get("cookies", []) or []:
         domain = canonical_host("http://" + str(c.get("domain") or "").lstrip(".") + "/")
-        if not domain or not mine or not (mine == domain or mine.endswith("." + domain)):
+        if not domain or not mine or not (
+                mine == domain or (not is_ip and mine.endswith("." + domain))):
             continue
         if c.get("secure") and not secure_ok:
             continue

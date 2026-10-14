@@ -199,11 +199,15 @@ fuzzer.
     action passes the same header scope. The auditor's browser (CC-AUD-0038) and the M6
     executor's storage headers (CC-FUZZ-0076) use the same mechanism.
   - **Session check.** After each authenticated submission (FR-CRAWL-13), besides the
-    injected credential cookies (since CC-CRAWL-0025, BUG-0132: not the cookies a
-    browser login took from the app's own jar, which the context gets from
-    `storage_state` and which the app may legitimately rewrite;
-    `BrowserSession.checked_cookies`) and `verify_live` (a browser login's protected
-    probe), each
+    injected credential cookies (since CC-CRAWL-0025, BUG-0132: `session.manager.
+    credential_cookie` decides, the same predicate as the corrupted arm. Every
+    login-response cookie counts, and so does a jar cookie the app's JS set when it
+    copies the token or looks like an identifier, e.g. Juice Shop's `token`; an ambient
+    jar cookie does not, `BrowserSession.checked_cookies`). A credential jar cookie may
+    rotate the way a localStorage entry may: a new non-empty, identifier-like value is
+    re-adopted, while cleared, empty, `"null"` or `"undefined"` is a loss. A
+    login-response cookie must keep its value. Then `verify_live` (a browser login's
+    protected probe) runs, and each
     adopted localStorage entry must still hold its value, read with `page.evaluate` on
     an open page of its origin; no such page, a read failure, or an entry cleared or set
     to an empty, `"null"`, `"undefined"` or non-identifier value is a loss (fail closed)
@@ -411,7 +415,7 @@ fuzzer.
   - Enforced by (scope of SPA traffic, both contexts): `tests/test_spa_capture.py::test_bare_submission_in_an_anonymous_crawl`, `tests/test_spa_routes.py::test_cross_origin_and_oversized_scripts_are_never_read`
   - Enforced by (no request body sent twice by the guard): `tests/test_browser_scope.py::test_a_redirected_post_navigation_is_submitted_once`
   - Enforced by (session headers only in scope, through the route; FR-CRAWL-14): `navguard.make_route_handler(headers=, header_scope=)`, `browserauth.header_scope_for` — `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`, `tests/test_browser_scope.py::test_session_headers_ride_a_redirect_hop_only_when_it_is_in_scope`, `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_the_header_guard_catches_synthetic_offenders`, `tests/test_browserauth.py::test_bearer_session_headers_go_through_the_route_only`, `tests/test_browserauth.py::test_an_https_sessions_headers_never_go_over_http`
-  - Enforced by (adopted browser session; FR-CRAWL-14): `browserlogin.filter_storage_state`, `LocalSpider._session_intact` — `tests/test_session_browser_login.py::test_storage_state_adoption_keeps_in_scope_origins_only`, `tests/test_session_browser_login.py::test_a_submission_that_clears_local_storage_stops_submitting`, `tests/test_session_browser_login.py::test_the_crawls_session_check_catches_a_revoked_token`, `tests/test_session_browser_login.py::test_a_cleared_token_still_stops_the_crawl_with_rotation_on`, `tests/test_session_browser_login.py::test_a_rotated_token_keeps_the_crawl_submitting`
+  - Enforced by (adopted browser session; FR-CRAWL-14): `browserlogin.filter_storage_state`, `LocalSpider._session_intact` — `tests/test_session_browser_login.py::test_storage_state_adoption_keeps_in_scope_origins_only`, `tests/test_session_browser_login.py::test_a_submission_that_clears_local_storage_stops_submitting`, `tests/test_session_browser_login.py::test_the_crawls_session_check_catches_a_revoked_token`, `tests/test_session_browser_login.py::test_a_cleared_token_still_stops_the_crawl_with_rotation_on`, `tests/test_session_browser_login.py::test_a_rotated_token_keeps_the_crawl_submitting`, `tests/test_session_browser_login.py::test_a_crawl_stops_when_only_the_token_cookie_is_deleted`, `tests/test_session_browser_login.py::test_a_rotated_credential_jar_cookie_is_readopted_and_a_cleared_one_is_a_loss`, `tests/test_session_browser_login.py::test_one_predicate_tells_credential_cookies_from_ambient_ones`
   *(CC-CRAWL-0023/0024, forms phase 4:)* **a reveal can only read**: from just before a
   reveal click or the first constraint-aware interaction until after the close, the
   reload and a quiet period, the route aborts every write and every navigation (its

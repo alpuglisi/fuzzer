@@ -76,11 +76,15 @@ class BrowserSession:
     storage_state: dict | None = field(repr=False)
     #: its in-scope localStorage entries, ``{origin: {name: value}}``
     local_storage: dict[str, dict[str, str]] = field(repr=False)
-    #: ``(name, value)`` of the session's credential cookies -- not the ones a browser
-    #: login adopted from the browser's jar (BUG-0132), which the context already gets
-    #: from ``storage_state`` and which the app may legitimately change -- for the
-    #: crawler's session check
+    #: ``(name, value)`` of the session's credential cookies
+    #: (`session.manager.credential_cookie`: every login-response cookie, and a jar
+    #: cookie that copies the token or looks like an identifier; never an ambient one),
+    #: for the crawler's session check (BUG-0132, reviewer B)
     checked_cookies: list[tuple[str, str]] = field(default_factory=list, repr=False)
+    #: the names among them a browser login took from the app's jar: the app may rotate
+    #: those (a new identifier-like value is re-adopted, `spider._storage_rotated`);
+    #: a login-response cookie must keep its value
+    rotating_cookies: frozenset = field(default_factory=frozenset, repr=False)
 
 
 def browser_session(manager, identity: str, base_url: str, *,
@@ -96,14 +100,17 @@ def browser_session(manager, identity: str, base_url: str, *,
         if raw else None
     local = {o["origin"]: {e["name"]: e["value"] for e in o["localStorage"]}
              for o in (storage or {}).get("origins", []) if o["localStorage"]}
+    from fuzzlab.session.manager import credential_cookie
     cookies = _cookies_of(state, base_url)
     jar = set(getattr(state, "browser_cookies", None) or ())
+    checked = [(c["name"], c["value"]) for c in cookies
+               if not jar or credential_cookie(c["name"], c["value"], state)]
     return BrowserSession(cookies=cookies,
                           headers=dict(getattr(state, "headers", None) or {}),
                           header_scope=header_scope_for(state, base_url, in_scope),
                           storage_state=storage, local_storage=local,
-                          checked_cookies=[(c["name"], c["value"]) for c in cookies
-                                           if c["name"] not in jar])
+                          checked_cookies=checked,
+                          rotating_cookies=frozenset(n for n, _v in checked if n in jar))
 
 
 def context_options(session: BrowserSession | None) -> dict:

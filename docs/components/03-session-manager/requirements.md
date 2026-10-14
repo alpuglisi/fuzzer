@@ -161,7 +161,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     (`_USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
     password only into the password control, from the credential store, never logged.
     One click (`spa.click_vetted`: covered -> Escape -> dispatch, labels re-read),
-    never retried within an attempt.
+    never retried within an attempt. After a 2xx login answer the page is settled until
+    it is quiet **and** a probe candidate has been seen, within the settle budget (5 s),
+    so an app slow to start its follow-up requests is not cut off by a quiet gap.
   - **The credential and success.** `detect.detect_session_credential` on the login
     request's own response (a cookie that response set, else a token in its JSON body,
     `exp` read for refresh); a non-2xx answer is a rejected login. Success is FR-SESS-5's
@@ -193,7 +195,14 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     bearer token the same corrupted token, every other credential cookie (one the login
     response set, or an identifier-like jar cookie) a random value, and keeps an ambient
     jar cookie (a short non-identifier value such as a language choice) as it is.
-    Re-login and isolated copies go through the same path.
+    Re-login and isolated copies go through the same path. *(Review of CC-SESS-0022:)*
+    which cookies are credentials is one predicate, `manager.credential_cookie`, used
+    by the corrupted arm and the crawler's check (FR-CRAWL-14). These are credentials:
+    every login-response cookie; a jar cookie equal to a detected token; a jar cookie
+    that `_identifier_like` holds for. Only a short, plain jar cookie is ambient. The
+    anonymous arm carries the ambient jar cookies too, so it differs from the corrupted
+    arm only by the credential (reviewer A-S1). An IP host takes only cookies for its
+    own address, never a parent domain's (A-N2).
   - **What is kept.** `SessionState.browser_state` = the login context's
     `storage_state()` (cookies and per-origin localStorage) without any entry whose
     name or value carries the password (review round 1, A-M2), then filtered to the
@@ -210,7 +219,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     another origin needs that origin in `auth_origins`. An app that makes no
     credential-dependent GET after its login cannot be confirmed (fails loudly).
     Username detection depends on `_USERNAME_HINT` (BUG-0121). Juice Shop itself has
-    not been exercised here (offline fixture only).
+    not been exercised here (offline fixture only). *(CC-SESS-0022 review:)* the jar
+    cookies and the bearer reach any port on the session's host, per PA-0123's stated
+    host-level exception (FR-SESS-12/13); origin-scoped sessions are a separate
+    follow-up (reviewer A). A jar cookie's `path` is not kept: a `path=/admin` cookie is
+    sent host-wide (A-N2).
 - **FR-SESS-18 (logout by redirect, CC-SESS-0019, BUG-0122)**
   - A redirect is a logout only when its target, resolved against the page, is either:
     - the session's own login URL: same host and path, an http→https upgrade on

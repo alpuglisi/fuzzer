@@ -1103,3 +1103,124 @@ def test_the_auditors_browser_renders_the_app_logged_in(spa):
     assert {o["origin"] for o in session.storage_state["origins"]} == \
         {lab.base.rstrip("/")}
     assert browserauth.context_options(None) == {}
+
+
+# --- BUG-0132 review: credential jar cookies are checked, rotations re-adopted -------
+JWT = "eyJhbGciOiAiSFMyNTYifQ.eyJqdGkiOiAiYWJjIn0.c2lnbmF0dXJl"
+
+
+def _jar_state():
+    return SessionState(HOST, "u", kind="bearer", headers={"Authorization": f"Bearer {JWT}"},
+                        cookies={"token": JWT, "lang": "en", "sid": "1",
+                                 "continueCode": "9f8e7d6c5b4a39281706f5e4d3c2b1a0"},
+                        browser_cookies=("continueCode", "lang", "token"))
+
+
+def test_one_predicate_tells_credential_cookies_from_ambient_ones():
+    """Reviewer B, must-fix 1 (PA-0003): a login-response cookie, a jar cookie copying
+    the token and an identifier-like jar cookie are credentials; a short plain jar
+    cookie is ambient. `_corrupted` and `checked_cookies` use the same predicate."""
+    from fuzzlab.session.manager import _corrupted, credential_cookie
+    from fuzzlab.tools import browserauth
+    state = _jar_state()
+    verdict = {n: credential_cookie(n, v, state) for n, v in state.cookies.items()}
+    assert verdict == {"token": True, "lang": False, "sid": True, "continueCode": True}
+    bad = _corrupted(state)
+    assert {n for n in state.cookies if bad.cookies[n] != state.cookies[n]} == \
+        {n for n, cred in verdict.items() if cred}
+
+    class Mgr:
+        def ensure(self, host, identity, base_url, *, operator=False):
+            return state
+    session = browserauth.browser_session(Mgr(), "u", f"http://{HOST}:1/",
+                                          in_scope=lambda u: True)
+    assert {n for n, _v in session.checked_cookies} == {"token", "sid", "continueCode"}
+    assert session.rotating_cookies == {"token", "continueCode"}
+
+
+def _spider_with(tmp_path, jar, injected, rotating):
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider(f"http://{HOST}:8080/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+
+    class Ctx:
+        pages = []
+
+        def cookies(self):
+            return [{"name": n, "value": v} for n, v in jar.items()]
+    sp._context = Ctx()
+    sp._browser_session = type("S", (), {"rotating_cookies": frozenset(rotating)})()
+    sp._injected_cookies = list(injected)
+    return sp
+
+
+@pytest.mark.parametrize("jar, ok, why", [
+    ({"sid": "S1", "token": "T1"}, True, None),
+    ({"sid": "S1", "token": "9f8e7d6c5b4a39281706f5e4d3c2b1a0"}, True, None),  # rotated
+    ({"sid": "S1"}, False, "token"),                                   # cleared
+    ({"sid": "S1", "token": "null"}, False, "token"),
+    ({"sid": "S1", "token": "undefined"}, False, "token"),
+    ({"sid": "S1", "token": ""}, False, "token"),
+    ({"sid": "9f8e7d6c5b4a39281706f5e4d3c2b1a0", "token": "T1"}, False, "sid"),  # strict
+])
+def test_a_rotated_credential_jar_cookie_is_readopted_and_a_cleared_one_is_a_loss(
+        tmp_path, jar, ok, why):
+    """Reviewer B, should-fix 2: a credential cookie the app's JS set may rotate to
+    another identifier-like value (re-adopted); cleared, empty, "null" or "undefined"
+    is a loss; a login-response cookie must keep its value."""
+    sp = _spider_with(tmp_path, jar, [("sid", "S1"), ("token", "T1")], {"token"})
+    try:
+        got_ok, got_why = sp._client_session_intact()
+        assert got_ok is ok and (why is None or why in got_why)
+        if ok and jar["token"] != "T1":
+            assert ("token", jar["token"]) in sp._injected_cookies
+    finally:
+        sp.storage.close()
+
+
+def test_a_crawl_stops_when_only_the_token_cookie_is_deleted(spa, tmp_path):
+    """Reviewer B, must-fix 1: the notes submission deletes only the JS-set ``token``
+    cookie (localStorage kept, the server still accepts the token): the crawl's
+    session check sees it and stops submitting."""
+    from fuzzlab.tools.spider import LocalSpider
+    pw = _password()
+    lab = spa(pw, clear_cookie=True)
+    sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                     engine="playwright", timeout_ms=10000,
+                     session_manager=_manager(lab, pw), identity="user",
+                     submit_spa_forms=["notes", "contact"])
+    run_crawl(sp)
+    assert len(lab.seen("POST", "/api/notes")) == 1
+    assert sp.spa_submit_stopped and "cookie 'token'" in sp.spa_submit_stopped
+    assert lab.seen("POST", "/api/contact") == []
+
+
+def test_a_probe_whose_body_depends_on_an_ambient_cookie_still_confirms(spa):
+    """Reviewer A-S1: the app sets an ambient ``lang`` cookie and every probe body
+    echoes it: the anonymous arm carries it as the corrupted arm does, so the two still
+    agree and the login is confirmed."""
+    pw = _password()
+    lab = spa(pw, invalid_200=True, lang=True)
+    mgr = _manager(lab, pw)
+    state = _login(mgr, lab)
+    assert state.cookies.get("lang") == "en" and state.probe_refusal_digest is not None
+    assert mgr.verify_live(HOST, "user", lab.base) is True
+
+
+def test_an_ip_host_takes_no_parent_domain_cookie():
+    """Reviewer A-N2."""
+    from fuzzlab.session.manager import _jar_cookies
+    storage = {"cookies": [{"name": "a", "value": "1", "domain": "0.0.1"},
+                           {"name": "b", "value": "2", "domain": "127.0.0.1"}]}
+    assert _jar_cookies(storage, "127.0.0.1", secure_ok=False) == {"b": "2"}
+
+
+def test_a_slow_apps_follow_up_requests_are_waited_for(spa):
+    """Review of 26507a1 (PA-0128(2)): the app starts its post-login requests 1.5 s after
+    the login answer, well past the 300 ms quiet window that used to end the settle; the
+    login still finds its protected probe (the settle waits for a candidate, within its
+    budget, instead of trusting a quiet gap)."""
+    pw = _password()
+    lab = spa(pw, followup_ms=1500)
+    state = _login(_manager(lab, pw), lab)
+    assert state.valid and state.protected_probe
