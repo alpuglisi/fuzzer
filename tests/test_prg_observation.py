@@ -20,7 +20,7 @@ import json
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, quote, quote_plus, urlsplit
 
 import pytest
 
@@ -272,6 +272,76 @@ def test_the_restore_value_is_the_fields_own_string_default_or_the_filler():
     assert _restore_value(cand("a.b[", "json", leaves)) == LADDER_TEXT       # malformed
 
 
+class _RestoreRaises:
+    """Evaluates ``#{a*b}`` in its follow-ups (a PRG SSTI); the restore send (a POST
+    without ``prg``) raises ``error``."""
+    prg_capable = True
+
+    def __init__(self, error):
+        self.error = error
+
+    def send(self, url, param, value, timing=False, method="GET", location="query",
+             content_type=None, entries=None, prg=False):
+        if not prg:
+            raise self.error
+        probe = Probe(303, "", headers={"Location": "/show"})
+        probe.followed = Probe(200, "<p>" + PrgSite._evaluate(value) + "</p>",
+                               headers={"Content-Type": "text/html"}, url="http://h/show")
+        probe.prg = PRG_OBSERVED
+        return probe
+
+
+def test_a_restore_that_raises_never_changes_the_outcome(tmp_path):
+    """Reviewers A S1 / B must-fix 1: the restore is total. Its failure is counted and
+    logged; the confirming verdict (and its finding) stands. An interrupt is not
+    contained (PA-0106(2): one contained, one propagated)."""
+    from fuzzlab.core.store import Store
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    cand = Candidate(url="http://h/p", param="v", method="POST", location="body",
+                     category="server-side-template-injection")
+    for error in (ConnectionError("down"), UnplaceableLocation("no"),
+                  RuntimeError("seam session")):
+        with Store(tmp_path / f"{type(error).__name__}.db") as store:
+            run_id = store.start_run("auto", "h")
+            oracle = Oracle(store=store, run_id=run_id)
+            verdict, unsure = oracle.confirm_outcome(cand, _RestoreRaises(error))
+            assert verdict is not None and verdict.confirmed and unsure is None
+            assert oracle.prg_counts["prg_restore_failed"] == 1
+            assert oracle.prg_counts["prg_restores"] == 0
+            assert store.conn.execute("SELECT COUNT(*) FROM finding").fetchone()[0] == 1
+    with pytest.raises(KeyboardInterrupt):
+        Oracle().confirm_outcome(cand, _RestoreRaises(KeyboardInterrupt()))
+
+
+def test_the_sender_chain_run_auto_builds_accepts_prg(tmp_path, monkeypatch):
+    """Reviewer B's nit: the chain `run_auto` hands the pipeline (ground truth:
+    `_CountingSender`; crawl: `_FragmentGuard` over it) reports the real sender's PRG
+    capability."""
+    from fuzzlab.core.store import Store
+    from fuzzlab.harness import auto
+    from fuzzlab.labels import contract
+    from tests.test_auto import GT_DIR
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def capture(points, store, run_id, sender, plan, **kw):
+        seen.append(sender)
+        raise Stop
+    monkeypatch.setattr(auto, "run_pipeline", capture)
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("auto", "h")
+        for source in ("ground-truth", "crawl"):
+            with pytest.raises(Stop):
+                auto.run_auto(base_url="http://127.0.0.1:1/", store=store, run_id=run_id,
+                              sender=RequestsProbeSender(), mode="automatic",
+                              ground_truth=contract.load(GT_DIR), points_source=source)
+    assert [type(s).__name__ for s in seen] == ["_CountingSender", "_FragmentGuard"]
+    assert all(accepts_prg(s) is True for s in seen)
+    assert accepts_prg(auto._CountingSender(_NoPrg(RequestsProbeSender()))) is False
+
+
 # --- M5 ------------------------------------------------------------------------------
 def test_a_reflection_confirmed_only_through_the_follow_up_is_stored_xss(site):
     """P6: the value rendered on another request is stored XSS, evidence ``prg``."""
@@ -280,6 +350,37 @@ def test_a_reflection_confirmed_only_through_the_follow_up_is_stored_xss(site):
     assert verdict is not None and verdict.mechanism == "reflected-context"
     assert verdict.vuln_class == "xss-stored"
     assert verdict.evidence["observation"] == "prg"
+
+
+def test_a_payload_that_rode_the_redirect_is_reflected_xss(site):
+    """P6 refined: a GET probe whose 302 target carries the payload in its query, and
+    whose rendered follow-up executes it structurally, is reflected XSS (``prg-redirect``),
+    never stored."""
+    app = site()
+    verdict = Oracle().confirm(Candidate(url=app.base + "/search", param="q",
+                                         category="xss"), RequestsProbeSender())
+    assert verdict is not None and verdict.vuln_class == "xss-reflected"
+    assert verdict.evidence["observation"] == "prg-redirect"
+    assert any(p == "/results" and q.get("q") == verdict.evidence["signature"]
+               for _m, p, q in [(m, urlsplit(x).path, d) for m, x, d in app.log])
+
+
+@pytest.mark.parametrize("encode", [
+    lambda v: v, lambda v: quote(v, safe=""), lambda v: quote_plus(v),
+    lambda v: html.escape(v), lambda v: json.dumps(v)[1:-1]])
+def test_a_follow_up_url_carrying_any_form_of_the_token_rode_the_redirect(encode):
+    from fuzzlab.oracle.strategies import _rode_the_redirect
+    token, fragment = "zqxbab12cd34", "\"><script>zqxbab12cd34</script>"
+    probe = Probe(302, "", followed=Probe(200, "", url="http://h/r?x=" + encode(
+        fragment) + "&y=1"))
+    assert _rode_the_redirect(probe, [fragment, token])
+    # the payload alone, in this encoding (not only its plain token), is recognised
+    value = "\"><svg onload=1>\\x"            # a quote and a backslash: every form differs
+    bare = Probe(302, "", followed=Probe(200, "", url="http://h/r?x=" + encode(value)))
+    assert _rode_the_redirect(bare, [value])
+    clean = Probe(302, "", followed=Probe(200, "", url="http://h/profile"))
+    assert not _rode_the_redirect(clean, [fragment, token])
+    assert not _rode_the_redirect(Probe(302, ""), [fragment, token])
 
 
 def test_a_json_follow_up_echoing_the_payload_never_confirms_m5(site):

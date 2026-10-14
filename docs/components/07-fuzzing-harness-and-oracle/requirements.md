@@ -1233,32 +1233,42 @@ rewards) derives from it.
     observed through its own follow-up without it; a control the app rejected (no
     follow-up) is a refusal.
   - **Classification (P6).** A reflection confirmed only through a follow-up is
-    recorded `xss-stored` (evidence `observation: "prg"`); an M2 confirmation only
+    recorded `xss-stored` (evidence `observation: "prg"`) when the follow-up's URL
+    carries neither the payload nor its token in any reflected form (raw, percent,
+    form `+`, HTML-entity, JSON-escaped; `strategies._rode_the_redirect`); when it does,
+    the payload rode the redirect and it is `xss-reflected` with `observation:
+    "prg-redirect"` (coordinator's refinement); an M2 confirmation only
     through a follow-up carries `observation: "prg"`, `second_order: true`; other
     strategies add `observation: "prg"`.
   - **Cost (P8).** A follow-up is one more request of its probe
     (`Probe.follow_up_sends`): counted by `_CountingSender` (the run's `requests`) and
     `_CostCounter` (the bandit's cost), spent from the client's `RequestBudget`. The
     pipeline reports `prg_follow_ups` (after a POST-family probe), `prg_follow_ups_get`,
-    `prg_unobserved` and `prg_restores` when non-zero; `fuzzlab auto` prints them on
+    `prg_unobserved`, `prg_restores` and `prg_restore_failed` when non-zero; `fuzzlab auto` prints them on
     one line only then. A run with no PRG redirect keeps its metrics (the
     `score_only` golden summary is byte-identical with a PRG-capable sender).
   - **Stored state (P9).** After a candidate's run that made a follow-up after a
     POST-family probe, one benign send of the form's own default for the field (or the
     importer's text filler) at the point, without PRG (counted `prg_restores`; not for
-    a raw whole body or a header point).
+    a raw whole body or a header point). The restore is total: the verdict is decided
+    first, and a restore send that raises is contained, counted `prg_restore_failed`
+    and logged with the host and the error's class only (an interrupt propagates).
   - **Residuals (stated):** the last payload (or the restore value) stays in the lab
     account; a payload that breaks the page makes later checks of that page false
     negatives; history pages hold earlier tokens (fresh tokens and P5 reject them, at
     the cost of a false negative); a 307/308 after a POST is never observed; an
     anonymous follow-up carries no cookie the 3xx set, so an anonymous flow keeping
-    the value in a session the POST just created is not observed; a GET probe whose
-    redirect target carries the payload is still recorded `xss-stored` when confirmed
-    only through the follow-up (P6 as agreed); `SqliEvaluationMarkerStrategy` is not
-    opted in (not in the agreed list).
+    the value in a session the POST just created is not observed;
+    `SqliEvaluationMarkerStrategy` is not opted in (not in the agreed list); the restore
+    is itself a submission, so it adds one more write per candidate whose run made a
+    POST-family follow-up; its value is the crawl-time form default, which may be a
+    stale earlier value if the crawl saw an already-mutated page (a cost in
+    cleanliness, not safety).
   - Enforced by: `tests/test_prg_observation.py::test_prg_ssti_confirms_only_through_the_follow_up`,
     `tests/test_prg_observation.py::test_every_send_of_a_prg_run_asks_for_the_follow_up`,
     `tests/test_prg_observation.py::test_a_reflection_confirmed_only_through_the_follow_up_is_stored_xss`,
+    `tests/test_prg_observation.py::test_a_payload_that_rode_the_redirect_is_reflected_xss`,
+    `tests/test_prg_observation.py::test_a_restore_that_raises_never_changes_the_outcome`,
     `tests/test_prg_observation.py::test_a_json_follow_up_echoing_the_payload_never_confirms_m5`,
     `tests/test_prg_observation.py::test_a_rejected_control_refuses_m2`,
     `tests/test_prg_observation.py::test_a_history_page_still_showing_product_1_is_no_attribution`,

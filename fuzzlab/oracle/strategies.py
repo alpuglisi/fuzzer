@@ -193,6 +193,22 @@ def _via_prg(probe) -> bool:
     return getattr(probe, "followed", None) is not None
 
 
+def _rode_the_redirect(probe, values: list[str]) -> bool:
+    """Does the PRG follow-up's own URL carry one of ``values`` (the payload or its
+    token), in any reflected form: raw, percent, form ``+``, HTML-entity or
+    JSON-escaped (FR-FUZZ-49, P6)? Then the payload travelled in the redirect, not in
+    stored state. Compared case-insensitively (``%3c`` / ``%3C``)."""
+    import json
+    url = (getattr(getattr(probe, "followed", None), "url", None) or "").lower()
+    if not url:
+        return False
+    for value in values:
+        forms = _reflection_forms(value) | {json.dumps(value)[1:-1]}
+        if any(form and form.lower() in url for form in forms):
+            return True
+    return False
+
+
 class ConfirmationStrategy:
     vuln_class: str = ""
     mechanism: str = ""
@@ -613,7 +629,9 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         FR-FUZZ-49: each response is read as observed (`_observed`, whole: the HTML
         check and the structure from the same response). A break-out confirmed only
         in a PRG follow-up is the stored value rendered on another request: recorded
-        as ``xss-stored`` with ``observation: "prg"``."""
+        as ``xss-stored`` with ``observation: "prg"`` -- unless the follow-up's own URL
+        carries the payload or its token (`_rode_the_redirect`): the payload rode the
+        redirect, so it is ``xss-reflected`` with ``observation: "prg-redirect"``."""
         token = _token()
         marker = f"zqxm{token}"
         first = _observed(self._send(sender, candidate, marker))
@@ -628,6 +646,9 @@ class ReflectedXssStrategy(ConfirmationStrategy):
                 evidence = {"context": ref.context, "breakout": kind,
                             "signature": fragment}
                 if _via_prg(probe):
+                    if _rode_the_redirect(probe, [fragment, probe_token]):
+                        evidence["observation"] = "prg-redirect"
+                        return Verdict(True, self.vuln_class, self.mechanism, evidence)
                     evidence["observation"] = "prg"
                     return Verdict(True, StoredXssStrategy.vuln_class, self.mechanism,
                                    evidence)

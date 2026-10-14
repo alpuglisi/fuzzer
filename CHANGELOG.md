@@ -4,6 +4,12 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-FUZZ-49 review: PRG classification refined, the restore made total)
+- A reflection seen only after a redirect is `xss-stored` unless the redirect target
+  carries the payload (then `xss-reflected`, `prg-redirect`); a restore send that raises
+  no longer escapes a decided outcome (counted `prg_restore_failed`). Review of 991f0af
+  by the coordinator and reviewers A and B (CC-FUZZ-0078).
+
 ## 2026-10-14 (FR-FUZZ-49: post/redirect/get observation for the server-side confirmers)
 - **Why:** Juice Shop answers `POST /profile username=#{11*13}` with `302 /profile` and no
   `143`; only `GET /profile` shows it. The confirmers read the probe's own response and

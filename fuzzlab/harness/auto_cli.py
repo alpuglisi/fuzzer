@@ -496,12 +496,15 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         rpf = m.get("requests_per_finding")
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
-    if any(m.get(k) for k in ("prg_follow_ups", "prg_follow_ups_get", "prg_restores")):
+    if any(m.get(k) for k in ("prg_follow_ups", "prg_follow_ups_get", "prg_restores",
+                              "prg_restore_failed")):
         # FR-FUZZ-49: printed only when PRG observation did something (in `requests`)
         print(f"  post/redirect/get follow-ups: {m.get('prg_follow_ups', 0)} after POST, "
               f"{m.get('prg_follow_ups_get', 0)} after GET, "
               f"{m.get('prg_unobserved', 0)} without an observation; "
-              f"restores: {m.get('prg_restores', 0)}")
+              f"restores: {m.get('prg_restores', 0)}"
+              + (f" ({m['prg_restore_failed']} failed)" if m.get("prg_restore_failed")
+                 else ""))
     unsure = getattr(result, "inconclusive", None) or []
     if unsure:
         from fuzzlab.core.urls import to_route_path

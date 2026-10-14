@@ -138,8 +138,10 @@ class _FormBoundSender:
 
 #: The run's PRG counters (FR-FUZZ-49), reported in the pipeline's metrics when non-zero:
 #: follow-ups after a POST-family probe, after a GET probe, follow-ups that gave no
-#: observation (another redirect, a timeout), and the benign restores sent (P9).
-PRG_COUNTERS = ("prg_follow_ups", "prg_follow_ups_get", "prg_unobserved", "prg_restores")
+#: observation (another redirect, a timeout), the benign restores sent (P9), and the
+#: restores whose send raised (contained, reviewers A S1 / B must-fix 1).
+PRG_COUNTERS = ("prg_follow_ups", "prg_follow_ups_get", "prg_unobserved", "prg_restores",
+                "prg_restore_failed")
 
 
 class _PrgRun:
@@ -238,11 +240,28 @@ class Oracle:
         """P9 (FR-FUZZ-49), best effort: after a candidate's PRG run made a follow-up
         after a POST-family probe, one benign send of the form's own default (or the
         filler) at the point leaves the page without the last payload. Not for a raw
-        whole body (it has no field default) or a header point; no PRG asked."""
+        whole body (it has no field default) or a header point; no PRG asked.
+
+        Total (reviewers A S1 / B must-fix 1): the verdict is already decided (and a
+        finding may be written), so a restore send that raises never changes it. The
+        failure is a per-unit containment boundary (PA-0086): counted
+        (``prg_restore_failed``) and logged with the host and the error's class only,
+        never swallowed silently; ``BaseException`` (an interrupt) still propagates."""
         if candidate.content_type or candidate.location not in (
                 "query", "body", jsonbody.LOCATION):
             return
-        ConfirmationStrategy._send(sender, candidate, _restore_value(candidate))
+        try:
+            ConfirmationStrategy._send(sender, candidate, _restore_value(candidate))
+        except Exception as exc:                     # noqa: BLE001 - containment boundary
+            counts["prg_restore_failed"] += 1
+            from urllib.parse import urlsplit
+
+            from fuzzlab.core.obs import get_logger
+            get_logger("oracle").warning(
+                "post/redirect/get restore failed",
+                extra={"host": urlsplit(candidate.url).hostname or "",
+                       "error": type(exc).__name__})
+            return
         counts["prg_restores"] += 1
 
     def _confirm_outcome(self, candidate: Candidate, sender: Sender,

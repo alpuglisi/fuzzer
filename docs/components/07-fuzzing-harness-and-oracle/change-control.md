@@ -101,6 +101,18 @@ note of the same date.
   and 5 combined 6 passed, category 3 combined + spring_boot expedia + trackernest +
   category 4 7 passed. Each mutation in the deliverables is caught by at least one test.
   The live Juice Shop `/profile` SSTI check is the coordinator's.
+- Follow-up (review of 991f0af; coordinator, reviewers A and B), a second commit:
+  - P6 refined (coordinator): `xss-stored` only when the follow-up's URL carries neither
+    the payload nor its token in any reflected form (`strategies._rode_the_redirect`);
+    otherwise `xss-reflected`, `observation: "prg-redirect"`.
+  - The P9 restore is total (B must-fix 1, A S1): a restore send that raises is
+    contained, counted `prg_restore_failed`, logged with the host and error class only;
+    the outcome is returned unchanged; an interrupt propagates. A containment boundary
+    under PA-0086, reported, not a silent PA-0106 swallow.
+  - B's nit: a direct `accepts_prg` assertion on the chains `run_auto` builds; A's N1:
+    two restore residuals in FR-FUZZ-49.
+  - Mutation checks: never / always "rode the redirect", raw-only and no-JSON encodings,
+    restore not contained / interrupts contained / failure not counted: each caught.
 
 ### CC-FUZZ-0077 — Point selection judges a SPA route's fragment as a text (BUG-0131 sweep) (2026-10-14)
 - Change: `harness/auto._crawl_url_refusal` (point selection, FR-FUZZ-40) judged a SPA
