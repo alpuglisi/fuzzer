@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-SESS-20 review fix: the oracle's form-binding pin walks the sender chain)
+- **Why:** the oracle's `_SessionNotes` wrapper (CC-FUZZ-0080) became the outermost
+  sender, which broke a test that checked the outermost sender's type. The binding
+  itself was unaffected.
+- **What:** the test now walks the wrappers' `_inner` to look for `_FormBoundSender`,
+  and a new pin fixes the wrapper order with and without a scheduler. Tests only.
+  CC-FUZZ-0080 amendment.
+
 ## 2026-10-14 (BUG-0136: a refused navigation keeps the crawled page)
 - **Why:** the browser guard aborted a refused navigation (out of scope, destructive,
   refused method or body) with the default error code, so Chromium replaced the page

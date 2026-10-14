@@ -64,6 +64,22 @@ note of the same date.
 - Review round 2 of 97101a9 (2026-10-14; T4): `SeamProbeSender._session_note` reads the
   declared `Request.session_decision` (CC-CORE-0054) in place of round 1's
   `SESSION_DECISION` dynamic attribute.
+- Review fix of c69e6fb (2026-10-14): this entry's `_SessionNotes` (O2) became the
+  outermost sender a strategy is handed, which broke the pin
+  `tests/test_forms_phase1.py::test_the_oracle_binds_a_form_candidate_and_only_then`.
+  That test asserted the type of the outermost sender (`_FormBoundSender`) and now saw
+  `_SessionNotes`. The binding itself was unaffected (still one layer in), and no
+  production code reads a sender's type. The test was missed because neither related set
+  included `test_forms_phase1.py`. Fix (tests only): the test walks the wrappers'
+  `_inner` and checks that a form candidate's chain contains `_FormBoundSender` and a
+  non-form candidate's does not. A new pin,
+  `test_the_oracle_wraps_the_sender_in_a_fixed_order`, fixes the intended order:
+  `_SessionNotes(_FormBoundSender(...))` without a scheduler, and
+  `_CostCounter(_SessionNotes(_FormBoundSender(...)))` with one. Mutation checks:
+  dropping the oracle's `_FormBoundSender` wrap fails all 3 (1 binding + 2 order); swapping
+  `_CostCounter` and `_SessionNotes` fails the scheduler order pin. Every test file
+  that imports a module changed on this branch since cdde39f (104 files): 2350 passed,
+  4 skipped (labgen live-boot reproductions), 6 xfailed, 0 failed.
 
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's

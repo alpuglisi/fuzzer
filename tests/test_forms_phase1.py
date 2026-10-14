@@ -391,20 +391,63 @@ def test_the_binding_leaves_other_urls_and_methods_alone():
     assert [c[5] for c in inner.calls] == [None, None]
 
 
+def _sender_chain(sender):
+    """The class names of a sender and every sender it wraps (outermost first)."""
+    chain = []
+    while sender is not None:
+        chain.append(type(sender).__name__)
+        sender = vars(sender).get("_inner")
+    return chain
+
+
+class _ChainSeen:
+    """A strategy that records the sender chain it was handed."""
+    arm = "s"
+
+    def __init__(self):
+        self.seen = []
+
+    def applies(self, c):
+        return True
+
+    def confirm(self, c, sender):
+        self.seen.append(_sender_chain(sender))
+
+
 def test_the_oracle_binds_a_form_candidate_and_only_then():
-    seen = []
+    """A form candidate's strategy sends through `_FormBoundSender` (somewhere in its
+    sender chain); a non-form candidate's never does. The chain is walked through the
+    wrappers' ``_inner``, so the other wrappers (FR-SESS-20's `_SessionNotes`, the
+    scheduler's `_CostCounter`) do not hide the binding."""
+    s = _ChainSeen()
+    Oracle(strategies=[s]).confirm(_cand(), _Rec())
+    Oracle(strategies=[s]).confirm(_cand(base_entries=None), _Rec())
+    form, plain = s.seen
+    assert "_FormBoundSender" in form and form[-1] == "_Rec"
+    assert "_FormBoundSender" not in plain and plain[-1] == "_Rec"
 
-    class S:
-        arm = "s"
 
-        def applies(self, c):
-            return True
+class _OneArm:
+    """A minimal scheduler: keeps the order, records nothing."""
 
-        def confirm(self, c, sender):
-            seen.append(type(sender).__name__)
-    Oracle(strategies=[S()]).confirm(_cand(), _Rec())
-    Oracle(strategies=[S()]).confirm(_cand(base_entries=None), _Rec())
-    assert seen == ["_FormBoundSender", "_Rec"]
+    def order(self, ctx, arms):
+        return list(arms)
+
+    def update(self, ctx, arm, reward, cost=1):
+        pass
+
+
+@pytest.mark.parametrize("scheduler,chain", [
+    (None, ["_SessionNotes", "_FormBoundSender", "_Rec"]),
+    (_OneArm(), ["_CostCounter", "_SessionNotes", "_FormBoundSender", "_Rec"]),
+])
+def test_the_oracle_wraps_the_sender_in_a_fixed_order(scheduler, chain):
+    """The intended order (CC-FUZZ-0080): `_SessionNotes` outermost without a
+    scheduler, `_CostCounter(_SessionNotes(...))` with one; the form binding is inside
+    both, so every send the run makes is bound, noted and counted."""
+    s = _ChainSeen()
+    Oracle(strategies=[s], scheduler=scheduler).confirm(_cand(), _Rec())
+    assert s.seen == [chain]
 
 
 def test_requests_sender_sends_entries_as_body_or_query():
