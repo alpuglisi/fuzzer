@@ -1216,12 +1216,26 @@ rewards) derives from it.
     (a false negative);
   - after `load`, with no sink: executed=False, as before;
   - a sink that fires and then navigates: executed=True, as before;
-  - **during parsing or at `DOMContentLoaded` (before `load`):** now `goto` waits for a
-    `load` that never comes, so the run takes `timeout_ms` and raises; before, the
-    error page loaded and the run reported executed=False. *Open, flagged:* a raise
-    from the executor is not contained by the oracle or the pipeline (it ends the
-    confirmation loop), as already for a target whose own redirect is refused
-    (`net::ERR_ABORTED`, was `net::ERR_FAILED`).
+  - **during parsing or at `DOMContentLoaded` (before `load`):** the page never loads;
+    with no hit it is no verdict (BUG-0137, below); before BUG-0136 the error page
+    loaded and the run reported executed=False.
+  - **the target's own redirect refused:** no verdict (BUG-0137); it was a raise.
+  *(CC-FUZZ-0083, BUG-0137:)* **a page the executor could not observe is no verdict,
+  never the end of the run.**
+  - The observe navigation waits for the commit (`wait_until="commit"`), then for
+    `load` for at most `LOAD_WAIT_MS` (3 s, suppressed), then for the sentinel as
+    above. A load that a refused navigation superseded is not waited out: before, it
+    cost `timeout_ms` (8 s) and then a raise.
+  - A Playwright error or timeout of the context set-up, the plant or the observe
+    navigation is `UnplaceableLocation` with a reason (the error's class and text up to
+    the URL, never the URL, which carries the payload). So is a page that never reached
+    `load` by the end of the sentinel wait. Both apply only when there was no hit: a
+    hit recorded at any point is executed=True.
+  - Only Playwright errors are caught (PA-0106); any other exception propagates.
+    `browser.close()` failing on a dead browser is suppressed.
+  - A launch failure keeps BUG-0126's behaviour.
+  - As for a missing browser, other mechanisms still decide the candidate (the
+    oracle's `UnplaceableLocation` path).
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
     `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,
@@ -1230,7 +1244,8 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
     `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
-  - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_raises`
+  - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict`
+  - Enforced by (a page the executor could not observe is no verdict, never the end of the run; CC-FUZZ-0083, BUG-0137): `PlaywrightBrowserExecutor.run` (`wait_until="commit"`, `LOAD_WAIT_MS`, `except PlaywrightError`) — `tests/test_m6_navigation_failures.py::test_a_before_load_navigation_is_no_verdict_well_under_the_timeout`, `tests/test_m6_navigation_failures.py::test_a_hit_after_a_before_load_navigation_counts`, `tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline`, `tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url`, `tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed`
 - **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
   server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
   `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`

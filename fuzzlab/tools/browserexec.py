@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest
@@ -44,6 +45,25 @@ def _with_fragment(url: str, param: str, value: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
 
 
+def _failure_reason(exc) -> str:
+    """Why the browser observed nothing (BUG-0137): the error's class and the first
+    line of its text up to the URL. The URL carries the payload, so it is never
+    included."""
+    first = str(exc).splitlines()[0] if str(exc) else ""
+    return (f"the browser could not load the page ({type(exc).__name__}: "
+            f"{first.split(' at ', 1)[0][:120]})")
+
+
+def _loaded(page, error) -> bool:
+    """Has the page's document reached ``load`` (at any point so far)? Playwright
+    answers at once for a load already fired."""
+    try:
+        page.wait_for_load_state("load", timeout=1)
+        return True
+    except error:
+        return False
+
+
 class PlaywrightBrowserExecutor:
     """Drive a headless browser to confirm stored/DOM XSS. Lab-only, loopback targets."""
 
@@ -61,6 +81,11 @@ class PlaywrightBrowserExecutor:
     #: search sink, which fires at about one second). Polled; the wait ends on the hit.
     SETTLE_MS = 4000
     _POLL_MS = 100
+    #: How long the observe navigation waits for ``load`` after it commits (BUG-0137).
+    #: Bounded and suppressed: a page whose script navigates to a refused URL before
+    #: ``load`` never fires it (the aborted navigation stopped the load), and the
+    #: sentinel wait that follows sees a sink whenever it fires.
+    LOAD_WAIT_MS = 3000
 
     def _wait_for_token(self, page, hits: set, token: str) -> bool:
         """Wait up to `SETTLE_MS` for ``token`` in ``hits``, which the context's
@@ -82,6 +107,7 @@ class PlaywrightBrowserExecutor:
         if request.store is not None and request.store.location not in ("body", "query"):
             return ExecObservation(False, detail="unplaceable store location "
                                                  f"{request.store.location!r}")
+        from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import sync_playwright
 
         from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
@@ -108,9 +134,9 @@ class PlaywrightBrowserExecutor:
                 self._launch_failed(exc)
             self._failures = 0
             context = None
+            hits: set = set()
             try:
                 context = browser.new_context(service_workers="block")   # BUG-0111
-                hits: set = set()
                 # the sentinel is a binding: every document of the page calls back here,
                 # so a hit survives the page navigating afterwards (reviewer B)
                 context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
@@ -144,14 +170,37 @@ class PlaywrightBrowserExecutor:
                 if request.param is not None and request.value is not None:
                     target = (_with_fragment if request.location == "fragment"
                               else _with_query)(request.url, request.param, request.value)
-                page.goto(target, wait_until="load", timeout=self._timeout)
+                # BUG-0137: wait for the commit only, then for `load` briefly: a load
+                # that a refused navigation superseded never comes, and is not waited
+                # out (it was `timeout_ms`, then a raise)
+                page.goto(target, wait_until="commit", timeout=self._timeout)
+                load_ms = min(self.LOAD_WAIT_MS, self._timeout)
+                with suppress(PlaywrightError):
+                    page.wait_for_load_state("load", timeout=load_ms)
                 fired = self._wait_for_token(page, hits, token)   # BUG-0126: async sinks
-                return ExecObservation(executed=fired,
-                                       detail="playwright" if fired else "")
+                if fired:
+                    return ExecObservation(executed=True, detail="playwright")
+                if not _loaded(page, PlaywrightError):
+                    # never loaded, even by the end of the sentinel wait, and no hit:
+                    # the page was not observed -- no verdict, never a negative
+                    raise UnplaceableLocation(
+                        f"the page committed but did not finish loading within "
+                        f"{load_ms} ms (a navigation superseded its load, or it is "
+                        f"slow): not observed")
+                return ExecObservation(executed=False, detail="")
+            except PlaywrightError as exc:
+                # BUG-0137: a page that failed to plant or load (a refused redirect, a
+                # timeout, a crash) observed nothing: no verdict for this candidate --
+                # never a negative, never an exception that ends the run. A hit recorded
+                # before the failure still counts.
+                if token in hits:
+                    return ExecObservation(executed=True, detail="playwright")
+                raise UnplaceableLocation(_failure_reason(exc)) from None
             finally:
                 if context is not None:
                     release(context)
-                browser.close()
+                with suppress(PlaywrightError):      # BUG-0137: a dead browser closes too
+                    browser.close()
         finally:
             manager.__exit__(None, None, None)
 

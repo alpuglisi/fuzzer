@@ -192,4 +192,10 @@ Sweep additions (the PA-0002 table above, for what keeps running after an abort)
 | reveal window close failure (`spider._window`) | pages closed, route page sent to `about:blank` | already handled (CC-CRAWL-0024) |
 | `browserlogin._drive` after a refused submission | login page alive with the password filled | **fixed** (X3): field cleared |
 | `browserexec.run` | the page stays; the context is closed right after the wait | no leak (one probe per context); verdict shift recorded (X2) |
-| `fetcher.ContentFetcher.fetch` (auditor, `tools/fetcher.py`) | the same leak: one page for the whole audit, `_xhr_urls` reset per URL, `except` goes straight to the static fallback, so a previous page's XHRs are listed under the next URL's `xhr_urls` | **open, flagged**: the same one-line fix belongs to the auditor component (a CC-AUD entry), which this lane has no number for |
+| `fetcher.ContentFetcher.fetch` (auditor, `tools/fetcher.py`) | the same leak: one page for the whole audit, `_xhr_urls` reset per URL, `except` goes straight to the static fallback, so a previous page's XHRs are listed under the next URL's `xhr_urls` | **fixed** (added in review): `about:blank` before the static fallback, CC-AUD-0042 |
+
+Follow-up (added in review, BUG-0137): the M6 table's "during parsing" row and its
+"refused own redirect" row are now **no verdict**: the executor waits for the commit and
+a bounded `load`, and maps a Playwright failure or a page that never loaded, with no
+hit, to `UnplaceableLocation`. The "open, flagged" containment gap is fixed under
+BUG-0137 / CC-FUZZ-0083, and the auditor fetcher's twin of X1 under CC-AUD-0042.

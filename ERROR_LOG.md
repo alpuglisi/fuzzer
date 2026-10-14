@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Oracle/M6: a page the browser executor could not load ended the confirmation run (fixed, BUG-0137/PA-0137)
+- **Symptom:** one DOM/stored XSS candidate whose page timed out, crashed or had its own redirect refused raised out of `oracle.confirm` and `pipeline._confirm`; every later candidate stayed `pending`. After BUG-0136, a page that navigates by script to a refused URL before `load` also cost 8 s, then raised.
+- **Root cause:** `PlaywrightBrowserExecutor.run` mapped only a launch failure to "no verdict" (BUG-0126); a Playwright error of its context, plant or observe navigation escaped, and no layer above contains a mechanism's raw errors.
+- **Remediation:** CC-FUZZ-0083: the observe navigation waits for the commit, then for `load` for at most 3 s (suppressed). A Playwright error, or a page that never loaded, with no hit is `UnplaceableLocation` with a URL-free reason; a hit at any point counts. Only Playwright errors are caught. See `docs/bugs/BUG-0137-an-m6-page-failure-ended-the-confirmation-run.md`, PA-0137.
+- **Status:** Fixed.
+
 ## 2026-10-14 — Crawler: a refused script navigation replaced the page with Chromium's error page (fixed, BUG-0136/PA-0136)
 - **Symptom:** a page whose script navigated after load to an out-of-scope host or a destructive URL was stored with Chromium's error page as its content; its links were never crawled.
 - **Root cause:** `navguard`'s route aborted refused navigations with the default error code (Chromium then commits its error page); only the reveal window and BUG-0134's withheld branch used `"aborted"`.

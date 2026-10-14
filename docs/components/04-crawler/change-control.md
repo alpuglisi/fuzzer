@@ -58,6 +58,9 @@ Newest first.
       a burst of ticks after the fallback;
     - `_abort_code` returning the default fails 43 and passes 16. The iframe pins and
       M6 (a)/(b) pass either way, because they pin behavior that did not change.
+  - Sweep note (2026-10-14): the X1 twin in the auditor's `ContentFetcher.fetch` is
+    fixed under CC-AUD-0042. The M6 executor's failed or superseded loads are no
+    verdict under BUG-0137 / CC-FUZZ-0083.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:

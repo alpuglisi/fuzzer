@@ -22,6 +22,48 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
+- Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
+  - **(a)** The observe `goto` uses `wait_until="commit"`, then
+    `wait_for_load_state("load", timeout=min(LOAD_WAIT_MS, timeout_ms))` (3 s,
+    Playwright errors suppressed), then the sentinel wait as before.
+  - **(b)** A `playwright.sync_api.Error` (a timeout included) of the context set-up,
+    the plant or the observe navigation becomes `UnplaceableLocation` (no verdict) when
+    no hit was recorded. So does a page that never reached `load` by the end of the
+    sentinel wait (`_loaded`). The reason (`_failure_reason`) is the error's class and
+    its text up to the URL; it never includes the URL, which carries the payload. A hit
+    at any point is executed=True. No other exception is caught (PA-0106).
+  - `browser.close()` suppresses a Playwright error, so a dead browser cannot replace
+    the no-verdict.
+  - **(c)** Launch failures are unchanged (BUG-0126).
+  - The M6 semantics recorded in CC-FUZZ-0082 change for two rows: a before-`load`
+    script navigation to a refused URL and a refused own redirect are now no verdict.
+    X2's pin `test_m6_a_target_whose_own_redirect_is_refused_raises` is renamed
+    `..._is_no_verdict`. FR-FUZZ-48 is edited in place.
+- Impact (other components / project):
+  - The oracle and the pipeline are unchanged. A candidate whose page could not be
+    observed is decided by its other mechanisms, as for a missing browser (BUG-0126):
+    with none it is inconclusive (`unplaceable`), with others their verdict stands.
+  - Later candidates are now reached.
+  - A page that never loads costs `LOAD_WAIT_MS` + `SETTLE_MS` per payload instead of
+    `timeout_ms` and a raise.
+  - Test fakes of `playwright.sync_api` gain `Error` and `wait_for_load_state`.
+- Risk: low. A page that loads in over 3 s is still observed (its sink is seen during
+  the sentinel wait, and a late `load` makes a no-hit run a negative). Residuals are in
+  BUG-0137: the plant still waits for `load`, and the driver stop is not contained.
+- Deliverables:
+  - [x] code (`tools/browserexec.py`) — done
+  - [x] tests (`tests/test_m6_navigation_failures.py`; `test_navigation_aborts.py` M6
+    pins; fakes in `test_browser_scope.py`, `test_destructive_urls.py`,
+    `test_json_points.py`) — done
+  - [x] BUG-0137, PA-0137, ERROR_LOG, CHANGELOG; FR-FUZZ-48 edited in place — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-14): `tests/test_m6_navigation_failures.py` 5 passed. The before-`load` case takes 4.7 s;
+  it was 8 s and a raise. The related files (every test file importing `tools/browserexec.py` or `tools/fetcher.py`, the changed test files, the traceability guard, plus `test_oracle_browser.py` and `test_auto.py`; 16 files, FUZZLAB_REQUIRE_BROWSER=1): 866 passed, 2 xfailed, 0 skipped, 0 failed. Mutation checks:
+  - without the `except PlaywrightError` block, the two-candidate pipeline test fails
+    (the raise ends the run), as do the URL-free reason test and the renamed pin (c);
+  - with `wait_until="load"` restored, the timing test fails (8.8 s, not under 6.5 s).
+
 ### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
 - Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort
   every refused navigation with ERR_ABORTED, and `PlaywrightBrowserExecutor` runs under

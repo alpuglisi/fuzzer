@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0137: a page the M6 browser could not load no longer ends the run; the auditor's failed load ends the previous page)
+- **Why:** an exception from the M6 executor (a timeout, a refused own redirect, a page
+  whose load a refused navigation superseded) escaped the oracle and the pipeline and
+  ended confirmation for every remaining candidate. The auditor's fetcher had the same
+  left-alive-page leak as the crawler's X1.
+- **What:** the executor waits for the commit and a bounded `load`. A Playwright
+  failure, or a page that never loaded, with no hit is no verdict
+  (`UnplaceableLocation`); a hit counts whenever it lands. The auditor sends its page
+  to `about:blank` before the static fallback. CC-FUZZ-0083 (BUG-0137, PA-0137) and
+  CC-AUD-0042.
+
 ## 2026-10-14 (BUG-0136 review: a failed load ends the previous page; M6 shift recorded)
 - **Why:** with refused navigations aborted as ERR_ABORTED (BUG-0136) the previous page
   stays alive. After a failed load its fetches ran on under the next crawled URLs, and a

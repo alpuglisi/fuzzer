@@ -437,6 +437,53 @@ def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
     assert "/next" in a.requests and "/logout.php" not in a.requests
 
 
+_TICKER = ("<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
+           "headers: {'content-type': 'application/json'}, "
+           "body: JSON.stringify({['k' + (n++)]: 1})}), 50)</script>")
+
+
+def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
+    """X1's twin in the auditor (CC-AUD-0042): `ContentFetcher.fetch` keeps one page
+    for the whole audit. After a refused `goto` (/go redirects to /logout.php) it sends
+    the page to ``about:blank`` before the static fallback: A's ticker stops there, so
+    the server sees no tick once the fallback's own request is sent, and the next
+    URL's XHR list holds none of A's ticks (before, the ticks queued during the
+    fallback were listed under the next URL)."""
+    import time
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.fetcher import ContentFetcher
+    _chromium_or_skip(monkeypatch)
+    a = _Site()
+    a.pages["/"] = f"<html><body><p>A-OWN-CONTENT</p>{_TICKER}</body></html>"
+    a.redirects["/go"] = "/logout.php"
+    marks = {}
+    try:
+        with ContentFetcher(engine="playwright", timeout_ms=3000) as fetcher:
+            real = fetcher._static_fetch
+
+            def static_fetch(url):
+                marks[url] = (fetcher._page.url, len(a.log))
+                time.sleep(0.4)                  # time for a live document's ticker
+                return real(url)
+            fetcher._static_fetch = static_fetch
+            try:
+                first = fetcher.fetch(a.base)
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                skip_or_fail(f"chromium could not launch: {exc}")
+            assert "A-OWN-CONTENT" in first[2]
+            fetcher.fetch(a.base + "go")
+            _status, _ct, _html, next_xhr = fetcher.fetch(a.base + "next")
+    finally:
+        a.close()
+    shown, seen = marks[a.base + "go"]
+    assert shown == "about:blank"                              # the failed load ended A
+    fallback = a.log.index(("GET", "/go"), seen)
+    assert ("POST", "/tick") not in a.log[fallback:]           # no tick after that
+    assert not any("/tick" in url for url in next_xhr)         # none filed under /next
+    assert "/logout.php" not in a.requests
+
+
 # --- the M6 executor (X2, B-S1) -----------------------------------------------------
 def _m6_site():
     from fuzzlab.oracle.browser import SENTINEL
@@ -458,7 +505,9 @@ def _m6_site():
     return site
 
 
-def _m6_run(site, path, settle_ms=1500):
+def _m6_run(site, path, settle_ms=1500, value="x"):
+    """Run the real M6 executor on ``path``. A launch failure skips (or fails, when a
+    browser is required); any other no-verdict (`UnplaceableLocation`) propagates."""
     from tests._browser import skip_or_fail
     from fuzzlab.oracle.browser import ExecRequest
     from fuzzlab.oracle.probe import UnplaceableLocation
@@ -467,9 +516,11 @@ def _m6_run(site, path, settle_ms=1500):
     executor.SETTLE_MS = settle_ms
     try:
         return executor.run(ExecRequest(url=site.base + path.lstrip("/"), param="q",
-                                        value="x"), "tok")
+                                        value=value), "tok")
     except UnplaceableLocation as exc:
-        skip_or_fail(f"chromium could not launch: {exc}")
+        if str(exc).startswith("browser unavailable"):
+            skip_or_fail(f"chromium could not launch: {exc}")
+        raise
 
 
 def test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed(monkeypatch):
@@ -488,8 +539,8 @@ def test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative(monkeypat
     """(b): once loaded, the page navigates to /logout.php before any payload runs
     (and none does). The navigation is aborted with ERR_ABORTED, so the page stays and
     the run reports executed=False, with no exception. (A navigation during parsing,
-    before ``load``, is different: `goto` then times out and the run raises -- see
-    BUG-0136, "M6 semantic shift".)"""
+    before ``load``, is no verdict instead: BUG-0137,
+    `tests/test_m6_navigation_failures.py`.)"""
     _chromium_or_skip(monkeypatch)
     site = _m6_site()
     try:
@@ -513,15 +564,18 @@ def test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed(monkeypatch
     assert "/logout.php" not in site.requests
 
 
-def test_m6_a_target_whose_own_redirect_is_refused_raises(monkeypatch):
-    """(c): the observe URL itself redirects to /logout.php: the hop is refused and
-    the run raises, as before (now ``net::ERR_ABORTED``, was ``net::ERR_FAILED``)."""
-    from playwright.sync_api import Error as PlaywrightError
+def test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict(monkeypatch):
+    """(c): the observe URL itself redirects to /logout.php: the hop is refused with
+    ``net::ERR_ABORTED`` (it was ``net::ERR_FAILED``), and the run gives no verdict
+    (`UnplaceableLocation`, BUG-0137), never a Playwright error that ends the run. The
+    reason never carries the URL (whose query carries the payload)."""
+    from fuzzlab.oracle.probe import UnplaceableLocation
     _chromium_or_skip(monkeypatch)
     site = _m6_site()
     try:
-        with pytest.raises(PlaywrightError, match="ERR_ABORTED"):
-            _m6_run(site, "/redir")
+        with pytest.raises(UnplaceableLocation, match="ERR_ABORTED") as err:
+            _m6_run(site, "/redir", value="PAYLOAD-MARK")
     finally:
         site.close()
+    assert "PAYLOAD-MARK" not in str(err.value) and site.base not in str(err.value)
     assert "/logout.php" not in site.requests

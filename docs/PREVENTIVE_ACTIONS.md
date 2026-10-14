@@ -1752,3 +1752,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      same change** (here, every abort site), whatever feature the first fix was filed
      under. (from BUG-0136)
 
+
+- **PA-0137** — Strengthens `PA-0126(3)` (a browser that cannot start is no verdict) and
+  generalises FR-FUZZ-45/47's "never a silent negative" to a mechanism's external
+  failures, after BUG-0137: a page the M6 executor could not load raised out of the
+  oracle and the pipeline, which ended confirmation for every remaining candidate.
+  1. **A confirmation mechanism maps every expected failure of the external work it
+     depends on to "no verdict" at its own boundary,** not only the failure first seen.
+     For a browser this covers the start, the context, each navigation and the
+     observation (a page that never loaded and showed nothing). It uses the oracle's
+     no-verdict path (`UnplaceableLocation`, with a reason that carries no payload or
+     URL), and only for the named error class (PA-0106); a defect still propagates.
+     Evidence already gathered (a hit) still counts.
+  2. **A wait is never for an event a refused action can cancel:** wait for what is
+     certain (the commit), then bound the rest.
+  3. **Enforced by a run, not only a unit:** a multi-candidate run in which an early
+     candidate's mechanism fails and a later one must still be confirmed, plus one test
+     per failure point that mutation-checks the mapping. (from BUG-0137)
