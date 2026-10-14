@@ -531,6 +531,9 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
         def evaluate(self, js):
             return []
 
+        def wait_for_timeout(self, ms):              # the settle poll (BUG-0126)
+            pass
+
     class Context:
         request = types.SimpleNamespace(post=lambda *a, **k: None)
 
@@ -563,7 +566,7 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
-    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS", 0)
     PlaywrightBrowserExecutor().run(
         ExecRequest(url="http://h/comments/delete.php", param="q", value="x",
                     store=StoreStep(url="http://h/post.php", param="c", value="x")), "tok")

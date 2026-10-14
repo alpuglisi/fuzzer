@@ -1533,3 +1533,27 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A confirmer that relies on one probe form states the server-side filters it
      cannot pass, or carries a stated second form** (here: a seeded canary for
      containment allowlists, sent only after the plain one fails). (from BUG-0124)
+
+- **PA-0126** — Strengthens `PA-0035` (probe the real operation) and `PA-0123` (browser
+  confinement), after BUG-0126: the M6 browser executor had never run against a real
+  browser. It ignored the operator's Chromium (its launch configuration was a third
+  copy), let a launch failure abort the whole run, and read the sentinel 300 ms after
+  `load`, before an asynchronously rendered sink fired.
+  1. **Every Chromium launch takes its whole configuration from one helper**
+     (`navguard.chromium_launch_kwargs`: headless, scoped args, the operator's binary),
+     enforced by the AST guard at every `chromium.launch`, proven on a synthetic
+     offender. A second copy of launch settings is a defect.
+  2. **A browser mechanism has a real-browser check against a page whose sink fires
+     after `load`**, and waits by polling up to a stated window, never by a fixed sleep.
+  3. **A browser that cannot start is "no verdict"** (`UnplaceableLocation`), remembered
+     for the run: never a crash, never a negative. (from BUG-0126)
+
+- **PA-0127** — Strengthens the BUG-0072 rule (observe the context, never assume it)
+  and `PA-0035`, after BUG-0127: a reflection in Juice Shop's `application/json` error
+  confirmed reflected XSS.
+  1. **A confirmer states every precondition of its signal and checks each on the
+     observed response.** A markup signal (an injected element, attribute or script
+     state; a meta refresh) counts only in a response a browser renders as HTML
+     (`oracle/strategies._renders_as_html`).
+  2. **Its tests include a response that breaks each precondition** (for a markup
+     signal: a JSON, plain-text and script echo of the same payload). (from BUG-0127)

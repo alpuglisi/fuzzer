@@ -1108,6 +1108,8 @@ rewards) derives from it.
   or meta-refresh target, resolved against the probed URL (scheme-relative included),
   is `http`/`https` with our token host (one trailing dot allowed) and path `/cb` (or `/cb/`): the host is the signal, never a
   prefix (PA-0122). Cost: +1 request per seeded candidate whose plain probe failed.
+  A meta refresh counts only in a response rendered as HTML (`CC-FUZZ-0072`, BUG-0127;
+  `tests/test_open_redirect_seed.py::test_a_meta_refresh_in_a_non_html_response_never_confirms`).
 - **FR-FUZZ-47** *(JSON body points; `CC-FUZZ-0068`, 2026-10-14, forms phase 3, lane
   J).*
   - **Sending.** `SeamProbeSender` and `RequestsProbeSender` place a `json` point
@@ -1162,6 +1164,18 @@ rewards) derives from it.
     - a JSON request needing a fresh token per request (a CAPTCHA answer, a CSRF
       header) does not confirm;
     - a fragment probe sends only the probed route parameter, not the route's others.
+- **FR-FUZZ-48** *(the M6 browser executor on a real browser; `CC-FUZZ-0071`,
+  2026-10-14, BUG-0126).* `PlaywrightBrowserExecutor` launches with the one Chromium
+  launch configuration (`navguard.chromium_launch_kwargs`: the operator's
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE`, scoped args). A browser that cannot start is no
+  verdict from the browser mechanisms (`UnplaceableLocation`), remembered for the run:
+  never a crash, never a negative; other mechanisms still decide. After `load` the
+  sentinel is polled every 100 ms for up to `SETTLE_MS` (4 s), so a sink that a
+  single-page app renders after its own API calls is seen; a negative costs the full
+  window per payload.
+  - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
+    `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
+    `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -1342,6 +1356,11 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **text:** an injected **element** with no inert ancestor (`textarea`, `title`,
     `script`, `style`, `xmp`, `noscript`, `iframe`, `noembed`, `noframes`,
     `plaintext`, `template`). RCDATA is broken out of by its closing tag.
+  - **Document type** *(amended in place, `CC-FUZZ-0072`, 2026-10-14, BUG-0127)*: a
+    break-out confirms only in a response a browser renders as HTML (`text/html`,
+    `application/xhtml+xml`, or no Content-Type); a JSON, text or script echo never
+    does (`tests/test_oracle_xss_structural.py::test_a_reflection_confirms_only_in_a_response_rendered_as_html`).
+    Stated false negative: script-capable `text/xml` / `image/svg+xml` responses.
 
   Verified against the four lab XSS sink templates, each vulnerable and as its secure
   twin.

@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Fuzzer: reflected XSS confirmed in a JSON response (fixed, BUG-0127/PA-0127)
+- **Symptom:** the live Juice Shop run confirmed `xss-reflected` on `/api/Challenges/?sort=`, whose `application/json` error echoes the value; no browser runs it.
+- **Root cause:** `ReflectedXssStrategy` parsed every response as HTML; the content type was an unstated precondition no fixture broke. The open-redirect meta-refresh check had the same gap.
+- **Remediation:** both confirm only in a response a browser renders as HTML (`text/html`, `application/xhtml+xml`, or untyped); tests with JSON/text/script echoes. CC-FUZZ-0072. `docs/bugs/BUG-0127-reflected-xss-confirmed-in-json.md`.
+- **Status:** Fixed
+
+## 2026-10-14 — Fuzzer: `auto --browser` aborted; DOM XSS missed (fixed, BUG-0126/PA-0126)
+- **Symptom:** the first live `fuzzlab auto --browser` run on Juice Shop exited `rc=1` at the first browser check (`Executable doesn't exist at …/chrome-headless-shell`); with the binary given, the `#/search?q=` DOM XSS was not confirmed.
+- **Root cause:** the M6 executor had its own copy of the Chromium launch settings without the operator's binary, did not contain a launch failure, and read its sentinel 300 ms after `load` (Juice Shop's sink fires at about 1 s). Its tests were all fakes.
+- **Remediation:** one launch helper (`navguard.chromium_launch_kwargs`) at all three launch sites, AST-guarded; a failed launch is "no verdict" for the run; the sentinel is polled for up to 4 s. Verified live (the DOM XSS confirms in 2.1 s). CC-FUZZ-0071, CC-CRAWL-0018, CC-AUD-0037. `docs/bugs/BUG-0126-browser-executor-never-worked-live.md`.
+- **Status:** Fixed
+
 ## 2026-10-14 — Fuzzer: Juice Shop's allowlist-gated open redirect never detected (fixed, BUG-0124/PA-0124)
 - **Symptom:** `fuzzlab auto` over all categories missed Juice Shop's open redirect (`/redirect?to=` redirects when the target contains an allowlisted URL).
 - **Root cause:** the open-redirect rule selected by parameter name only (`to` is not in it); the value-shape rules mapped only the categories one lane needed; the confirmer sent one plain canary, which a containment allowlist refuses.

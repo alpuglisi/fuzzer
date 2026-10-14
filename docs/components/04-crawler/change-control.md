@@ -3,6 +3,27 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0018 — One Chromium launch configuration (BUG-0126) (2026-10-14)
+- Change:
+  - `tools/navguard.py`: `chromium_launch_kwargs(args, *, headless=True)`, the one
+    launch configuration (headless, the scoped `browser_launch_args`, and
+    `executable_path` from `PLAYWRIGHT_CHROMIUM_EXECUTABLE` when set).
+  - `tools/spider.py` `_start_browser` uses it (its own copy removed, and the now
+    unused `os` import).
+  - `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped` also
+    requires `chromium_launch_kwargs` at every `chromium.launch`, proven on its
+    synthetic offender.
+- Impact: FR-CRAWL-11 amended in place (the launch configuration is shared). The
+  auditor (CC-AUD-0037) and the M6 executor (CC-FUZZ-0071) use the same helper.
+  Behaviour of the crawl unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (AST guard, real-browser crawl tests unchanged and passing) — done
+- Review: with the forms phase 3 integration, reviewers A and B.
+- Effectiveness (assessed 2026-10-14): the guard fails on a launch without the helper;
+  the live crawl and fuzz runs launch the operator's binary.
+
 ### CC-CRAWL-0017 — Request capture and SPA form submission (forms phase 3, lane S: I) (2026-10-14)
 - Change:
   - `tools/spider.py`:

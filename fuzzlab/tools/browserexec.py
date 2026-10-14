@@ -10,10 +10,12 @@ lab host), not in the offline test sandbox.
 
 from __future__ import annotations
 
+import logging
 import time
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fuzzlab.oracle.browser import SENTINEL, ExecObservation, ExecRequest
+from fuzzlab.oracle.probe import UnplaceableLocation
 
 
 def _with_query(url: str, param: str, value: str) -> str:
@@ -50,6 +52,24 @@ class PlaywrightBrowserExecutor:
         self._headless = headless
         self._timeout = timeout_ms
         self._headers = storage_headers or {}
+        #: why this run has no browser (BUG-0126), once a launch has failed
+        self._unavailable: str | None = None
+
+    #: How long a loaded page may take to fire the sentinel: a single-page app renders
+    #: after its own API calls, well after ``load`` (BUG-0126: 300 ms missed Juice Shop's
+    #: search sink, which fires at about one second). Polled; the wait ends on the hit.
+    SETTLE_MS = 4000
+    _POLL_MS = 100
+
+    def _wait_for_token(self, page, token: str) -> bool:
+        deadline = time.monotonic() + self.SETTLE_MS / 1000
+        while True:
+            hits = page.evaluate("window.__fzlbHits||[]")
+            if token in (hits or []):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            page.wait_for_timeout(self._POLL_MS)
 
     def run(self, request: ExecRequest, token: str) -> ExecObservation:
         # refuse, never relocate (BUG-0115, PA-0115): checked before any browser starts
@@ -64,15 +84,27 @@ class PlaywrightBrowserExecutor:
                 f"(window.__fzlbHits=window.__fzlbHits||[]).push(t);}};")
         from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
         from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
-                                            guard_page, release)
+                                            chromium_launch_kwargs, guard_page, release)
         # The browser reaches only the observe and store origins (BUG-0123).
         scope_urls = [request.url] + ([request.store.url] if request.store else [])
         origins = origin_scope(*scope_urls)
         def in_scope(url):
             return in_origin_scope(url, origins)
+        if self._unavailable is not None:              # BUG-0126: no browser, no verdict
+            raise UnplaceableLocation(self._unavailable)
+        launch = chromium_launch_kwargs(browser_launch_args(scope_urls),
+                                        headless=self._headless)       # BUG-0126
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self._headless,
-                                         args=browser_launch_args(scope_urls))
+            try:
+                browser = pw.chromium.launch(**launch)
+            except Exception as exc:  # noqa: BLE001 - any launch failure: no browser here
+                # BUG-0126: a browser that cannot start is "no verdict" from the browser
+                # mechanisms (never a negative), remembered so later probes do not retry
+                self._unavailable = ("browser unavailable: "
+                                     f"{str(exc).splitlines()[0][:160]}")
+                logging.warning(f"M6 browser execution disabled for this run: "
+                                f"{self._unavailable}")
+                raise UnplaceableLocation(self._unavailable) from None
             context = None
             try:
                 context = browser.new_context(service_workers="block")   # BUG-0111
@@ -105,9 +137,7 @@ class PlaywrightBrowserExecutor:
                     target = (_with_fragment if request.location == "fragment"
                               else _with_query)(request.url, request.param, request.value)
                 page.goto(target, wait_until="load", timeout=self._timeout)
-                time.sleep(0.3)                               # let async sinks fire
-                hits = page.evaluate("window.__fzlbHits||[]")
-                fired = token in (hits or [])
+                fired = self._wait_for_token(page, token)     # BUG-0126: async sinks
                 return ExecObservation(executed=fired,
                                        detail="playwright" if fired else "")
             finally:

@@ -69,7 +69,9 @@ fuzzer.
   The crawl summary reports the out-of-scope browser requests it blocked, by host.
   The browser's routed requests (fetched by the Playwright driver) are guarded by that
   predicate alone, checked before every fetch; Chromium's own traffic is confined by
-  the launch arguments. Stated residuals (BUG-0123): a redirected GET navigation's
+  the launch arguments. Every Chromium launch (crawler, auditor, M6 executor) takes its
+  whole configuration from `navguard.chromium_launch_kwargs` (CC-CRAWL-0018, BUG-0126),
+  guarded at every `chromium.launch`. Stated residuals (BUG-0123): a redirected GET navigation's
   landing page is requested twice, the second time unrouted (scope still enforced by
   the resolver rules, destructive tokens not re-checked on any new hops); a 307/308
   navigation keeps its first URL as `page.url`; walked hops carry the context's headers,

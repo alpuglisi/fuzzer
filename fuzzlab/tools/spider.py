@@ -381,7 +381,6 @@ class LocalSpider:
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
-        import os
         self._pw = sync_playwright().start()
         # --no-sandbox / --disable-dev-shm-usage keep Chromium happy in
         # containers and when running as root.
@@ -394,13 +393,9 @@ class LocalSpider:
         else:
             args = browser_launch_args([], any_port_hosts=[self._scope_host,
                                                            f"www.{self._scope_host}"])
-        launch_kwargs = {"headless": True, "args": args}
-        # Optional override: point at a specific Chromium binary (useful when the
-        # managed browser version does not match, e.g. a pre-installed browser).
-        exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-        if exe:
-            launch_kwargs["executable_path"] = exe
-        self._browser = self._pw.chromium.launch(**launch_kwargs)
+        # the one launch configuration, the operator's binary included (BUG-0126)
+        from fuzzlab.tools.navguard import chromium_launch_kwargs
+        self._browser = self._pw.chromium.launch(**chromium_launch_kwargs(args))
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(service_workers="block")
         # guard the context, not the page, so popups are confined too (BUG-0123)

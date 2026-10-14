@@ -279,3 +279,28 @@ def test_the_audits_regex_reflection_never_confirms():
             "/; }</script>"
     v, page = _confirm(render)
     assert v is None, page.sent
+
+
+# --- BUG-0127: a reflection in a non-HTML response is not XSS ---------------------------
+@pytest.mark.parametrize("ctype,confirmed", [
+    ("application/json; charset=utf-8", False),     # Juice Shop's /api/Challenges/?sort=
+    ("text/plain", False),
+    ("application/javascript", False),
+    ("text/html; charset=utf-8", True),
+    ("application/xhtml+xml", True),
+    (None, True),                                   # no type: a browser may sniff HTML
+])
+def test_a_reflection_confirms_only_in_a_response_rendered_as_html(ctype, confirmed):
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import ReflectedXssStrategy
+
+    class Echo:
+        def send(self, url, param, value, timing=False, **kw):
+            headers = {"Content-Type": ctype} if ctype else {}
+            return Probe(400, '{"error": "unknown column ' + value + '"}' if ctype and
+                         "json" in ctype else "<html><body>" + value + "</body></html>",
+                         headers=headers)
+    verdict = ReflectedXssStrategy().confirm(
+        Candidate(url="http://127.0.0.1:3000/api/Challenges/", param="sort",
+                  category="xss"), Echo())
+    assert (verdict is not None and verdict.confirmed) is confirmed

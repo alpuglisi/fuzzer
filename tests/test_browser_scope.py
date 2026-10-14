@@ -345,6 +345,9 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
         def evaluate(self, js):
             return []
 
+        def wait_for_timeout(self, ms):              # the settle poll (BUG-0126)
+            pass
+
     class Context:
         request = types.SimpleNamespace(
             post=lambda url, **kw: seen["posts"].append((url, kw)))
@@ -384,7 +387,7 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
-    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr(PlaywrightBrowserExecutor, "SETTLE_MS", 0)
     PlaywrightBrowserExecutor().run(
         ExecRequest(url="http://127.0.0.1:8090/view.php", param="q", value="x",
                     store=StoreStep(url="http://127.0.0.1:8090/post.php", param="c",
@@ -708,6 +711,12 @@ def _browser_offenders(root: Path) -> list[str]:
                         and f.value.attr == "chromium"
                         and "browser_launch_args" not in names):
                     offenders.append(f"{where}: unscoped launch")
+                if (isinstance(f, ast.Attribute) and f.attr == "launch"
+                        and isinstance(f.value, ast.Attribute)
+                        and f.value.attr == "chromium"
+                        and "chromium_launch_kwargs" not in names):
+                    offenders.append(f"{where}: launch not configured by "
+                                     f"chromium_launch_kwargs (BUG-0126)")
                 if getattr(f, "id", getattr(f, "attr", None)) == "guard_page" \
                         and "in_scope" not in kws:
                     offenders.append(f"{where}: guard_page without in_scope")
@@ -741,6 +750,7 @@ def test_the_browser_guard_catches_synthetic_offenders(tmp_path):
         "    return c.fetch(url, method='GET')\n")
     assert _browser_offenders(tmp_path) == [
         "rogue.py:launch: unscoped launch",
+        "rogue.py:launch: launch not configured by chromium_launch_kwargs (BUG-0126)",
         "rogue.py:launch: guard_page without in_scope",
         "rogue.py:launch: API request may redirect",
         "rogue.py:launch: API request not scope-checked",
@@ -755,3 +765,136 @@ def test_the_launch_sites_are_the_three_known_ones():
         if ".chromium.launch(" in path.read_text():
             sites.add(path.name)
     assert sites == {"spider.py", "fetcher.py", "browserexec.py"}
+
+
+# --- BUG-0126: the M6 executor honours the configured Chromium; no browser, no verdict --
+def test_the_m6_executor_uses_the_configured_chromium(monkeypatch):
+    import sys
+    import types
+
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    seen = {}
+
+    class PW:
+        chromium = types.SimpleNamespace(
+            launch=lambda **kw: seen.update(kw) or (_ for _ in ()).throw(RuntimeError("x")))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("playwright.sync_api")
+    fake.sync_playwright = PW
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/opt/chrome")
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    with pytest.raises(UnplaceableLocation):
+        PlaywrightBrowserExecutor().run(
+            ExecRequest(url="http://127.0.0.1:3000/#/search", param="q", value="x",
+                        location="fragment"), "tok")
+    assert seen["executable_path"] == "/opt/chrome"
+
+
+def test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative(monkeypatch):
+    """BUG-0126: `fuzzlab auto --browser` aborted the whole run when Chromium could not
+    launch. Now the browser mechanisms give no verdict, remembered for the run, and the
+    point is decided by the others or left inconclusive."""
+    import sys
+    import types
+
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.probe import Candidate, Probe, UnplaceableLocation
+    from fuzzlab.oracle.strategies import DomXssStrategy
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    launches = []
+
+    class PW:
+        chromium = types.SimpleNamespace(
+            launch=lambda **kw: launches.append(kw) or (_ for _ in ()).throw(
+                RuntimeError("Executable doesn't exist")))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    fake = types.ModuleType("playwright.sync_api")
+    fake.sync_playwright = PW
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    executor = PlaywrightBrowserExecutor()
+    request = ExecRequest(url="http://127.0.0.1:3000/", param="q", value="x",
+                          location="query")
+    for _ in range(3):
+        with pytest.raises(UnplaceableLocation, match="browser unavailable"):
+            executor.run(request, "tok")
+    assert len(launches) == 1                              # remembered, not retried
+    strategy = DomXssStrategy(executor)
+    cand = Candidate(url="http://127.0.0.1:3000/", param="q", category="xss")
+    with pytest.raises(UnplaceableLocation):
+        strategy.confirm(cand, sender=types.SimpleNamespace(send=lambda *a, **k: Probe(200, "")))
+
+
+# --- BUG-0126 / PA-0126: the M6 executor against a real, asynchronously rendering page --
+_ASYNC_SINK = (
+    "<html><body><div id=out></div><script>"
+    "setTimeout(function(){"                   # renders after its own 'API call'
+    "var m=location.hash.match(/[?&]q=([^&]*)/);"
+    "if(m){document.getElementById('out').%s=decodeURIComponent(m[1]);}"
+    "},1200);</script></body></html>")
+
+
+def _async_app():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server API
+            sink = "textContent" if self.path.startswith("/safe") else "innerHTML"
+            body = (_ASYNC_SINK % sink).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_the_m6_executor_sees_a_sink_that_fires_after_load(monkeypatch):
+    """A real browser, a page whose DOM sink runs 1.2 s after ``load`` (Juice Shop's
+    search renders after its API call): the executor confirms the payload there, not on
+    the escaping twin, and the old 300 ms read would have missed it (the fixture really
+    is asynchronous)."""
+    from tests._browser import skip_or_fail
+    from fuzzlab.oracle.browser import ExecRequest
+    from fuzzlab.oracle.probe import UnplaceableLocation
+    from fuzzlab.oracle.strategies import _xss_exec_payloads
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    _chromium_or_skip(monkeypatch)
+    server = _async_app()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    payload = _xss_exec_payloads("tok1")[0]
+
+    def run(path, executor=None):
+        executor = executor or PlaywrightBrowserExecutor(timeout_ms=10000)
+        try:
+            return executor.run(ExecRequest(url=f"{base}{path}#/search", param="q",
+                                            value=payload, location="fragment"),
+                                "tok1").executed
+        except UnplaceableLocation as exc:
+            skip_or_fail(f"chromium could not launch: {exc}")
+
+    try:
+        assert run("/") is True                              # fires after load
+        assert run("/safe") is False                         # escaped: never fires
+        early = PlaywrightBrowserExecutor(timeout_ms=10000)
+        early.SETTLE_MS = 300                                # BUG-0126's fixed wait
+        assert run("/", early) is False
+    finally:
+        server.shutdown()

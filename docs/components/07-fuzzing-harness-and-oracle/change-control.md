@@ -22,6 +22,57 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0072 — Markup signals confirm only in a response rendered as HTML (BUG-0127) (2026-10-14)
+- Change:
+  - `oracle/strategies.py`: `_renders_as_html(probe)` (`text/html`,
+    `application/xhtml+xml`, or no Content-Type). `ReflectedXssStrategy` (M5) confirms
+    only when a break-out's structural check passes in such a response;
+    `OpenRedirectStrategy` (M9) reads a meta refresh only in one (a `Location` header is
+    unchanged).
+  - Found live: Juice Shop's `/api/Challenges/?sort=` echoes the value in an
+    `application/json` error; M5 confirmed `xss-reflected` there.
+- Impact: FR-FUZZ-39 and FR-FUZZ-46 amended in place (the document-type precondition).
+  Fewer confirmed findings on REST APIs (false positives removed); no lab sink changes
+  (they are HTML). ML labels from such responses become negatives.
+- Risk: low. Stated false negatives: script-capable `text/xml` and `image/svg+xml`
+  responses (M6 decides them when a browser is attached).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_oracle_xss_structural.py::test_a_reflection_confirms_only_in_a_response_rendered_as_html`,
+    `tests/test_open_redirect_seed.py::test_a_meta_refresh_in_a_non_html_response_never_confirms`
+    (mutation check: 4 failures with the gates removed) — done
+  - [x] BUG-0127, PA-0127, ERROR_LOG — done
+- Review: with the forms phase 3 integration, reviewers A and B.
+- Effectiveness (assessed 2026-10-14): the live re-run no longer reports the
+  `/api/Challenges` finding; its other three findings and the DOM XSS stand.
+
+### CC-FUZZ-0071 — The M6 browser executor runs on a real browser (BUG-0126) (2026-10-14)
+- Change:
+  - `tools/browserexec.py` `PlaywrightBrowserExecutor.run`: launches with
+    `navguard.chromium_launch_kwargs` (the operator's `PLAYWRIGHT_CHROMIUM_EXECUTABLE`,
+    scoped args); a launch failure is logged once, remembered for the run
+    (`_unavailable`) and raised as `UnplaceableLocation`: no verdict from M6, never a
+    crash or a negative. After `load` the sentinel is polled every 100 ms for up to
+    `SETTLE_MS` (4000), ending on the hit, replacing a fixed 300 ms sleep.
+  - Found live: `auto --browser` on Juice Shop aborted (`rc=1`) at the first browser
+    check; with the binary given, the `#/search?q=` DOM XSS (rendered after an API
+    call, about 1 s after `load`) was missed.
+- Impact: FR-FUZZ-48 (new). `auto --browser` works on this host; DOM/stored XSS on
+  asynchronously rendering pages is confirmed. A negative browser check costs up to 4 s
+  per payload.
+- Risk: low; the browser stays scoped (BUG-0123 unchanged).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
+    `::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
+    `::test_the_m6_executor_sees_a_sink_that_fires_after_load` (real Chromium); fake
+    pages in `test_browser_scope.py`, `test_destructive_urls.py`, `test_json_points.py`
+    gained `wait_for_timeout` — done
+  - [x] BUG-0126, PA-0126, ERROR_LOG — done
+- Review: with the forms phase 3 integration, reviewers A and B.
+- Effectiveness (assessed 2026-10-14): live Juice Shop re-run confirms `xss-dom` on
+  `/#/search?q` (2.1 s).
+
 ### CC-FUZZ-0070 — Forms phase 3 integration: a mechanism that observes nothing never makes a point read as tested (2026-10-14)
 - Change:
   - `oracle/strategies.py`: `GreyboxConfirmationStrategy.confirm` raises

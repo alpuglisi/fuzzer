@@ -133,6 +133,17 @@ def test_a_meta_refresh_to_the_canary_confirms():
     assert OpenRedirectStrategy().confirm(_cand(), Meta(lambda v: True)).confirmed
 
 
+def test_a_meta_refresh_in_a_non_html_response_never_confirms():
+    """BUG-0127 sweep: a browser follows a meta refresh only in a document it renders;
+    the same tag echoed in a JSON body redirects nobody."""
+    class JsonMeta(_Redirector):
+        def send(self, url, param, value, timing=False, **kw):
+            self.sent.append(value)
+            body = '{"echo": "<meta http-equiv=refresh content=\'0;url=%s\'>"}' % value
+            return Probe(200, body, headers={"Content-Type": "application/json"})
+    assert OpenRedirectStrategy().confirm(_cand(), JsonMeta(lambda v: True)) is None
+
+
 # --- end to end: a crawled link, the rules, the seed, the oracle -----------------------
 def _juice_like(exact=False):
     def handler(req):

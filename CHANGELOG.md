@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (Juice Shop live run: BUG-0126, BUG-0127)
+- **Why:** the first live `fuzzlab auto --browser` run on Juice Shop aborted at the first
+  browser check, missed the `#/search?q` DOM XSS, and confirmed a "reflected XSS" in a
+  JSON error response.
+- **What:** one Chromium launch configuration (`navguard.chromium_launch_kwargs`) at
+  every launch site; the M6 executor treats a browser that cannot start as no verdict
+  and polls its sentinel for up to 4 s after `load` (BUG-0126, PA-0126; CC-FUZZ-0071,
+  CC-CRAWL-0018, CC-AUD-0037). Reflected XSS and meta-refresh open redirect confirm only
+  in a response rendered as HTML (BUG-0127, PA-0127; CC-FUZZ-0072). Live re-run: four
+  confirmed findings, all real (open redirect, two SQLi, DOM XSS).
+
 ## 2026-10-14 (Forms phase 3 integration: lanes S and J merged)
 - **Why:** the two lanes each decided "SPA route fragment" and "redact a body leaf" on
   their own, and lane J's leaf rule missed numbers; a rule location typo could widen a

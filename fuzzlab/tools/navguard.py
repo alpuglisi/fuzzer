@@ -227,6 +227,19 @@ def browser_launch_args(scope_urls, *, any_port_hosts=()) -> list[str]:
             "--no-default-browser-check", "--metrics-recording-only"]
 
 
+def chromium_launch_kwargs(args: list[str], *, headless: bool = True) -> dict:
+    """The keyword arguments of every Chromium launch we make (BUG-0126, PA-0003):
+    ``args`` (from `browser_launch_args`), ``headless``, and the operator's configured
+    binary (``PLAYWRIGHT_CHROMIUM_EXECUTABLE``) when set. One helper, so no launch site
+    drifts from the others (the M6 executor ignored the binary and crashed a run)."""
+    import os
+    kwargs = {"headless": headless, "args": list(args)}
+    exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    if exe:
+        kwargs["executable_path"] = exe
+    return kwargs
+
+
 def checked_api_request(in_scope: Callable[[str], bool], url: str) -> None:
     """Before a Playwright API-request call (``context.request.*``,
     ``pw.request.new_context().fetch``), which `route` never sees: refuse an

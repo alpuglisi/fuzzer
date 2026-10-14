@@ -748,6 +748,9 @@ def _fake_playwright(monkeypatch) -> list:
         def evaluate(self, js):
             return []
 
+        def wait_for_timeout(self, ms):              # the settle poll (BUG-0126)
+            pass
+
     class Context:
         request = types.SimpleNamespace(post=lambda *a, **k: None)
 
@@ -778,7 +781,7 @@ def _fake_playwright(monkeypatch) -> list:
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
-    monkeypatch.setattr("time.sleep", lambda s: None)
+    monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS", 0)
     return gotos
 
 

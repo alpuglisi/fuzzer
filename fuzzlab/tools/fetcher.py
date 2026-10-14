@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import re
 import sqlite3
 import sys
@@ -347,15 +346,11 @@ class ContentFetcher:
     def _start_browser(self, first_url):
         from fuzzlab.tools.navguard import browser_launch_args, guard_page
         self._pw = sync_playwright().start()
-        launch_kwargs = {
-            "headless": True,
-            # resolve nothing but the fixed scope (BUG-0123)
-            "args": browser_launch_args(sorted(self._scope_origins)),
-        }
-        exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-        if exe:
-            launch_kwargs["executable_path"] = exe
-        self._browser = self._pw.chromium.launch(**launch_kwargs)
+        # resolve nothing but the fixed scope (BUG-0123); the one launch configuration,
+        # the operator's binary included (BUG-0126)
+        from fuzzlab.tools.navguard import chromium_launch_kwargs
+        self._browser = self._pw.chromium.launch(**chromium_launch_kwargs(
+            browser_launch_args(sorted(self._scope_origins))))
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(service_workers="block")
         # NFR-AUD-safe (BUG-0111, BUG-0123): the whole context, popups included, is

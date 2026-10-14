@@ -3,6 +3,20 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0037 — The auditor's browser launches with the shared configuration (BUG-0126) (2026-10-14)
+- Change: `tools/fetcher.py` `_start_browser` launches with
+  `navguard.chromium_launch_kwargs` (CC-CRAWL-0018) instead of its own copy; the unused
+  `os` import is removed.
+- Impact: none on behaviour (the copy matched today); it cannot drift again (PA-0126).
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: the AST guard over every `chromium.launch`;
+    `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`
+    (real browser) passing — done
+- Review: with the forms phase 3 integration, reviewers A and B.
+- Effectiveness (assessed 2026-10-14): verified offline.
+
 ### CC-AUD-0036 — Forms phase 3 integration: locations a closed set; open redirect off fragment points (2026-10-14)
 - Change:
   - `audit/rules.py`: `LOCATIONS` (query, body, header, cookie, json, fragment, path:

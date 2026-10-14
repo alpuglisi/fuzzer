@@ -543,6 +543,21 @@ class SqliTimingStrategy(ConfirmationStrategy):
         return self._confirm_timing(candidate, sender, _TIMING_TEMPLATES)
 
 
+#: Content types a browser renders as a document that can run script (BUG-0127).
+_HTML_TYPES = ("text/html", "application/xhtml+xml")
+
+
+def _renders_as_html(probe) -> bool:
+    """Would a browser render this response as HTML? A ``text/html`` or
+    ``application/xhtml+xml`` content type, or none at all (a browser may sniff one).
+    A JSON, plain-text or other typed body never executes, however its text reads
+    (BUG-0127: Juice Shop's ``application/json`` error echoed a tag)."""
+    ctype = next((v for k, v in (probe.headers or {}).items()
+                  if k.lower() == "content-type"), "")
+    main = ctype.split(";", 1)[0].strip().lower()
+    return main == "" or main in _HTML_TYPES
+
+
 class ReflectedXssStrategy(ConfirmationStrategy):
     vuln_class = "xss-reflected"
     mechanism = "reflected-context"
@@ -552,7 +567,8 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         """Type where a marker reflects, then try the break-outs that context allows
         (at most 3) and confirm only on their **structural** effect in the parsed
         response: an element outside any inert element, an injected attribute, or the
-        token in JavaScript code state (BUG-0083, FR-FUZZ-39). The context is always
+        token in JavaScript code state (BUG-0083, FR-FUZZ-39), in a response a browser
+        renders as HTML (`_renders_as_html`, BUG-0127). The context is always
         observed: no strategy reads the auditor's coarse ``sink_context`` (``html``,
         ``sql``, …), which keeps one confirmation per key sound (BUG-0072; guarded by
         ``tests/test_oracle_xss_structural.py``)."""
@@ -565,7 +581,7 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         probe_token = f"zqxb{token}"
         for kind, fragment, check in xss_breakouts(ref, probe_token):
             second = self._send(sender, candidate, fragment)
-            if check(second.text):
+            if check(second.text) and _renders_as_html(second):        # BUG-0127
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"context": ref.context, "breakout": kind,
                                 "signature": fragment})
@@ -627,7 +643,8 @@ class OpenRedirectStrategy(ConfirmationStrategy):
         location = self._header(probe, "location")
         if location and self._lands_on(location, candidate.url, host):
             return {"sink": "location-header", "location": location[:200]}
-        m = _META_REFRESH.search(probe.text or "")
+        # a meta refresh is followed only in a document a browser renders (BUG-0127)
+        m = _META_REFRESH.search(probe.text or "") if _renders_as_html(probe) else None
         if m and self._lands_on(m.group(1), candidate.url, host):
             return {"sink": "meta-refresh", "url": m.group(1)[:200]}
         return None
