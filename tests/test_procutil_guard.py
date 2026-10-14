@@ -35,8 +35,9 @@ FORKING_TOOLS = {"npm", "npx", "go", "mvn", "gradle", "composer", "bundle", "car
 #: allowlisted file fails, and so does an entry that no longer matches.
 ALLOWLIST: dict[str, tuple[int, str]] = {
     "fuzzlab/procutil.py": (
-        3, "the sanctioned implementation: the supervisor's Popen (owner side), its asyncio "
-           "twin, and the supervisor's own single-threaded spawn of the server"),
+        2, "the sanctioned implementation: the supervisor's Popen (owner side, sync and "
+           "asyncio alike -- asyncio's own spawn would reap the supervisor before the sweep, "
+           "review M2) and the supervisor's own single-threaded spawn of the server"),
     "fuzzlab/tools/corpus_validation_sandbox.py": (
         1, "BUG-0125 D14: keeps runsc's own lifecycle (its pid is attached to cgroups at once); "
            "started in its own session and its timeout kills the whole group through "

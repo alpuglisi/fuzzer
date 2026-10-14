@@ -23,6 +23,7 @@ from fuzzlab.labgen.conformance.live_boot import LiveBootError, LiveBootHarness
 from fuzzlab.labgen.emitters.go_net_http import GoEmitter
 from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter, served_url_for
 from fuzzlab.labgen.schema import load_manifest
+from tests._procs import raw_members
 
 
 @pytest.fixture
@@ -43,8 +44,8 @@ def _cmdline(pid: int) -> list[str]:
 def _assert_nothing_left(server: procutil.ServerHandle, port: int) -> None:
     with pytest.raises(ConnectionRefusedError):
         socket.create_connection(("127.0.0.1", port), timeout=2.0).close()
-    assert procutil.group_members(server.child_pid, server.child_start_time) == []
-    assert procutil.session_members(server.pid, server.start_time) == []
+    assert raw_members("pgid", server.child_pid, server.child_start_time) == []
+    assert raw_members("sid", server.pid, server.start_time) == []
     assert server.proc.returncode is not None  # the supervisor was reaped
     assert server not in procutil.registered()
 
@@ -115,8 +116,8 @@ def test_a_build_that_fails_after_the_server_started_leaves_nothing(offline, mon
         with GoLiveBootHarness(GoEmitter(), manifest.cells):
             pass
     server = seen["server"]
-    assert procutil.group_members(server.child_pid, server.child_start_time) == []
-    assert procutil.session_members(server.pid, server.start_time) == []
+    assert raw_members("pgid", server.child_pid, server.child_start_time) == []
+    assert raw_members("sid", server.pid, server.start_time) == []
     assert server not in procutil.registered()
 
 

@@ -79,12 +79,14 @@ owner's death left nothing behind.
   (PDEATHSIG, a changed parent, or EOF on the owner's control pipe) or the server's own
   exit: SIGTERMs the server's group and every re-parented descendant once, waits the
   grace period, SIGKILLs what is left, reaps, and exits with the server's exit code.
-  `stop_server` writes a stop token, signals the supervisor through a pidfd, waits,
-  falls back (D15), reaps, and sweeps the supervisor's session. Every signal is
-  identity-checked: a pidfd is opened, `/proc/<pid>/stat` field 22 is compared with the
-  recorded start time, and only then is the signal sent through that pidfd; group and
-  session members are signalled one by one, only when the leader pid is absent or still
-  has the recorded start time. Nothing is ever killed by name or pattern.
+  `stop_server` writes a stop token, signals the supervisor through a pidfd, waits for
+  it to exit **without reaping it**, falls back (D15) if it is wedged, sweeps the
+  supervisor's session while its pid is still held, and only then reaps it. Every
+  signal is identity-checked: a pidfd is opened, `/proc/<pid>/stat` field 22 is compared
+  with the recorded start time, and only then is the signal sent through that pidfd. A
+  group or session id is trusted only while its leader pid is held (alive or an
+  unreaped zombie with the recorded start time); a start time of 0 matches nothing.
+  Nothing is ever killed by name or pattern. *(Tightened in review round 1, below.)*
   `run_bounded` is `subprocess.run(capture_output=True, timeout=)` through the
   supervisor: a timeout or the tool's own exit takes the tool's whole tree.
   `astart_server` / `astop_server` / `arun_bounded` are the asyncio forms. A registry
@@ -191,6 +193,76 @@ unrequested. The supervisor now drains the pipe again before calling a stop
 unrequested (`_Supervisor._stop_reason`): 0 in 500 under the same load, and a
 deterministic test injects the interleaving
 (`test_a_stop_token_that_lands_before_its_signal_is_never_misread_as_unrequested`).
+
+### Review round 1 (CC-CORE-0050, 2026-10-14)
+Reviewer B agreed; reviewer A found two kill paths that could signal processes this
+run did not start (pid_max is 32768 here, so pids wrap within minutes). The rule both
+fixes follow: **a group or session id may be signalled only while its leader pid is
+still held -- alive, or an unreaped zombie with the recorded start time.**
+- **A-M1 (supersedes B's should-fix 1).** The supervisor's grace loop reaped
+  (`waitpid(-1)`) its server, then the SIGKILL loop kept calling `killpg` on the freed
+  group id while a setsid-escaped descendant lived. *Mechanism:* `_reap` now reaps every
+  exited child **except the server** (each zombie child found in `/proc`, by pid); the
+  server is reaped by `_reap_server` only after the last `killpg` (bounded, loud if it
+  cannot be reaped). *Test:* the supervisor runs under a spy that records, at every
+  `os.killpg`, whether `read_stat(group)` exists; a server that exits on SIGTERM with a
+  setsid child that ignores SIGTERM forces the SIGKILL phase; every call must find the
+  leader held. Reverting the fix fails it.
+- **A-M2.** (a) The owner reaped the supervisor (`Popen.wait`) and only then swept its
+  session. *Mechanism:* `stop_server`, `reap_registered` and the asyncio path wait with
+  `waitid(P_PID, pid, WEXITED|WNOHANG|WNOWAIT)` in a timeout loop, then sweep, then
+  reap. asyncio's own `create_subprocess_exec` would reap the supervisor as soon as it
+  exits, so `astart_server` now spawns it with `subprocess.Popen` and offers an asyncio
+  view (`_AsyncSupervisorProc`: stream readers, a non-reaping `wait()`,
+  `communicate()`); `astop_server` runs the same stop steps off the loop. (b) The
+  fallback's pgid kill now also requires `st.sid == supervisor pid` (the supervisor is
+  alive at fallback time, so that id is anchored), and the fallback also kills the
+  supervisor's other descendants and session members before the supervisor itself.
+  (c) `_members` accepts an absent leader only with such an anchor (a held
+  `(sid, start)`); otherwise it returns nothing. *Tests:* a reaped supervisor's session
+  faked onto a bystander (`_iter_stats`/`read_stat` monkeypatched) is never swept; a
+  bystander faked into the server's freed pgid but outside the session is never
+  signalled by the fallback; an externally SIGKILLed supervisor's leftover child is
+  swept (sync and asyncio) because the supervisor is still held.
+- **B-2.** A start time of 0 meant "match anything". *Mechanism:* 0 is "identity
+  unknown": `_members` returns nothing, `_signal_checked` refuses, `start_server`
+  refuses loudly (`ProcUtilError`, after the supervisor has stopped what it started),
+  and the safety net reports such a record (`note="identity unknown: not signalled"`)
+  without signalling it. *Tests:* a group whose leader is gone with a live member and a
+  start-0 record naming it: nothing is signalled, the leak is reported; `start_server`
+  with an unknown supervisor start time raises and leaves nothing.
+- **A-S1.** The server's `child_setup` re-checks `getppid()` against the supervisor's
+  pid after its `prctl` (the fork-to-prctl race) and exits if the supervisor is gone.
+  Not testable deterministically (a race of a few instructions); recorded as such.
+- **A-S2 (measured, once).** A throwaway script ran a pytest in its own session, opened
+  a real Chromium page (about:blank), SIGKILLed the pytest, and counted by session id
+  and by the recorded process tree (pid + start time, never by name): before, 9
+  descendants -- the Playwright node driver in pytest's session and 8 chrome processes
+  in their own (detached) session; 5 s after the SIGKILL, **0 of 9** alive and 0 left in
+  pytest's session. Playwright's own cleanup held. Not a standing test: follow-up owner
+  the crawler component (04), recorded on NFR-LAB-cleanup's `Not yet enforced:` line.
+- **B-3 / B-4 (nits).** The dead `if not _send(...): pass` is gone (the safety net was
+  rewritten). `web/runner.py` documents that `allow_thread=True` is right because
+  `serve()` runs uvicorn's loop on the main thread, and that a shorter-lived loop thread
+  (TestClient's portal) stops its jobs loudly; a test checks `serve` calls
+  `uvicorn.run` on the main thread.
+- **A-N1.** `_members`' docstring states that pids wrap quickly (pid_max 32768 here) and
+  an id is only trusted while its leader pid is held.
+- **Mutation check (round 1), one mutant at a time over `tests/test_procutil.py`, the
+  failed-build cleanup test and `tests/test_web_runner.py`: 22/26 killed**, each
+  must-fix's revert among them: A-M1 revert (supervisor reaps the server mid-
+  termination) killed; A-M2(a) "owner reaps before the sweep" and "asyncio-style reap
+  on exit" killed; A-M2(c) "absent leader trusted without an anchor" and "anchor's
+  session not required" killed; B-2 "unknown identity accepted at start" killed. (A
+  separate held re-check inside the sweep was removed: it duplicated
+  `session_members`' rule, and its revert could not fail any test.) The four
+  survivors: the fallback's group TERM without its anchor (with the
+  leader gone and no anchor, `_members` returns nothing, and the session/descendant
+  kill that follows reaches the same processes -- no unsafe signal results), B-2's
+  explicit `leader_start <= 0` guard (subsumed by A-M2(c): an absent leader without an
+  anchor already yields nothing), the "members no older than the leader" filter
+  (unreachable while the leader is held), and A-S1's race re-check (not deterministic).
+  None of the survivors lets a signal reach a process this run did not start.
 
 ## What was verified here (and what was not)
 - Real processes, offline: `tests/test_procutil.py` (22), `tests/test_live_boot_cleanup.py`

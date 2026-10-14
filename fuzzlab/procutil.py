@@ -33,10 +33,14 @@ The supervisor is single-threaded, so it may use ``preexec_fn`` for the server
 **Identity.** Nothing here kills by name or pattern -- the operator's own labs (bWAPP,
 Juice Shop) run on the same machine. Every signal goes to a process we recorded, by a
 ``pidfd`` where the platform has one, after re-reading ``/proc/<pid>/stat`` and
-matching its start time (field 22) against the value recorded at start; a process
-group or session is signalled member by member, only when its leader pid is absent or
-still has the recorded start time, and only members started no earlier than the
-leader. A reused pid is therefore never signalled.
+matching its start time (field 22) against the value recorded at start. A process
+group or session id is trusted **only while its leader pid is held** -- alive, or a
+zombie nobody has reaped -- with the recorded start time (pids wrap within minutes:
+pid_max is 32768 here): the supervisor reaps its server only after its last
+``killpg``, the owner sweeps the supervisor's session before it reaps the supervisor,
+and a group whose leader is gone is signalled only inside a still-held supervisor's
+session. A start time of 0 means "identity unknown" and matches nothing (BUG-0125
+review). A reused pid is therefore never signalled.
 
 **Threads (BUG-0125 D12; allow_thread, D17).** ``PR_SET_PDEATHSIG`` fires when the *thread* that forked the
 supervisor exits, not only when the owner process does. :func:`start_server` therefore
@@ -189,48 +193,85 @@ def _signal_checked(pid: int, start: int, sig: int) -> bool:
             os.close(fd)
 
 
-def _members(kind: str, ident: int, leader_start: int) -> list[ProcStat]:
+def _held(pid: int, start: int) -> bool:
+    """``pid`` still names the process that started at ``start`` -- alive, or a zombie
+    nobody has reaped -- so the pid (and any group or session id equal to it) cannot
+    have been reused."""
+    st = read_stat(pid)
+    return start > 0 and st is not None and st.start == start
+
+
+def _members(kind: str, ident: int, leader_start: int, *,
+             anchor: tuple[int, int] | None = None) -> list[ProcStat]:
     """Live members of process group (``kind="pgid"``) or session (``"sid"``)
-    ``ident`` that belong to the recorded leader: empty when the leader pid now names
-    a different process (its start time differs), and only members started no earlier
-    than the leader. A pgid/sid stays allocated while any member uses it, so when the
-    leader pid is absent every member still carrying it is a leftover of ours."""
+    ``ident``, trusted only while that id cannot have been reused.
+
+    Pids wrap quickly (pid_max 32768 here); an id is only trusted while its leader pid
+    is held. So members are returned only when the leader pid still names the recorded
+    leader (alive or an unreaped zombie), or -- for a group whose leader is gone -- when
+    ``anchor`` (a ``(session id, its leader's start time)`` pair whose leader *is*
+    held) is given, and then only members of that anchored session. A start time of 0
+    means "identity unknown": nothing is returned (BUG-0125 review, B2 / A-M2). Only
+    members started no earlier than the leader are kept."""
+    if leader_start <= 0 or (anchor is not None and anchor[1] <= 0):
+        return []
     leader = read_stat(ident)
-    if leader is not None and leader.start != leader_start:
+    if leader is None:
+        if anchor is None or not _held(*anchor):
+            return []
+    elif leader.start != leader_start:
         return []
     out = []
     for st in _iter_stats():
         key = st.pgid if kind == "pgid" else st.sid
-        if key == ident and st.start >= leader_start and st.state != "Z":
+        if key == ident and st.start >= leader_start and st.state != "Z" and (
+                anchor is None or st.sid == anchor[0]):
             out.append(st)
     return out
 
 
 def session_members(sid: int, leader_start: int) -> list[ProcStat]:
-    """Live processes in the session a supervisor led (identity-checked)."""
+    """Live processes in the session a supervisor led, while its leader pid is held."""
     return _members("sid", sid, leader_start)
 
 
-def group_members(pgid: int, leader_start: int) -> list[ProcStat]:
-    """Live processes in the process group a server led (identity-checked)."""
-    return _members("pgid", pgid, leader_start)
+def group_members(pgid: int, leader_start: int, *,
+                  anchor: tuple[int, int] | None = None) -> list[ProcStat]:
+    """Live processes in the process group a server led (see :func:`_members`)."""
+    return _members("pgid", pgid, leader_start, anchor=anchor)
 
 
-def _signal_members(kind: str, ident: int, leader_start: int, sig: int) -> int:
+def _signal_members(kind: str, ident: int, leader_start: int, sig: int, *,
+                    anchor: tuple[int, int] | None = None) -> int:
     n = 0
-    for st in _members(kind, ident, leader_start):
+    for st in _members(kind, ident, leader_start, anchor=anchor):
         if _signal_checked(st.pid, st.start, sig):
             n += 1
     return n
 
 
-def kill_process_group(pgid: int, leader_start: int, sig: int = signal.SIGKILL) -> int:
+def kill_process_group(pgid: int, leader_start: int, sig: int = signal.SIGKILL, *,
+                       anchor: tuple[int, int] | None = None) -> int:
     """Signal every live member of process group ``pgid`` whose leader started at
-    ``leader_start`` (identity-checked, member by member); returns how many were
-    signalled. For a caller that must own its child's lifecycle itself (e.g. the
-    corpus sandbox, which attaches ``runsc`` to cgroups by pid) but started it with
-    ``start_new_session=True``."""
-    return _signal_members("pgid", pgid, leader_start, sig)
+    ``leader_start`` (identity-checked, member by member; only while the leader pid,
+    or ``anchor``'s, is held); returns how many were signalled. For a caller that owns
+    its child's lifecycle itself (e.g. the corpus sandbox, which attaches ``runsc`` to
+    cgroups by pid) and started it with ``start_new_session=True``: call it before
+    reaping that child."""
+    return _signal_members("pgid", pgid, leader_start, sig, anchor=anchor)
+
+
+def _descendants_of(root: int) -> list[ProcStat]:
+    """Every process whose parent chain leads to ``root`` (one /proc scan)."""
+    kids: dict[int, list[ProcStat]] = {}
+    for st in _iter_stats():
+        kids.setdefault(st.ppid, []).append(st)
+    out, todo = [], [root]
+    while todo:
+        for st in kids.get(todo.pop(), []):
+            out.append(st)
+            todo.append(st.pid)
+    return out
 
 
 # --- prctl --------------------------------------------------------------------
@@ -329,9 +370,13 @@ class _Supervisor:
         own_oom = _read_oom("self")
         oom_target = None if own_oom is None or own_oom >= 1000 else min(1000, own_oom + OOM_SCORE_ADJ_RAISE)
 
+        sup = os.getpid()
+
         def child_setup() -> None:  # in the forked child; the supervisor has no threads
             os.setpgid(0, 0)
             libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
+            if os.getppid() != sup:  # the supervisor died between fork and prctl
+                os._exit(1)
             if oom_target is not None:
                 try:
                     with open("/proc/self/oom_score_adj", "w") as fh:
@@ -413,28 +458,33 @@ class _Supervisor:
             os.waitpid(info.si_pid, 0)
 
     def _descendants(self) -> list[ProcStat]:
-        stats = list(_iter_stats())
-        kids: dict[int, list[ProcStat]] = {}
-        for st in stats:
-            kids.setdefault(st.ppid, []).append(st)
-        out, todo = [], [self.me]
-        while todo:
-            for st in kids.get(todo.pop(), []):
-                out.append(st)
-                todo.append(st.pid)
-        return out
+        return _descendants_of(self.me)
 
     def _reap(self) -> None:
+        """Reap every exited child *except the server*: its pid is its group id, and
+        the group may be signalled only while that pid is held (BUG-0125 review M1).
+        The server is reaped by :meth:`_reap_server`, after the last ``killpg``."""
         assert self.child is not None
-        while True:
-            try:
-                pid, status = os.waitpid(-1, os.WNOHANG)
-            except ChildProcessError:
-                return
-            if pid == 0:
-                return
-            if pid == self.child.pid:
+        for st in _iter_stats():
+            if st.ppid == self.me and st.state == "Z" and st.pid != self.child.pid:
+                try:
+                    os.waitpid(st.pid, os.WNOHANG)
+                except ChildProcessError:
+                    pass
+
+    def _reap_server(self) -> None:
+        assert self.child is not None
+        deadline = time.monotonic() + KILL_BOUND_S
+        while self.child_status is None:
+            pid, status = os.waitpid(self.child.pid, os.WNOHANG)
+            if pid:
                 self.child_status = status
+            elif time.monotonic() >= deadline:  # unkillable (D state): say so, do not hang
+                self.loud(f"server {self.child.pid} could not be reaped")
+                break
+            else:
+                time.sleep(0.02)
+        self._reap()
 
     def _terminate_tree(self) -> None:
         assert self.child is not None
@@ -478,7 +528,7 @@ class _Supervisor:
             time.sleep(0.02)
 
     def _exit_code(self) -> int:
-        self._reap()
+        self._reap_server()
         if self.child_status is None:
             return 0
         code = os.waitstatus_to_exitcode(self.child_status)
@@ -547,7 +597,7 @@ class ServerHandle:
     child_start_time: int
     started_at: float = field(default_factory=time.time)
     grace: float = DEFAULT_GRACE_S
-    proc: Any = None              # subprocess.Popen or asyncio.subprocess.Process
+    proc: Any = None              # subprocess.Popen, or _AsyncSupervisorProc (asyncio)
     pidfd: int | None = None
     oom_supervisor: int | None = None
     oom_child: int | None = None
@@ -608,7 +658,7 @@ def _pipes() -> tuple[int, int, int, int]:
 
 
 def _complete_start(h: ServerHandle, reader: _LineReader, ready_timeout: float,
-                    kill_supervisor) -> ServerHandle:
+                    kill_supervisor, abandon) -> ServerHandle:
     line = reader.readline(ready_timeout)
     if line is None:
         kill_supervisor()
@@ -627,8 +677,64 @@ def _complete_start(h: ServerHandle, reader: _LineReader, ready_timeout: float,
     h.child_start_time = int(f["start"])
     h.oom_supervisor = None if f.get("oom_supervisor") in (None, "None") else int(f["oom_supervisor"])
     h.oom_child = None if f.get("oom_child") in (None, "None") else int(f["oom_child"])
+    if h.start_time <= 0 or h.child_start_time <= 0:
+        # Without a start time nothing can be identity-checked later (BUG-0125 review
+        # B2): refuse loudly, after the supervisor has stopped what it started.
+        abandon()
+        raise ProcUtilError(
+            f"could not record the /proc start time of the supervisor ({h.start_time}) or the "
+            f"server ({h.child_start_time}) for {list(h.argv)!r}; refusing to run a server "
+            "whose identity cannot be checked")
     _register(h)
     return h
+
+
+def _popen_of(h: ServerHandle) -> subprocess.Popen | None:
+    if isinstance(h.proc, subprocess.Popen):
+        return h.proc
+    return getattr(h.proc, "_popen", None)
+
+
+def _exited(h: ServerHandle) -> bool:
+    """Has the supervisor exited? Never reaps it (``waitid(WNOWAIT)``): its pid -- also
+    its session id -- stays held until the session sweep is done (BUG-0125 review M2)."""
+    p = _popen_of(h)
+    if p is None or p.returncode is not None:
+        return True
+    try:
+        info = os.waitid(os.P_PID, h.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:  # reaped by someone else
+        return True
+    return info is not None
+
+
+def _peek_code(h: ServerHandle) -> int | None:
+    """The exited supervisor's status, without reaping it."""
+    p = _popen_of(h)
+    if p is not None and p.returncode is not None:
+        return p.returncode
+    try:
+        info = os.waitid(os.P_PID, h.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return p.returncode if p is not None else None
+    if info is None:
+        return None
+    return info.si_status if info.si_code == os.CLD_EXITED else -info.si_status
+
+
+def _wait_exited(h: ServerHandle, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while not _exited(h):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _reap_supervisor(h: ServerHandle) -> None:
+    p = _popen_of(h)
+    if p is not None and p.returncode is None:
+        p.wait()
 
 
 def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | None = None,
@@ -640,12 +746,21 @@ def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | 
     ``stdout``/``stderr`` carry the server's output, and it exits (with the server's
     exit code) when the server does. Stop it with :func:`stop_server`."""
     _check_thread(allow_thread)
+    h, proc = _spawn_supervisor(argv, grace, cwd=cwd, env=env, stdin=stdin, stdout=stdout,
+                                stderr=stderr, text=text)
+    return _complete_start(h, h._status, ready_timeout, *_start_failure_paths(h, proc))
+
+
+def _spawn_supervisor(argv: Sequence[str], grace: float, **popen_kw: Any) -> tuple[ServerHandle, subprocess.Popen]:
     status_r, status_w, control_r, control_w = _pipes()
     try:
-        proc = subprocess.Popen(  # noqa: S603 -- the one sanctioned Popen (procutil)
-            _supervisor_argv(argv, grace, status_w, control_r), cwd=cwd, env=env,
-            stdin=stdin, stdout=stdout, stderr=stderr, text=text,
-            start_new_session=True, pass_fds=(status_w, control_r))
+        proc = subprocess.Popen(  # noqa: S603 -- the one sanctioned owner-side spawn
+            _supervisor_argv(argv, grace, status_w, control_r),
+            start_new_session=True, pass_fds=(status_w, control_r), **popen_kw)
+    except BaseException:
+        os.close(status_r)
+        os.close(control_w)
+        raise
     finally:
         os.close(status_w)
         os.close(control_r)
@@ -654,13 +769,23 @@ def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | 
                      start_time=st.start if st else 0, child_pid=0, child_start_time=0,
                      grace=grace, proc=proc, pidfd=_open_pidfd(proc.pid),
                      _status=_LineReader(status_r), _control=control_w)
+    return h, proc
 
+
+def _start_failure_paths(h: ServerHandle, proc: subprocess.Popen):
     def kill_supervisor() -> None:
         _send(h, signal.SIGKILL)
         proc.wait()
         _close_fds(h)
 
-    return _complete_start(h, h._status, ready_timeout, kill_supervisor)
+    def abandon() -> None:  # a requested stop: the supervisor stops its own tree
+        request_stop(h)
+        if not _wait_exited(h, h.grace + STOP_MARGIN_S):
+            _send(h, signal.SIGKILL)
+        proc.wait()
+        _close_fds(h)
+
+    return kill_supervisor, abandon
 
 
 def _open_pidfd(pid: int) -> int | None:
@@ -699,21 +824,39 @@ def request_stop(h: ServerHandle) -> bool:
 
 def _fallback_kill(h: ServerHandle) -> None:
     """BUG-0125 D15: the supervisor did not exit within its grace (wedged, stopped, or
-    ignoring TERM). Kill the server's own process group directly -- identity-checked
-    by pgid and start time -- then the supervisor, then anything left in its
-    session."""
+    ignoring TERM). It is still alive and unreaped, so its pid -- the session id -- is
+    held and anchors everything below (review M2(b)):
+
+    1. the server's own process group, SIGTERM then SIGKILL, members of the
+       supervisor's session only (the server's pgid is usually free by now);
+    2. every other descendant of the supervisor and every other member of its session
+       (identity-checked, SIGKILL);
+    3. the supervisor itself (pidfd)."""
+    anchor = (h.pid, h.start_time)
+    if not _held(*anchor):
+        _send(h, signal.SIGKILL)
+        return
     if h.child_pid:
-        _signal_members("pgid", h.child_pid, h.child_start_time, signal.SIGTERM)
+        _signal_members("pgid", h.child_pid, h.child_start_time, signal.SIGTERM, anchor=anchor)
         deadline = time.monotonic() + min(h.grace, 2.0)
-        while time.monotonic() < deadline and _members("pgid", h.child_pid, h.child_start_time):
+        while time.monotonic() < deadline and _members("pgid", h.child_pid, h.child_start_time,
+                                                       anchor=anchor):
             time.sleep(0.05)
-        _signal_members("pgid", h.child_pid, h.child_start_time, signal.SIGKILL)
+        _signal_members("pgid", h.child_pid, h.child_start_time, signal.SIGKILL, anchor=anchor)
+    seen = set()
+    for st in _descendants_of(h.pid) + session_members(h.pid, h.start_time):
+        if st.pid != h.pid and st.state != "Z" and st.start >= h.start_time and st.pid not in seen:
+            seen.add(st.pid)
+            _signal_checked(st.pid, st.start, signal.SIGKILL)
     _send(h, signal.SIGKILL)
 
 
 def _sweep_session(h: ServerHandle) -> list[ProcStat]:
-    """SIGKILL anything still in the supervisor's session (identity-checked);
-    returns what was found."""
+    """SIGKILL anything still in the supervisor's session -- only while the supervisor
+    is exited but **unreaped** by us (its pid, the session id, is held); a reaped or
+    unknown supervisor's session is never swept (review M2(a)). Returns what was
+    found. (The guarantee is :func:`session_members`' leader-held rule; the owner's part
+    is never to reap the supervisor before calling this.)"""
     left = session_members(h.pid, h.start_time)
     for st in left:
         _signal_checked(st.pid, st.start, signal.SIGKILL)
@@ -732,14 +875,16 @@ def _close_fds(h: ServerHandle) -> None:
 
 
 def _collect(h: ServerHandle) -> None:
-    """Read the supervisor's final ``exit`` line (it has exited), sweep its session,
-    close fds, unregister. Safe to call from two tasks at once (a stop watchdog and
-    the output pump both collect)."""
+    """For an exited supervisor: sweep its session while it is still held, reap it,
+    read its final ``exit`` line, close fds, unregister. Safe to call from two tasks
+    at once (a stop watchdog and the output pump both collect)."""
     with h._lock:
         _collect_locked(h)
 
 
 def _collect_locked(h: ServerHandle) -> None:
+    _sweep_session(h)
+    _reap_supervisor(h)
     if h._status is not None:
         while True:
             line = h._status.readline(0.5)
@@ -752,7 +897,6 @@ def _collect_locked(h: ServerHandle) -> None:
                 h.exit_signals = int(f.get("signals", "0"))
     if h.exit_reason is None:
         h.exit_reason = "killed"  # no exit line: the supervisor itself was killed
-    _sweep_session(h)
     _close_fds(h)
     _unregister(h)
 
@@ -773,32 +917,38 @@ def finish(h: ServerHandle) -> str:
     return h.exit_reason or ""
 
 
+def _stop_core(h: ServerHandle, timeout: float | None) -> str:
+    """Request a stop, wait for the supervisor to exit *without reaping it*, fall back
+    if it is wedged, then sweep (held), reap and collect."""
+    if _popen_of(h) is None:
+        raise ProcUtilError("stop_server needs a handle returned by start_server")
+    with h._lock:
+        if h.exit_reason is not None and h._status is None:
+            return h.exit_reason
+        wait = h.grace + STOP_MARGIN_S if timeout is None else timeout
+        if not _exited(h):
+            request_stop(h)
+            if not _wait_exited(h, wait):
+                _fallback_kill(h)
+                _wait_exited(h, KILL_BOUND_S)
+        _collect_locked(h)
+        return h.exit_reason or ""
+
+
 def stop_server(h: ServerHandle, *, timeout: float | None = None) -> str:
     """Stop the server and its whole tree, and reap the supervisor. Idempotent.
     Returns the supervisor's exit reason (``stop``, ``child``, ...); raises
     :class:`ServerLost` if the server had already been stopped without a request."""
-    if h.proc is None:
-        raise ProcUtilError("stop_server needs a handle returned by start_server")
-    if h.exit_reason is not None and h._status is None:
-        return h.exit_reason
-    wait = h.grace + STOP_MARGIN_S if timeout is None else timeout
-    if h.proc.poll() is None:
-        request_stop(h)
-        try:
-            h.proc.wait(timeout=wait)
-        except subprocess.TimeoutExpired:
-            _fallback_kill(h)
-            h.proc.wait(timeout=KILL_BOUND_S)
-    _collect(h)
+    _stop_core(h, timeout)
     _raise_if_lost(h)
     return h.exit_reason or ""
 
 
 def is_live(h: ServerHandle) -> bool:
     """True when the recorded supervisor (start time matching) or any member of its
-    session is still alive."""
+    session (while its pid is held) is still alive."""
     st = read_stat(h.pid)
-    if st is not None and st.start == h.start_time and st.state != "Z":
+    if h.start_time > 0 and st is not None and st.start == h.start_time and st.state != "Z":
         return True
     return bool(session_members(h.pid, h.start_time))
 
@@ -808,38 +958,42 @@ class Leak:
     argv: tuple[str, ...]
     pid: int
     age_s: float
+    note: str = ""
 
     def describe(self) -> str:
-        return f"pid {self.pid}, age {self.age_s:.1f}s: {list(self.argv)!r}"
+        note = f" ({self.note})" if self.note else ""
+        return f"pid {self.pid}, age {self.age_s:.1f}s: {list(self.argv)!r}{note}"
 
 
 def reap_registered() -> list[Leak]:
     """The session-end safety net: stop every registered server that is still live
     (identity-checked) and return what was found. A record whose pid now names a
-    different process (start time differs) is dropped, never signalled."""
+    different process (start time differs) is dropped, never signalled; a record with
+    no recorded start time is reported, never signalled."""
     leaks: list[Leak] = []
     for h in registered():
+        if h.start_time <= 0:
+            leaks.append(Leak(argv=h.argv, pid=h.pid, age_s=h.age(),
+                              note="identity unknown: not signalled"))
+            _unregister(h)
+            continue
         if not is_live(h):
             _unregister(h)
             continue
         leaks.append(Leak(argv=h.argv, pid=h.pid, age_s=h.age()))
-        if h.proc is not None and isinstance(h.proc, subprocess.Popen):
-            try:
-                stop_server(h)
-            except ServerLost:
-                pass  # reported as a leak either way
-        else:
-            if not _send(h, signal.SIGTERM):
-                pass
-            deadline = time.monotonic() + h.grace + STOP_MARGIN_S
-            while time.monotonic() < deadline and is_live(h):
-                time.sleep(0.05)
-            if is_live(h):
-                _fallback_kill(h)
-            _sweep_session(h)
-            if h.pidfd is not None or h._status is not None or h._control is not None:
-                _close_fds(h)
-            _unregister(h)
+        if _popen_of(h) is not None:
+            _stop_core(h, None)  # sync and asyncio handles alike; never reaps before the sweep
+            continue
+        # A record without a process object (not our child): signal the recorded
+        # supervisor (identity-checked); its session only while its pid is held.
+        _send(h, signal.SIGTERM)
+        deadline = time.monotonic() + h.grace + STOP_MARGIN_S
+        while time.monotonic() < deadline and is_live(h):
+            time.sleep(0.05)
+        if is_live(h):
+            _fallback_kill(h)
+        _close_fds(h)
+        _unregister(h)
     return leaks
 
 
@@ -873,55 +1027,79 @@ def run_bounded(argv: Sequence[str], *, timeout: float, cwd: Any = None,
 
 # --- asyncio ----------------------------------------------------------------
 
+class _AsyncSupervisorProc:
+    """An asyncio view of the supervisor's :class:`subprocess.Popen` that never reaps
+    it: asyncio's own child watcher would reap ``create_subprocess_exec`` children as
+    soon as they exit, freeing the session id before the owner's sweep (BUG-0125
+    review M2(a)). Exit is observed with ``waitid(WNOWAIT)``; the owner reaps it after
+    the sweep (:func:`astop_server`)."""
+
+    def __init__(self, h: ServerHandle, popen: subprocess.Popen,
+                 stdout: Any, stderr: Any) -> None:
+        self._h = h
+        self._popen = popen
+        self.pid = popen.pid
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode: int | None = None
+
+    async def wait(self) -> int:
+        import asyncio
+
+        while self.returncode is None:
+            code = _peek_code(self._h)
+            if code is not None:
+                self.returncode = code
+                break
+            await asyncio.sleep(0.05)
+        return self.returncode
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        import asyncio
+
+        async def read(stream: Any) -> bytes:
+            return b"" if stream is None else await stream.read()
+
+        out, err = await asyncio.gather(read(self.stdout), read(self.stderr))
+        await self.wait()
+        return out, err
+
+
+async def _stream_reader(loop: Any, pipe: Any) -> Any:
+    import asyncio
+
+    if pipe is None:
+        return None
+    reader = asyncio.StreamReader(loop=loop)
+    await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader, loop=loop), pipe)
+    return reader
+
+
 async def astart_server(argv: Sequence[str], *, env: dict[str, str] | None = None,
                         stdin: Any = subprocess.DEVNULL, stdout: Any = None, stderr: Any = None,
                         grace: float = DEFAULT_GRACE_S, allow_thread: bool = False,
                         ready_timeout: float = READY_TIMEOUT_S) -> ServerHandle:
-    """:func:`start_server` for asyncio: ``handle.proc`` is an
-    :class:`asyncio.subprocess.Process`. The forking thread is the event loop's."""
+    """:func:`start_server` for asyncio: ``handle.proc`` offers ``stdout`` / ``stderr``
+    (:class:`asyncio.StreamReader` for ``PIPE``), ``wait()``, ``communicate()`` and
+    ``returncode`` -- and never reaps the supervisor before the owner's sweep. The
+    forking thread is the event loop's."""
     import asyncio
 
     _check_thread(allow_thread)
-    status_r, status_w, control_r, control_w = _pipes()
-    try:
-        proc = await asyncio.create_subprocess_exec(  # the one sanctioned asyncio spawn
-            *_supervisor_argv(argv, grace, status_w, control_r), env=env,
-            stdin=stdin, stdout=stdout, stderr=stderr,
-            start_new_session=True, pass_fds=(status_w, control_r))
-    finally:
-        os.close(status_w)
-        os.close(control_r)
-    st = read_stat(proc.pid)
-    h = ServerHandle(argv=tuple(str(a) for a in argv), pid=proc.pid,
-                     start_time=st.start if st else 0, child_pid=0, child_start_time=0,
-                     grace=grace, proc=proc, pidfd=_open_pidfd(proc.pid),
-                     _status=_LineReader(status_r), _control=control_w)
-
-    def kill_supervisor() -> None:
-        _send(h, signal.SIGKILL)
-        _close_fds(h)
-
     loop = asyncio.get_running_loop()
+    h, popen = _spawn_supervisor(argv, grace, env=env, stdin=stdin, stdout=stdout, stderr=stderr)
+    h.proc = _AsyncSupervisorProc(h, popen, await _stream_reader(loop, popen.stdout),
+                                  await _stream_reader(loop, popen.stderr))
     return await loop.run_in_executor(None, _complete_start, h, h._status, ready_timeout,
-                                      kill_supervisor)
+                                      *_start_failure_paths(h, popen))
 
 
 async def astop_server(h: ServerHandle, *, timeout: float | None = None) -> str:
-    """:func:`stop_server` for a handle from :func:`astart_server`."""
+    """:func:`stop_server` for a handle from :func:`astart_server` (same steps, run off
+    the event loop)."""
     import asyncio
 
-    if h.exit_reason is not None and h._status is None:
-        return h.exit_reason
-    wait = h.grace + STOP_MARGIN_S if timeout is None else timeout
-    if h.proc.returncode is None:
-        request_stop(h)
-        try:
-            await asyncio.wait_for(h.proc.wait(), wait)
-        except asyncio.TimeoutError:
-            _fallback_kill(h)
-            await asyncio.wait_for(h.proc.wait(), KILL_BOUND_S)
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _collect, h)
+    await asyncio.get_running_loop().run_in_executor(None, _stop_core, h, timeout)
     _raise_if_lost(h)
     return h.exit_reason or ""
 
@@ -945,9 +1123,7 @@ async def arun_bounded(argv: Sequence[str], *, timeout: float,
     except BaseException:
         await astop_server(h)
         raise
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _collect, h)
-    _raise_if_lost(h)
+    await astop_server(h)  # exited: sweep (held), reap, collect
     return h.proc.returncode, out, err, False
 
 

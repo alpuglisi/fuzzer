@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from fuzzlab import procutil
+from tests._procs import raw_members
 
 REPO = Path(__file__).resolve().parent.parent
 BOUND_S = 10.0
@@ -107,8 +108,15 @@ def test_stop_server_takes_the_whole_tree_and_reaps() -> None:
 def test_stop_server_catches_a_grandchild_that_escaped_group_and_session() -> None:
     h = procutil.start_server([sys.executable, "-c", ESCAPING_PROGRAM],
                               stdout=subprocess.PIPE, text=True)
-    lines = [h.proc.stdout.readline().split() for _ in range(2)]
-    pids = {kind: int(pid) for kind, pid in lines}
+    pids: dict[str, int] = {}
+    for _ in range(6):  # two processes share the pipe: parse tokens, not line shapes
+        import re
+
+        for kind, pid in re.findall(r"(CHILD|GRAND) (\d+)", h.proc.stdout.readline()):
+            pids[kind] = int(pid)
+        if len(pids) == 2:
+            break
+    assert set(pids) == {"CHILD", "GRAND"}, pids
     grand = procutil.read_stat(pids["GRAND"])
     assert grand is not None and grand.sid != h.pid  # it really left the session
     targets = [(pids["CHILD"], procutil.read_stat(pids["CHILD"]).start), (grand.pid, grand.start)]
@@ -120,7 +128,7 @@ def test_a_server_that_exits_on_its_own_is_collected_with_its_code() -> None:
     h = procutil.start_server(["sh", "-c", "sleep 300 & exit 7"])
     assert h.proc.wait(timeout=BOUND_S) == 7
     assert procutil.finish(h) == "child"
-    assert procutil.session_members(h.pid, h.start_time) == []  # the orphaned sleep too
+    assert raw_members("sid", h.pid, h.start_time) == []  # the orphaned sleep too
 
 
 def test_exec_failure_is_the_real_oserror() -> None:
@@ -262,7 +270,7 @@ def test_supervisor_refuses_to_start_when_its_owner_is_not_its_parent() -> None:
         assert sup.wait(timeout=BOUND_S) == 125
         with os.fdopen(status_r) as fh:
             assert fh.read().startswith("error kind=owner-gone")
-        assert procutil.session_members(sup.pid, 0) == []  # no server was started
+        assert raw_members("sid", sup.pid, 0) == []  # no server was started
     finally:
         os.close(control_w)
 
@@ -276,7 +284,7 @@ def test_a_stale_record_whose_pid_was_reused_is_never_signalled() -> None:
     old = procutil.start_server(["sleep", "300"])
     stale_start, stale_child_start = old.start_time, old.child_start_time
     procutil.stop_server(old)
-    victim = subprocess.Popen(["sleep", "300"], start_new_session=True)  # noqa: S603 -- the bystander
+    victim = _bystander(["sleep", "300"])
     try:
         vstat = procutil.read_stat(victim.pid)
         assert vstat is not None and vstat.start != stale_start
@@ -293,6 +301,206 @@ def test_a_stale_record_whose_pid_was_reused_is_never_signalled() -> None:
     finally:
         victim.kill()
         victim.wait()
+
+
+def _bystander(argv: list[str], **kw) -> subprocess.Popen:
+    """A process the test starts in its own session that procutil must NOT treat as
+    one of its servers (the one place these tests use a bare Popen for it)."""
+    return subprocess.Popen(argv, start_new_session=True, **kw)  # noqa: S603
+
+
+def _with_fake_proc_entries(monkeypatch, extra: list, hidden: frozenset = frozenset()) -> None:
+    """Make /proc show ``extra`` ProcStat rows (and hide ``hidden`` pids from
+    ``read_stat``) -- a reused pid, group or session, without waiting for pid wrap."""
+    real_iter, real_read = procutil._iter_stats, procutil.read_stat
+    monkeypatch.setattr(procutil, "_iter_stats", lambda: iter([*real_iter(), *extra]))
+    monkeypatch.setattr(procutil, "read_stat",
+                        lambda pid: None if pid in hidden else real_read(pid))
+
+
+def test_a_reaped_supervisors_session_is_never_swept(monkeypatch) -> None:
+    """BUG-0125 review M2: once the supervisor is reaped its session id is free; a
+    process that later carries that sid (faked here) is not ours and is never
+    signalled -- not by the sweep, not by the session enumeration."""
+    h = procutil.start_server(["sleep", "300"])
+    procutil.stop_server(h)
+    victim = _bystander(["sleep", "300"])
+    try:
+        vst = procutil.read_stat(victim.pid)
+        fake = procutil.ProcStat(pid=victim.pid, ppid=1, pgid=victim.pid, sid=h.pid,
+                                 start=vst.start, state="S")
+        _with_fake_proc_entries(monkeypatch, [fake], hidden=frozenset({h.pid}))
+        assert procutil.session_members(h.pid, h.start_time) == []
+        assert procutil._sweep_session(h) == []
+        assert procutil.is_live(h) is False
+        monkeypatch.undo()
+        time.sleep(0.2)
+        assert victim.poll() is None, "a process in a reused session was signalled"
+    finally:
+        victim.kill()
+        victim.wait()
+
+
+def test_the_fallback_never_signals_a_reused_server_group_outside_the_session(monkeypatch) -> None:
+    """BUG-0125 review M2(b): the server's pgid is usually free by fallback time; a
+    process that carries it (faked) but is not in the still-held supervisor's session
+    is never signalled, while the real tree is stopped."""
+    h = procutil.start_server(["sh", "-c", "sleep 300 & wait"], grace=0.5)
+    tree = _wait_members(h, 3)
+    victim = _bystander(["sleep", "300"])
+    try:
+        vst = procutil.read_stat(victim.pid)
+        fake = procutil.ProcStat(pid=victim.pid, ppid=1, pgid=h.child_pid, sid=victim.pid,
+                                 start=vst.start, state="S")
+        os.kill(h.pid, signal.SIGSTOP)  # wedged
+        _with_fake_proc_entries(monkeypatch, [fake], hidden=frozenset({h.child_pid}))  # leader "gone"
+        procutil._fallback_kill(h)
+        monkeypatch.undo()
+        assert h.proc.wait(timeout=BOUND_S) == -signal.SIGKILL
+        assert procutil.finish(h) == "killed"
+        assert _wait_gone(tree) == []
+        time.sleep(0.2)
+        assert victim.poll() is None, "a process outside the supervisor's session was signalled"
+    finally:
+        victim.kill()
+        victim.wait()
+
+
+def test_a_killed_supervisors_leftovers_are_swept_while_its_pid_is_held() -> None:
+    """The owner's sweep runs before it reaps the supervisor (its pid, the session id,
+    is still held): a supervisor SIGKILLed from outside leaves a background child,
+    which the sweep stops."""
+    h = procutil.start_server(["sh", "-c", "sleep 300 & echo $!; wait"], stdout=subprocess.PIPE,
+                              text=True)
+    sleeper = int(h.proc.stdout.readline())
+    sst = procutil.read_stat(sleeper)
+    os.kill(h.pid, signal.SIGKILL)  # the supervisor dies without cleaning up
+    deadline = time.monotonic() + BOUND_S
+    while _alive(h.child_pid, h.child_start_time):
+        assert time.monotonic() < deadline
+        time.sleep(0.02)  # sh dies of its PDEATHSIG(SIGKILL); the sleep is left
+    assert _alive(sleeper, sst.start)
+    assert procutil.stop_server(h) == "killed"
+    assert _wait_gone([(sleeper, sst.start)]) == []
+
+
+def test_an_async_handle_is_swept_before_it_is_reaped() -> None:
+    """Same, through the asyncio path: astart_server's process view never lets
+    asyncio reap the supervisor before astop_server's sweep."""
+    import asyncio
+
+    async def go():
+        h = await procutil.astart_server(["sh", "-c", "sleep 300 & echo $!; wait"],
+                                         stdout=subprocess.PIPE, allow_thread=True)
+        sleeper = int((await h.proc.stdout.readline()).decode())
+        sst = procutil.read_stat(sleeper)
+        os.kill(h.pid, signal.SIGKILL)
+        assert await asyncio.wait_for(h.proc.wait(), BOUND_S) == -signal.SIGKILL
+        assert procutil.read_stat(h.pid) is not None  # exited, not reaped: still held
+        reason = await procutil.astop_server(h)
+        return reason, sleeper, sst
+
+    reason, sleeper, sst = asyncio.run(go())
+    assert reason == "killed"
+    assert _wait_gone([(sleeper, sst.start)]) == []
+
+
+def test_an_unknown_start_time_never_signals_anything() -> None:
+    """BUG-0125 review B2: a start time of 0 means "identity unknown", never "match
+    anything". A group whose leader is gone has a live member; a record with start 0
+    naming it signals nothing and is reported."""
+    sh = _bystander(["sh", "-c", "sleep 300 & echo $!"], stdout=subprocess.PIPE, text=True)
+    sleeper = int(sh.stdout.readline())
+    sh.wait()
+    sst = procutil.read_stat(sleeper)
+    try:
+        assert sst is not None and sst.pgid == sh.pid
+        assert procutil.group_members(sh.pid, 0) == []
+        assert procutil.kill_process_group(sh.pid, 0, signal.SIGKILL) == 0
+        assert procutil.group_members(sh.pid, 1) == []  # leader not held, no anchor
+        record = procutil.ServerHandle(argv=("x",), pid=sh.pid, start_time=0,
+                                       child_pid=sh.pid, child_start_time=0)
+        procutil._register(record)
+        leaks = procutil.reap_registered()
+        assert [leak.note for leak in leaks if leak.pid == sh.pid] == ["identity unknown: not signalled"]
+        time.sleep(0.2)
+        assert _alive(sleeper, sst.start), "an unknown identity was signalled"
+    finally:
+        procutil._signal_checked(sleeper, sst.start, signal.SIGKILL)
+
+
+def test_start_server_refuses_a_server_whose_identity_cannot_be_recorded(monkeypatch) -> None:
+    """Loud, not silent (B2): with no /proc start time for the supervisor, start_server
+    stops what it started and raises."""
+    real, seen = procutil.read_stat, []
+
+    def first_unknown(pid: int):
+        if not seen:
+            seen.append(pid)
+            return None
+        return real(pid)
+
+    monkeypatch.setattr(procutil, "read_stat", first_unknown)
+    with pytest.raises(procutil.ProcUtilError, match="identity cannot be checked"):
+        procutil.start_server(["sleep", "300"])
+    monkeypatch.undo()
+    assert raw_members("sid", seen[0], 0) == []
+
+
+SPY = textwrap.dedent("""
+    import importlib.util, os, sys
+    log, path = sys.argv[1], sys.argv[2]
+    spec = importlib.util.spec_from_file_location("procutil_under_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    real_killpg = os.killpg
+
+    def spy(pgid, sig):
+        with open(log, "a") as fh:
+            fh.write(f"{pgid} {sig} {int(mod.read_stat(pgid) is not None)}\\n")
+        return real_killpg(pgid, sig)
+
+    os.killpg = spy
+    sys.exit(mod._supervisor_main(sys.argv[3:]))
+""")
+
+
+def test_the_supervisor_signals_the_servers_group_only_while_its_leader_is_held(
+        tmp_path: Path, monkeypatch) -> None:
+    """BUG-0125 review M1: the supervisor must not reap its server mid-termination and
+    then keep calling killpg on the freed group id. The server exits on SIGTERM; its
+    child setsid()s and ignores SIGTERM, so the SIGKILL phase runs. Every killpg is
+    spied on (in the real supervisor process) and must find the leader pid held."""
+    spy, log = tmp_path / "spy.py", tmp_path / "killpg.log"
+    spy.write_text(SPY)
+    real_argv = procutil._supervisor_argv
+
+    def spied(argv, grace, status_w, control_r):
+        full = real_argv(argv, grace, status_w, control_r)
+        i = full.index(procutil._SUPERVISOR_SCRIPT)
+        return [*full[:i], str(spy), str(log), procutil._SUPERVISOR_SCRIPT, *full[i + 1:]]
+
+    monkeypatch.setattr(procutil, "_supervisor_argv", spied)
+    prog = textwrap.dedent("""
+        import os, signal, time
+        if os.fork() == 0:
+            os.setsid()
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            print(os.getpid(), flush=True)
+            time.sleep(300)
+            os._exit(0)
+        time.sleep(300)
+    """)
+    h = procutil.start_server([sys.executable, "-c", prog], stdout=subprocess.PIPE, text=True,
+                              grace=0.5)
+    escaped = int(h.proc.stdout.readline())
+    est = procutil.read_stat(escaped)
+    assert procutil.stop_server(h) == "stop"
+    calls = [line.split() for line in log.read_text().splitlines()]
+    assert any(sig == str(int(signal.SIGKILL)) for _, sig, _ in calls), calls  # non-vacuous
+    assert all(held == "1" for _, _, held in calls), f"killpg on a freed group id: {calls}"
+    assert _wait_gone([(escaped, est.start)]) == []
 
 
 def test_kill_process_group_kills_exactly_the_recorded_group() -> None:

@@ -1152,7 +1152,8 @@ tracked in the requirements files, not here.
   label contract). Every long-lived child the toolkit or its tests start -- the five
   live-boot harnesses' servers, test servers, the web launcher's jobs -- runs under a
   supervisor in its own session (PDEATHSIG + subreaper; group stop; identity-checked by
-  pidfd and `/proc` start time; never killed by pattern); `run_bounded` runs forking
+  pidfd and `/proc` start time, a group or session id only while its leader pid is held
+  -- CC-CORE-0050; never killed by pattern); `run_bounded` runs forking
   tools (composer, npm, go, mvn, bundle and the corpus sync's VCS client) so a timeout
   stops the whole tree. Enforced by an AST guard (`tests/test_procutil_guard.py`) and
   the session-end safety net (Cross-cutting concerns, Testing).

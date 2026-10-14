@@ -1552,4 +1552,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      fails the run, naming argv, pid and age.
   4. **A "bounded" stop is checked for completeness:** a timeout, `terminate()` or
      `kill()` on one pid is not a stop of a launcher (`artisan`, `go run`,
-     `bundle exec`, `mvn`, `npm`). (from BUG-0125)
+     `bundle exec`, `mvn`, `npm`).
+  5. **An id is trusted only while its leader pid is held** (review round 1): a process
+     group or session id may be signalled only while its leader pid is still held --
+     alive, or a zombie this code has not yet reaped, with the recorded start time. Pids
+     wrap within minutes (pid_max 32768 here). So a supervisor reaps its server only
+     after its last `killpg`, an owner sweeps a supervisor's session before reaping it
+     (never through a runtime that reaps for it, e.g. asyncio's child watcher), a group
+     whose leader is gone is signalled only inside a still-held session, and an unknown
+     start time (0) matches nothing. Each such kill path has a test that fakes a reused
+     id and shows nothing is signalled. (from BUG-0125)

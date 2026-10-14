@@ -342,22 +342,29 @@ plugin registry. It is the layer that makes the store the integration bus.
     downgrade). Off the main thread it raises unless `allow_thread=True`, with which the
     server dies when the forking thread ends -- loudly (`ServerLost`, a stderr line).
   - `stop_server(handle, *, timeout)` requests a stop (control pipe + pidfd SIGTERM),
-    waits, and if the supervisor is wedged kills the server's own group directly,
-    identity-checked, then the supervisor; then sweeps the supervisor's session.
-    Idempotent; returns the exit reason (`stop`, `child`, `owner`, `killed`); raises
-    `ServerLost` for `signal`. `finish(handle)` collects an exited one.
+    waits for the supervisor to exit **without reaping it** (`waitid(WNOWAIT)`), and if
+    it is wedged kills, inside its still-held session, the server's group and the
+    supervisor's other descendants, then the supervisor; then sweeps the supervisor's
+    session while its pid is held, and only then reaps it. Idempotent; returns the exit
+    reason (`stop`, `child`, `owner`, `killed`); raises `ServerLost` for `signal`.
+    `finish(handle)` collects an exited one. The supervisor likewise reaps its server
+    only after its last `killpg`. *(BUG-0125 review, CC-CORE-0050.)*
   - `run_bounded(argv, *, timeout, cwd, env, input, text)` behaves like
     `subprocess.run(capture_output=True, timeout=)` but stops the tool's whole tree on
     timeout and on its exit. `astart_server` / `astop_server` / `arun_bounded` are the
-    asyncio forms; `request_stop` is the non-blocking stop.
+    asyncio forms (their process view never lets asyncio reap the supervisor before the
+    sweep); `request_stop` is the non-blocking stop.
   - Identity: every signal goes through a pidfd (where available) after the target's
-    `/proc/<pid>/stat` start time (field 22) matches the recorded one; groups and
-    sessions are signalled member by member only when their leader pid is absent or
-    still has the recorded start time. Nothing is killed by name or pattern
-    (`kill_process_group`, `group_members`, `session_members`, `read_stat`).
+    `/proc/<pid>/stat` start time (field 22) matches the recorded one. A group or
+    session id is trusted only while its leader pid is held (alive or an unreaped
+    zombie, matching start time); a group whose leader is gone only inside a held
+    supervisor's session (`anchor`). A start time of 0 means "identity unknown":
+    nothing is signalled, `start_server` refuses such a server, and the safety net
+    reports such a record. Nothing is killed by name or pattern (`kill_process_group`,
+    `group_members`, `session_members`, `read_stat`).
   - A registry of what this process started (`registered()`); `reap_registered()` stops
-    every live entry and returns `Leak(argv, pid, age_s)` records, dropping a record
-    whose pid now names another process.
+    every live entry and returns `Leak(argv, pid, age_s, note)` records, dropping a
+    record whose pid now names another process.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0125 review fixes: a process id is trusted only while its leader is held)
+- **Why:** review found kill paths that could signal processes this run did not start
+  once pids wrap (the supervisor reaped its server before its last group kill; the
+  owner reaped the supervisor before sweeping its session; start time 0 matched
+  anything).
+- **What:** `procutil` keeps each leader pid held until the last signal that relies on
+  it, sweeps before reaping (asyncio path included), anchors the fallback to the
+  supervisor's session, and treats an unknown start time as "match nothing" (PA-0125
+  rule 5). CC-CORE-0050.
+
 ## 2026-10-14 (BUG-0125: test-launched servers own their whole process tree)
 - **Why:** 429 orphaned `php -S` servers (each a stopped `artisan serve`'s child), `go
   run` binaries and a puma (~14 GB) OOM-killed full-suite runs; nothing tied a server or

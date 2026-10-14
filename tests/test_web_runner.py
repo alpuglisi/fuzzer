@@ -181,3 +181,17 @@ def test_launch_readonly_tool_returns_token():
 def test_launch_stop_unknown_token_is_false():
     r = _client().post("/api/launch/deadbeef/stop")
     assert r.status_code == 200 and r.json()["stopped"] is False
+
+
+def test_the_ui_event_loop_runs_on_the_main_thread(monkeypatch):
+    """BUG-0125 review nit 4: the launcher spawns with ``allow_thread=True`` because the
+    event-loop thread lives as long as the UI. ``serve`` hands the app to ``uvicorn.run``
+    on the calling (main) thread, which runs the loop there."""
+    import threading
+
+    uvicorn = pytest.importorskip("uvicorn")
+    from fuzzlab.web.app import serve
+    seen = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.append(threading.current_thread()))
+    serve(load_config(overrides={"web_host": "127.0.0.1"}, environ={}))
+    assert seen == [threading.main_thread()]

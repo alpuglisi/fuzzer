@@ -3,6 +3,57 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0050 — BUG-0125 review fixes: an id is trusted only while its leader pid is held (2026-10-14)
+- Change (`fuzzlab/procutil.py`, on top of CC-CORE-0048; reviewer A's must-fixes, B's
+  items; A-M1 supersedes B's should-fix 1):
+  - **A-M1:** the supervisor's `_reap` reaps every exited child except the server (each
+    zombie child found in `/proc`, by pid); `_reap_server` reaps the server only after
+    the last `killpg` (bounded; loud if it cannot).
+  - **A-M2(a):** the owner waits for the supervisor with `waitid(WNOWAIT)` (never
+    reaping), sweeps its session while the pid is held, then reaps (`_stop_core`, used by
+    `stop_server`, `astop_server` and `reap_registered`). `astart_server` spawns with
+    `subprocess.Popen` and returns an asyncio view (`_AsyncSupervisorProc`: stream
+    readers, non-reaping `wait()`, `communicate()`), because asyncio's child watcher
+    reaps its own children on exit.
+  - **A-M2(b):** the fallback's pgid kill requires `st.sid == supervisor pid` (anchor
+    held: the supervisor is alive), and it also kills the supervisor's other
+    descendants and session members before the supervisor itself.
+  - **A-M2(c) + B-2:** `_members(kind, id, start, anchor=None)` trusts an id only while
+    its leader pid is held (`_held`: present with the recorded start time, alive or
+    an unreaped zombie), or -- for a group whose leader is gone -- inside a held
+    anchor session; a start time of 0 is "identity unknown" and matches nothing;
+    `start_server` refuses such a server loudly after stopping it; the safety net
+    reports such a record (`Leak.note`) without signalling it.
+  - **A-S1:** the server's `child_setup` re-checks `getppid()` after its `prctl`.
+  - **B-3:** dead code in the safety net removed. **B-4:** `web/runner.py` documents
+    why `allow_thread=True` is right (uvicorn's loop on the main thread).
+  - **A-N1:** the "pids wrap quickly (pid_max 32768 here)" note in `_members`.
+  - FR-CORE-38 updated in place; NFR-LAB-cleanup gains the new tests and the S2
+    measurement; PA-0125 gains rule 5.
+- Impact: no API change for callers (`kill_process_group` / `group_members` gain an
+  optional `anchor`; `Leak` gains `note`). The web runner's `run.proc` is now the
+  asyncio view (same `stdout` / `wait()` / `returncode`).
+- Risk: medium (all kill paths). Mitigation: a test per must-fix that fails on its
+  revert, and a measured Playwright check (S2: 0 of 9 descendants left 5 s after a
+  pytest SIGKILL).
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_procutil.py` (29, 7 new),
+    `tests/test_web_runner.py::test_the_ui_event_loop_runs_on_the_main_thread`,
+    `tests/_procs.py` (raw scans for assertions only), guard allowlist updated — done
+  - [x] BUG-0125 corrective action (review round 1), PA-0125(5), FR-CORE-38,
+    NFR-LAB-cleanup, CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): one offline pytest process over the targeted
+  files: **283 passed, 13 skipped** (runsc/cgroup v1 absent; github unreachable by
+  design). Mutation: **22/26 killed**; every must-fix revert killed (A-M1; A-M2(a)
+  reap-before-sweep and asyncio-style reap; A-M2(c) absent leader without anchor, anchor
+  session not required; B-2 unknown identity at start). Survivors: the fallback group
+  TERM without its anchor (with the leader gone `_members` yields nothing and the
+  descendant/session kill that follows reaches the same processes), B-2's explicit
+  start-0 guard (subsumed by A-M2(c)), the "no older than the leader" filter
+  (unreachable while the leader is held), and A-S1 (a race; not deterministic). None
+  lets a signal reach a process this run did not start.
+
 ### CC-CORE-0048 — `procutil`: one owner for every child process tree (BUG-0125) (2026-10-14)
 - Change: new `fuzzlab/procutil.py` (FR-CORE-38), a stdlib-only leaf.
   `start_server` launches a supervisor (`sys.executable -I -S fuzzlab/procutil.py`) in a

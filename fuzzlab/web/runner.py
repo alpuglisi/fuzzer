@@ -22,8 +22,15 @@ every live job (:meth:`Runner.shutdown`); and if the UI process dies, the superv
 (PR_SET_PDEATHSIG, a changed parent, EOF on its control pipe) stops the job too. The
 job's output is streamed to the UI over a pipe, so a job that outlived its UI would
 run blind and die on its next write; an operator who wants a job to outlive the UI
-runs the same command from the CLI (the dry-run preview shows it). The spawn runs on
-the event-loop thread, which lives as long as the UI does, hence ``allow_thread``.
+runs the same command from the CLI (the dry-run preview shows it).
+
+``allow_thread=True`` is correct only because the spawn runs on the event-loop thread
+and that thread lives as long as the UI: under ``fuzzlab.web.app.serve`` the loop is
+``uvicorn.run``'s, on the process's **main thread**. PR_SET_PDEATHSIG fires when the
+forking thread exits, so a host that runs this loop on a shorter-lived thread (e.g.
+Starlette's ``TestClient`` portal thread, which ends with the client) stops its jobs
+when that thread ends -- loudly, as a ``[fuzzlab]`` line on the job's stream
+(``ServerLost``), never silently (BUG-0125 D17/D18, review nit 4).
 """
 
 from __future__ import annotations
