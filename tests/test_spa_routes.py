@@ -73,19 +73,29 @@ def _time(body: str, cap: int) -> float:
     return time.perf_counter() - start
 
 
+def _ops(body: str, cap: int) -> spa.StepCounter:
+    counter = spa.StepCounter()
+    spa.scan_routes(body, max_bytes=cap, counter=counter)
+    return counter
+
+
 def test_the_scan_is_linear_on_adversarial_5mb_bodies():
-    """PA-0095 / reviewer A9: near-miss bodies (an unterminated ``{path:'`` repeated, a
-    5 MB bundle) are scanned in bounded time, and doubling the body roughly doubles the
-    time (a quadratic scan would quadruple it)."""
+    """PA-0095 / reviewer A9, BUG-0135 / PA-0135: near-miss bodies (an unterminated
+    ``{path:'`` repeated, a 5 MB bundle) are scanned under a generous wall-clock smoke
+    bound, and doubling the body at most doubles the scan's **operation counts** (its
+    Python-level steps and the characters ``str.find`` covered; a quadratic scan would
+    quadruple them). A wall-clock ratio is never asserted: it failed under load
+    (BUG-0135)."""
     big = 5 * 1024 * 1024
     for name, body in _adversarial(big).items():
         assert _time(body, 8 * big) < 10.0, name
     for name in _adversarial(1024):
-        small = _adversarial(512 * 1024)[name]
-        large = _adversarial(1024 * 1024)[name]
-        t_small = min(_time(small, big) for _ in range(3))
-        t_large = min(_time(large, big) for _ in range(3))
-        assert t_large < 3.5 * max(t_small, 1e-3), name
+        small = _ops(_adversarial(512 * 1024)[name], big)
+        large = _ops(_adversarial(1024 * 1024)[name], big)
+        slack = 16 * spa._MAX_TAG_BACK            # boundary effects: a few look-backs
+        assert large.steps <= 2 * small.steps + slack, (name, small.steps, large.steps)
+        assert large.scanned <= 2 * small.scanned + slack, (name, small.scanned,
+                                                            large.scanned)
 
 
 def test_a_script_over_the_size_cap_is_not_scanned():
@@ -395,7 +405,8 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert not any("socket.io" in u or "cdn.example" in u for u in urls)
     # the counts are stored too, not only logged (PA-0110, lane S review)
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
-    assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0}   # + FR-CRAWL-16
+    assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0,   # + FR-CRAWL-16
+                     "spa_query_stopped": 0}                          # + FR-CRAWL-17
     # the bundle was read from the guard's own fetch: main.js requested once per document
     assert len(lab.seen("GET", "/main.js")) == 1
     # a form on a route is recorded

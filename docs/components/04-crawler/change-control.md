@@ -136,6 +136,79 @@ Newest first.
   `test_browserauth`: 658 passed, 0 skipped. Not verified here: the live Juice Shop crawl
   and M6 run (the coordinator's live check).
 
+- **Review amendment, round 1 (2026-10-14; reviewers A and B, both AGREE-with-changes;
+  the coordinator's reconciled fix list S1-S11, D41).** Appended; the entry above stays
+  as landed. Supersedes, from this amendment on: the anchor cap (`MAX_QUERY_ANCHORS`,
+  `QueryScan.anchor_cap`, `spa_query_anchor_cap`), "windows never overlap" as the stated
+  bound, the "same-name API forwarding discounted" and "persisted markers can reappear"
+  residuals, the "no CLI flag" and "no session check" residuals, and the read of
+  `tools.fetcher.REDIRECT_PARAMS`.
+  - **S1 (A-M1):** each seed/probe window records what it blocked
+    (`LocalSpider._window_refusal`: `win["writes"]` for non-GETs; the probe's
+    `blocked` set, also fed by `_note_guard_abort` / `_note_out_of_scope`). A name
+    whose only evidence is a blocked request is not kept (`spa.observed_names` takes
+    `(url, body, blocked)`). A seed whose window blocked a write is re-filed
+    `source = 'spa-query-writes'` (`spa.WRITE_SEED_SOURCE`,
+    `StorageManager.set_source`, `_after_query_window`; counted
+    `spa_query_write_seeds`), which `store_adapter.import_spider` imports as a page only
+    (CC-CORE-0053). Follow-up, its own design gate (CC-FUZZ): M6 loads of such a route
+    inside a write-blocking window.
+  - **S2 (A-M2):** docstrings and FR-CRAWL-17 state the real bound: monotone `str.find`
+    per anchor kind plus a step budget.
+  - **S3 (A-M3, B-S3), BUG-0135 / PA-0135:** `spa.StepCounter` (`steps`, `scanned`);
+    `scan_routes(counter=)` and `QueryScan.steps/.scanned`; the linearity tests of both
+    scanners assert `ops(2n) <= 2 * ops(n) + slack` (wall clock: absolute smoke only);
+    the AST guard `tests/test_no_wall_clock_ratio.py`, which this crawler lane adds for
+    the whole `tests/` tree (no other component's test changed).
+  - **S4 (A-S1):** the walker's budget is `MAX_QUERY_STEPS` (2,000,000) steps, not an
+    anchor count (`QueryScan.budget_hit`, counted `spa_query_step_cap`).
+  - **S5 (A-S2):** options with `relativeTo` leave the names unpaired;
+    `classify_route` refuses a `.` / `..` segment.
+  - **S6 (A-S3):** the `<name>=` discount applies to a request URL only when it is a
+    copy of the page's own (its path is the document's, or it carries the fragment
+    route).
+  - **S7 (A-S4):** `spa.scrub_markers` replaces any whole-token marker with
+    `spa.MARKER_PLACEHOLDER` at the spider's storage boundary (`mark_visited` URL, title
+    and text; `record_request`; `record_form`; `record_revealed_form`).
+  - **S8 (A-S5, B-S2, A-N5):** `REDIRECT_PARAMS` moved unchanged to `core.urls`
+    (CC-CORE-0053); `tools.fetcher` re-exports it; `spa.redirect_name` reads it. Wording:
+    the window is the guard, `/` is hygiene; the `R-OPEN-REDIRECT` `name_regex` tension
+    is stated in FR-CRAWL-17 / FR-CORE-39.
+  - **S9 (B-S1):** `_note_guard_abort` never records a probe URL in
+    `skipped_destructive`.
+  - **S10 (B-S4):** in an authenticated crawl `_leave` runs `_client_session_intact` on
+    the load's own page before it leaves; on a loss query loads stop
+    (`spa_query_stopped`, `spa_query_session_losses`, later ones refused
+    `session lost`) and the session is re-adopted once on the start page; a
+    re-adoption that does not hold stops reveals and submissions (as W4).
+  - **S11:** the `navigateByUrl(` anchor (A-N1); a quoted name that is not
+    identifier-shaped is counted `not identifier-shaped` (A-N2); `--no-spa-query`
+    (A-N3); a `queryParams` anchor continuing a longer identifier is ignored (A-N4).
+  - Not done here: the merge with origin-scope (B-M1), pending the coordinator.
+  - Effectiveness (review amendment, assessed 2026-10-14): `tests/test_spa_query.py` 71
+    passed, 0 skipped (real Chromium, `FUZZLAB_REQUIRE_BROWSER=1`), including the S1
+    crawl + import + real-M6 test (no POST to `/api/send` or `/api/beacon`) and the S10
+    authenticated test. Mutation checks, each reverted afterwards: S1 blocked evidence
+    counted -> the probe test fails (`beacon` kept); S1 seed re-filing dropped -> the S1
+    M6 test fails; S3 a quadratic walker (`hi = len(text)`) -> 4 fail (3 doubling shapes
+    and the budget test, deterministically), and an unbounded `<Route` look-back in
+    `scan_routes` -> its linearity test fails; S4 an anchor cap of 2000 in place of the
+    step budget -> 2 fail (the 3000-noise-anchor test, the budget test); S6 the
+    `<name>=` discount on every request URL -> 2 fail (the unit test and the browser
+    probe test, `forward`); S7 no scrub in `mark_visited` -> the no-marker test fails.
+    The 4 MB adversarial bodies scan in 0.02-1.4 s (budget-bound; smoke bound 10 s). The
+    Juice Shop `main.js` scan is unchanged (pairs `403: error`, `login: redirectUrl`,
+    `track-result: id`; 7 unpaired; refused `non-literal query` x2, `dynamic segment`
+    x1; 45 anchors, 664 steps). Related suites with `FUZZLAB_REQUIRE_BROWSER=1`: 1312
+    passed, 0 failed, 0 skipped (`test_spa_query`, `test_no_wall_clock_ratio`,
+    `test_spa_routes`, `test_store_adapter`, `test_json_points`,
+    `test_requirements_traceability`, `test_lint` with `FUZZLAB_REQUIRE_LINT=1`,
+    `test_logout_redirect`: 286; `test_spa_capture`, `test_spider_scope`,
+    `test_storage_redaction`, `test_proxy_redaction`, `test_destructive_urls`,
+    `test_browserauth`: 377; `test_browser_scope`, `test_forms_phase4`,
+    `test_forms_phase1`, `test_forms_phase2`, `test_session_browser_login`,
+    `test_form_entries`, `test_cli_dry_run`, `test_auditor_seam`: 649).
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

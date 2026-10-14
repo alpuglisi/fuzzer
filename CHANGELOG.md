@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-CRAWL-17 review: write-safe seeds, no stored marker, op-count complexity tests)
+- Review round 1 of FR-CRAWL-17 (reviewers A and B): a seed whose load blocked a write is
+  kept as a page but never imported as a point, so M6 never replays the write, and a name
+  seen only in a blocked request is not kept; probe markers are scrubbed at the spider's
+  storage boundary; the scan's budget is on walker steps; relative navigations and
+  `.`/`..` segments name no route; same-name API forwarding keeps its name; the session
+  is checked after each seed/probe load; a new `--no-spa-query` flag; the open-redirect
+  name set moved to `core.urls` (CC-CRAWL-0027 amendment, CC-CORE-0053). BUG-0135: the
+  scanners' linearity tests asserted a wall-clock ratio and failed under load; they now
+  assert operation counts, enforced by an AST guard (PA-0135).
+
 ## 2026-10-14 (FR-CRAWL-17: SPA route query parameters are crawled, so `#/track-result?id=` is a point)
 - The crawler now reads query-parameter names from the scripts it already scans and crawls
   each paired route with them (`#/track-result?id=fuzzlab`), so Juice Shop's

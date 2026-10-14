@@ -12,8 +12,12 @@ crawler's scan; the hash router at its end renders each view from ``location.has
   to ``/plain``, ``login`` following its ``redirectUrl``, a destructive ``logout``, a
   dynamic-segment ``chat``, a sensitive ``token``), and unpaired names (``term``,
   ``extra``, the redirect-ish ``next``) on routes that reflect, ignore, self-echo
-  (``location.href`` in a link), stash and replay (``save`` / ``show``: a stale marker),
-  forward in a GET query (``fetcher``) or path (``pathy``), or POST (``beacon``).
+  (``location.href`` in a link), stash and replay (``save`` / ``show``: a stale marker;
+  ``memo`` reflects ``term`` and replays the stash, so its seed after the probe shows a
+  stale marker), forward in a GET query under another name (``fetcher``) or the same
+  name (``forward``), in a path (``pathy``), or POST it (``beacon``).
+* ``SessionQuerySpa``: an authenticated crawl (the session in localStorage) whose
+  ``fade`` seed clears the token client-side (S10).
 * ``TrackSpa``: Juice Shop's ``#/track-result?id=`` shape alone, for the end-to-end M6
   test.
 """
@@ -25,8 +29,8 @@ from tests._spa_fixture import _HASH_INDEX, _Lab
 _QUERY_JS = r"""
 const routes = [{path:'track'}, {path:'search'}, {path:'score-board'}, {path:'poster'},
   {path:'hop'}, {path:'away'}, {path:'login'}, {path:'logout'}, {path:'reflect'},
-  {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'fetcher'},
-  {path:'pathy'}, {path:'beacon'}];
+  {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'memo'},
+  {path:'fetcher'}, {path:'forward'}, {path:'pathy'}, {path:'beacon'}];
 // read by the crawler's scan only (never called): Angular-style navigations and reads
 class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}});
 this.router.navigate([`/search`],{queryParams:{q:t}});
@@ -67,6 +71,11 @@ function render() {
   else if (name === 'save') { if (p.get('term')) localStorage.setItem('memo', p.get('term'));
     text('saved'); }
   else if (name === 'show') text('Last: ' + (localStorage.getItem('memo') || ''));
+  else if (name === 'memo') { text('Term: ' + (p.get('term') || ''));
+    text('Last: ' + (localStorage.getItem('memo') || '')); }
+  else if (name === 'forward') { text('forward');
+    if (p.get('term')) fetch('/api/search?term=' + encodeURIComponent(p.get('term')))
+      .catch(() => {}); }
   else if (name === 'fetcher') { text('fetcher');
     if (p.get('term')) fetch('/rest/lookup?k=' + encodeURIComponent(p.get('term')))
       .catch(() => {}); }
@@ -116,3 +125,25 @@ render();
 class TrackSpa(_Lab):
     index = _HASH_INDEX.replace("/main.js", "/track.js").replace("#/about", "#/")
     script = ("/track.js", _TRACK_JS)
+
+
+_SESSION_QUERY_JS = r"""
+const routes = [{path:'fade'}, {path:'after1'}];
+class Nav{go(t){this.router.navigate([`/fade`],{queryParams:{mode:t}});
+this.router.navigate([`/after1`],{queryParams:{x:t}})}}
+const mark = c => fetch('/rest/marker/' + c).catch(() => {});
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '').split('?')[0];
+  const p = new URLSearchParams(location.hash.split('?')[1] || '');
+  document.getElementById('app').textContent = name || 'home';
+  mark((name || 'home') + (location.hash.indexOf('?') >= 0 ? '-query' : ''));
+  if (name === 'fade' && p.get('mode')) window.localStorage.removeItem('token');
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class SessionQuerySpa(_Lab):
+    index = _HASH_INDEX.replace("/main.js", "/sq.js").replace("#/about", "#/after1")
+    script = ("/sq.js", _SESSION_QUERY_JS)

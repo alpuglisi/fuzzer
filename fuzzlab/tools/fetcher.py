@@ -52,12 +52,9 @@ SSRF_URL_PARAMS = {
     'image_url', 'imageurl', 'avatar_url', 'remote', 'endpoint', 'api',
     'redirect_uri', 'return_uri',
 }
-REDIRECT_PARAMS = {
-    'redirect', 'redirect_url', 'redirect_uri', 'redir', 'next', 'next_url',
-    'return', 'returnurl', 'return_url', 'returnto', 'return_to', 'goto',
-    'continue', 'dest', 'destination', 'url', 'u', 'r', 'back', 'forward',
-    'out', 'success_url', 'cancel_url', 'checkout_url', 'location',
-}
+# The one open-redirect name set lives in core (CC-CORE-0053, PA-0003); re-exported
+# here for the redirect rule below and older importers.
+from fuzzlab.core.urls import REDIRECT_PARAMS  # noqa: E402
 COMMAND_PARAMS = {
     'cmd', 'command', 'exec', 'execute', 'run', 'ping', 'host', 'ip', 'addr',
     'address', 'shell', 'code', 'system', 'process', 'script', 'binary',

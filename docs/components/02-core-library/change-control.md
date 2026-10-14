@@ -3,6 +3,31 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0053 — One open-redirect name set in `core.urls`; the importer skips SPA query seeds that blocked a write (FR-CRAWL-17 review) (2026-10-14)
+- Change:
+  - **`core/urls.py`:** `REDIRECT_PARAMS` (a frozenset), moved unchanged from
+    `tools/fetcher.py`, which re-exports the same object for its redirect rule. The
+    crawler's `spa.redirect_name` reads it (PA-0003, review A-S5 / B-S2). FR-CORE-39.
+  - **`tools/store_adapter.py`:** `import_spider` imports a page whose `source` is
+    `spa.WRITE_SEED_SOURCE` (`'spa-query-writes'`, a SPA query seed whose load blocked
+    a write, FR-CRAWL-17) as a page only: no endpoint, parameter, route-query parameter
+    or link set (counted `write_seed_skipped`; review A-M1). FR-AUD-22's text says so.
+- Impact: AUD (the redirect rule reads the same set; behaviour unchanged), CRAWL (reads
+  the set; writes the new source). Downstream FUZZ: a write seed is never a point, so M6
+  never replays its write outside a window. No schema change.
+- Risk: low. The move is mechanical (`fetcher.REDIRECT_PARAMS is
+  core.urls.REDIRECT_PARAMS` is tested). The import skip only removes points, from rows
+  that only FR-CRAWL-17 writes.
+- Deliverables:
+  - [x] code: `core/urls.py`, `tools/fetcher.py`, `tools/store_adapter.py` — done
+  - [x] tests: `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`
+    (the shared object), `::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`
+    (import + real M6) — done
+  - [x] FR-CORE-39 (new), FR-AUD-22 (one sentence) — done
+- Effectiveness (assessed 2026-10-14): the S1 test is green with a real browser, and the
+  mutation that drops the seed re-filing fails it; `tests/test_store_adapter.py` and the
+  json-points suite are still green (numbers in CC-CRAWL-0027's review amendment).
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

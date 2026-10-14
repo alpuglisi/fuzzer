@@ -97,7 +97,9 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     """Import discovered pages -> page/endpoint/parameter rows, crawled forms, each
     query-bearing URL's query as a link set (forms phase 2), each SPA hash route's query
     as ``fragment`` parameters, and the app's own captured requests (forms phase 3,
-    FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``)."""
+    FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``). A SPA query seed that blocked
+    a write (``source = 'spa-query-writes'``, FR-CRAWL-17) is a page only: no endpoint,
+    parameter or link set comes from it (counted ``write_seed_skipped``)."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
@@ -122,6 +124,11 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
             )
             seen_pages.add((path, "GET"))
             counts["page"] += 1
+        if source == _write_seed_source():
+            # a SPA query seed whose load blocked a write (FR-CRAWL-17, review A-M1): a
+            # page, never a point -- an M6 load of it would send that write unguarded
+            counts["write_seed_skipped"] = counts.get("write_seed_skipped", 0) + 1
+            continue
         # blank values are parameters too (`?title=`), forms phase 1
         query = parse_qsl(urlparse(raw).query, keep_blank_values=True)
         if query:
@@ -143,6 +150,11 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     store.conn.commit()
     src.close()
     return counts
+
+
+def _write_seed_source() -> str:
+    from fuzzlab.tools.spa import WRITE_SEED_SOURCE        # the one definition (PA-0003)
+    return WRITE_SEED_SOURCE
 
 
 def _import_link_sets(store: Store, run_id: int, link_sets, counts: dict) -> None:

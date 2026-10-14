@@ -162,7 +162,9 @@ class StorageManager:
         doc, why = redact_captured_body(body, content_type)
         if why is not None:
             return why
-        safe_url = redact_url_identifiers(url)
+        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4)
+        doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
+        safe_url = spa.scrub_markers(redact_url_identifiers(url))
         method = (method or "").upper()
         keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
         sig = json.dumps([method, url_key(safe_url), keys])
@@ -172,7 +174,7 @@ class StorageManager:
                 INSERT INTO discovered_requests
                     (page_url, method, url, content_type, body_json, source, signature)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (redact_url_identifiers(page_url), method, safe_url, media,
+            ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
                   json.dumps(doc, ensure_ascii=False), source, sig))
             self.conn.commit()
             return None
@@ -195,7 +197,8 @@ class StorageManager:
         self.cursor.execute(
             "INSERT INTO revealed_forms (page_url, route, signature, submitted) "
             "VALUES (?, ?, ?, ?)",
-            (redact_url_identifiers(page_url), route, signature, int(bool(submitted))))
+            (spa.scrub_markers(redact_url_identifiers(page_url)), route, signature,
+             int(bool(submitted))))
         self.conn.commit()
         return True
 
@@ -223,10 +226,11 @@ class StorageManager:
                     (page_url, action_url, method, enctype, entries, controls, selector,
                      options, sig)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (redact_url(record["page_url"]), redact_url(record["action_url"]),
-                  record["method"], record["enctype"], json.dumps(record["entries"]),
-                  json.dumps(record["controls"]), int(record["selector"]),
-                  json.dumps(record["options"]), sig))
+            ''', tuple(spa.scrub_markers(v) for v in (      # FR-CRAWL-17 (A-S4)
+                redact_url(record["page_url"]), redact_url(record["action_url"]),
+                record["method"], record["enctype"], json.dumps(record["entries"]),
+                json.dumps(record["controls"]), int(record["selector"]),
+                json.dumps(record["options"]), sig)))
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -239,7 +243,10 @@ class StorageManager:
     def mark_visited(self, url, status_code, depth, title=None, content=None,
                      rendered=0, source='link'):
         """Records a URL (and any parsed content). Returns False if already present
-        (by visit key: an alias spelling of a stored page is present)."""
+        (by visit key: an alias spelling of a stored page is present). A probe marker
+        (FR-CRAWL-17) in the URL, title or text is replaced (`spa.scrub_markers`): an app
+        may replay one it persisted, and no row ever carries one (review A-S4)."""
+        url, title, content = (spa.scrub_markers(v) for v in (url, title, content))
         key = spa.visit_key(url)
         if key in self._keys:
             return False
@@ -254,6 +261,14 @@ class StorageManager:
         except sqlite3.IntegrityError:
             # URL already exists in the unique column
             return False
+
+    def set_source(self, url, source):
+        """Re-file a stored page's ``source`` (a query seed that blocked a write,
+        FR-CRAWL-17). Returns True when a row changed."""
+        cur = self.cursor.execute("UPDATE discovered_pages SET source = ? WHERE url = ?",
+                                  (source, spa.scrub_markers(url)))
+        self.conn.commit()
+        return cur.rowcount > 0
 
     def is_visited(self, url):
         """Whether a page with this URL's visit key (`spa.visit_key`: canonical origin,
@@ -427,8 +442,9 @@ class LocalSpider:
             # forms phase 5 (FR-CRAWL-17; persisted in crawl_stats, PA-0110)
             "spa_query_pairs", "spa_query_unpaired", "spa_query_probe_loads",
             "spa_query_kept", "spa_query_refused", "spa_query_writes_blocked",
-            "spa_query_marker_in_path", "spa_query_anchor_cap", "spa_query_seeded",
-            "spa_query_seeded_fragment"), 0)
+            "spa_query_marker_in_path", "spa_query_step_cap", "spa_query_seeded",
+            "spa_query_seeded_fragment", "spa_query_write_seeds",
+            "spa_query_session_losses"), 0)
         # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
         #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
         self._query_on = self._spa_on and bool(spa_query)
@@ -451,6 +467,8 @@ class LocalSpider:
         #: why seeds, probes or names were refused, by reason (crawl_stats keys
         #: ``spa_query_refused[<reason>]``)
         self.spa_query_refused: dict = {}
+        #: why seed and probe loads stopped for the crawl (a session loss), or None
+        self.spa_query_stopped = None
         # --- forms phase 4: the reveal window (W1-W4) and reveals (FR-CRAWL-16) ---
         #: Reveal navigation: on by default in the Playwright engine (--no-reveal); a
         #: reveal can only read (the window), like following a link.
@@ -582,8 +600,12 @@ class LocalSpider:
     def _note_guard_abort(self, url, reason):
         """The guard aborted ``url`` (destructive, a refused method or body): recorded;
         while the reveal window is open it also counts as something the window
-        aborted (W4's live probe)."""
-        self.skipped_destructive.setdefault(url, reason)
+        aborted (W4's live probe). A probe load's URL (FR-CRAWL-17) is never recorded:
+        it is blocked evidence of that probe only (review B-S1, A-M1)."""
+        if self._probe is not None:
+            self._probe["blocked"].add(url)
+        else:
+            self.skipped_destructive.setdefault(url, reason)
         if self._win is not None:
             self._win["aborted"] += 1
 
@@ -606,6 +628,13 @@ class LocalSpider:
         if why is None:
             return None
         win["aborted"] += 1
+        if win.get("query"):
+            # FR-CRAWL-17 (review A-M1): a seed records whether it blocked a write; a
+            # probe's blocked requests are never evidence
+            if self._probe is not None:
+                self._probe["blocked"].add(url)
+            if not navigation and method not in ("GET", "HEAD"):
+                win["writes"] = win.get("writes", 0) + 1
         if navigation:
             win["navs"].append(url)
         else:
@@ -700,6 +729,10 @@ class LocalSpider:
         the lift. What the window aborted while leaving is counted with the rest
         (``spa_query_writes_blocked``)."""
         win["own_nav"] = frozenset()
+        if self._authenticated:
+            # S10 (review B-S4): the client-side session check (no network), on the
+            # load's own page, before it leaves; a loss stops seed and probe loads
+            win["session"] = self._client_session_intact()
         url = page.url or ""
         if win.get("query") == spa.SEED_SOURCE and \
                 url.lower().startswith(("http://", "https://")) and \
@@ -785,7 +818,7 @@ class LocalSpider:
                 body = request.post_data_buffer or b""
                 self._probe["requests"].append(
                     (request.url, body[:65536].decode("utf-8", "replace")))
-                return
+                return                         # blocked ones are marked at the read
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
         except Exception:
@@ -911,6 +944,8 @@ class LocalSpider:
         return host == self._scope_host
 
     def _note_out_of_scope(self, url):
+        if self._probe is not None:
+            self._probe["blocked"].add(url)          # FR-CRAWL-17: never evidence
         host = urlparse(url).hostname or "?"
         self.skipped_out_of_scope[host] = self.skipped_out_of_scope.get(host, 0) + 1
 
@@ -1132,8 +1167,8 @@ class LocalSpider:
                 self.spa_counts["spa_query_unpaired"] += 1
         for reason, n in scan.refused.items():
             self._refuse_query(reason, n)
-        if scan.anchor_cap:
-            self.spa_counts["spa_query_anchor_cap"] += 1
+        if scan.budget_hit:
+            self.spa_counts["spa_query_step_cap"] += 1
 
     def _refuse_query(self, reason, n=1):
         self.spa_query_refused[reason] = self.spa_query_refused.get(reason, 0) + n
@@ -1213,6 +1248,7 @@ class LocalSpider:
             self._refuse_query(why)
             return None
         return {"url": url, "route_url": route_url, "names": names, "requests": [],
+                "blocked": set(),
                 "markers": {v: n for n, v in zip(names, values) if v != "/"}}
 
     def _finish_probe(self, probe, depth):
@@ -1226,14 +1262,49 @@ class LocalSpider:
             logging.info(f"probe of {probe['route_url']} could not be read "
                           f"({str(exc).splitlines()[0][:80]})")
             texts = []
-        kept, in_path = spa.observed_names(texts, probe["requests"], probe["markers"],
-                                           probe["names"])
+        requests = [(u, b, u in probe["blocked"]) for u, b in probe["requests"]]
+        frag = spa.spa_fragment(probe["url"])
+        kept, in_path = spa.observed_names(
+            texts, requests, probe["markers"], probe["names"],
+            doc_path=urlparse(probe["url"]).path or "/",
+            route="#" + frag.split("?", 1)[0] if frag is not None else None)
         self.spa_counts["spa_query_marker_in_path"] += in_path
         self.spa_counts["spa_query_kept"] += len(kept)
         names = [n for n in probe["names"] if n in kept]
         logging.info(f"SPA query probe of {probe['route_url']}: kept "
                      f"{', '.join(names) or 'none'} of {len(probe['names'])} name(s)")
         return self._queue_seed(probe["route_url"], names, depth) if names else []
+
+    def _after_query_window(self, win, url):
+        """After a seed or probe window (FR-CRAWL-17). A seed whose window blocked a
+        write (a non-GET) is re-filed with source `spa.WRITE_SEED_SOURCE`, which the
+        importer never turns into points: an M6 load of it would send that write
+        unguarded (review A-M1; counted ``spa_query_write_seeds``). In an authenticated
+        crawl, the window's client-side session check (S10): on a loss, seed and probe
+        loads stop for the crawl, and the session is re-adopted once on the start page;
+        a re-adoption that does not hold stops reveals and submissions too (as W4)."""
+        if win.get("query") == spa.SEED_SOURCE and win.get("writes"):
+            if self.storage.set_source(url, spa.WRITE_SEED_SOURCE):
+                self.spa_counts["spa_query_write_seeds"] += 1
+                logging.info(f"SPA query seed {url} blocked a write: kept as a page, "
+                             f"never a point")
+        ok, why = win.get("session", (True, None))
+        if ok:
+            return
+        self.spa_counts["spa_query_session_losses"] += 1
+        self.spa_query_stopped = f"the session was lost after a query load ({why})"
+        logging.warning(f"SPA query loads stopped: {self.spa_query_stopped}")
+        try:
+            self._page.goto(self.start_url, wait_until="domcontentloaded",
+                            timeout=self.timeout_ms)
+            ok, again = self._readopt_session()
+        except PlaywrightError as exc:
+            ok, again = False, f"re-adoption failed ({type(exc).__name__})"
+        if not ok:
+            stop = f"the session could not be re-adopted after a query load ({again})"
+            self.reveals_stopped = self.reveals_stopped or stop
+            self.spa_submit_stopped = self.spa_submit_stopped or stop
+            logging.warning(f"reveals and submissions stopped: {stop}")
 
     def _take_query_navs(self, depth):
         """The navigations a seed's window aborted or its load made (``location.hash``),
@@ -2036,11 +2107,15 @@ class LocalSpider:
             why = ", ".join(f"{k} x{v}" for k, v in sorted(self.spa_query_refused.items()))
             lines.append(f"SPA query parameters refused: {why}.")
         if c["spa_query_writes_blocked"] or c["spa_query_marker_in_path"] or \
-                c["spa_query_anchor_cap"]:
+                c["spa_query_step_cap"] or c["spa_query_write_seeds"]:
             lines.append(f"SPA query loads: {c['spa_query_writes_blocked']} request(s) "
-                         f"blocked by their window; {c['spa_query_marker_in_path']} "
-                         f"marker(s) seen in a request path (no point); the anchor cap "
-                         f"stopped {c['spa_query_anchor_cap']} script scan(s).")
+                         f"blocked by their window; {c['spa_query_write_seeds']} seed(s) "
+                         f"that blocked a write kept as pages, never points; "
+                         f"{c['spa_query_marker_in_path']} marker(s) or filler(s) seen in "
+                         f"a request path (no point); the step budget stopped "
+                         f"{c['spa_query_step_cap']} script scan(s).")
+        if self.spa_query_stopped:
+            lines.append(f"SPA query loads stopped: {self.spa_query_stopped}.")
         return lines
 
     def crawl(self):
@@ -2060,6 +2135,9 @@ class LocalSpider:
                         break
                 current_url, depth, source = queue.pop(0)
                 probe = None
+                if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE) and self.spa_query_stopped:
+                    self._refuse_query("session lost")     # S10: no more query loads
+                    continue
                 if source == spa.PROBE_SOURCE:
                     # fresh markers for this load only (B2, PA-0090)
                     probe = self._mint_probe(current_url)
@@ -2072,11 +2150,12 @@ class LocalSpider:
 
                 # a seed or probe load runs inside its window (FR-CRAWL-17, Q4)
                 window = contextlib.ExitStack()
+                win = None
                 try:
                     self._current_url = current_url
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
-                        window.enter_context(self._window(self._page, self._context,
-                                                          current_url, query=source))
+                        win = window.enter_context(self._window(
+                            self._page, self._context, current_url, query=source))
                         self._probe = probe
                     if probe is not None:
                         # rendered only: a probe never falls back to a static request
@@ -2147,6 +2226,8 @@ class LocalSpider:
                     finally:
                         self._probe = None
                     queue.extend(self._take_query_navs(depth))
+                    if win is not None:
+                        self._after_query_window(win, current_url)
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")
@@ -2177,7 +2258,9 @@ class LocalSpider:
                                        **{f"spa_query_refused[{k}]": v
                                           for k, v in self.spa_query_refused.items()},
                                        "submit_stopped": int(bool(self.spa_submit_stopped)),
-                                       "reveals_stopped": int(bool(self.reveals_stopped))})
+                                       "reveals_stopped": int(bool(self.reveals_stopped)),
+                                       "spa_query_stopped":
+                                           int(bool(self.spa_query_stopped))})
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 
@@ -2232,6 +2315,12 @@ def build_parser():
                         "inside a reveal window that lets only safe GETs through (no "
                         "write, no navigation, no WebSocket message), so a reveal can "
                         "only read (FR-CRAWL-16).")
+    p.add_argument("--no-spa-query", action="store_true",
+                   help="Do not crawl single-page-app routes with the query parameters "
+                        "their scripts read (seeds, and the observation probe for names "
+                        "read without a route). On with SPA routes in the Playwright "
+                        "engine: every such load runs inside the reveal window, which "
+                        "lets only safe GETs through (FR-CRAWL-17).")
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
@@ -2277,6 +2366,7 @@ if __name__ == "__main__":
         spa_routes=not args.no_spa_routes,
         submit_spa_forms=spa_route_names(args.submit_spa_forms),
         reveal=not args.no_reveal,
+        spa_query=not args.no_spa_query,
     )
     spider.crawl()
     if args.store:

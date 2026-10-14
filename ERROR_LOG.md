@@ -18,6 +18,19 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Crawler tests: a wall-clock ratio decided a linearity test (fixed, BUG-0135/PA-0135)
+- **Symptom:** `tests/test_spa_routes.py::test_the_scan_is_linear_on_adversarial_5mb_bodies`
+  failed once in the FR-CRAWL-17 lane's related run and once under concurrent lane load
+  (`t_large < 3.5 * t_small` broken), then passed when re-run; `scan_routes` had not changed.
+- **Root cause:** a linearity claim tested by a wall-clock ratio, which machine load
+  decides; PA-0095(2) asked for operation counts but only for per-candidate paths, and
+  nothing enforced it. The new FR-CRAWL-17 scan test repeated it.
+- **Remediation:** the scanners expose operation counts (`spa.StepCounter`); both
+  tests assert `ops(2n) <= 2 * ops(n) + slack`, proven on deliberately quadratic
+  variants; a wall-clock bound stays only as an absolute smoke alarm; the AST guard
+  `tests/test_no_wall_clock_ratio.py` (PA-0135) (CC-CRAWL-0027 review amendment).
+- **Status:** Fixed.
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.

@@ -1700,3 +1700,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+
+- **PA-0135** — Strengthens `PA-0095(2)` and replaces its scope, after BUG-0135: a
+  `scan_routes` linearity test asserted `t_large < 3.5 * t_small` and failed under
+  load on linear code, and the FR-CRAWL-17 scan test repeated the shape. PA-0095 named
+  only per-candidate and per-flow paths, did not forbid a timing ratio, and nothing
+  enforced it.
+  1. **A complexity claim is tested on an operation count the code exposes, never on a
+     wall-clock ratio.** This holds for any code that claims to be linear, bounded or
+     at most doubling, whatever path it is on. A wall-clock bound is only a generous
+     absolute smoke alarm.
+  2. **Code with a complexity claim exposes its operation counts**, covering both its
+     Python-level steps and the span of its C-level searches (here `spa.StepCounter`).
+  3. **The oracle is proven on a deliberately quadratic variant** (`PA-0034(2)`).
+  4. **Enforced:** `tests/test_no_wall_clock_ratio.py` fails on a test that compares
+     two clock measurements scaled against each other, or their ratio. It is proven on
+     BUG-0135's own lines. A timing property measured by the system under test (a
+     side-channel test) is not a complexity claim and is out of scope. (from BUG-0135)

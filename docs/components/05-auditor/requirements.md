@@ -275,7 +275,11 @@ budget where a vulnerability is plausible.
     (`core.urls.to_route_path`), never `query` ones; lane A's link sets and header
     queries read only `urlsplit(url).query`. A `fragment` crawl point is built only with
     a browser (`--browser`, M6), else reported as ground truth's DOM points are; a
-    destructive route (`/#/logout`) is never a point.
+    destructive route (`/#/logout`) is never a point. A crawled SPA query seed whose
+    load blocked a write (`discovered_pages.source = 'spa-query-writes'`, FR-CRAWL-17) is
+    imported as a page only: no endpoint, parameter or link set comes from it (counted
+    `write_seed_skipped`; `CC-CORE-0053`), so M6 never replays that write outside a
+    window.
   - **Client-side categories only on fragment points.** A `fragment` payload never
     reaches the server, so every server-side rule carries `location_not_in:
     ["fragment"]` (a closed predicate beside `location_in`) or a `location_in` without

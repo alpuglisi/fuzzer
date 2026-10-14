@@ -89,28 +89,39 @@ def _quoted(text: str, i: int) -> str | None:
     return text[i + 1:end]
 
 
-def scan_routes(text: str, max_bytes: int = MAX_SCRIPT_BYTES) -> list[str] | None:
+def scan_routes(text: str, max_bytes: int = MAX_SCRIPT_BYTES, *,
+                counter: "StepCounter | None" = None) -> list[str] | None:
     """The route paths ``text`` declares, in order, deduplicated; None when ``text`` is
     longer than ``max_bytes`` (not scanned).
 
     A declaration is the key ``path`` (bare or quoted) opening an object or following a
     comma, then ``:`` and a string literal (``{path:'x'``, ``{ path: "/x", element``,
-    ``,"path":"x"``), or a ``path=`` attribute of a ``<Route`` tag. Each occurrence of
-    ``path`` costs bounded work (whitespace and literals have fixed caps), so the scan is
-    linear in ``len(text)`` (PA-0095)."""
+    ``,"path":"x"``), or a ``path=`` attribute of a ``<Route`` tag. ``str.find`` only
+    moves forward, and each occurrence of ``path`` costs bounded work (whitespace and
+    literals have fixed caps), so the scan is linear in ``len(text)`` (PA-0095).
+    ``counter`` (a `StepCounter`) receives its operation counts: one step per occurrence
+    plus each whitespace character examined, and the characters ``str.find`` covered
+    (PA-0135)."""
     if len(text) > max_bytes:
         return None
+    counter = counter if counter is not None else StepCounter()
     found: dict[str, None] = {}
     i = text.find("path")
+    counter.scanned += i + 4 if i >= 0 else len(text)
     while i >= 0 and len(found) < MAX_ROUTES_PER_SCRIPT:
-        value = _declaration_at(text, i)
+        counter.tick()
+        value = _declaration_at(text, i, counter)
         if value is not None:
             found.setdefault(value, None)
-        i = text.find("path", i + 4)
+        nxt = text.find("path", i + 4)
+        counter.scanned += (nxt if nxt >= 0 else len(text)) - i
+        i = nxt
     return list(found)
 
 
-def _declaration_at(text: str, i: int) -> str | None:
+def _declaration_at(text: str, i: int, counter=None) -> str | None:
+    counter = counter if counter is not None else StepCounter()
+    tick = counter.tick
     after = i + 4
     before = i - 1
     if before >= 0 and text[before] in _QUOTES:              # "path": ...
@@ -122,18 +133,25 @@ def _declaration_at(text: str, i: int) -> str | None:
             (after < len(text) and (text[after].isalnum() or text[after] in "_$")):
         return None                                           # part of a longer name
     j = _skip_ws(text, after, _MAX_GAP)
+    tick(j - after + 1)
     if j >= len(text):
         return None
     if text[j] == ":":                                        # an object key
         k = _back_ws(text, before, _MAX_GAP)
+        start = _skip_ws(text, j + 1, _MAX_GAP)
+        tick(before - k + start - j)
         if k < 0 or text[k] not in "{,":
             return None
-        return _quoted(text, _skip_ws(text, j + 1, _MAX_GAP))
+        return _quoted(text, start)
     if text[j] == "=":                                        # a JSX attribute
-        tag = text.rfind("<Route", max(0, i - _MAX_TAG_BACK), i)
+        lo = max(0, i - _MAX_TAG_BACK)
+        tag = text.rfind("<Route", lo, i)
+        counter.scanned += i - lo                             # the bounded look-back
+        start = _skip_ws(text, j + 1, _MAX_GAP)
+        tick(start - j + 1)
         if tag < 0 or text.find(">", tag, i) >= 0:
             return None
-        return _quoted(text, _skip_ws(text, j + 1, _MAX_GAP))
+        return _quoted(text, start)
     return None
 
 
@@ -153,15 +171,16 @@ def classify_route(path: str) -> tuple[str, str | None]:
     parameterised or wildcard (``:id``, ``*``, ``**``), destructive
     (`core.urls.destructive_reason` on the route path), the root, a socket.io /
     engine.io transport path (socket.io's own ``{path:'/socket.io'}`` option,
-    `is_transport_url`), or not a route (a protocol-relative ``//host`` value
-    included)."""
+    `is_transport_url`), or not a route (a protocol-relative ``//host`` value and a
+    relative ``.`` / ``..`` segment included, FR-CRAWL-17 review A-S2)."""
     if (path or "").lstrip("#!").startswith("//"):
         return ROUTE_INVALID, None
     route = normalise_route(path)
     if not route:
         return ROUTE_ROOT, None
-    if len(route) > MAX_ROUTE_LEN or not set(route) <= _ROUTE_CHARS or "//" in route:
-        return ROUTE_INVALID, None
+    if len(route) > MAX_ROUTE_LEN or not set(route) <= _ROUTE_CHARS or "//" in route \
+            or any(seg in (".", "..") for seg in route.split("/")):
+        return ROUTE_INVALID, None                            # '.' / '..': relative
     if is_transport_url("/" + route):
         return ROUTE_TRANSPORT, None
     if "*" in route or any(seg.startswith(":") for seg in route.split("/")):
@@ -1163,8 +1182,11 @@ MENU_ITEMS_JS = r"""
 #: How far one anchor's window reaches (characters); a window also ends at the next
 #: anchor of the same kind and at the end of its call's argument list.
 QUERY_WINDOW = 512
-#: At most this many anchors are examined per script (`QueryScan.anchor_cap` when hit).
-MAX_QUERY_ANCHORS = 2000
+#: The walker's step budget per script (review A-S1, S4): every character or token the
+#: Python-level walker examines is one step; the scan stops when it is spent
+#: (`QueryScan.budget_hit`, counted). A noise anchor costs O(1) steps, a window at most
+#: about `QUERY_WINDOW`, so the budget bounds the walk whatever the anchors are.
+MAX_QUERY_STEPS = 2_000_000
 #: At most this many distinct names are taken from one script.
 MAX_QUERY_NAMES = 50
 #: A name longer than this is not a query-parameter name.
@@ -1179,6 +1201,7 @@ _ID_CHARS = _ID_START | frozenset(string.digits)
 _JS_ID_CHARS = _ID_CHARS | {"$"}
 #: The anchors, the only places a name is read (never a bare ``get(`` or ``query``).
 _Q_NAVIGATE = "navigate("
+_Q_NAVIGATE_URL = "navigateByUrl("
 _Q_PARAMS_OBJ = "queryParams:"
 _Q_PARAMS_DOT = "queryParams."
 _Q_PARAMS_IDX = "queryParams["
@@ -1189,62 +1212,98 @@ _Q_VUE_ROUTE = "route.query."
 _Q_VUE_QUERY = "query:"
 _Q_JSX_LINK = "<Link"
 _Q_JS_LINK = "Link,{"
-_QUERY_ANCHORS = (_Q_NAVIGATE, _Q_PARAMS_OBJ, _Q_PARAMS_DOT, _Q_PARAMS_IDX, _Q_PARAM_MAP,
-                  _Q_SEARCH_PARAMS, _Q_URL_SEARCH, _Q_VUE_ROUTE, _Q_VUE_QUERY, _Q_JSX_LINK,
-                  _Q_JS_LINK)
+_QUERY_ANCHORS = (_Q_NAVIGATE, _Q_NAVIGATE_URL, _Q_PARAMS_OBJ, _Q_PARAMS_DOT,
+                  _Q_PARAMS_IDX, _Q_PARAM_MAP, _Q_SEARCH_PARAMS, _Q_URL_SEARCH,
+                  _Q_VUE_ROUTE, _Q_VUE_QUERY, _Q_JSX_LINK, _Q_JS_LINK)
 #: `QueryScan.refused` reasons (counted, never logged with a name).
 Q_DYNAMIC = "dynamic segment"
 Q_NONLITERAL = "non-literal query"
 Q_SENSITIVE = "sensitive name"
 Q_NAME_CAP = "name cap"
+Q_SHAPE = "not identifier-shaped"
+
+
+class _BudgetSpent(Exception):
+    """The walker's step budget is spent: the scan stops (`QueryScan.budget_hit`)."""
+
+
+class StepCounter:
+    """The operation counts of a scan (BUG-0135, PA-0135): ``steps`` is the
+    Python-level work (each character, token or loop turn a walker examines), ``scanned``
+    the characters the body-level ``str.find`` calls covered. A complexity test asserts
+    on these, never on a wall-clock ratio. ``budget`` (None: unbounded) stops a walk
+    that would spend more steps."""
+
+    def __init__(self, budget: int | None = None):
+        self.steps = 0
+        self.scanned = 0
+        self.budget = budget
+
+    def tick(self, n: int = 1) -> None:
+        self.steps += n
+        if self.budget is not None and self.steps > self.budget:
+            raise _BudgetSpent
 
 
 @dataclass
 class QueryScan:
     """What `scan_query_params` read from one script: ``pairs`` (route -> names, in
     order), ``unpaired`` names (read with no route), ``refused`` counts by reason,
-    ``anchors`` examined and whether `MAX_QUERY_ANCHORS` stopped the scan."""
+    ``anchors`` examined, whether the step budget stopped the scan (``budget_hit``), and
+    its operation counts (``steps``, ``scanned``; `StepCounter`)."""
     pairs: dict = field(default_factory=dict)
     unpaired: list = field(default_factory=list)
     refused: dict = field(default_factory=dict)
     anchors: int = 0
-    anchor_cap: bool = False
+    budget_hit: bool = False
+    steps: int = 0
+    scanned: int = 0
 
     def _refuse(self, reason: str) -> None:
         self.refused[reason] = self.refused.get(reason, 0) + 1
 
 
 def scan_script(text: str, max_bytes: int = MAX_SCRIPT_BYTES):
-    """``(routes, QueryScan)`` for one same-origin script body -- the crawler's one scan
-    of a script it already loaded (FR-CRAWL-12 and FR-CRAWL-17) -- or None when ``text``
-    is longer than ``max_bytes`` (not scanned). Both scans are linear (PA-0095)."""
+    """``(routes, QueryScan)`` for one same-origin script body -- the crawler's one call
+    per script it already loaded (FR-CRAWL-12 and FR-CRAWL-17) -- or None when ``text``
+    is longer than ``max_bytes`` (not scanned). Two linear scans of the same body, each
+    with its own operation bound (PA-0095, PA-0135)."""
     if len(text) > max_bytes:
         return None
     return scan_routes(text, max_bytes), scan_query_params(text, max_bytes)
 
 
-def _string_end(text: str, i: int, hi: int) -> int | None:
+def _ws(st: StepCounter, text: str, i: int, hi: int) -> int:
+    """`_skip_ws` up to ``hi``, each skipped character a step."""
+    j = _skip_ws(text, i, max(0, hi - i))
+    st.tick(j - i + 1)
+    return j
+
+
+def _string_end(st: StepCounter, text: str, i: int, hi: int) -> int | None:
     """The index of the quote closing the string literal opened at ``i`` (escapes
     honoured), searched only before ``hi``; None when it does not close."""
     quote = text[i]
     j = text.find(quote, i + 1, hi)
+    st.tick()
     while j > 0:
         k = j - 1
         while k > i and text[k] == "\\":
             k -= 1
+        st.tick(j - k)
         if (j - 1 - k) % 2 == 0:                  # an even run of backslashes: closed
             return j
         j = text.find(quote, j + 1, hi)
     return None
 
 
-def _literal(text: str, i: int, hi: int):
+def _literal(st: StepCounter, text: str, i: int, hi: int):
     """``(value, end)`` for the string literal at ``i``: ``value`` None when it is a
     template literal with a substitution (not literal); ``end`` its closing quote, or
     None (not a string, or unterminated before ``hi``)."""
     if i >= hi or text[i] not in _QUOTES:
         return None, None
-    end = _string_end(text, i, hi)
+    end = _string_end(st, text, i, hi)
     if end is None:
         return None, None
     value = text[i + 1:end]
@@ -1253,14 +1312,15 @@ def _literal(text: str, i: int, hi: int):
     return value, end
 
 
-def _skip_value(text: str, i: int, hi: int) -> int | None:
+def _skip_value(st: StepCounter, text: str, i: int, hi: int) -> int | None:
     """From ``i``, skip one expression: the index of the first ``,`` or closing bracket
     at depth 0 (strings skipped), or None when ``hi`` comes first."""
     depth = 0
     while i < hi:
+        st.tick()
         c = text[i]
         if c in _QUOTES:
-            end = _string_end(text, i, hi)
+            end = _string_end(st, text, i, hi)
             if end is None:
                 return None
             i = end + 1
@@ -1277,55 +1337,57 @@ def _skip_value(text: str, i: int, hi: int) -> int | None:
     return None
 
 
-def _close(text: str, i: int, hi: int) -> int | None:
+def _close(st: StepCounter, text: str, i: int, hi: int) -> int | None:
     """The index of the bracket closing the one at ``i``, or None before ``hi``."""
-    j = _skip_value(text, i + 1, hi)
+    j = _skip_value(st, text, i + 1, hi)
     while j is not None and text[j] == ",":
-        j = _skip_value(text, j + 1, hi)
+        j = _skip_value(st, text, j + 1, hi)
     return j
 
 
-def _ident(text: str, i: int, hi: int, chars=_JS_ID_CHARS) -> tuple[str, int]:
+def _ident(st: StepCounter, text: str, i: int, hi: int,
+           chars=_JS_ID_CHARS) -> tuple[str, int]:
     j = i
     while j < hi and text[j] in chars:
         j += 1
+    st.tick(j - i + 1)
     return text[i:j], j
 
 
-def _object_keys(text: str, i: int, hi: int):
+def _object_keys(st: StepCounter, text: str, i: int, hi: int):
     """``(keys, end)`` for the object literal whose ``{`` is at ``i``: each depth-1 key
-    as ``(name, value_index)`` (``value_index`` None for a shorthand ``{q}``), ``end``
-    its closing ``}``; None when it does not close before ``hi``. Methods, spreads and
-    computed keys are skipped."""
+    as ``(name, value_index, quoted)`` (``value_index`` None for a shorthand ``{q}``),
+    ``end`` its closing ``}``; None when it does not close before ``hi``. Methods,
+    spreads and computed keys are skipped."""
     keys = []
     j = i + 1
     while j < hi:
-        j = _skip_ws(text, j, hi - j)
+        j = _ws(st, text, j, hi)
         if j >= hi:
             return None
         c = text[j]
         if c == "}":
             return keys, j
-        name = None
+        name, quoted = None, False
         if c in _QUOTES:
-            name, end = _literal(text, j, hi)
+            name, end = _literal(st, text, j, hi)
             if end is None:
                 return None
-            j = end + 1
+            quoted, j = True, end + 1
         elif c in _ID_START or c == "$":
-            name, j = _ident(text, j, hi)
-        k = _skip_ws(text, j, hi - j)
+            name, j = _ident(st, text, j, hi)
+        k = _ws(st, text, j, hi)
         if k >= hi:
             return None
         if name is not None and text[k] == ":":
-            value = _skip_ws(text, k + 1, hi - k - 1)
-            keys.append((name, value))
-            j = _skip_value(text, value, hi)
+            value = _ws(st, text, k + 1, hi)
+            keys.append((name, value, quoted))
+            j = _skip_value(st, text, value, hi)
         elif name is not None and text[k] in ",}":
-            keys.append((name, None))
+            keys.append((name, None, quoted))
             j = k
         else:                                     # a method, a spread, a computed key
-            j = _skip_value(text, k, hi)
+            j = _skip_value(st, text, k, hi)
         if j is None:
             return None
         if text[j] == "}":
@@ -1346,14 +1408,19 @@ def query_name_ok(name) -> bool:
 
 
 class _QueryState:
-    def __init__(self):
+    def __init__(self, st: StepCounter):
+        self.st = st
         self.scan = QueryScan()
         self.names: dict[str, None] = {}
 
-    def take(self, name, route: str | None = None) -> None:
+    def take(self, name, route: str | None = None, *, literal: bool = False) -> None:
         """Keep ``name`` (paired with ``route``, or unpaired): identifier-shaped, not
-        sensitive (counted by class only), within the per-script cap."""
+        sensitive (counted by class only), within the per-script cap. A name written as
+        a string literal (a quoted key, a ``get("x")`` argument) that is not
+        identifier-shaped is counted (``not identifier-shaped``, review A-N2)."""
         if not query_name_ok(name):
+            if literal and isinstance(name, str) and name and name not in QUERY_MEMBERS:
+                self.scan._refuse(Q_SHAPE)
             return
         if is_sensitive_name(name):
             self.scan._refuse(Q_SENSITIVE)
@@ -1373,12 +1440,14 @@ class _QueryState:
 
     def take_query_text(self, query: str, route: str | None) -> None:
         for part in query.split("&"):
-            self.take(part.partition("=")[0], route)
+            self.st.tick()
+            self.take(part.partition("=")[0], route, literal=True)
 
 
 def _literal_url(state: _QueryState, value: str) -> None:
-    """A literal ``"/x?a=1&b"`` (React ``navigate`` / ``<Link to>``): its names paired
-    with its route, or unpaired when it names no route (``?a=1``)."""
+    """A literal ``"/x?a=1&b"`` (React ``navigate`` / ``<Link to>``, Angular
+    ``navigateByUrl``): its names paired with its route, or unpaired when it names no
+    route (``?a=1``)."""
     route, sep, query = value.partition("?")
     if sep:
         state.take_query_text(query.split("#", 1)[0], route or None)
@@ -1389,16 +1458,17 @@ def _query_object(state: _QueryState, text: str, i: int, hi: int, route: str | N
     """The ``queryParams`` / ``query`` value at ``i``: an object literal's keys are taken
     (paired with ``route`` or unpaired); anything else is a non-literal query (counted).
     Returns the end of the value, or None."""
+    st = state.st
     if i < hi and text[i] == "{":
-        got = _object_keys(text, i, hi)
+        got = _object_keys(st, text, i, hi)
         if got is None:
             return None
-        for name, _value in got[0]:
-            state.take(name, route)
+        for name, _value, quoted in got[0]:
+            state.take(name, route, literal=quoted)
         return got[1]
     if count_nonliteral:
         state.scan._refuse(Q_NONLITERAL)
-    return _skip_value(text, i, hi)
+    return _skip_value(st, text, i, hi)
 
 
 def _scan_navigate(state: _QueryState, text: str, i: int, hi: int) -> int | None:
@@ -1407,12 +1477,14 @@ def _scan_navigate(state: _QueryState, text: str, i: int, hi: int) -> int | None
     ``/``); a multi-element array with any non-literal element is a dynamic segment
     (refused, its names dropped: no element is ever seeded alone, B7, A-S2); an empty
     array or a lone non-literal element names no known route, so its names are
-    unpaired. Returns the call's end."""
-    j = _skip_ws(text, i, _MAX_GAP)
+    unpaired, as are a navigation ``relativeTo`` another route's (review A-S2: the
+    route is relative). Returns the call's end."""
+    st = state.st
+    j = _ws(st, text, i, min(hi, i + _MAX_GAP))
     if j >= hi:
         return None
     if text[j] in _QUOTES:                                   # React: navigate("/x?a=")
-        value, end = _literal(text, j, hi)
+        value, end = _literal(st, text, j, hi)
         if value is not None:
             _literal_url(state, value)
         return end
@@ -1420,19 +1492,19 @@ def _scan_navigate(state: _QueryState, text: str, i: int, hi: int) -> int | None
         return None
     parts, literal, k, count = [], True, j + 1, 0
     while True:
-        k = _skip_ws(text, k, hi - k)
+        k = _ws(st, text, k, hi)
         if k >= hi:
             return None
         if text[k] == "]":
             break
         count += 1
-        value, end = _literal(text, k, hi)
+        value, end = _literal(st, text, k, hi)
         if value is not None:
             parts.append(value)
-            k = _skip_ws(text, end + 1, hi - end - 1)
+            k = _ws(st, text, end + 1, hi)
         else:
             literal = False
-            k = _skip_value(text, k, hi)
+            k = _skip_value(st, text, k, hi)
             if k is None:
                 return None
         if k >= hi:
@@ -1446,32 +1518,53 @@ def _scan_navigate(state: _QueryState, text: str, i: int, hi: int) -> int | None
     else:
         route = None
     dynamic = count > 1 and not literal
-    k = _skip_ws(text, k + 1, hi - k - 1)
+    k = _ws(st, text, k + 1, hi)
     if k >= hi or text[k] != ",":
         return k if k < hi else None                          # no options: no query
-    k = _skip_ws(text, k + 1, hi - k - 1)
+    k = _ws(st, text, k + 1, hi)
     if k >= hi or text[k] != "{":
-        return _skip_value(text, k, hi)                       # options not literal
-    got = _object_keys(text, k, hi)
+        return _skip_value(st, text, k, hi)                   # options not literal
+    got = _object_keys(st, text, k, hi)
     if got is None:
         return None
     keys, end = got
-    for name, value in keys:
+    if any(name == "relativeTo" for name, _v, _q in keys):
+        route = None                                          # relative: unpaired
+    for name, value, _quoted in keys:
         if name != "queryParams" or value is None:
             continue
         if dynamic:
             if value < hi and text[value] == "{":
-                sub = _object_keys(text, value, hi)
-                if sub is not None and any(query_name_ok(n) for n, _v in sub[0]):
+                sub = _object_keys(st, text, value, hi)
+                if sub is not None and any(query_name_ok(n) for n, _v, _q in sub[0]):
                     state.scan._refuse(Q_DYNAMIC)
             continue
         _query_object(state, text, value, hi, route)
     return end
 
 
-def _scan_params_obj(state, text, i, hi):
-    """A ``queryParams: {...}`` outside a ``navigate`` call: its names, unpaired."""
-    j = _skip_ws(text, i, _MAX_GAP)
+def _scan_navigate_url(state, text, i, hi):
+    """Angular ``navigateByUrl("/x?a=1")``: a literal URL, as a React literal (review
+    A-N1). A non-literal argument gives nothing."""
+    st = state.st
+    j = _ws(st, text, i, min(hi, i + _MAX_GAP))
+    value, end = _literal(st, text, j, hi)
+    if value is not None:
+        _literal_url(state, value)
+    return end
+
+
+def _after_identifier(text: str, p: int) -> bool:
+    """The anchor at ``p`` continues a longer identifier (``myqueryParams:``)."""
+    return p > 0 and text[p - 1] in _JS_ID_CHARS
+
+
+def _scan_params_obj(state, text, p, i, hi):
+    """A ``queryParams: {...}`` outside a ``navigate`` call: its names, unpaired (never
+    part of a longer name, review A-N4)."""
+    if _after_identifier(text, p):
+        return None
+    j = _ws(state.st, text, i, min(hi, i + _MAX_GAP))
     if j >= hi or text[j] != "{":
         return None
     return _query_object(state, text, j, hi, None, count_nonliteral=False)
@@ -1480,8 +1573,8 @@ def _scan_params_obj(state, text, i, hi):
 def _member(state, text, i, hi):
     """``queryParams.<name>`` / ``route.query.<name>``: unpaired, unless it is a member
     call (``.subscribe(``, any name followed by ``(``)."""
-    name, j = _ident(text, i, hi)
-    k = _skip_ws(text, j, hi - j)
+    name, j = _ident(state.st, text, i, hi)
+    k = _ws(state.st, text, j, hi)
     if name and not (k < hi and text[k] == "("):
         state.take(name)
     return j
@@ -1489,19 +1582,19 @@ def _member(state, text, i, hi):
 
 def _quoted_arg(state, text, i, hi):
     """``queryParams["q"]`` / ``.get("q")``: the literal, unpaired."""
-    j = _skip_ws(text, i, _MAX_GAP)
-    value, end = _literal(text, j, hi)
+    j = _ws(state.st, text, i, min(hi, i + _MAX_GAP))
+    value, end = _literal(state.st, text, j, hi)
     if value is not None:
-        state.take(value)
+        state.take(value, literal=True)
     return end
 
 
 def _scan_url_search(state, text, i, hi):
     """``URLSearchParams(...).get("q")``."""
-    close = _close(text, i - 1, hi)
+    close = _close(state.st, text, i - 1, hi)
     if close is None:
         return None
-    j = _skip_ws(text, close + 1, hi - close - 1)
+    j = _ws(state.st, text, close + 1, hi)
     if not text.startswith(".get(", j):
         return close
     return _quoted_arg(state, text, j + 5, hi)
@@ -1521,48 +1614,54 @@ def _scan_vue_push(state, text, i, hi, floor):
     ``replace(`` call's object found at most `_MAX_CALL_BACK` back (and not before
     ``floor``, the end of the previous window). Paired with a literal ``path``; a
     ``name:`` route or a non-literal path leaves its names unpaired."""
-    if i > 0 and text[i - 1] in _JS_ID_CHARS:
+    st = state.st
+    if _after_identifier(text, i):
         return None
-    brace = _skip_ws(text, i + len(_Q_VUE_QUERY), _MAX_GAP)
+    brace = _ws(st, text, i + len(_Q_VUE_QUERY), min(len(text), i + 64))
     if brace >= len(text) or text[brace] != "{":
         return None
     lo = max(floor, i - _MAX_CALL_BACK)
     call = max(text.rfind("push(", lo, i), text.rfind("replace(", lo, i))
+    st.tick()
+    st.scanned += 2 * (i - lo)                                # the bounded look-back
     if call < 0:
         return None
-    obj = _skip_ws(text, text.find("(", call) + 1, _MAX_GAP)
+    obj = _ws(st, text, text.find("(", call) + 1, i)
     if obj >= i or text[obj] != "{":
         return None
-    got = _object_keys(text, obj, min(len(text), obj + QUERY_WINDOW))
+    got = _object_keys(st, text, obj, min(len(text), obj + QUERY_WINDOW))
     if got is None:
         return None
     keys, end = got
-    if not any(name == "query" and value == brace for name, value in keys):
+    if not any(name == "query" and value == brace for name, value, _q in keys):
         return None
     route = None
-    for name, value in keys:
+    for name, value, _q in keys:
         if name == "path" and value is not None:
-            route, _e = _literal(text, value, end)
+            route, _e = _literal(st, text, value, end)
     _query_object(state, text, brace, end, route)
     return end
 
 
 def _scan_jsx_link(state, text, i, hi):
     """``<Link to="/x?a=">`` (or ``to={"/x?a="}``) in a JSX string."""
+    st = state.st
     if i + len(_Q_JSX_LINK) >= hi or text[i + len(_Q_JSX_LINK)] not in " \t\r\n":
         return None
     close = text.find(">", i, hi)
+    st.tick()
     if close < 0:
         return None
     at = text.find("to=", i, close)
     while at >= 0 and text[at - 1] not in " \t\r\n":
+        st.tick()
         at = text.find("to=", at + 3, close)
     if at < 0:
         return close
     j = at + 3
     if j < close and text[j] == "{":
         j += 1
-    value, _end = _literal(text, j, close)
+    value, _end = _literal(st, text, j, close)
     if value is not None:
         _literal_url(state, value)
     return close
@@ -1570,75 +1669,97 @@ def _scan_jsx_link(state, text, i, hi):
 
 def _scan_js_link(state, text, i, hi):
     """Compiled JSX ``(Link,{to:"/x?a="})``."""
-    got = _object_keys(text, i + len(_Q_JS_LINK) - 1, hi)
+    st = state.st
+    got = _object_keys(st, text, i + len(_Q_JS_LINK) - 1, hi)
     if got is None:
         return None
-    for name, value in got[0]:
+    for name, value, _q in got[0]:
         if name == "to" and value is not None:
-            literal, _e = _literal(text, value, got[1])
+            literal, _e = _literal(st, text, value, got[1])
             if literal is not None:
                 _literal_url(state, literal)
     return got[1]
 
 
-def scan_query_params(text: str, max_bytes: int = MAX_SCRIPT_BYTES) -> QueryScan | None:
+def scan_query_params(text: str, max_bytes: int = MAX_SCRIPT_BYTES, *,
+                      budget: int = MAX_QUERY_STEPS) -> QueryScan | None:
     """The query-parameter names ``text`` reads (FR-CRAWL-17, Q1/Q2), or None when it
     is longer than ``max_bytes``.
 
-    **Paired** (route, names): Angular ``navigate([`/r`], {queryParams: {id: t}})``, Vue
-    ``push({path: '/r', query: {q: x}})`` and React literals (``navigate("/r?a=")``,
-    ``<Link to="/r?a=">``). **Unpaired** names: ``queryParams.id``, ``queryParams["id"]``,
-    ``queryParamMap.get("id")``, ``searchParams.get("id")``, ``URLSearchParams(..)
-    .get("id")``, ``$route.query.id`` / ``route.query.id``, and a ``queryParams: {..}``
-    object outside a ``navigate`` call. Names are identifier-shaped (`query_name_ok`);
-    a sensitive name (`core.redaction.is_sensitive_name`) is dropped and counted by
-    class only; at most `MAX_QUERY_NAMES` per script.
+    **Paired** (route, names): Angular ``navigate([`/r`], {queryParams: {id: t}})``,
+    ``navigateByUrl("/r?a=")``, Vue ``push({path: '/r', query: {q: x}})`` and React
+    literals (``navigate("/r?a=")``, ``<Link to="/r?a=">``). **Unpaired** names:
+    ``queryParams.id``, ``queryParams["id"]``, ``queryParamMap.get("id")``,
+    ``searchParams.get("id")``, ``URLSearchParams(..).get("id")``, ``$route.query.id`` /
+    ``route.query.id``, a ``queryParams: {..}`` object outside a ``navigate`` call, and a
+    navigation ``relativeTo`` another route. Names are identifier-shaped
+    (`query_name_ok`); a sensitive name (`core.redaction.is_sensitive_name`) is dropped
+    and counted by class only; at most `MAX_QUERY_NAMES` per script.
 
-    Linear (PA-0095, B1): each anchor kind is found with ``str.find`` from where the
-    previous window ended (windows never overlap), each window ends at
-    ``min(anchor + QUERY_WINDOW, the next anchor of the same kind, the end of its
-    call)`` and is searched only inside those bounds, and at most `MAX_QUERY_ANCHORS`
-    anchors are examined (``anchor_cap``)."""
+    The bound (review A-M2, BUG-0135): each anchor kind is searched with ``str.find``
+    from a position that only moves forward (monotone: each kind's searches together
+    cover the body at most once; ``scanned`` counts them, and each window's bounded
+    search, at most `QUERY_WINDOW` per anchor), and every Python-level step of the
+    walker -- each character, token and loop turn it examines, inside a window that ends
+    at ``min(anchor + QUERY_WINDOW, the next anchor of the same kind, the end of its
+    call)`` -- is counted against ``budget`` (``steps``; `MAX_QUERY_STEPS`), which stops
+    the scan when spent (``budget_hit``). So the scan is O(len(text)) C-level finds plus
+    at most ``budget`` steps (PA-0095, PA-0135)."""
     if len(text) > max_bytes:
         return None
-    state = _QueryState()
-    nxt = {a: text.find(a) for a in _QUERY_ANCHORS}
+    st = StepCounter(budget)
+    state = _QueryState(st)
+    nxt = {}
+    for a in _QUERY_ANCHORS:
+        nxt[a] = text.find(a)
+        st.scanned += (nxt[a] if nxt[a] >= 0 else len(text))
     floor = 0
-    while True:
-        live = [(p, a) for a, p in nxt.items() if p >= 0]
-        if not live:
-            break
-        if state.scan.anchors >= MAX_QUERY_ANCHORS:
-            state.scan.anchor_cap = True
-            break
-        p, anchor = min(live)
-        state.scan.anchors += 1
-        start = p + len(anchor)
-        same = text.find(anchor, start, p + QUERY_WINDOW)
-        hi = same if same >= 0 else min(len(text), p + QUERY_WINDOW)
-        if anchor == _Q_NAVIGATE:
-            end = _scan_navigate(state, text, start, hi)
-        elif anchor == _Q_PARAMS_OBJ:
-            end = _scan_params_obj(state, text, start, hi)
-        elif anchor in (_Q_PARAMS_DOT,):
-            end = _member(state, text, start, hi)
-        elif anchor in (_Q_PARAMS_IDX, _Q_PARAM_MAP, _Q_SEARCH_PARAMS):
-            end = _quoted_arg(state, text, start, hi)
-        elif anchor == _Q_URL_SEARCH:
-            end = _scan_url_search(state, text, start, hi)
-        elif anchor == _Q_VUE_ROUTE:
-            end = _scan_vue_route(state, text, p, hi)
-        elif anchor == _Q_VUE_QUERY:
-            end = _scan_vue_push(state, text, p, hi, floor)
-        elif anchor == _Q_JSX_LINK:
-            end = _scan_jsx_link(state, text, p, hi)
-        else:
-            end = _scan_js_link(state, text, p, hi)
-        pos = max(start, (end + 1) if end is not None else start)
-        floor = max(floor, pos if end is not None else floor)
-        for a, at in nxt.items():
-            if 0 <= at < pos:
-                nxt[a] = text.find(a, pos)
+    try:
+        while True:
+            live = [(p, a) for a, p in nxt.items() if p >= 0]
+            st.tick()
+            if not live:
+                break
+            p, anchor = min(live)
+            state.scan.anchors += 1
+            start = p + len(anchor)
+            same = text.find(anchor, start, p + QUERY_WINDOW)
+            hi = same if same >= 0 else min(len(text), p + QUERY_WINDOW)
+            st.scanned += hi - start                          # the bounded window find
+            if anchor == _Q_NAVIGATE:
+                end = _scan_navigate(state, text, start, hi)
+            elif anchor == _Q_NAVIGATE_URL:
+                end = _scan_navigate_url(state, text, start, hi)
+            elif anchor == _Q_PARAMS_OBJ:
+                end = _scan_params_obj(state, text, p, start, hi)
+            elif anchor == _Q_PARAMS_DOT:
+                end = None if _after_identifier(text, p) else \
+                    _member(state, text, start, hi)
+            elif anchor == _Q_PARAMS_IDX:
+                end = None if _after_identifier(text, p) else \
+                    _quoted_arg(state, text, start, hi)
+            elif anchor in (_Q_PARAM_MAP, _Q_SEARCH_PARAMS):
+                end = _quoted_arg(state, text, start, hi)
+            elif anchor == _Q_URL_SEARCH:
+                end = _scan_url_search(state, text, start, hi)
+            elif anchor == _Q_VUE_ROUTE:
+                end = _scan_vue_route(state, text, p, hi)
+            elif anchor == _Q_VUE_QUERY:
+                end = _scan_vue_push(state, text, p, hi, floor)
+            elif anchor == _Q_JSX_LINK:
+                end = _scan_jsx_link(state, text, p, hi)
+            else:
+                end = _scan_js_link(state, text, p, hi)
+            pos = max(start, (end + 1) if end is not None else start)
+            floor = max(floor, pos if end is not None else floor)
+            for a, at in nxt.items():
+                if 0 <= at < pos:
+                    found = text.find(a, pos)
+                    st.scanned += (found if found >= 0 else len(text)) - pos
+                    nxt[a] = found
+    except _BudgetSpent:
+        state.scan.budget_hit = True
+    state.scan.steps, state.scan.scanned = st.steps, st.scanned
     return state.scan
 
 
@@ -1647,6 +1768,10 @@ def scan_query_params(text: str, max_bytes: int = MAX_SCRIPT_BYTES) -> QueryScan
 #: probe load (never stored).
 SEED_SOURCE = "spa-query"
 PROBE_SOURCE = "spa-query-probe"
+#: A seed whose window blocked a write (a non-GET): kept as a page, never imported as a
+#: point -- an M6 fuzz load of it would send that write outside any window (review A-M1;
+#: `tools.store_adapter.import_spider` reads it).
+WRITE_SEED_SOURCE = "spa-query-writes"
 
 
 #: The value a seed gives each name: the text filler (`store_adapter`'s, PA-0003).
@@ -1657,10 +1782,11 @@ def query_filler() -> str:
 def redirect_name(name: str) -> bool:
     """Whether ``name`` is redirect-ish: one of its whole tokens
     (`core.redaction.name_tokens`), or the whole name, is in the shared open-redirect
-    name set (`tools.fetcher.REDIRECT_PARAMS`, the one definition, PA-0003). Such a name
-    is given the same-origin path ``/`` in seeds and probes, never the filler, so a load
-    cannot navigate away (B6)."""
-    from fuzzlab.tools.fetcher import REDIRECT_PARAMS
+    name set (`core.urls.REDIRECT_PARAMS`, the one definition, PA-0003). Such a name is
+    given the same-origin path ``/`` in seeds and probes, never the filler. That is
+    hygiene: the guard is the window, which aborts every navigation a load makes (B6,
+    review A-S5)."""
+    from fuzzlab.core.urls import REDIRECT_PARAMS
     low = (name or "").lower()
     return low in REDIRECT_PARAMS or bool(set(name_tokens(name or "")) & REDIRECT_PARAMS)
 
@@ -1769,37 +1895,75 @@ def _name_assignment(text: str, names) -> bool:
 MAX_OBSERVED_STRING = 8192
 
 
-def observed_names(texts, requests, markers: dict, names) -> tuple[set, int]:
+def observed_names(texts, requests, markers: dict, names, *, doc_path: str | None = None,
+                   route: str | None = None) -> tuple[set, int]:
     """``(kept names, marker-in-path count)`` for one probe load (FR-CRAWL-17, Q5).
 
     ``markers`` maps **this load's** markers to their names; nothing else is ever
     attributed (a stale marker from an earlier load matches none of them). ``texts``
-    are the rendered DOM's strings (`OBSERVE_JS`); ``requests`` the ``(url, body)`` of
-    every request the load made (the window's request hook, aborted ones included).
+    are the rendered DOM's strings (`OBSERVE_JS`); ``requests`` the ``(url, body,
+    blocked)`` of every request the load made (the request hook, aborted ones included).
+    A **blocked** request (aborted by the window or the guard) is never evidence: a
+    name whose only evidence is a blocked request is not kept (review A-M1).
+
     A marker counts where it appears with non-alphanumeric boundaries in a string that
-    carries no other of this load's markers and no ``<name>=`` syntax of a probed name
-    (a URL self-echo -- ``location.href`` in a link, ``<base>``, a canonical URL --
-    keeps nothing, B5). A marker in a request URL's path is counted
+    carries no other of this load's markers. ``<name>=`` syntax of a probed name also
+    discounts it (a URL self-echo -- ``location.href`` in a link, a canonical URL, B5) in
+    a DOM string and a body, but in a request **URL** only when that URL is a copy of the
+    page's own: its path is the document's (``doc_path``) or it carries the fragment
+    route (``route``, e.g. ``#/search``) -- an app's API forwarding ``?q=<marker>``
+    keeps ``q`` (review A-S3). A marker in a request URL's path is counted
     (``marker_in_path``); it still keeps the name (no server-side point comes from it,
     Q6)."""
     from urllib.parse import unquote
     kept: set = set()
     in_path = 0
-    judged = [(t, False) for t in texts or [] if isinstance(t, str)]
-    for url, body in requests or []:
-        judged.append((unquote(url or ""), True))
+    judged = [(t, None) for t in texts or [] if isinstance(t, str)]
+    for entry in requests or []:
+        url, body = entry[0], entry[1]
+        if len(entry) > 2 and entry[2]:
+            continue                                    # blocked: never evidence
+        judged.append((unquote(url or ""), "url"))
         if body:
-            judged.append((unquote(body), False))
-    for text, is_url in judged:
+            judged.append((unquote(body), None))
+    for text, kind in judged:
         if len(text) > MAX_OBSERVED_STRING:
             continue
         hits = [m for m in markers if _bounded_hit(text, m)]
-        if len(hits) != 1 or _name_assignment(text, names):
+        if len(hits) != 1:
+            continue
+        if kind == "url":
+            self_copy = (doc_path is not None and urlsplit(text).path == doc_path) or \
+                bool(route and route in text)
+            if self_copy and _name_assignment(text, names):
+                continue
+        elif _name_assignment(text, names):
             continue
         kept.add(markers[hits[0]])
-        if is_url and _bounded_hit(urlsplit(text).path, hits[0]):
+        if kind == "url" and _bounded_hit(urlsplit(text).path, hits[0]):
             in_path += 1
     return kept, in_path
+
+
+#: A marker as a whole token (fixed shape): what `scrub_markers` replaces.
+_MARKER_RE = None
+#: What a marker becomes in every stored row (review A-S4).
+MARKER_PLACEHOLDER = "__FUZZLAB_PROBE__"
+
+
+def scrub_markers(text):
+    """``text`` with every whole-token marker (`MARKER_PREFIX`, then `MARKER_INDEX_LEN` +
+    `MARKER_RAND_LEN` lower-case letters) replaced by `MARKER_PLACEHOLDER`: applied at the
+    spider's storage boundary, so a marker an app persisted and replays later never
+    reaches a row. Total: a non-string is returned as is."""
+    global _MARKER_RE
+    if not isinstance(text, str) or MARKER_PREFIX not in text:
+        return text
+    if _MARKER_RE is None:
+        import re
+        _MARKER_RE = re.compile(r"(?<![A-Za-z0-9])" + MARKER_PREFIX + "[a-z]{%d}(?![A-Za-z0-9])"
+                                % (MARKER_INDEX_LEN + MARKER_RAND_LEN))
+    return _MARKER_RE.sub(MARKER_PLACEHOLDER, text)
 
 
 #: ``prefix => [string]``: every text node, attribute value and form-control value of

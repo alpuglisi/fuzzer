@@ -384,6 +384,15 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
+- **FR-CORE-39** *(the open-redirect name set; `CC-CORE-0053`, 2026-10-14, FR-CRAWL-17
+  review).* `core.urls.REDIRECT_PARAMS` (a frozenset) is the one set of parameter names
+  that control the next location. The auditor's redirect rule
+  (`tools.fetcher.rule_redirect_parameters`, exact lower-cased names; `tools.fetcher`
+  re-exports the same object) and the crawler's seeds and probes
+  (`tools.spa.redirect_name`, whole tokens or the whole name) both read it (PA-0003).
+  Moved unchanged from `tools/fetcher.py`. Stated tension: the rules-data
+  `R-OPEN-REDIRECT` `name_regex` is a second, regex-shaped list; changing detection is
+  out of this requirement's scope.
 - **FR-CORE-38** *(process trees; `CC-CORE-0048`, 2026-10-14, BUG-0125).*
   `fuzzlab/procutil.py` is the one way the toolkit and its tests start a long-lived
   child process or a forking tool. It is a **stdlib-only leaf** (imports nothing from

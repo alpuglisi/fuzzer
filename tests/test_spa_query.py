@@ -149,14 +149,47 @@ def test_sensitive_names_are_dropped_and_counted_by_class_only():
     assert refused == {spa.Q_SENSITIVE: 5}
 
 
-def test_names_and_anchors_are_capped():
+def test_names_are_capped():
     many = "".join(f"r.queryParams.n{i};" for i in range(spa.MAX_QUERY_NAMES + 7))
     q = spa.scan_query_params(many)
     assert len(q.unpaired) == spa.MAX_QUERY_NAMES
     assert q.refused == {spa.Q_NAME_CAP: 7}
-    noise = "x.queryParams.get(1);" * (spa.MAX_QUERY_ANCHORS + 10) + "r.queryParams.late;"
-    q = spa.scan_query_params(noise)
-    assert q.anchor_cap and q.anchors == spa.MAX_QUERY_ANCHORS and q.unpaired == []
+
+
+def test_cheap_noise_anchors_never_hide_a_later_pair():
+    """S4 (review A-S1): the budget is on the walker's steps, not the anchor count, so
+    3000 O(1) noise anchors cost O(1) each and the real pair after them is found."""
+    body = "navigate(x);" * 3000 + "this.router.navigate([`/t`],{queryParams:{id:t}})"
+    q = spa.scan_query_params(body)
+    assert q.pairs == {"t": ["id"]} and not q.budget_hit and q.anchors == 3001
+
+
+def test_the_step_budget_is_enforced_and_counted():
+    body = "navigate([`/a`],{queryParams:{x" * 2000 + "r.queryParams.late;"
+    q = spa.scan_query_params(body, budget=20_000)
+    assert q.budget_hit and q.steps <= 20_000 + spa.QUERY_WINDOW
+    assert "late" not in q.unpaired
+    assert not spa.scan_query_params(body).budget_hit           # the default budget
+
+
+def test_relative_navigations_and_dot_segments_name_no_route():
+    """S5 (review A-S2): ``relativeTo`` makes the route relative -- its names are
+    unpaired; a ``.`` / ``..`` segment is never a route."""
+    assert _scan("navigate([`child`],{relativeTo:this.route,queryParams:{tab:t}})") == (
+        {}, ["tab"], {})
+    for path in (".", "..", "./x", "a/../b", "#/./a"):
+        assert spa.classify_route(path)[0] == spa.ROUTE_INVALID, path
+
+
+def test_navigate_by_url_hyphenated_keys_and_longer_names():
+    """S11: ``navigateByUrl`` literals pair (A-N1); a dropped quoted key that is not
+    identifier-shaped is counted (A-N2); ``myqueryParams:{`` is not an anchor (A-N4)."""
+    assert _scan("this.router.navigateByUrl(`/basket?tab=open`);navigateByUrl(t)") == (
+        {"/basket": ["tab"]}, [], {})
+    assert _scan("navigate(['/r'],{queryParams:{'a-b':1,ok:2}})") == (
+        {"r": ["ok"]}, [], {spa.Q_SHAPE: 1})
+    assert _scan("x.myqueryParams:{a:1}; myqueryParams.b; z.queryParams.c") == (
+        {}, ["c"], {})
 
 
 def test_the_window_is_bounded_no_pair_across_500kb():
@@ -175,7 +208,8 @@ def test_scan_script_is_one_call_with_one_size_cap():
 
 
 def _near_misses(size: int) -> dict:
-    """4 MB adversarial bodies: every anchor repeated as a near miss."""
+    """Adversarial bodies: every anchor repeated as a near miss, and reviewer A's
+    shapes (a long route array, cheap noise anchors)."""
     return {
         "navigate run": "navigate([`" * (size // 11),
         "unclosed options": "navigate([`/a`],{queryParams:{x" * (size // 32),
@@ -186,35 +220,48 @@ def _near_misses(size: int) -> dict:
         "deep brackets": "navigate([" + "[" * size,
         "string soup": "navigate(['" + "\\'" * (size // 2),
         "no anchor": "queryParam navigat quer: route.quer " * (size // 36),
+        "long route array": ("navigate([" + "`a`," * 126 + "]") * (size // 515),
+        "noise anchors": "navigate(x);" * (size // 12),
     }
 
 
-def _time(body: str) -> float:
-    start = time.perf_counter()
-    spa.scan_query_params(body, max_bytes=8 * len(body) + 1)
-    return time.perf_counter() - start
-
-
-#: The generous CI bound for one 4 MB adversarial body (seconds).
+#: The absolute smoke bound for one 4 MB adversarial body (seconds): a gross-regression
+#: alarm only; the complexity is asserted on operation counts (PA-0135).
 SCAN_BOUND_S = 10.0
+#: The additive constant of the doubling oracle: a few windows' worth of steps.
+DOUBLING_SLACK = 64 * spa.QUERY_WINDOW
 
 
-def test_the_scan_is_linear_on_4mb_adversarial_bodies(capsys):
-    """B1 / PA-0095: each 4 MB near-miss body is scanned under a generous bound, and
-    doubling a body (below the anchor cap) at most roughly doubles the time."""
+def test_the_scan_stays_within_its_step_budget_on_4mb_adversarial_bodies(capsys):
+    """BUG-0135 / PA-0135: on each 4 MB near-miss body the walker spends at most its
+    budget (plus one window), and the monotone ``str.find`` covers the body at most
+    once per anchor kind. The wall-clock time is only a smoke bound."""
     big = 4 * 1024 * 1024
     times = {}
     for name, body in _near_misses(big).items():
-        times[name] = _time(body)
+        start = time.perf_counter()
+        q = spa.scan_query_params(body, max_bytes=8 * len(body) + 1)
+        times[name] = time.perf_counter() - start
+        assert q.steps <= spa.MAX_QUERY_STEPS + spa.QUERY_WINDOW, name
+        assert q.scanned <= len(spa._QUERY_ANCHORS) * (len(body) + 1) + \
+            2 * spa.QUERY_WINDOW * q.anchors, name
         assert times[name] < SCAN_BOUND_S, name
     with capsys.disabled():
         print("\nFR-CRAWL-17 scan, 4 MB adversarial bodies (s): "
               + ", ".join(f"{k} {v:.3f}" for k, v in times.items()))
-    small, large = (_near_misses(256 * 1024)["no anchor"],
-                    _near_misses(512 * 1024)["no anchor"])
-    t_small = min(_time(small) for _ in range(3))
-    t_large = min(_time(large) for _ in range(3))
-    assert t_large < 3.5 * max(t_small, 1e-3)
+
+
+@pytest.mark.parametrize("shape", sorted(_near_misses(1024)))
+def test_doubling_a_body_at_most_doubles_the_operations(shape):
+    """BUG-0135 / PA-0135 (operation-count oracle): for every adversarial shape,
+    ``ops(2n) <= 2 * ops(n) + DOUBLING_SLACK`` for both the walker's steps and the
+    characters ``str.find`` covered, with no budget (a quadratic walker fails this
+    whatever the machine's load; proven by a mutation, CC-CRAWL-0027)."""
+    small, large = (_near_misses(8 * 1024)[shape], _near_misses(16 * 1024)[shape])
+    a = spa.scan_query_params(small, budget=None)
+    b = spa.scan_query_params(large, budget=None)
+    assert b.steps <= 2 * a.steps + DOUBLING_SLACK, (a.steps, b.steps)
+    assert b.scanned <= 2 * a.scanned + DOUBLING_SLACK, (a.scanned, b.scanned)
 
 
 # =====================================================================================
@@ -225,8 +272,11 @@ def test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path():
     assert url == "http://h/#/login?redirectUrl=/&q=fuzzlab&next=/&returnTo=/"
     assert spa.query_filler() == spa.filler("text") == "fuzzlab"
     assert spa.seed_url("http://h/app/search", ["q"]) == "http://h/app/search?q=fuzzlab"
-    # whole tokens of the one shared open-redirect name set (PA-0003)
-    from fuzzlab.tools.fetcher import REDIRECT_PARAMS
+    # whole tokens of the one shared open-redirect name set (PA-0003), in core since
+    # CC-CORE-0053; the auditor's rule reads the same object
+    from fuzzlab.core.urls import REDIRECT_PARAMS
+    from fuzzlab.tools import fetcher
+    assert fetcher.REDIRECT_PARAMS is REDIRECT_PARAMS
     assert all(spa.redirect_name(n) for n in REDIRECT_PARAMS)
     assert not any(spa.redirect_name(n) for n in ("q", "id", "nextable", "urlish",
                                                   "returned", "term"))
@@ -280,12 +330,15 @@ def test_markers_are_fresh_per_load_and_fixed_width():
         spa.mint_markers(spa.MAX_UNPAIRED_NAMES + 1)
 
 
-def _attr(texts, requests=(), names=("q", "extra")):
+def _attr(texts, requests=(), names=("q", "extra"), **kw):
     markers = {m: n for m, n in zip(spa.mint_markers(len(names)), names)}
     by_name = {n: m for m, n in markers.items()}
     texts = [t.format(**by_name) for t in texts]
-    requests = [(u.format(**by_name), b.format(**by_name)) for u, b in requests]
-    return spa.observed_names(texts, requests, markers, list(names))
+    requests = [(r[0].format(**by_name), r[1].format(**by_name), *r[2:])
+                for r in requests]
+    kw.setdefault("doc_path", "/")
+    kw.setdefault("route", "#/r")
+    return spa.observed_names(texts, requests, markers, list(names), **kw)
 
 
 def test_two_names_one_reflected():
@@ -300,6 +353,29 @@ def test_a_url_self_echo_keeps_nothing():
     assert _attr(["{q} {extra}"]) == (set(), 0)
 
 
+def test_a_single_name_location_href_echo_keeps_nothing():
+    """S6: the DOM's ``<a href>`` copy of ``location.href`` with one probed name."""
+    assert _attr(["http://h/#/r?q={q}"], names=("q",)) == (set(), 0)
+
+
+def test_a_blocked_request_is_never_evidence():
+    """S1 (review A-M1): a name whose only evidence is a request the window or the guard
+    aborted is not kept; the same request completed keeps it."""
+    assert _attr([], [("http://h/api/beacon", "v={q}", True)]) == (set(), 0)
+    assert _attr([], [("http://h/rest/lookup?k={q}", "", True)]) == (set(), 0)
+    assert _attr([], [("http://h/rest/lookup?k={q}", "", False)]) == ({"q"}, 0)
+
+
+def test_markers_are_scrubbed_to_a_fixed_placeholder():
+    """S7 (review A-S4): any whole-token marker, never a longer word that contains one."""
+    m = spa.mint_markers(1)[0]
+    assert spa.scrub_markers(f"Last: {m}; ?q={m}") == \
+        f"Last: {spa.MARKER_PLACEHOLDER}; ?q={spa.MARKER_PLACEHOLDER}"
+    assert spa.scrub_markers(f"x{m}") == f"x{m}" and spa.scrub_markers(m + "s") == m + "s"
+    assert spa.MARKER_PREFIX not in spa.MARKER_PLACEHOLDER
+    assert spa.scrub_markers(None) is None and spa.scrub_markers(7) == 7
+
+
 def test_a_stale_marker_from_an_earlier_load_is_never_attributed():
     old = spa.mint_markers(1)[0]                        # load 1's marker for "q"
     markers = {spa.mint_markers(1)[0]: "q"}             # load 2's
@@ -312,7 +388,11 @@ def test_boundaries_requests_and_the_path_count():
     assert _attr([], [("http://h/rest/lookup?k={q}", "")]) == ({"q"}, 0)
     assert _attr([], [("http://h/rest/item/{q}", "")]) == ({"q"}, 1)   # Q6 residual
     assert _attr([], [("http://h/api/beacon", "v={extra}")]) == ({"extra"}, 0)
-    assert _attr([], [("http://h/rest/x?q={q}", "")]) == (set(), 0)      # name= echo
+    # S6: an API forwarding the name keeps it; a copy of the page's own URL does not
+    assert _attr([], [("http://h/api/search?q={q}", "")]) == ({"q"}, 0)
+    assert _attr([], [("http://h/?q={q}", "")]) == (set(), 0)          # the document
+    assert _attr([], [("http://h/log?u=http://h/%23/r%3Fq%3D{q}", "")]) == (set(), 0)
+    assert _attr([], [("http://h/app/?q={q}", "")], doc_path="/app/") == (set(), 0)
     assert _attr([], [("http://h/rest/x?k=%66zq", "")]) == (set(), 0)
     long = "a " * spa.MAX_OBSERVED_STRING + "{q}"
     assert _attr([long]) == (set(), 0)                           # too long: fail closed
@@ -382,8 +462,7 @@ def test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points(quer
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
     assert sources[base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE
     params = _params(query_crawl["store"], query_crawl["run"])
-    for route, name in (("track", "id"), ("search", "q"), ("score-board", "q"),
-                        ("poster", "msg")):
+    for route, name in (("track", "id"), ("search", "q"), ("score-board", "q")):
         assert (f"/#/{route}", name, "fragment") in params, route
     c = query_crawl["sp"].spa_counts
     assert c["spa_query_pairs"] == 8          # track..login + logout:bye (refused later)
@@ -468,24 +547,25 @@ def test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin
 
 
 def test_the_probe_keeps_only_observed_names(query_crawl):
-    """Q5: ``term`` is kept where this load's marker is seen -- rendered (``reflect``),
-    in a GET query (``fetcher``) or path (``pathy``), in an aborted POST's body
-    (``beacon``) -- and nowhere else: ignored, self-echoed in a link (``echohref``),
-    stashed (``save``) or replayed stale (``show``). ``extra`` is never shown; the
-    redirect-ish ``next`` carries ``/``, no marker."""
+    """Q5: ``term`` is kept where this load's marker is seen -- rendered (``reflect``,
+    ``memo``), in a completed GET's query under another name (``fetcher``) or the same
+    name (``forward``, S6) or its path (``pathy``) -- and nowhere else: ignored,
+    self-echoed in a link (``echohref``), stashed (``save``), replayed stale
+    (``show``), or only in a POST the window blocked (``beacon``, S1). ``extra`` is never
+    shown; the redirect-ish ``next`` carries ``/``, no marker."""
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     pages = set(_pages(db))
-    for kept in ("reflect", "fetcher", "pathy", "beacon"):
+    for kept in ("reflect", "memo", "fetcher", "forward", "pathy"):
         assert lab.base + f"#/{kept}?term=fuzzlab" in pages, kept
     seeded = {u for u in pages if "?" in u.partition("#")[2]}
-    for dropped in ("ignore", "echohref", "save", "show"):
+    for dropped in ("ignore", "echohref", "save", "show", "beacon"):
         assert not any(f"#/{dropped}?" in u for u in seeded), dropped
     assert not any("extra=" in u or "next=" in u for u in pages)
     c = sp.spa_counts
-    assert c["spa_query_unpaired"] == 3 and c["spa_query_kept"] == 4
-    assert c["spa_query_probe_loads"] == 15                 # every rendered route once
+    assert c["spa_query_unpaired"] == 3 and c["spa_query_kept"] == 5
+    assert c["spa_query_probe_loads"] == 17                 # every rendered route once
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
-    assert lab.seen("POST", "/api/beacon") == []            # aborted, still observed
+    assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
     params = _params(query_crawl["store"], query_crawl["run"])
     assert ("/rest/lookup", "k", "query") in params
@@ -497,6 +577,10 @@ def test_no_stored_row_carries_a_marker(query_crawl):
     count carries a marker, in the spider DB or the store."""
     assert spa.MARKER_PREFIX not in db_text(query_crawl["db"])
     assert spa.MARKER_PREFIX not in db_text(query_crawl["store_path"])
+    # S7: ``memo``'s seed, visited after the probes, showed ``save``'s stashed marker;
+    # the storage boundary replaced it
+    content = dict(db_rows(query_crawl["db"], "SELECT url, content FROM discovered_pages"))
+    assert spa.MARKER_PLACEHOLDER in content[query_crawl["lab"].base + "#/memo?term=fuzzlab"]
     # ...while the probes did run with markers (the server saw them)
     assert any(spa.MARKER_PREFIX in r[1] for r in query_crawl["lab"].requests)
 
@@ -510,6 +594,42 @@ def test_the_summary_reports_kept_vs_confirmable_without_a_browser(query_crawl):
     assert any(ln.startswith("SPA query parameters refused:") for ln in sp.spa_summary())
     stats = dict(db_rows(query_crawl["db"], "SELECT name, value FROM crawl_stats"))
     assert all(stats[k] == v for k, v in c.items())
+
+
+def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
+        query_crawl, tmp_path, monkeypatch):
+    """S1 (review A-M1): ``#/poster?msg=`` POSTs on load. Its seed's window blocked the
+    write, so the seed is kept as a page (``source = 'spa-query-writes'``) but is never a
+    point, and ``beacon``, whose only evidence was the blocked POST, is never kept: a
+    later M6 run (real browser, outside any window) never loads them, so the server sees
+    no POST to ``/api/send`` or ``/api/beacon`` -- through the crawl, the import and
+    M6."""
+    import requests
+
+    from fuzzlab.harness.auto import run_auto
+    from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    assert sources[lab.base + "#/poster?msg=fuzzlab"] == spa.WRITE_SEED_SOURCE
+    assert sp.spa_counts["spa_query_write_seeds"] >= 1
+    assert dict(db_rows(db, "SELECT name, value FROM crawl_stats"))[
+        "spa_query_write_seeds"] >= 1
+    monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS",
+                        1000)                       # the fixture's sinks are synchronous
+    store, run, counts = _import(db, tmp_path / "m6.db")
+    with store, contextlib.closing(requests.Session()) as session:
+        params = _params(store, run)
+        assert counts["write_seed_skipped"] >= 1
+        assert not any(u in ("/#/poster", "/#/beacon") for u, _n, _l in params)
+        run_auto(base_url=lab.base, store=store, run_id=run,
+                 sender=RequestsProbeSender(session=session), mode="manual",
+                 selected_categories=["xss"], points_source="crawl",
+                 browser=PlaywrightBrowserExecutor())
+        found = {(r["url"], r["param"]) for r in store.conn.execute(
+            "SELECT url, param FROM finding WHERE run_id=?", (run,))}
+    assert ("/#/track", "id") in found                      # M6 did run
+    assert lab.seen("POST", "/api/send") == [] and lab.seen("POST", "/api/beacon") == []
 
 
 def test_two_crawls_give_the_same_pages_endpoints_and_parameters(query_crawl, tmp_path):
@@ -585,3 +705,63 @@ def test_track_result_id_reaches_m6_and_confirms_dom_xss(monkeypatch, tmp_path):
         assert off_found == set()
     finally:
         lab.close()
+
+
+# =====================================================================================
+# Review round 1 (S9-S11): probe aborts, the session after a query load, the CLI flag
+# =====================================================================================
+def test_a_probes_aborted_url_is_blocked_evidence_never_a_skipped_destructive(tmp_path):
+    """S9 (review B-S1): while a probe is open, a guard abort (destructive, out of
+    scope) marks the URL blocked for that probe and is never recorded in
+    ``skipped_destructive``; outside a probe it is recorded as before."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    try:
+        sp._probe = {"blocked": set()}
+        sp._note_guard_abort("http://127.0.0.1:9/logout?q=fzqaaabcdefgh", "logout")
+        sp._note_out_of_scope("http://203.0.113.9/x?q=fzqaaabcdefgh")
+        assert sp.skipped_destructive == {}
+        assert sp._probe["blocked"] == {"http://127.0.0.1:9/logout?q=fzqaaabcdefgh",
+                                        "http://203.0.113.9/x?q=fzqaaabcdefgh"}
+        sp._probe = None
+        sp._note_guard_abort("http://127.0.0.1:9/logout", "logout")
+        assert sp.skipped_destructive == {"http://127.0.0.1:9/logout": "logout"}
+    finally:
+        sp.storage.close()
+
+
+def test_the_cli_flag_turns_query_discovery_off():
+    """S11 (review A-N3): ``--no-spa-query``."""
+    from fuzzlab.tools.spider import build_parser
+    assert build_parser().parse_args([]).no_spa_query is False
+    assert build_parser().parse_args(["--no-spa-query"]).no_spa_query is True
+
+
+def test_a_session_lost_in_a_query_load_stops_query_loads(monkeypatch, tmp_path):
+    """S10 (review B-S4): in an authenticated crawl whose session is in localStorage, the
+    ``fade`` seed clears the token client-side (no request). The window's client-side
+    check sees it before the page leaves; seed and probe loads stop for the crawl (the
+    ``after1`` seed is never loaded), the session is re-adopted on the start page and
+    verified live, and the crawl goes on."""
+    from tests.test_forms_phase4 import _LsManager
+    from tests._spa_query_fixture import SessionQuerySpa
+    chromium_or_skip(monkeypatch)
+    lab = SessionQuerySpa()
+    try:
+        manager = _LsManager(lab.base)
+        sp = _crawl(lab, tmp_path / "s.db", session_manager=manager, identity="user")
+    finally:
+        lab.close()
+    gets = [r[1] for r in lab.seen("GET", "/rest/marker/")]
+    assert "/rest/marker/fade-query" in gets                 # the seed that logs out
+    assert "/rest/marker/after1-query" not in gets           # stopped
+    assert "/rest/marker/after1" in gets                     # the bare route was crawled
+    assert sp.spa_counts["spa_query_session_losses"] == 1
+    assert sp.spa_query_stopped and "session was lost" in sp.spa_query_stopped
+    assert sp.spa_query_refused.get("session lost", 0) >= 1
+    assert not sp.reveals_stopped and not sp.spa_submit_stopped   # re-adopted
+    assert manager.verified >= 1
+    stats = dict(db_rows(str(tmp_path / "s.db"), "SELECT name, value FROM crawl_stats"))
+    assert stats["spa_query_stopped"] == 1
+    assert any(ln.startswith("SPA query loads stopped") for ln in sp.spa_summary())

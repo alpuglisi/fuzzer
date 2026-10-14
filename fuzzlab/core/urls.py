@@ -175,6 +175,19 @@ def _destructive_tokens(tokens: list[str]) -> str | None:
 #: Words that name a transaction: submitting it spends, buys, moves or subscribes
 #: (forms phase 3). Separate from DESTRUCTIVE_TOKENS: such a page may be *visited*, but
 #: its form is never submitted and a captured request to it is never fuzzed.
+#: Parameter names that control the next location: the auditor's redirect rule
+#: (`tools.fetcher.rule_redirect_parameters`, exact names) and the crawler's seeds and
+#: probes (`tools.spa.redirect_name`, whole tokens) read this one set (CC-CORE-0053,
+#: PA-0003). Moved unchanged from `tools/fetcher.py`. The rules-data
+#: ``R-OPEN-REDIRECT`` ``name_regex`` is a separate, regex-shaped list (a stated
+#: PA-0003 tension, FR-CRAWL-17).
+REDIRECT_PARAMS = frozenset({
+    'redirect', 'redirect_url', 'redirect_uri', 'redir', 'next', 'next_url',
+    'return', 'returnurl', 'return_url', 'returnto', 'return_to', 'goto',
+    'continue', 'dest', 'destination', 'url', 'u', 'r', 'back', 'forward',
+    'out', 'success_url', 'cancel_url', 'checkout_url', 'location',
+})
+
 TRANSACTION_TOKENS = frozenset({
     "checkout", "purchase", "pay", "payment", "order", "transfer", "redeem", "wallet",
     "membership", "subscribe", "subscription", "buy", "donate", "donation", "deposit",
