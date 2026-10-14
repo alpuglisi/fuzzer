@@ -186,6 +186,8 @@ class StorageManager:
         the page URL redacted (`core.redaction.redact_url_identifiers`). A later
         submission of the same form marks it ``submitted``. Returns True when new."""
         from fuzzlab.core.redaction import redact_url_identifiers
+        # a probe marker never reaches a row; the dedup key is the stored one (B-N3)
+        route, signature = spa.scrub_markers(route), spa.scrub_markers(signature)
         row = self.cursor.execute("SELECT id FROM revealed_forms WHERE route = ? AND "
                                   "signature = ?", (route, signature)).fetchone()
         if row is not None:
@@ -608,6 +610,8 @@ class LocalSpider:
             self.skipped_destructive.setdefault(url, reason)
         if self._win is not None:
             self._win["aborted"] += 1
+            if self._win.get("query"):
+                self._win.setdefault("blocked", set()).add(url)
 
     # ----- the reveal window (forms phase 4: W1-W3) -----
     def _window_refusal(self, method, url, navigation, context=None):
@@ -630,12 +634,19 @@ class LocalSpider:
         win["aborted"] += 1
         if win.get("query"):
             # FR-CRAWL-17 (review A-M1): a seed records whether it blocked a write; a
-            # probe's blocked requests are never evidence
+            # probe's blocked requests are never evidence; a blocked URL is never queued
+            # from the load's request list (it would be fetched outside the window)
+            win.setdefault("blocked", set()).add(url)
             if self._probe is not None:
                 self._probe["blocked"].add(url)
-            if not navigation and method not in ("GET", "HEAD"):
+            # a write (review round 2, U1): every refused non-GET/HEAD, a navigation (an
+            # auto-submitted form) included, and every non-navigation GET the window's
+            # word rules refused (a transaction or account GET)
+            if method not in ("GET", "HEAD") or not navigation:
                 win["writes"] = win.get("writes", 0) + 1
-        if navigation:
+        if navigation and not (win.get("query") and method not in ("GET", "HEAD")):
+            # a query window's refused non-GET navigation (an auto-submitted form) is a
+            # write, never a page to visit: its target is not queued as a GET (A2-M1)
             win["navs"].append(url)
         else:
             # a seed or probe load's window (FR-CRAWL-17, Q4) counts its own
@@ -654,6 +665,9 @@ class LocalSpider:
         self.spa_counts["reveal_ws_dropped"] += 1
         if self._win is not None:
             self._win["aborted"] += 1
+            if self._win.get("query"):
+                # a held page-to-server WebSocket message is a write (U1)
+                self._win["writes"] = self._win.get("writes", 0) + 1
 
     @contextlib.contextmanager
     def _window(self, page, context, page_url, *, query=None):
@@ -678,6 +692,9 @@ class LocalSpider:
                "pages": list(getattr(context, "pages", []) or []), "query": query}
         if query:
             win["own_nav"] = frozenset({_nav_key(page_url)})
+            if self._authenticated:
+                # U3 (review B2-M2): a check that never completes is a loss
+                win["session"] = (False, "the session check did not complete")
         self._win = win
         try:
             yield win
@@ -689,6 +706,9 @@ class LocalSpider:
                 else:
                     self._restore(page, page_url, win)
                 self._quiesce(page)
+                if query:
+                    self._recheck_query_session(win)
+                    win["closed"] = True             # U2: the window closed cleanly
             except PlaywrightError as exc:
                 logging.info(f"the reveal window could not close {page_url} cleanly "
                              f"({str(exc).splitlines()[0][:80]}); leaving the page")
@@ -731,8 +751,13 @@ class LocalSpider:
         win["own_nav"] = frozenset()
         if self._authenticated:
             # S10 (review B-S4): the client-side session check (no network), on the
-            # load's own page, before it leaves; a loss stops seed and probe loads
-            win["session"] = self._client_session_intact()
+            # load's own page, before it leaves; a loss stops seed and probe loads. Any
+            # failure of the check itself is a loss (U3); the page still leaves.
+            try:
+                win["session"] = self._client_session_intact()
+            except Exception as exc:  # noqa: BLE001 - fail closed: recorded as a loss
+                win["session"] = (False, f"the session check failed "
+                                         f"({type(exc).__name__})")
         url = page.url or ""
         if win.get("query") == spa.SEED_SOURCE and \
                 url.lower().startswith(("http://", "https://")) and \
@@ -740,6 +765,23 @@ class LocalSpider:
             win["navs"].append(url)
         self._close_window_pages(win, page)
         page.goto("about:blank", timeout=self.timeout_ms)
+
+    def _recheck_query_session(self, win):
+        """After a seed or probe window's quiet period (U4, review B2-S1/S2), in an
+        authenticated crawl: the cookie half of the session check again -- a response
+        that landed while the page left may have cleared a credential cookie -- and,
+        when the window blocked a write, the server's own verdict (`verify_live`, as W4
+        does after an abort). A failure of either check is a loss."""
+        if not self._authenticated or not win.get("session", (False, None))[0]:
+            return
+        try:
+            ok, why = self._cookies_intact()
+            if ok and win.get("writes"):
+                ok, why = self._live_session_intact()
+        except Exception as exc:  # noqa: BLE001 - fail closed: recorded as a loss
+            ok, why = False, f"the session re-check failed ({type(exc).__name__})"
+        if not ok:
+            win["session"] = (False, why)
 
     @staticmethod
     def _close_window_pages(win, page):
@@ -1211,7 +1253,8 @@ class LocalSpider:
         """When the queue drains (the bare routes are visited): one probe load per
         scanned route the crawl rendered and has not probed, at most
         `spa.MAX_QUERY_PROBE_ROUTES` per crawl (Q5). Nothing without unpaired names."""
-        if not self._query_on or not self._query_unpaired or self._page is None:
+        if not self._query_on or not self._query_unpaired or self._page is None \
+                or self.spa_query_stopped:
             return []
         out = []
         for name, (url, depth) in self._probe_routes.items():
@@ -1275,20 +1318,25 @@ class LocalSpider:
                      f"{', '.join(names) or 'none'} of {len(probe['names'])} name(s)")
         return self._queue_seed(probe["route_url"], names, depth) if names else []
 
-    def _after_query_window(self, win, url):
-        """After a seed or probe window (FR-CRAWL-17). A seed whose window blocked a
-        write (a non-GET) is re-filed with source `spa.WRITE_SEED_SOURCE`, which the
-        importer never turns into points: an M6 load of it would send that write
-        unguarded (review A-M1; counted ``spa_query_write_seeds``). In an authenticated
-        crawl, the window's client-side session check (S10): on a loss, seed and probe
-        loads stop for the crawl, and the session is re-adopted once on the start page;
-        a re-adoption that does not hold stops reveals and submissions too (as W4)."""
-        if win.get("query") == spa.SEED_SOURCE and win.get("writes"):
-            if self.storage.set_source(url, spa.WRITE_SEED_SOURCE):
+    def _after_query_window(self, win, url, visited=True):
+        """After a seed or probe window (FR-CRAWL-17). A seed is stored with source
+        `spa.WRITE_SEED_SOURCE`, which the importer never turns into points, and is
+        promoted to `spa.SEED_SOURCE` only here, after its window closed cleanly with no
+        write (U2, fail closed: anything that stops the crawl before this keeps it a
+        write seed). A seed that blocked a write stays one -- an M6 load of it would send
+        that write unguarded (review A-M1; counted ``spa_query_write_seeds``). In an
+        authenticated crawl, the window's session verdict (S10, U3, U4): on a loss, seed
+        and probe loads stop for the crawl, and the session is re-adopted once on the
+        start page; a re-adoption that does not hold stops reveals and submissions too
+        (as W4)."""
+        if win.get("query") == spa.SEED_SOURCE and visited:
+            if win.get("closed") and not win.get("writes"):
+                self.storage.set_source(url, spa.SEED_SOURCE)
+            else:
                 self.spa_counts["spa_query_write_seeds"] += 1
-                logging.info(f"SPA query seed {url} blocked a write: kept as a page, "
-                             f"never a point")
-        ok, why = win.get("session", (True, None))
+                logging.info(f"SPA query seed {url} blocked a write (or its window did "
+                             f"not close cleanly): kept as a page, never a point")
+        ok, why = win.get("session", (not self._authenticated, "no session check"))
         if ok:
             return
         self.spa_counts["spa_query_session_losses"] += 1
@@ -1298,7 +1346,7 @@ class LocalSpider:
             self._page.goto(self.start_url, wait_until="domcontentloaded",
                             timeout=self.timeout_ms)
             ok, again = self._readopt_session()
-        except PlaywrightError as exc:
+        except Exception as exc:  # noqa: BLE001 - fail closed: re-adoption did not hold
             ok, again = False, f"re-adoption failed ({type(exc).__name__})"
         if not ok:
             stop = f"the session could not be re-adopted after a query load ({again})"
@@ -1656,18 +1704,9 @@ class LocalSpider:
         rotation re-adopted: of a localStorage entry, or of a credential cookie the app's
         JS set -- a login-response cookie must keep its value). Returns ``(ok, why)``;
         fail closed."""
-        jar = {c["name"]: c["value"] for c in self._context.cookies()}
-        rotating = getattr(self._browser_session, "rotating_cookies", frozenset())
-        for i, (name, value) in enumerate(self._injected_cookies):
-            current = jar.get(name)
-            if current == value:
-                continue
-            if name in rotating and _storage_rotated(current):
-                # a credential cookie the app's JS set and rotated (reviewer B, BUG-0132):
-                # re-adopted, as a rotated localStorage token is; `verify_live` decides
-                self._injected_cookies[i] = (name, current)
-                continue
-            return False, f"cookie {name!r} was changed or cleared"
+        ok, why = self._cookies_intact()
+        if not ok:
+            return ok, why
         for origin, entries in self._adopted_storage.items():
             page = next((p for p in self._context.pages
                          if canonical_origin(p.url) == canonical_origin(origin)), None)
@@ -1687,6 +1726,24 @@ class LocalSpider:
                     entries[name] = current
                     continue
                 return False, f"localStorage entry {name!r} was cleared or invalidated"
+        return True, None
+
+    def _cookies_intact(self):
+        """The cookie half of `_client_session_intact` (no page needed): each injected
+        credential cookie still holds its value in the crawl's context, a rotation of a
+        cookie the app's JS set re-adopted. Returns ``(ok, why)``."""
+        jar = {c["name"]: c["value"] for c in self._context.cookies()}
+        rotating = getattr(self._browser_session, "rotating_cookies", frozenset())
+        for i, (name, value) in enumerate(self._injected_cookies):
+            current = jar.get(name)
+            if current == value:
+                continue
+            if name in rotating and _storage_rotated(current):
+                # a credential cookie the app's JS set and rotated (reviewer B, BUG-0132):
+                # re-adopted, as a rotated localStorage token is; `verify_live` decides
+                self._injected_cookies[i] = (name, current)
+                continue
+            return False, f"cookie {name!r} was changed or cleared"
         return True, None
 
     def _live_session_intact(self):
@@ -2150,7 +2207,7 @@ class LocalSpider:
 
                 # a seed or probe load runs inside its window (FR-CRAWL-17, Q4)
                 window = contextlib.ExitStack()
-                win = None
+                win, visited = None, False
                 try:
                     self._current_url = current_url
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
@@ -2177,8 +2234,12 @@ class LocalSpider:
                     self.storage.mark_visited(
                         current_url, status, depth, title, content,
                         rendered=1 if self.engine == "playwright" else 0,
-                        source=source,
+                        # U2 (fail closed): a seed is filed as a write seed (never a
+                        # point) until its window closes cleanly with no write
+                        source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
+                                else source),
                     )
+                    visited = True
                     crawled += 1
                     if source == spa.SEED_SOURCE and self._last_html is not None:
                         self.spa_counts["spa_query_seeded"] += 1       # rendered (PA-0110)
@@ -2210,6 +2271,8 @@ class LocalSpider:
                         # content type, so JSON APIs behind rendered pages land
                         # in the map and get audited like any other URL.
                         for href in xhr_links:
+                            if win is not None and href in win.get("blocked", ()):
+                                continue          # FR-CRAWL-17: blocked in the window
                             absolute_link = self._queue_xhr(current_url, href)
                             if absolute_link and (self._in_scope(absolute_link)
                                     and not self._destructive(absolute_link)
@@ -2219,7 +2282,11 @@ class LocalSpider:
                 except Exception as e:
                     logging.error(f"Failed to process {current_url}: {e}")
                     if probe is None:                    # a probe records nothing
-                        self.storage.mark_visited(current_url, 0, depth, source=source)
+                        self.storage.mark_visited(
+                            current_url, 0, depth,
+                            source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
+                                    else source))
+                    visited = False
                 finally:
                     try:
                         window.close()
@@ -2227,7 +2294,7 @@ class LocalSpider:
                         self._probe = None
                     queue.extend(self._take_query_navs(depth))
                     if win is not None:
-                        self._after_query_window(win, current_url)
+                        self._after_query_window(win, current_url, visited)
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")
@@ -2334,6 +2401,27 @@ def spa_route_names(values):
     return [r for v in values for r in v.replace(",", " ").split() if r]
 
 
+def spider_kwargs(args, session_manager=None) -> dict:
+    """The `LocalSpider` keywords the CLI's ``args`` select (one place, so every flag is
+    wired and testable; review B-N1)."""
+    return dict(
+        max_depth=args.max_depth,
+        db_name=args.db,
+        engine=args.engine,
+        timeout_ms=args.timeout,
+        resume=args.resume,
+        session_manager=session_manager,
+        identity=args.identity,
+        selector_forms=(None if args.follow_selector_forms is None else
+                        [n.strip() for n in args.follow_selector_forms.split(",")
+                         if n.strip()]),
+        spa_routes=not args.no_spa_routes,
+        submit_spa_forms=spa_route_names(args.submit_spa_forms),
+        reveal=not args.no_reveal,
+        spa_query=not args.no_spa_query,
+    )
+
+
 def parse_args():
     return build_parser().parse_args()
 
@@ -2351,23 +2439,7 @@ if __name__ == "__main__":
     if args.identity:
         from fuzzlab.tools.authhttp import make_session_manager
         session_manager = make_session_manager(args.start, store_path=args.store)
-    spider = LocalSpider(
-        args.start,
-        max_depth=args.max_depth,
-        db_name=args.db,
-        engine=args.engine,
-        timeout_ms=args.timeout,
-        resume=args.resume,
-        session_manager=session_manager,
-        identity=args.identity,
-        selector_forms=(None if args.follow_selector_forms is None else
-                        [n.strip() for n in args.follow_selector_forms.split(",")
-                         if n.strip()]),
-        spa_routes=not args.no_spa_routes,
-        submit_spa_forms=spa_route_names(args.submit_spa_forms),
-        reveal=not args.no_reveal,
-        spa_query=not args.no_spa_query,
-    )
+    spider = LocalSpider(args.start, **spider_kwargs(args, session_manager))
     spider.crawl()
     if args.store:
         from fuzzlab.core.config import load_config

@@ -171,6 +171,8 @@ class _Lab:
     history = False
     #: extra server-rendered pages: path -> HTML
     pages: dict = {}
+    #: custom answers: path -> ``fn(handler)`` that writes the whole response
+    responders: dict = {}
 
     def __init__(self, other_port: int = 9):
         self.requests: list[tuple[str, str, str, str, bytes]] = []
@@ -188,7 +190,9 @@ class _Lab:
                                      self.headers.get("Cookie", ""),
                                      self.headers.get("Authorization", ""), body))
                 path = self.path.split("?", 1)[0]
-                if path == "/ws" and \
+                if path in lab.responders:
+                    lab.responders[path](self)
+                elif path == "/ws" and \
                         (self.headers.get("Upgrade") or "").lower() == "websocket":
                     self._websocket()
                 elif path in lab.pages:

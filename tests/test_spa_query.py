@@ -181,6 +181,20 @@ def test_relative_navigations_and_dot_segments_name_no_route():
         assert spa.classify_route(path)[0] == spa.ROUTE_INVALID, path
 
 
+@pytest.mark.parametrize("body", [
+    "navigate([`./rel`],{queryParams:{dot:t}})",
+    "navigate(['..'],{queryParams:{dot:t}})",
+    "navigate(['a','..','b'],{queryParams:{dot:t}})",
+    "this.$router.push({path:'../up',query:{dot:1}})",
+    "navigate('./x?dot=1')",
+    "navigateByUrl(`../x?dot=1`)",
+])
+def test_a_relative_dot_segment_route_is_dropped_at_the_scan(body):
+    """U7 (review A2-S3): a ``.`` / ``..`` route names no route: no pair is counted (that
+    `classify_route` would refuse later); its names are unpaired."""
+    assert _scan(body) == ({}, ["dot"], {})
+
+
 def test_navigate_by_url_hyphenated_keys_and_longer_names():
     """S11: ``navigateByUrl`` literals pair (A-N1); a dropped quoted key that is not
     identifier-shaped is counted (A-N2); ``myqueryParams:{`` is not an anchor (A-N4)."""
@@ -228,21 +242,43 @@ def _near_misses(size: int) -> dict:
 #: The absolute smoke bound for one 4 MB adversarial body (seconds): a gross-regression
 #: alarm only; the complexity is asserted on operation counts (PA-0135).
 SCAN_BOUND_S = 10.0
-#: The additive constant of the doubling oracle: a few windows' worth of steps.
-DOUBLING_SLACK = 64 * spa.QUERY_WINDOW
+#: Shapes with O(1) anchors, so O(1) work whatever their length (stated, U5): the
+#: doubling oracle checks them for constancy instead.
+CONSTANT_SHAPES = frozenset({"deep brackets", "string soup", "no anchor"})
+#: The 4 MB shapes whose walk the step budget stops (asserted, U5).
+BUDGET_SHAPES = frozenset({"long route array", "navigate run", "unclosed options",
+                           "vue query run"})
+#: Steps per character on a 4 MB body that the budget does not stop (U5).
+STEPS_PER_CHAR = 0.25
+#: The doubling oracle's sizes, its factor and its additive slack (U5, review A2-M2):
+#: ``ops(2n) <= 2.1 * ops(n) + 2 * QUERY_WINDOW``, at sizes where a quadratic walker's
+#: extra steps dwarf the slack.
+DOUBLING_SIZES = (64 * 1024, 128 * 1024)
+DOUBLING_FACTOR = 2.1
+DOUBLING_SLACK = 2 * spa.QUERY_WINDOW
+#: A finite budget for the oracle's runs: a linear scan of 128 KB stays far under it
+#: (the heaviest shape, vue, ~5.2 M steps); a quadratic one hits it and fails.
+DOUBLING_BUDGET = 10_000_000
 
 
 def test_the_scan_stays_within_its_step_budget_on_4mb_adversarial_bodies(capsys):
-    """BUG-0135 / PA-0135: on each 4 MB near-miss body the walker spends at most its
-    budget (plus one window), and the monotone ``str.find`` covers the body at most
-    once per anchor kind. The wall-clock time is only a smoke bound."""
+    """BUG-0135 / PA-0135 (U5): on each 4 MB near-miss body, the four shapes whose walk
+    is heavy hit the step budget (and stop within one window of it); every other shape
+    stays under `STEPS_PER_CHAR` steps per character without hitting it; the monotone
+    ``str.find`` covers the body at most once per anchor kind. The wall-clock time is
+    only a smoke bound."""
     big = 4 * 1024 * 1024
     times = {}
     for name, body in _near_misses(big).items():
         start = time.perf_counter()
         q = spa.scan_query_params(body, max_bytes=8 * len(body) + 1)
         times[name] = time.perf_counter() - start
-        assert q.steps <= spa.MAX_QUERY_STEPS + spa.QUERY_WINDOW, name
+        if name in BUDGET_SHAPES:
+            assert q.budget_hit, name
+            assert q.steps <= spa.MAX_QUERY_STEPS + spa.QUERY_WINDOW, name
+        else:
+            assert not q.budget_hit, name
+            assert q.steps <= STEPS_PER_CHAR * len(body), (name, q.steps)
         assert q.scanned <= len(spa._QUERY_ANCHORS) * (len(body) + 1) + \
             2 * spa.QUERY_WINDOW * q.anchors, name
         assert times[name] < SCAN_BOUND_S, name
@@ -251,17 +287,28 @@ def test_the_scan_stays_within_its_step_budget_on_4mb_adversarial_bodies(capsys)
               + ", ".join(f"{k} {v:.3f}" for k, v in times.items()))
 
 
-@pytest.mark.parametrize("shape", sorted(_near_misses(1024)))
+@pytest.mark.parametrize("shape", sorted(set(_near_misses(1024)) - CONSTANT_SHAPES))
 def test_doubling_a_body_at_most_doubles_the_operations(shape):
-    """BUG-0135 / PA-0135 (operation-count oracle): for every adversarial shape,
-    ``ops(2n) <= 2 * ops(n) + DOUBLING_SLACK`` for both the walker's steps and the
-    characters ``str.find`` covered, with no budget (a quadratic walker fails this
-    whatever the machine's load; proven by a mutation, CC-CRAWL-0027)."""
-    small, large = (_near_misses(8 * 1024)[shape], _near_misses(16 * 1024)[shape])
-    a = spa.scan_query_params(small, budget=None)
-    b = spa.scan_query_params(large, budget=None)
-    assert b.steps <= 2 * a.steps + DOUBLING_SLACK, (a.steps, b.steps)
-    assert b.scanned <= 2 * a.scanned + DOUBLING_SLACK, (a.scanned, b.scanned)
+    """BUG-0135 / PA-0135 (operation-count oracle, U5): for every shape whose work
+    grows, ``ops(2n) <= 2.1 * ops(n) + 2 * QUERY_WINDOW`` for both the walker's steps and
+    the characters ``str.find`` covered, at 64 / 128 KB, and neither run hits the
+    oracle's budget. A quadratic walker fails this on every such shape, whatever the
+    machine's load (proven by mutation, CC-CRAWL-0027)."""
+    small, large = (_near_misses(n)[shape] for n in DOUBLING_SIZES)
+    a = spa.scan_query_params(small, budget=DOUBLING_BUDGET)
+    b = spa.scan_query_params(large, budget=DOUBLING_BUDGET)
+    assert not a.budget_hit and not b.budget_hit, (a.steps, b.steps)
+    assert b.steps <= DOUBLING_FACTOR * a.steps + DOUBLING_SLACK, (a.steps, b.steps)
+    assert b.scanned <= DOUBLING_FACTOR * a.scanned + DOUBLING_SLACK, (a.scanned, b.scanned)
+
+
+@pytest.mark.parametrize("shape", sorted(CONSTANT_SHAPES))
+def test_a_shape_with_constant_anchors_does_constant_work(shape):
+    """U5: the stated constant shapes really are constant."""
+    small, large = (_near_misses(n)[shape] for n in DOUBLING_SIZES)
+    a = spa.scan_query_params(small, budget=DOUBLING_BUDGET)
+    b = spa.scan_query_params(large, budget=DOUBLING_BUDGET)
+    assert a.steps == b.steps and a.anchors == b.anchors <= 1
 
 
 # =====================================================================================
@@ -465,7 +512,8 @@ def test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points(quer
     for route, name in (("track", "id"), ("search", "q"), ("score-board", "q")):
         assert (f"/#/{route}", name, "fragment") in params, route
     c = query_crawl["sp"].spa_counts
-    assert c["spa_query_pairs"] == 8          # track..login + logout:bye (refused later)
+    # track..login, autopost, wsping, txn, and logout:bye (refused later); never ./rel
+    assert c["spa_query_pairs"] == 11
     assert c["spa_query_seeded"] == c["spa_query_seeded_fragment"] >= 9
 
 
@@ -562,8 +610,9 @@ def test_the_probe_keeps_only_observed_names(query_crawl):
         assert not any(f"#/{dropped}?" in u for u in seeded), dropped
     assert not any("extra=" in u or "next=" in u for u in pages)
     c = sp.spa_counts
-    assert c["spa_query_unpaired"] == 3 and c["spa_query_kept"] == 5
-    assert c["spa_query_probe_loads"] == 17                 # every rendered route once
+    # term, extra, next, and dot (from ``./rel``: a relative route names none, U7)
+    assert c["spa_query_unpaired"] == 4 and c["spa_query_kept"] == 5
+    assert c["spa_query_probe_loads"] == 20                 # every rendered route once
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
     assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
@@ -611,8 +660,13 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     from fuzzlab.tools.probesender import RequestsProbeSender
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
-    assert sources[lab.base + "#/poster?msg=fuzzlab"] == spa.WRITE_SEED_SOURCE
-    assert sp.spa_counts["spa_query_write_seeds"] >= 1
+    # U1: an auto-submitted POST navigation, a held WebSocket message and a transaction
+    # GET the window refused are writes too
+    for seed in ("#/poster?msg=fuzzlab", "#/autopost?go2=fuzzlab", "#/wsping?ping=fuzzlab",
+                 "#/txn?ref=fuzzlab"):
+        assert sources[lab.base + seed] == spa.WRITE_SEED_SOURCE, seed
+    assert sources[lab.base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE     # promoted
+    assert sp.spa_counts["spa_query_write_seeds"] >= 4
     assert dict(db_rows(db, "SELECT name, value FROM crawl_stats"))[
         "spa_query_write_seeds"] >= 1
     monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS",
@@ -621,7 +675,8 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     with store, contextlib.closing(requests.Session()) as session:
         params = _params(store, run)
         assert counts["write_seed_skipped"] >= 1
-        assert not any(u in ("/#/poster", "/#/beacon") for u, _n, _l in params)
+        assert not any(u in ("/#/poster", "/#/beacon", "/#/autopost", "/#/wsping",
+                             "/#/txn") for u, _n, _l in params)
         run_auto(base_url=lab.base, store=store, run_id=run,
                  sender=RequestsProbeSender(session=session), mode="manual",
                  selected_categories=["xss"], points_source="crawl",
@@ -630,6 +685,12 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
             "SELECT url, param FROM finding WHERE run_id=?", (run,))}
     assert ("/#/track", "id") in found                      # M6 did run
     assert lab.seen("POST", "/api/send") == [] and lab.seen("POST", "/api/beacon") == []
+    assert lab.seen("POST", "/api/autopost") == []
+    assert not any(m.startswith("ping-") for m in lab.ws_messages)
+    # the window's refusals are never queued from the load's request list and fetched
+    # outside it (found by this test in review round 2)
+    assert lab.seen("GET", "/api/order/confirm") == [] and lab.seen("GET", "/api/send") == []
+    assert lab.seen("GET", "/api/autopost") == []
 
 
 def test_two_crawls_give_the_same_pages_endpoints_and_parameters(query_crawl, tmp_path):
@@ -765,3 +826,296 @@ def test_a_session_lost_in_a_query_load_stops_query_loads(monkeypatch, tmp_path)
     stats = dict(db_rows(str(tmp_path / "s.db"), "SELECT name, value FROM crawl_stats"))
     assert stats["spa_query_stopped"] == 1
     assert any(ln.startswith("SPA query loads stopped") for ln in sp.spa_summary())
+
+
+# =====================================================================================
+# Review round 2 (U1-U4, U9): what counts as a write, fail-closed filing, the session
+# =====================================================================================
+def _requests_spider(tmp_path):
+    from fuzzlab.tools.spider import LocalSpider
+    return LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                       engine="requests")
+
+
+def test_a_held_websocket_message_is_a_write(tmp_path):
+    """U1: in a query window a dropped page-to-server WebSocket message counts as a
+    write; in a reveal window it does not (that window has no write accounting)."""
+    sp = _requests_spider(tmp_path)
+    try:
+        sp._win = {"query": spa.SEED_SOURCE, "aborted": 0}
+        sp._note_ws_drop("ws://127.0.0.1:9/ws")
+        assert sp._win["writes"] == 1
+        sp._win = {"query": None, "aborted": 0}
+        sp._note_ws_drop("ws://127.0.0.1:9/ws")
+        assert "writes" not in sp._win
+    finally:
+        sp.storage.close()
+
+
+@pytest.mark.parametrize("method,url,navigation,write", [
+    ("POST", "http://127.0.0.1:9/api/autopost", True, True),     # a form's POST nav
+    ("POST", "http://127.0.0.1:9/api/x", False, True),
+    ("GET", "http://127.0.0.1:9/api/order/confirm", False, True),  # a word rule
+    ("GET", "http://127.0.0.1:9/other", True, False),            # a navigation, queued
+])
+def test_what_a_query_window_counts_as_a_write(tmp_path, method, url, navigation, write):
+    sp = _requests_spider(tmp_path)
+    try:
+        ctx = object()
+        sp._win = {"context": ctx, "lifted_for": None, "own_nav": frozenset(),
+                   "aborted": 0, "navs": [], "query": spa.SEED_SOURCE}
+        assert sp._window_refusal(method, url, navigation, context=ctx) is not None
+        assert bool(sp._win.get("writes")) is write
+        # a refused POST navigation is a write, never a page to visit as a GET (A2-M1)
+        assert sp._win["navs"] == ([url] if navigation and method == "GET" else [])
+        assert url in sp._win["blocked"]          # never queued from the request list
+    finally:
+        sp.storage.close()
+
+
+class _FakeCtx:
+    def __init__(self):
+        self.jar = [{"name": "sid", "value": "S"}]
+        self.pages = []
+
+    def cookies(self):
+        return list(self.jar)
+
+
+class _FakePage:
+    """Just enough of a page for a query window's exit; ``on_wait`` runs at each wait
+    (the window's quiet period)."""
+
+    def __init__(self, url, on_wait=None):
+        self.url, self.on_wait = url, on_wait
+        self.keyboard = type("K", (), {"press": lambda s, k: None})()
+
+    def goto(self, url, **kw):
+        self.url = url
+
+    def wait_for_timeout(self, ms):
+        if self.on_wait is not None:
+            self.on_wait()
+
+    def evaluate(self, script, *a):
+        return 0
+
+
+def _session_spider(tmp_path, live=True):
+    sp = _requests_spider(tmp_path)
+    ctx = _FakeCtx()
+
+    class Manager:
+        verified = 0
+
+        def verify_live(self, host, identity, base):
+            Manager.verified += 1
+            return live
+    sp._authenticated, sp._context, sp._injected_cookies = True, ctx, [("sid", "S")]
+    sp._session_manager, sp._identity = Manager(), "user"
+    return sp, ctx, Manager
+
+
+def test_a_cookie_cleared_while_the_page_leaves_is_a_loss(tmp_path):
+    """U4 (review B2-S1): the cookie half of the check runs again after the window's
+    quiet period; a credential cookie cleared by a response that landed while the page
+    left is a loss, though the check before leaving passed."""
+    sp, ctx, _m = _session_spider(tmp_path)
+    try:
+        page = _FakePage("http://127.0.0.1:9/#/x?a=fuzzlab",
+                         on_wait=lambda: setattr(ctx, "jar", []))
+        with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["session"][0] is False and "sid" in win["session"][1]
+        assert win["closed"] and page.url == "about:blank"
+    finally:
+        sp.storage.close()
+
+
+@pytest.mark.parametrize("live", [True, False])
+def test_verify_live_runs_after_a_window_that_blocked_a_write(tmp_path, live):
+    """U4 (review B2-S2, W4 parity): the server's verdict is asked only when the window
+    blocked a write, and its "no" is a loss."""
+    sp, ctx, manager = _session_spider(tmp_path, live=live)
+    try:
+        with sp._window(_FakePage("http://127.0.0.1:9/#/x?a=1"), ctx, "http://127.0.0.1:9/#/x?a=1",
+                        query=spa.SEED_SOURCE) as win:
+            pass
+        assert manager.verified == 0 and win["session"] == (True, None)
+        with sp._window(_FakePage("http://127.0.0.1:9/#/y?a=1"), ctx, "http://127.0.0.1:9/#/y?a=1",
+                        query=spa.SEED_SOURCE) as win:
+            win["writes"] = 1
+        assert manager.verified == 1 and win["session"][0] is live
+    finally:
+        sp.storage.close()
+
+
+def test_the_cli_flags_reach_the_spider_through_one_builder():
+    """U9 (review B-N1): ``__main__`` builds `LocalSpider`'s keywords with
+    `spider_kwargs`; ``--no-spa-query`` reaches ``spa_query``, and every keyword the
+    builder passes is one `LocalSpider` takes."""
+    import inspect
+
+    from fuzzlab.tools.spider import LocalSpider, build_parser, spider_kwargs
+    on = spider_kwargs(build_parser().parse_args([]))
+    off = spider_kwargs(build_parser().parse_args(["--no-spa-query"]))
+    assert on["spa_query"] is True and off["spa_query"] is False
+    params = set(inspect.signature(LocalSpider.__init__).parameters) - {"self", "start_url"}
+    assert set(on) == params
+
+
+def test_a_revealed_forms_route_and_signature_are_scrubbed(tmp_path):
+    """U9 (review B-N3): the route and signature are stored scrubbed, and the dedup
+    reads the stored key."""
+    sp = _requests_spider(tmp_path)
+    try:
+        m = spa.mint_markers(1)[0]
+        assert sp.storage.record_revealed_form("http://h/#/r", f"r?q={m}", f"sig {m}")
+        assert not sp.storage.record_revealed_form("http://h/#/r", f"r?q={m}", f"sig {m}")
+        rows = sp.storage.cursor.execute(
+            "SELECT route, signature FROM revealed_forms").fetchall()
+        assert rows == [(f"r?q={spa.MARKER_PLACEHOLDER}", f"sig {spa.MARKER_PLACEHOLDER}")]
+    finally:
+        sp.storage.close()
+
+
+def test_no_probe_is_planned_once_query_loads_stopped(tmp_path):
+    """U9 (review B-N5)."""
+    sp = _requests_spider(tmp_path)
+    try:
+        sp._query_on, sp._page = True, object()
+        sp._query_unpaired = {"q": None}
+        sp._probe_routes = {"a": ("http://127.0.0.1:9/#/a", 1)}
+        sp.storage.mark_visited("http://127.0.0.1:9/#/a", 200, 1)
+        assert sp._plan_probes() == [("http://127.0.0.1:9/#/a", 1, spa.PROBE_SOURCE)]
+        sp._probed = set()
+        sp.spa_query_stopped = "lost"
+        assert sp._plan_probes() == []
+    finally:
+        sp.storage.close()
+
+
+def test_a_seed_is_never_importable_until_its_window_closed_cleanly(monkeypatch, tmp_path):
+    """U2 (review A2-S1, fail closed): a seed is stored as a write seed and promoted only
+    after its window closed cleanly with no write. When the crawl stops between the
+    two (``_take_query_navs`` raises once), the seed stays a page that is never a
+    point."""
+    from fuzzlab.tools.spider import LocalSpider
+    chromium_or_skip(monkeypatch)
+    lab = TrackSpa()
+    try:
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000)
+        original, fired = sp._take_query_navs, []
+
+        def take(depth):
+            row = sp.storage.cursor.execute(
+                "SELECT source FROM discovered_pages ORDER BY rowid DESC LIMIT 1").fetchone()
+            if not fired and row and row[0] in (spa.SEED_SOURCE, spa.WRITE_SEED_SOURCE):
+                fired.append(1)
+                raise RuntimeError("injected")
+            return original(depth)
+        sp._take_query_navs = take
+        with pytest.raises(RuntimeError, match="injected"):
+            sp.crawl()
+    finally:
+        lab.close()
+    sources = dict(db_rows(str(tmp_path / "s.db"), "SELECT url, source FROM discovered_pages"))
+    assert sources[lab.base + "#/track-result?id=fuzzlab"] == spa.WRITE_SEED_SOURCE
+    store, run, _c = _import(tmp_path / "s.db", tmp_path / "u.db")
+    with store:
+        assert not any(n == "id" for _u, n, _l in _params(store, run))
+
+
+def _session_query_crawl(monkeypatch, tmp_path, raise_with):
+    """The ``SessionQuerySpa`` crawl with the first client-side session check raising
+    ``raise_with``; records the page's URL at each window's after-step."""
+    from tests._spa_query_fixture import SessionQuerySpa
+    from tests.test_forms_phase4 import _LsManager
+
+    from fuzzlab.tools.spider import LocalSpider
+    chromium_or_skip(monkeypatch)
+    real, calls, seen = LocalSpider._client_session_intact, [], []
+
+    def check(self):
+        calls.append(1)
+        if len(calls) == 1:
+            raise raise_with("injected")
+        return real(self)
+    after = LocalSpider._after_query_window
+
+    def spy(self, win, url, visited=True):
+        seen.append(self._page.url)
+        return after(self, win, url, visited)
+    monkeypatch.setattr(LocalSpider, "_client_session_intact", check)
+    monkeypatch.setattr(LocalSpider, "_after_query_window", spy)
+    lab = SessionQuerySpa()
+    try:
+        manager = _LsManager(lab.base)
+        sp = _crawl(lab, tmp_path / "s.db", session_manager=manager, identity="user")
+    finally:
+        lab.close()
+    return lab, sp, seen
+
+
+def test_a_session_check_that_raises_is_a_loss(monkeypatch, tmp_path):
+    """U3 (review B2-M2): the first check (``calm``'s seed) raises a Playwright error:
+    that is a loss, never a pass -- query loads stop (``fade`` and ``after1`` are
+    queued and refused, never loaded) and the window still left for ``about:blank``."""
+    from fuzzlab.tools.spider import PlaywrightError
+    lab, sp, seen = _session_query_crawl(monkeypatch, tmp_path, PlaywrightError)
+    gets = [r[1] for r in lab.seen("GET", "/rest/marker/")]
+    assert "/rest/marker/calm-query" in gets
+    assert "/rest/marker/fade-query" not in gets and "/rest/marker/after1-query" not in gets
+    assert sp.spa_counts["spa_query_session_losses"] == 1
+    assert sp.spa_query_stopped and "the session check failed" in sp.spa_query_stopped
+    assert sp.spa_query_refused.get("session lost") == 2       # queued, then refused
+    assert seen[0] == "about:blank"
+
+
+def test_any_failure_of_the_session_check_is_a_loss_and_the_crawl_finishes(
+        monkeypatch, tmp_path):
+    """U3: a ``RuntimeError`` from the check is kept as a loss; the page still reaches
+    ``about:blank`` and the crawl finishes with its counts stored."""
+    _lab, sp, seen = _session_query_crawl(monkeypatch, tmp_path, RuntimeError)
+    assert seen[0] == "about:blank"
+    assert sp.spa_query_stopped and "RuntimeError" in sp.spa_query_stopped
+    stats = dict(db_rows(str(tmp_path / "s.db"), "SELECT name, value FROM crawl_stats"))
+    assert stats["spa_query_stopped"] == 1 and stats["spa_query_session_losses"] == 1
+
+
+class _CookieState:
+    cookies = {"sid": "S7d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"}
+    headers: dict = {}
+    secure_only = False
+    browser_state = None
+
+
+class _CookieManager:
+    def __init__(self):
+        self.verified = 0
+
+    def ensure(self, host, identity, base_url, operator=False):
+        return _CookieState()
+
+    def verify_live(self, host, identity, base_url):
+        self.verified += 1
+        return True
+
+
+def test_a_slow_response_that_expires_the_session_cookie_is_a_loss(monkeypatch, tmp_path):
+    """U4: the ``chill`` seed's slow GET answers ``Set-Cookie: sid=; Max-Age=0``; the
+    session check sees the cleared cookie, query loads stop (``after2``'s seed is
+    refused) and the session is re-adopted."""
+    from tests._spa_query_fixture import SessionCookieSpa
+    chromium_or_skip(monkeypatch)
+    lab = SessionCookieSpa()
+    try:
+        sp = _crawl(lab, tmp_path / "s.db", session_manager=_CookieManager(),
+                    identity="user")
+    finally:
+        lab.close()
+    gets = [r[1] for r in lab.seen("GET", "/rest/marker/")]
+    assert "/rest/marker/chill-query" in gets and "/rest/marker/after2-query" not in gets
+    assert sp.spa_counts["spa_query_session_losses"] == 1
+    assert sp.spa_query_stopped and "cookie 'sid'" in sp.spa_query_stopped

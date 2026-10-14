@@ -209,6 +209,58 @@ Newest first.
     `test_forms_phase1`, `test_forms_phase2`, `test_session_browser_login`,
     `test_form_entries`, `test_cli_dry_run`, `test_auditor_seam`: 649).
 
+- **Review amendment, round 2 (2026-10-14; reviewers A and B, both AGREE-with-changes;
+  the coordinator's reconciled fix list U1-U10, D46).** Appended.
+  - **U1 (A2-M1, B2-M1):** in a query window `_window_refusal` counts as a write every
+    refused non-GET/HEAD (a navigation included) and every refused non-navigation GET
+    (the word rules); `_note_ws_drop` counts a held WebSocket message. A refused non-GET
+    navigation's target is not queued (it was queued as a GET: reviewer A's note; an
+    addition to U1's text, flagged to the coordinator). **Found by U1's test and fixed
+    here:** a URL the window blocked was still queued from the load's request list
+    (`_xhr_urls`) and fetched later outside the window (`GET /api/order/confirm`, `GET
+    /api/send`); every URL a query window or the guard blocks now goes in
+    `win["blocked"]`, and the loop never queues one. This defect was in this lane's own
+    unmerged code, not on trunk.
+  - **U2 (A2-S1):** a seed is stored `spa-query-writes` and promoted to `spa-query` in
+    `_after_query_window` only when `win["closed"]` (the exit, quiet period and re-check
+    all completed) and it wrote nothing; a failed visit is never promoted.
+  - **U3 (B2-M2):** `win["session"]` is preset to `(False, "the session check did not
+    complete")`; the check in `_leave` is wrapped and any exception is kept as a loss;
+    the reader's default is `(not self._authenticated, "no session check")`; the page
+    still leaves for `about:blank`. A re-adoption that raises anything is a failed one.
+  - **U4 (B2-S1/S2):** `_recheck_query_session` runs after `_quiesce`: the cookie half
+    (`_cookies_intact`, split out of `_client_session_intact`) again, then
+    `_live_session_intact` when the window blocked a write.
+  - **U5 / U6:** BUG-0135's oracle and guard tightened (see that bug's "Added in
+    review").
+  - **U7 (A2-S3):** `spa._known_route`: a route with a `.` / `..` segment names no route
+    at the scan (its names unpaired, no pair counted).
+  - **U8 (B2-S4):** `TRANSACTION_TOKENS`' comment is back above it in `core/urls.py`.
+  - **U9:** `spider_kwargs(args)` builds `LocalSpider`'s keywords for `__main__`
+    (B-N1); `record_revealed_form` scrubs its route and signature before the dedup read
+    (B-N3); `observed_names` states that URL-keyed blocking is conservative (B-N4);
+    `_plan_probes` plans nothing once query loads stopped (B-N5); FR-CRAWL-17's
+    residuals gained B-N6, A-N1 and A-N2.
+  - **U10:** CC-AUD-0041 (the importer), CC-CORE-0053 amended to point to it.
+  - Effectiveness (U1-U10 amendment, assessed 2026-10-14): `tests/test_spa_query.py` 92
+    passed, 0 skipped (real Chromium, `FUZZLAB_REQUIRE_BROWSER=1`); the crawl + import +
+    real M6 test sees no POST to `/api/send`, `/api/beacon` or `/api/autopost`, no
+    `ping-` WebSocket message, and no GET of a blocked URL. Mutation checks, each reverted
+    afterwards: U1 (the old write rule and no WebSocket count) -> 4 fail; U2 (seeds filed
+    importable from the start) -> the fail-closed test fails; U3 (no preset, no
+    try/except, an open default) -> both U3 tests fail; U5 a prefix re-walking walker ->
+    all 8 non-constant shapes fail, an unbounded window -> the same 8 plus 2 constant
+    shapes; U6 each guard feature reverted -> exactly its synthetic offender escapes (14
+    features, 17 offenders). Related suites, `FUZZLAB_REQUIRE_BROWSER=1`: 1333 passed, 0
+    failed, 0 skipped (`test_spa_query`, `test_no_wall_clock_ratio`, `test_spa_routes`,
+    `test_store_adapter`, `test_requirements_traceability`, `test_lint` with
+    `FUZZLAB_REQUIRE_LINT=1`, `test_logout_redirect`: 194; `test_json_points`,
+    `test_spa_capture`, `test_spider_scope`, `test_storage_redaction`,
+    `test_proxy_redaction`, `test_destructive_urls`, `test_browserauth`: 490;
+    `test_browser_scope`, `test_forms_phase4`, `test_forms_phase1`, `test_forms_phase2`,
+    `test_session_browser_login`, `test_form_entries`, `test_cli_dry_run`,
+    `test_auditor_seam`: 649).
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

@@ -3,6 +3,31 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0041 — The importer never makes a point of a SPA query seed that may write (FR-CRAWL-17 review) (2026-10-14)
+- Change: `tools/store_adapter.py` `import_spider` imports a page whose `source` is
+  `spa.WRITE_SEED_SOURCE` (`'spa-query-writes'`) as a page only -- no endpoint,
+  parameter, route-query (`fragment`) parameter or link set -- and counts it
+  (`write_seed_skipped`). The crawler files every SPA query seed that way and promotes it
+  to `'spa-query'` only after its load window closed cleanly with no write (FR-CRAWL-17,
+  CC-CRAWL-0027 review amendments): an M6 fuzz load of a seed whose load writes would
+  send that write outside any window (review A-M1). The source value is read from
+  `tools.spa` (one definition, PA-0003). Filed under the auditor by precedent
+  (CC-AUD-0035 / CC-AUD-0040 own the importer); first recorded as part of CC-CORE-0053
+  (amended to point here).
+- Impact: CRAWL writes the source; FUZZ gets no point from such a page (by design). No
+  schema change; other spider rows are imported as before.
+- Risk: low: it only removes points, from rows only FR-CRAWL-17 writes.
+- Deliverables:
+  - [x] code: `tools/store_adapter.py` (`_write_seed_source`, the skip) — done
+  - [x] tests: `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`
+    (crawl, import, real M6: no POST to the write endpoints, `write_seed_skipped` >= 1),
+    `::test_a_seed_is_never_importable_until_its_window_closed_cleanly` — done
+  - [x] FR-AUD-22 (one sentence) — done
+- Effectiveness (assessed 2026-10-14): both tests green with a real browser; the
+  mutations that file seeds importable from the start (U2) or stop counting writes (U1)
+  fail them; `tests/test_store_adapter.py` and `tests/test_json_points.py` still green
+  (numbers in CC-CRAWL-0027's U1-U10 amendment).
+
 ### CC-AUD-0040 — The auditor's browser adopts a browser login's localStorage (BUG-0132 sweep) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher._start_browser` creates its context with
   `browserauth.context_options(session)`, the one adoption helper the crawl uses now too

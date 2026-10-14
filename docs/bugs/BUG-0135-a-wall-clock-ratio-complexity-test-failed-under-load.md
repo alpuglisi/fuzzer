@@ -133,3 +133,32 @@ with the guard and by reading each timing assertion:
   `tests/test_labgen_spring_boot_absent_input_live_boot.py`, and the absolute bounds in
   `tests/test_proxy_upstream_and_flush.py` and `tests/test_oracle_oob.py`: not
   complexity claims. Kept.
+
+## Added in review (2026-10-14, code review round 2: U5, U6)
+Reviewer A (A2-M2, A2-S2) and reviewer B (B-N7) found the first corrective action too
+weak. No new bug number: these are review fixes to this bug's own change
+(CC-CRAWL-0027, U1-U10 amendment).
+- **The oracle could not catch a quadratic walker on most shapes (U5).** The slack
+  (`64 * QUERY_WINDOW` = 32,768 steps) was large compared with 8–16 KiB bodies, and the
+  4 MB check only restated the budget. Now:
+  - The oracle runs at 64/128 KiB: `ops(2n) <= 2.1 * ops(n) + 2 * QUERY_WINDOW` for both
+    counts, under a finite oracle budget (10 M steps) that neither run may hit.
+  - The three shapes with O(1) anchors (deep brackets, string soup, no anchor) are
+    stated and asserted to be constant.
+  - On 4 MB bodies, the four heavy shapes (long route array, navigate run, unclosed
+    options, vue query run) must hit the budget. Every other shape must stay under
+    0.25 steps per character without hitting it.
+  - **Proven by mutation on every non-constant shape:** a walker that re-walks the body
+    prefix at each anchor fails all eight. They are navigate run, unclosed options,
+    queryParams object run, member run, vue query run, url search run, long route array
+    and noise anchors. An unbounded window (`hi = len(text)`) fails the same eight, and
+    the constancy test of two of the constant shapes.
+- **The guard had blind spots (U6).** Every comparison nested anywhere in an `assert`
+  is now checked, as are unittest assertions (`assertLess`, `assertTrue`, …) and an
+  `if` whose body calls `pytest.fail` or raises `AssertionError`. Clocks are recognised
+  under import aliases (`import time as tm`, `from time import perf_counter as pc`,
+  `from time import time`), and `timeit` and `datetime.now()` / `utcnow()` count as
+  clocks. Timing helpers count too: lambdas, and functions imported from another test
+  module. Each spelling has a synthetic offender. A per-feature mutation (each feature
+  reverted on its own) lets exactly that offender through. The docstring now says
+  "scaled comparisons or ratios".

@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (FR-CRAWL-17 review round 2: every write counted, seeds filed fail-closed)
+- A query load's window now counts as a write every refused non-GET (a form's POST
+  navigation too, whose target is no longer queued as a GET), held WebSocket message and
+  word-rule GET, and nothing it blocked is queued from the load's request list; seeds are
+  filed as never-a-point pages until their window closes cleanly with no write
+  (CC-AUD-0041); the session check fails closed and is re-run after the quiet period
+  (`verify_live` after a write); relative `.`/`..` routes are dropped at the scan; the
+  BUG-0135 complexity oracle and its wall-clock guard were tightened (CC-CRAWL-0027
+  U1-U10 amendment).
+
 ## 2026-10-14 (FR-CRAWL-17 review: write-safe seeds, no stored marker, op-count complexity tests)
 - Review round 1 of FR-CRAWL-17 (reviewers A and B): a seed whose load blocked a write is
   kept as a page but never imported as a point, so M6 never replays the write, and a name

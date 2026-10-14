@@ -1444,13 +1444,23 @@ class _QueryState:
             self.take(part.partition("=")[0], route, literal=True)
 
 
+def _known_route(route: str | None) -> str | None:
+    """``route``, or None when it is relative -- a ``.`` / ``..`` segment (review A2-S3,
+    U7): its names are then unpaired, never counted as a pair `classify_route` would
+    refuse later."""
+    if route is None:
+        return None
+    segs = route.split("?", 1)[0].lstrip("#!").split("/")
+    return None if any(seg in (".", "..") for seg in segs) else route
+
+
 def _literal_url(state: _QueryState, value: str) -> None:
     """A literal ``"/x?a=1&b"`` (React ``navigate`` / ``<Link to>``, Angular
     ``navigateByUrl``): its names paired with its route, or unpaired when it names no
     route (``?a=1``)."""
     route, sep, query = value.partition("?")
     if sep:
-        state.take_query_text(query.split("#", 1)[0], route or None)
+        state.take_query_text(query.split("#", 1)[0], _known_route(route or None))
 
 
 def _query_object(state: _QueryState, text: str, i: int, hi: int, route: str | None,
@@ -1530,6 +1540,7 @@ def _scan_navigate(state: _QueryState, text: str, i: int, hi: int) -> int | None
     keys, end = got
     if any(name == "relativeTo" for name, _v, _q in keys):
         route = None                                          # relative: unpaired
+    route = _known_route(route)
     for name, value, _quoted in keys:
         if name != "queryParams" or value is None:
             continue
@@ -1639,7 +1650,7 @@ def _scan_vue_push(state, text, i, hi, floor):
     for name, value, _q in keys:
         if name == "path" and value is not None:
             route, _e = _literal(st, text, value, end)
-    _query_object(state, text, brace, end, route)
+    _query_object(state, text, brace, end, _known_route(route))
     return end
 
 
@@ -1904,7 +1915,9 @@ def observed_names(texts, requests, markers: dict, names, *, doc_path: str | Non
     are the rendered DOM's strings (`OBSERVE_JS`); ``requests`` the ``(url, body,
     blocked)`` of every request the load made (the request hook, aborted ones included).
     A **blocked** request (aborted by the window or the guard) is never evidence: a
-    name whose only evidence is a blocked request is not kept (review A-M1).
+    name whose only evidence is a blocked request is not kept (review A-M1). The
+    caller marks requests blocked by URL, which is conservative: a completed GET to a
+    URL that was also blocked (as a POST, say) is not evidence either (review B-N4).
 
     A marker counts where it appears with non-alphanumeric boundaries in a string that
     carries no other of this load's markers. ``<name>=`` syntax of a probed name also

@@ -30,7 +30,8 @@ _QUERY_JS = r"""
 const routes = [{path:'track'}, {path:'search'}, {path:'score-board'}, {path:'poster'},
   {path:'hop'}, {path:'away'}, {path:'login'}, {path:'logout'}, {path:'reflect'},
   {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'memo'},
-  {path:'fetcher'}, {path:'forward'}, {path:'pathy'}, {path:'beacon'}];
+  {path:'fetcher'}, {path:'forward'}, {path:'pathy'}, {path:'beacon'}, {path:'autopost'},
+  {path:'wsping'}, {path:'txn'}];
 // read by the crawler's scan only (never called): Angular-style navigations and reads
 class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}});
 this.router.navigate([`/search`],{queryParams:{q:t}});
@@ -41,7 +42,11 @@ this.router.navigate([`/away`],{queryParams:{page:t}});
 this.router.navigate([`/login`],{queryParams:{redirectUrl:`/basket`}});
 this.router.navigate([`/logout`],{queryParams:{bye:t}});
 this.router.navigate([`/chat`,t],{queryParams:{initialMessage:t}});
-this.router.navigate([`/vault`],{queryParams:{token:t}})}
+this.router.navigate([`/vault`],{queryParams:{token:t}});
+this.router.navigate([`/autopost`],{queryParams:{go2:t}});
+this.router.navigate([`/wsping`],{queryParams:{ping:t}});
+this.router.navigate([`/txn`],{queryParams:{ref:t}});
+this.router.navigate([`./rel`],{queryParams:{dot:t}})}
 read(){return[this.route.snapshot.queryParams.term,this.route.queryParams.subscribe(n=>n),
 this.route.snapshot.queryParamMap.get(`extra`),this.route.snapshot.queryParamMap.get(`next`)]}}
 const P = () => new URLSearchParams(location.hash.split('?')[1] || '');
@@ -85,6 +90,19 @@ function render() {
   else if (name === 'beacon') { text('beacon');
     if (p.get('term')) fetch('/api/beacon', {method: 'POST', body: 'v=' + p.get('term')})
       .catch(() => {}); }
+  else if (name === 'autopost') { text('autopost');
+    // an auto-submitted form: a POST navigation on load (U1)
+    if (p.get('go2')) { const f = document.createElement('form'); f.method = 'post';
+      f.action = '/api/autopost'; const i = document.createElement('input');
+      i.name = 'v'; i.value = p.get('go2'); f.appendChild(i);
+      document.body.appendChild(f); f.submit(); } }
+  else if (name === 'wsping') { text('wsping');
+    // a page-to-server WebSocket message on load (U1)
+    if (p.get('ping')) { const ws = new WebSocket('ws://' + location.host + '/ws');
+      ws.onopen = () => ws.send('ping-' + p.get('ping')); } }
+  else if (name === 'txn') { text('txn');
+    // a transaction GET the window's word rules refuse (U1)
+    if (p.get('ref')) fetch('/api/order/confirm?ref=' + p.get('ref')).catch(() => {}); }
   else if (name === 'logout') mark('LOGOUT');
   else text(name || 'home');
 }
@@ -128,8 +146,9 @@ class TrackSpa(_Lab):
 
 
 _SESSION_QUERY_JS = r"""
-const routes = [{path:'fade'}, {path:'after1'}];
-class Nav{go(t){this.router.navigate([`/fade`],{queryParams:{mode:t}});
+const routes = [{path:'calm'}, {path:'fade'}, {path:'after1'}];
+class Nav{go(t){this.router.navigate([`/calm`],{queryParams:{z:t}});
+this.router.navigate([`/fade`],{queryParams:{mode:t}});
 this.router.navigate([`/after1`],{queryParams:{x:t}})}}
 const mark = c => fetch('/rest/marker/' + c).catch(() => {});
 function render() {
@@ -147,3 +166,41 @@ render();
 class SessionQuerySpa(_Lab):
     index = _HASH_INDEX.replace("/main.js", "/sq.js").replace("#/about", "#/after1")
     script = ("/sq.js", _SESSION_QUERY_JS)
+
+
+_COOKIE_QUERY_JS = r"""
+const routes = [{path:'chill'}, {path:'after2'}];
+class Nav{go(t){this.router.navigate([`/chill`],{queryParams:{c:t}});
+this.router.navigate([`/after2`],{queryParams:{x:t}})}}
+const mark = c => fetch('/rest/marker/' + c).catch(() => {});
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '').split('?')[0];
+  const p = new URLSearchParams(location.hash.split('?')[1] || '');
+  document.getElementById('app').textContent = name || 'home';
+  mark((name || 'home') + (location.hash.indexOf('?') >= 0 ? '-query' : ''));
+  // a slow GET whose answer expires the session cookie (U4)
+  if (name === 'chill' && p.get('c')) fetch('/rest/expire').catch(() => {});
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+def _expire(handler):
+    """``/rest/expire``: answers after a delay, clearing the ``sid`` session cookie."""
+    import time
+    time.sleep(1.0)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Set-Cookie", "sid=; Max-Age=0; Path=/")
+    handler.send_header("Content-Length", "2")
+    handler.end_headers()
+    handler.wfile.write(b"{}")
+
+
+class SessionCookieSpa(_Lab):
+    """An authenticated crawl whose session is a ``sid`` cookie: the ``chill`` seed's slow
+    GET clears it (U4)."""
+    index = _HASH_INDEX.replace("/main.js", "/sc.js").replace("#/about", "#/after2")
+    script = ("/sc.js", _COOKIE_QUERY_JS)
+    responders = {"/rest/expire": _expire}

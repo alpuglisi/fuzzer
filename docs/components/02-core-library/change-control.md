@@ -27,6 +27,9 @@ Newest first.
 - Effectiveness (assessed 2026-10-14): the S1 test is green with a real browser, and the
   mutation that drops the seed re-filing fails it; `tests/test_store_adapter.py` and the
   json-points suite are still green (numbers in CC-CRAWL-0027's review amendment).
+- Amendment (2026-10-14, review round 2): the `store_adapter` import exclusion is filed
+  under the auditor as **CC-AUD-0041** (the importer's owner by precedent, CC-AUD-0035 /
+  CC-AUD-0040); this entry's core change is the `REDIRECT_PARAMS` move (FR-CORE-39).
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:

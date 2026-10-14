@@ -172,9 +172,6 @@ def _destructive_tokens(tokens: list[str]) -> str | None:
     return None
 
 
-#: Words that name a transaction: submitting it spends, buys, moves or subscribes
-#: (forms phase 3). Separate from DESTRUCTIVE_TOKENS: such a page may be *visited*, but
-#: its form is never submitted and a captured request to it is never fuzzed.
 #: Parameter names that control the next location: the auditor's redirect rule
 #: (`tools.fetcher.rule_redirect_parameters`, exact names) and the crawler's seeds and
 #: probes (`tools.spa.redirect_name`, whole tokens) read this one set (CC-CORE-0053,
@@ -188,6 +185,9 @@ REDIRECT_PARAMS = frozenset({
     'out', 'success_url', 'cancel_url', 'checkout_url', 'location',
 })
 
+#: Words that name a transaction: submitting it spends, buys, moves or subscribes
+#: (forms phase 3). Separate from DESTRUCTIVE_TOKENS: such a page may be *visited*, but
+#: its form is never submitted and a captured request to it is never fuzzed.
 TRANSACTION_TOKENS = frozenset({
     "checkout", "purchase", "pay", "payment", "order", "transfer", "redeem", "wallet",
     "membership", "subscribe", "subscription", "buy", "donate", "donation", "deposit",

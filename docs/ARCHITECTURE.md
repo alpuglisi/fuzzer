@@ -1381,9 +1381,10 @@ tracked in the requirements files, not here.
   letters-only markers, recording nothing -- sees this load's marker in the DOM or the
   load's own requests. Every seed and probe load runs inside the reveal window and
   leaves for `about:blank` inside it. Seeds become `fragment` points (M6, `--browser`)
-  through the existing importer; a seed's GET XHRs, `query` points. A seed whose load
-  blocked a write is kept as a page (`source = 'spa-query-writes'`) that the importer
-  never turns into a point, and no stored row carries a probe marker (scrubbed at the
+  through the existing importer; a seed's GET XHRs, `query` points. A seed is filed as
+  a page the importer never turns into a point (`source = 'spa-query-writes'`) and
+  promoted only when its window closed cleanly with no write (a non-GET, a held
+  WebSocket message, a word-rule GET), and no stored row carries a probe marker (scrubbed at the
   spider's storage boundary). `--no-spa-query` turns it off.
 - **Depends on (components):** `core/` (including the one open-redirect name set
   `core.urls.REDIRECT_PARAMS`, FR-CORE-39, which the auditor's redirect rule shares),

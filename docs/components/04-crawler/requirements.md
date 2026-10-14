@@ -401,8 +401,9 @@ fuzzer.
     `queryParamMap.get("x")`, `searchParams.get("x")`, `URLSearchParams(..).get("x")`,
     `$route.query.x` / `route.query.x`, and a `queryParams: {..}` object outside a
     `navigate` call (never as part of a longer name, `myqueryParams:`); also an empty
-    or lone non-literal route array, and a navigation `relativeTo` another route (its
-    route is relative). Never a bare `get(` or `query`. A multi-element route array with any non-literal element is a dynamic
+    or lone non-literal route array, a navigation `relativeTo` another route, and a
+    route with a `.` / `..` segment (relative: dropped at the scan, so no pair is
+    counted that `classify_route` would refuse later). Never a bare `get(` or `query`. A multi-element route array with any non-literal element is a dynamic
     segment: refused, its names dropped, no element seeded alone. A non-literal
     `queryParams` value is skipped (counted), `{}` is nothing. Names: ASCII identifier
     characters, at most 64, never an Observable/ParamMap member (`spa.QUERY_MEMBERS`) or
@@ -434,14 +435,23 @@ fuzzer.
     settled; it leaves for `about:blank` inside the window (never a reload, which would
     replay the load's on-load code). A seed neither reveals nor submits. Counted
     `spa_query_writes_blocked`. M6's own fuzz loads are unchanged (outside this window),
-    so a seed whose window **blocked a write** (a non-GET) is stored with `source =
-    'spa-query-writes'` and the importer never makes it a point (counted
-    `spa_query_write_seeds`; the importer's `write_seed_skipped`): fuzzing it would send
-    that write unguarded (review A-M1). Follow-up, its own design gate (a CC-FUZZ
+    so a seed is stored with `source = 'spa-query-writes'`, which the importer never
+    makes a point (`write_seed_skipped`; CC-AUD-0041), and is promoted to `'spa-query'`
+    only after its window **closed cleanly with no write** (fail closed: a crawl that
+    stops in between leaves it a page). A **write** in a query window is every refused
+    non-GET/HEAD request, a navigation included (an auto-submitted form: its target is
+    never queued as a GET), every held page-to-server WebSocket message, and every
+    non-navigation GET the window's word rules refused (a transaction or account GET);
+    a seed that wrote stays a write seed (`spa_query_write_seeds`): fuzzing it would send
+    that write unguarded (review A-M1, round 2 U1). No URL a query window blocked is
+    queued from the load's request list (it would be fetched outside the window). Follow-up, its own design gate (a CC-FUZZ
     change): run M6's loads of such a route inside a write-blocking window instead, so
     the route stays fuzzable. **In an authenticated crawl** each seed and probe window
     ends with the client-side session check (`_client_session_intact`, on the load's own
-    page, before it leaves); on a loss seed and probe loads stop for the crawl
+    page, before it leaves), its cookie half again after the window's quiet period, and
+    `verify_live` when the window blocked a write (W4 parity); the verdict is preset to a
+    loss and any failure of a check is a loss (fail closed); on a loss seed and probe
+    loads stop for the crawl (no probe is planned after it)
     (`spa_query_stopped`, `spa_query_session_losses`; later ones refused `session lost`)
     and the session is re-adopted once on the start page, as W4 does -- a re-adoption
     that does not hold stops reveals and submissions too.
@@ -483,7 +493,12 @@ fuzzer.
     never kept (it carries `/`, no marker); a route whose load writes is a page, not a
     point, until the M6 follow-up above; a name seen only in a blocked request is not
     kept; requests from popups and WebSocket frames are not observed; a marker an app
-    transforms (upper-cases, splits) is neither seen nor scrubbed; for a hash route,
+    transforms (upper-cases, splits) is neither seen nor scrubbed; a destructive non-GET
+    is aborted by the guard's destructive rule before the window is asked, so it is not
+    counted as a write (the request is never sent either way); a crawled hash URL whose
+    load writes (a link, not a seed) is still imported as a point until FR-FUZZ-50's
+    M6 window; blocked requests are matched by URL (conservative: a completed GET to a
+    URL also blocked as a POST is not evidence); for a hash route,
     `own_nav` admits the document path itself while the load settles (`_nav_key` drops
     the fragment), as the reveal window's own reload does; a route not in a route table
     is probed only if paired; names read through other APIs (a hand-rolled
@@ -536,7 +551,7 @@ fuzzer.
   whose load blocked a write is never a point (so M6 never replays that write outside a
   window), and in an authenticated crawl a session lost in a query load stops them
   (FR-CRAWL-17).
-  - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`
+  - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`, `tests/test_spa_query.py::test_what_a_query_window_counts_as_a_write`, `tests/test_spa_query.py::test_a_held_websocket_message_is_a_write`, `tests/test_spa_query.py::test_a_seed_is_never_importable_until_its_window_closed_cleanly`, `tests/test_spa_query.py::test_a_session_check_that_raises_is_a_loss`, `tests/test_spa_query.py::test_a_slow_response_that_expires_the_session_cookie_is_a_loss`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
   - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
   - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_refused`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`
