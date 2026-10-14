@@ -133,6 +133,22 @@ note of the same date.
   `portal.php` with `--follow-selector-forms bug`, then `auto --points crawl --identity
   … --header-points User-Agent,Referer,bWAPP` with `budget_total` raised; expected new
   confirmations: gap-map rows #5, #12, #13, #18, #19, #23, #28, #37, #43, #44, #48.
+- Live bWAPP (orchestrator, 2026-10-14; integrated phase 2 tree):
+  - **Setup:** crawl from `portal.php` with `--follow-selector-forms bug` (159 pages,
+    3 destructive URLs skipped), then `auto --points crawl --identity user
+    --header-points` with `budget_total=30000`. The default 5000 is refused up front:
+    "143 page(s) x 2 header(s) need at least 6292 requests".
+  - **First run, before BUG-0122:** 47 findings. Header coverage was cut short by
+    BUG-0122, a false breaker trip on `ba_insecure_login.php`'s redirect.
+  - **After BUG-0122:** 50 findings, none lost, 8236 requests, and no header-breaker
+    trip. These are new against phase 1:
+    - SQLi through User-Agent on `sqli_17`;
+    - XSS through User-Agent on `xss_user_agent` and `xss_stored_4`, and through
+      Referer on `xss_referer`;
+    - `commandi` and `commandi_blind` (loopback base);
+    - the `sqli_13` POST picker (SQLi and XSS);
+    - `rlfi`;
+    - three `iframei` parameters.
 
 ### CC-FUZZ-0065 — String-context SQLi confirmation; probes must cause their evidence (BUG-0117) (2026-10-14)
 - Change:
@@ -238,6 +254,13 @@ note of the same date.
 - Effectiveness: effective in tests (counts above). Live pending: the bWAPP sandbox
   check of sqli_4/11/12/14, and the PFF scored run (a possible +1 tp on
   `/login.php [username]`, fp=0 expected).
+- Live bWAPP (orchestrator, 2026-10-14):
+  - **SQLite, new findings:**
+    - `sqli_11 [title]` and `sqli_14 [title]`, by string-grammar boolean;
+    - `sqli_12 [entry]` by the evaluation marker, with no `entry_delete` sent.
+  - **`oracle_inconclusive`:** 0 in both runs.
+  - **`sqli_4` (MySQL, masked blind):** not confirmed. Still pending the on-host
+    MySQL proof, as recorded.
 
 ### CC-FUZZ-0064 — In-app login forms probed on an isolated session (forms phase 2, lane B) (2026-10-14)
 - Merge note: CC numbers land out of numeric order here (0064 above 0062; lane A's 0063
@@ -320,6 +343,12 @@ note of the same date.
     (4c4f18c), the code-review tests that pin new behaviour fail (5).
   - **Mutation check** over the new logic: 40/40 killed (32 at the first commit, plus
     8 from the code review, including reviewer B's fallback-identity mutant).
+- Live bWAPP (orchestrator, 2026-10-14):
+  - **Isolation:** 6 login-form paths were probed on 6 isolated logins (381 isolated
+    sends, 0 anonymous), and the run's session survived.
+  - **New findings:** SQLi on `sqli_3 [login]`, `sqli_16 [login]` and
+    `xss_login [login]`.
+  - **Not imported:** `ba_weak_pwd` and `ba_pwd_attacks_2`, as accepted.
 
 ### CC-FUZZ-0062 — Forms as injection points, probed with their sibling fields (forms phase 1) (2026-10-13)
 - Change:

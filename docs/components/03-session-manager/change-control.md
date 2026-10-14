@@ -40,7 +40,8 @@ Newest first.
     `ba_insecure_login.php`), checked against the lab's page names as a test (PA-0122
     clause 4); only http/https targets. Reviewer A required the `store_adapter` sweep
     row to be accurate.
-- Effectiveness: verified offline; live header re-run pending.
+- Effectiveness: verified live: the bWAPP header re-run (50 findings, none lost) had no
+  false breaker trip, and reached `xss_user_agent`, `xss_referer` and `xss_stored_4`.
 
 ### CC-SESS-0018 — Isolated session copies for in-app login forms (forms phase 2, lane B) (2026-10-14)
 - Change:
