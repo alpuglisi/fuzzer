@@ -3,6 +3,159 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0021 — Browser login fallback for single-page apps (FR-SESS-19) (2026-10-14)
+- Change:
+  - **New `session/browserlogin.py`.** When `SessionManager._login` finds no
+    server-rendered login form and no Basic challenge, and the manager may use a browser
+    (`SessionManager(browser_login=None)`: on with the default network fetcher, off with
+    a fetcher double; copied to isolated copies), `_browser_login_state` runs
+    `browserlogin.run`. Before, this raised "SPA logins are not auto-detected".
+  - **Worker thread (Revision 2 item 5).** `run` drives the login on a dedicated
+    `threading.Thread` (no event loop), joined with `LOGIN_DEADLINE_S` (120 s), under the
+    `ensure` lock already held. Verified first that a nested sync Playwright in the same
+    thread raises ("using Playwright Sync API inside the asyncio loop") and that a worker
+    thread works.
+  - **Dedicated browser and context (item 2).** One launch through
+    `navguard.chromium_launch_kwargs(browser_launch_args(login scope))`, a
+    `new_context(service_workers="block")` with no HAR, video or tracing; `guard_page`
+    with no passive-capture observer and no spider-DB writer. In the `finally`:
+    `navguard.release(context)` (pages first, PA-0128), `context.close()`,
+    `browser.close()`, the driver stopped, all before the worker returns, so before the
+    manager's differential and before any crawl context opens.
+  - **Login window gate (item 1).** `LoginGate.in_scope` is the route's and the
+    WebSocket handler's one predicate: the login scope (`origin_scope(base_url,
+    *auth_origins)`), and, from just before the first `page.fill` until the context
+    closes, the manager's `_credential_destination_ok` too. The password detector
+    (`secret_forms` / `carries`: raw, percent, form `+`, JSON-escaped, base64, Basic
+    `user:pass`; URL, headers, body) only identifies the login request. Refusals are
+    logged and reported by host only.
+  - **Login-shaped form only (item 3).** `login_form_refusal`: exactly one password
+    control, `store_adapter.login_shaped`, `account_word_reason` (`ACCOUNT_WORDS` /
+    `ACCOUNT_PAIRS` by whole token over route, button text, aria-label, action, control
+    names), `credential_change_reason` with the real action, `spa.form_refusal`; the
+    password control must be enabled. Forms are read with `spa.FORMS_JS` on the base
+    page, then on login routes (`_login_routes`: script routes via the guard's observe
+    hook and link fragments, `classify_route` OK, last segment in
+    `detect._LOGIN_SEGMENTS`, at most `MAX_ROUTES`). **Request side:**
+    `navguard.make_route_handler(request_refusal=)` (new) lets `LoginGate.request_refusal`
+    abort a password-carrying request to an account endpoint (`account_endpoint_reason`)
+    before it is sent, and again on a 307/308 hop keeping the body.
+  - **One click.** The username (`_USERNAME_HINT` or `type=email`, else the only user
+    field) and the password are filled, then `spa.click_vetted` (moved from
+    `LocalSpider._click_vetted`, now its one implementation) clicks once.
+  - **Credential and success (item 4).** The login request's own response (captured in
+    the observer, in memory) goes through `detect.detect_session_credential` (cookies
+    that response set, then without them: a JSON token); the first candidate whose
+    differential holds is kept. `_spa_probe` replays the app's post-click in-scope GETs
+    (`_navigate`, fresh fetcher each, session host only): 2xx with the credential, and
+    401/403, another non-5xx status, or a stable different body without it. The probe
+    URL and the anonymous body's sha256 are kept on `SessionState`; `verify_live` uses
+    them instead of the public base URL.
+  - **`SessionState` (item 8):** `cookies`, `headers` `repr=False`; new in-memory
+    fields `browser_state` (`repr=False, compare=False`), `protected_probe`,
+    `probe_refusal_digest` (`repr=False`); `non_secret_state` unchanged (none persisted).
+  - **Logging off (item 9).** `_driver_env_without_api_logs` removes `DEBUG` and
+    `PWDEBUG` from `os.environ` under a lock for the instant the driver is spawned (it
+    copies the environment then; verified that `DEBUG=pw:api` prints `fill("<value>")`);
+    `DEBUGP`, printed per message from the Python side, refuses the login. Failure texts
+    are scrubbed of every password form (`_scrub`) and re-raised without the chain.
+  - **Attempts (item 10).** Unchanged accounting in `ensure`: each browser login is one
+    attempt toward `max_reauth` / `_failures` and an isolated copy's `max_logins`.
+- Impact:
+  - **CRAWL** (CC-CRAWL-0022): the crawler adopts `browser_state` and the session's
+    headers through the route; `navguard` gains `request_refusal`, `headers` and
+    `header_scope`; `spa.click_vetted` is shared.
+  - **AUD** (CC-AUD-0038), **FUZZ** (CC-FUZZ-0076): header sweep onto the route.
+  - **Project:** the session manager now depends on `tools/navguard`, `tools/spa`,
+    `tools/store_adapter` and (optionally) Playwright (ARCHITECTURE #3 updated). A
+    fourth Chromium launch site, under the existing AST guard.
+  - Senders unchanged: a bearer reaches them through `prepare` as before.
+- Risk: medium (a new credential-sending path). Mitigated: the password is typed only
+  into the detected password control and sent only by the app's own single click; every
+  request in the window is checked against the credential-destination rule before it
+  leaves (independent of spotting the password); account endpoints are refused on both
+  the form and the request side; nothing is recorded; each mechanism has a test that a
+  mutation reverting it fails (below). Accepted residuals (FR-SESS-19): stateless JWT
+  isolation; one browser login per isolated copy; an app with no credential-dependent
+  GET after login fails loudly; `_USERNAME_HINT` (BUG-0121); not exercised on Juice Shop
+  itself in this change (offline fixture only).
+- Deliverables:
+  - [x] `session/browserlogin.py`, `session/manager.py`, `session/state.py` — done
+  - [x] `tools/navguard.py` (`request_refusal`, `headers`, `header_scope`), `tools/spa.py`
+    (`click_vetted`, `covered`) — done
+  - [x] tests: `tests/test_session_browser_login.py` (new; real Chromium against
+    `tests/_spa_login_fixture.py`), `tests/test_browser_scope.py` (route headers,
+    request refusal, header guard, the fourth launch site), `tests/test_logout_redirect.py`
+    (PA-0122 scope gains `browserlogin.py`) — done
+  - [x] tests also cover: an app under a sub-path (`/app/`, PA-0113(3)); the login
+    browser's whole process tree gone when `ensure` returns (PA-0125 style, /proc); a
+    static guard that the module records nothing (no HAR / video / tracing / spider-DB
+    or store writer), proven on a synthetic offender (PA-0083(2), PA-0034(2)) — done
+  - [x] mutation checks (each reverted, its test failed): window gate
+    (`test_the_window_gate_refuses_a_non_destination_only_in_the_window`), login-shaped
+    refusal (`test_a_form_that_is_not_login_shaped_is_never_used`), account words
+    (`test_a_sign_up_button_on_the_login_route_is_never_clicked`), request-side gate
+    (`test_a_login_route_posting_to_api_users_creates_nothing`), context close (never
+    closed: `test_the_login_browser_is_gone_when_the_login_returns` failed; the ordering
+    test alone did not, since an unclosed, unpumped context sends nothing), worker thread
+    inline (`test_a_relogin_during_an_authenticated_crawl`), env strip
+    (`test_the_password_appears_nowhere` with `DEBUG=pw:api`,
+    `test_the_driver_starts_without_debug_logging`), `repr=False`
+    (`test_session_state_repr_and_str_hold_no_secret`), protected probe in `verify_live`
+    (`test_revocation_makes_verify_live_false`,
+    `test_the_crawls_session_check_catches_a_revoked_token`) — done
+  - [x] FR-SESS-19, FR-SESS-6 amended, NFR-SESS-redaction traced, ARCHITECTURE #3 — done
+- Code review round 1 (reviewers A and B, AGREE-with-changes; a follow-up commit):
+  - **B-M1 / A-S2, abandoned login:** `run` shares a `threading.Event` with the worker
+    and sets it at the deadline; `LoginGate.in_scope` and `request_refusal` then refuse
+    everything, the worker raises at its checkpoints (`_alive`, before each `goto`, each
+    fill, the click, and the storage capture), its `finally` still closes the context,
+    browser and driver, and `run` waits up to `CLEANUP_S` (30 s) more, else reports
+    "browser login abandoned; cleanup pending".
+  - **B-M2, no second login beside it:** a module-level `_LIVE` map of login workers per
+    (`url_key(base_url)`, identity or copy label); `run` refuses ("still finishing")
+    while one is alive; a worker removes itself when it ends.
+  - **A-M1, probe differential:** `_spa_probe` adds a corrupted-credential arm
+    (`_corrupted`: a bearer's last character flipped in its base64url high bits, a
+    cookie's value random under the same name). The no-credential and the corrupted
+    answers must agree (the same non-2xx, non-5xx status, or the same stable body) and
+    differ from the credentialed one. `SessionState.probe_anon_digest` is renamed
+    `probe_refusal_digest` (the corrupted answer's sha256), `verify_live`'s "not live"
+    reference.
+  - **A-M2, password out of URLs and storage:** the login URL is kept without query or
+    fragment (`strip_url`) in the observation, the state and the auth endpoints, and the
+    login refuses if its path still carries the password; `non_secret_state` persists
+    `login_url` / `logout_url` without query or fragment (every login); probe
+    candidates whose URL carries the password are skipped; `drop_secret_values` removes
+    any cookie or localStorage entry carrying it before `filter_storage_state`.
+  - **A-S1, account gate on every write:** `request_refusal` now refuses every POST,
+    PUT, PATCH or DELETE to an account endpoint in the window, whatever its body.
+  - **A-N1 / B-S4:** `_ENV_LOCK`'s docstring states it is best effort and process-wide.
+  - Tests (`tests/test_session_browser_login.py`): a stalling login page with a short
+    deadline sends no password-carrying POST and leaves no process; a second `run`
+    beside an abandoned one refuses; an echo endpoint is never the probe; a revoked
+    token answered with a 2xx error body reads as not live; a leaky app's password is
+    absent from the stored URL, the probe, the store, the log, the state and the adopted
+    storage; a hashed password posted to `/api/Users` sends nothing; a 307 keeping the
+    body to an account endpoint is refused at the hop (A-N2); units for the cancelled
+    gate, the checkpoint, the corrupted credential, URL stripping and storage cleaning.
+  - Mutation checks: each reverted, its test failed: no
+    cancel event (`test_an_abandoned_login_never_sends_the_password`); gate ignoring the
+    cancel (`test_a_cancelled_gate_refuses_every_request`); no checkpoints
+    (`test_a_cancelled_login_stops_at_a_checkpoint`; end to end the gate layer alone
+    still stops the send, by design); no live-login refusal
+    (`test_no_second_login_starts_beside_an_abandoned_one`); no corrupted arm
+    (`test_an_endpoint_that_echoes_the_credential_is_never_the_probe`); login URL kept
+    with its query, a password-carrying probe kept, storage not cleaned (each:
+    `test_the_password_is_kept_out_of_urls_and_storage`); the account gate needing the
+    password again (`test_a_hashed_password_posted_to_api_users_sends_nothing`,
+    `test_every_write_to_an_account_endpoint_is_refused_in_the_window`).
+- Review: reviewers A and B on the design draft (Revision 1: A, AGREE-with-changes;
+  Revision 2: B, AGREE-with-changes, A and B reconciled into items 1-12, the spec built
+  here). Answers adopted: fallback only, with a loud error naming a missing browser;
+  `browser_state` in memory only; both form-side words and a request-side gate.
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`): the targeted run (every touched test file, the session-manager tests, the browser-scope, SPA, sub-path, destructive-URL, lint, traceability and loopback-listener guards) gave 739 passed, 2 xfailed, 0 skipped, 1 failed -- `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, which fails identically on the unmodified base 2150bf8 (`labgen/conformance/*_live_boot.py` `start_server` sites, outside this change; flagged, not fixed here). `tests/test_session_browser_login.py`: 61 passed; every listed mutation failed its test. Not verified here: Juice Shop itself (no lab traffic in this change; operator step: register a test user, `fuzzlab session set-credential`, then crawl/auto with `--identity`).
+
 ### CC-SESS-0020 — The post-login redirect chain is walked by hand, every hop checked (BUG-0123 sweep) (2026-10-14)
 - Change:
   - `session/manager.py` `_post_credentials`: after a 301/302/303 whose first

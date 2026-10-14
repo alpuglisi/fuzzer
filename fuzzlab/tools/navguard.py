@@ -22,6 +22,11 @@ Every one is checked where it is made (PA-0123):
 
 Callers open their pages with ``service_workers="block"``: a service worker's own
 requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
+
+A session's headers (a bearer) are added **by the route only**, to a request that passed
+the scope predicate and the caller's header scope, and to each fetched redirect hop
+that does -- never ``set_extra_http_headers`` (FR-CRAWL-14). A ``request_refusal`` hook
+sees a request's body before it is sent (FR-SESS-19's login window).
 """
 
 from __future__ import annotations
@@ -43,7 +48,11 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        on_out_of_scope: Callable[[str], None] | None = None,
                        api=None,
                        method_refusal: Callable[[str, str], str | None] | None = None,
-                       observe: Callable[[object, object], None] | None = None):
+                       observe: Callable[[object, object], None] | None = None,
+                       request_refusal: Callable[[str, str, dict, object], str | None]
+                       | None = None,
+                       headers: dict[str, str] | None = None,
+                       header_scope: Callable[[str], bool] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -61,7 +70,15 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     request that was sent and its final response, before it is answered (the crawler
     reads already-loaded script bodies and captures request bodies there, FR-CRAWL-13);
     it is contained: a failing observer is logged and never changes the answer
-    (PA-0086(2))."""
+    (PA-0086(2)).
+
+    ``request_refusal(method, url, headers, body)`` (FR-SESS-19's login window): a
+    reason aborts the request before it is sent, and every redirect hop that keeps the
+    body (307/308) is asked again; the log line names the host only. ``headers`` (a
+    session's headers, FR-CRAWL-14) are added **here only**, to ``route.fetch`` and to
+    each fetched redirect hop, and only for a URL that passed ``in_scope`` and
+    ``header_scope`` (default ``in_scope``) -- never ``set_extra_http_headers``, which
+    would hand them to whatever the browser sends."""
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -77,6 +94,24 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 on_abort(url, reason)
             return True
         return False
+
+    def session_headers(url: str) -> dict[str, str]:
+        """The session's headers for ``url``: only after ``in_scope`` (the caller has
+        already refused anything else) and ``header_scope`` pass (FR-CRAWL-14)."""
+        if not headers or not in_scope(url) or \
+                not (header_scope or in_scope)(url):
+            return {}
+        return dict(headers)
+
+    def body_refused(method: str, url: str, req_headers, body) -> bool:
+        why = request_refusal(method, url, req_headers, body) if request_refusal else None
+        if why is None:
+            return False
+        logging.info(f"blocked a browser {method} to "
+                     f"{urlsplit(url).hostname or '?'!r} ({why})")    # the host only
+        if on_abort is not None:
+            on_abort(url, why)
+        return True
 
     def handler(route, request=None) -> None:
         req = request if request is not None else route.request
@@ -95,8 +130,13 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 on_abort(url, why)
             route.abort()
             return
+        if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
+            route.abort()
+            return
         try:
-            first = route.fetch(max_redirects=0)
+            extra = session_headers(url)
+            first = route.fetch(max_redirects=0, headers=_merged(req.headers, extra)) \
+                if extra else route.fetch(max_redirects=0)
             final, final_url, method = first, url, req.method.upper()
             for _ in range(MAX_REDIRECTS + 1):
                 location = final.headers.get("location")
@@ -109,11 +149,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
                 keep_body = method not in ("GET", "HEAD")
+                if keep_body and body_refused(method, nxt, req.headers or {},
+                                              req.post_data_buffer):
+                    route.abort()
+                    return
+                hop = {"content-type": req.headers.get("content-type", "")} \
+                    if keep_body else {}
+                hop.update(session_headers(nxt))            # in scope: checked above
                 final = api.fetch(nxt, method=method, max_redirects=0,
                                   data=req.post_data_buffer if keep_body else None,
-                                  headers={"content-type": req.headers.get("content-type",
-                                                                           "")}
-                                  if keep_body else None)
+                                  headers=hop or None)
                 final_url = nxt
             else:
                 logging.info(f"blocked a browser redirect chain over {MAX_REDIRECTS} "
@@ -143,6 +188,15 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             # the answer (a navigation's page.url stays the first URL)
             route.fulfill(response=final)
     return handler
+
+
+def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
+    """The request's own headers with ``extra`` put in place of any header of the same
+    name (case-insensitive): ``route.fetch(headers=)`` replaces the whole set."""
+    names = {k.lower() for k in extra}
+    out = {k: v for k, v in (request_headers or {}).items() if k.lower() not in names}
+    out.update(extra)
+    return out
 
 
 def release(target) -> None:
@@ -190,15 +244,23 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                in_scope: Callable[[str], bool],
                on_out_of_scope: Callable[[str], None] | None = None,
                method_refusal: Callable[[str, str], str | None] | None = None,
-               observe: Callable[[object, object], None] | None = None) -> None:
+               observe: Callable[[object, object], None] | None = None,
+               request_refusal: Callable[[str, str, dict, object], str | None]
+               | None = None,
+               headers: dict[str, str] | None = None,
+               header_scope: Callable[[str], bool] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
-    (BUG-0123). ``method_refusal`` and ``observe``: see `make_route_handler`."""
+    (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal`` and the session
+    ``headers`` (with ``header_scope``): see `make_route_handler`. Session headers are
+    applied by the route only (FR-CRAWL-14)."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,
                                             method_refusal=method_refusal,
-                                            observe=observe))
+                                            observe=observe,
+                                            request_refusal=request_refusal,
+                                            headers=headers, header_scope=header_scope))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "

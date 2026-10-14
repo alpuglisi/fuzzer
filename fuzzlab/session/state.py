@@ -17,8 +17,9 @@ class SessionState:
     host: str
     identity: str
     kind: str = "none"                       # 'cookie' | 'bearer' | 'basic' | 'none'
-    cookies: dict[str, str] = field(default_factory=dict)
-    headers: dict[str, str] = field(default_factory=dict)   # e.g. Authorization
+    # secrets: never in repr/str (FR-SESS-19, reviewer B6)
+    cookies: dict[str, str] = field(default_factory=dict, repr=False)
+    headers: dict[str, str] = field(default_factory=dict, repr=False)  # e.g. Authorization
     login_url: str | None = None
     logout_url: str | None = None
     token_exp: float | None = None           # unix ts, for JWT proactive refresh
@@ -31,6 +32,19 @@ class SessionState:
     #: password form with exactly these names is the login form re-rendered in place,
     #: wherever it posts (BUG-0113).
     login_fields: tuple[str, ...] | None = None
+    #: A browser login's ``storage_state()`` (cookies and per-origin localStorage), for
+    #: an authenticated Playwright crawl to adopt (FR-SESS-19, FR-CRAWL-14). In memory
+    #: only: never persisted, never in repr/str, never compared.
+    browser_state: dict | None = field(default=None, repr=False, compare=False)
+    #: A browser login's protected probe (FR-SESS-19): an in-scope GET the app made
+    #: after the login click that answers 2xx with the credential and 401/403 (or a
+    #: materially different body) without it. ``verify_live`` and the crawler's session
+    #: check re-fetch it. In memory only.
+    protected_probe: str | None = field(default=None, repr=False)
+    #: sha256 of the probe's answer to a **corrupted** credential when that was 2xx
+    #: (the differential was the body, A-M1): a live session's probe must answer
+    #: something else. In memory only.
+    probe_refusal_digest: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.secure_only is None:
@@ -77,11 +91,22 @@ class SessionState:
             "identity": self.identity,
             "kind": self.kind,
             "valid": self.valid,
-            "login_url": self.login_url,
-            "logout_url": self.logout_url,
+            # no query or fragment is ever persisted (A-M2: a login URL may carry a
+            # secret there)
+            "login_url": _no_query(self.login_url),
+            "logout_url": _no_query(self.logout_url),
             "token_exp": self.token_exp,
             "secure_only": self.secure_only,
         }
+
+
+def _no_query(url: str | None) -> str | None:
+    """``url`` without its query and fragment (None stays None)."""
+    if not url:
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
 def secure_only_of(record: dict | None) -> bool:

@@ -1,7 +1,7 @@
 # Session Manager — Requirement Specification
 
 Component code: **SESS** · Status: `[built; live validation + resume pending]` (Phase 1)
-· Last updated: 2026-09-21
+· Last updated: 2026-10-14
 
 Related: `ARCHITECTURE.md` #3; `DECISIONS_AND_ROADMAP.md` (D3, D10, D12, D13);
 `./change-control.md`.
@@ -41,9 +41,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   reappearing, JWT `exp`) and re-authenticate under a single-flight lock; cap
   attempts then hard-fail.
 - **FR-SESS-6 (fail loud)** When detection cannot parse a login (multi-step,
-  CAPTCHA, exotic SPA), fail loudly with diagnostics (what was found, where it
-  stopped) rather than silently proceeding unauthenticated; there is no
-  hand-written override (D13).
+  CAPTCHA, an SPA login the browser fallback cannot find or confirm, FR-SESS-19), fail
+  loudly with diagnostics (what was found, where it stopped) rather than silently
+  proceeding unauthenticated; there is no hand-written override (D13).
 - **FR-SESS-7** Auto-exclude auth endpoints (the detected login/logout,
   session-destroy) from fuzzing scope.
 - **FR-SESS-8** Obtain credentials from the `core/` credential store **keyed by
@@ -111,6 +111,88 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-19 (browser login for single-page apps, CC-SESS-0021)**
+  - **When.** Only as a fallback (detection only, D13): `_login` found no
+    server-rendered login form and no Basic challenge, and the manager may use a
+    browser (`SessionManager(browser_login=...)`; default on when the manager's fetches
+    go to the network, i.e. the default fetcher; off when a fetcher double stands in;
+    copied to isolated copies). Without Playwright or a launchable Chromium the login
+    fails loudly naming the missing browser.
+  - **Where it runs (`session/browserlogin.py`).** On a dedicated worker thread (no
+    event loop: a sync Playwright never nests inside a crawl's), under the
+    per-(host, identity) login lock, joined with a deadline (120 s). *(Review round 1,
+    B-M1/B-M2:)* at the deadline the login is **cancelled**: a shared event makes the
+    gate refuse every request and the worker stop at its next checkpoint (before each
+    navigation, each fill and the click); its `finally` still closes the context,
+    browser and driver, waited for up to 30 s more, else the error says "browser login
+    abandoned; cleanup pending". While a worker for the same (base URL, identity) is
+    alive, a new browser login refuses ("still finishing"). Its own browser
+    (the one launch helper, `navguard.chromium_launch_kwargs` over
+    `browser_launch_args(login scope)`) and its own context (service workers blocked);
+    no passive capture, no spider-DB writer, no HAR, no trace. The context is closed
+    (`navguard.release` first) right after its `storage_state()` is captured, before
+    the manager's differential and before any crawl context opens. Playwright's API log
+    is off: the driver starts without `DEBUG` / `PWDEBUG`; `DEBUGP` set refuses the
+    login.
+  - **The login scope and window.** The route's and WebSockets' scope is the base
+    URL's origin plus the operator's `auth_origins`. From the first fill until the
+    context closes (the window) every request, of any method or content, must also pass
+    `_credential_destination_ok` (transport deny first); WebSockets connect only if they
+    pass it. The password detector (raw, percent, form `+`, JSON-escaped, base64; in the
+    URL, headers and body) only identifies the login request (the first in-scope
+    POST/PUT carrying it after the click). Every write (POST, PUT, PATCH, DELETE) in the
+    window to an account endpoint (path tokens register, sign-up, password, reset,
+    change; users / accounts without a login token) is aborted before it is sent,
+    whatever its body (review round 1, A-S1: a client-side hashed password included),
+    and again on a 307/308 hop that keeps the body. Aborted-request logs name the host
+    only.
+  - **The form.** On the base page, then on SPA routes (from the app's own scripts and
+    links, hash or history mode) and same-origin links whose last segment is a login
+    word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
+    (`spa.FORMS_JS`) with exactly one enabled password control that is login-shaped
+    (`store_adapter.login_shaped`), has no account word (register, sign up, create,
+    join, enroll, new, forgot, recover, reset, change, repeat, confirm, retype, security
+    question/answer, OTP) on its route, button text or aria-label, action or control
+    names, is not a credential-change form (`store_adapter.credential_change_reason`)
+    and passes `spa.form_refusal`. The username goes into the one user field
+    (`_USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
+    password only into the password control, from the credential store, never logged.
+    One click (`spa.click_vetted`: covered -> Escape -> dispatch, labels re-read),
+    never retried within an attempt.
+  - **The credential and success.** `detect.detect_session_credential` on the login
+    request's own response (a cookie that response set, else a token in its JSON body,
+    `exp` read for refresh); a non-2xx answer is a rejected login. Success is FR-SESS-5's
+    positive differential on a **protected probe**: an in-scope GET XHR the app made
+    after the click (scope- and destructive-checked, 2xx in the browser, no password in
+    its URL) that answers 2xx when replayed with the credential, and whose answers with
+    **no** credential and with a **corrupted** one (review round 1, A-M1: a bearer with
+    its last character flipped in its high bits, a cookie with a random value under the
+    same name) agree with each other and not with the credentialed one: the same
+    non-2xx, non-5xx status, or the same body, stable over two fetches each, that
+    differs from the (stable) credentialed body. So an endpoint that reacts to the mere
+    presence of a header or cookie (an echo, a header-keyed cache) never confirms. The
+    probe (and the corrupted credential's body sha256 when that was 2xx) is kept in
+    memory on the `SessionState`; `verify_live` re-fetches it (2xx, and not the
+    corrupted-credential body), so a revoked token reads as lost even when the app
+    answers it with a 2xx error body. The login request URL and `logout` are auth
+    endpoints (FR-SESS-7); the SPA shell is not.
+  - **What is kept.** `SessionState.browser_state` = the login context's
+    `storage_state()` (cookies and per-origin localStorage) without any entry whose
+    name or value carries the password (review round 1, A-M2), then filtered to the
+    login scope, in memory only (never persisted, never in repr, not compared).
+    `SessionState`'s cookies, headers, browser state and probe are `repr=False`. The
+    login URL is kept without its query or fragment (and the login refuses if its path
+    carries the password); `non_secret_state` persists `login_url` / `logout_url`
+    without query or fragment for every login.
+  - **Attempts.** Each browser login is one attempt toward `max_reauth` / `_failures`
+    and an isolated copy's `max_logins`; a wrong password stops at the cap.
+  - **Residuals (stated).** JWT sessions are stateless: an isolated copy's distinct
+    token is the same account server-side (FR-FUZZ-44's isolation is weaker there);
+    each isolated copy performs its own browser login. A login whose API lives on
+    another origin needs that origin in `auth_origins`. An app that makes no
+    credential-dependent GET after its login cannot be confirmed (fails loudly).
+    Username detection depends on `_USERNAME_HINT` (BUG-0121). Juice Shop itself has
+    not been exercised here (offline fixture only).
 - **FR-SESS-18 (logout by redirect, CC-SESS-0019, BUG-0122)**
   - A redirect is a logout only when its target, resolved against the page, is either:
     - the session's own login URL: same host and path, an http→https upgrade on
@@ -206,7 +288,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
 - **NFR-SESS-redaction** Credentials, cookies, and tokens redacted on write.
   - Enforced by: `SessionState.non_secret_state` / `redacted` — `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_session_capture.py::test_adopt_persists_only_non_secret_metadata`, `tests/test_session_detect.py::test_session_state_apply_and_redacted`
   - Enforced by (isolated copies, FR-SESS-17): never persisted, and no credential value in an isolation error or report — `tests/test_login_form_isolation.py::test_the_isolated_session_is_never_persisted`, `tests/test_login_form_isolation.py::test_isolation_errors_and_report_carry_no_secret_values`
-  - Not yet enforced: no test runs `SessionManager` with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.)
+  - Enforced by (browser login, FR-SESS-19): a unique password never reaches the spider DB, the store, the logs (with `DEBUG=pw:api`), an exception or a repr; `SessionState`'s secrets are `repr=False` — `tests/test_session_browser_login.py::test_the_password_appears_nowhere`, `tests/test_session_browser_login.py::test_session_state_repr_and_str_hold_no_secret`, `tests/test_session_browser_login.py::test_the_driver_starts_without_debug_logging`, `tests/test_session_browser_login.py::test_a_failure_text_never_holds_the_password`
+  - Enforced by (browser login: where the password may go): `browserlogin.LoginGate`, `navguard.make_route_handler(request_refusal=)` — `tests/test_session_browser_login.py::test_the_password_never_leaves_to_another_port`, `tests/test_session_browser_login.py::test_the_window_gate_refuses_a_non_destination_only_in_the_window`, `tests/test_session_browser_login.py::test_a_login_route_posting_to_api_users_creates_nothing`, `tests/test_session_browser_login.py::test_a_sign_up_button_on_the_login_route_is_never_clicked`, `tests/test_session_browser_login.py::test_register_and_change_password_forms_on_the_login_route_are_never_used`, `tests/test_session_browser_login.py::test_a_hashed_password_posted_to_api_users_sends_nothing`, `tests/test_session_browser_login.py::test_every_write_to_an_account_endpoint_is_refused_in_the_window`, `tests/test_session_browser_login.py::test_a_body_keeping_redirect_to_an_account_endpoint_is_refused_at_the_hop`
+  - Enforced by (an abandoned browser login sends nothing; no second login beside it; review round 1): `browserlogin.run` cancellation, `LoginGate.cancelled`, `_LIVE` — `tests/test_session_browser_login.py::test_an_abandoned_login_never_sends_the_password`, `tests/test_session_browser_login.py::test_a_cancelled_gate_refuses_every_request`, `tests/test_session_browser_login.py::test_a_cancelled_login_stops_at_a_checkpoint`, `tests/test_session_browser_login.py::test_no_second_login_starts_beside_an_abandoned_one`
+  - Enforced by (the password never kept through URLs or storage; review round 1, A-M2): `browserlogin.strip_url`, `drop_secret_values`, `SessionState.non_secret_state` — `tests/test_session_browser_login.py::test_the_password_is_kept_out_of_urls_and_storage`, `tests/test_session_browser_login.py::test_persisted_login_urls_carry_no_query_or_fragment`, `tests/test_session_browser_login.py::test_storage_values_carrying_the_password_are_dropped`
+  - Not yet enforced: no test runs the server-form login (`_login`) with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.)
 - **NFR-SESS-portable** Works on interactive desktops, headless hosts, containers,
   and CI via the credential-store backend resolution (D12).
 - **NFR-SESS-zero-config** No per-host auth configuration: the only per-host input
@@ -237,9 +323,10 @@ help locate the login, though the manager can also probe on its own).
 - Runs headless/CI via the encrypted-file credential backend (D12).
 
 ## 8. Open questions
-- Detection heuristics for multi-form pages (which form is the login) and for
-  SPA logins where the login is an XHR, not an HTML form. (Cases detection still
-  can't crack are covered post-Phase 6 by proxy session capture, FR-SESS-11.)
+- Detection heuristics for multi-form pages (which form is the login). SPA logins
+  where the login is an XHR are detected in a browser since FR-SESS-19; cases
+  detection still can't crack are covered post-Phase 6 by proxy session capture,
+  FR-SESS-11.
 - MFA/TOTP: out of scope for automated detection; handled post-Phase 6 by adopting
   a manual browser login captured through the proxy (FR-SESS-11).
 - How aggressively to probe for a login when the crawler has not yet found a form.

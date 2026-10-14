@@ -3,6 +3,72 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0022 — The crawl adopts a browser session; session headers through the route only (FR-CRAWL-14) (2026-10-14)
+- Change:
+  - **`tools/spider.py` `_start_browser`:** the session is ensured **before** the crawl
+    context opens (`browserauth.browser_session`), so a browser login (CC-SESS-0021) has
+    already closed its own context; the context is created with its `storage_state`
+    filtered to in-scope origins (`browserlogin.filter_storage_state`, reviewer A7) and
+    gets the session's cookies (`add_cookies`).
+  - **Headers (reviewers A6/B7).** `_guard(context, session=True)` hands the session's
+    headers to `navguard.guard_page(headers=, header_scope=)`: the route adds them with
+    `route.fetch(headers=)` (the request's own headers merged, case-insensitively) only
+    after `in_scope` passes and `header_scope` (`browserauth.header_scope_for`: the
+    session's host, its transport floor) admits the URL, and to each fetched redirect
+    hop only when that hop does. Verified live first that `route.fetch(headers=)`
+    replaces the whole header set, hence the merge. An unauthenticated submission
+    context gets none. `_isolated_submit`'s API client sends them only when the action
+    passes `header_scope`.
+  - **`browserauth`:** `apply_to_context` adds cookies only and refuses headers
+    (`ValueError`); new `browser_session`, `BrowserSession`, `header_scope_for`.
+    `set_extra_http_headers` is gone from `fuzzlab/` (PA-0002 sweep, below).
+  - **Session check (reviewer B4).** `_session_intact` also compares each adopted
+    localStorage entry with `page.evaluate` on an open page of its origin (fail closed);
+    `verify_live` now checks a browser login's protected probe.
+  - **`navguard.make_route_handler` / `guard_page`:** new `headers`, `header_scope`,
+    `request_refusal` (the login window's pre-send hook, CC-SESS-0021); a
+    request-refusal log names the host only.
+  - **`spa.click_vetted` / `spa.covered`:** `LocalSpider._click_vetted` now delegates to
+    the one implementation it shares with the browser login (PA-0003).
+  - **Sweep (PA-0002), every session-header path into a browser:**
+    `browserauth.apply_to_context` (crawler, auditor: moved onto the route);
+    `browserexec` storage headers (moved, CC-FUZZ-0076); `fetcher._start_browser`
+    (moved, CC-AUD-0038); `spider._isolated_submit`'s `pw.request.new_context(
+    extra_http_headers=)` (kept: one `checked_api_request`-checked request with
+    `max_redirects=0`; now also gated by `header_scope`). Enforced by
+    `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`
+    (AST, proven on synthetic offenders).
+- Impact: SESS (adopts `browser_state`, `verify_live`), AUD and FUZZ (same header
+  mechanism). Cookie sessions from server-rendered logins behave as before. A bearer is
+  no longer sent to an out-of-scope or other-host request even if a guard let one
+  through.
+- Risk: low-medium. The header path moved from Chromium to the route; covered by the
+  route unit tests, the existing real-browser SPA tests (bearer seen on the crawl's
+  submissions, never on the unauthenticated context's) and the new authenticated-crawl
+  test.
+- Deliverables:
+  - [x] code (`tools/spider.py`, `tools/navguard.py`, `tools/browserauth.py`,
+    `tools/spa.py`) — done
+  - [x] tests: `tests/test_browser_scope.py` (route headers, hop headers, request
+    refusal, header AST guard + offenders), `tests/test_browserauth.py` (headers refused
+    on the context; header scope; https-only), `tests/test_session_browser_login.py`
+    (authenticated crawl sees the protected route; localStorage loss stops submitting;
+    revoked token stops submitting; re-login during a crawl; storage filtering) — done
+  - [x] mutation checks: localStorage check, header scope, `set_extra_http_headers`
+    reintroduced — each failed its tests — done
+  - [x] FR-CRAWL-14, NFR-CRAWL-safe traced, ARCHITECTURE #4 — done
+- Code review round 1 (reviewer B-S3; a follow-up commit): `_session_intact` tells a
+  token rotation from a loss (`_storage_rotated`): an adopted localStorage entry changed
+  to another non-empty, identifier-like value (`core.redaction.looks_like_identifier`) is
+  re-adopted and `verify_live` still decides; cleared, empty, `"null"`, `"undefined"` or
+  a non-identifier value is a loss. Tests: an app that rotates its token every 300 ms
+  keeps submitting (and the new value is re-adopted); a clear still stops it with
+  rotation on; a predicate table. Mutation checks: no rotation ever
+  (`test_a_rotated_token_keeps_the_crawl_submitting` failed); any change a rotation
+  (`test_a_cleared_token_still_stops_the_crawl_with_rotation_on` failed).
+- Review: with CC-SESS-0021 (reviewers A and B, Revision 2 items 6, 7 and 4).
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`): the targeted run (every touched test file, the session-manager tests, the browser-scope, SPA, sub-path, destructive-URL, lint, traceability and loopback-listener guards) gave 739 passed, 2 xfailed, 0 skipped, 1 failed -- `tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated`, which fails identically on the unmodified base 2150bf8 (`labgen/conformance/*_live_boot.py` `start_server` sites, outside this change; flagged, not fixed here). The authenticated-crawl, localStorage, revocation and re-login tests passed; the header-scope and `set_extra_http_headers` mutations failed their tests. Live Juice Shop crawl not run here.
+
 ### CC-CRAWL-0021 — `release` closes pages until none remain (reviewer B, BUG-0128 follow-up) (2026-10-14)
 - Change: `navguard.release` repeats its page-closing pass, at most 3 passes, while the
   context still has pages, and only then unroutes. A popup opened by one page while

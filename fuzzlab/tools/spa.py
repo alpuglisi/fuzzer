@@ -16,7 +16,8 @@ Pure helpers, testable without a browser; `tools/spider.py` wires them:
   transport, not an endpoint;
 * **SPA form submission** (FR-CRAWL-13) -- `form_refusal` is the one gate for
   ``--submit-spa-forms``, and `FORMS_JS` finds forms and form-like containers in the
-  rendered page.
+  rendered page; `click_vetted` clicks a vetted button once (also the session
+  manager's browser login, FR-SESS-19).
 """
 
 from __future__ import annotations
@@ -370,6 +371,53 @@ _LABELS_FN = r"""
 #: ``el => [text, aria, icons]`` for one element: re-read right before a click, which
 #: must find the labels the gate vetted (an app may re-render and reuse the node).
 LABELS_JS = "el => {" + _LABELS_FN + "  return buttonLabels(el);\n}"
+
+def covered(exc) -> bool:
+    """Did a click fail because another element covers the target (an overlay)?"""
+    return "intercepts pointer events" in str(exc)
+
+
+def click_vetted(page, selector: str, vetted, *, timeout_ms: int,
+                 counts: dict | None = None) -> str | None:
+    """Click the button a gate already vetted, exactly once (live-run fix; the one
+    implementation, PA-0003: the crawler's SPA submission and the session manager's
+    browser login, FR-SESS-19). A trial click (actionability only, nothing is clicked)
+    comes first. Only if something **covers** the button (Playwright: "intercepts
+    pointer events") -- a first-visit welcome dialog, a cookie bar -- is ``Escape``
+    pressed once and the trial repeated; if it is still covered, its own ``click()`` is
+    run on the element (``clicks_dispatched``). A hidden, detached or never-actionable
+    button raises (not submittable): a user could not click it either. Right before the
+    click the button's labels are read again and must equal ``vetted`` (`LABELS_JS`; an
+    app may re-render after Escape and reuse the marked node); otherwise nothing is
+    clicked (``forms_label_changed``). An overlay's own buttons are never clicked.
+    Returns ``"clicked"``, ``"dispatched"`` or None (labels changed); ``counts`` (when
+    given) is incremented for the two counted outcomes."""
+    from playwright.sync_api import Error as PlaywrightError
+    counts = counts if counts is not None else {}
+    probe = min(timeout_ms, 5000)
+    dispatch = False
+    try:
+        page.click(selector, trial=True, timeout=probe)
+    except PlaywrightError as exc:
+        if not covered(exc):
+            raise
+        page.keyboard.press("Escape")
+        try:
+            page.click(selector, trial=True, timeout=probe)
+        except PlaywrightError as again:
+            if not covered(again):
+                raise
+            dispatch = True
+    if list(page.eval_on_selector(selector, LABELS_JS)) != list(vetted):
+        counts["forms_label_changed"] = counts.get("forms_label_changed", 0) + 1
+        return None
+    if dispatch:
+        page.eval_on_selector(selector, "el => el.click()")
+        counts["clicks_dispatched"] = counts.get("clicks_dispatched", 0) + 1
+        return "dispatched"
+    page.click(selector, timeout=timeout_ms)
+    return "clicked"
+
 
 #: Material glyph names whose button acts destructively whatever its text says
 #: (``<button><mat-icon>delete</mat-icon> Item 3</button>``): refused (fail closed).

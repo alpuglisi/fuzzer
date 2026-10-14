@@ -114,15 +114,16 @@ class PlaywrightBrowserExecutor:
                 # the sentinel is a binding: every document of the page calls back here,
                 # so a hit survives the page navigating afterwards (reviewer B)
                 context.expose_binding(SENTINEL, lambda _source, t: hits.add(str(t)))
-                if self._headers:
-                    context.set_extra_http_headers(self._headers)
                 page = context.new_page()
                 # Abort destructive subresources/redirects; the navigation targets
                 # themselves are the explicit (ground-truth) points (BUG-0111).
                 allowed = {url_key(request.url)}
                 if request.store is not None:
                     allowed.add(url_key(request.store.url))
-                guard_page(context, allow=frozenset(allowed), in_scope=in_scope)
+                # storage headers go through the guarded route only, in scope, never
+                # set_extra_http_headers (FR-CRAWL-14's mechanism, CC-FUZZ-0076)
+                guard_page(context, allow=frozenset(allowed), in_scope=in_scope,
+                           headers=dict(self._headers) or None)
                 # a dialog is dismissed and never counted: the payloads call the
                 # sentinel, and an app's own alert/confirm is not the probe's doing
                 # (BUG-0129)

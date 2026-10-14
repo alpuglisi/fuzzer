@@ -761,13 +761,14 @@ def test_the_browser_guard_catches_synthetic_offenders(tmp_path):
     ]
 
 
-def test_the_launch_sites_are_the_three_known_ones():
-    """Not vacuous: the guard sees every launch site there is."""
+def test_the_launch_sites_are_the_four_known_ones():
+    """Not vacuous: the guard sees every launch site there is (the session manager's
+    browser login, FR-SESS-19, is the fourth)."""
     sites = set()
     for path in (ROOT / "fuzzlab").rglob("*.py"):
         if ".chromium.launch(" in path.read_text():
             sites.add(path.name)
-    assert sites == {"spider.py", "fetcher.py", "browserexec.py"}
+    assert sites == {"spider.py", "fetcher.py", "browserexec.py", "browserlogin.py"}
 
 
 # --- BUG-0126: the M6 executor honours the configured Chromium; no browser, no verdict --
@@ -1108,3 +1109,117 @@ def test_an_apps_own_dialog_is_never_a_hit(monkeypatch):
         assert obs.executed is False
     finally:
         server.shutdown()
+
+
+# --- FR-CRAWL-14: session headers through the route only; the login window's refusal ---
+class _HdrRoute(_Route):
+    def fetch(self, max_redirects=None, headers=None):
+        assert max_redirects == 0
+        self.fetched.append(self.request.url)
+        self.sent_headers = headers
+        return self.site.get(self.request.url, _Resp())
+
+
+class _HdrApi(_Api):
+    def fetch(self, url, method=None, max_redirects=None, data=None, headers=None):
+        assert max_redirects == 0
+        self.calls.append((url, method, data, headers))
+        return self.site.get(url, _Resp())
+
+
+BEARER = {"Authorization": "Bearer SESSION"}
+
+
+def test_session_headers_are_added_by_the_route_only_in_scope():
+    """Reviewers A6/B7: ``route.fetch(headers=)`` after ``in_scope`` passes, merged
+    with the request's own headers; nothing for an out-of-scope URL (never fetched) or
+    one ``header_scope`` refuses (fetched without them)."""
+    handler = make_route_handler(in_scope=_scope(), headers=BEARER,
+                                 header_scope=lambda u: "/public" not in u)
+    inside = _HdrRoute(f"{H}/api/me")
+    handler(inside)
+    assert inside.sent_headers == {"content-type": "x/y", **BEARER}
+    outside = _HdrRoute("http://127.0.0.1:3000/api/me")
+    handler(outside)
+    assert outside.outcome == "abort" and outside.fetched == []
+    public = _HdrRoute(f"{H}/public/x")
+    handler(public)
+    assert public.fetched == [f"{H}/public/x"] and public.sent_headers is None
+    no_session = _HdrRoute(f"{H}/api/me")
+    make_route_handler(in_scope=_scope())(no_session)
+    assert no_session.sent_headers is None
+
+
+def test_session_headers_ride_a_redirect_hop_only_when_it_is_in_scope():
+    site = {f"{H}/a": _Resp(302, "/b"), f"{H}/b": _Resp(302, "/public/c")}
+    api = _HdrApi(site)
+    route = _HdrRoute(f"{H}/a", site)
+    make_route_handler(in_scope=_scope(), api=api, headers=BEARER,
+                       header_scope=lambda u: "/public" not in u)(route)
+    assert [(c[0], c[3]) for c in api.calls] == [(f"{H}/b", BEARER),
+                                                 (f"{H}/public/c", None)]
+    out = []
+    site = {f"{H}/r": _Resp(302, "http://127.0.0.1:3000/x")}
+    api = _HdrApi(site)
+    make_route_handler(in_scope=_scope(), api=api, headers=BEARER,
+                       on_out_of_scope=out.append)(_HdrRoute(f"{H}/r", site))
+    assert api.calls == [] and out == ["http://127.0.0.1:3000/x"]
+
+
+def test_a_request_refusal_aborts_before_any_fetch_and_on_a_body_keeping_hop():
+    """FR-SESS-19's login window: ``request_refusal`` sees the method, URL, headers and
+    body before the request leaves, and again for a 307/308 hop that keeps the body."""
+    seen, aborted = [], []
+
+    def refusal(method, url, headers, body):
+        seen.append((method, url, body))
+        return "account endpoint" if "/api/Users" in url else None
+    route = _HdrRoute(f"{H}/api/Users", method="POST")
+    make_route_handler(in_scope=_scope(), request_refusal=refusal,
+                       on_abort=lambda u, r: aborted.append(r))(route)
+    assert route.outcome == "abort" and route.fetched == []
+    assert aborted == ["account endpoint"]
+    site = {f"{H}/login": _Resp(307, "/api/Users")}
+    api = _HdrApi(site)
+    route = _HdrRoute(f"{H}/login", site, method="POST")
+    make_route_handler(in_scope=_scope(), api=api, request_refusal=refusal)(route)
+    assert route.outcome == "abort" and api.calls == []
+    assert seen[-1] == ("POST", f"{H}/api/Users", b"body")
+
+
+def _extra_header_offenders(root: Path) -> list[str]:
+    """``set_extra_http_headers(...)`` anywhere, or ``extra_http_headers=`` on a
+    browser's ``new_context`` (not an API-request client's): either hands a session's
+    headers to every request the browser sends (FR-CRAWL-14)."""
+    out = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            where = f"{path.relative_to(root)}:{node.lineno}"
+            if node.func.attr == "set_extra_http_headers":
+                out.append(f"{where}: set_extra_http_headers")
+            api_client = isinstance(node.func.value, ast.Attribute) and \
+                node.func.value.attr == "request"
+            if node.func.attr in ("new_context", "new_page") and not api_client and \
+                    any(k.arg == "extra_http_headers" for k in node.keywords):
+                out.append(f"{where}: extra_http_headers on a browser context")
+    return out
+
+
+def test_no_browser_context_gets_session_headers_outside_the_route():
+    assert _extra_header_offenders(ROOT / "fuzzlab") == []
+
+
+def test_the_header_guard_catches_synthetic_offenders(tmp_path):
+    (tmp_path / "rogue.py").write_text(
+        "def a(ctx, h):\n"
+        "    ctx.set_extra_http_headers(h)\n"
+        "def b(browser, h):\n"
+        "    return browser.new_context(extra_http_headers=h)\n"
+        "def c(pw, h):\n"
+        "    return pw.request.new_context(extra_http_headers=h)\n")
+    assert _extra_header_offenders(tmp_path) == [
+        "rogue.py:2: set_extra_http_headers",
+        "rogue.py:4: extra_http_headers on a browser context"]
