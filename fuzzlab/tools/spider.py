@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import copy
 import functools
 import logging
 import sqlite3
@@ -100,6 +102,19 @@ class StorageManager:
                 value INTEGER
             )
         ''')
+        # Forms a reveal made visible (forms phase 4, FR-CRAWL-16 G2e): the route they
+        # are attributed to and their `spa.form_signature`, for a later opt-in. Never
+        # values; the page URL passes `redact_url_identifiers`.
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS revealed_forms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_url TEXT,
+                route TEXT,
+                signature TEXT,
+                submitted INTEGER DEFAULT 0,
+                UNIQUE (route, signature)
+            )
+        ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
                           ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
@@ -120,6 +135,7 @@ class StorageManager:
         self.cursor.execute('DELETE FROM selector_verdicts')
         self.cursor.execute('DELETE FROM discovered_requests')
         self.cursor.execute('DELETE FROM crawl_stats')
+        self.cursor.execute('DELETE FROM revealed_forms')
         self.conn.commit()
         self._keys = set()
 
@@ -162,6 +178,26 @@ class StorageManager:
             return None
         except sqlite3.IntegrityError:
             return "duplicate"
+
+    def record_revealed_form(self, page_url, route, signature, submitted=False):
+        """File a form a reveal made visible (FR-CRAWL-16, G2e): its route and signature;
+        the page URL redacted (`core.redaction.redact_url_identifiers`). A later
+        submission of the same form marks it ``submitted``. Returns True when new."""
+        from fuzzlab.core.redaction import redact_url_identifiers
+        row = self.cursor.execute("SELECT id FROM revealed_forms WHERE route = ? AND "
+                                  "signature = ?", (route, signature)).fetchone()
+        if row is not None:
+            if submitted:
+                self.cursor.execute("UPDATE revealed_forms SET submitted = 1 WHERE id = ?",
+                                    (row[0],))
+                self.conn.commit()
+            return False
+        self.cursor.execute(
+            "INSERT INTO revealed_forms (page_url, route, signature, submitted) "
+            "VALUES (?, ?, ?, ?)",
+            (redact_url_identifiers(page_url), route, signature, int(bool(submitted))))
+        self.conn.commit()
+        return True
 
     def record_verdict(self, sig, verdict):
         """File what a submitted selector form did (``settings`` wins over
@@ -250,7 +286,7 @@ class LocalSpider:
     def __init__(self, start_url, max_depth=3, db_name="spider_results.db",
                  engine="auto", timeout_ms=10000, resume=False,
                  session_manager=None, identity=None, selector_forms=None,
-                 spa_routes=True, submit_spa_forms=None):
+                 spa_routes=True, submit_spa_forms=None, reveal=True):
         self.start_url = start_url
         self.max_depth = max_depth
         self.storage = StorageManager(db_name)
@@ -372,7 +408,30 @@ class LocalSpider:
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "deletes_blocked", "forms_submitted",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
-            "submissions_over_cap", "clicks_dispatched", "forms_label_changed"), 0)
+            "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
+            # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
+            "reveals_clicked", "reveals_refused", "reveals_over_cap",
+            "reveal_writes_blocked", "reveal_ws_dropped", "reveal_navigations_captured",
+            "revealed_links", "revealed_forms", "session_losses_after_reveal",
+            "g1_controls_filled", "g1_forms_unsatisfiable"), 0)
+        # --- forms phase 4: the reveal window (W1-W4) and reveals (FR-CRAWL-16) ---
+        #: Reveal navigation: on by default in the Playwright engine (--no-reveal); a
+        #: reveal can only read (the window), like following a link.
+        self._reveal_on = self.engine == "playwright" and bool(reveal)
+        #: The open reveal window (W1), or None: ``{"context", "lifted_for", "own_nav",
+        #: "aborted", "navs", "restore_aborted", "pages"}``.
+        self._win = None
+        #: Why reveals stopped for the whole crawl (a second session loss), or None.
+        self.reveals_stopped = None
+        self._reveal_stopped_routes: set = set()
+        self._reveal_seen: set = set()
+        self._card_counts: dict = {}
+        self._reveal_losses = 0
+        self._revealed_link_keys: set = set()
+        self._browser_session = None
+        self._adopted_original: dict = {}
+        self._g1_attempts = 0
+        self._rendered_ok = False
 
     @staticmethod
     def _start_dir(url):
@@ -430,6 +489,10 @@ class LocalSpider:
             self._auth_headers = dict(session.headers)
             self._header_scope = session.header_scope
             self._adopted_storage = dict(session.local_storage)
+            # what a re-adoption after a session loss restores (W4): the values as
+            # adopted, never a rotated one
+            self._browser_session = session
+            self._adopted_original = copy.deepcopy(session.local_storage)
         # service workers would fetch outside page.route (BUG-0111)
         context = self._browser.new_context(
             service_workers="block",
@@ -462,14 +525,135 @@ class LocalSpider:
         none."""
         from fuzzlab.tools.navguard import guard_page
         guard_page(context, allow=self._allow,
-                   on_abort=lambda url, reason: self.skipped_destructive.setdefault(url, reason),
+                   on_abort=self._note_guard_abort,
                    in_scope=self._in_scope, on_out_of_scope=self._note_out_of_scope,
                    method_refusal=functools.partial(self._method_refusal,
                                                     context=context),
                    observe=functools.partial(self._observe,
                                              scripts=scripts and self._spa_on),
                    headers=(self._auth_headers or None) if session else None,
-                   header_scope=self._header_scope if session else None)
+                   header_scope=self._header_scope if session else None,
+                   # the reveal window (W2, W3): every context this crawl opens
+                   window=functools.partial(self._window_refusal, context=context),
+                   ws_hold=functools.partial(self._ws_hold, context),
+                   on_ws_drop=self._note_ws_drop)
+
+    def _note_guard_abort(self, url, reason):
+        """The guard aborted ``url`` (destructive, a refused method or body): recorded;
+        while the reveal window is open it also counts as something the window
+        aborted (W4's live probe)."""
+        self.skipped_destructive.setdefault(url, reason)
+        if self._win is not None:
+            self._win["aborted"] += 1
+
+    # ----- the reveal window (forms phase 4: W1-W3) -----
+    def _window_refusal(self, method, url, navigation, context=None):
+        """W2: while the window is open, a request (from any context of this crawl) is
+        aborted unless `spa.window_request_refusal` lets it through -- or it comes from
+        the context whose vetted final submission lifted the window (W1), or it is the
+        window's own reload of its route (GET, that route's URL, from that context).
+        A refused navigation's target is kept, to be queued through the normal gates."""
+        win = self._win
+        if win is None:
+            return None
+        if win["lifted_for"] is not None and context is win["lifted_for"]:
+            return None
+        if navigation and method in ("GET", "HEAD") and context is win["context"] \
+                and url_key(url) in win["own_nav"]:
+            return None
+        why = spa.window_request_refusal(method, url, navigation)
+        if why is None:
+            return None
+        win["aborted"] += 1
+        if navigation:
+            win["navs"].append(url)
+        else:
+            self.spa_counts["reveal_writes_blocked"] += 1
+        return why
+
+    def _ws_hold(self, context):
+        """W3: hold (drop) a page-to-server WebSocket message while the window is open,
+        unless the window was lifted for ``context``'s vetted submission."""
+        win = self._win
+        return win is not None and not (win["lifted_for"] is not None
+                                        and context is win["lifted_for"])
+
+    def _note_ws_drop(self, _url):
+        self.spa_counts["reveal_ws_dropped"] += 1
+        if self._win is not None:
+            self._win["aborted"] += 1
+
+    @contextlib.contextmanager
+    def _window(self, page, context, page_url):
+        """The reveal window (W1): opened before the first reveal click or G1
+        interaction; on exit the route is closed inside it -- ``Escape``, popups opened
+        in it closed, the route reloaded (GET; `_restore`) -- and it is lifted only after
+        a final quiet period (`_quiesce`: nothing in flight, then a round trip that
+        flushes pending events). Re-entrant: a G1 inside a reveal uses the open window.
+        If the close fails, the page is sent to ``about:blank`` (its timers die) before
+        the window is lifted."""
+        if self._win is not None:
+            yield self._win
+            return
+        win = {"context": context, "lifted_for": None, "own_nav": frozenset(),
+               "aborted": 0, "navs": [], "restore_aborted": 0,
+               "pages": list(getattr(context, "pages", []) or [])}
+        self._win = win
+        try:
+            yield win
+        finally:
+            try:
+                win["lifted_for"] = None                  # lifted for one click only
+                self._restore(page, page_url, win)
+                self._quiesce(page)
+            except PlaywrightError as exc:
+                logging.info(f"the reveal window could not close {page_url} cleanly "
+                             f"({str(exc).splitlines()[0][:80]}); leaving the page")
+                with contextlib.suppress(PlaywrightError):
+                    page.goto("about:blank", timeout=self.timeout_ms)
+            finally:
+                self._win = None
+
+    def _restore(self, page, page_url, win):
+        """Close what a reveal opened, inside the window (W1, G2c): ``Escape`` (never a
+        dialog's own Cancel/Close button), close popups opened in the window, then
+        reload the route (a GET navigation the window lets through for this context and
+        this URL only) and let it settle. A dialog's timers die with the reload."""
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(100)
+        for extra in list(getattr(win["context"], "pages", []) or []):
+            if extra not in win["pages"] and extra is not page:
+                with contextlib.suppress(PlaywrightError):
+                    extra.close()
+        before = win["aborted"]
+        win["own_nav"] = frozenset({url_key(page_url)})
+        try:
+            if spa.visit_key(page.url) != spa.visit_key(page_url):
+                page.goto(page_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+            self._settle(page)
+        finally:
+            win["own_nav"] = frozenset()
+            win["restore_aborted"] += win["aborted"] - before
+
+    def _quiesce(self, page):
+        """The final quiet period before the window is lifted (W1): settle, flush the
+        driver's pending events with a round trip, and settle again (bounded) while a
+        request is still in flight."""
+        self._settle(page)
+        for _ in range(2):
+            page.evaluate("() => 0")
+            if self._inflight.get(id(page), 0) == 0:
+                return
+            self._settle(page)
+
+    def _lift_for(self, context):
+        """``click_vetted``'s ``before_click``: lift the window for ``context``'s one
+        vetted final submission (W1)."""
+        def lift():
+            if self._win is not None:
+                self._win["lifted_for"] = context
+        return lift
 
     def _track(self, page):
         """Count a page's requests in flight, so a settle waits for the app's own XHRs
@@ -661,6 +845,7 @@ class LocalSpider:
         crawler falls back to a plain request rather than dropping them.
         """
         self._xhr_urls = []   # collected by _on_request during this navigation
+        self._rendered_ok = False
         try:
             return self._goto_and_parse(url)
         except Exception as e:
@@ -705,6 +890,7 @@ class LocalSpider:
                 text = self._page.inner_text('body')
             except Exception:
                 text = None
+            self._rendered_ok = True          # the browser shows this page (reveals)
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
 
     # ----- landing URLs, forms, selector navigation (forms phase 1) -----
@@ -725,6 +911,11 @@ class LocalSpider:
             if (self._submit_routes is not None and self._last_html is not None
                     and self._is_spa_page(url)):
                 self._submit_spa_forms(final or url)
+        if self._reveal_on and self._last_html is not None and self._rendered_ok:
+            # G2 (FR-CRAWL-16): menus, dialogs and drawers, inside the reveal window
+            more += self._reveal_page(final or url, depth)
+            if self._spa_on:
+                more += self._queue_routes(final or url, depth)  # scripts a reveal loaded
         if not self._last_html:
             return more
         from fuzzlab.core.forms import form_record
@@ -820,12 +1011,13 @@ class LocalSpider:
         except PlaywrightError as exc:
             logging.info(f"could not read the forms on {page_url} ({exc})")
             return
+        stale = False
         for form in forms:
             sig = spa.form_signature(form)
             if sig in self._submitted_sigs:
                 continue
             self._submitted_sigs.add(sig)
-            why = spa.form_refusal(form, route, named=named)
+            why = spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
             if why:
                 self.spa_counts["forms_refused"] += 1
                 logging.info(f"SPA form on {page_url} not submitted: {why}")
@@ -841,6 +1033,15 @@ class LocalSpider:
             if anonymous:
                 self._submit_anonymously(page_url, sig, explicit)
                 continue
+            if stale:
+                # an earlier submission (or G1's reload, W1) re-rendered the page: the
+                # form is found again by its signature (its marks are gone)
+                form = self._refind_form(self._page, sig)
+                if form is None:
+                    logging.info(f"SPA form on {page_url} no longer rendered: not "
+                                 f"submitted")
+                    continue
+            stale = True
             if self._fill_and_click(self._page, self._context, form, page_url,
                                     explicit) and \
                     self._authenticated:
@@ -855,7 +1056,21 @@ class LocalSpider:
     def _fill_and_click(self, page, context, form, page_url, explicit):
         """Fill ``form``'s typed controls with our fillers and click its button once.
         Returns True when the click happened (counted). A DELETE it causes is allowed
-        only on a named route (``explicit``) and only from ``context``."""
+        only on a named route (``explicit``) and only from ``context``.
+
+        On a named route (``explicit``) this is constraint-aware (G1, FR-CRAWL-15) and
+        runs entirely inside the reveal window (W1): the fill, every G1 interaction and
+        the checks happen with the window's write block on; only the vetted final click
+        lifts it, for that click (`spa.click_vetted`'s ``before_click``); the route is
+        then closed and reloaded inside the window again."""
+        if not explicit:
+            return self._fill_and_click_now(page, context, form, page_url, explicit,
+                                            g1=False)
+        with self._window(page, context, page_url):
+            return self._fill_and_click_now(page, context, form, page_url, explicit,
+                                            g1=True)
+
+    def _fill_and_click_now(self, page, context, form, page_url, explicit, *, g1):
         for (name, kind), cid in zip(form["controls"], form["ids"]):
             if not spa.fillable(kind) or (kind != "password"
                                           and spa.sensitive_control(name)):
@@ -867,10 +1082,25 @@ class LocalSpider:
                 pass                                    # e.g. a range or read-only input
         button = form.get("button_id")
         selector = f'[data-fuzzlab-id="{button}"]'
+        if g1:
+            try:
+                why = self._g1(page, form)
+            except PlaywrightError as exc:
+                why = f"constraint-aware filling failed ({str(exc).splitlines()[0][:80]})"
+            if why is not None:
+                self.spa_counts["forms_not_submittable"] += 1
+                logging.info(f"SPA form on {page_url} not submittable: {why}")
+                return False
         try:
             if not button or not page.is_enabled(selector, timeout=self.timeout_ms):
                 self.spa_counts["forms_not_submittable"] += 1
-                logging.info(f"SPA form on {page_url} not submittable (no enabled button)")
+                why = "no enabled button"
+                if g1 and button:
+                    still = self._g1_invalid_names(page, form)
+                    why = (f"invalid after {self._g1_attempts} attempts: "
+                           f"{', '.join(still) or '(no control reports invalid)'}")
+                    self.spa_counts["g1_forms_unsatisfiable"] += 1
+                logging.info(f"SPA form on {page_url} not submittable ({why})")
                 return False
         except PlaywrightError:
             self.spa_counts["forms_not_submittable"] += 1
@@ -880,7 +1110,8 @@ class LocalSpider:
         try:
             how = self._click_vetted(page, selector, [
                 form.get("button") or "", form.get("button_aria") or "",
-                form.get("button_icons") or ""])
+                form.get("button_icons") or ""],
+                before_click=self._lift_for(context) if g1 else None)
             if how is None:
                 logging.info(f"SPA form on {page_url} not clicked: its button's labels "
                              f"changed after the gate vetted them")
@@ -900,13 +1131,151 @@ class LocalSpider:
             self._capture_source, self._capture_page = "passive", None
             self._delete_ok_for = None
 
-    def _click_vetted(self, page, selector, vetted):
+    # ----- G1: constraint-aware filling (forms phase 4, FR-CRAWL-15) -----
+    def _g1_invalid_names(self, page, form):
+        names = dict(zip(form["ids"], (n for n, _k in form["controls"])))
+        infos = page.evaluate(spa.G1_READ_JS, list(form["ids"]))
+        return [names.get(i["id"]) or i["id"] for i in infos
+                if not i.get("missing") and i.get("invalid")]
+
+    def _g1(self, page, form):
+        """Make each invalid control valid with ladder values (G1a), inside the window.
+        Returns None, or why the form is not submittable: a sensitive or credential-like
+        control that is invalid (G1b; never filled), an object-selector or identifier
+        select / radio, or an option failing the label gate (G1c), a required checkbox
+        whose label fails the gate (G1d). Attempts are counted in ``_g1_attempts``
+        (at most `spa.G1_MAX_ATTEMPTS` per control)."""
+        self._g1_attempts = 0
+        names = dict(zip(form["ids"], (n for n, _k in form["controls"])))
+        infos = page.evaluate(spa.G1_READ_JS, list(form["ids"]))
+        done_groups = set()
+        for info in infos:
+            if info.get("missing") or not info.get("invalid"):
+                continue
+            name = names.get(info["id"]) or info["id"]
+            sel = f'[data-fuzzlab-id="{info["id"]}"]'
+            kind = info.get("kind") or "text"
+            if kind in ("hidden", "submit", "button", "reset", "image", "file"):
+                continue
+            if kind == "password":
+                continue                                # the filler only (G1b)
+            hit = spa.g1_sensitive(info.get("names") or [name])
+            if hit:
+                return f"a sensitive or credential control is invalid ({hit!r}): never filled"
+            if kind == "checkbox":
+                why = spa.checkbox_refusal(info.get("label"))
+                if why:
+                    return f"required checkbox {info.get('label')!r}: {why}"
+                self._g1_attempts += 1
+                page.eval_on_selector(sel, "el => el.click()")
+            elif kind == "radio":
+                if info.get("group") in done_groups:
+                    continue
+                done_groups.add(info.get("group"))
+                why = self._g1_radio(page, info, infos)
+                if why:
+                    return why
+            elif kind == "select":
+                why = (self._g1_custom_select(page, sel, info)
+                       if info.get("tag") == "custom-select"
+                       else self._g1_native_select(page, sel, info))
+                if why:
+                    return why
+            else:
+                self._g1_ladder(page, sel, info)
+            self._settle(page, budget_ms=1000)
+            if not page.eval_on_selector(sel, spa.G1_INVALID_JS):
+                self.spa_counts["g1_controls_filled"] += 1
+                logging.info(f"G1: control {name!r} ({kind}) made valid")
+            else:
+                logging.info(f"G1: control {name!r} ({kind}) still invalid")
+        return None
+
+    def _g1_ladder(self, page, sel, info):
+        """Try ladder values (`spa.g1_candidates`; a pattern's candidates must pass the
+        page's own RegExp first, in a bounded worker) until the control is valid."""
+        cands = spa.g1_candidates(info)
+        if info.get("pattern") and info.get("kind") not in ("number", "range"):
+            verdicts = page.evaluate(spa.PATTERN_TEST_JS, {
+                "pattern": info["pattern"], "candidates": cands,
+                "timeout": spa.G1_PATTERN_TIMEOUT_MS})
+            cands = [c for c, ok in zip(cands, verdicts or []) if ok]
+        for value in cands[:spa.G1_MAX_ATTEMPTS]:
+            self._g1_attempts += 1
+            if info.get("kind") == "range":
+                page.eval_on_selector(sel, spa.G1_SET_JS, value)
+            else:
+                page.fill(sel, value, timeout=self.timeout_ms)
+            if not page.eval_on_selector(sel, spa.G1_INVALID_JS):
+                return
+
+    @staticmethod
+    def _g1_label(info):
+        return info.get("label") or next(iter(info.get("names") or []), info["id"])
+
+    def _g1_native_select(self, page, sel, info):
+        options = [(v, t) for v, t, disabled in info.get("options") or [] if not disabled]
+        chosen = next(((v, t) for v, t in options if v and t), None)
+        why = spa.select_refusal(info.get("names") or [], options,
+                                 chosen[1] if chosen else "")
+        if why or chosen is None:
+            return f"select {self._g1_label(info)!r}: {why or 'no option'}"
+        self._g1_attempts += 1
+        page.select_option(sel, value=chosen[0], timeout=self.timeout_ms)
+        return None
+
+    def _g1_custom_select(self, page, sel, info):
+        """A mat-select (role=combobox): its names are judged before it is opened; it is
+        opened by a click, its options read and judged, and the first non-empty one
+        chosen by a click (the option click is not a submission; G1c)."""
+        why = spa.select_refusal(info.get("names") or [], [], "")
+        if why:
+            return f"select {self._g1_label(info)!r}: {why}"
+        page.click(sel, timeout=self.timeout_ms)
+        self._settle(page, budget_ms=1000)
+        opts = [o for o in page.evaluate(spa.G1_OPTIONS_JS) if not o.get("disabled")]
+        chosen = next((o for o in opts if o.get("text")), None)
+        why = spa.select_refusal(info.get("names") or [],
+                                 [(o.get("value"), o.get("text")) for o in opts],
+                                 chosen["text"] if chosen else "")
+        if why or chosen is None:
+            page.keyboard.press("Escape")
+            return f"select {self._g1_label(info)!r}: {why or 'no option'}"
+        self._g1_attempts += 1
+        page.click(f'[data-fuzzlab-opt="{chosen["id"]}"]', timeout=self.timeout_ms)
+        return None
+
+    def _g1_radio(self, page, info, infos):
+        group = [i for i in infos if i.get("kind") == "radio" and not i.get("missing")
+                 and i.get("group") == info.get("group")]
+        if any(i.get("checked") for i in group):
+            return None
+        options = [(i.get("value") or "", i.get("label") or "") for i in group]
+        chosen = next((i for i in group if not spa.checkbox_refusal(i.get("label"))), None)
+        why = spa.select_refusal([info.get("group") or ""] + (info.get("names") or []),
+                                 options, chosen.get("label") if chosen else "")
+        if why or chosen is None:
+            return (f"radio group {info.get('group')!r}: "
+                    f"{why or 'no option passes the label gate'}")
+        self._g1_attempts += 1
+        page.eval_on_selector(f'[data-fuzzlab-id="{chosen["id"]}"]', "el => el.click()")
+        return None
+
+    def _click_vetted(self, page, selector, vetted, before_click=None):
         """Click the button the gate already vetted, exactly once: `spa.click_vetted`
         (the one implementation, shared with the session manager's browser login),
         counting ``clicks_dispatched`` and ``forms_label_changed`` here. Returns
         ``"clicked"``, ``"dispatched"`` or None (labels changed)."""
         return spa.click_vetted(page, selector, vetted, timeout_ms=self.timeout_ms,
-                                counts=self.spa_counts)
+                                counts=self.spa_counts, before_click=before_click)
+
+    def _refind_form(self, page, sig):
+        """The rendered form with signature ``sig`` (marked afresh), or None."""
+        try:
+            return next((f for f in page.evaluate(spa.FORMS_JS, 20)
+                         if spa.form_signature(f) == sig), None)
+        except PlaywrightError:
+            return None
 
     def _submit_anonymously(self, page_url, sig, explicit):
         """Load the route in a fresh unauthenticated context (same browser, so the same
@@ -945,6 +1314,15 @@ class LocalSpider:
         login's protected probe). A localStorage entry changed to another non-empty,
         identifier-like value is a token rotation: re-adopted, not a loss. Returns ``(ok, why)``; anything that cannot be
         verified is a loss (fail closed)."""
+        ok, why = self._client_session_intact()
+        if not ok:
+            return ok, why
+        return self._live_session_intact()
+
+    def _client_session_intact(self):
+        """The client-side half of `_session_intact` (no network; W4): each injected
+        cookie and each adopted localStorage entry still holds its value (a rotation
+        re-adopted). Returns ``(ok, why)``; fail closed."""
         jar = {c["name"]: c["value"] for c in self._context.cookies()}
         for name, value in self._injected_cookies:
             if jar.get(name) != value:
@@ -968,6 +1346,11 @@ class LocalSpider:
                     entries[name] = current
                     continue
                 return False, f"localStorage entry {name!r} was cleared or invalidated"
+        return True, None
+
+    def _live_session_intact(self):
+        """The server half of `_session_intact`: the session manager's `verify_live` (a
+        browser login's protected probe). Fail closed."""
         verify = getattr(self._session_manager, "verify_live", None)
         if verify is not None:
             host = urlparse(self._auth_base_url).hostname or ""
@@ -977,6 +1360,277 @@ class LocalSpider:
             except Exception as exc:  # noqa: BLE001 - unverifiable counts as lost
                 return False, f"the session could not be verified ({type(exc).__name__})"
         return True, None
+
+    # ----- G2: reveal navigation (forms phase 4, FR-CRAWL-16) -----
+    def _reveal_page(self, page_url, depth):
+        """Click this page's reveal candidates (`spa.REVEAL_JS`), each once per (route,
+        label signature), each inside its own reveal window. Bounded: per page, per
+        crawl, cards per structural signature. Returns more ``(url, depth, source)``."""
+        if self.reveals_stopped or self._page is None:
+            return []
+        route = spa.route_of(page_url, self._last_base or self._app_base)
+        if route in self._reveal_stopped_routes:
+            return []
+        try:
+            cands = self._page.evaluate(spa.REVEAL_JS, spa.MAX_REVEAL_CANDIDATES)
+        except PlaywrightError as exc:
+            logging.info(f"could not read the reveal candidates on {page_url} ({exc})")
+            return []
+        more, here = [], 0
+        for cand in cands:
+            if self.reveals_stopped or route in self._reveal_stopped_routes:
+                break
+            key = spa.reveal_key(route, cand)
+            if key in self._reveal_seen:
+                continue
+            self._reveal_seen.add(key)
+            why = spa.reveal_refusal(cand.get("labels")) or (
+                "a card text too long to judge whole" if cand.get("long") else None)
+            if why:
+                self.spa_counts["reveals_refused"] += 1
+                logging.info(f"reveal on {page_url} refused: {why}")
+                continue
+            card = (route, cand.get("sig")) if cand.get("kind") == "card" else None
+            if card and self._card_counts.get(card, 0) >= spa.MAX_CARDS_PER_SIGNATURE:
+                self.spa_counts["reveals_over_cap"] += 1
+                continue
+            if here >= spa.MAX_REVEALS_PER_PAGE or \
+                    self.spa_counts["reveals_clicked"] >= spa.MAX_REVEALS:
+                self.spa_counts["reveals_over_cap"] += 1
+                continue
+            if card:
+                self._card_counts[card] = self._card_counts.get(card, 0) + 1
+            here += 1
+            try:
+                more += self._reveal_one(page_url, route, cand, depth)
+            except PlaywrightError as exc:
+                logging.info(f"reveal on {page_url} failed "
+                             f"({str(exc).splitlines()[0][:80]})")
+        return more
+
+    def _find_candidate(self, page, cand, route):
+        """The candidate with ``cand``'s key on the page now (marked afresh), or None."""
+        key = spa.reveal_key(route, cand)
+        return next((c for c in page.evaluate(spa.REVEAL_JS, spa.MAX_REVEAL_CANDIDATES)
+                     if spa.reveal_key(route, c) == key), None)
+
+    def _reveal_click(self, page, cand, route):
+        """Click one vetted candidate, in the open window: an announcer through
+        `spa.click_vetted` (labels re-read, covered-only dispatch); a card by its own
+        ``el.click()`` after its labels are re-read (never a coordinate click, B6).
+        Returns True when clicked."""
+        found = self._find_candidate(page, cand, route)
+        if found is None:
+            return False
+        sel = f'[data-fuzzlab-reveal="{found["id"]}"]'
+        if found.get("kind") == "card":
+            if list(page.eval_on_selector(sel, spa.CARD_LABELS_JS)) != \
+                    list(found.get("labels") or []):
+                return False
+            page.eval_on_selector(sel, "el => el.click()")
+            return True
+        return spa.click_vetted(page, sel, found.get("labels") or [],
+                                timeout_ms=self.timeout_ms, counts={}) is not None
+
+    def _hrefs(self, page):
+        return page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
+
+    def _revealed(self, page, before_links, url_before, win):
+        """What a reveal made reachable: new ``a[href]`` targets, a changed page URL (a
+        same-document route change), and navigations the window aborted (W2)."""
+        found = [h for h in self._hrefs(page) if h not in before_links]
+        if page.url.lower().startswith(("http://", "https://")) and \
+                spa.visit_key(page.url) != spa.visit_key(url_before):
+            found.append(page.url)
+            self.spa_counts["reveal_navigations_captured"] += 1
+        navs, win["navs"] = win["navs"], []
+        self.spa_counts["reveal_navigations_captured"] += len(navs)
+        return found + navs
+
+    def _reveal_one(self, page_url, route, cand, depth):
+        """One reveal (G2), inside one window (W1): click, settle, collect links, routes
+        and forms; click the revealed menu items that pass the label gate (each after a
+        reload and a re-click, inside the window; G2b); a revealed form is filed (G2e)
+        and submitted only on a named route. The window closes with Escape and a reload
+        (G2c). Afterwards the session is checked (W4). Returns more to queue."""
+        page, context = self._page, self._context
+        found = []
+        with self._window(page, context, page_url) as win:
+            before_links = set(self._hrefs(page))
+            url_before = page.url
+            before_forms = {spa.form_signature(f) for f in page.evaluate(spa.FORMS_JS, 20)}
+            if not self._reveal_click(page, cand, route):
+                logging.info(f"reveal on {page_url} not clicked: the candidate changed")
+                return []
+            self.spa_counts["reveals_clicked"] += 1
+            self._settle(page)
+            found += self._revealed(page, before_links, url_before, win)
+            new_forms = [f for f in page.evaluate(spa.FORMS_JS, 20)
+                         if spa.form_signature(f) not in before_forms]
+            self._record_revealed_forms(page, page_url, route, new_forms)
+            submitted = self._submit_revealed(page, context, page_url, route, new_forms)
+            items = [] if submitted else page.evaluate(spa.MENU_ITEMS_JS)
+            todo = []
+            for item in items:
+                if item.get("href") or item.get("disabled"):
+                    continue                     # a link item: queued as a link
+                why = spa.reveal_refusal(item.get("labels"))
+                if why:
+                    self.spa_counts["reveals_refused"] += 1
+                    logging.info(f"revealed menu item on {page_url} not clicked: {why}")
+                    continue
+                todo.append(item)
+            for i, item in enumerate(todo[:spa.MAX_MENU_ITEMS]):
+                if i:
+                    self._restore(page, page_url, win)
+                    if not self._reveal_click(page, cand, route):
+                        break
+                    self._settle(page)
+                    url_before = page.url
+                match = next((m for m in page.evaluate(spa.MENU_ITEMS_JS)
+                              if m.get("labels") == item.get("labels")), None)
+                if match is None:
+                    continue
+                if spa.click_vetted(page, f'[data-fuzzlab-item="{match["id"]}"]',
+                                    match.get("labels") or [], timeout_ms=self.timeout_ms,
+                                    counts={}) is None:
+                    continue
+                self._settle(page)
+                found += self._revealed(page, before_links, url_before, win)
+        more = self._queue_revealed(page_url, found, depth)
+        if win["restore_aborted"]:
+            # the close ran with the window's write block on: a clean reload (a page
+            # visit, as the crawl makes) so the next reveal sees the app's normal state
+            with contextlib.suppress(PlaywrightError):
+                page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+                self._settle(page)
+        self._reveal_session_check(win["aborted"], route)
+        return more
+
+    def _record_revealed_forms(self, page, page_url, route, forms):
+        """File the forms a reveal showed (G2e): ``revealed_forms`` (route, signature),
+        and each real ``<form>`` through the existing phase 1/2 record (`form_record`:
+        its own action and method, never relocated, BUG-0115)."""
+        from fuzzlab.core.forms import form_record
+        for f in forms:
+            if self.storage.record_revealed_form(page_url, route, spa.form_signature(f)):
+                self.spa_counts["revealed_forms"] += 1
+        if forms:
+            for form in BeautifulSoup(page.content(), 'html.parser').find_all('form'):
+                self.storage.record_form(form_record(form, page_url))
+
+    def _submit_revealed(self, page, context, page_url, route, forms):
+        """Submit a revealed form only as a named route's form is (FR-CRAWL-13 + G1): the
+        route named, the gate passed, no password, in the crawl's own context. Inside
+        the open window (its vetted click lifts it). Returns True when one was clicked."""
+        if not self._submit_routes or self.spa_submit_stopped or not self._spa_on:
+            return False
+        named = self._submit_routes
+        for form in forms:
+            sig = spa.form_signature(form)
+            if sig in self._submitted_sigs:
+                continue
+            self._submitted_sigs.add(sig)
+            why = (spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
+                   or ("a password form (submitted only unauthenticated; not from a "
+                       "reveal)" if spa.has_password(form) else None))
+            if why:
+                self.spa_counts["forms_refused"] += 1
+                logging.info(f"revealed SPA form on {page_url} not submitted: {why}")
+                continue
+            if self.spa_counts["forms_submitted"] >= spa.MAX_SUBMISSIONS:
+                self.spa_counts["submissions_over_cap"] += 1
+                continue
+            clicked = self._fill_and_click(page, context, form, page_url, True)
+            if clicked:
+                self.storage.record_revealed_form(page_url, route, sig, submitted=True)
+                if self._authenticated:
+                    intact, why = self._session_intact()
+                    if not intact:
+                        self.spa_submit_stopped = (f"the crawl's session was lost after "
+                                                   f"submitting a revealed form on "
+                                                   f"{route!r} ({why})")
+                        logging.warning(f"SPA form submission stopped: "
+                                        f"{self.spa_submit_stopped}")
+                return True
+        return False
+
+    def _queue_revealed(self, page_url, found, depth):
+        """Revealed targets through the normal queue gates: scope, the destructive rule
+        (a logout link or route is refused), not visited, the depth bound."""
+        more = []
+        if depth >= self.max_depth:
+            return more
+        for href in found:
+            link = self._crawl_url(urljoin(page_url, href))
+            if not (self._in_scope(link) and not self._destructive(link)):
+                continue
+            key = spa.visit_key(link)
+            if key not in self._revealed_link_keys:
+                self._revealed_link_keys.add(key)
+                self.spa_counts["revealed_links"] += 1
+            if not self.storage.is_visited(link):
+                more.append((link, depth + 1, 'reveal'))
+        return more
+
+    # ----- W4: the session after a reveal -----
+    def _reveal_session_check(self, aborted, route):
+        """W4 (authenticated crawls): after every reveal, the client-side session check
+        (cookies and adopted localStorage, no network), plus `verify_live` when the
+        window aborted anything. On a loss: reveals stop on this route, the adopted
+        browser state is re-adopted once and the crawl goes on; a second loss (or a
+        re-adoption that does not hold) stops reveals for the crawl. Reported."""
+        if not self._authenticated:
+            return
+        ok, why = self._client_session_intact()
+        if ok and aborted:
+            ok, why = self._live_session_intact()
+        if ok:
+            return
+        self.spa_counts["session_losses_after_reveal"] += 1
+        self._reveal_losses += 1
+        self._reveal_stopped_routes.add(route)
+        if self._reveal_losses >= 2:
+            self.reveals_stopped = (f"the session was lost again after a reveal on "
+                                    f"{route!r} ({why})")
+            logging.warning(f"reveals stopped: {self.reveals_stopped}")
+            return
+        logging.warning(f"the session was lost after a reveal on {route!r} ({why}); "
+                        f"reveals stop on that route and the browser state is "
+                        f"re-adopted")
+        ok, again = self._readopt_session()
+        if not ok:
+            self.reveals_stopped = (f"the session could not be re-adopted after a reveal "
+                                    f"on {route!r} ({again})")
+            self.spa_submit_stopped = self.spa_submit_stopped or self.reveals_stopped
+            logging.warning(f"reveals stopped: {self.reveals_stopped}")
+
+    def _readopt_session(self):
+        """Re-adopt the session the crawl started with (W4): its cookies and its
+        browser login's cookies, and the adopted localStorage entries **as adopted**
+        (never a rotated value), then reload the page so the app reads them. Returns the
+        client-side check's ``(ok, why)``."""
+        from fuzzlab.tools import browserauth
+        sess, ctx = self._browser_session, self._context
+        try:
+            if sess is not None:
+                state_cookies = (sess.storage_state or {}).get("cookies") or []
+                if state_cookies:
+                    ctx.add_cookies(state_cookies)
+                browserauth.apply_to_context(ctx, sess.cookies)
+            for origin, entries in self._adopted_original.items():
+                page = next((p for p in ctx.pages
+                             if canonical_origin(p.url) == canonical_origin(origin)), None)
+                if page is None:
+                    return False, f"no page of {origin} to restore its localStorage"
+                page.evaluate("pairs => pairs.forEach(([k, v]) => "
+                              "window.localStorage.setItem(k, v))", sorted(entries.items()))
+            self._adopted_storage = copy.deepcopy(self._adopted_original)
+            self._page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+            self._settle(self._page)
+        except PlaywrightError as exc:
+            return False, f"re-adoption failed ({type(exc).__name__})"
+        return self._client_session_intact()
 
     def _isolated_submit(self, method, action_url, entries):
         """Submit a selector form without following redirects, through a client that
@@ -1062,6 +1716,29 @@ class LocalSpider:
                          f"{c['submissions_over_cap']} over the cap.")
         if self.spa_submit_stopped:
             lines.append(f"SPA form submission stopped: {self.spa_submit_stopped}.")
+        if c["g1_controls_filled"] or c["g1_forms_unsatisfiable"]:
+            lines.append(f"Constraint-aware filling: {c['g1_controls_filled']} control(s) "
+                         f"made valid, {c['g1_forms_unsatisfiable']} form(s) still "
+                         f"invalid.")
+        if c["reveals_clicked"] or c["reveals_refused"] or c["reveals_over_cap"]:
+            lines.append(f"Reveals: {c['reveals_clicked']} clicked, "
+                         f"{c['reveals_refused']} refused, {c['reveals_over_cap']} over "
+                         f"the caps; {c['revealed_links']} link(s) and "
+                         f"{c['revealed_forms']} form(s) revealed, "
+                         f"{c['reveal_navigations_captured']} navigation(s) captured.")
+        if c["reveal_writes_blocked"] or c["reveal_ws_dropped"]:
+            lines.append(f"The reveal window blocked {c['reveal_writes_blocked']} "
+                         f"request(s) and dropped {c['reveal_ws_dropped']} WebSocket "
+                         f"message(s).")
+        if c["revealed_forms"]:
+            lines.append("Revealed forms are recorded (spider table revealed_forms: "
+                         "route and signature); they are submitted only on a route "
+                         "named with --submit-spa-forms.")
+        if c["session_losses_after_reveal"]:
+            lines.append(f"The session was lost {c['session_losses_after_reveal']} "
+                         f"time(s) after a reveal.")
+        if self.reveals_stopped:
+            lines.append(f"Reveals stopped: {self.reveals_stopped}.")
         return lines
 
     def crawl(self):
@@ -1152,7 +1829,8 @@ class LocalSpider:
             for line in self.spa_summary():
                 logging.info(line)
             self.storage.record_stats({**self.spa_counts,
-                                       "submit_stopped": int(bool(self.spa_submit_stopped))})
+                                       "submit_stopped": int(bool(self.spa_submit_stopped)),
+                                       "reveals_stopped": int(bool(self.reveals_stopped))})
             self.storage.close()
             logging.info("Crawl finished. Data saved to SQLite database.")
 
@@ -1201,6 +1879,12 @@ def build_parser():
                         "only those. Off by default: a submission changes lab state. "
                         "Destructive, settings, transaction, credential-change, 2FA and "
                         "file-upload forms are never submitted (FR-CRAWL-13).")
+    p.add_argument("--no-reveal", action="store_true",
+                   help="Do not open menus, dialogs and drawers to find the links and "
+                        "forms behind them. On by default in the Playwright engine: "
+                        "inside a reveal window that lets only safe GETs through (no "
+                        "write, no navigation, no WebSocket message), so a reveal can "
+                        "only read (FR-CRAWL-16).")
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
@@ -1245,6 +1929,7 @@ if __name__ == "__main__":
                          if n.strip()]),
         spa_routes=not args.no_spa_routes,
         submit_spa_forms=spa_route_names(args.submit_spa_forms),
+        reveal=not args.no_reveal,
     )
     spider.crawl()
     if args.store:

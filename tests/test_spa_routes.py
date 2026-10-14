@@ -395,7 +395,7 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert not any("socket.io" in u or "cdn.example" in u for u in urls)
     # the counts are stored too, not only logged (PA-0110, lane S review)
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
-    assert stats == {**c, "submit_stopped": 0}
+    assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0}   # + FR-CRAWL-16
     # the bundle was read from the guard's own fetch: main.js requested once per document
     assert len(lab.seen("GET", "/main.js")) == 1
     # a form on a route is recorded

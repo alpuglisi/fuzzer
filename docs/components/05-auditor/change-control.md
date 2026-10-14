@@ -3,6 +3,35 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0039 — The importer recognises the crawler's ladder values as fillers; entries judged as texts (FR-CRAWL-15, BUG-0131) (2026-10-14)
+- Change (`tools/store_adapter.py`, filed under the auditor as CC-AUD-0035 was):
+  - **The ladder (FR-CRAWL-15, reviewer B7):** `LADDER_MAX_DIGITS` (15),
+    `LADDER_CONSTANTS` (`2000`), `LADDER_TEXT` / `LADDER_TEXT_VARIANTS` /
+    `LADDER_PAD` / `LADDER_MIN_PREFIX` / `LADDER_MAX_TEXT`, `ladder_digits(n)` and
+    `is_ladder_value(value)` (total). `is_filler` is the single source: an importer
+    filler **or** a ladder value -- repeated or ascending digits up to 15 digits,
+    `fuzzlab` padded with `x` or cut to a prefix of 3+, `Fuzzlab`, `FUZZLAB`, `2000`.
+    16+ digits are excluded because they look like identifiers.
+  - **BUG-0131:** `entries_refusal` judges each name and value with
+    `core.urls.text_destructive_reason`, never `destructive_reason("/?x=" + text)`.
+- Impact: FUZZ -- `harness.auto._send_value` sends a ladder value as is (it never
+  resolves), and a field whose example is a ladder value takes the shapes its name has
+  elsewhere in the run, as for any filler; an app-supplied example that happens to be
+  a ladder value (`11`, `123`) is treated the same way (a coverage nuance, never a
+  safety one). CRAWL -- the constraint-aware filling (CC-CRAWL-0023) types only these
+  values. Link sets / captured bodies: an entry with a `#` before a destructive word is
+  now refused (more refusals only).
+- Risk: low. The filler predicate only widens toward values that are not identifiers
+  (tested over every value the ladder can produce); the entry rule only adds refusals.
+- Deliverables:
+  - [x] code: `tools/store_adapter.py` — done
+  - [x] tests: `tests/test_forms_phase4.py::test_every_ladder_value_is_a_filler_and_never_identifier_like`
+    (plus near misses), `::test_a_hash_in_a_label_name_value_or_option_hides_nothing`;
+    `tests/test_forms_phase2.py` and `tests/test_json_points.py` still green — done
+  - [x] FR-AUD-20 (fillers) and FR-AUD-22 (entries) text — done
+- Effectiveness (assessed 2026-10-14): every ladder value is a filler and none is
+  identifier-like; the `#` case is refused. Effective.
+
 ### CC-AUD-0038 — The auditor's browser sends session headers through its route only (FR-CRAWL-14 sweep) (2026-10-14)
 - Change: `tools/fetcher.py` `_start_browser` ensures the session first
   (`browserauth.browser_session`), then guards the context with

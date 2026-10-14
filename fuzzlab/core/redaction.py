@@ -47,6 +47,9 @@ SENSITIVE_TOKENS = frozenset({
     "authtoken", "bearer", "signature", "sig", "pin",
     # anti-CSRF names that tokenise as one word (forms phase 1, reviewer B-M5)
     "nonce", "wpnonce", "csrfmiddlewaretoken",
+    # a payment card's security code (forms phase 4, FR-CRAWL-15 G1b): never filled,
+    # stored or fuzzed
+    "cvv", "cvc", "cvn", "csc",
 })
 #: ``key`` is a secret with one of these beside it (``api_key``, ``privateKey``), or alone.
 _KEY_QUALIFIERS = frozenset({"api", "private", "secret", "access", "signing", "client",

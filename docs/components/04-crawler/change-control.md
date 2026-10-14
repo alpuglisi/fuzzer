@@ -3,6 +3,167 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0024 — Reveal navigation inside a reveal window (FR-CRAWL-16, forms phase 4, G2 and W1-W4) (2026-10-14)
+- Change (the agreed design `forms-p4-draft.md`, Revision 2, reviewers A and B):
+  - **The reveal window (W1), `tools/spider.py`:** `LocalSpider._window` (a context
+    manager, re-entrant) opens before a reveal click or the first G1 interaction; on
+    exit `_restore` presses `Escape`, closes popups opened in the window, re-navigates to
+    the route if needed and reloads it (the window lets this one GET navigation through
+    for its own context and URL), then `_quiesce` settles (nothing in flight, three
+    quiet polls) and flushes the driver's events with a round trip before the window is
+    lifted; if the close fails the page goes to `about:blank`. `spa.click_vetted` gained
+    `before_click`, which lifts the window for the vetted final click of a named-route
+    form only (W1).
+  - **W2:** `navguard.make_route_handler(window=)` / `guard_page(window=)` asks the
+    window after the scope and destructive checks, for the request and each redirect
+    hop; a refused navigation is aborted with `"aborted"` (no error page is committed)
+    and its target kept. `spa.window_request_refusal`: only GET/HEAD; every navigation;
+    destructive (with the SPA fragment), transaction, account-endpoint, account-word or
+    credential-token GETs. `LocalSpider._window_refusal` keeps the state (any context
+    of the crawl; the lifted context; the own reload), counts `reveal_writes_blocked`
+    and queues the navigations' targets through the normal gates.
+  - **W3:** `navguard.make_ws_handler(hold=, on_drop=)`: an in-scope socket is
+    connected through a forwarding handler (`connect_to_server()`, `ws.on_message`
+    forwarding with the server route's no-reply `send` only while the window is
+    closed; dropped and counted `reveal_ws_dropped` while open). Mechanism checked in
+    Playwright 1.63's source: `send` is `send_may_fail` (no reply), so it does not
+    deadlock a sync handler as `close()` does.
+  - **W4:** `_session_intact` is split into `_client_session_intact` (cookies, adopted
+    localStorage, rotation) and `_live_session_intact` (`verify_live`).
+    `_reveal_session_check` runs after every reveal in an authenticated crawl (client
+    side; `verify_live` too when the window aborted anything); on a loss reveals stop on
+    the route and `_readopt_session` re-adopts the session's cookies, its browser
+    login's cookies and the localStorage entries **as adopted** (kept in
+    `_adopted_original`), then reloads; a second loss, or a re-adoption that does not
+    hold (which also sets `spa_submit_stopped`), sets `reveals_stopped`.
+  - **G2a-G2e:** `spa.REVEAL_JS` (announcers, sidenav toggles, interactive cards with no
+    interactive descendant; never links, select-likes, disabled elements or elements in
+    a form unless `type=button`), `CARD_LABELS_JS`, `MENU_ITEMS_JS`;
+    `LocalSpider._reveal_page` / `_reveal_one` / `_reveal_click` (announcers through
+    `click_vetted`, cards by `el.click()` after their labels are re-read) /
+    `_revealed` / `_queue_revealed` (source `reveal`) / `_record_revealed_forms` (spider
+    table `revealed_forms`; real `<form>`s through `form_record`) /
+    `_submit_revealed` (named routes only, never a password form). Revealed menu items
+    passing the gate are clicked inside the window, each after a reload and a re-click
+    (G2b); the close is Escape then the reload, never a dialog's own button (G2c). The
+    label gate (G2d): `spa.label_refusal` (destructive with inflections folded,
+    settings, transaction, account words), `spa.reveal_refusal` (plus any destructive
+    glyph, no label); `exit_to_app` added to `DESTRUCTIVE_GLYPHS`, judged text-first on
+    a form's submitter (`spa.submitter_glyph`, `TEXT_FIRST_GLYPHS`) so Juice Shop's
+    login stays submittable. Caps as constants: `MAX_REVEAL_CANDIDATES` 40,
+    `MAX_REVEALS_PER_PAGE` 6, `MAX_REVEALS` 60, `MAX_CARDS_PER_SIGNATURE` 3,
+    `MAX_MENU_ITEMS` 4, `MAX_CARD_TEXT` 1000. On by default in the Playwright engine
+    (`--no-reveal`, `LocalSpider(reveal=)`); only on a page the browser rendered
+    (`_rendered_ok`). Scripts a reveal loads are scanned for routes.
+  - **Counts** (`spa_counts`, `crawl_stats`): `reveals_clicked`, `reveals_refused`,
+    `reveals_over_cap`, `reveal_writes_blocked`, `reveal_ws_dropped`,
+    `reveal_navigations_captured`, `revealed_links`, `revealed_forms`,
+    `session_losses_after_reveal`, `reveals_stopped`; summary lines.
+  - **BUG-0131 (found here):** `formnav.option_refusal` judges option texts with
+    `core.urls.text_destructive_reason`; `spa.form_refusal`'s labels and control names
+    and `spa.route_destructive_reason`'s fragment likewise.
+  - **Fixture/test changes:** `tests/_spa_fixture.py` (a minimal WebSocket endpoint and
+    extra server-rendered pages on the loopback lab; `RevealSpa`, `G1Spa`,
+    `SessionRevealSpa`); `tests/test_spa_routes.py` (the stored-stats contract has
+    `reveals_stopped`); `tests/test_session_browser_login.py` (the synthetic glyph-only
+    `exit_to_app` login case is now refused, per G2d -- `FORMS_JS` never yields that
+    shape: an icon-only button with no aria-label keeps its raw text, already refused on
+    `exit`).
+- Impact (other components / project): SESS -- `login_form_refusal` calls
+  `spa.form_refusal`, so a glyph-only `exit_to_app` submitter is refused (unreachable
+  from a real page, see above); the browser login is otherwise unchanged (its window,
+  guard and `click_vetted` call without `before_click`). AUD/FUZZ -- `navguard`'s new
+  parameters are optional; the auditor's and M6's guards are unchanged. The importer
+  reads `discovered_pages.source = 'reveal'` as any source; `revealed_forms` is not
+  imported. CORE -- uses `text_destructive_reason` (CC-CORE-0052). Default-on behaviour
+  change: every Playwright crawl now opens menus, dialogs and cards (read-only through
+  the window; `--no-reveal` restores the old crawl).
+- Risk (level; mitigation): medium -- a new automatic click path on every rendered page.
+  Mitigated by the window (all writes, navigations and side-effect GETs aborted,
+  WebSocket messages dropped, the close inside it, the lift after a quiet period),
+  the label gate, the card rules, caps, W4's session check, and real-browser tests for
+  each; each mechanism mutation-checked. Accepted residuals (FR-CRAWL-16): an opaque
+  side-effect GET; a request whose route callback the driver dispatches in the instant
+  after the lift (narrowed by the flush); cards clickable only through an
+  `addEventListener` handler without a pointer cursor are not seen.
+- Deliverables:
+  - [x] code: `tools/spider.py`, `tools/spa.py`, `tools/navguard.py`,
+    `tools/formnav.py` — done
+  - [x] tests: `tests/test_forms_phase4.py` (window unit tests: GET rules, route hook,
+    redirect hop, WS forwarder; the reveal gate; Juice Shop login with `exit_to_app`;
+    BUG-0131 and its AST guard with synthetic offenders; real browser: W2 POST and
+    side-effect GETs, W2 navigation captured and `/profile` requested once, W3 WS
+    message dropped, W1 debounced POST after close, G2b menu items, G2a cards (cap,
+    descendants, gate, dialog Close never clicked), G2e dialog form and menu link,
+    counts persisted, named-route revealed submission, crawl cap, `--no-reveal`, W4
+    re-adopt then stop) — done
+  - [x] mutation checks (each reverted, its test failed for the expected assertion):
+    W1 (close and quiet period removed: `/api/after-close` arrived), W2 writes (POST
+    arrived), W2 navigations (`/profile` requested twice), W3 (`reveal-msg` arrived),
+    W4 (`opened-late` requested), G2a(c) (`card-bad` requested), G2b (the gated items
+    clicked) — done
+  - [x] FR-CRAWL-16, FR-CRAWL-13 (CAPTCHA, texts), NFR-CRAWL-safe traced, §5 contract,
+    ARCHITECTURE #2/#4 — done
+- Effectiveness (assessed 2026-10-14): offline only. Real-browser fixtures reproduce
+  Juice Shop's patterns (a script-navigating account-menu item, product cards with a
+  review dialog, an icon-only client-side logout); every safety clause has a failing
+  mutation. Not verified against the live Juice Shop (no traffic to a running lab in
+  this lane): `/profile` discovery and the product-review dialog on the real app remain
+  to be confirmed on-host. pending (live).
+
+### CC-CRAWL-0023 — Constraint-aware SPA form filling on named routes (FR-CRAWL-15, forms phase 4, G1) (2026-10-14)
+- Change:
+  - **`LocalSpider._fill_and_click`** splits into the window wrapper and
+    `_fill_and_click_now`: on a named route (`explicit`) the fill, G1 and the checks
+    run inside the reveal window (CC-CRAWL-0024) and the vetted click lifts it
+    (`before_click=_lift_for(context)`); an unnamed route fills as before.
+  - **`LocalSpider._g1`** (with `_g1_ladder`, `_g1_native_select`,
+    `_g1_custom_select`, `_g1_radio`, `_g1_invalid_names`): reads `spa.G1_READ_JS`,
+    and for each invalid control tries `spa.g1_candidates` (a pattern's candidates
+    first filtered by `spa.PATTERN_TEST_JS`: the page's own RegExp in a worker
+    terminated after `G1_PATTERN_TIMEOUT_MS` 500), at most `G1_MAX_ATTEMPTS` 6; selects
+    by `select_option`, mat-selects by opening click and option click
+    (`G1_OPTIONS_JS`), radios and checkboxes by their own `click()`, ranges by
+    `G1_SET_JS`; refusals `g1_sensitive` (G1b), `select_refusal` (G1c),
+    `checkbox_refusal` (G1d); still disabled → "invalid after N attempts: <names>".
+    A per-control log line says which control was made valid.
+  - **`spa.captcha_reason`** (G1e) runs beside `form_refusal` for every SPA submission;
+    `FORMS_JS` now reports `hints` (container attribute values and label texts),
+    `challenge` (a canvas), `tags`, and custom selects (mat-select, `role=combobox`)
+    as kind `select`.
+  - **The ladder is ours** (B7): `store_adapter.is_ladder_value` / `ladder_digits`
+    (CC-AUD-0039); `is_filler` recognises every ladder value; none is identifier-like.
+  - **The submission loop** finds each later form again by its signature after an
+    earlier one (or G1's reload) re-rendered the page (`_refind_form`).
+- Impact: AUD (`is_filler` widened, CC-AUD-0039; the fuzzer's `_send_value` and the
+  shape fallback treat ladder values as fillers), CORE (`is_sensitive_name` names card
+  security codes, CC-CORE-0052). Named-route submissions now reload the route after the
+  click (inside the window), so a debounced write the app schedules after a submission
+  is not sent.
+- Risk: medium -- G1 interacts with more controls (selects, checkboxes, radios) on
+  routes the operator named. Mitigated: inside the window (nothing is written before
+  the vetted click), object selectors / identifier options / gated labels / sensitive
+  controls / CAPTCHAs refused, only filler values. Stated gaps: async validators;
+  grids and patterns without a ladder value; a select named with a settings word
+  (`country`) is still refused by FR-CRAWL-13's control-name rule before G1.
+- Deliverables:
+  - [x] code: `tools/spider.py`, `tools/spa.py` — done
+  - [x] tests (`tests/test_forms_phase4.py`): the ladder's constraints, quantifier
+    lengths, a grid without a ladder value, every ladder value a filler and not
+    identifier-like, `select_refusal`, `checkbox_refusal`, `g1_sensitive`, CAPTCHA
+    rule, caps; real browser: the Angular-like form (number range, pattern, select,
+    slider, checkbox, mat-select) submitted once with ladder values, no autosave before
+    the submission, an unsatisfiable pattern reported with the reason, a CAPTCHA form
+    refused, a saved-card mat-select never chosen in, a delete-account checkbox never
+    checked — done
+  - [x] mutation checks: G1c (identifier options: the card form was submitted), G1d
+    (checkbox gate: the delete-account form was submitted) — done
+  - [x] FR-CRAWL-15 — done
+- Effectiveness (assessed 2026-10-14): offline fixture forms with Juice Shop's patterns
+  are submitted or refused as specified; the live address/contact/recycle forms are not
+  verified here (no lab traffic in this lane; contact is a CAPTCHA form and is now
+  refused by design). pending (live).
+
 ### CC-CRAWL-0022 — The crawl adopts a browser session; session headers through the route only (FR-CRAWL-14) (2026-10-14)
 - Change:
   - **`tools/spider.py` `_start_browser`:** the session is ensured **before** the crawl

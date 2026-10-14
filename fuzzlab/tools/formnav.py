@@ -32,7 +32,7 @@ from urllib.parse import urljoin, urlsplit
 
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.redaction import name_tokens
-from fuzzlab.core.urls import destructive_reason, url_key
+from fuzzlab.core.urls import destructive_reason, text_destructive_reason, url_key
 
 #: A select or control named with one of these words configures something. Shared by
 #: navigation (`refusal`, `option_refusal`) and the importer's POST-selector rule
@@ -111,7 +111,7 @@ def option_refusal(value: str, label: str) -> str | None:
         word = settings_word(text)
         if word:
             return f"settings word {word!r}"
-        reason = destructive_reason("/?" + "x=" + (text or "").replace(" ", "+"))
+        reason = text_destructive_reason(text)              # never via a URL (BUG-0131)
         if reason:
             return f"destructive ({reason!r})"
     return None
