@@ -354,3 +354,34 @@ commit (CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080 amendments; CC-CORE-0054).
   page stays on its own origin and is crawled; the other origin is only recorded.
   Pinned: `test_a_script_navigation_to_another_origin_leaves_the_page_crawled`.
 - The other residuals of round 1 are unchanged.
+
+## Review round 3 (added in review round 3, 2026-10-14)
+Reviewer B: AGREE (round 2). Reviewer A: all round-2 items closed and verified live;
+one race found (D47: V1, V2), built in a fourth commit (CC-CRAWL-0026, CC-SESS-0023
+amendments).
+
+### What round 3 found (added in review round 3)
+- **A3-M1, the isolated context's own jar.** R2's cookie-less request context stores the
+  `Set-Cookie` of the answers it fetches; it was retired once it held one, but fetches
+  already in flight on it, and the next ones racing its retirement, went out with a
+  cookie another B answer had set (reviewer A's 12-image probe: 3 of 4 runs). A's
+  session never leaked and the main jar was unchanged: the leak was B's own cookies
+  among B's requests. **Fixed (V1):** every isolated fetch, request and hop, carries an
+  explicit empty `Cookie` (the API client then adds no jar value), and the context is
+  made once per guard, when the guard is built, and kept for its life (a lazy creation
+  in the concurrent route handlers made several, seen while testing).
+- **A3-N1, the scope abort counted as FR-SESS-20.** A commit off the session's origins
+  that is also out of scope (or the error page the scope guard's abort leaves) was read
+  as `SessionWithheld`. **Fixed (V2):** only an in-scope commit off the session's origins
+  is FR-SESS-20's; an out-of-scope one is BUG-0123's scope abort, counted in
+  `skipped_out_of_scope`.
+
+### Residuals restated (added in review round 3)
+- **The isolated context's own jar** still fills from the answers it fetches; it is
+  never sent (the empty header on every fetch). Pinned:
+  `test_concurrent_withheld_fetches_never_carry_a_cookie` (5 repetitions; without the
+  header 15 of 15 repetitions leaked) and the route unit test.
+- **An out-of-scope script navigation** commits Chromium's error page (the scope guard's
+  default abort code), so that page's links are lost to the crawl: a BUG-0123 coverage
+  effect, flagged, not changed here. Pinned as a scope abort, not FR-SESS-20's:
+  `test_an_out_of_scope_script_navigation_is_a_scope_abort_not_fr_sess_20`.

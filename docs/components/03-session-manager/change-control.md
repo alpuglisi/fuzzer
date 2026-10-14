@@ -134,6 +134,10 @@ Newest first.
     passing any count) fails `test_an_extra_host_compare_in_an_allowed_function_is_flagged`.
     T1: see CC-CRAWL-0026.
   - Effectiveness (review round 2): the related suites (round 1's set, plus the core seam suites) with `FUZZLAB_REQUIRE_BROWSER=1`: **1490 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 74 tests. The full suite is the coordinator's run.
+- Review round 3 of 9f417ae (2026-10-14; V1, V2; code in CC-CRAWL-0026): FR-SESS-20's
+  browser bullet is edited in place: the isolated context is made once per guard and
+  every fetch through it carries an empty `Cookie`; only an in-scope commit off the
+  session's origins is FR-SESS-20's. No session-manager code changed.
 
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:

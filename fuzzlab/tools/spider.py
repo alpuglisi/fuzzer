@@ -952,9 +952,11 @@ class LocalSpider:
     def _navigation_withheld(self, url):
         """Did this page navigation meet another origin than the session's (FR-SESS-20,
         T1)? Its own target or redirect landing was withheld by the route, or the main
-        frame committed off the session's origins (an error page included). A
+        frame committed on an **in-scope** origin outside the session's. A
         script-initiated navigation away that the route aborted is neither: the page
-        stays, and is extracted."""
+        stays, and is extracted. An out-of-scope committed URL (or the error page the
+        scope guard's abort leaves) is BUG-0123's scope abort, already counted under its
+        own reason (`skipped_out_of_scope`), never FR-SESS-20's (review round 3, V2)."""
         if self._cookie_scope is None:
             return False
         if url_key(url) in self._withheld_targets:
@@ -963,8 +965,7 @@ class LocalSpider:
             committed = self._page.url if self._page is not None else ""
         except Exception:  # noqa: BLE001 - a closed page: nothing committed here
             return False
-        return bool(committed) and committed != "about:blank" and \
-            not self._cookie_scope(committed)
+        return bool(committed) and self._other_origin(committed)
 
     def _goto_and_parse(self, url):
         self._last_final_url, self._last_html, self._last_base = url, None, None

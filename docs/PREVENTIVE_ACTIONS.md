@@ -1731,4 +1731,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      aborted, and any other request there goes through a separate cookie-less client
      whose `Set-Cookie` is dropped. Withholding a header is not enough when the client
      shares state (a cookie jar, `document.cookie`, `localStorage`) with the session.
+     *(Review round 3:)* that separate client sends an explicit empty `Cookie` on every
+     request, since its own jar fills from the answers it fetches, and it is made once
+     per guard (concurrent handlers race on any lazy or retiring lifecycle).
   (from BUG-0134)

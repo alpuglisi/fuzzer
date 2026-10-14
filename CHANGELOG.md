@@ -4,6 +4,13 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0134 review round 3: the isolated request context never sends a cookie)
+- **Why:** reviewer A saw concurrent withheld fetches carry a cookie another other-origin
+  answer had stored in the isolated context (a race with its retirement).
+- **What:** every isolated fetch sends an explicit empty Cookie, and the context is made
+  once per guard; only an in-scope off-origin commit counts as FR-SESS-20's (an
+  out-of-scope one is BUG-0123's scope abort). CC-CRAWL-0026, CC-SESS-0023 amendments.
+
 ## 2026-10-14 (BUG-0134 review round 2: the crawled page stays when a script navigates away; `Request.session_decision`)
 - **Why:** reviewer A showed live that aborting another origin's document with
   `blockedbyclient` put Chromium's error page in place of the crawled page, so a page that

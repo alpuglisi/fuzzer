@@ -663,7 +663,8 @@ def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_les
     assert own.sent_headers == {"accept": "*/*", **bearer}           # its own origin
     doc = _HdrRoute("http://127.0.0.2:8090/a")
     handler(doc)
-    assert doc.outcome == "abort" and not doc.fetched and made == []  # never loaded
+    assert len(made) == 1                    # V1: made once, when the guard is built
+    assert doc.outcome == "abort" and not doc.fetched and made[0].calls == []  # never loaded
     assert doc.abort_code == "aborted"        # ERR_ABORTED: no error page (T1)
     frame = _HdrRoute("http://127.0.0.2:8090/f")
     frame.request.frame = type("F", (), {"parent_frame": object()})()
@@ -671,20 +672,23 @@ def test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_les
     assert frame.outcome == "abort" and ("http://127.0.0.2:8090/f", "frame") in withheld
     img = _HdrRoute("http://127.0.0.2:8090/i.png", navigation=False)
     handler(img)
-    assert not img.fetched and made[0].calls == [
-        ("http://127.0.0.2:8090/i.png", "GET", {"accept": "*/*"})]   # no cookie, no bearer
+    assert not img.fetched and made[0].calls == [                    # no jar, no bearer
+        ("http://127.0.0.2:8090/i.png", "GET", {"accept": "*/*", "cookie": ""})]
     assert "set-cookie" not in {k.lower() for k in img.fulfilled[2]}
-    assert not made[0].disposed                      # its answer is still being fulfilled
+    # V1 (review round 3): one context for the guard's life, never disposed here; it
+    # stored B's cookie, yet the next fetch sends an empty Cookie, never that value
     handler(_HdrRoute("http://127.0.0.2:8090/j.png", navigation=False))
-    assert made[0].disposed                          # it got a cookie: never reused
-    assert len(made) == 2 and made[1].calls[0][0] == "http://127.0.0.2:8090/j.png"
+    assert len(made) == 1 and not made[0].disposed
+    assert made[0].calls[1] == ("http://127.0.0.2:8090/j.png", "GET",
+                                {"accept": "*/*", "cookie": ""})
     site = {"http://127.0.0.2:3000/go": _Resp(302, {"location": "http://127.0.0.2:8090/land"})}
     nav = _HdrRoute("http://127.0.0.2:3000/go", site)
     handler(nav)
     assert nav.outcome == "abort" and api_calls == []               # the landing: aborted
     sub = _HdrRoute("http://127.0.0.2:3000/go", site, navigation=False)
     handler(sub)
-    assert api_calls == [] and made[-1].calls[-1][0] == "http://127.0.0.2:8090/land"
+    assert api_calls == [] and made[-1].calls[-1] == (           # a hop: no jar either
+        "http://127.0.0.2:8090/land", "GET", {"cookie": ""})
     assert nav.abort_code == "aborted"
     assert ("http://127.0.0.2:8090/a", "document") in withheld and \
         ("http://127.0.0.2:8090/land", "landing") in withheld and \
@@ -1454,3 +1458,139 @@ def test_skipped_reasons_name_the_kind_and_isolated_contexts_are_counted(tmp_pat
     sp._isolated_request()
     assert sp.isolated_contexts_created == 2
     sp.storage.close()
+
+
+# --- review round 3 ------------------------------------------------------------------
+_GIF = (b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00"
+        b"\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;")
+
+
+def _image_lab(host: str = "127.0.0.1"):
+    """A (a page of 12 images from B) and B (each image after a staggered delay, each
+    setting its own cookie), both recording ``(server, path, Cookie)``: reviewer A's
+    round-3 probe (``r2c.py``) as fixtures."""
+    import time
+    require_loopback(host)
+    log, ports = [], {}
+
+    def handler(name):
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server API
+                log.append((name, self.path, self.headers.get("Cookie")))
+                if name == "B" and self.path.startswith("/img"):
+                    n = int(self.path[4:].split("?")[0] or 0)
+                    time.sleep(0.05 * (n % 4))
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/gif")
+                    self.send_header("Set-Cookie", f"sid=FROM_B{n}; Path=/")
+                    self.send_header("Content-Length", str(len(_GIF)))
+                    self.end_headers()
+                    self.wfile.write(_GIF)
+                    return
+                body = "".join(f"<img src='http://{host}:{ports['B']}/img{i}'>"
+                               for i in range(12)) if name == "A" else "B"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body.encode())
+
+            def log_message(self, *args):
+                pass
+        return H
+    servers = {}
+    for name in ("A", "B"):
+        servers[name] = ThreadingHTTPServer((host, 0), handler(name))
+        ports[name] = servers[name].server_address[1]
+        threading.Thread(target=servers[name].serve_forever, daemon=True).start()
+    return servers, ports, log
+
+
+def test_concurrent_withheld_fetches_never_carry_a_cookie(monkeypatch):
+    """V1 (review A3-M1, seen live in 3 of 4 runs): concurrent withheld fetches went
+    out with a cookie another B answer had stored in the isolated context. Now every
+    isolated fetch carries an empty Cookie, and the one context lives as long as the
+    guard. Real Chromium, 5 repetitions: B never receives a cookie value, the main jar
+    keeps only A's session, and all 12 images load."""
+    from tests._browser import launch_browser_or_skip, skip_or_fail
+    from fuzzlab.tools.navguard import guard_page, release
+    _chromium_or_skip(monkeypatch)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        skip_or_fail(f"playwright unavailable: {exc}")
+    servers, ports, log = _image_lab()
+    a_base = f"http://127.0.0.1:{ports['A']}/"
+    origins = origin_scope(a_base)
+    bad = []
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            try:
+                for rep in range(5):
+                    made = []
+
+                    def isolated():
+                        made.append(pw.request.new_context())
+                        return made[-1]
+                    ctx = browser.new_context(service_workers="block")
+                    ctx.add_cookies([{"name": "sid", "value": "A-SESSION-0123456789",
+                                      "domain": "127.0.0.1", "path": "/"}])
+                    guard_page(ctx, in_scope=lambda u: "127.0.0.1" in u,
+                               cookie_scope=lambda u: in_origin_scope(u, origins),
+                               isolated_request=isolated)
+                    page = ctx.new_page()
+                    start = len(log)
+                    page.goto(a_base + "imgs", wait_until="load")
+                    loaded = page.evaluate(
+                        "[...document.images].filter(i => i.naturalWidth > 0).length")
+                    jar = [(c["name"], c["value"]) for c in ctx.cookies()]
+                    b_cookies = [c for name, _p, c in log[start:] if name == "B" and c]
+                    if b_cookies or loaded != 12 or \
+                            jar != [("sid", "A-SESSION-0123456789")] or len(made) != 1:
+                        bad.append((rep, len(b_cookies), loaded, len(jar), len(made)))
+                    release(ctx)
+                    ctx.close()
+                    for c in made:
+                        c.dispose()
+            finally:
+                browser.close()
+    finally:
+        for s in servers.values():
+            s.shutdown()
+            s.server_close()
+    assert bad == [], f"{len(bad)} of 5 repetitions leaked or broke: {bad}"
+
+
+def test_an_out_of_scope_script_navigation_is_a_scope_abort_not_fr_sess_20(monkeypatch,
+                                                                         tmp_path):
+    """V2 (review A3-N1): A's script navigates to an out-of-scope host. The scope guard
+    aborts it (BUG-0123) and counts it under its own reason; it is not FR-SESS-20's:
+    no `SessionWithheld` for A, nothing in ``skipped_other_origin``."""
+    import sqlite3
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.spider import LocalSpider
+    _chromium_or_skip(monkeypatch)
+    a = _App("127.0.0.2")
+    a.pages["/"] = (200, (
+        "<html><body><p>A-OWN-CONTENT</p><a href='/next'>n</a><script>"
+        "setTimeout(()=>location.href='http://127.0.0.3:9/away',200)</script>"
+        "</body></html>").encode(), [])
+    try:
+        sp = LocalSpider(a.base, max_depth=1, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=8000,
+                         session_manager=_mgr(host="127.0.0.2"), identity="user")
+        if sp.engine != "playwright":
+            skip_or_fail("playwright engine unavailable")
+        try:
+            sp.crawl()
+        except Exception as exc:  # noqa: BLE001 - a launch failure is a skip, not a pass
+            skip_or_fail(f"chromium could not launch: {exc}")
+    finally:
+        a.close()
+    rows = dict(sqlite3.connect(str(tmp_path / "s.db")).execute(
+        "SELECT url, status_code FROM discovered_pages").fetchall())
+    assert rows.get(a.base) == 200                          # not a SessionWithheld row
+    assert sp.skipped_other_origin == {}                    # not FR-SESS-20's
+    assert sp.skipped_out_of_scope.get("127.0.0.3")         # the scope abort's reason

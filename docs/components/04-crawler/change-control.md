@@ -76,6 +76,31 @@ Newest first.
     `test_a_script_navigation_to_another_origin_leaves_the_page_crawled` and the route
     unit test; attributing every withheld document to the current navigation fails the
     former.
+- Review round 3 of 9f417ae (2026-10-14; reviewer A, D47; V1, V2):
+  - **V1 (A3-M1, seen live in 3 of 4 runs):** concurrent withheld fetches went out with a
+    cookie another B answer had stored in the isolated context (a retired context was
+    still in use by fetches in flight). Every isolated fetch, request and hop, now
+    carries an explicit empty `Cookie` header; retirement and the deferred disposal are
+    dropped. The context is made once, when the guard is built: a lazy creation in the
+    handler made up to 12 contexts for 12 concurrent images (route handlers run
+    concurrently; seen live while testing). The creator still disposes it at teardown.
+  - **V2 (A3-N1):** `_navigation_withheld` counts a committed URL only when it is
+    in scope and off the session's origins (`_other_origin`); an out-of-scope commit,
+    or the error page the scope guard's abort leaves, is BUG-0123's scope abort (already
+    counted in `skipped_out_of_scope`), never `SessionWithheld`.
+  - Tests: `test_concurrent_withheld_fetches_never_carry_a_cookie` (real Chromium,
+    reviewer A's 12-image probe, 5 repetitions), the route unit test (an empty Cookie on
+    request and hop, one context, never disposed by the guard),
+    `test_an_out_of_scope_script_navigation_is_a_scope_abort_not_fr_sess_20`.
+  - Mutation checks: without the empty header the 12-image test failed in **15 of 15**
+    repetitions (3 runs of 5; 6–11 of the 12 B requests carried a cookie each time), and
+    the unit test failed; restoring the old committed-URL rule fails the V2 test (A's
+    row stored as `SessionWithheld`, status 0).
+  - Observation (not changed here, flagged): the scope guard aborts an out-of-scope
+    navigation with the default error code, so a script navigation off scope still
+    commits Chromium's error page and the page's links are lost to the crawl (a
+    BUG-0123 coverage effect, not a leak).
+  - Effectiveness (review round 3): the related suites (as in round 2) with `FUZZLAB_REQUIRE_BROWSER=1`: **1492 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 76 tests; the traceability guard passes. The full suite is the coordinator's run.
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

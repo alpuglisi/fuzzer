@@ -205,13 +205,17 @@ fuzzer.
       review round 2 T1) and every **WebSocket** is never connected: such a page is
       recorded as skipped (`skipped_other_origin`, its reason naming the kind: "crawl that
       origin separately, or --auth-origin"). A page navigation whose own target or
-      redirect landing was withheld, or whose main frame committed off the session's
-      origins, extracts nothing and has no static fallback; a script-initiated
+      redirect landing was withheld, or whose main frame committed on an **in-scope**
+      origin outside the session's, extracts nothing and has no static fallback (an
+      out-of-scope commit is BUG-0123's scope abort, counted in `skipped_out_of_scope`;
+      review round 3, V2); a script-initiated
       navigation away leaves the page extracted normally;
     - every other request there, and every hop, is fetched through one cookie-less
       request context per guard (`navguard.guard_page(isolated_request=)`, the spider's
-      `pw.request.new_context()`, disposed at the end) and fulfilled with `Set-Cookie`
-      removed, so that origin neither receives nor writes the jar;
+      `pw.request.new_context()`, made once when the guard is built and disposed at the
+      end), each fetch with an explicit empty `Cookie` (that context's own jar is never
+      sent; review round 3, V1), and fulfilled with `Set-Cookie` removed, so that origin
+      neither receives nor writes a cookie;
     - the selector-form API client drops the jar's cookies for such an action.
     Each is counted (`session_out_of_origin`) and summarised at the end of the crawl.
     `fuzzlab crawl --auth-origin ORIGIN` (repeatable; a bare, in-scope origin, else a

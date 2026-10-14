@@ -37,7 +37,8 @@ port-agnostic, so the context's jar and its pages' ``document.cookie`` /
 * **Subresources** there (an image, a script, an XHR), the request and every redirect
   hop, are fetched through one dedicated cookie-less request context per guard
   (``isolated_request()``, a ``playwright.request.new_context()`` with no storage),
-  never ``route.fetch`` or the context's request client, which would send the jar and
+  each fetch with an explicit empty ``Cookie`` header so that context's own jar is
+  never sent (review round 3, V1), never ``route.fetch`` or the context's request client, which would send the jar and
   write that origin's ``Set-Cookie`` into it; the answer is fulfilled with its
   ``Set-Cookie`` removed (review round 1, A-M1/A-M2: both seen live).
 A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's login
@@ -115,8 +116,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     for a child frame's, and ``source`` the URL the request chain started at (the
     navigation's target). Any other request, and each such redirect hop, is fetched
     through the guard's one cookie-less request context (``isolated_request()``,
-    created lazily, retired once it holds a cookie; kind ``"request"``), without the
-    session's headers, and fulfilled with ``Set-Cookie`` removed. Without
+    called once when the handler is built and kept for the guard's life; kind
+    ``"request"``), with an empty
+    ``Cookie`` header and without the session's headers, and fulfilled with
+    ``Set-Cookie`` removed. Without
     ``isolated_request`` such a request is aborted (fail closed). None: nothing is
     withheld (an unauthenticated context has no session to withhold).
 
@@ -159,31 +162,24 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if on_session_withheld is not None:
             on_session_withheld(url, kind, source)
 
-    isolated = {"ctx": None, "stale": []}
+    # the guard's one cookie-less request context (R2, V1), made once, here, when the
+    # guard is built: route handlers run concurrently, so a lazy "make it if missing"
+    # in the handler made several (seen live)
+    isolated = {"ctx": isolated_request() if isolated_request is not None else None}
 
     def isolated_fetch(url: str, method: str, data, req_headers):
-        """One fetch through the guard's cookie-less request context (R2); the context
-        is retired once an answer set a cookie, so it never sends one. Two disposals
-        are kept: a retired context is disposed here at the guard's next isolated
-        fetch (not at once: its answer is still being fulfilled, and a disposed
-        context's response cannot be), and every context ``isolated_request()`` made
-        is disposed by its creator at teardown (the spider's ``_stop_browser``), which
-        covers the last one retired (review round 2, T6)."""
-        while isolated["stale"]:
-            try:
-                isolated["stale"].pop().dispose()
-            except Exception:  # noqa: BLE001 - the caller disposes what it made anyway
-                pass
-        if isolated["ctx"] is None:
-            isolated["ctx"] = isolated_request()
+        """One fetch through the guard's one cookie-less request context (R2), kept for
+        the guard's life and disposed by its creator at teardown (the spider's
+        ``_stop_browser``). Every fetch -- the request and every hop -- carries an
+        explicit empty ``Cookie`` header, so whatever that context's own jar stored
+        from an earlier answer is never sent: concurrent withheld fetches cannot carry
+        one another's cookies (review round 3, V1: retiring a context once it held a
+        cookie raced with fetches already in flight; seen live)."""
         sent = {k: v for k, v in (req_headers or {}).items()
                 if k.lower() not in ("cookie", "authorization")}
-        resp = isolated["ctx"].fetch(url, method=method, max_redirects=0, data=data,
-                                     headers=sent or None)
-        if any(k.lower() == "set-cookie" for k in (resp.headers or {})):
-            isolated["stale"].append(isolated["ctx"])     # never used again
-            isolated["ctx"] = None
-        return resp
+        sent["cookie"] = ""                       # the jar is never sent (V1)
+        return isolated["ctx"].fetch(url, method=method, max_redirects=0, data=data,
+                                     headers=sent)
 
     def body_refused(method: str, url: str, req_headers, body) -> bool:
         why = request_refusal(method, url, req_headers, body) if request_refusal else None

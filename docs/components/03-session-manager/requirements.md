@@ -180,13 +180,17 @@ data. Shared by all tools; a hard dependency for external validation (D10).
       the context's cookies and `localStorage` (R1, review A-M1, seen live);
     - fetches every other request there (and every hop) through **one cookie-less
       request context per guard** (`isolated_request`, a `playwright.request.new_context()`
-      with no storage, retired once it holds a cookie), never `route.fetch` or the
+      with no storage, made once when the guard is built and kept for its life; every
+      fetch carries an explicit empty `Cookie`, so that context's own jar is never sent:
+      review round 3, V1), never `route.fetch` or the
       context's client, and fulfils it with `Set-Cookie` removed, so that origin can
       neither read nor write the jar (R2, review A-M2, seen live);
     - the crawl records such a page as skipped, with its kind ("crawl that origin
       separately, or --auth-origin"); a page navigation whose own target or redirect
-      landing was withheld extracts nothing, while a script-initiated navigation away
-      leaves the page extracted (T1); the spider's `_isolated_submit` drops the jar's
+      landing was withheld, or whose main frame committed on an in-scope origin outside
+      the session's, extracts nothing, while a script-initiated navigation away leaves
+      the page extracted (T1); an out-of-scope commit is BUG-0123's scope abort, counted
+      under its own reason, never this one (V2); the spider's `_isolated_submit` drops the jar's
       cookies for such an action (FR-CRAWL-14).
   - **Listeners and auth endpoints (O9).** FR-SESS-16's listener gets the logout's
     origin; lane A's header breaker and lane B's single-session breaker compare it with
