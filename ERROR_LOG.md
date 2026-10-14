@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Session manager: a browser login's senders lacked the cookie the SPA's JS set (fixed, BUG-0132/PA-0132)
+- **Symptom:** live on Juice Shop, `fuzzlab auto --identity juice-user` probed `/profile` (SSTI) and `/profile/image/url` (SSRF) effectively unauthenticated: 0 candidates, 0 attempts. `/profile` answers 500 with the bearer alone and 200 with the `token` cookie alone; the crawl (full browser state) did reach it.
+- **Root cause:** `_browser_login_state` built the session from the login response's detected credential only (the bearer); the `token` cookie the app's JS sets afterwards is in the browser's jar, never in a response, and was not carried into `SessionState.cookies`. The fixture's endpoints read only the bearer.
+- **Remediation:** the jar's in-scope cookies (password-cleaned, host-matched, unexpired, `secure` only for an https-only session) join the session's cookies; the corrupted-credential arm corrupts the cookie copy of the bearer too; `session print` prints every header; the crawler checks credential cookies only. CC-SESS-0022, CC-CRAWL-0025. `docs/bugs/BUG-0132-browser-login-dropped-the-js-set-session-cookie.md`.
+- **Status:** Fixed (verified offline on a fixture page that reads only the JS-set cookie; the live Juice Shop re-run is the coordinator's)
+
 ## 2026-10-14 — Crawler/importer: a `#` in a label, control name, entry or option hid the destructive word (fixed, BUG-0131/PA-0131)
 - **Symptom:** while building forms phase 4's label gate: `spa.form_refusal` let a button labelled `#1 Delete` through (plain `Delete` was refused); `store_adapter.entries_refusal`, `formnav.option_refusal` and control names behaved the same.
 - **Root cause:** each gate judged a text by embedding it in a URL (`destructive_reason("/?x=" + text)`); `urlsplit` moves everything after `#` into the fragment, which the URL rule never reads. Tests used only texts without URL-structural characters.

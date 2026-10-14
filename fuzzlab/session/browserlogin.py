@@ -395,10 +395,16 @@ class _Inflight:
 
 
 def _settle(page, inflight: _Inflight, budget_ms: int,
-            cancelled: threading.Event | None = None) -> None:
+            cancelled: threading.Event | None = None, until=None) -> None:
+    """Pump the page until it is quiet for 3 polls of 100 ms, at most ``budget_ms``.
+    With ``until``, quiet alone is not enough: the condition must hold too. After a 2xx
+    login answer that is "a probe candidate was seen", so a slow app's follow-up GETs,
+    made after its JS handles the answer, are not missed by a quiet gap (review of
+    26507a1, PA-0128(2): a condition, not a longer sleep)."""
     deadline = time.monotonic() + budget_ms / 1000
     quiet = 0
-    while time.monotonic() < deadline and quiet < 3 and \
+    while time.monotonic() < deadline and \
+            (quiet < 3 or (until is not None and not until())) and \
             not (cancelled is not None and cancelled.is_set()):
         page.wait_for_timeout(100)
         quiet = quiet + 1 if inflight.n == 0 else 0
@@ -577,7 +583,9 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
                 page.wait_for_timeout(100)
                 quiet = quiet + 1 if gate.window_refusals and inflight.n == 0 else 0
             if gate.login is not None:
-                _settle(page, inflight, SETTLE_MS, cancelled)
+                _settle(page, inflight, SETTLE_MS, cancelled,
+                        until=(lambda: bool(gate.probes))
+                        if 200 <= gate.login["status"] < 300 else None)
             _alive(cancelled)
             # nothing carrying the password is kept, before any filtering (A-M2)
             storage = drop_secret_values(context.storage_state(), forms)

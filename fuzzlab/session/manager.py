@@ -349,6 +349,16 @@ class SessionManager:
             return f"Authorization: {applied['Authorization']}"
         return ""
 
+    def session_headers(self, host: str, identity: str, base_url: str, *,
+                        operator: bool = False) -> dict[str, str]:
+        """Standalone: every header the session sends (``Cookie`` and
+        ``Authorization`` together, e.g. a browser login's bearer and the cookie the
+        app's JS set, BUG-0132), under the same transport refusal as `session_header`.
+        ``fuzzlab session print`` prints each."""
+        state = self.ensure(host, identity, base_url, operator=operator)
+        _check_transport(state, base_url)
+        return state.apply({})
+
     # -- isolated copies (forms phase 2, FR-SESS-17) -------------------------
     def isolated_copy(self, identity: str, *, ordinal: int,
                       max_logins: int = 3) -> SessionManager:
@@ -615,13 +625,19 @@ class SessionManager:
                     detected.kind in tried:
                 continue
             tried.append(detected.kind)
+            # BUG-0132: the cookies the app's own JS set after the login (Juice Shop's
+            # `token`) are in the browser's jar, never in the login response; a
+            # requests-based send needs them too (server-rendered pages read them)
+            jar = _jar_cookies(obs.storage_state, host, secure_ok=obs.floor_https)
             state = SessionState(host=host, identity=identity, kind=detected.kind,
-                                 cookies=dict(detected.cookies),
+                                 cookies={**jar, **detected.cookies},
                                  headers=dict(detected.headers),
                                  token_exp=detected.token_exp, login_url=obs.login_url,
                                  logout_url=urljoin(base_url, "logout"),
                                  secure_only=obs.floor_https,
-                                 browser_state=obs.storage_state)
+                                 browser_state=obs.storage_state,
+                                 browser_cookies=tuple(sorted(
+                                     set(jar) - set(detected.cookies))))
             probe, refusal_digest = self._spa_probe(host, base_url, state, obs.probes)
             if probe is None:
                 continue
@@ -647,8 +663,9 @@ class SessionManager:
         """FR-SESS-5's differential for a browser login (reviewers A3, A-M1): the first
         in-scope GET the app made after the click (already scope- and
         destructive-checked; 2xx in the browser, no password in its URL) that answers
-        2xx when replayed with the credential, and whose answers **without** it and with
-        a **corrupted** credential (`_corrupted`) agree with each other and not with the
+        2xx when replayed with the credential, and whose answers **without** it (only the
+        ambient jar cookies, reviewer A-S1) and with a **corrupted** credential
+        (`_corrupted`) agree with each other and not with the
         credentialed one: the same non-2xx (non-5xx) status, or the same body, stable
         over two fetches each, that differs from the credentialed body (also stable).
         The corrupted arm keeps an endpoint that only reacts to the *presence* of an
@@ -659,6 +676,11 @@ class SessionManager:
         `_navigate` to this host only."""
         floor = bool(state.secure_only)
         good, bad_headers = state.apply({}), _corrupted(state).apply({})
+        # the anonymous arm carries the same ambient jar cookies the corrupted arm
+        # keeps (reviewer A-S1), so the two differ only by the credential
+        ambient = SessionState(state.host, state.identity, cookies={
+            n: v for n, v in (state.cookies or {}).items()
+            if not credential_cookie(n, str(v), state)}).apply({}) or None
 
         def ok(resp) -> bool:
             return 200 <= resp.status < 300
@@ -670,7 +692,7 @@ class SessionManager:
                 authed = self._probe_fetch(url, base_url, floor, host, good)
                 if not ok(authed):
                     continue
-                anon = self._probe_fetch(url, base_url, floor, host, None)
+                anon = self._probe_fetch(url, base_url, floor, host, ambient)
                 bad = self._probe_fetch(url, base_url, floor, host, bad_headers)
                 if anon.status >= 500 or bad.status >= 500:
                     continue
@@ -678,7 +700,7 @@ class SessionManager:
                     if anon.status == bad.status:
                         return url, None                  # e.g. 401 both ways
                     continue
-                anon2 = self._probe_fetch(url, base_url, floor, host, None)
+                anon2 = self._probe_fetch(url, base_url, floor, host, ambient)
                 bad2 = self._probe_fetch(url, base_url, floor, host, bad_headers)
                 authed2 = self._probe_fetch(url, base_url, floor, host, good)
             except SessionAuthError:
@@ -975,20 +997,102 @@ def _corrupt_token(token: str) -> str:
 
 
 def _corrupted(state: SessionState) -> SessionState:
-    """A copy of ``state`` with an invalid credential of the same shape (A-M1): a
-    bearer token with its last character flipped, each cookie a random value under the
-    same name. Never stored."""
+    """A copy of ``state`` with an invalid credential of the same shape (A-M1,
+    BUG-0132), never stored:
+
+    * a bearer token with its last character flipped (`_corrupt_token`);
+    * a cookie whose value equals that token (the app's JS copy of it, Juice Shop's
+      ``token`` cookie) carries the **same** corrupted token, so neither arm can keep
+      the corrupted request authenticated through the other;
+    * every other credential cookie -- one the login response set, or a jar cookie
+      that looks like an identifier (`_identifier_like`) -- a random value under the
+      same name;
+    * an ambient jar cookie (a short, non-identifier value: a language or a banner
+      choice) as it is: it is the request's shape, not its credential."""
     import dataclasses
     import secrets
-    headers = {}
+    headers, tokens = {}, {}
     for name, value in (state.headers or {}).items():
         scheme, sep, token = str(value).partition(" ")
-        headers[name] = f"{scheme} {_corrupt_token(token)}" if sep else \
-            _corrupt_token(str(value))
-    cookies = {name: secrets.token_hex(max(8, len(str(value)) // 2))
-               for name, value in (state.cookies or {}).items()}
+        bad = _corrupt_token(token if sep else str(value))
+        headers[name] = f"{scheme} {bad}" if sep else bad
+        tokens[token if sep else str(value)] = bad
+    cookies = {}
+    for name, value in (state.cookies or {}).items():
+        value = str(value)
+        if value in tokens:
+            cookies[name] = tokens[value]
+        elif credential_cookie(name, value, state):
+            cookies[name] = secrets.token_hex(max(8, len(value) // 2))
+        else:
+            cookies[name] = value
     return dataclasses.replace(state, headers=headers, cookies=cookies,
                                browser_state=None)
+
+
+def _header_tokens(state: SessionState) -> set[str]:
+    """The credential values of ``state``'s headers (a bearer's token, a whole header
+    value when it has no scheme)."""
+    out = set()
+    for value in (state.headers or {}).values():
+        _scheme, sep, token = str(value).partition(" ")
+        out.add(token if sep else str(value))
+    return out
+
+
+def credential_cookie(name: str, value: str, state: SessionState) -> bool:
+    """Is cookie ``name=value`` of ``state`` a credential (BUG-0132, reviewer B)? The one
+    predicate (PA-0003) the corrupted arm (`_corrupted`) and the crawler's session check
+    (`browserauth.BrowserSession.checked_cookies`) share. A cookie the login response
+    set is one. A cookie a browser login took from the app's jar
+    (`SessionState.browser_cookies`) is one when its value equals a detected credential
+    token (the app's copy of the bearer, Juice Shop's ``token``), or it looks like an
+    identifier (`_identifier_like`: a sensitive name, an identifier-like or a long
+    value). Only an ambient jar cookie (short and plain, e.g. a language choice) is
+    not."""
+    value = str(value)
+    if name not in set(state.browser_cookies or ()):
+        return True
+    return value in _header_tokens(state) or _identifier_like(name, value)
+
+
+def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
+                 now: float | None = None) -> dict[str, str]:
+    """The browser jar's cookies a requests-based send of this session may carry
+    (BUG-0132): from a ``storage_state`` already cleaned of the password and filtered
+    to the login scope (`browserlogin.drop_secret_values`, `filter_storage_state`),
+    those whose domain matches the session's ``host`` (canonical: loopback aliases one
+    host), not expired, and not ``secure`` unless the session is https-only
+    (``secure_ok``: then every send of it is over https, FR-SESS-13). They then go
+    through the session's one cookie path (`SessionState.apply`, sent only to the
+    session's host by `prepare`, under its transport floor). An IP host matches only
+    its own address (no parent domain, reviewer A-N2). A cookie's ``path`` is not kept:
+    it is sent host-wide (a stated residual, FR-SESS-19)."""
+    import time
+
+    from fuzzlab.session.browserlogin import canonical_host
+    import ipaddress
+    now = time.time() if now is None else now
+    mine = canonical_host(f"http://{host}/")
+    try:                    # an IP host has no parent domain: exact match only (A-N2)
+        ipaddress.ip_address((mine or "").strip("[]"))
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    out: dict[str, str] = {}
+    for c in (storage or {}).get("cookies", []) or []:
+        domain = canonical_host("http://" + str(c.get("domain") or "").lstrip(".") + "/")
+        if not domain or not mine or not (
+                mine == domain or (not is_ip and mine.endswith("." + domain))):
+            continue
+        if c.get("secure") and not secure_ok:
+            continue
+        expires = c.get("expires")
+        if isinstance(expires, (int, float)) and expires > 0 and expires < now:
+            continue
+        if c.get("name"):
+            out[str(c["name"])] = str(c.get("value") or "")
+    return out
 
 
 def _digest(text: str | None) -> str:

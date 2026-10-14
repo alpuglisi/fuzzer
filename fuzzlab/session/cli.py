@@ -52,12 +52,17 @@ def main(argv: list[str]) -> int:
             scope.append(args.host)
         mgr = SessionManager(store, scope_hosts=scope)
         try:
-            header = mgr.session_header(args.host, args.identity, args.base_url,
-                                        operator=True)
+            # every header the session sends: a browser login has a bearer AND the
+            # cookie its app set (BUG-0132), and a server-rendered page reads the cookie
+            headers = mgr.session_headers(args.host, args.identity, args.base_url,
+                                          operator=True)
         except SessionAuthError as exc:
             print(f"login failed: {exc}")
             return 1
-        print(header or "(no session header detected)")
+        for name, value in headers.items():
+            print(f"{name}: {value}")
+        if not headers:
+            print("(no session header detected)")
         return 0
 
     return 2

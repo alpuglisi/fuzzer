@@ -3,6 +3,35 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0040 — The auditor's browser adopts a browser login's localStorage (BUG-0132 sweep) (2026-10-14)
+- Change: `tools/fetcher.py` `ContentFetcher._start_browser` creates its context with
+  `browserauth.context_options(session)`, the one adoption helper the crawl uses now too
+  (CC-CRAWL-0025). It adopts a browser login's `storage_state` (cookies and localStorage)
+  as filtered to in-scope origins by `browserauth.browser_session`. Before, the auditor
+  adopted the session's cookies and headers but not localStorage: an app that reads its
+  token from localStorage rendered logged out in the auditor's browser. BUG-0132's
+  PA-0002 sweep found this and pinned it by a strict xfail. The log line now counts the
+  adopted localStorage entries.
+- Impact: the auditor's rendered fetch of a single-page app shows its logged-in UI, so
+  the forms and inputs behind it are audited. Server-rendered sessions are unchanged:
+  no browser state means no options. Scope is unchanged: the guard and the launch
+  arguments are as before, and only in-scope origins' state is adopted.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_session_browser_login.py`). The strict xfail is now a
+    passing static check that both `_start_browser`s (auditor, crawl) build their
+    context through `context_options`. A real-browser test fetches a route that renders
+    `LOGGED-IN-UI` from localStorage alone, and checks that only the in-scope origin is
+    adopted — done
+  - [x] mutation checks, each reverted and failing: the fetcher without the helper
+    (both tests); the helper adopting nothing (the real-browser test) — done
+  - [x] interfaces (§5) and NFR-AUD-safe traced in place; BUG-0132's sweep table;
+    CHANGELOG — done
+- Review: the coordinator's decision on BUG-0132's flagged sweep gap; reviewers A and B
+  are reviewing 26507a1 in parallel.
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`): `test_session_browser_login`, `test_browser_scope`, `test_lint`, `test_requirements_traceability`, `test_browserauth`, `test_spa_capture`, `test_subpath_apps`, `test_auditor_seam`, `test_destructive_urls`, `test_forms_phase4`: 560 passed, 0 skipped, 0 failed. Live Juice Shop not run here.
+
 ### CC-AUD-0039 — The importer recognises the crawler's ladder values as fillers; entries judged as texts (FR-CRAWL-15, BUG-0131) (2026-10-14)
 - Change (`tools/store_adapter.py`, filed under the auditor as CC-AUD-0035 was):
   - **The ladder (FR-CRAWL-15, reviewer B7):** `LADDER_MAX_DIGITS` (15),

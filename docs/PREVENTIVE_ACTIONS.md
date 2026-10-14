@@ -1661,3 +1661,25 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Enforced by an AST guard** (`tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`):
      no URL-rule call in `fuzzlab/` takes an argument built with a `?`, except a listed,
      reasoned allowance; proven on synthetic offenders (PA-0034(2)). (from BUG-0131)
+
+- **PA-0132** — Strengthens `PA-0111` (browser behaviour emulated rule by rule) and
+  `PA-0006` (fixtures shaped like the real upstream), after BUG-0132: a browser login
+  handed the requests-based senders only the bearer from its login response, not the
+  `token` cookie the app's own JS set, so Juice Shop's server-rendered pages were probed
+  anonymously. PA-0111's enforcement covered form serialisation only, and the login was
+  designed as "detection", so the rule was not seen to apply.
+  1. **A session handed from one client to another carries all the session state the
+     first client holds for the host:** its cookie jar, script-set cookies included,
+     and any other state the second client can use. This holds for a browser login to
+     the requests senders, a crawl to an API client, and a capture to the manager. It is
+     filtered by the scope, transport (`secure`, FR-SESS-13) and secret rules. It is
+     never a projection derived from one response, and one function does the carrying
+     (here `manager._jar_cookies`, PA-0003).
+  2. **A session feature's fixture models what the target's server reads, per
+     consumer**, not only what its login writes. At least one endpoint authenticates
+     only through the state the target's client code establishes (a JS-set cookie, a
+     header the app builds from localStorage). A real-path test sends through each
+     consumer to it (the browser crawl, the `core/` seam, `session print`; PA-0035).
+  3. **The PA-0002 sweep for this class lists every handoff point** of a session
+     between clients, with a disposition each. A gap not fixed is pinned by a strict
+     xfail (`PA-0054(3)`). (from BUG-0132)

@@ -506,10 +506,9 @@ class LocalSpider:
             self._browser_session = session
             self._adopted_original = copy.deepcopy(session.local_storage)
         # service workers would fetch outside page.route (BUG-0111)
-        context = self._browser.new_context(
-            service_workers="block",
-            **({"storage_state": session.storage_state}
-               if session is not None and session.storage_state else {}))
+        from fuzzlab.tools import browserauth
+        context = self._browser.new_context(service_workers="block",
+                                            **browserauth.context_options(session))
         # guard the context, not the page, so popups are confined too (BUG-0123)
         self._guard(context, scripts=True, session=session is not None)
         self._context = context
@@ -518,7 +517,10 @@ class LocalSpider:
         if session is not None:
             from fuzzlab.tools import browserauth
             browserauth.apply_to_context(context, session.cookies)
-            self._injected_cookies = [(c["name"], c["value"]) for c in session.cookies]
+            # the session's credential cookies (`session.manager.credential_cookie`),
+            # jar ones included when they copy the token or look like an identifier
+            # (BUG-0132, reviewer B); an ambient jar cookie is the app's to change
+            self._injected_cookies = list(session.checked_cookies)
             logging.info(f"Crawler authenticated as {self._identity} "
                          f"({len(session.cookies)} cookie(s), "
                          f"{sum(map(len, self._adopted_storage.values()))} localStorage "
@@ -1348,12 +1350,22 @@ class LocalSpider:
 
     def _client_session_intact(self):
         """The client-side half of `_session_intact` (no network; W4): each injected
-        cookie and each adopted localStorage entry still holds its value (a rotation
-        re-adopted). Returns ``(ok, why)``; fail closed."""
+        credential cookie and each adopted localStorage entry still holds its value (a
+        rotation re-adopted: of a localStorage entry, or of a credential cookie the app's
+        JS set -- a login-response cookie must keep its value). Returns ``(ok, why)``;
+        fail closed."""
         jar = {c["name"]: c["value"] for c in self._context.cookies()}
-        for name, value in self._injected_cookies:
-            if jar.get(name) != value:
-                return False, f"cookie {name!r} was changed or cleared"
+        rotating = getattr(self._browser_session, "rotating_cookies", frozenset())
+        for i, (name, value) in enumerate(self._injected_cookies):
+            current = jar.get(name)
+            if current == value:
+                continue
+            if name in rotating and _storage_rotated(current):
+                # a credential cookie the app's JS set and rotated (reviewer B, BUG-0132):
+                # re-adopted, as a rotated localStorage token is; `verify_live` decides
+                self._injected_cookies[i] = (name, current)
+                continue
+            return False, f"cookie {name!r} was changed or cleared"
         for origin, entries in self._adopted_storage.items():
             page = next((p for p in self._context.pages
                          if canonical_origin(p.url) == canonical_origin(origin)), None)
@@ -1654,6 +1666,7 @@ class LocalSpider:
                 if state_cookies:
                     ctx.add_cookies(state_cookies)
                 browserauth.apply_to_context(ctx, sess.cookies)
+                self._injected_cookies = list(sess.checked_cookies)   # as adopted
             for origin, entries in self._adopted_original.items():
                 page = next((p for p in ctx.pages
                              if canonical_origin(p.url) == canonical_origin(origin)), None)

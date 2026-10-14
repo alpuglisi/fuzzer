@@ -54,7 +54,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   timestamps) to the store so a crashed run resumes; never persist live
   cookies/tokens/credentials in cleartext.
 - **FR-SESS-10** Be usable standalone (print a ready-to-use cookie/header/token
-  for a given identity on a given host).
+  for a given identity on a given host). *(CC-SESS-0022, BUG-0132:)* `fuzzlab session
+  print` prints **every** header the session sends (`SessionManager.session_headers`:
+  `Cookie` and `Authorization` together for a browser login); `session_header` keeps
+  returning one (the Cookie first).
 - **FR-SESS-11** `[planned, post-Phase 6]` **Adopt a captured manual session.**
   For hosts whose login detection can't parse (the FR-SESS-6 fail-loud cases),
   accept an authenticated session captured by the proxy from a manual browser login
@@ -158,7 +161,9 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     (`_USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
     password only into the password control, from the credential store, never logged.
     One click (`spa.click_vetted`: covered -> Escape -> dispatch, labels re-read),
-    never retried within an attempt.
+    never retried within an attempt. After a 2xx login answer the page is settled until
+    it is quiet **and** a probe candidate has been seen, within the settle budget (5 s),
+    so an app slow to start its follow-up requests is not cut off by a quiet gap.
   - **The credential and success.** `detect.detect_session_credential` on the login
     request's own response (a cookie that response set, else a token in its JSON body,
     `exp` read for refresh); a non-2xx answer is a rejected login. Success is FR-SESS-5's
@@ -176,6 +181,28 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     corrupted-credential body), so a revoked token reads as lost even when the app
     answers it with a 2xx error body. The login request URL and `logout` are auth
     endpoints (FR-SESS-7); the SPA shell is not.
+  - **The browser's cookies go with the session (CC-SESS-0022, BUG-0132).** The
+    session's cookies are the detected credential's **plus** the browser jar's cookies
+    from the captured `storage_state` (after `drop_secret_values` and
+    `filter_storage_state`) whose domain matches the session's host (loopback aliases
+    one host), unexpired, and not `secure` unless the session is https-only
+    (`manager._jar_cookies`); the detected credential wins a name clash. So a cookie the
+    app's own JS sets after the login (Juice Shop's `token`, read by its server-rendered
+    `/profile`) reaches the requests-based senders through the one cookie path
+    (`apply` / `prepare`: the session's host only, its transport floor). Their names are
+    kept in memory (`SessionState.browser_cookies`). The differential and `verify_live`
+    replay the cookies with the bearer; the corrupted arm gives a cookie equal to the
+    bearer token the same corrupted token, every other credential cookie (one the login
+    response set, or an identifier-like jar cookie) a random value, and keeps an ambient
+    jar cookie (a short non-identifier value such as a language choice) as it is.
+    Re-login and isolated copies go through the same path. *(Review of CC-SESS-0022:)*
+    which cookies are credentials is one predicate, `manager.credential_cookie`, used
+    by the corrupted arm and the crawler's check (FR-CRAWL-14). These are credentials:
+    every login-response cookie; a jar cookie equal to a detected token; a jar cookie
+    that `_identifier_like` holds for. Only a short, plain jar cookie is ambient. The
+    anonymous arm carries the ambient jar cookies too, so it differs from the corrupted
+    arm only by the credential (reviewer A-S1). An IP host takes only cookies for its
+    own address, never a parent domain's (A-N2).
   - **What is kept.** `SessionState.browser_state` = the login context's
     `storage_state()` (cookies and per-origin localStorage) without any entry whose
     name or value carries the password (review round 1, A-M2), then filtered to the
@@ -192,7 +219,11 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     another origin needs that origin in `auth_origins`. An app that makes no
     credential-dependent GET after its login cannot be confirmed (fails loudly).
     Username detection depends on `_USERNAME_HINT` (BUG-0121). Juice Shop itself has
-    not been exercised here (offline fixture only).
+    not been exercised here (offline fixture only). *(CC-SESS-0022 review:)* the jar
+    cookies and the bearer reach any port on the session's host, per PA-0123's stated
+    host-level exception (FR-SESS-12/13); origin-scoped sessions are a separate
+    follow-up (reviewer A). A jar cookie's `path` is not kept: a `path=/admin` cookie is
+    sent host-wide (A-N2).
 - **FR-SESS-18 (logout by redirect, CC-SESS-0019, BUG-0122)**
   - A redirect is a logout only when its target, resolved against the page, is either:
     - the session's own login URL: same host and path, an http→https upgrade on
@@ -286,6 +317,7 @@ data. Shared by all tools; a hard dependency for external validation (D10).
 - **NFR-SESS-zero-request** Prefer validity signals that cost no request (e.g.
   JWT `exp`); validate on a schedule or reactively, not before every request.
 - **NFR-SESS-redaction** Credentials, cookies, and tokens redacted on write.
+  - Enforced by (a browser login's JS-set cookie, BUG-0132: only to the session's host, never in repr, logs or the store): `manager._jar_cookies`, `SessionState.apply` / `prepare` — `tests/test_session_browser_login.py::test_the_js_set_cookie_value_is_in_no_repr_log_or_store`, `tests/test_session_browser_login.py::test_the_js_set_cookie_never_goes_to_another_host`, `tests/test_session_browser_login.py::test_jar_cookies_are_host_scoped_unexpired_and_secure_only_over_https`
   - Enforced by: `SessionState.non_secret_state` / `redacted` — `tests/test_session_persistence.py::test_login_persists_non_secret_state_only`, `tests/test_proxy_session_capture.py::test_adopt_persists_only_non_secret_metadata`, `tests/test_session_detect.py::test_session_state_apply_and_redacted`
   - Enforced by (isolated copies, FR-SESS-17): never persisted, and no credential value in an isolation error or report — `tests/test_login_form_isolation.py::test_the_isolated_session_is_never_persisted`, `tests/test_login_form_isolation.py::test_isolation_errors_and_report_carry_no_secret_values`
   - Enforced by (browser login, FR-SESS-19): a unique password never reaches the spider DB, the store, the logs (with `DEBUG=pw:api`), an exception or a repr; `SessionState`'s secrets are `repr=False` — `tests/test_session_browser_login.py::test_the_password_appears_nowhere`, `tests/test_session_browser_login.py::test_session_state_repr_and_str_hold_no_secret`, `tests/test_session_browser_login.py::test_the_driver_starts_without_debug_logging`, `tests/test_session_browser_login.py::test_a_failure_text_never_holds_the_password`

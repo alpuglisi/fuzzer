@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0132: a browser login's senders now carry the cookie its app set)
+- **Why:** after a browser login on Juice Shop the requests-based senders sent only the
+  bearer from the login response; the `token` cookie the app's JS sets was never seen,
+  so the server-rendered `/profile` (500 without it) was probed anonymously.
+- **What:** the login's in-scope browser cookies join the session (host-scoped, `secure`
+  respected, password-cleaned) and reach the senders through the one cookie path; the
+  probe differential corrupts the cookie copy of the bearer too; `session print` prints
+  every header; the crawler's cookie check covers credential cookies only (CC-SESS-0022,
+  CC-CRAWL-0025, PA-0132). The sweep's one gap, the auditor's browser not adopting a
+  browser login's localStorage (so an SPA rendered logged out there), is fixed too: it
+  adopts the in-scope `storage_state` through the crawl's helper (CC-AUD-0040). Review
+  of 26507a1:
+  - one `credential_cookie` predicate, so the crawl notices the JS-set `token` cookie
+    being cleared, while a rotated one is re-adopted;
+  - the anonymous probe arm carries the ambient cookies;
+  - an IP host takes only exact-domain cookies;
+  - the login waits for the app's follow-up requests by condition, not by a quiet gap.
+  The reported flaky run was traced to a tree caught mid-edit (a strict xfail turning
+  XPASS); 24 loaded runs showed no flake.
+
 ## 2026-10-14 (forms phase 4: constraint-aware filling and reveal navigation)
 - **The crawler can now submit Angular forms whose button stays disabled until their
   validators pass, and finds what sits behind menus and dialogs** (Juice Shop's

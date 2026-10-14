@@ -76,6 +76,15 @@ class BrowserSession:
     storage_state: dict | None = field(repr=False)
     #: its in-scope localStorage entries, ``{origin: {name: value}}``
     local_storage: dict[str, dict[str, str]] = field(repr=False)
+    #: ``(name, value)`` of the session's credential cookies
+    #: (`session.manager.credential_cookie`: every login-response cookie, and a jar
+    #: cookie that copies the token or looks like an identifier; never an ambient one),
+    #: for the crawler's session check (BUG-0132, reviewer B)
+    checked_cookies: list[tuple[str, str]] = field(default_factory=list, repr=False)
+    #: the names among them a browser login took from the app's jar: the app may rotate
+    #: those (a new identifier-like value is re-adopted, `spider._storage_rotated`);
+    #: a login-response cookie must keep its value
+    rotating_cookies: frozenset = field(default_factory=frozenset, repr=False)
 
 
 def browser_session(manager, identity: str, base_url: str, *,
@@ -91,10 +100,28 @@ def browser_session(manager, identity: str, base_url: str, *,
         if raw else None
     local = {o["origin"]: {e["name"]: e["value"] for e in o["localStorage"]}
              for o in (storage or {}).get("origins", []) if o["localStorage"]}
-    return BrowserSession(cookies=_cookies_of(state, base_url),
+    from fuzzlab.session.manager import credential_cookie
+    cookies = _cookies_of(state, base_url)
+    jar = set(getattr(state, "browser_cookies", None) or ())
+    checked = [(c["name"], c["value"]) for c in cookies
+               if not jar or credential_cookie(c["name"], c["value"], state)]
+    return BrowserSession(cookies=cookies,
                           headers=dict(getattr(state, "headers", None) or {}),
                           header_scope=header_scope_for(state, base_url, in_scope),
-                          storage_state=storage, local_storage=local)
+                          storage_state=storage, local_storage=local,
+                          checked_cookies=checked,
+                          rotating_cookies=frozenset(n for n, _v in checked if n in jar))
+
+
+def context_options(session: BrowserSession | None) -> dict:
+    """The ``browser.new_context(...)`` keywords that adopt ``session``: its browser
+    login's ``storage_state``, already filtered to in-scope origins by
+    `browser_session` (reviewer A7). The one adoption helper for every authenticated
+    browser context (the crawl, FR-CRAWL-14; the auditor, CC-AUD-0040). Empty for no
+    session or one without a browser state."""
+    if session is None or not session.storage_state:
+        return {}
+    return {"storage_state": session.storage_state}
 
 
 def apply_to_context(context, cookies, headers=None) -> None:
