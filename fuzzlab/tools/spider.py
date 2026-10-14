@@ -518,7 +518,9 @@ class LocalSpider:
         if session is not None:
             from fuzzlab.tools import browserauth
             browserauth.apply_to_context(context, session.cookies)
-            self._injected_cookies = [(c["name"], c["value"]) for c in session.cookies]
+            # the session's credential cookies; a cookie a browser login took from the
+            # app's own jar (BUG-0132) is the app's to change, like its localStorage
+            self._injected_cookies = list(session.checked_cookies)
             logging.info(f"Crawler authenticated as {self._identity} "
                          f"({len(session.cookies)} cookie(s), "
                          f"{sum(map(len, self._adopted_storage.values()))} localStorage "

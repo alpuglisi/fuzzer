@@ -349,6 +349,16 @@ class SessionManager:
             return f"Authorization: {applied['Authorization']}"
         return ""
 
+    def session_headers(self, host: str, identity: str, base_url: str, *,
+                        operator: bool = False) -> dict[str, str]:
+        """Standalone: every header the session sends (``Cookie`` and
+        ``Authorization`` together, e.g. a browser login's bearer and the cookie the
+        app's JS set, BUG-0132), under the same transport refusal as `session_header`.
+        ``fuzzlab session print`` prints each."""
+        state = self.ensure(host, identity, base_url, operator=operator)
+        _check_transport(state, base_url)
+        return state.apply({})
+
     # -- isolated copies (forms phase 2, FR-SESS-17) -------------------------
     def isolated_copy(self, identity: str, *, ordinal: int,
                       max_logins: int = 3) -> SessionManager:
@@ -615,13 +625,19 @@ class SessionManager:
                     detected.kind in tried:
                 continue
             tried.append(detected.kind)
+            # BUG-0132: the cookies the app's own JS set after the login (Juice Shop's
+            # `token`) are in the browser's jar, never in the login response; a
+            # requests-based send needs them too (server-rendered pages read them)
+            jar = _jar_cookies(obs.storage_state, host, secure_ok=obs.floor_https)
             state = SessionState(host=host, identity=identity, kind=detected.kind,
-                                 cookies=dict(detected.cookies),
+                                 cookies={**jar, **detected.cookies},
                                  headers=dict(detected.headers),
                                  token_exp=detected.token_exp, login_url=obs.login_url,
                                  logout_url=urljoin(base_url, "logout"),
                                  secure_only=obs.floor_https,
-                                 browser_state=obs.storage_state)
+                                 browser_state=obs.storage_state,
+                                 browser_cookies=tuple(sorted(
+                                     set(jar) - set(detected.cookies))))
             probe, refusal_digest = self._spa_probe(host, base_url, state, obs.probes)
             if probe is None:
                 continue
@@ -975,20 +991,68 @@ def _corrupt_token(token: str) -> str:
 
 
 def _corrupted(state: SessionState) -> SessionState:
-    """A copy of ``state`` with an invalid credential of the same shape (A-M1): a
-    bearer token with its last character flipped, each cookie a random value under the
-    same name. Never stored."""
+    """A copy of ``state`` with an invalid credential of the same shape (A-M1,
+    BUG-0132), never stored:
+
+    * a bearer token with its last character flipped (`_corrupt_token`);
+    * a cookie whose value equals that token (the app's JS copy of it, Juice Shop's
+      ``token`` cookie) carries the **same** corrupted token, so neither arm can keep
+      the corrupted request authenticated through the other;
+    * every other credential cookie -- one the login response set, or a jar cookie
+      that looks like an identifier (`_identifier_like`) -- a random value under the
+      same name;
+    * an ambient jar cookie (a short, non-identifier value: a language or a banner
+      choice) as it is: it is the request's shape, not its credential."""
     import dataclasses
     import secrets
-    headers = {}
+    headers, tokens = {}, {}
     for name, value in (state.headers or {}).items():
         scheme, sep, token = str(value).partition(" ")
-        headers[name] = f"{scheme} {_corrupt_token(token)}" if sep else \
-            _corrupt_token(str(value))
-    cookies = {name: secrets.token_hex(max(8, len(str(value)) // 2))
-               for name, value in (state.cookies or {}).items()}
+        bad = _corrupt_token(token if sep else str(value))
+        headers[name] = f"{scheme} {bad}" if sep else bad
+        tokens[token if sep else str(value)] = bad
+    jar = set(state.browser_cookies or ())
+    cookies = {}
+    for name, value in (state.cookies or {}).items():
+        value = str(value)
+        if value in tokens:
+            cookies[name] = tokens[value]
+        elif name not in jar or _identifier_like(name, value):
+            cookies[name] = secrets.token_hex(max(8, len(value) // 2))
+        else:
+            cookies[name] = value
     return dataclasses.replace(state, headers=headers, cookies=cookies,
                                browser_state=None)
+
+
+def _jar_cookies(storage: dict | None, host: str, *, secure_ok: bool,
+                 now: float | None = None) -> dict[str, str]:
+    """The browser jar's cookies a requests-based send of this session may carry
+    (BUG-0132): from a ``storage_state`` already cleaned of the password and filtered
+    to the login scope (`browserlogin.drop_secret_values`, `filter_storage_state`),
+    those whose domain matches the session's ``host`` (canonical: loopback aliases one
+    host), not expired, and not ``secure`` unless the session is https-only
+    (``secure_ok``: then every send of it is over https, FR-SESS-13). They then go
+    through the session's one cookie path (`SessionState.apply`, sent only to the
+    session's host by `prepare`, under its transport floor)."""
+    import time
+
+    from fuzzlab.session.browserlogin import canonical_host
+    now = time.time() if now is None else now
+    mine = canonical_host(f"http://{host}/")
+    out: dict[str, str] = {}
+    for c in (storage or {}).get("cookies", []) or []:
+        domain = canonical_host("http://" + str(c.get("domain") or "").lstrip(".") + "/")
+        if not domain or not mine or not (mine == domain or mine.endswith("." + domain)):
+            continue
+        if c.get("secure") and not secure_ok:
+            continue
+        expires = c.get("expires")
+        if isinstance(expires, (int, float)) and expires > 0 and expires < now:
+            continue
+        if c.get("name"):
+            out[str(c["name"])] = str(c.get("value") or "")
+    return out
 
 
 def _digest(text: str | None) -> str:

@@ -199,7 +199,11 @@ fuzzer.
     action passes the same header scope. The auditor's browser (CC-AUD-0038) and the M6
     executor's storage headers (CC-FUZZ-0076) use the same mechanism.
   - **Session check.** After each authenticated submission (FR-CRAWL-13), besides the
-    injected cookies and `verify_live` (a browser login's protected probe), each
+    injected credential cookies (since CC-CRAWL-0025, BUG-0132: not the cookies a
+    browser login took from the app's own jar, which the context gets from
+    `storage_state` and which the app may legitimately rewrite;
+    `BrowserSession.checked_cookies`) and `verify_live` (a browser login's protected
+    probe), each
     adopted localStorage entry must still hold its value, read with `page.evaluate` on
     an open page of its origin; no such page, a read failure, or an entry cleared or set
     to an empty, `"null"`, `"undefined"` or non-identifier value is a loss (fail closed)

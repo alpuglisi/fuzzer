@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0132: a browser login's senders now carry the cookie its app set)
+- **Why:** after a browser login on Juice Shop the requests-based senders sent only the
+  bearer from the login response; the `token` cookie the app's JS sets was never seen,
+  so the server-rendered `/profile` (500 without it) was probed anonymously.
+- **What:** the login's in-scope browser cookies join the session (host-scoped, `secure`
+  respected, password-cleaned) and reach the senders through the one cookie path; the
+  probe differential corrupts the cookie copy of the bearer too; `session print` prints
+  every header; the crawler's cookie check covers credential cookies only (CC-SESS-0022,
+  CC-CRAWL-0025, PA-0132). The auditor's browser still does not adopt localStorage:
+  pinned by a strict xfail and flagged.
+
 ## 2026-10-14 (forms phase 4: constraint-aware filling and reveal navigation)
 - **The crawler can now submit Angular forms whose button stays disabled until their
   validators pass, and finds what sits behind menus and dialogs** (Juice Shop's

@@ -343,7 +343,11 @@ def test_a_spa_login_is_detected_as_a_bearer_and_verified(spa):
     state = _login(mgr, lab)
     token = state.headers["Authorization"][len("Bearer "):]
     assert state.kind == "bearer" and state.valid and token in lab.tokens
-    assert mgr.session_header(HOST, "user", lab.base) == f"Authorization: Bearer {token}"
+    # BUG-0132: the session also carries the cookie the app's JS set to the token;
+    # `session_header` keeps its rule (the Cookie first), `session_headers` gives both
+    assert mgr.session_header(HOST, "user", lab.base).startswith("Cookie: ")
+    assert mgr.session_headers(HOST, "user", lab.base)["Authorization"] == \
+        f"Bearer {token}"
     assert state.protected_probe and state.protected_probe.startswith(lab.base)
     assert state.token_exp == 9999999999.0
     (origin,) = state.browser_state["origins"]
@@ -869,7 +873,9 @@ def test_a_hashed_password_posted_to_api_users_sends_nothing(spa):
 
 def test_a_rotated_token_keeps_the_crawl_submitting(spa, tmp_path):
     """B-S3: the app replaces its localStorage token every 300 ms: a rotation, re-adopted
-    and still checked with `verify_live`; submitting goes on."""
+    and still checked with `verify_live`; submitting goes on. BUG-0132: it rewrites its
+    ``token`` cookie too, which the session now carries for the senders; the crawl's
+    cookie check covers only credential cookies, so that is no loss either."""
     from fuzzlab.tools.spider import LocalSpider
     pw = _password()
     lab = spa(pw, rotate=True)
@@ -909,3 +915,168 @@ def test_a_cancelled_login_stops_at_a_checkpoint():
     cancelled.set()
     with pytest.raises(browserlogin.BrowserLoginError, match="abandoned"):
         browserlogin._alive(cancelled)
+
+
+# =====================================================================================
+# BUG-0132: the cookie the app's JS sets after a browser login reaches the senders
+# =====================================================================================
+def _seam_get(mgr, url, identity="user"):
+    """A send through the real request seam the senders use (`core.http.HttpClient`
+    with the session manager as its addon, the default requests transport)."""
+    from fuzzlab.core.budget import RequestBudget
+    from fuzzlab.core.http import HttpClient, Request
+    client = HttpClient(RequestBudget(20), [HOST], session=mgr)
+    return client.send(Request("GET", url, identity=identity))
+
+
+def test_a_requests_send_reaches_a_page_that_reads_only_the_js_set_cookie(spa):
+    """BUG-0132, the real path (PA-0035): Juice Shop's ``/profile`` answers 200 only
+    with the ``token`` cookie its JS sets after the JSON login, 500 with the bearer
+    alone. After `ensure`, a send through the seam reaches it, and so do the headers
+    ``session print`` shows (`session_headers`)."""
+    import requests
+    pw = _password()
+    lab = spa(pw)
+    mgr = _manager(lab, pw)
+    state = _login(mgr, lab)
+    token = state.headers["Authorization"][len("Bearer "):]
+    assert state.cookies.get("token") == token and "token" in state.browser_cookies
+    assert _seam_get(mgr, lab.base + "profile").status == 200
+    headers = mgr.session_headers(HOST, "user", lab.base)
+    assert set(headers) == {"Cookie", "Authorization"}
+    assert requests.get(lab.base + "profile", headers=headers, timeout=10,
+                        allow_redirects=False).status_code == 200
+    bearer_only = requests.get(lab.base + "profile", timeout=10, allow_redirects=False,
+                               headers={"Authorization": headers["Authorization"]})
+    assert bearer_only.status_code == 500                     # the bug's symptom
+    assert mgr.session_header(HOST, "user", lab.base).startswith("Cookie: ")
+
+
+def test_the_js_set_cookie_never_goes_to_another_host(spa):
+    """BUG-0132: the adopted cookie rides the session's one cookie path: only to the
+    session's own host (`prepare`), never to another one."""
+    from fuzzlab.core.http import Request
+    pw = _password()
+    lab = spa(pw)
+    mgr = _manager(lab, pw)
+    _login(mgr, lab)
+    other = Request("GET", "http://127.0.0.2:9/x", identity="user")
+    mgr.prepare(other, "user")
+    assert "Cookie" not in other.headers and "Authorization" not in other.headers
+    mine = Request("GET", lab.base + "x", identity="user")
+    mgr.prepare(mine, "user")
+    assert "token=" in mine.headers["Cookie"]
+
+
+def test_jar_cookies_are_host_scoped_unexpired_and_secure_only_over_https():
+    """BUG-0132: which of the browser's cookies a requests-based send may carry."""
+    import time
+
+    from fuzzlab.session.manager import _jar_cookies
+    now = time.time()
+    storage = {"cookies": [
+        {"name": "token", "value": "T", "domain": "127.0.0.1", "expires": -1},
+        {"name": "alias", "value": "A", "domain": "localhost", "expires": -1},
+        {"name": "parent", "value": "P", "domain": ".example.com"},
+        {"name": "other", "value": "O", "domain": "auth.example"},
+        {"name": "old", "value": "X", "domain": "127.0.0.1", "expires": now - 10},
+        {"name": "later", "value": "L", "domain": "127.0.0.1", "expires": now + 3600},
+        {"name": "sec", "value": "S", "domain": "127.0.0.1", "secure": True}]}
+    assert _jar_cookies(storage, "127.0.0.1", secure_ok=False, now=now) == \
+        {"token": "T", "alias": "A", "later": "L"}
+    assert _jar_cookies(storage, "127.0.0.1", secure_ok=True, now=now)["sec"] == "S"
+    assert _jar_cookies(storage, "app.example.com", secure_ok=False, now=now) == \
+        {"parent": "P"}
+    assert _jar_cookies(None, "h", secure_ok=True) == {}
+
+
+def test_the_corrupted_arm_corrupts_the_cookie_copy_of_the_bearer():
+    """BUG-0132 (A-M1's arm extended): the cookie the app set to the bearer's value
+    carries the same corrupted token; a login-response cookie and an identifier-like
+    jar cookie are random; an ambient jar cookie keeps its value."""
+    from fuzzlab.session.manager import _corrupted
+    jwt = "eyJhbGciOiAiSFMyNTYifQ.eyJqdGkiOiAiYWJjIn0.c2lnbmF0dXJl"
+    state = SessionState(HOST, "u", kind="bearer",
+                         headers={"Authorization": f"Bearer {jwt}"},
+                         cookies={"token": jwt, "language": "en", "sid": "1",
+                                  "continueCode": "9f8e7d6c5b4a39281706f5e4d3c2b1a0"},
+                         browser_cookies=("continueCode", "language", "token"))
+    bad = _corrupted(state)
+    bad_token = bad.headers["Authorization"][len("Bearer "):]
+    assert bad_token != jwt and bad.cookies["token"] == bad_token
+    assert bad.cookies["language"] == "en"
+    assert bad.cookies["sid"] != "1"                          # a login-response cookie
+    assert bad.cookies["continueCode"] != state.cookies["continueCode"]
+
+
+def test_a_probe_that_reads_only_the_cookie_confirms_and_tracks_revocation(spa):
+    """BUG-0132: the differential and `verify_live` consider the adopted cookie: an app
+    whose API reads only its JS-set cookie is confirmed (the corrupted arm corrupts that
+    cookie too), and a revoked token reads as not live."""
+    pw = _password()
+    lab = spa(pw, cookie_only=True)
+    mgr = _manager(lab, pw)
+    state = _login(mgr, lab)
+    assert state.protected_probe
+    assert mgr.verify_live(HOST, "user", lab.base) is True
+    lab.revoke_all()
+    assert mgr.verify_live(HOST, "user", lab.base) is False
+
+
+def test_a_relogin_and_an_isolated_copy_carry_their_own_js_set_cookie(spa):
+    """BUG-0132: re-login and isolated copies (FR-SESS-17) go through the same path:
+    each session's cookie is its own token, and the copy is distinct."""
+    pw = _password()
+    lab = spa(pw)
+    mgr = _manager(lab, pw)
+    first = _login(mgr, lab)
+    mgr._state[(HOST, "user")].valid = False
+    second = mgr.ensure(HOST, "user", lab.base)
+    assert second.cookies["token"] != first.cookies["token"]
+    assert second.cookies["token"] == second.headers["Authorization"][len("Bearer "):]
+    copy = mgr.isolated_copy("user", ordinal=1)
+    iso = copy.ensure(HOST, "user", lab.base)
+    assert iso.cookies["token"] == iso.headers["Authorization"][len("Bearer "):]
+    assert iso.cookies["token"] not in (first.cookies["token"], second.cookies["token"])
+    assert _seam_get(copy, lab.base + "profile", identity=copy.label).status == 200
+
+
+def test_the_js_set_cookie_value_is_in_no_repr_log_or_store(spa, tmp_path, caplog):
+    """BUG-0132, NFR-SESS-redaction: the adopted cookie is a secret like the bearer."""
+    from fuzzlab.core.store import Store
+    caplog.set_level(logging.DEBUG)
+    pw = _password()
+    lab = spa(pw)
+    store_path = tmp_path / "store.db"
+    store = Store(str(store_path))
+    try:
+        mgr = SessionManager(_creds(pw), scope_hosts=[HOST], store=store,
+                             logger=logging.getLogger("fuzzlab.test"))
+        state = _login(mgr, lab)
+        _seam_get(mgr, lab.base + "profile")
+    finally:
+        store.close()
+    token = state.cookies["token"]
+    for text in (repr(state), str(state), caplog.text,
+                 store_path.read_bytes().decode("latin-1"),
+                 json.dumps(state.non_secret_state()), json.dumps(state.redacted())):
+        assert token not in text
+    assert "token" in state.redacted()["cookies"]             # its name only
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "BUG-0132 PA-0002 sweep, flagged and not fixed here (no AUD change number "
+    "assigned): the auditor's rendered fetch adopts the session's cookies (the JS-set "
+    "one included since BUG-0132) and its headers, but not a browser login's "
+    "localStorage, so an app that reads its token from localStorage renders logged out "
+    "in the auditor's browser"))
+def test_the_auditors_browser_adopts_a_browser_logins_local_storage():
+    import ast
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / "fuzzlab" / "tools" / "fetcher.py").read_text()
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "_start_browser")
+    contexts = [c for c in ast.walk(fn) if isinstance(c, ast.Call)
+                and isinstance(c.func, ast.Attribute) and c.func.attr == "new_context"]
+    assert contexts and any(k.arg == "storage_state" or k.arg is None
+                            for c in contexts for k in c.keywords)

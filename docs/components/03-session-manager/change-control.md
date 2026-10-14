@@ -3,6 +3,61 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
+- Change:
+  - **`session/manager.py`:** `_jar_cookies(storage_state, host, secure_ok=)`: the
+    browser jar's cookies from a browser login's captured `storage_state` (already
+    `drop_secret_values`- and `filter_storage_state`-ed) whose domain matches the
+    session's host (canonical; parent-domain cookies included), unexpired, and not
+    `secure` unless the session is https-only. `_browser_login_state` merges them into
+    `SessionState.cookies` under the detected credential and records their names in the
+    new in-memory field `SessionState.browser_cookies` (`repr=False, compare=False`).
+    They are sent through the existing cookie path (`apply` / `prepare`: the session's
+    host only, `_check_transport`), so the requests-based senders now carry Juice Shop's
+    JS-set `token` cookie. Before, only the login response's detected credential was
+    kept.
+  - **The differential and `verify_live`:** unchanged in shape; they replay
+    `state.apply({})`, which now includes the cookies. `_corrupted` gives a cookie whose
+    value equals the bearer token the same corrupted token, any other credential cookie
+    (a login-response cookie or an identifier-like jar cookie) a random value, and keeps
+    an ambient jar cookie as is (it is the request's shape, and a random language value
+    could turn the corrupted arm into a 5xx that disqualifies a good probe).
+  - **`session_headers`** (new): every header the session sends; `session/cli.py`
+    `print` prints each. `session_header` keeps its rule (the Cookie first).
+  - Re-login and isolated copies use the same `_browser_login_state`.
+- Impact:
+  - **Senders, auditor, fuzzer:** authenticated sends to pages that read the JS-set
+    cookie now succeed.
+  - **CRAWL** (CC-CRAWL-0025): the crawl's cookie check excludes jar cookies.
+  - **greybox:** `session_header` now hands it the cookie (it carries cookies only).
+  - **`fuzzlab session print`:** prints several lines for a browser login.
+  - No persisted field changes: `non_secret_state` still has no cookie values.
+- Risk: medium (more state on every authenticated send). Mitigated: the jar is already
+  password-cleaned and scope-filtered; host, expiry and `secure` are checked; the cookies
+  go only to the session's host under its transport floor. Each check has a test that a
+  mutation reverting it fails (below).
+- Deliverables:
+  - [x] code (`session/manager.py`, `session/state.py`, `session/cli.py`) — done
+  - [x] tests (`tests/test_session_browser_login.py`, fixture `/profile` and
+    `cookie_only` in `tests/_spa_login_fixture.py`): the real-path send through the
+    `core/` seam and through `session_headers` (fails before the fix); bearer alone 500;
+    never to another host; host, expiry and `secure`; the corrupted arm; a cookie-only
+    API confirmed and its revocation seen; re-login and an isolated copy; no cookie
+    value in repr, logs or the store — done
+  - [x] BUG-0132, PA-0132, ERROR_LOG, FR-SESS-19 and FR-SESS-10 in place,
+    NFR-SESS-redaction traced, CHANGELOG — done
+  - [x] PA-0002 sweep (in BUG-0132): the auditor's browser does not adopt a browser
+    login's localStorage. It is pinned by a strict xfail and flagged (no AUD change
+    number was assigned) — done
+  - [x] mutation checks, each reverted and failing its tests: no jar merge (the
+    real-path send, the cookie-only probe, re-login and the isolated copy); the cookie
+    copy of the bearer left uncorrupted (the corrupted-arm unit, the cookie-only probe);
+    `secure`, host scope or expiry ignored (the `_jar_cookies` table) — done
+- Review: the coordinator's BUG-0132 brief (verified live on Juice Shop). Mechanism as
+  specified: jar cookies through the existing cookie path; the corrupted arm corrupts
+  the bearer and the cookie equal to it.
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`): the targeted run (`test_session*.py`, `test_login_form_isolation`, `test_browser_scope`, `test_forms_phase4`, `test_lint`, `test_requirements_traceability`, `test_browserauth`, `test_spa_capture`, `test_subpath_apps`, `test_logout_listener`, `test_proxy_session_capture`, `test_logout_redirect`, `test_loopback_listeners`) gave 751 passed, 1 xfailed (the strict pin of the auditor's localStorage gap), 0 skipped, 0 failed. Not verified here: the live Juice Shop re-run (no lab traffic in this change).
+
 ### CC-SESS-0021 — Browser login fallback for single-page apps (FR-SESS-19) (2026-10-14)
 - Change:
   - **New `session/browserlogin.py`.** When `SessionManager._login` finds no

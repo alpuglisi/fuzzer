@@ -45,6 +45,10 @@ class SessionState:
     #: (the differential was the body, A-M1): a live session's probe must answer
     #: something else. In memory only.
     probe_refusal_digest: str | None = field(default=None, repr=False)
+    #: The names in ``cookies`` that a browser login adopted from the browser's own
+    #: cookie jar (a cookie the app's JS set, e.g. Juice Shop's ``token``) rather than
+    #: from the login response (BUG-0132). In memory only.
+    browser_cookies: tuple[str, ...] = field(default=(), repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.secure_only is None:

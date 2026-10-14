@@ -42,9 +42,10 @@ const api = (url, opt) => { opt = opt || {};
   return fetch(url, opt); };
 const post = (url, body) => api(url, {method: 'POST', headers: {'Content-Type':
   'application/json'}, body: JSON.stringify(body)}).catch(() => {});
-if (CFG.rotate) setInterval(() => { if (tok()) localStorage.setItem('token',
-  [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16)
-    .padStart(2, '0')).join('')); }, 300);
+if (CFG.rotate) setInterval(() => { if (!tok()) return;
+  const t = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16)
+    .padStart(2, '0')).join('');
+  localStorage.setItem('token', t); document.cookie = 'token=' + t + '; path=/'; }, 300);
 if (CFG.poll) { let polls = 0;
   setInterval(() => { if (++polls <= 400) api(P + 'rest/ping').catch(() => {}); }, 50); }
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -142,7 +143,8 @@ class LoginSpa:
                  clear_ls: bool = False, revoke_on_feedback: bool = False,
                  poll: bool = False, probe_delay: float = 0.0, prefix: str = "/",
                  script_delay: float = 0.0, leaky: bool = False, echo: bool = False,
-                 invalid_200: bool = False, rotate: bool = False):
+                 invalid_200: bool = False, rotate: bool = False,
+                 cookie_only: bool = False):
         self.password = password
         self.variant = variant
         self.other_port = other_port
@@ -161,8 +163,12 @@ class LoginSpa:
         self.echo = echo
         #: ``/api/me`` answers a non-live token with a 200 error body (A-M1)
         self.invalid_200 = invalid_200
-        #: the app replaces its localStorage token every 300 ms (B-S3)
+        #: the app replaces its localStorage token (and its ``token`` cookie copy) every
+        #: 300 ms (B-S3, BUG-0132)
         self.rotate = rotate
+        #: the API reads only the ``token`` cookie the app's JS sets, never the bearer
+        #: (BUG-0132); ``/profile`` always does (Juice Shop's server-rendered page)
+        self.cookie_only = cookie_only
         self.requests: list[tuple[str, str, dict, bytes]] = []
         self.tokens: set[str] = set()
         self.revoked: set[str] = set()
@@ -194,10 +200,15 @@ class LoginSpa:
                "leaky": self.leaky, "echo": self.echo, "rotate": self.rotate}
         return _APP_JS.replace("__CFG__", json.dumps(cfg))
 
-    def live(self, headers) -> bool:
-        auth = headers.get("Authorization") or ""
-        token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
-        return token in self.tokens and token not in self.revoked
+    def live(self, headers, *, cookie: bool | None = None) -> bool:
+        """Is the request's token live: the bearer, or with ``cookie`` (default: the
+        lab's ``cookie_only``) only the ``token`` cookie."""
+        if cookie if cookie is not None else self.cookie_only:
+            token = _cookie(headers.get("Cookie") or "", "token")
+        else:
+            auth = headers.get("Authorization") or ""
+            token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+        return bool(token) and token in self.tokens and token not in self.revoked
 
     def route(self, h, body: bytes) -> None:
         path = h.path.split("?", 1)[0]
@@ -231,6 +242,12 @@ class LoginSpa:
             if self.invalid_200:
                 return _send(h, 200, "application/json", b'{"error":"invalid token"}')
             return _send(h, 401, "application/json", b'{"error":"Unauthorized"}')
+        if path == "/profile":
+            # Juice Shop's server-rendered profile: the JS-set cookie only, else 500
+            if self.live(h.headers, cookie=True):
+                return _send(h, 200, "text/html",
+                             f"<html><h1>{USER}</h1>{PROTECTED}</html>".encode())
+            return _send(h, 500, "text/html", b"<html>Error: Blocked illegal activity</html>")
         if path == "/rest/echo":
             return _send(h, 200, "application/json", json.dumps(
                 {"auth": h.headers.get("Authorization") or ""}).encode())
@@ -263,6 +280,14 @@ class LoginSpa:
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
+
+
+def _cookie(header: str, name: str) -> str:
+    for part in header.split(";"):
+        key, sep, value = part.strip().partition("=")
+        if sep and key == name:
+            return value
+    return ""
 
 
 def _send(h, status: int, ctype: str, data: bytes) -> None:

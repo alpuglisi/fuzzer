@@ -3,6 +3,28 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
+- Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
+  session's cookies minus those a browser login took from the app's own jar
+  (`SessionState.browser_cookies`, CC-SESS-0022). `tools/spider.py` `_start_browser`
+  sets `_injected_cookies` from it. Since BUG-0132 the session's cookies include the
+  jar's (e.g. Juice Shop's `token`, which the app rewrites). Checking those would read a
+  legitimate rewrite as a lost session. They reach the crawl context through
+  `storage_state` already, as the localStorage entries do.
+- Impact: none for server-rendered logins (they have no jar cookies). For a browser
+  login, the check is what it was before BUG-0132: credential cookies, localStorage and
+  `verify_live`.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] test:
+    `tests/test_session_browser_login.py::test_a_rotated_token_keeps_the_crawl_submitting`
+    (the fixture now rewrites the cookie with the localStorage token); the mutation that
+    checks every cookie fails it — done
+  - [x] FR-CRAWL-14 in place — done
+- Review: with CC-SESS-0022 (BUG-0132 brief).
+- Effectiveness (assessed 2026-10-14): verified offline against loopback fixtures, real Chromium (`FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1`, `FUZZLAB_REQUIRE_NETNS=1`): the targeted run (`test_session*.py`, `test_login_form_isolation`, `test_browser_scope`, `test_forms_phase4`, `test_lint`, `test_requirements_traceability`, `test_browserauth`, `test_spa_capture`, `test_subpath_apps`, `test_logout_listener`, `test_proxy_session_capture`, `test_logout_redirect`, `test_loopback_listeners`) gave 751 passed, 1 xfailed (the strict pin of the auditor's localStorage gap), 0 skipped, 0 failed. Not verified here: the live Juice Shop re-run (no lab traffic in this change).
+
 ### CC-CRAWL-0024 — Reveal navigation inside a reveal window (FR-CRAWL-16, forms phase 4, G2 and W1-W4) (2026-10-14)
 - Change (the agreed design `forms-p4-draft.md`, Revision 2, reviewers A and B):
   - **The reveal window (W1), `tools/spider.py`:** `LocalSpider._window` (a context

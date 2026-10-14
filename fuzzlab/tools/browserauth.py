@@ -76,6 +76,11 @@ class BrowserSession:
     storage_state: dict | None = field(repr=False)
     #: its in-scope localStorage entries, ``{origin: {name: value}}``
     local_storage: dict[str, dict[str, str]] = field(repr=False)
+    #: ``(name, value)`` of the session's credential cookies -- not the ones a browser
+    #: login adopted from the browser's jar (BUG-0132), which the context already gets
+    #: from ``storage_state`` and which the app may legitimately change -- for the
+    #: crawler's session check
+    checked_cookies: list[tuple[str, str]] = field(default_factory=list, repr=False)
 
 
 def browser_session(manager, identity: str, base_url: str, *,
@@ -91,10 +96,14 @@ def browser_session(manager, identity: str, base_url: str, *,
         if raw else None
     local = {o["origin"]: {e["name"]: e["value"] for e in o["localStorage"]}
              for o in (storage or {}).get("origins", []) if o["localStorage"]}
-    return BrowserSession(cookies=_cookies_of(state, base_url),
+    cookies = _cookies_of(state, base_url)
+    jar = set(getattr(state, "browser_cookies", None) or ())
+    return BrowserSession(cookies=cookies,
                           headers=dict(getattr(state, "headers", None) or {}),
                           header_scope=header_scope_for(state, base_url, in_scope),
-                          storage_state=storage, local_storage=local)
+                          storage_state=storage, local_storage=local,
+                          checked_cookies=[(c["name"], c["value"]) for c in cookies
+                                           if c["name"] not in jar])
 
 
 def apply_to_context(context, cookies, headers=None) -> None:
