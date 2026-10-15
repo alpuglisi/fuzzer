@@ -285,6 +285,10 @@ def log_finding(cursor, url, category, trans_type, target, context="", reference
     ''', (url, category, trans_type, target, context, reference))
 
 
+#: Is the live document's body missing or empty (no text, no element)?
+_BODY_EMPTY_JS = ("() => !document.body || (!document.body.innerText.trim() && "
+                  "!document.body.children.length)")
+
 class ContentFetcher:
     """Fetches page HTML, optionally rendering JavaScript with a headless browser.
 
@@ -424,15 +428,36 @@ class ContentFetcher:
             if self._pw is None:
                 self._start_browser(url)        # a launch failure is an error, as before
             try:
-                response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                from fuzzlab.tools import navguard
+                # BUG-0138 (CC-AUD-0043): the commit, then a bounded load: a refused own
+                # target still raises; a load a refused script navigation superseded is
+                # not waited out
+                nav = navguard.navigate(self._page, url, timeout_ms=self.timeout_ms)
+                response = nav.response
                 status = response.status if response else 0
                 ct = (response.headers or {}).get('content-type', '') if response else ''
-                # Let JavaScript-driven DOM updates settle (best effort).
-                try:
-                    self._page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
-                except Exception:
-                    pass
-                html = self._page.content()
+                if nav.reached:
+                    # Let JavaScript-driven DOM updates settle (best effort).
+                    navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
+                    html = self._page.content()
+                else:
+                    # BUG-0138 (review Q2): the load did not complete. Its parsing
+                    # stopped (superseded), or another document a script navigation
+                    # committed replaced it: the HTML the browser received for this
+                    # navigation, never a second request. Merely slow: the DOM stands
+                    # (JS-rendered content included)
+                    own = navguard.shows_own_document(self._page, url, response)
+                    html = None
+                    if nav.superseded or not own:
+                        html = nav.html                # taken at the commit
+                    elif self._page.evaluate(_BODY_EMPTY_JS):
+                        # merely slow, but nothing of the body parsed yet: the
+                        # received HTML, as the spider does (review B-N2)
+                        html = nav.html
+                    if html is None and own:
+                        html = self._page.content()
+                    if html is None:
+                        html = ""                      # nothing of the other document
                 return status, ct, html, list(dict.fromkeys(self._xhr_urls))
             except Exception as e:
                 # BUG-0136 review (X1's twin, CC-AUD-0042): a failed load ends the
@@ -440,7 +465,9 @@ class ContentFetcher:
                 # which leaves the page shown before it alive; its fetches would
                 # otherwise be listed under the URLs fetched next
                 with contextlib.suppress(PlaywrightError):
-                    self._page.goto("about:blank", timeout=self.timeout_ms)
+                    from fuzzlab.tools import navguard
+                    navguard.navigate(self._page, "about:blank",
+                                      timeout_ms=self.timeout_ms, wait_until="load")
                 # Chromium refuses to render some responses (downloads,
                 # application/octet-stream). Those URLs are still audit targets,
                 # so fall back to a plain request rather than losing the page.

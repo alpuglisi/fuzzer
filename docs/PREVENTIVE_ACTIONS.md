@@ -1791,3 +1791,37 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      mechanism goes on to its next probe within a stated bound. With no evidence and
      anything unobserved, the result is inconclusive, never a negative, so it never
      becomes a training negative.
+
+- **PA-0138** — Strengthens `PA-0137(2)` from the M6 executor to the whole codebase,
+  with enforcement, and widens `PA-0136(3)` / `PA-0002` for a rule about a shared
+  primitive, after BUG-0138: a page whose script navigates to a refused URL while it is
+  parsed never fires `domcontentloaded`. The crawl, its query windows, the auditor and
+  the browser login each waited out their timeouts, because BUG-0137 applied PA-0137(2)
+  on the oracle path only.
+  1. **A guarded page is navigated, and a load state waited for, only through
+     `navguard`'s helper** (`navigate`, `reload`, `wait_for_state`,
+     `load_state_reached`). The helper waits for the commit, so a refused own target
+     still raises. It then waits for the load state, bounded and suppressed, and cut
+     short once a main-frame navigation fails. **Enforced by an AST guard**
+     (`tests/test_guarded_navigation.py`): no other module of fuzzlab calls `goto`,
+     `reload`, `go_back`, `go_forward`, `wait_for_navigation`, `expect_navigation`,
+     `wait_for_load_state` or `wait_for_url`. It is proven on synthetic offenders.
+  2. **A page whose load did not complete is read from what is there:**
+     - the DOM, read without waiting for an element that may never come (no
+       `inner_text('body')` wait);
+     - the response the browser already received;
+     - never a second request, and never a wait on content.
+  3. **A rule about a shared primitive (a call every component makes) is swept across
+     every caller of that primitive, not along the path its bug came from;** and a
+     behavior change to a shared mechanism (here the abort code) is followed to every
+     consumer that waits on what it changed. Each such rule gets a structural guard
+     where one is possible. (from BUG-0138)
+  4. *(Review, D58.)* **A cancellation signal counts only from the commit of what it
+     cancels:** an earlier event (the previous page's navigation) never cuts this one's
+     wait. **Content comes from the document the URL loaded:**
+     - its received bytes, kept by the guard that fulfilled them, when its parsing
+       stopped or another document replaced it;
+     - its live DOM when it was merely slow;
+     - never another document's.
+
+     The guard also covers `set_content`, `wait_for_event` and `expect_event`.

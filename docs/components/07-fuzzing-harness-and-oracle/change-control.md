@@ -138,6 +138,14 @@ note of the same date.
     `tools/browserexec.py`, `oracle/strategies.py`, `harness/pipeline.py` or the
     `fuzzlab.oracle` package, plus the traceability guard (59 files,
     FUZZLAB_REQUIRE_BROWSER=1): 1351 passed, 2 xfailed, 0 skipped, 0 failed.
+- Amendment, BUG-0138 (2026-10-15): the executor's plant and observe navigations go
+  through the one helper, `navguard.navigate(page, url, timeout_ms=self._timeout,
+  wait_until="load", wait_ms=LOAD_WAIT_MS)` (CC-CRAWL-0030). The `committed_at` it
+  returns caps the settle as before. The load check is `navguard.load_state_reached`,
+  and `browserexec._loaded` is removed. The semantics are unchanged, except that a
+  superseded load now ends 300 ms after the refused navigation is reported instead of
+  at `LOAD_WAIT_MS`. The BUG-0137 suites pass (`test_m6_navigation_failures.py`,
+  `test_navigation_aborts.py`).
 
 ### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
 - Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort

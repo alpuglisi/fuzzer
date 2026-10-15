@@ -509,7 +509,7 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
 
     from fuzzlab.tools import spa
     from fuzzlab.tools.navguard import (browser_launch_args, chromium_launch_kwargs,
-                                        guard_page, release)
+                                        guard_page, navigate, release)
     cancelled = cancelled if cancelled is not None else threading.Event()
     gate = LoginGate(destination_ok, base_url, auth_origins, forms=forms,
                      cancelled=cancelled)
@@ -538,14 +538,17 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             inflight = _Inflight(page)
             page.on("dialog", lambda d: d.dismiss())    # an app's alert is never ours
             _alive(cancelled)
-            page.goto(base_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            # BUG-0138 (CC-SESS-0024): the commit, then a bounded load: a page whose
+            # script navigates to a refused URL while it is parsed is not waited out;
+            # with no form on it the login fails loudly, and fast
+            navigate(page, base_url, timeout_ms=timeout_ms)
             _settle(page, inflight, SETTLE_MS, cancelled)
             refusals: list[str] = []
             picked = _pick_form(page, base_url, refusals, timeout_ms)
             if picked is None:
                 for url in _login_routes(page, gate, base_url):
                     _alive(cancelled)
-                    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    navigate(page, url, timeout_ms=timeout_ms)
                     _settle(page, inflight, SETTLE_MS, cancelled)
                     picked = _pick_form(page, base_url, refusals, timeout_ms)
                     if picked is not None:

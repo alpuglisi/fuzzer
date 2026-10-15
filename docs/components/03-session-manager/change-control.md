@@ -3,6 +3,28 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
+- Change: `session/browserlogin.py` `_drive` loads the base page and each login route
+  through `navguard.navigate` (commit, then a bounded load cut short after a refused
+  navigation; CC-CRAWL-0030), instead of `goto(wait_until="domcontentloaded")` with
+  the whole timeout.
+- Impact: a login page whose head script navigates to a refused URL has no form, so the
+  login fails loudly ("no login form was found in the browser") in about 2 s. Before,
+  it waited out the login's `timeout_ms` (10 s). Nothing is posted either way.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_guarded_navigation.py::test_a_login_page_that_navigates_away_fails_loudly_and_fast`;
+    the fixture's new `head_nav`) — done
+  - [x] mutation check (the old `goto` fails the test and the AST guard) — done
+  - [x] FR-SESS-19 edited in place; BUG-0138; CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): the test passes; the related run is recorded in
+  CC-CRAWL-0030.
+- Amendment, review of 98325e5 (2026-10-15; D58 Q1): the login's navigations get Q1
+  through the shared helper. A failure reported before a login page's commit (the
+  previous route's pending navigation) no longer cuts that page's wait. No code
+  change here; the run is in CC-CRAWL-0030's amendment.
+
 ### CC-SESS-0023 — Origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change: built to Revision 2 of `origin-scope-draft.md` (reviewers A and B reconciled;
   O1-O13), the design that cleared the pre-change review gate.

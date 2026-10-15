@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0138 review of 8350ab1: a document is its path and query)
+- **Why:** the guard's "is this still my document" check keyed URLs without their
+  query, so `/p?a=2` passed for `/p?a=1`. The failure watch armed on `goto`'s return,
+  not on the commit itself. The fetcher kept an empty live body when the received HTML
+  was available.
+- **What:** `core.urls.document_key` (origin, path, query) is the one key. The watch
+  arms on the main frame's commit. The fetcher falls back to the received HTML for an
+  empty body. CC-CRAWL-0030 and CC-AUD-0043 amendments.
+
 ## 2026-10-15 (FR-CRAWL-17 baseline fixes B1-B3: a query-caused write is never baselined)
 - Only a bare route's own load (no query) now records into the write baseline, so a
   crawled link's query-caused POST can never excuse its seed. A write carrying the seed's
@@ -11,6 +20,17 @@ changed, and the reason. Reference the commit hash where useful.
   message, even on a baseline endpoint. Either hole let a seed whose query writes get
   promoted, so M6 would replay that write. (CC-CRAWL-0027 baseline amendment,
   CC-CRAWL-0026 amendment.)
+
+## 2026-10-15 (BUG-0138 review: which failures cut a wait, and which content a page that did not load keeps)
+- **Why:** reviewers found that the previous page's cancelled navigation could cut a
+  normal load short. They also found that a page that merely loaded slowly lost its
+  JS-rendered text, and that a page replaced by another document took that document's
+  title and links.
+- **What:** only failures reported after this navigation's commit count. A
+  not-completed load is read as superseded (the received HTML, kept by the guard),
+  merely slow (the live DOM) or replaced (this URL's own HTML alone). The reveal
+  restore leaves a stopped page. The AST guard covers `set_content`, `wait_for_event`
+  and `expect_event`. CC-CRAWL-0030, CC-AUD-0043 and CC-SESS-0024 amendments.
 
 ## 2026-10-15 (FR-CRAWL-17 post-merge fixes P1-P4: an app shell's own writes no longer demote seeds)
 - A hash-route seed or probe now loads its bare route outside its window and then makes
@@ -22,6 +42,18 @@ changed, and the reason. Reference the commit hash where useful.
   - a load counts as committed only after its `goto` returns;
   - the browser guard's log lines are scrubbed of probe markers.
   (CC-CRAWL-0027 post-merge amendment, CC-CRAWL-0026 amendment.)
+
+## 2026-10-15 (BUG-0138: no guarded navigation waits for a load a refused navigation cancelled)
+- **Why:** since BUG-0136, a page whose script navigates to a refused URL while it is
+  parsed stops loading and never fires `domcontentloaded`. The crawl, its query probes
+  and seeds, the auditor and the browser login each waited out their timeouts, and the
+  crawl and auditor then re-sent the page. BUG-0137's rule had been applied to the M6
+  executor only.
+- **What:** one helper, `navguard.navigate` / `reload`: wait for the commit, then for
+  the load state, bounded and cut short after a refused navigation. A page whose load
+  did not complete is read from the response the browser received, never a second
+  request. An AST guard keeps every module on the helper. CC-CRAWL-0030, CC-AUD-0043,
+  CC-SESS-0024, CC-FUZZ-0083 amendment; BUG-0138, PA-0138.
 
 ## 2026-10-15 (FR-CRAWL-17 merged with origin-scoped sessions: M0-M10)
 - spa-query merged p3-int (89268f7: FR-SESS-20 / BUG-0134, BUG-0136, BUG-0137); then a

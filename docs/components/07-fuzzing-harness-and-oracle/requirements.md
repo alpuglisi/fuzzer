@@ -1265,6 +1265,10 @@ rewards) derives from it.
     run.
   - **Errors.** Only Playwright errors are caught (PA-0106); any other exception
     propagates. `browser.close()` failing on a dead browser is suppressed.
+  - **One helper (BUG-0138).** The plant and observe navigations and the load check
+    go through `navguard.navigate(..., wait_until="load", wait_ms=LOAD_WAIT_MS)` and
+    `navguard.load_state_reached`, the crawl's own rule (CC-CRAWL-0030). A superseded
+    load ends 300 ms after the refused navigation is reported.
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
     `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,

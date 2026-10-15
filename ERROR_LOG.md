@@ -18,6 +18,20 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Crawler, auditor, browser login: a page whose script navigates to a refused URL while it is parsed was waited out (fixed, BUG-0138/PA-0138)
+- **Symptom:** on the merged tree (spa-query + origin-scope), a page whose head script runs `location.href = '/logout'`:
+  - the crawl waited out its `timeout_ms` ("Timeout 4000ms exceeded", 4.95 s), then fell back to a static request, so the lab saw `GET /` twice;
+  - a query probe or seed load timed out and kept nothing;
+  - the auditor's rendered fetch and the browser login waited out their timeouts too.
+- **Root cause:** each caller navigated with `goto(wait_until="domcontentloaded")` and the full timeout. Since BUG-0136 the refused navigation is aborted with ERR_ABORTED, which keeps the document but stops its loading, so `domcontentloaded` never comes. BUG-0137 applied PA-0137(2) ("never wait for an event a refused action can cancel") to the M6 executor only; its sweep stopped at the oracle path. A second wait of the same kind, `inner_text('body')` on a document with no body, cost a further 30 s once the first was fixed.
+- **Remediation:**
+  - CC-CRAWL-0030, CC-AUD-0043, CC-SESS-0024 and the CC-FUZZ-0083 amendment move every navigation onto one helper, `navguard.navigate` / `reload`: wait for the commit (a refused own target still raises), then wait for the load state, bounded and cut short 300 ms after a main-frame navigation fails.
+  - A page whose load did not complete is read from the response the browser already received, never with a second request.
+  - The body text is read without waiting.
+  - An AST guard holds every module to the helper.
+  - See `docs/bugs/BUG-0138-a-page-that-navigates-away-while-parsed-was-waited-out.md` and PA-0138.
+- **Status:** Fixed.
+
 ## 2026-10-14 — Oracle/M6: a page the browser executor could not load ended the confirmation run (fixed, BUG-0137/PA-0137)
 - **Symptom:** one DOM/stored XSS candidate whose page timed out, crashed or had its own redirect refused raised out of `oracle.confirm` and `pipeline._confirm`; every later candidate stayed `pending`. After BUG-0136, a page that navigates by script to a refused URL before `load` also cost 8 s, then raised.
 - **Root cause:** `PlaywrightBrowserExecutor.run` mapped only a launch failure to "no verdict" (BUG-0126); a Playwright error of its context, plant or observe navigation escaped, and no layer above contains a mechanism's raw errors.

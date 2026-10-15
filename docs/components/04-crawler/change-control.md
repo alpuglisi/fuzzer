@@ -3,6 +3,148 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
+- Change:
+  - **`tools/navguard.py`:** the one way a guarded page is navigated (PA-0138):
+    - `navigate(page, url, *, timeout_ms, wait_until="domcontentloaded", wait_ms=None)`
+      and `reload(...)`: `goto` / `reload` with `wait_until="commit"`, so a refused or
+      failed own target still raises (BUG-0136);
+    - then the load state in 100 ms steps, at most `wait_ms` (default `timeout_ms`),
+      suppressed, and no longer than `SUPERSEDED_GRACE_MS` (300 ms) after a main-frame
+      navigation of the page fails (`requestfailed`). It returns
+      `Navigation(response, reached, superseded, committed_at)`;
+    - `wait_for_state` (the same rule, for `networkidle`), `load_state_reached` (a check)
+      and `response_html` (the HTML the browser already received).
+  - **`tools/spider.py`:** every `goto` and `reload` goes through it: `_goto_and_parse`,
+    the `about:blank` leaves, `_restore`, the re-adoption page, `_submit_anonymously`,
+    and the two reloads.
+    - `_goto_and_parse` waits for `networkidle` only after a completed load. It reads
+      the body text with `evaluate`, never `inner_text('body')`: a document stopped in
+      its head has no body, and that wait cost 30 s.
+    - When the load did not complete, the title, text and links come from
+      `response_html`, parsed as `_fetch_static` parses a page (now the shared
+      `_parse_html`) and merged with the DOM's links. `_last_html` is that HTML, so its
+      forms are read. There is no second request.
+    - `_rendered_ok` is set for a completed load only.
+- Impact (other components / project):
+  - A page whose script navigates to a refused URL while it is parsed is read in about
+    2 s from its one request. Before, it waited out `timeout_ms` and was sent again by
+    the static fallback.
+  - Query probes and seeds (FR-CRAWL-17) load once and finish: a seed keeps its
+    content, and a probe is counted.
+  - A page whose `domcontentloaded` takes longer than `timeout_ms` is read from its
+    response, no longer re-sent statically.
+  - The auditor (CC-AUD-0043), the browser login (CC-SESS-0024) and M6 (CC-FUZZ-0083
+    amendment) use the same helper. No contract change.
+- Risk: low to medium (it touches every navigation). Mitigated:
+  - the helper's bound is the caller's own timeout, cut short only after a refused
+    navigation, so slow pages are waited for as before (pinned);
+  - the BUG-0136/0137 suites pass;
+  - the AST guard holds the rule.
+- Deliverables:
+  - [x] code (`tools/navguard.py`, `tools/spider.py`) — done
+  - [x] tests (`tests/test_guarded_navigation.py`: crawl, slow page, query probe and
+    seed, auditor, browser login, AST guard with synthetic offenders) — done
+  - [x] BUG-0138 (RCA, recurrence review, prior-PA analysis, PA-0002 sweep), PA-0138,
+    ERROR_LOG, CHANGELOG, NFR-CRAWL-safe edited in place — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-15): `tests/test_guarded_navigation.py` 13 passed.
+  Mutation (the spider's `_goto_and_parse` back on `goto(wait_until="domcontentloaded")`):
+  the crawl test, the query probe/seed test and the AST guard fail. The BUG-0136/0137 and
+  Playwright-fake suites (`test_browser_scope`, `test_destructive_urls`,
+  `test_json_points`, `test_m6_navigation_failures`, `test_navigation_aborts`): 316
+  passed. The full related run on the committed tree is recorded below.
+- Effectiveness, the related run (2026-10-15): every test file importing
+  `tools/navguard.py`, `tools/spider.py`, `tools/fetcher.py`, `session/browserlogin.py`
+  or `tools/browserexec.py`, the SPA, query and login fixtures' users, and the
+  traceability guard. 30 files, run on the committed tree (00b9545) with
+  FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_NETNS=1: 1486 passed, 11 skipped, 6 xfailed,
+  7 failed.
+  - The 7 failures were all in `test_spa_query.py`: its `_FakePage` lacked the `on`
+    and `wait_for_load_state` that `navigate` uses. f0b1109 gives the double that
+    surface (test-only).
+  - `test_spa_query.py` rerun on that committed tree: 103 passed.
+  - In all: 1493 passed, 0 failed, 6 xfailed, 11 skipped. The skips are 7 for the
+    optional fastapi extra (PA-0005) and 4 labgen live-boot reproductions.
+  - Mutation checks, the old `goto(wait_until="domcontentloaded")` restored per
+    caller:
+    - the spider: the crawl and query tests and the AST guard fail;
+    - the fetcher: the auditor test and the guard fail;
+    - the browser login: the login test and the guard fail.
+- Amendment, review of 98325e5 (2026-10-15; reviewer A AGREE, reviewer B
+  AGREE-with-changes; D58 Q1, Q2, Q4; Q3 waits for the SPA lane's merge):
+  - **Q1 (A-S1 = B-S1):** `_NavigationFailures` counts a main-frame failure only once
+    armed, at this navigation's commit (when `goto(commit)` returns). A previous page's
+    pending navigation that this one cancels, reported before the commit, no longer
+    cuts the wait. On real Chromium a head script's refusal was reported after the
+    return in 40 of 40 runs.
+  - **Q2 (B-S2 + A-S2):** the not-reached branch of `_goto_and_parse` tells the cases
+    apart with `navguard.shows_own_document` (the page's URL against the requested and
+    final URL):
+    - **superseded**, same document: the received HTML, with the DOM's links merged
+      (as before);
+    - **merely slow**, same document: the live DOM (JS-rendered text kept), with the
+      received HTML filling an empty text only;
+    - **another document** (an allowed script navigation committed): this URL's
+      received HTML alone, and `_last_final_url` stays this URL.
+
+    A replaced document's body is dropped by the browser before `goto(commit)` even
+    returns, so the received HTML comes from the guard. `make_route_handler` keeps the
+    body of the main-frame document it fulfils, per page (`_note_received`, a weak map).
+    `navigate` / `reload` clear it before their own navigation and return it as
+    `Navigation.html`.
+  - **Q4:**
+    - `_restore` leaves for `about:blank` when its reload did not complete (B-N1);
+    - the AST guard also forbids `set_content`, `wait_for_event` and `expect_event`
+      outside navguard, with three more synthetic offenders (A-N1, B-N2);
+    - the download-navigation residual is in BUG-0138 (A-N2).
+  - Tests (`tests/test_guarded_navigation.py`, now 20):
+    - a page double whose failure is reported before the commit, with `load` at
+      500 ms: reached;
+    - real Chromium, a previous page's slow navigation pending when the next URL
+      loads: its `domcontentloaded` (about 1 s, a slow script) is reached;
+    - a merely slow page keeps its JS-rendered text;
+    - A's head script to an allowed, slow B: A's row holds A's title, text and links
+      only, and B's link is never crawled.
+  - Mutation checks:
+    - **Q1**, failures counted before the commit: both Q1 tests fail;
+    - **Q2**, the old branch (`own = True`, always the response): both Q2 tests fail.
+  - Effectiveness: the 20 tests of `tests/test_guarded_navigation.py` pass; the related
+    run on the committed tree is recorded below.
+  - Effectiveness, the related run (the same 30 files, FUZZLAB_REQUIRE_BROWSER=1
+    FUZZLAB_REQUIRE_NETNS=1):
+    - On 1a1da68: 1484 passed, 2 failed. Two route-handler tests' request doubles have
+      no `frame`, and `_note_received` raised `AttributeError`; 0d2371b names it.
+    - On 0d2371b: 1485 passed, 1 failed, 4 skipped, 6 xfailed. The failure is
+      `test_labgen_go_net_http_navigability_live_boot.py::test_pa_0053_bare_request_sweep_no_route_answers_5xx`
+      (status 0 for `/channels/redirect`). That test crawls with the `requests` engine,
+      which does not use `navguard.navigate`. It passed on 1a1da68 and in 7 of 7 reruns
+      on 0d2371b: a live-boot flake, not this change.
+- Amendment, review of 8350ab1 (2026-10-15; reviewers A and B AGREE; A-S1, B-N1, B-N2):
+  - **A-S1:** `url_key` drops the query, so `/p?a=1` and `/p?a=2` looked like one
+    document to `shows_own_document`, `_received_html` and the `_RECEIVED` entry. A new
+    `core.urls.document_key` (canonical origin, path and query, no fragment) is the one
+    key (PA-0003). The spider's `_nav_key` now returns it, and navguard's three uses go
+    through one `_navigation_keys`.
+    - Test (real Chromium): `/p?a=1`'s head script navigates, allowed, to a slow
+      `/p?a=2`. The row for `/p?a=1` holds `P-A1`, its text and link only;
+      `_last_final_url` stays `/p?a=1`; `/a2link` is never crawled.
+    - Mutation: with `url_key` back at those sites, the test fails (the row takes
+      `P-A2`).
+  - **B-N1:** `_NavigationFailures` arms on the main frame's own commit
+    (`framenavigated`) as well as when `goto` returns (kept as a fallback for a page
+    that reports no `framenavigated`). In 20 of 20 real-Chromium head-script loads it
+    was armed by `framenavigated` before the refusal was reported, and the refusal
+    counted. The arming therefore no longer depends on when `goto` returns.
+  - **B-N2:** in the fetcher, see CC-AUD-0043.
+  - Tests: `tests/test_guarded_navigation.py` 21 passed. `tests/test_navigation_aborts.py`'s
+    `_Site` looks a page up by path and query first.
+  - Effectiveness: the related run on the committed tree is recorded below.
+  - Effectiveness, the related run on e7afbb8 (FUZZLAB_REQUIRE_BROWSER=1
+    FUZZLAB_REQUIRE_NETNS=1): the 30 files above plus every test file importing
+    `core.urls` (33 files): 1679 passed, 4 skipped (labgen live-boot reproductions),
+    6 xfailed, 0 failed.
+
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
   target for the queue only when it is a GET/HEAD navigation. A refused non-GET

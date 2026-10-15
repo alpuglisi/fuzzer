@@ -11,8 +11,9 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
-from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, url_key
-from fuzzlab.tools import spa
+from fuzzlab.core.urls import (canonical_origin, document_key, in_origin_scope, origin_scope,
+                               url_key)
+from fuzzlab.tools import navguard, spa
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -294,12 +295,10 @@ def _storage_rotated(value) -> bool:
 
 def _nav_key(url):
     """A navigation's exact target for the reveal window's own-reload exemption (review
-    A-S2): canonical origin (scheme, host, port), path and query -- never only the path
-    (`url_key`), so a redirect or a navigation to ``?action=x`` on the same path is not
-    the window's own reload. The fragment is dropped: a reload never sends one."""
-    parts = urlparse(url or "")
-    origin = canonical_origin(url) or ""
-    return origin + (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    A-S2): `core.urls.document_key` -- canonical origin, path and query, never only the
+    path, so a redirect or a navigation to ``?action=x`` on the same path is not the
+    window's own reload. The fragment is dropped: a reload never sends one."""
+    return document_key(url)
 
 
 def _route_key(url):
@@ -354,6 +353,14 @@ _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
 class SessionWithheld(RuntimeError):
     """A navigation met a document on another origin than the authenticated session's
     (FR-SESS-20): it is not crawled, and nothing is extracted from it."""
+
+
+def _parse_html(html):
+    """``(title, text, links)`` of an HTML document, as the static engine reads it."""
+    soup = BeautifulSoup(html, 'html.parser')
+    title = soup.title.string.strip() if soup.title and soup.title.string else None
+    return title, soup.get_text(" ", strip=True), \
+        [a['href'] for a in soup.find_all('a', href=True)]
 
 
 class LocalSpider:
@@ -846,7 +853,8 @@ class LocalSpider:
                 # before the window is lifted: their timers die with them (review A-S1)
                 self._close_window_pages(win, page)
                 with contextlib.suppress(PlaywrightError):
-                    page.goto("about:blank", timeout=self.timeout_ms)
+                    navguard.navigate(page, "about:blank", timeout_ms=self.timeout_ms,
+                                      wait_until="load")
                 if query:
                     # Y3 (review B3-S3): the session re-check runs on this path too
                     self._recheck_query_session(win)
@@ -867,8 +875,13 @@ class LocalSpider:
         win["own_nav"] = frozenset({_nav_key(page_url)})
         try:
             if spa.visit_key(page.url) != spa.visit_key(page_url):
-                page.goto(page_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-            page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+                navguard.navigate(page, page_url, timeout_ms=self.timeout_ms)
+            if not navguard.reload(page, timeout_ms=self.timeout_ms).reached:
+                # the route's reload did not complete (a refused script navigation
+                # stopped it): the page leaves, so nothing of that stopped document
+                # runs on (BUG-0138 review B-N1)
+                navguard.navigate(page, "about:blank", timeout_ms=self.timeout_ms,
+                                  wait_until="load")
             self._settle(page)
         finally:
             win["own_nav"] = frozenset()
@@ -907,7 +920,8 @@ class LocalSpider:
                 spa.visit_key(url) != spa.visit_key(page_url):
             win["navs"].append(url)
         self._close_window_pages(win, page)
-        page.goto("about:blank", timeout=self.timeout_ms)
+        navguard.navigate(page, "about:blank", timeout_ms=self.timeout_ms,
+                          wait_until="load")
 
     def _recheck_query_session(self, win):
         """After a seed or probe window's quiet period (U4, review B2-S1/S2), in an
@@ -1232,11 +1246,7 @@ class LocalSpider:
         self._last_final_url = getattr(resp, "url", None) or url
         self._last_html = resp.text if 'text/html' in ct else None
         if 'text/html' in ct:
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            if soup.title and soup.title.string:
-                title = soup.title.string.strip()
-            text = soup.get_text(" ", strip=True)
-            links = [a['href'] for a in soup.find_all('a', href=True)]
+            title, text, links = _parse_html(resp.text)
         return resp.status_code, ct, title, text, links, []
 
     def _fetch_rendered(self, url, fallback=True):
@@ -1257,7 +1267,8 @@ class LocalSpider:
             # it alive; its timers and fetches would otherwise run on and be sent and
             # captured under the URLs crawled next
             with contextlib.suppress(PlaywrightError):
-                self._page.goto("about:blank", timeout=self.timeout_ms)
+                navguard.navigate(self._page, "about:blank", timeout_ms=self.timeout_ms,
+                                  wait_until="load")
             if self._navigation_withheld(url):
                 # this navigation's own target or its redirect landing is on another
                 # origin than the session's (R1, T1): nothing is extracted, and no
@@ -1312,7 +1323,11 @@ class LocalSpider:
         self._last_final_url, self._last_html, self._last_base = url, None, None
         self._load_committed = False                    # P4 (B-N1): set once it commits
         self._doc_url, self._page_scripts, self._pending_routes = url, 0, []
-        response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+        # BUG-0138: the commit, then a bounded load (navguard.navigate): a refused own
+        # target still raises; a load a refused script navigation superseded is not
+        # waited out
+        nav = navguard.navigate(self._page, url, timeout_ms=self.timeout_ms)
+        response = nav.response
         same_document = response is None and spa.spa_fragment(url) is not None
         if same_document:
             # a hash-route change in the loaded app: no new document, no response; the
@@ -1325,33 +1340,67 @@ class LocalSpider:
                 self._last_doc = (status, ct)
 
         title, text, links = None, None, []
+        own = True                     # a non-HTML response: the page shows it (merge)
         if 'text/html' in ct or ct == '':
-            # Let JavaScript-driven fetch()/render settle (best effort).
-            try:
-                self._page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
-            except Exception:
-                pass
+            # Let JavaScript-driven fetch()/render settle (best effort), unless the load
+            # never completed (its loading stopped: nothing more will settle)
+            if nav.reached:
+                navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
             if same_document:
                 self._settle(self._page)
             if self._win is not None and self._win.get("query"):
                 self._win["own_nav"] = frozenset()   # the load's own navigation only (Q4)
-            title = self._page.title()
-            self._last_final_url = self._page.url
-            self._last_html = self._page.content()
-            if self._spa_on:
-                self._last_base = self._page.evaluate(
-                    "() => document.querySelector('base') ? document.baseURI : null")
-            # Links and text come from the RENDERED DOM, so JS-injected nav links
-            # and JS-built content are included.
-            links = self._page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
-            try:
-                text = self._page.inner_text('body')
-            except Exception:
-                text = None
-            self._rendered_ok = True          # the browser shows this page (reveals)
+            # BUG-0138 review (Q2): a load that did not complete either stopped (a
+            # refused script navigation superseded it), merely outlasted the wait, or
+            # was replaced by another document a script navigation committed
+            own = nav.reached or navguard.shows_own_document(self._page, url, response)
+            if own:
+                title = self._page.title()
+                self._last_final_url = self._page.url
+                self._last_html = self._page.content()
+                if self._spa_on:
+                    self._last_base = self._page.evaluate(
+                        "() => document.querySelector('base') ? document.baseURI : null")
+                # Links and text come from the RENDERED DOM, so JS-injected nav links
+                # and JS-built content are included.
+                links = self._page.eval_on_selector_all('a[href]',
+                                                        'els => els.map(e => e.href)')
+                try:
+                    # read, never waited for: a document whose loading stopped in its
+                    # head has no body, and `inner_text('body')` would wait 30 s for one
+                    text = self._page.evaluate(
+                        "() => document.body ? document.body.innerText : null")
+                except Exception:
+                    text = None
+            if not nav.reached and response is not None:
+                # BUG-0138: what the browser received for this navigation, read as the
+                # static engine reads a page -- never a second request
+                html = nav.html
+                if html is not None:
+                    got_title, got_text, got_links = _parse_html(html)
+                    if not own:
+                        # another document replaced this one: this URL's own response
+                        # alone, never the other document's title, links or URL
+                        title, text, links = got_title, got_text, got_links
+                        self._last_final_url, self._last_html = url, html
+                    elif nav.superseded:
+                        # its parsing stopped: the response holds the document; the
+                        # DOM's links (JS-built ones) are kept with it
+                        title, text = title or got_title, got_text
+                        links = list(dict.fromkeys(list(links) + got_links))
+                        self._last_html = html
+                    elif not text:
+                        # merely slow: the DOM stands (JS-rendered text included); the
+                        # response fills an empty text only
+                        text = got_text
+            elif not own:
+                self._last_final_url = url              # nothing of the other document
+            # the browser shows this page, fully loaded (reveals)
+            self._rendered_ok = nav.reached
         # P4 (review B-N1): the navigation committed (a document, or a same-document
-        # hash change), recorded after the goto returned, never before it
-        self._load_committed = response is not None or same_document
+        # hash change), recorded after the navigation returned, never before it -- and
+        # only while the page shows this load's own document (BUG-0138 merge)
+        self._load_committed = (response is not None or same_document) and own
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
 
     # ----- landing URLs, forms, selector navigation (forms phase 1) -----
@@ -1643,8 +1692,7 @@ class LocalSpider:
         self.spa_query_stopped = f"the session was lost after a query load ({why})"
         logging.warning(f"SPA query loads stopped: {self.spa_query_stopped}")
         try:
-            self._page.goto(self.start_url, wait_until="domcontentloaded",
-                            timeout=self.timeout_ms)
+            navguard.navigate(self._page, self.start_url, timeout_ms=self.timeout_ms)
             ok, again = self._readopt_session()
         except Exception as exc:  # noqa: BLE001 - fail closed: re-adoption did not hold
             ok, again = False, f"re-adoption failed ({type(exc).__name__})"
@@ -1966,7 +2014,7 @@ class LocalSpider:
         try:
             page = context.new_page()
             self._track(page)
-            page.goto(page_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+            navguard.navigate(page, page_url, timeout_ms=self.timeout_ms)
             self._settle(page)
             forms = page.evaluate(spa.FORMS_JS, 20)
             match = next((f for f in forms if spa.form_signature(f) == sig), None)
@@ -2200,7 +2248,7 @@ class LocalSpider:
             # the close ran with the window's write block on: a clean reload (a page
             # visit, as the crawl makes) so the next reveal sees the app's normal state
             with contextlib.suppress(PlaywrightError):
-                page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+                navguard.reload(page, timeout_ms=self.timeout_ms)
                 self._settle(page)
         self._reveal_session_check(win["aborted"], route)
         return more
@@ -2334,7 +2382,7 @@ class LocalSpider:
                 page.evaluate("pairs => pairs.forEach(([k, v]) => "
                               "window.localStorage.setItem(k, v))", sorted(entries.items()))
             self._adopted_storage = copy.deepcopy(self._adopted_original)
-            self._page.reload(wait_until="domcontentloaded", timeout=self.timeout_ms)
+            navguard.reload(self._page, timeout_ms=self.timeout_ms)
             self._settle(self._page)
         except PlaywrightError as exc:
             return False, f"re-adoption failed ({type(exc).__name__})"
@@ -2534,7 +2582,9 @@ class LocalSpider:
                         # navigation leaves it, so none of its timers or requests is
                         # counted as the load's own (a write, an XHR)
                         with contextlib.suppress(PlaywrightError):
-                            self._page.goto("about:blank", timeout=self.timeout_ms)
+                            navguard.navigate(self._page, "about:blank",
+                                              timeout_ms=self.timeout_ms,
+                                              wait_until="load")
                         if spa.spa_fragment(current_url) is not None:
                             # P1(a): a hash route's load is the bare route's, fresh and
                             # settled OUTSIDE the window (the shell's start-up writes

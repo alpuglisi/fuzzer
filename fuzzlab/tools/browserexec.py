@@ -64,15 +64,6 @@ def _failure_reason(exc) -> str:
     return f"the browser could not load the page ({type(exc).__name__}: {text[:120]})"
 
 
-def _loaded(page, error) -> bool:
-    """Has the page's document reached ``load`` (at any point so far)? Playwright
-    answers at once for a load already fired."""
-    try:
-        page.wait_for_load_state("load", timeout=1)
-        return True
-    except error:
-        return False
-
 
 class PlaywrightBrowserExecutor:
     """Drive a headless browser to confirm stored/DOM XSS. Lab-only, loopback targets."""
@@ -150,7 +141,8 @@ class PlaywrightBrowserExecutor:
                     error) -> ExecObservation:
         from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
         from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
-                                            chromium_launch_kwargs, guard_page, release)
+                                            chromium_launch_kwargs, guard_page,
+                                            load_state_reached, navigate, release)
         # The browser reaches only the observe and store origins (BUG-0123).
         scope_urls = [request.url] + ([request.store.url] if request.store else [])
         origins = origin_scope(*scope_urls)
@@ -196,11 +188,9 @@ class PlaywrightBrowserExecutor:
                                          max_redirects=0)
                 else:
                     # the commit, then a bounded load, as the observe navigation
-                    # (BUG-0137 review A-N3)
-                    page.goto(_with_query(s.url, s.param, s.value),
-                              wait_until="commit", timeout=self._timeout)
-                    with suppress(error):
-                        page.wait_for_load_state("load", timeout=load_ms)
+                    # (BUG-0137 review A-N3; the one helper since BUG-0138)
+                    navigate(page, _with_query(s.url, s.param, s.value),
+                             timeout_ms=self._timeout, wait_until="load", wait_ms=load_ms)
 
             target = request.url
             if request.param is not None and request.value is not None:
@@ -211,16 +201,15 @@ class PlaywrightBrowserExecutor:
             page.once("load", lambda *_: load_at.__setitem__(0, time.monotonic()))
             # BUG-0137: wait for the commit only, then for `load` briefly: a load
             # that a refused navigation superseded never comes, and is not waited
-            # out (it was `timeout_ms`, then a raise)
-            page.goto(target, wait_until="commit", timeout=self._timeout)
-            committed = time.monotonic()
-            with suppress(error):
-                page.wait_for_load_state("load", timeout=load_ms)
+            # out (it was `timeout_ms`, then a raise); the one helper (BUG-0138),
+            # which also ends the wait once that refused navigation is reported
+            nav = navigate(page, target, timeout_ms=self._timeout, wait_until="load",
+                           wait_ms=load_ms)
             fired = self._wait_for_token(                  # BUG-0126: async sinks
                 page, hits, token, error, load_at,
-                cap=committed + (self._timeout + self.SETTLE_MS) / 1000)
-            loaded = fired or _loaded(page, error)
-            if fired or token in hits:                     # re-read after `_loaded`
+                cap=nav.committed_at + (self._timeout + self.SETTLE_MS) / 1000)
+            loaded = fired or load_state_reached(page, "load")
+            if fired or token in hits:                     # re-read after the load check
                 return ExecObservation(executed=True, detail="playwright")
             if not loaded:
                 # never loaded, even by the end of the sentinel wait, and no hit:

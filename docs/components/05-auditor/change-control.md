@@ -3,6 +3,40 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)
+- Change: `tools/fetcher.py` `ContentFetcher.fetch` navigates through
+  `navguard.navigate` (commit, then a bounded load cut short after a refused navigation;
+  CC-CRAWL-0030) and waits for `networkidle` through `navguard.wait_for_state` after a
+  completed load only. When the load did not complete, it returns the HTML the browser
+  received (`navguard.response_html`), else the DOM, never a second request. Its
+  failure path's `about:blank` uses the helper too.
+- Impact: a page whose script navigates to a refused URL while it is parsed is fetched
+  in about 1 s from one request, with its HTML (fields, links). Before, it waited out
+  `timeout_ms` and was re-fetched statically. A page whose `domcontentloaded` outlasts
+  `timeout_ms` is likewise read from its response. No interface change.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_guarded_navigation.py::test_the_auditor_reads_the_page_without_waiting_it_out`)
+    — done
+  - [x] mutation check (the old `goto(wait_until="domcontentloaded")` fails the test
+    and the AST guard) — done
+  - [x] FR-AUD-18 edited in place; BUG-0138; CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): the test passes; the related run is recorded in
+  CC-CRAWL-0030.
+- Amendment, review of 98325e5 (2026-10-15; D58 Q1, Q2): the fetcher's navigation
+  gets Q1 through the shared helper.
+  - Q2: a load that did not complete returns the received HTML (`Navigation.html`,
+    taken by the guard) when it was superseded or another document replaced it.
+  - When it was merely slow, the live DOM is returned (JS-rendered content included).
+  - It never returns another document's HTML.
+  - The tests and run are in CC-CRAWL-0030's amendment.
+- Amendment, review of 8350ab1 (2026-10-15; B-N2, A-S1): in the merely-slow case,
+  when the live body is missing or empty (`_BODY_EMPTY_JS`: no text, no element), the
+  fetcher returns the received HTML (`Navigation.html`), as the spider does; otherwise
+  the live DOM. Its document checks use `core.urls.document_key` through navguard
+  (CC-CRAWL-0030 amendment).
+
 ### CC-AUD-0042 — A failed load in the auditor's browser ends the previous page (BUG-0136 review, X1's twin) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch`. When the rendered fetch of a URL
   fails (a refused navigation, a timeout, anything), the page is sent to `about:blank`
