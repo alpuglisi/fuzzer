@@ -590,8 +590,22 @@ fuzzer.
   `about:blank`, so the previous document, which ERR_ABORTED left alive, stops: its
   timers and fetches are never sent or captured under the URLs crawled next. Then the
   withheld check, `SessionWithheld` or the static fallback run as before.
+  *(CC-CRAWL-0030, BUG-0138:)* **no guarded navigation waits for a load a refused
+  navigation can cancel.** A script that navigates to a refused URL while the page is
+  parsed stops the page's loading, so `domcontentloaded` never fires.
+  - Every navigation of a guarded page goes through `navguard.navigate` / `reload`:
+    wait for the commit (a refused own target still raises), then for the load state at
+    most the caller's timeout, cut short 300 ms after a main-frame navigation fails.
+  - `networkidle` is waited for (`wait_for_state`) only after a completed load. The
+    body text is read without waiting for a body.
+  - A page whose load did not complete is read from the response the browser received
+    for it (`navguard.response_html`, parsed as the static engine parses a page): its
+    content, links and forms, with no second request. Query probes and seeds
+    (FR-CRAWL-17) take the same path.
+  - No other module of fuzzlab navigates a page or waits for a load state itself.
   - Enforced by (the abort code, per reason; BUG-0136): `navguard.make_route_handler` (`abort()`, `_abort_code`) — `tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation`, `tests/test_navigation_aborts.py::test_a_script_navigation_out_of_scope_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_script_navigation_to_a_destructive_url_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_goto_of_a_refused_target_still_raises_and_the_page_stays`, `tests/test_navigation_aborts.py::test_the_crawls_own_target_redirected_to_a_refused_url_raises_and_falls_back`, `tests/test_navigation_aborts.py::test_a_refused_post_form_submission_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_refused_iframe_keeps_its_parent_crawled`
   - Enforced by (a failed load ends the previous document; BUG-0136 review X1): `LocalSpider._fetch_rendered` (`about:blank` before the fallback) — `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`
+  - Enforced by (no navigation waits for a load a refused navigation cancelled; one helper; BUG-0138): `navguard.navigate` / `reload` / `wait_for_state` / `response_html`, `LocalSpider._goto_and_parse` — `tests/test_guarded_navigation.py::test_a_head_script_navigation_to_a_refused_url_is_not_waited_out`, `tests/test_guarded_navigation.py::test_a_slow_page_is_still_waited_for`, `tests/test_guarded_navigation.py::test_query_probe_and_seed_loads_are_not_waited_out`, `tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper`, `tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
   *(CC-CRAWL-0016/0017, forms phase 3:)* **a crawl never deletes**: a browser-initiated
   DELETE is aborted unless it comes from a submission on an operator-named route

@@ -3,6 +3,58 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
+- Change:
+  - **`tools/navguard.py`:** the one way a guarded page is navigated (PA-0138):
+    - `navigate(page, url, *, timeout_ms, wait_until="domcontentloaded", wait_ms=None)`
+      and `reload(...)`: `goto` / `reload` with `wait_until="commit"`, so a refused or
+      failed own target still raises (BUG-0136);
+    - then the load state in 100 ms steps, at most `wait_ms` (default `timeout_ms`),
+      suppressed, and no longer than `SUPERSEDED_GRACE_MS` (300 ms) after a main-frame
+      navigation of the page fails (`requestfailed`). It returns
+      `Navigation(response, reached, superseded, committed_at)`;
+    - `wait_for_state` (the same rule, for `networkidle`), `load_state_reached` (a check)
+      and `response_html` (the HTML the browser already received).
+  - **`tools/spider.py`:** every `goto` and `reload` goes through it: `_goto_and_parse`,
+    the `about:blank` leaves, `_restore`, the re-adoption page, `_submit_anonymously`,
+    and the two reloads.
+    - `_goto_and_parse` waits for `networkidle` only after a completed load. It reads
+      the body text with `evaluate`, never `inner_text('body')`: a document stopped in
+      its head has no body, and that wait cost 30 s.
+    - When the load did not complete, the title, text and links come from
+      `response_html`, parsed as `_fetch_static` parses a page (now the shared
+      `_parse_html`) and merged with the DOM's links. `_last_html` is that HTML, so its
+      forms are read. There is no second request.
+    - `_rendered_ok` is set for a completed load only.
+- Impact (other components / project):
+  - A page whose script navigates to a refused URL while it is parsed is read in about
+    2 s from its one request. Before, it waited out `timeout_ms` and was sent again by
+    the static fallback.
+  - Query probes and seeds (FR-CRAWL-17) load once and finish: a seed keeps its
+    content, and a probe is counted.
+  - A page whose `domcontentloaded` takes longer than `timeout_ms` is read from its
+    response, no longer re-sent statically.
+  - The auditor (CC-AUD-0043), the browser login (CC-SESS-0024) and M6 (CC-FUZZ-0083
+    amendment) use the same helper. No contract change.
+- Risk: low to medium (it touches every navigation). Mitigated:
+  - the helper's bound is the caller's own timeout, cut short only after a refused
+    navigation, so slow pages are waited for as before (pinned);
+  - the BUG-0136/0137 suites pass;
+  - the AST guard holds the rule.
+- Deliverables:
+  - [x] code (`tools/navguard.py`, `tools/spider.py`) — done
+  - [x] tests (`tests/test_guarded_navigation.py`: crawl, slow page, query probe and
+    seed, auditor, browser login, AST guard with synthetic offenders) — done
+  - [x] BUG-0138 (RCA, recurrence review, prior-PA analysis, PA-0002 sweep), PA-0138,
+    ERROR_LOG, CHANGELOG, NFR-CRAWL-safe edited in place — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-15): `tests/test_guarded_navigation.py` 13 passed.
+  Mutation (the spider's `_goto_and_parse` back on `goto(wait_until="domcontentloaded")`):
+  the crawl test, the query probe/seed test and the AST guard fail. The BUG-0136/0137 and
+  Playwright-fake suites (`test_browser_scope`, `test_destructive_urls`,
+  `test_json_points`, `test_m6_navigation_failures`, `test_navigation_aborts`): 316
+  passed. The full related run on the committed tree is recorded below.
+
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
   target for the queue only when it is a GET/HEAD navigation. A refused non-GET

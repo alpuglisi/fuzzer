@@ -54,6 +54,8 @@ forwarded only while ``ws_hold()`` is false, else dropped and reported).
 from __future__ import annotations
 
 import logging
+import time
+from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
@@ -395,6 +397,147 @@ def release(target) -> None:
         target.unroute_all(behavior="ignoreErrors")
     except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
         pass
+
+
+# --- guarded navigation (BUG-0138, PA-0138) -----------------------------------------
+#: How long a load state is still waited for once a main-frame navigation of the page
+#: has failed during the wait: a refused script navigation (ERR_ABORTED, BUG-0136) made
+#: while the document was parsed stops its loading, so the state never comes.
+SUPERSEDED_GRACE_MS = 300
+_STEP_MS = 100
+
+
+@dataclass(frozen=True)
+class Navigation:
+    """What a guarded navigation got: the main resource's ``response`` (None for a
+    same-document navigation), whether the awaited load state was ``reached``, and
+    whether the load was ``superseded`` (a main-frame navigation failed meanwhile);
+    ``committed_at`` is the `time.monotonic()` of the commit."""
+    response: object
+    reached: bool
+    superseded: bool
+    committed_at: float = 0.0
+
+
+class _NavigationFailures:
+    """Notes each failed main-frame navigation request of ``page`` while it is open."""
+
+    def __init__(self, page):
+        from playwright.sync_api import Error
+        self._page, self._error, self.failed = page, Error, []
+        page.on("requestfailed", self._on_failed)
+
+    def _on_failed(self, request) -> None:
+        try:
+            main = request.frame == self._page.main_frame
+            navigation = request.is_navigation_request()
+        except self._error:        # a request with no frame (a service worker's)
+            return
+        if main and navigation:
+            self.failed.append(time.monotonic())
+
+    def close(self) -> None:
+        remove = getattr(self._page, "remove_listener", None)   # a page double may lack it
+        if remove is not None:
+            try:
+                remove("requestfailed", self._on_failed)
+            except self._error:    # the page has gone: its listeners with it
+                pass
+
+
+def _await_state(page, state: str, wait_ms: float, failures: _NavigationFailures) -> bool:
+    """Wait for ``state`` at most ``wait_ms``, in short steps, and no longer than
+    `SUPERSEDED_GRACE_MS` after a main-frame navigation failed. Never raises."""
+    from playwright.sync_api import Error
+    try:
+        from playwright.sync_api import TimeoutError as StepTimeout
+    except ImportError:            # a Playwright double without it
+        StepTimeout = Error
+    deadline = time.monotonic() + wait_ms / 1000
+    while True:
+        end = deadline
+        if failures.failed:
+            end = min(end, failures.failed[0] + SUPERSEDED_GRACE_MS / 1000)
+        left_ms = (end - time.monotonic()) * 1000
+        if left_ms <= 0:
+            return False
+        try:
+            page.wait_for_load_state(state, timeout=max(1, min(_STEP_MS, left_ms)))
+            return True
+        except StepTimeout:
+            continue
+        except Error:              # the page closed or the frame went away
+            return False
+
+
+def navigate(page, url: str, *, timeout_ms: float, wait_until: str = "domcontentloaded",
+             wait_ms: float | None = None) -> Navigation:
+    """**The** way a guarded page is navigated in fuzzlab (BUG-0138, PA-0138; an AST
+    guard holds every other module to it). ``goto`` waits for the **commit** only, so a
+    refused or failed own target still raises (BUG-0136). Then ``wait_until`` is waited
+    for at most ``wait_ms`` (default ``timeout_ms``), suppressed, and no longer than
+    `SUPERSEDED_GRACE_MS` after a main-frame navigation failed: a page whose script
+    navigates to a refused URL while it is parsed never reaches it, and is never
+    waited out. The caller reads the page as it is, or ``response``, when not
+    ``reached``."""
+    failures = _NavigationFailures(page)
+    try:
+        response = page.goto(url, wait_until="commit", timeout=timeout_ms)
+        committed = time.monotonic()
+        reached = _await_state(page, wait_until,
+                               timeout_ms if wait_ms is None else wait_ms, failures)
+        return Navigation(response, reached, bool(failures.failed), committed)
+    finally:
+        failures.close()
+
+
+def reload(page, *, timeout_ms: float, wait_until: str = "domcontentloaded",
+           wait_ms: float | None = None) -> Navigation:
+    """`navigate`'s rule for a reload (BUG-0138)."""
+    failures = _NavigationFailures(page)
+    try:
+        response = page.reload(wait_until="commit", timeout=timeout_ms)
+        committed = time.monotonic()
+        reached = _await_state(page, wait_until,
+                               timeout_ms if wait_ms is None else wait_ms, failures)
+        return Navigation(response, reached, bool(failures.failed), committed)
+    finally:
+        failures.close()
+
+
+def wait_for_state(page, state: str, timeout_ms: float) -> bool:
+    """Wait for a load state of the current document (``networkidle`` after a load) by
+    `navigate`'s rule: bounded, suppressed, and cut short when a main-frame navigation
+    fails meanwhile. Whether it was reached."""
+    failures = _NavigationFailures(page)
+    try:
+        return _await_state(page, state, timeout_ms, failures)
+    finally:
+        failures.close()
+
+
+def load_state_reached(page, state: str = "load") -> bool:
+    """Has the page's document reached ``state`` (at any point so far)? A check, not a
+    wait: Playwright answers at once for a state already fired."""
+    from playwright.sync_api import Error
+    try:
+        page.wait_for_load_state(state, timeout=1)
+        return True
+    except Error:
+        return False
+
+
+def response_html(response) -> str | None:
+    """The HTML body a navigation's ``response`` carried, or None (BUG-0138): what the
+    browser already received, read when its document's loading stopped before it was
+    parsed -- never fetched again."""
+    from playwright.sync_api import Error
+    try:
+        if "text/html" not in (response.headers or {}).get("content-type", ""):
+            return None
+        return response.text()
+    except Error:                  # the body is gone (the page moved on)
+        return None
 
 
 def make_ws_handler(in_scope: Callable[[str], bool],

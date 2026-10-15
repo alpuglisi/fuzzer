@@ -3,6 +3,28 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)
+- Change: `tools/fetcher.py` `ContentFetcher.fetch` navigates through
+  `navguard.navigate` (commit, then a bounded load cut short after a refused navigation;
+  CC-CRAWL-0030) and waits for `networkidle` through `navguard.wait_for_state` after a
+  completed load only. When the load did not complete, it returns the HTML the browser
+  received (`navguard.response_html`), else the DOM, never a second request. Its
+  failure path's `about:blank` uses the helper too.
+- Impact: a page whose script navigates to a refused URL while it is parsed is fetched
+  in about 1 s from one request, with its HTML (fields, links). Before, it waited out
+  `timeout_ms` and was re-fetched statically. A page whose `domcontentloaded` outlasts
+  `timeout_ms` is likewise read from its response. No interface change.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_guarded_navigation.py::test_the_auditor_reads_the_page_without_waiting_it_out`)
+    — done
+  - [x] mutation check (the old `goto(wait_until="domcontentloaded")` fails the test
+    and the AST guard) — done
+  - [x] FR-AUD-18 edited in place; BUG-0138; CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): the test passes; the related run is recorded in
+  CC-CRAWL-0030.
+
 ### CC-AUD-0042 — A failed load in the auditor's browser ends the previous page (BUG-0136 review, X1's twin) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch`. When the rendered fetch of a URL
   fails (a refused navigation, a timeout, anything), the page is sent to `about:blank`

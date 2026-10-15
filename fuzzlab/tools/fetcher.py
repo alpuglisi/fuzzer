@@ -424,15 +424,25 @@ class ContentFetcher:
             if self._pw is None:
                 self._start_browser(url)        # a launch failure is an error, as before
             try:
-                response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                from fuzzlab.tools import navguard
+                # BUG-0138 (CC-AUD-0043): the commit, then a bounded load: a refused own
+                # target still raises; a load a refused script navigation superseded is
+                # not waited out
+                nav = navguard.navigate(self._page, url, timeout_ms=self.timeout_ms)
+                response = nav.response
                 status = response.status if response else 0
                 ct = (response.headers or {}).get('content-type', '') if response else ''
-                # Let JavaScript-driven DOM updates settle (best effort).
-                try:
-                    self._page.wait_for_load_state("networkidle", timeout=self.timeout_ms)
-                except Exception:
-                    pass
-                html = self._page.content()
+                if nav.reached:
+                    # Let JavaScript-driven DOM updates settle (best effort).
+                    navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
+                    html = self._page.content()
+                else:
+                    # the document's loading stopped before it was parsed (or outlasted
+                    # the wait): the HTML the browser received for this navigation, as
+                    # the static engine would read it -- never a second request
+                    html = navguard.response_html(response) if response is not None else None
+                    if html is None:
+                        html = self._page.content()
                 return status, ct, html, list(dict.fromkeys(self._xhr_urls))
             except Exception as e:
                 # BUG-0136 review (X1's twin, CC-AUD-0042): a failed load ends the
@@ -440,7 +450,9 @@ class ContentFetcher:
                 # which leaves the page shown before it alive; its fetches would
                 # otherwise be listed under the URLs fetched next
                 with contextlib.suppress(PlaywrightError):
-                    self._page.goto("about:blank", timeout=self.timeout_ms)
+                    from fuzzlab.tools import navguard
+                    navguard.navigate(self._page, "about:blank",
+                                      timeout_ms=self.timeout_ms, wait_until="load")
                 # Chromium refuses to render some responses (downloads,
                 # application/octet-stream). Those URLs are still audit targets,
                 # so fall back to a plain request rather than losing the page.

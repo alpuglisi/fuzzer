@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0138: no guarded navigation waits for a load a refused navigation cancelled)
+- **Why:** since BUG-0136, a page whose script navigates to a refused URL while it is
+  parsed stops loading and never fires `domcontentloaded`. The crawl, its query probes
+  and seeds, the auditor and the browser login each waited out their timeouts, and the
+  crawl and auditor then re-sent the page. BUG-0137's rule had been applied to the M6
+  executor only.
+- **What:** one helper, `navguard.navigate` / `reload`: wait for the commit, then for
+  the load state, bounded and cut short after a refused navigation. A page whose load
+  did not complete is read from the response the browser received, never a second
+  request. An AST guard keeps every module on the helper. CC-CRAWL-0030, CC-AUD-0043,
+  CC-SESS-0024, CC-FUZZ-0083 amendment; BUG-0138, PA-0138.
+
 ## 2026-10-15 (FR-CRAWL-17 merged with origin-scoped sessions: M0-M10)
 - spa-query merged p3-int (89268f7: FR-SESS-20 / BUG-0134, BUG-0136, BUG-0137); then a
   URL withheld from the session during a probe is that probe's blocked evidence only, a
