@@ -162,7 +162,7 @@ Newest first.
 - Code review round 5 (on 4f6c46b): correctness **APPROVE**, security **APPROVE** — the
   review gate is closed (both agree). One CORE note applied and one CORE follow-up
   recorded (CC-CORE-0450).
-- Effectiveness (assessed pending): pending.
+- Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). UI: `tests/test_web_projects.py` + `tests/test_web_projects_browser.py` 122 passed.
 
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive

@@ -22,25 +22,25 @@ Format per entry:
 - **Symptom:** security reviewer: replacing the space before `argv` in `launch`'s stored definition with U+00A0 (or moving the newline that ends a `--` comment in `page`) passed `inspect` and `summary`; SQLite then had no `argv` column and `/project` was a 500.
 - **Root cause:** the definition check compared text after Python's `str.split()` whitespace normalisation, which is not SQLite's grammar.
 - **Remediation:** definitions compared byte for byte (`_exact_sql`), verified against fresh, analysed, downgraded and historical stores; regression test with non-vacuity steps; mutation-checked.
-- **Status:** Fixed (re-review pending)
+- **Status:** Fixed (re-reviewed: both reviewers APPROVE, code review round 5 on 4f6c46b)
 
 ## 2026-10-15 — project files (unmerged): code review round 3 — crafted table definitions ran SQL on open; crafted values crashed the project pages; a straddling credential was recorded (fixed, BUG-0453/PA-0453, BUG-0454/PA-0454, BUG-0455/PA-0455)
 - **Symptom:** security reviewer: a project file whose `project` table definition gained a generated column built from `printf`/`replace` held `inspect` for 38 s (and `summary` hung the start screen); a 200 000-deep `targets` JSON or a BLOB `started_at` made `/projects/open` and `/project` 500s; both reviewers: `http://admin:<4 KB>@host` was recorded with the password.
 - **Root cause:** the allowlist exempted tables from definition matching on a false belief about `trusted_schema=OFF`, and read `schema_version` before checking it; readers assumed fuzzlab-written types and shallow JSON; the record redactor cut values before stripping userinfo.
 - **Remediation:** every definition compared, `schema_version` checked first, newer files read no further, length limits; `_text`/`_int` typing and `RecursionError` handled at both parsers; userinfo stripped from the whole value, cut last. Regression tests with non-vacuity steps; mutation-checked.
-- **Status:** Fixed (re-review pending)
+- **Status:** Fixed (re-reviewed: both reviewers APPROVE, code review round 5 on 4f6c46b)
 
 ## 2026-10-15 — project files (unmerged): a trigger passed the untrusted-file check again; tests created ./fuzzlab.db (fixed, BUG-0451/PA-0451, BUG-0452/PA-0452)
 - **Symptom:** code review round 2 (reviewer B): a `sqlite_master` row typed `TRIGGER` passed `core.project.inspect` and fired during the UI's open; layout review (reviewer C): `/home/user/fuzzer/fuzzlab.db` (+ `fuzzlab.db.d/`) had been created in the repo by this branch's web tests.
 - **Root cause:** the schema check was a case-sensitive denylist (its round-1 fix patched one spelling); the UI bound the built-in default store and a pinned launch from a default-config test created it.
 - **Remediation:** an allowlist of exactly the objects fuzzlab's migrations create (`reference_schema`); the default store counts only if it exists, else the start screen offers it; default-config tests use private stores; a session guard fails a run that creates `./fuzzlab.db`; the stray files were removed.
-- **Status:** Fixed (re-review pending)
+- **Status:** Fixed (re-reviewed: both reviewers APPROVE, code review round 5 on 4f6c46b)
 
 ## 2026-10-15 — project files (unmerged, branch claude/new-session-dwzrhb): code review round 1 found defects in 9f1536e (fixed in the follow-up commit; CC-UI-0450, CC-CORE-0450)
 - **Symptom:** two independent reviewers of the pushed, unmerged project-files commit found: a trigger named like a table passed the untrusted-file refusal (it deleted findings once opened); `redact_for_record` kept part of a password containing `@`; New / Save as adopted or deleted a stale `<name>.fuzzlab.d`; a planted symlink at a pinned intermediate let a tool write outside the project; opening an older/newer file while a project was open was silent; plus non-blocking gaps (dropped discard reports, broad exception lists, an uncapped `recent.json` read, an unrecorded `stopped` at shutdown, …). While testing the fix, a test that planted a FIFO as `recent.json` hung the run: opening a FIFO read-only blocks — the page itself would have hung the same way.
 - **Root cause:** in-change defects of a not-yet-merged feature, caught by the review gate the process requires; the FIFO hang was an `os.open` without `O_NONBLOCK` on an attacker-placeable path.
 - **Remediation:** every finding fixed and given a regression test (listed in the CC-UI-0450 / CC-CORE-0450 review notes); `recent.json` opened `O_NOFOLLOW | O_NONBLOCK` and refused unless a regular file. Recorded under the change's own CC entries (as BUG-0125's review rounds were, CC-CORE-0050) rather than as separate BUG-NNNN, since no defect reached a merged branch.
-- **Status:** Fixed (re-review pending)
+- **Status:** Fixed (re-reviewed: both reviewers APPROVE, code review round 5 on 4f6c46b)
 
 ## 2026-10-15 — fuzzer: an empty run imported the previous run's CSV (fixed, BUG-0450/PA-0450)
 - **Symptom:** found in design review of project files (CC-UI-0450): `fuzzlab fuzz --store S` with a run that collected no rows still imported `--output` (default `blind_sqli_dataset.csv` in the working directory) — an earlier run's, possibly another target's or project's — as its own attempts; with no such file it crashed with `FileNotFoundError` before the oracle confirmation.

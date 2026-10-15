@@ -116,7 +116,7 @@ Newest first.
   `SQLITE_DBCONFIG_DEFENSIVE` on `open_store` and the inspect/summary connections
   (Python ≥ 3.12 `setconfig`) as defence in depth for FTS5 shadow data `quick_check`
   does not validate — a change to every tool's connection, for its own CC entry.
-- Effectiveness (assessed pending): pending.
+- Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). Store-level: `tests/test_core_project.py` 90 passed.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
