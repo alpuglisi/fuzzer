@@ -25,6 +25,16 @@ this doc's numbering-collision fix; see below).
   content, re-pointing deployment/production configuration, and any change
   whose correctness cannot be verified within the current sandbox (e.g. no
   Docker/network access) — see §4.
+- **Never run two lanes on the same file concurrently without a planned merge
+  order.** Before dispatch, list the files each lane will edit
+  (`git diff --name-only` of its plan, or the modules its design names). If two
+  lanes share a file, either serialise them (the second starts from the first's
+  merged result) or split the file first; if they must run together, write the
+  merge order and who resolves the overlap into both dispatch prompts. Hot files
+  (today `fuzzlab/tools/spider.py` and `fuzzlab/tools/navguard.py`) are never
+  shared. Two concurrent lanes on `spider.py` and `navguard.py` cost about three
+  extra review rounds and a regression bug (BUG-0138) found only on the merged
+  tree, after an earlier decision had already identified the cost.
 
 ## 2. Independent verification (never trust a self-report alone)
 
@@ -32,13 +42,36 @@ Before merging any lane's work:
 
 - Read the actual diff. A lane's own summary describes what it *intended*
   to do, not necessarily what it did.
-- Re-run the relevant test suite yourself, in the lane's own worktree or
-  after merging into the integration branch — do not accept a reported pass
-  count without reproducing it.
+- **Re-run the tests with `scripts/verify_change.py --base <ref>`** yourself
+  (`--full` for a merge to the integration branch). Never a hand-picked list of
+  "relevant" tests: that wording produced hand-picked lists, and one missed a
+  test broken for three review rounds. The harness is the rule made mechanical:
+  - it verifies the **committed** HEAD in a fresh **detached** worktree and refuses
+    a dirty tree (a tree caught mid-edit, or a lane's live worktree, has produced
+    false "flaky" failures here);
+  - it builds the list from **every test file that imports a changed `fuzzlab`
+    module** (AST import analysis over `git diff --name-only <base>..HEAD --
+    fuzzlab`, through helpers, lazy imports and string module names), plus every
+    changed test file;
+  - it adds **every whole-package guard** (lint, traceability, PA enforcement, the
+    shared-primitive table, AST scans): they import nothing they check, so an
+    import-based list misses them;
+  - it runs **one pytest process at a time** (it waits for any other pytest on the
+    host), with `FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1` and
+    `FUZZLAB_REQUIRE_NETNS=1`, and runs live-boot, timing, procutil, multitarget and
+    browser-heavy files in a **serial pass** after the parallel one;
+  - it prints the file count and passed / failed / skipped, and records and stops
+    only its own processes (never kill by name or pattern).
+
+  Quote its file count and counts in the merge record. A reported pass count
+  that the harness has not reproduced is not verification. A failing test is
+  never written off as "flaky": root-cause it (load-dependent outcomes have each
+  been a real defect or a real verification error here).
 - Spot-check claimed behavior directly (e.g. actually invoke the new
   function/gate/checker, don't just read that a test exists for it).
 - Check that the bookkeeping entries a lane claims to have added actually
-  exist, with the exact IDs claimed (see §3).
+  exist, with the exact IDs claimed (see §3), and that every new PA ends with
+  its `- Enforced by:` line (`tests/test_pa_enforcement.py`).
 
 This applies with equal weight to work done by a lane you dispatched and to
 your own direct edits when reporting completion to the user.
@@ -162,3 +195,29 @@ This generalizes the pre-assigned-numbering fix in §3: a marker shared
 across concurrent, not-yet-merged lanes is exactly the same kind of
 race-prone shared state a bookkeeping ID is, and deserves the same
 explicit, no-silent-improvisation discipline.
+
+## 7. Measure the real target and the real browser before design
+
+Before a design (a design gate's draft, or a bug fix's planned change) relies on
+how a real target or the real browser behaves, **measure it, and cite the
+measurement in the design doc**: a short "Measured" section listing each platform
+or target behaviour the design depends on, the probe that measured it (a script
+or a real-browser test, committed or attached), and the observed result.
+Examples of facts that were assumed and turned out wrong here: Playwright's route
+sees only a redirect chain's first hop; an `ERR_ABORTED` navigation keeps the
+current document; a script navigation refused during parsing never fires
+`domcontentloaded`; Juice Shop's server reads the `token` cookie, not the bearer;
+a server-side step rejects a quote before the sink.
+
+- A design that names such a behaviour without a measurement does not pass its
+  design gate; reviewers check the "Measured" section first.
+- Keep a probe that pins a platform fact as a real-browser or real-process test
+  (failing, not skipping, under `FUZZLAB_REQUIRE_BROWSER=1`), so a Playwright or
+  Chromium upgrade re-checks it.
+- A fake (a fake `Page`, route or session) may stand in for the platform only for
+  a behaviour a real-browser test has already pinned.
+
+Why: in BUG-0110..BUG-0139, 15 of 25 bugs came from a fixture that did not model
+the real data path or from browser behaviour that was assumed rather than
+measured (classes T1 and T2), and the most productive review technique was a
+reviewer measuring in real Chromium.

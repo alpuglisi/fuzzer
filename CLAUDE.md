@@ -27,8 +27,15 @@ that gets forgotten; treat it as part of the change, done in the same commit —
 1. **Follow the preventive-action rules.** Read `docs/PREVENTIVE_ACTIONS.md` *before and
    during* the change and comply with every rule (PA-0001…). This list is authoritative
    and must be followed — it is not advisory.
-2. **Tests.** Add/adjust tests for the change and run the suite (`pytest`); keep it green.
-   State the pass/skip counts where you report the change.
+2. **Tests, verified through the harness.** Add/adjust tests for the change, commit, then
+   verify with `scripts/verify_change.py --base <ref>` (`--full` for the whole suite) —
+   never a hand-picked list of "relevant" tests. It checks the committed HEAD in a
+   detached worktree (refusing a dirty tree), selects every test file that imports a
+   changed `fuzzlab` module plus every whole-package guard and every changed test, and
+   runs one pytest at a time with `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`, live-boot and
+   timing files in a serial pass. Keep it green; state its file count and pass/fail/skip
+   counts where you report the change. A failing test is root-caused, never called
+   "flaky".
 3. **CHANGELOG.md** — add one dated, high-level line: *what changed and why* (reference the
    commit/CC IDs where useful). Required for every change.
 4. **Component change-control** — for each affected component, add a full
@@ -36,13 +43,27 @@ that gets forgotten; treat it as part of the change, done in the same commit —
    `docs/components/README.md`. A single change may yield one CHANGELOG line and several
    change-control entries.
 5. **If you fixed a bug** (any code defect — failing test, wrong result, crash, regression,
-   security flaw), do the full bug protocol below — not just a code fix.
+   security flaw), do the full bug protocol below — not just a code fix. **A new PA names
+   its enforcement** in its last line: `- Enforced by: tests/<file>.py::<test>[, …]` (a
+   test that fails when the rule is broken; prefer an AST or whole-package guard proven
+   on a synthetic offender) or `- Enforced by: none — <reason>`.
+   `tests/test_pa_enforcement.py` checks every PA has exactly one such line and that each
+   named test exists.
 6. **Keep the specs current.** If a component's behavior, scope, interfaces, or data
    contracts changed, update that component's living **`requirements.md`** in place (add
    new requirements with stable IDs; mark superseded ones). If the project structure,
    components, dependencies, or the store-as-contract changed — or the build status of a
    phase advanced — update **`docs/ARCHITECTURE.md`**. These are living documents that must
    always reflect current truth, not just history.
+
+7. **A fix to a shared primitive** (a mechanism listed in `docs/SHARED_PRIMITIVES.md`, or
+   one that should be) is made in its owner, **sweeps every caller** of the owner and
+   every consumer that waits on or reads what changed (not only the path the bug came
+   from), and updates `docs/SHARED_PRIMITIVES.md` in the same change (new owner, guard or
+   row). `tests/test_shared_primitives.py` checks the table.
+8. **Measure before design.** A design or fix that relies on how a real target or the
+   real browser behaves cites a measurement of it (see
+   `docs/MULTI_AGENT_ORCHESTRATION.md` §7).
 
 If a step does not apply, it is because the change genuinely doesn't touch it — not because
 it's inconvenient. When in doubt, do it.
@@ -57,7 +78,8 @@ it's inconvenient. When in doubt, do it.
 | **Architecture** | `docs/ARCHITECTURE.md` | when structure, components, dependencies, contracts, or a phase's build status change | **living doc, kept current** |
 | **Error log** | `ERROR_LOG.md` | anything that broke and was fixed (bugs, deploy/env failures) | one dated entry: symptom / root cause / remediation / status |
 | **Bug report** | `docs/bugs/BUG-NNNN-*.md` | every **code** defect | full RCA; see `docs/bugs/README.md` |
-| **Preventive actions** | `docs/PREVENTIVE_ACTIONS.md` | one (or more) per bug report | distilled rule; **must be read and followed on every change** |
+| **Preventive actions** | `docs/PREVENTIVE_ACTIONS.md` | one (or more) per bug report | distilled rule ending with its `- Enforced by:` line; **must be read and followed on every change** |
+| **Shared primitives** | `docs/SHARED_PRIMITIVES.md` | when a one-implementation mechanism is added, moved or changed | living table: owner + guard test per mechanism |
 
 Note the split: `change-control.md` is the **append-only history** of a component; its
 `requirements.md` is the **living specification** of what the component is now. A change
@@ -84,8 +106,10 @@ with a recurrence review (step 3) gating the preventive action:
    naming the prior BUG-NNNN and PA-NNNN — and only then decide the new PA, which must fix
    that failure mode and **strengthen or supersede** the prior PA, not restate it.
 4. **`docs/PREVENTIVE_ACTIONS.md`** — add the preventive rule(s) derived from the root
-   cause (and, on a recurrence, from step 3), and then **sweep the codebase for other
-   instances of that bug class and remediate them** (that sweep is itself a rule, PA-0002).
+   cause (and, on a recurrence, from step 3), each ending with its `- Enforced by:` line,
+   and then **sweep the codebase for other instances of that bug class and remediate
+   them** (that sweep is itself a rule, PA-0002). For a shared primitive, sweep by
+   primitive (every caller), not by symptom path.
 
 The three cross-reference each other (ERROR_LOG ↔ BUG-NNNN ↔ PA-NNNN). Do not stop at the
 ERROR_LOG line — that is the exact corner that has been cut before.
@@ -112,9 +136,10 @@ ERROR_LOG line — that is the exact corner that has been cut before.
 
 If you are an orchestrating session dispatching concurrent build lanes/sub-agents against
 this repo: read `docs/MULTI_AGENT_ORCHESTRATION.md` before dispatching anything. In brief —
-run independent lanes in parallel and never let an eligible one sit idle; always
-independently verify a lane's work yourself before merging (re-run tests, read the diff,
-check bookkeeping — never trust a self-report alone); restrict to offline-buildable work
+run independent lanes in parallel and never let an eligible one sit idle, but never two
+lanes on the same file without a planned merge order; always independently verify a
+lane's work yourself before merging (`scripts/verify_change.py` on the committed tree,
+read the diff, check bookkeeping — never trust a self-report alone); restrict to offline-buildable work
 and flag (never silently build or skip) anything carrying genuine cross-component/
 downstream risk or that you cannot actually verify in the current environment;
 **pre-assign each concurrent lane its own bookkeeping numbers** before dispatch rather than
@@ -130,6 +155,8 @@ substitute if the specified one is unavailable.
   template + component index.
 - `docs/bugs/README.md` — bug-investigation policy and required contents.
 - `docs/PREVENTIVE_ACTIONS.md` — the rule list to follow (read it every session).
+- `docs/SHARED_PRIMITIVES.md` — the one-implementation mechanisms, their owners and guards.
+- `scripts/verify_change.py` — the verification harness (`--help`).
 - `CHANGELOG.md` / `ERROR_LOG.md` — their own headers restate their format.
 - `docs/DECISIONS_AND_ROADMAP.md` — settled decisions (D-numbers) and the phased plan.
 - `docs/ON_HOST_RUNBOOK.md` — how to run the on-host (lab) activities.

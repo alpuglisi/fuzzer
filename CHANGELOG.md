@@ -4,6 +4,32 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (process: a verification harness, enforced PAs and a shared-primitive table)
+- **Why:** the retrospective of BUG-0110..BUG-0139 found every one of the 25 bugs
+  happened while a prose PA already applied, while the AST guards held inside their
+  scope. The verification rules learned the hard way (committed detached checkout,
+  import-based test list plus whole-package guards, one pytest at a time, live and
+  timing tests serially) lived only in session notes, and "re-run the relevant tests"
+  had produced a hand-picked list that missed a broken test for three review rounds.
+- **What:**
+  - `scripts/verify_change.py`: verifies the committed HEAD in a detached worktree
+    (refuses a dirty tree), selects every test importing a changed `fuzzlab` module (AST)
+    plus every whole-package guard and changed test, runs a parallel then a serial pass
+    one pytest at a time with the require-flags, prints the file count and counts, and
+    stops only its own process groups. `--full` runs the whole suite the same way.
+    Tested on synthetic repositories (`tests/test_verify_change.py`); new `package_guard`
+    marker.
+  - Every PA now ends with `- Enforced by: <tests>` or `- Enforced by: none — <reason>`;
+    `tests/test_pa_enforcement.py` checks the line and that each named test exists, and
+    reports the unenforced share (37 of 134 at this change).
+  - `docs/SHARED_PRIMITIVES.md` lists 30 one-implementation mechanisms with owner and
+    guard; `tests/test_shared_primitives.py` checks it, adds a defined-once check and a
+    route-abort-only-in-navguard guard.
+  - `docs/MULTI_AGENT_ORCHESTRATION.md`: §2 verification goes through the harness; no
+    two lanes on one file without a planned merge order; §7 measure the real target and
+    browser before design. `CLAUDE.md`'s definition of done follows. Process docs only:
+    no component change control.
+
 ## 2026-10-15 (BUG-0139 review: a path-segment-safe quote-free payload, ordered by reach)
 - **Why:** the quote-free payload `/TOKEN/.source` was cut by a sink that takes the
   value as one path segment, and the payload loop could stop before any quote-free

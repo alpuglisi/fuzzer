@@ -10,26 +10,43 @@ changelog, change-control, error-log, and bug-report requirements.
 
 Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
 
+Every entry ends with exactly one enforcement line, checked by
+`tests/test_pa_enforcement.py` (each named test must exist; resolved by AST):
+
+- `- Enforced by: tests/<file>.py::<test>[, tests/<file>.py::<test> …]` — the tests
+  that fail when the rule is broken, or
+- `- Enforced by: none — <reason>` — why no test enforces it (a process or conduct
+  rule, on-host only, not yet built).
+
+A new PA names its enforcement when it is written. Prefer a mechanical guard (an AST or
+whole-package check proven on a synthetic offender, PA-0034(2)) to prose: the
+retrospective of BUG-0110..BUG-0139 found every one of those 25 bugs happened while a
+prose PA already applied. The test prints the share of PAs enforced by `none`.
+
 - **PA-0001** — In tests, do not hardcode a value that a source-of-truth constant
   or registry in the code already defines (schema head version, `FEATURE_VERSION`,
   enum members, etc.); derive the expectation from that source. Reserve literal
   expected values for genuinely fixed external contracts. (from BUG-0001)
+  - Enforced by: none — a test-writing convention; no check can tell a derived expectation from a hard-coded one, so it is applied in review
 - **PA-0002** — When a bug investigation adds a preventive action, sweep the whole
   codebase for existing instances of that bug class and remediate them (or record
   why not) — do not fix only the instance that triggered the investigation. (from
   BUG-0002)
+  - Enforced by: none — a process rule for bug investigations; the sweep and its result are recorded in each bug report, not checked by a test
 - **PA-0003** — A storage or serialization convention that must hold across more
   than one writer lives in exactly one shared function that every writer calls at
   the write site — not as a per-writer private helper, and not as a convention
   stated only in prose. New writers of the same column/field go through that shared
   function (e.g. result URLs are stored in path form via `fuzzlab.core.urls.to_path`).
   (from BUG-0003)
+  - Enforced by: tests/test_identifier_predicate.py::test_defined_once, tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms, tests/test_session_browser_login.py::test_one_predicate_tells_credential_cookies_from_ambient_ones, tests/test_shared_primitives.py::test_every_owner_is_defined_once
 - **PA-0004** — A committed default that selects an external identity, credential, or
   endpoint must be a value the target actually accepts **and** must match what the lab
   provisions (compose / `.env` / schema) — not a developer's local assumption. And
   when an incident is resolved only by an environment workaround (an `ERROR_LOG` entry
   marked `Environment`), still fix the repo default that caused it, so a fresh checkout
   does not reproduce it. (from BUG-0004)
+  - Enforced by: none — no test compares committed defaults with what the lab provisions; checked when a default changes
 - **PA-0005** — Every library imported at runtime — including one pulled in by a
   third-party backend the code instantiates — must be a **declared** dependency; never
   assume a different installed library satisfies another's requirement (e.g.
@@ -38,12 +55,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   implementation (skippable when it needs an environment feature) or a documented
   on-host smoke check, so fresh-install / first-use failures are caught before a user
   hits them. (from BUG-0005)
+  - Enforced by: none — no test compares runtime imports with the declared dependencies; the real-path half is applied per feature (PA-0065 adds the browser backstop)
 - **PA-0006** — An integration/pipeline test must feed inputs shaped like what the
   real upstream produces; do not hand-populate a field the live path does not set at
   that stage (e.g. a post-detection label like `sink_context` on a freshly-discovered
   point) to make a downstream step succeed — that masks a wiring gap. A rule or step
   keys only on what is available at its stage; anything derived later belongs to the
   stage that derives it. (from BUG-0006)
+  - Enforced by: none — a fixture-writing convention; no generic check can tell a hand-populated field from an upstream-shaped one
 - **PA-0007** — Never infer authentication or authorization success from the mere
   presence of an *ambient* credential the server also issues to anonymous users (a
   session cookie set by `session_start()`, an ambient CSRF/anti-forgery token, etc.).
@@ -53,17 +72,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   for auth/detection code must reproduce the server's ambient state (e.g. a pre-login
   anonymous cookie), not only the happy path, or a broken success path looks healthy
   (a recurrence vector of PA-0006). (from BUG-0008)
+  - Enforced by: tests/test_session_browser_login.py::test_one_predicate_tells_credential_cookies_from_ambient_ones
 - **PA-0008** — Gate optional behavior on the **authoritative capability probe**, not on
   a fragile name string. To detect a native extension use `extension_loaded('x')` (not
   `function_exists('\x\fn')`, whose leading-backslash namespaced form is unreliable);
   likewise prefer the direct capability check over stringly-typed name lookups elsewhere.
   A misfiring guard silently degrades to "feature off / no signal", which is hard to spot.
   (from BUG-0009)
+  - Enforced by: none — the PHP coverage shim's capability check runs on-host only; no test inspects how capability probes are spelled
 - **PA-0009** — A build or deploy step that provisions a runtime capability (compiling/
   installing an extension, a package, a binary) must **verify it is actually usable in the
   same step** — e.g. `pecl install x && … && php -m | grep -qi '^x$'` — so a broken or
   cache-stale layer fails the build, not a later run. Install the toolchain the build
   needs (e.g. `$PHPIZE_DEPS` for PECL) rather than assuming it is present. (from BUG-0009)
+  - Enforced by: none — a container build-step rule, verified by the on-host image build, not by a test
 - **PA-0010** — When an API takes a filter/selector argument, confirm the expected
   **granularity** (file vs directory vs prefix vs glob) before passing it — a
   wrong-granularity argument commonly returns a silently-empty result rather than an
@@ -71,6 +93,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   produced **signal** end to end, not just that the dependency is present: "loads ≠
   works" — a self-test that inspects the real output catches what a presence check
   cannot. (from BUG-0009)
+  - Enforced by: none — a review rule (confirm an API filter's granularity, verify the produced signal); PA-0026 carries the adapter test that came from it
 - **PA-0011** — X.509 certificates generated for TLS must carry the extensions strict
   verifiers (modern OpenSSL, browsers) require: a CA with a Subject Key Identifier and a
   keyCertSign KeyUsage; a leaf with a Subject Key Identifier, an Authority Key Identifier
@@ -78,18 +101,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   type (IPAddress for IP hosts, DNSName otherwise). Assert the generated cert's extensions
   and verify it against a real chain check in a test — even one skip-guarded to the
   environment that has a working crypto backend. (from BUG-0010)
+  - Enforced by: tests/test_proxy_live.py::test_leaf_cert_chains_to_ca_with_aki_ski
 - **PA-0012** — Tearing down an `asyncio` server must be bounded and must not assume
   `wait_closed()` returns once the listener closes: on Python 3.12+ it also waits for
   active connections, which for a long-lived server may never end. Track and cancel
   in-flight connection tasks on stop and wrap the final wait in a timeout. Persist
   important state as it is produced (not only on graceful shutdown), so a forced/abrupt
   stop loses nothing. (from BUG-0011)
+  - Enforced by: tests/test_oracle_oob.py::test_stop_returns_while_a_connection_sits_idle
 - **PA-0013** — A self-test assertion must reflect the **true contract of the system under
   test**, not an intuitive-but-wrong premise (e.g. only *conflicting* Content-Length is
   invalid; duplicate-*identical* is valid per RFC 7230). An on-host / integration self-test
   must use the same construction the validated offline test proved — never a weaker or
   hand-rolled variant that asserts something the offline test did not establish. (from
   BUG-0012)
+  - Enforced by: tests/test_proxy_message.py::test_duplicate_content_length_raw_exact_but_parsed_rejects
 - **PA-0014** — Do not rely on compose behaviors that differ between `docker compose` and
   `podman-compose` — chiefly in-place recreate on a config/env change, which
   podman-compose cannot do. Orchestration that changes env/profile on a running stack must
@@ -97,6 +123,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   containers/pod/network under podman, and retry. And when a provider/environment incident
   is fixed in place, still record a PA for the *class* — closing it as a one-off leaves the
   class unguarded and it recurs. (from BUG-0013)
+  - Enforced by: none — compose and podman orchestration runs on-host only; no test exercises it
 - **PA-0015** — Operational / runbook documentation must be written from an **executed,
   verified run**, not from design intent. A step whose on-host last-mile code is not yet
   built and self-tested is tagged `[design]` and must **not** be presented as a followable
@@ -105,6 +132,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   ones actually produced, and any step that changes host state or sends traffic ships with
   such a script. If the build environment cannot execute the steps (no lab/host), say so and
   keep them `[design]` until validated on the host. (from BUG-0014)
+  - Enforced by: none — a documentation rule ([design] vs [run] steps), applied in review
 - **PA-0016** — Shell scripts under `set -e` must never end a function/case/script (or any
   branch whose status becomes the script's exit status) with a bare `A && B`: it returns
   non-zero when `A` is false (`B` is skipped), so the script exits non-zero on success and
@@ -115,6 +143,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   script's own harness (control flow, exit codes on every path) must be verified, not just
   its exit assertion, since a fail-loud self-test cannot catch an abort that happens before
   it runs. (from BUG-0015)
+  - Enforced by: none — on-host shell scripts are checked with shellcheck and branch exit-code runs by hand; no test runs them
 - **PA-0017** — An exit criterion or self-test metric must **isolate and measure the
   specific capability it claims to prove**, via a controlled comparison (e.g. an
   attack-vs-its-own-baseline differential), not a proxy dominated by unrelated work (a
@@ -122,6 +151,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   A passing self-test is not sufficient if the metric doesn't reflect the capability, and a
   diagnostic/NOTE must key on the actual condition it names (e.g. "no coverage captured" ⇒
   coverage-seen == 0), not a derived artifact. (from BUG-0016)
+  - Enforced by: none — a metric-design rule, judged per metric in review
 - **PA-0018** — Container-lifecycle self-heal is a cross-path convention. Every
   orchestration path that creates, removes, or recreates containers on a possibly-running
   or wedged podman stack must route through the **one shared force-clean helper** (per
@@ -132,6 +162,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   env/profile change). This re-keys PA-0014 from the trigger to the mechanism
   (podman-compose cannot remove or recreate a running/wedged stack) so a sibling path with
   the same cause but a different trigger cannot slip through the sweep. (from BUG-0017)
+  - Enforced by: none — on-host container-lifecycle code; no test enumerates its call sites
 - **PA-0019** — When a turn's work produces a finding that matches an artifact's stated
   scope for what it records (e.g. `ERROR_LOG.md`'s "anything that broke and was fixed"),
   add that artifact's entry in the same turn, checked against the artifact's literal scope
@@ -141,6 +172,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   hitting unexpected behavior, re-read the relevant bookkeeping artifacts' own scope lines
   as a checklist item, not as background context absorbed once at session start. (from
   BUG-0018)
+  - Enforced by: none — a session-conduct rule; partly backed by the Stop hook .claude/hooks/check-error-log-bookkeeping.sh, which is not a test
 - **PA-0020** — When a preventive action's root cause is my own missed or inconsistent
   self-check (rather than a defect in project code, tests, or a process document), a
   written rule alone does not count as prevention — it must also have an enforcement path
@@ -153,6 +185,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   incident-shaped (a new/modified `docs/spikes/` or `docs/bugs/` doc, or `fail`/`hang`/
   `workaround`/`killed`/`timed out`/`crash`/`broken`/`regress` added to the diff) but
   `ERROR_LOG.md` was not touched. (from BUG-0019)
+  - Enforced by: none — enforced by the Stop hook .claude/hooks/check-error-log-bookkeeping.sh, not by a pytest test
 - **PA-0021** — PA-0003's obligation (a storage/serialization convention shared by more than
   one writer or reader lives in exactly one shared function every participant calls) applies
   to **every** such convention in the codebase, not only the one it was originally written
@@ -162,6 +195,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   module that raises a typed error for some failure modes must raise that same typed error
   for every foreseeable failure at its boundary (e.g. a missing file/directory) — never let
   the underlying OS/library exception propagate raw. (from BUG-0007)
+  - Enforced by: tests/test_ml_persist.py::test_the_loader_boundary_types_every_extreme_failure, tests/test_shared_primitives.py::test_every_owner_is_defined_once
 - **PA-0022** — Any keyword/substring match used as a mechanical heuristic (a hook, a lint
   rule, a build gate) must anchor on word boundaries (`\b`) unless a bare substring is
   specifically intended, and must be checked against the project's own routine vocabulary
@@ -169,6 +203,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before being trusted to run unattended — e.g. grep the heuristic's own keyword list
   against a sample of ordinary, incident-free commit messages/diffs and confirm zero
   matches. (from BUG-0020)
+  - Enforced by: tests/test_oracle_strategies_access_control.py::test_denial_marker_is_word_boundary_anchored, tests/test_ml_model_selection.py::test_guard_ignores_legitimate_model_queries
 - **PA-0023** — Any object wrapping a `sqlite3` connection (or another thread-affine OS
   handle) that is held as shared state on an object reachable from more than one call path
   must not assume its calls always land on the same OS thread — either confine it to a
@@ -179,6 +214,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   assumption still holds for the new component's actual callers — e.g. an ASGI test client
   used without its context-manager form spins up a fresh thread per top-level call, which
   is enough to break it. (from BUG-0021)
+  - Enforced by: none — no test drives a shared sqlite handle from two threads; the single-thread invariant is stated in docstrings
 - **PA-0024** — Whenever an emitter's (or any capability-registry-driven component's)
   "supports this shape" declaration is widened to accept a new case, the same change must
   exercise **every** existing record (manifest cell, config entry, etc.) that could newly
@@ -188,6 +224,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before landing such a widening, add or extend a whole-collection regression test (e.g. a
   "render every cell of every existing manifest" test) rather than relying on tests scoped
   to the new record alone. (from BUG-0022)
+  - Enforced by: tests/test_labgen_harder_shapes.py::test_every_cell_of_every_manifest_that_targets_php_current_renders, tests/test_labgen_php_laravel_harder_shapes.py::test_every_cell_of_every_manifest_that_targets_php_laravel_renders
 - **PA-0025** — A tool-oracle wrapper that classifies a "no positive finding" result as
   `confirmed_secure` must independently verify, from the tool's own diagnostic output,
   that the tool actually reached and exercised the target — never infer "secure" purely
@@ -198,6 +235,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   for "cleaner" output) and check for them before returning `confirmed_secure`. Extends
   PA-0007's fail-closed doctrine from authentication-signal inference to tool-oracle-
   output inference generally. (from BUG-0023)
+  - Enforced by: tests/test_labgen_identifier_sqli_oracle.py::test_inconclusive_when_both_true_and_false_probes_error_identically, tests/test_labgen_identifier_sqli_assertion.py::test_an_unreachable_target_never_passes_a_secure_cell
 - **PA-0026** — Supersedes/strengthens PA-0010. When building an explicit-allowlist
   adapter around a third-party function specifically because it silently accepts and
   mishandles some input class, enumerate the value-shape preconditions the wrapped
@@ -213,6 +251,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   count, uncaught by an adapter that had already defended the kwarg-key and sorter-
   default surfaces). Applies to every existing PA-0010-motivated adapter, per PA-0002's
   sweep obligation. (from BUG-0024)
+  - Enforced by: tests/test_labgen_resolver.py::test_strength_exceeding_factor_count_rejected_not_silently_empty
 - **PA-0027** — Strengthens PA-0001 and complements PA-0024. A test's expectations **and
   its fault injection** must be functions of the specific record under test, never of the
   collection's cardinality or a record's iteration position. (a) A fixture that perturbs
@@ -229,6 +268,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   capability widening to exercise every newly-matching record; this rule covers the
   inverse direction — the *existing* tests must still test what they claim once the
   record count moves. (from BUG-0025)
+  - Enforced by: tests/test_labgen_cutover_gate.py::test_coverage_is_derived_from_supports_never_a_hand_maintained_literal
 - **PA-0028** — A semantics/equivalence validator that accepts a mutation by default
   (any fragment-level check — AST comparison, canonicalized-string comparison, or
   otherwise — that returns "equivalent") must enumerate the transform shapes its
@@ -239,6 +279,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   the fragment-level checks run, not left to them. This is PA-0025's fail-closed
   doctrine's "unprovable from the compared unit" case, applied to semantics validators:
   the default posture for an unproven case is reject, not accept. (from BUG-0026)
+  - Enforced by: tests/test_mutation_operators.py::test_untrusted_line_comment_introduction_is_rejected
 - **PA-0029** — Generalizes PA-0028 beyond semantics validators. Any checker whose "no
   violation found" verdict is reached by a code path that **gates off entirely (rather
   than narrows)** part of its own stated invariant under some condition must have a test
@@ -252,6 +293,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   gating boolean anywhere else) needs its own "declared difference alone passes, declared
   difference *plus* an unrelated rewrite still fails" pair of tests, not one. (from
   BUG-0027)
+  - Enforced by: tests/test_labgen_minimal_pair.py::test_content_confinement_runs_even_when_variable_categories_is_narrowed, tests/test_labgen_minimal_pair.py::test_unrelated_rewrite_before_the_transform_region_now_caught
 - **PA-0030** — A harness that claims to report "the real app's response" must not
   silently apply a client **default** that transforms what the server actually sent
   before the caller sees it (redirect-following, retry-on-error, automatic
@@ -265,6 +307,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   PA-0026's "enumerate every precondition, not only the one that motivated the
   change" discipline from allowlist adapters to live HTTP+ORM conformance harnesses.
   (from BUG-0028)
+  - Enforced by: none — superseded by PA-0046, which carries the enforcement
 - **PA-0031** — Before dispatching a wave of concurrently-running agent lanes that will
   each add sequential bookkeeping IDs (`CC-<CODE>-NNNN`, `FR-<CODE>-N`, or a
   `BUG-NNNN`/`PA-NNNN` pair), pre-assign each lane its own reserved, non-overlapping
@@ -277,6 +320,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
   alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
   bot).
+  - Enforced by: none — an orchestration rule (pre-assigned numbers), not checkable in the repository
 - **PA-0032** — Before ending a turn with any next-step question, offer, or "say the
   word" framing directed at the user, check that question against the standing
   instructions already given for the current task. If the user already authorized the
@@ -289,6 +333,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   different root cause from PA-0019's bookkeeping-recall gap (that one is about
   recalling *what to record*; this one is about recalling *what was already
   authorized*). (from BUG-0029)
+  - Enforced by: none — a session-conduct rule
 - **PA-0033** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
   PA-0033 reuses as-is): PA-0020 established that a bug whose root cause is "my own
   missed or inconsistent self-check" needs mechanical enforcement, not a clearer written
@@ -318,6 +363,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   prose (this plan doc's Status section) rather than mechanically enforced — caught
   before it recurred a second time by applying PA-0033's own rule proactively this time,
   rather than waiting for a review to catch it.
+  - Enforced by: none — enforced by the Stop hook .claude/hooks/check-corpus-cwe-coverage.sh, not by a pytest test
 - **PA-0034** — Two related rules, from a PR review that found real defects a
   same-session test suite and a 4-round change-control review both missed (from
   `BUG-0031`, code-generation, and `BUG-0032`, an enforcement hook — recurrence of the
@@ -340,6 +386,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      check is necessary but not sufficient; the check needs its own adversarial
      self-check before "mechanical enforcement exists" can be trusted. (from BUG-0031,
      BUG-0032)
+  - Enforced by: none — applied per guard (each guard carries its own synthetic-offender test); nothing checks that every guard has one
 - **PA-0035** — A capability probe that gates whether a real, potentially slow or
   hanging operation runs (a `pytest.mark.skipif(not xxx_available(), ...)`-style guard,
   or any equivalent pre-flight check) must exercise the **actual operation path** —
@@ -369,6 +416,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
   BUG-0033)
+  - Enforced by: tests/test_labgen_conformance_live_boot_probe.py::test_composer_network_probe_enforces_a_bounded_timeout, tests/test_labgen_conformance_live_boot_probe.py::test_composer_network_probe_returns_false_on_timeout_never_raises
 - **PA-0036** — When code-generation names an entity by one convention (a file path, a
   route string) and separately derives a *related* name for it via a target
   framework's own naming/inflection convention (a class name, or a symbol the
@@ -392,6 +440,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   operation path) — this is about generated code's own naming consistency with a
   target framework's implicit conventions, a failure mode neither prior rule covers.
   (from BUG-0034)
+  - Enforced by: none — no test runs the target framework's inflector against generated names
 - **PA-0037** — Two related rules from a real, 100%-reproducible defect that shipped
   latent through two full build phases because no test's own scope ever took the
   request pattern that triggers it:
@@ -429,6 +478,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      read on the second request of any session — invisible to two full build phases'
      worth of single-request tests, found only once a whole-app, multi-request test was
      built. (from BUG-0035)
+  - Enforced by: none — no test pins the ruby_rails skeleton's transitive gems or requires a multi-request live test per stack
 
 - **PA-0039 — a cross-language module port must re-verify every language-specific
   runtime-behavior assumption the source language's shape relied on, not just its
@@ -451,6 +501,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   already had it. A future cross-language module port should run the same sweep before
   considering that class of module "ported," not just "renders the same shape." (from
   BUG-0037)
+  - Enforced by: none — superseded in scope by PA-0053 and PA-0054, whose absent-input checks enforce it
 - **PA-0040** — When a change registers a module (or any entry) in a **shared,
   cross-stack** registry consumed by more than one stack-specific module set or more
   than one test file's own completeness table (as opposed to a change confined to one
@@ -466,6 +517,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `CC-LAB-0210` pattern) must satisfy both. (from BUG-0038; this ID was originally
   assigned `PA-0036` on `claude/category-5-build-6boejs`, which collided with this
   branch's own, unrelated `PA-0036` — renumbered on merge, not restated.)
+  - Enforced by: none — a process rule on which suite to run; scripts/verify_change.py now always adds the whole-package guards, but nothing forces its use
 - **PA-0038** — Before considering any new `lab/ground-truth-*/` directory
   complete: (a) confirm all three required files (`labels.json`,
   `injection-points.json`, `expectedresults.csv`) show as tracked/addable via
@@ -485,6 +537,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
   unconditionally, compounded here by that file also being unreachable via
   `git add` for lack of a `.gitignore` negation). (from BUG-0036)
+  - Enforced by: none — a commit-time process check (git add -n, a separate run of the new file); no test checks it
 - **PA-0041** — When a project maintains more than one implementation of the
   same seam/protocol (e.g. `fuzzlab.oracle.probe.Sender`: `SeamProbeSender`
   and `RequestsProbeSender`), a security-relevant transport setting adopted
@@ -493,6 +546,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   seam in the same change, not left to be discovered independently
   per-implementation the first time a vuln class that happens to exercise it
   is built. (from BUG-0039)
+  - Enforced by: none — no test compares transport settings across a seam's implementations; PA-0046 pins the redirect setting per sender
 - **PA-0042** — Before mapping a new vuln class into
   `fuzzlab.core.runmode._VULN_TO_CATEGORY` (wiring a real confirmation path
   for it), verify live, end to end, through `fuzzlab.harness.multitarget.
@@ -503,6 +557,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   positive if its `vuln_class` attribute's spelling doesn't match the
   ground-truth convention — a gap `confirm()`'s own return value alone can
   never surface. (from BUG-0040)
+  - Enforced by: none — a live end-to-end scoring check for each newly mapped class; the multitarget runs cover the classes mapped so far
 - **PA-0043** — `fuzzlab.labels.contract`'s ground truth has two distinct
   shapes per app: the *point* (`injection-points.json`, "where to probe" —
   url/method/param/location/rendering) and the *case*
@@ -526,6 +581,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   bugs are siblings, not a recurrence of one another: `PA-0006` is about a
   value that doesn't exist yet at a pipeline stage; this is about a value
   that exists elsewhere but was never wired through). (from BUG-0039)
+  - Enforced by: tests/test_auto.py::test_points_from_ground_truth_carries_sink_context_from_the_matching_case
 - **PA-0044** — Before considering any change to a `lab/ground-truth-*/`
   directory's case *or point* count (a `Case`/`InjectionPoint` added,
   removed, or reshaped — e.g. a `param`/`location` correction that changes
@@ -555,6 +611,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   neither covers: a pre-existing, unrelated-looking, cross-cutting test
   file whose hardcoded assertion merely happens to depend on a
   ground-truth directory's total count or shape. (from BUG-0040)
+  - Enforced by: none — a process rule (grep every cardinality assertion when ground truth changes)
 - **PA-0045** — Sharpens `PA-0044` from file-level to match-level
   verification, after `PA-0044`'s own fix (`CC-LAB-0197`) missed a second,
   independent hardcoded fraction in the same file it had just edited and
@@ -574,6 +631,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   in each), where a single ground-truth-cardinality change routinely
   invalidates TWO independent assertions in that one file, not one — do
   not stop at the first one found. (from BUG-0043)
+  - Enforced by: none — a process rule (count every occurrence of the assertion pattern)
 - **PA-0046** — Supersedes/strengthens `PA-0030`. `PA-0030`'s rule (a
   component that claims to report "the real app's response" must not
   silently apply a client default — redirect-following, retry-on-error,
@@ -602,6 +660,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   whether the caller is a `ConfirmationStrategy`/oracle that needs the
   UN-followed response, not blanket avoidance of `allow_redirects=True`
   everywhere. (from BUG-0044)
+  - Enforced by: tests/test_probesender.py::test_requests_probe_sender_never_follows_redirects, tests/test_fuzzer_seam.py::test_requests_sender_unchanged_standalone_behavior
 - **PA-0047** — When adding a `ConfirmationStrategy` (or the first ground-truth
   case for an existing one) whose category needs a `fuzzlab.core.
   runmode._VULN_TO_CATEGORY` entry (its category's hyphenated slug differs
@@ -633,6 +692,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   not sufficient proof it works end to end; a live, scored multitarget
   pipeline run is the only check that exercises category reachability AND
   the scoring key's exact vuln_class match together. (from BUG-0045)
+  - Enforced by: tests/test_oracle.py::test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped
 - **PA-0048** — When adding a `sink_context_in`-gated audit rule (the
   `R-INSECURE-DESERIALIZATION`/`R-HEADER-INJECTION` shape), do not assume
   `fuzzlab.harness.auto.points_from_ground_truth` hands the audited
@@ -660,6 +720,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   param, vuln_class)`, never `sink_context`, so it cannot double-count a
   TP/FP) — prefer emitting one point per distinct value over trying to
   merge/prioritize them. (from BUG-0046)
+  - Enforced by: tests/test_multitarget_category4.py::test_both_apps_run_through_multitarget_for_real
 
 - **PA-0049** — Every committed dependency lockfile must be resolved against the
   project's **pinned runtime**, not the build/developer host. Concretely: each
@@ -674,6 +735,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   When adding or fixing such a pin, **sweep every lockfile in the repo for a
   missing runtime pin** (PA-0002) and confirm each lock has no dependency
   requiring a runtime newer than the pinned one. (from BUG-0047)
+  - Enforced by: none — no test checks lockfile runtime pins; the from-scratch image build is the check
 
 - **PA-0050** — A liveness/readiness probe must target a **known-served,
   modelled endpoint** and treat "the server answered at all" as up; it must not
@@ -688,6 +750,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   direction (inferring *dead* from a reachable target's incidental 404). When a
   target-app cutover changes the served surface, re-audit every health/readiness
   probe that hard-codes a route. (from BUG-0048)
+  - Enforced by: none — the health probes are in on-host shell harnesses; no test covers them
 
 - **PA-0051** — When porting an **observation/interception mechanism** (a
   coverage/fault shim, a proxy hook, an error sniffer) across runtimes or
@@ -703,6 +766,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   discipline from PA-0008/BUG-0009 is what caught this). Verify the ported
   mechanism live (fault present ⇒ flag set; benign ⇒ flag clear), never assume
   parity with the predecessor runtime. (from BUG-0049)
+  - Enforced by: none — the ported shim is verified by greybox_e2e.sh's on-host self-test, not by a pytest test
 
 - **PA-0052** — A tool's **scope / allowlist filter** must be derived from the
   operator-configured target (e.g. the start URL's own host, with loopback
@@ -717,6 +781,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   Generalises `PA-0050` (which fixed the same class — a lab-shape assumption
   baked into a *readiness* check) from reachability probes to every
   target-scoping filter. (from BUG-0050)
+  - Enforced by: tests/test_spider_scope.py::test_external_start_follows_only_same_host, tests/test_spider_scope.py::test_external_host_was_the_bug_all_links_would_have_been_dropped
 
 - **PA-0053** — Strengthens/supersedes `PA-0039`'s scope. Every request
   parameter a generated page reads must have a **defined absent-input
@@ -734,6 +799,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before its pages count as converted, and a newly linked page must pass it.
   A known exception is pinned by an `xfail(strict=True)` test naming its
   follow-up, never by asserting the 500 as expected. (from BUG-0051)
+  - Enforced by: tests/test_labgen_navigability_live_boot.py::test_crawl_from_root_discovers_every_ground_truth_url_with_anonymous_status
 
 - **PA-0054** — Strengthens `PA-0053` (whose rule stands) on **enforcement
   scope**. `PA-0053`'s only mechanical check, a link-reachability crawl, cannot
@@ -749,6 +815,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   this class in an emitter it does not fix must pin each known instance with
   an `xfail(strict=True)` or an offline failing check -- never a prose
   deferral to a future lane. (from BUG-0052)
+  - Enforced by: tests/test_absent_input_declarations_cross_emitter.py::test_spring_boot_declares_absent_input_for_every_route, tests/test_absent_input_declarations_cross_emitter.py::test_django_declares_absent_input_for_every_get_param_route, tests/test_absent_input_declarations_cross_emitter.py::test_go_net_http_declares_absent_input_for_every_route
 
 - **PA-0055** — Completes `PA-0054`'s named sweep for `go_net_http` (Browsable
   Labs Lane 3). No new rule: `PA-0054` already named `go_net_http` as a
@@ -762,6 +829,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   is traceable to `BUG-0052`'s. Remaining stacks (`spring_boot`,
   `ruby_rails`, `node_express`, `python_fastapi`) still owe their own
   application of `PA-0054`, unchanged by this entry. (from BUG-0053)
+  - Enforced by: tests/test_absent_input_declarations_cross_emitter.py::test_go_net_http_declares_absent_input_for_every_route
 
 - **PA-0056** — Strengthens `PA-0054` (whose rule stands) on **enforcement
   precision**, after a `spring_boot` recurrence exposed three specific gaps in
@@ -781,6 +849,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a prose "Lane N must do this later" sentence with no enforcement is not a
   preventive action, and stating it a second time (as `PA-0054`'s own sweep
   note did) does not make it one. (from BUG-0054)
+  - Enforced by: tests/test_labgen_spring_boot_absent_input_live_boot.py::test_bare_own_method_request_answers_the_declared_status, tests/test_labgen_spring_boot_absent_input_live_boot.py::test_every_route_declares_a_bare_status_in_this_contract
 
 - **PA-0057** — Strengthens `PA-0039`'s scope (from module ports to a stack's
   skeleton/harness runtime configuration) and `PA-0054`'s live half. (1) Every
@@ -803,6 +872,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   turned into a 200. The PA-0002 sweep found one more instance (the test-time
   `node app.js` launches, `node_express`), pinned by a strict xfail and
   flagged, per `PA-0054`(3). (from BUG-0055)
+  - Enforced by: tests/test_labgen_debug_pages_disabled.py::test_ruby_rails_booted_environment_has_debug_pages_off, tests/test_labgen_debug_pages_disabled.py::test_php_laravel_deployment_and_harness_env_have_app_debug_false, tests/test_labgen_debug_pages_disabled.py::test_django_settings_have_debug_false, tests/test_labgen_debug_pages_disabled.py::test_every_test_time_node_launch_sets_production, tests/test_labgen_debug_pages_disabled.py::test_spring_boot_has_no_devtools_actuator_or_stacktraces, tests/test_labgen_debug_pages_disabled.py::test_go_net_http_serves_no_pprof_debug_handlers, tests/test_labgen_debug_pages_disabled.py::test_python_fastapi_has_no_debug_and_no_schema_routes
 
 - **PA-0058** — Strengthens `PA-0054`. `PA-0055` and `PA-0056` (the
   concurrent Lanes 3 and 4) add each route's own request method, input
@@ -828,6 +898,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   Until the concurrent lanes' spellings (`default:<v>` vs `default_value`)
   are unified, and the shared S15 check validates membership, that
   reconciliation is flagged to Lane 7 (`CC-LAB-0247`). (from BUG-0056)
+  - Enforced by: tests/test_labgen_node_express_browsable.py::test_every_node_express_route_declares_an_allowed_absent_input, tests/test_labgen_node_express_browsable.py::test_absent_input_lines_are_identical_on_both_twins
 
 - **PA-0059** — Strengthens `PA-0018` (container-lifecycle self-heal must route through
   the one shared `_force_clean` helper). `PA-0018` fixed *where* self-heal must run but not
@@ -845,6 +916,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      candidate to derive `_force_clean`'s container/network lists from `compose.yaml`
      directly the next time this file is touched for that reason, rather than continuing
      to hand-list them. (from BUG-0057)
+  - Enforced by: none — _force_clean's post-state check and its service list are on-host shell code; no test compares the list with compose.yaml
 
 - **PA-0060** — Every container base-image reference (`FROM`, `COPY --from=<image>`, a
   compose `image:` key) must be a **fully registry-qualified** name
@@ -860,6 +932,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `grep -nE '^\s*FROM |COPY --from=[a-zA-Z0-9]|image:' <file>` and check each match starts
   with a registry host, not a bare repository name (build-stage references like
   `--from=gen`/`--from=<stage-name>` are not images and are exempt). (from BUG-0058)
+  - Enforced by: none — no test checks that image references are registry-qualified; a grep at review time
 
 - **PA-0061** — Every bare `requests.Session()` this project creates to send traffic to a
   caller-supplied (possibly non-lab) target must set a realistic browser `User-Agent`
@@ -875,6 +948,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   bug's own first sweep pass wrongly asserted two files were already fixed without
   checking, then missed three more instances entirely until a full-package grep was
   actually run. (from BUG-0059)
+  - Enforced by: none — no test checks bare requests.Session() call sites for a browser User-Agent
 
 - **PA-0062** — Strengthens `PA-0061` (every bare `requests.Session()` must set a
   realistic `User-Agent`). A `User-Agent` header alone is not enough: `requests`' other
@@ -893,6 +967,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   theirs or one they are otherwise authorized to test (D11) before implementing it — done
   for this case, but re-confirm per target, not assumed from a prior confirmation.
   (from BUG-0060)
+  - Enforced by: none — no test checks bare requests.Session() call sites for the full browser header set
 
 - **PA-0063** — Strengthens `PA-0003`/`PA-0021`, which are worded around normalizing a
   *value* and fire only when someone *adds a derivation*. Three additions:
@@ -916,6 +991,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
 
   Distinct from `PA-0048`, which is a one-to-many *lookup* collapsing at point-build
   time; this is many producers sharing one table at read time. (from BUG-0061)
+  - Enforced by: tests/test_ml_model_selection.py::test_no_module_reads_model_as_newest_row_of_any_family, tests/test_ml_model_selection.py::test_guard_catches_the_buggy_shapes
 
 - **PA-0064** — Strengthens `PA-0017` (a metric must measure what it claims) and extends
   `PA-0029` (a gated-off branch needs a test that enters it) from checkers to
@@ -938,6 +1014,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      number is produced or displayed, not only the module where it was found. Enforced
      for `fuzzlab/ml/` by `tests/test_ml_oof.py::test_no_out_of_fold_scorer_bypasses_oof_folds`
      and that file's degenerate-branch tests. (from BUG-0062)
+  - Enforced by: tests/test_ml_oof.py::test_no_out_of_fold_scorer_bypasses_oof_folds, tests/test_ml_oof.py::test_oof_folds_fails_closed, tests/test_ml_oof.py::test_trainers_fall_back_instead_of_raising_when_k_is_below_two
 
 - **PA-0065** — Strengthens `PA-0005`, whose "skippable when it needs an environment
   feature" escape hatch had no backstop. It is extended to the web UI, where
@@ -965,6 +1042,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      handles.** Read the source, e.g. uPlot's `class` → `classList.add(c)` takes one
      token. This extends `PA-0026`'s precondition enumeration to adapters such as
      `static/js/chart.js`. (from BUG-0063, BUG-0064)
+  - Enforced by: tests/test_web_pages_browser.py::test_every_page_loads_without_errors_or_csp_violations, tests/test_web_templates_csp.py::test_no_template_contains_csp_blocked_markup, tests/test_web_templates_csp.py::test_guard_patterns_catch_the_blocked_constructs
 
 - **PA-0066** — Strengthens `PA-0063`, which named only *row selection* from a
   multi-producer table, and whose sweep was keyed on the "newest row" query shape. It is
@@ -981,6 +1059,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Sweep by mechanism.** The `PA-0002` sweep for a scope bug greps every read of a
      per-run table that has no `run_id` filter or id join, not only the query shape
      that surfaced the bug (the `PA-0018` lesson). (from BUG-0065)
+  - Enforced by: tests/test_ml_budget_and_scope.py::test_store_wide_dataset_takes_labels_and_counts_from_each_rows_own_run, tests/test_ml_budget_and_scope.py::test_store_wide_dataset_never_labels_across_targets
 
 - **PA-0067** — Strengthens `PA-0063` / `PA-0066` in how a sweep **judges** a site, after
   the per-run report (`BUG-0066`) recurred in a line `BUG-0061`'s sweep had explicitly
@@ -999,6 +1078,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A recurrence in a site a prior sweep cleared triggers a re-sweep** of every site
      that sweep cleared, judged by rule 1. The re-sweep is recorded in the new bug
      report. (from BUG-0066)
+  - Enforced by: tests/test_ml_model_selection.py::test_no_module_reads_model_as_newest_row_of_any_family, tests/test_ml_model_selection.py::test_each_run_page_uses_its_own_classifier
 
 - **PA-0068** — Strengthens `PA-0064` (held-out numbers; in-sample labelled) from *numbers*
   to *every calibrated artefact*, after BUG-0067: out-of-fold conformal thresholds were
@@ -1016,6 +1096,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Sweep by consumer.** The PA-0002 sweep for this class covers every consumer of a
      calibrated artefact (each `gate.decide`, each threshold comparison, each
      calibration applied), not only the producers. (from BUG-0067)
+  - Enforced by: tests/test_ml_saved_and_decisions.py::test_legacy_run_mode_rows_are_never_gated_on_in_sample_scores, tests/test_ml_saved_and_decisions.py::test_rescoring_in_another_mode_clears_the_old_out_of_fold_scores
 
 - **PA-0069** — Strengthens `PA-0064(3)/(4)` and `PA-0017` from *which data* an
   honest-evaluation artefact sees to *the statistic it computes*, after BUG-0070: the
@@ -1036,6 +1117,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Sweep every order-statistic threshold.** The PA-0002 sweep for this class covers
      every order-statistic threshold in the codebase (`sorted(…)[k]`, quantiles,
      fractions, contamination), not only the reported one. (from BUG-0070)
+  - Enforced by: tests/test_conformal_bound.py::test_per_side_error_on_the_calibration_set_is_at_most_alpha_with_ties, tests/test_conformal_bound.py::test_distinct_scores_flag_exactly_k_and_ties_never_exceed_it, tests/test_conformal_bound.py::test_the_gate_is_calibrated_on_the_stored_rounded_scores
 
 - **PA-0070** — Strengthens and generalises `PA-0065(3)` (verify in the real browser)
   and `PA-0035` (a probe exercises the real operation path), after BUG-0068: the built
@@ -1051,6 +1133,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      *directories* are not matched by `**/.*` — the equality test is the backstop.
   3. **The PA-0002 sweep for this class covers every build/ship path** (package data,
      scripts that copy files, container build COPY lists). (from BUG-0068)
+  - Enforced by: tests/test_packaging.py::test_the_built_package_ships_every_tracked_file, tests/test_packaging.py::test_the_deny_list_matches_no_tracked_file
 
 - **PA-0071** — A reader may depend only on what production writes, after BUG-0069: the
   report read `candidate.feature_version`, which nothing ever wrote, and its test passed
@@ -1065,6 +1148,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      synthetic writer-less column, and a stale allowlist entry fails too.
   3. **The PA-0002 sweep for this class covers every writer-less column** (the
      allowlist records each one's reason). (from BUG-0069)
+  - Enforced by: tests/test_contract_writers.py::test_every_contract_column_has_a_production_writer, tests/test_contract_writers.py::test_the_guard_catches_a_writer_less_column, tests/test_contract_writers.py::test_the_allowlist_has_no_stale_entries
 
 - **PA-0072** — Strengthens `PA-0041` (one seam's implementations stay in step) from
   *transport settings on senders* to the seam's **signature and every wrapper**, after
@@ -1081,6 +1165,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      flushes what it has in a `finally`.** A crash must never leave a value a consumer
      reads as a label (here NULL `oracle_status` reads as "oracle-labelled"). (from
      BUG-0071)
+  - Enforced by: tests/test_sender_conformance.py::test_every_seam_class_accepts_the_full_protocol_signature, tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument, tests/test_pipeline_invariants.py::test_a_crash_mid_loop_leaves_reached_rows_checked_and_the_rest_pending
 
 - **PA-0073** — Strengthens `PA-0048` ("duplicate points are safe to emit") after
   BUG-0072: the duplicates were safe for scoring, but the unbudgeted oracle loop
@@ -1092,6 +1177,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      modes (`tests/test_pipeline_invariants.py`).
   3. **A golden that pins a count is re-derived, never regenerated blindly.** A golden
      change is listed with before/after and its cause. (from BUG-0072)
+  - Enforced by: tests/test_pipeline_invariants.py::test_one_confirmation_and_at_most_one_finding_per_key
 
 - **PA-0074** — Strengthens `PA-0069(2)/(4)` (tie handling of order-statistic
   thresholds) and `PA-0003`, after BUG-0073: the ML tab compared a per-page ranker metric
@@ -1105,6 +1191,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      guarantee. A constant scorer is tested to equal the random expectation.
   3. **The PA-0002 sweep for this class covers every score-ordered computation**, not
      only thresholds. (from BUG-0073)
+  - Enforced by: tests/test_ml_ranking.py::test_a_constant_scorer_equals_the_exact_random_expectation, tests/test_web_ml.py::test_a_constant_ranker_shows_no_lift_over_its_baseline
 
 - **PA-0075** — Strengthens `PA-0063(1)` and `PA-0067` (model-row scope, judged on the
   reader side) after BUG-0074: a store-wide model (scope NULL = "all runs") was cited for
@@ -1117,6 +1204,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A reader of a legacy open-ended row falls back to a fact in the run's own data**
      (a stored score in the family's column, passed as `select_latest`'s required
      `score_column`), never to "covers everything". (from BUG-0074)
+  - Enforced by: tests/test_ml_model_selection.py::test_a_store_wide_train_covers_exactly_the_runs_it_scored, tests/test_ml_model_selection.py::test_each_family_reader_backs_a_legacy_row_with_its_own_score_column
 
 - **PA-0076** — Strengthens `PA-0066(1)` (cross-table lookups keyed by run + content)
   after BUG-0075: the label join keyed on `(run, path, param, category)` and ignored the
@@ -1127,6 +1215,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Both sides normalise through one helper** (PA-0003; here `dataset.method_key`).
   3. **When a new value of an identity field becomes possible** (a new method, location
      or content type), **sweep the joins keyed without it.** (from BUG-0075)
+  - Enforced by: tests/test_ml_dataset_keys.py::test_a_post_only_finding_labels_only_the_post_candidate, tests/test_ml_dataset_keys.py::test_method_key_normalises_both_sides
 
 - **PA-0077** — Plugin containment covers every per-plugin step, after BUG-0076: one
   entry point with `priority = "high"` raised inside `register()` and took every plugin
@@ -1136,6 +1225,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      tested at each step, not only at hook invocation.
   2. **A contained failure is visible:** a rejection or disable carries its reason to the
      run record or CLI. (from BUG-0076)
+  - Enforced by: tests/test_plugins.py::test_malformed_metadata_rejects_only_that_plugin, tests/test_plugins.py::test_a_raising_hook_attribute_disables_only_that_plugin, tests/test_plugins.py::test_record_writes_every_attached_plugin_and_marks_a_failed_one
 
 - **PA-0078** — A displayed count reads the recorded counter, after BUG-0077: the bandit
   panel showed `α + β − 2` as pulls, which counted informed-prior mass as pulls.
@@ -1143,6 +1233,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      prior, a smoothing term, a default).
   2. **A display test asserts the value a production writer records**, not a formula
      applied to a hand-seeded row (cf. PA-0071). (from BUG-0077)
+  - Enforced by: tests/test_web_ml.py::test_bandit_panel_pulls_are_the_schedulers_counter
 
 - **PA-0079** — Usage-level validation precedes every side effect, after BUG-0078: the
   D15 fail-safe exited 2 only after writing a run row (and importing the crawl). The same
@@ -1155,6 +1246,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      "aborted: …"`). It is never left looking like a finished empty run.
   3. **Tested per path:** each known usage-error path asserts that no run row (no store)
      is left behind. A sweep covers every `start_run` caller. (from BUG-0078)
+  - Enforced by: tests/test_auto_cli_side_effects.py::test_usage_failures_exit_2_with_no_run_row, tests/test_auto_cli_side_effects.py::test_a_failure_after_the_run_starts_marks_it_aborted
 
 - **PA-0080** — Untrusted input never becomes a filesystem path, and secrets are private
   from creation, after BUG-0079: a CONNECT host became a leaf-certificate filename (path
@@ -1164,6 +1256,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Secret files are created 0600 with `O_NOFOLLOW`** (`core.secretfile.write_secret`,
      the one helper), never chmodded after the write. The PA-0002 sweep for this class
      covers every write-then-chmod. (from BUG-0079)
+  - Enforced by: tests/test_proxy_ca_hardening.py::test_hostile_hosts_are_refused_and_nothing_is_written, tests/test_proxy_ca_hardening.py::test_keys_are_0600_from_creation_whatever_the_umask, tests/test_credentials.py::test_the_encrypted_keyring_file_is_private_from_creation
 
 - **PA-0081** — Strengthens `PA-0003` for safety gates, after BUG-0080: the loopback
   check existed in three copies and the proxy CLI had none.
@@ -1171,6 +1264,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Enforced by a guard test that finds listeners by call shape**
      (`tests/test_loopback_listeners.py`), proven on a synthetic offender. A new safety
      gate shared by several call sites gets the same treatment. (from BUG-0080)
+  - Enforced by: tests/test_loopback_listeners.py::test_every_listener_in_fuzzlab_is_gated, tests/test_loopback_listeners.py::test_the_guard_flags_an_ungated_listener
 
 - **PA-0082** — Strengthens `PA-0046` (no automatic redirects in senders) from the oracle
   seam to every client that sends credentials, after BUG-0081: the session manager
@@ -1182,6 +1276,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Every client that sends credentials disables automatic redirects** and follows
      them by hand under the same origin rule. A 307/308 is never followed with a body.
      (from BUG-0081)
+  - Enforced by: tests/test_session_credential_destination.py::test_a_cross_origin_form_action_gets_no_credentials, tests/test_session_credential_destination.py::test_a_307_or_308_is_never_followed
 
 - **PA-0083** — Safety claims are backed at the action, after BUG-0082 ("never … sent",
   but gated only at record time) and BUG-0084 ("redacts token query parameters",
@@ -1193,6 +1288,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      sweep for this class greps docstrings for such claims.
   3. **A gate on an obfuscatable signature matches the normalised form as well as the
      raw one** (normalising only adds refusals). (from BUG-0082, BUG-0084)
+  - Enforced by: tests/test_destructive_send_gate.py::test_the_live_filter_refuses_at_the_send_itself, tests/test_destructive_send_gate.py::test_obfuscated_destructive_payloads_are_refused, tests/test_requirements_traceability.py::test_every_safety_nfr_is_traced_to_real_tests
 
 - **PA-0084** — An oracle confirms by structural effect, after BUG-0083: reflected-XSS
   confirmed whenever a break-out substring appeared anywhere.
@@ -1203,6 +1299,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Each strategy has a true-positive and an escaped-reflection false-positive
      fixture per context**, derived from the lab's own sink templates where they exist.
      (from BUG-0083)
+  - Enforced by: tests/test_oracle_xss_structural.py::test_non_exploitable_reflections_never_confirm, tests/test_oracle_xss_structural.py::test_exploitable_reflections_confirm, tests/test_oracle_xss_structural.py::test_the_lab_sinks
 
 - **PA-0085** — Redaction rules, after BUG-0084: proxy history kept URL tokens and body
   passwords.
@@ -1212,6 +1309,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A redaction test plants each promised class of secret and searches every
      persisted copy** (rows, body table, FTS, separately stored bodies), with a benign
      list asserting nothing over-redacts. (from BUG-0084)
+  - Enforced by: tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy, tests/test_proxy_redaction.py::test_logs_use_the_same_predicate, tests/test_proxy_redaction.py::test_benign_names
 
 - **PA-0086** — Generalises `PA-0077` (plugin containment) to every per-unit boundary,
   after BUG-0085: one bad proxy rule broke every connection.
@@ -1219,6 +1317,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      patterns), never first evaluated on live traffic.
   2. **Every per-unit handler contains its own failures and reports them** (per
      connection, per plugin, per run). (from BUG-0085)
+  - Enforced by: tests/test_proxy_rules_and_scope.py::test_bad_match_replace_rules_are_refused_when_created, tests/test_proxy_rules_and_scope.py::test_an_engine_failure_answers_502_and_the_proxy_keeps_serving
 
 - **PA-0087** — One policy decision, one parser, after BUG-0086: a port-specific exclude
   was overridden by a second, host-only check, and every authority split broke on
@@ -1227,6 +1326,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      fallback on a less specific key must never be able to turn a deny into an allow.
   2. **Authorities are parsed by one IPv6-aware helper** (`proxy.authority`), never by
      `partition(":")`. (from BUG-0086)
+  - Enforced by: tests/test_proxy_rules_and_scope.py::test_a_port_specific_exclude_is_not_bypassed_by_a_host_wide_include, tests/test_proxy_rules_and_scope.py::test_ipv6_connect_and_host_headers_parse
 
 - **PA-0088** — Atomic transitions and locked check-then-act on shared storage, after
   BUG-0087: migrations were not atomic and two first opens raced. `open_store`'s own
@@ -1237,6 +1337,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      atomicity matters.
   3. **A rule stated in the store contract's docstring is backed by a concurrency
      test.** (from BUG-0087)
+  - Enforced by: tests/test_migrations_atomic.py::test_a_failing_migration_leaves_nothing_behind, tests/test_migrations_atomic.py::test_concurrent_first_opens_never_fail
 
 - **PA-0089** — Strengthens `PA-0071` from columns to any state, after BUG-0088: bandit
   backoff read parent posteriors that only a test created.
@@ -1244,6 +1345,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      path.** A flag whose on and off runs are indistinguishable in a test is a defect.
   2. **A test never creates state its producer does not**, in memory as well as in
      columns, unless it also tests the producer. (from BUG-0088)
+  - Enforced by: tests/test_spa_query.py::test_the_switch_turns_query_discovery_off, tests/test_proxy_redaction.py::test_the_redaction_opt_out_keeps_raw_bytes
 
 - **PA-0090** — Extends `PA-0084`, after BUG-0089: in-band SSRF/XXE confirmed on a mere
   reflection of the callback URL, whose token was also the "proof".
@@ -1252,6 +1354,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      token the request carries.
   2. **Each such strategy has a "reflects the request but does nothing"
      false-positive fixture.** (from BUG-0089)
+  - Enforced by: tests/test_oracle_oob.py::test_a_page_reflecting_the_callback_url_is_not_an_ssrf, tests/test_oracle_oob.py::test_the_callback_serves_a_proof_absent_from_its_url
 
 - **PA-0091** — Strengthens `PA-0085`, after BUG-0090: JSON lists and objects under a
   sensitive key (`tokens: [...]`, `credentials: {...}`) kept their secrets in history,
@@ -1261,6 +1364,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      list of objects. Each combination is searched in every persisted copy.
   2. **A sensitive key redacts its whole subtree.** A redactor never recurses into a
      sensitive container looking for a second sensitive name. (from BUG-0090)
+  - Enforced by: tests/test_proxy_redaction.py::test_a_sensitive_key_redacts_its_whole_value_whatever_its_shape
 
 - **PA-0092** — Strengthens `PA-0068`, after BUG-0091: sealed holdout labels moved
   public forward metrics and every later non-holdout model. The seal had been enforced
@@ -1273,6 +1377,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      trained artefact is unchanged**, with a control flip proving the check is live.
   3. **The sealing argument is required where it can be forgotten** (`metric_input`'s
      `held`), with an AST guard. (from BUG-0091)
+  - Enforced by: tests/test_ml_holdout_seal.py::test_flipping_every_sealed_label_moves_no_public_number, tests/test_ml_holdout_seal.py::test_every_metric_input_call_says_whether_the_row_is_sealed, tests/test_ml_holdout_seal.py::test_the_guard_catches_an_offender
 
 - **PA-0093** — Strengthens `PA-0082`, after BUG-0092: credentials could be sent over a
   downgrade from https to http. The allow-list had no deny, and the agreed "never a
@@ -1283,6 +1388,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A safety constraint from an agreed draft is never waived in implementation
      without going back to the reviewers.** A deviation is recorded as a reviewed
      change, never as an implementation note. (from BUG-0092)
+  - Enforced by: tests/test_session_credential_destination.py::test_every_allow_path_is_overridden_by_the_deny
 
 - **PA-0094** — Strengthens `PA-0084`, after BUG-0093: a reflection in a JSON /
   ld+json / `<template>` / `src` script was confirmed as XSS.
@@ -1291,6 +1397,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      predicate.
   2. **Each structural check has a fixture where the structure matches but the container
      is inert.** (from BUG-0093)
+  - Enforced by: tests/test_oracle_xss_structural.py::test_script_executes_is_the_one_predicate, tests/test_oracle_xss_structural.py::test_a_reflection_in_a_script_that_never_runs_does_not_confirm
 
 - **PA-0095** — New, after BUG-0094: `flag_top` counted tie groups by rescanning every
   score for each distinct value, which is O(n²).
@@ -1299,6 +1406,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Any function on a per-candidate or per-flow path has a test bounding its
      operation count** at a size where the quadratic form would be visibly worse. (from
      BUG-0094)
+  - Enforced by: tests/test_ml_anomaly.py::test_flag_top_does_linear_work_on_heavy_ties
 
 - **PA-0096** — Strengthens `PA-0021`, after BUG-0095: a saved model with `10**1000`
   escaped the loader as a raw `OverflowError`, and sizes were unbounded.
@@ -1307,6 +1415,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      element counts, depth). Sizes are bounded before allocation.
   2. **Validation predicates are total:** they return False and never raise. (from
      BUG-0095)
+  - Enforced by: tests/test_ml_persist.py::test_the_loader_boundary_types_every_extreme_failure, tests/test_ml_persist.py::test_is_num_is_total
 
 - **PA-0097** — Strengthens `PA-0080`, and extends `PA-0088` from the store to files,
   after BUG-0096: one `os.write` left a truncated secret behind a normal return, and
@@ -1319,6 +1428,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      `O_EXCL`.**
   4. **Each is tested with an injected mid-write failure**, including a real kernel short
      write where the platform allows it. (from BUG-0096)
+  - Enforced by: tests/test_secretfile.py::test_a_real_short_write_raises_instead_of_returning, tests/test_secretfile.py::test_a_failed_replace_leaves_the_original_intact_and_no_temp, tests/test_secretfile.py::test_create_never_replaces_and_a_failed_create_leaves_nothing
 
 - **PA-0098** — Strengthens `PA-0082` and `PA-0093`, after BUG-0097: a login-page
   redirect to another origin made that origin the credential allow-list's anchor.
@@ -1328,6 +1438,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Every navigation hop is authorised before it is fetched.**
   3. **A client that cannot refuse redirects must prove it followed none, or fail
      closed.** (from BUG-0097)
+  - Enforced by: tests/test_session_transport_binding.py::test_the_destination_anchor_is_the_base_url_not_the_page, tests/test_session_transport_binding.py::test_a_redirect_to_another_origin_is_never_fetched_nor_trusted, tests/test_session_transport_binding.py::test_a_fetcher_that_cannot_refuse_redirects_fails_closed
 
 - **PA-0099** — Strengthens `PA-0093`, after BUG-0098: an https-established session was
   reused over plain http.
@@ -1335,12 +1446,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      token, Basic header) **at every point it is sent**: cached or fresh, through any
      helper that hands it to another sender, and again after anything edits the
      request. (from BUG-0098)
+  - Enforced by: tests/test_session_transport_binding.py::test_an_https_session_is_never_applied_over_http, tests/test_session_transport_binding.py::test_greybox_never_sends_an_https_cookie_over_http
 
 - **PA-0100** — Generalises `PA-0092(1)` from evaluation numbers to persisted traffic,
   after BUG-0099: a second producer stored secrets unredacted.
   1. **Every producer of persisted traffic goes through the one storage boundary**
      (`core.redaction`). An AST guard enumerates the producers and is proven on a
      synthetic offender (PA-0034(2)). (from BUG-0099)
+  - Enforced by: tests/test_storage_redaction.py::test_every_traffic_producer_goes_through_the_redaction_boundary, tests/test_storage_redaction.py::test_the_guard_catches_a_synthetic_producer
 
 - **PA-0101** — Strengthens `PA-0091`, after BUG-0100: the JSON redactor kept bodies it
   could not parse.
@@ -1349,6 +1462,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **It is tested with malformed, huge-number, deep, oversized, mislabelled, chunked
      and compressed bodies carrying secrets** (PA-0096's extremes, applied to
      redaction). (from BUG-0100)
+  - Enforced by: tests/test_storage_redaction.py::test_an_unparseable_or_deep_json_body_with_a_secret_is_omitted, tests/test_proxy_redaction.py::test_chunked_and_compressed_bodies_with_a_secret_are_omitted
 
 - **PA-0102** — Extends `PA-0095` to I/O, after BUG-0101: unbounded, re-copying,
   event-loop-blocking upstream reads.
@@ -1357,17 +1471,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Accumulation never re-copies the buffer inside the read loop.** `bytes(buf)` in
      a loop is a swept pattern.
   3. **Blocking I/O never runs on an event loop.** (from BUG-0101)
+  - Enforced by: tests/test_proxy_upstream_and_flush.py::test_the_body_is_never_recopied_per_chunk, tests/test_proxy_upstream_and_flush.py::test_a_dripping_peer_hits_the_overall_deadline, tests/test_proxy_upstream_and_flush.py::test_a_slow_sender_does_not_block_the_event_loop
 
 - **PA-0103** — Strengthens `PA-0084` and `PA-0094`, after BUG-0102: a regex literal
   after `return` was lexed as code.
   1. **A hand-written lexer is tested on every grammar ambiguity it resolves.**
   2. **Where the grammar alone cannot decide, the result is UNSURE, never "code".**
      (from BUG-0102)
+  - Enforced by: tests/test_oracle_xss_structural.py::test_a_token_inside_a_regex_literal_is_not_code, tests/test_oracle_xss_structural.py::test_a_slash_after_a_closing_brace_is_unsure
 
 - **PA-0104** — Strengthens `PA-0096`, after BUG-0103: finite parameters produced NaN.
   1. **A loaded model's intermediate values and outputs are validated (finite, in
      range) before use.** Operand validation alone does not prove closure. (from
      BUG-0103)
+  - Enforced by: tests/test_ml_persist.py::test_a_finite_model_whose_arithmetic_overflows_is_refused_at_scoring
 
 - **PA-0105** — Strengthens `PA-0092`, after BUG-0104: a falsy holdout record was read
   as "no seal".
@@ -1375,6 +1492,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      read as absent.
   2. **Safety state lives in its own append-only table, not inside a mutable blob.** Any
      backfill runs in the migration, never on first use by a reader. (from BUG-0104)
+  - Enforced by: tests/test_holdout_seal_table.py::test_a_present_but_malformed_record_is_unknown, tests/test_holdout_seal_table.py::test_upgrading_a_v18_store_backfills_every_legacy_seal
 
 - **PA-0106** — Enforces `PA-0093(2)`, after BUG-0105: an agreed "no-op where
   unsupported" became "no-op on any error".
@@ -1382,27 +1500,32 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      bare `except OSError` / `except Exception`.
   2. **A swallow list is tested with one swallowed and one propagated error**, and
      guarded against bare swallows with a synthetic offender. (from BUG-0105)
+  - Enforced by: tests/test_secretfile.py::test_swallow_lists_are_explicit, tests/test_secretfile.py::test_the_swallow_guard_catches_an_offender
 
 - **PA-0107** — Generalises `PA-0088(1)`, after BUG-0106: a "one transaction" history
   flush was not atomic.
   1. **Every documented batch or transaction claim has an injected-failure test.**
   2. **A batch writer prepares before it writes, and rolls back to its own
      savepoint.** (from BUG-0106)
+  - Enforced by: tests/test_proxy_upstream_and_flush.py::test_a_database_failure_mid_flush_rolls_back_and_a_retry_writes_once
 
 - **PA-0108** — Generalises `PA-0096`, after BUG-0107: bad evidence crashed datasets or
   became a fabricated row.
   1. **Every reader of stored JSON validates shape and types at one parser.**
   2. **Malformed rows are quarantined and counted, never replaced by defaults that
      fabricate data.** (from BUG-0107)
+  - Enforced by: tests/test_dataset_evidence.py::test_a_bad_row_is_quarantined_never_fabricated
 
 - **PA-0109** — Generalises `PA-0088(2)` to files, after BUG-0108: concurrent keyring
   updates lost one.
   1. **A read-modify-write on any shared store, files included, holds an interprocess
      lock across the read, and has a two-writer test.** (from BUG-0108)
+  - Enforced by: tests/test_secretfile.py::test_concurrent_processes_lose_no_update
 
 - **PA-0110** — New, after BUG-0109: a failed delete reported success.
   1. **An operation reports success only when its effect is verified, or when the
      swallowed failure is exactly the documented no-op case.** (from BUG-0109)
+  - Enforced by: tests/test_secretfile.py::test_a_failed_delete_is_reported_and_a_missing_one_is_not
 
 - **PA-0111** — Strengthens `PA-0061` and `PA-0062`, after BUG-0110: the login detector
   serialised a form unlike a browser. PA-0062 checked emulated request headers only.
@@ -1414,6 +1537,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **At least one fixture is a captured third-party target's shape, not only our own
      lab's.** The lab never surfaces the divergence it was written around. (from
      BUG-0110)
+  - Enforced by: tests/test_form_entries.py::test_every_rule_has_a_fixture, tests/test_form_entries.py::test_bwapp_login_form_posts_what_a_browser_posts
 
 - **PA-0112** — Strengthens `PA-0083(2)` (related: `PA-0020`, `PA-0033`), after BUG-0111
   and BUG-0112: NFR-CRAWL-safe and NFR-FUZZ-safe were specified and never built, and
@@ -1426,6 +1550,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      clause is never presented as built without a test that fails when it is removed.
   3. **The guard is proven on synthetic offenders:** a missing line, a test that does
      not exist, an unclassified NFR. (from BUG-0111, BUG-0112)
+  - Enforced by: tests/test_requirements_traceability.py::test_every_safety_nfr_is_traced_to_real_tests, tests/test_requirements_traceability.py::test_every_classified_nfr_still_exists, tests/test_requirements_traceability.py::test_the_guard_catches_each_kind_of_offender
 
 - **PA-0113** — Strengthens `PA-0111`, after BUG-0113: authenticated tools truncated the
   operator's URL to its origin, so an app under a sub-path could not log in. PA-0111
@@ -1437,6 +1562,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Every component that takes an operator URL has a test with the app under a
      sub-path (`/app/`).** Our own labs all serve at the root and cannot surface this.
      (from BUG-0113)
+  - Enforced by: tests/test_subpath_apps.py::test_the_crawler_logs_in_from_its_start_url_not_the_bare_origin, tests/test_subpath_apps.py::test_crawl_points_join_absolute_paths_to_the_origin, tests/test_session_browser_login.py::test_a_spa_under_a_sub_path_logs_in
 
 - **PA-0114** — Strengthens `PA-0112`, after BUG-0114: the destructive-URL rule missed
   bWAPP's `update.php` (it rebuilds the database on a GET).
@@ -1445,6 +1571,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      against `core.urls.destructive_reason` in a test.
   2. **An endpoint the rule cannot catch is listed with its compensating control, or as
      a stated residual,** never silently. (from BUG-0114)
+  - Enforced by: tests/test_forms_phase1.py::test_bwapps_destructive_gets_are_refused, tests/test_forms_phase1.py::test_bwapps_uncaught_endpoints_are_known_and_covered_elsewhere
 
 - **PA-0115** — Strengthens `PA-0041` and `PA-0072`, after BUG-0115: greybox sent header
   payloads in the query, and DOM XSS moved body payloads into the URL. Those rules
@@ -1459,6 +1586,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **The sweep is by mechanism:** every location branch of every component that
      builds its own request. A known instance not fixed is pinned with a strict xfail
      in the same change (`PA-0054(3)`). (from BUG-0115)
+  - Enforced by: tests/test_sender_conformance.py::test_every_sender_places_a_probe_where_the_point_says, tests/test_sender_conformance.py::test_the_placement_check_catches_a_relocating_sender, tests/test_sender_conformance.py::test_senders_refuse_an_unplaceable_location
 
 - **PA-0117** — Strengthens `PA-0084(2)`, `PA-0090` and `PA-0094`, from the mechanisms
   they were written for to every confirmation strategy, after BUG-0117: the SQLi,
@@ -1474,6 +1602,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      not confirm. The guard is proven on synthetic offenders (PA-0034(2)).
   4. **The PA-0002 sweep covers every strategy with a fixed marker or a single sample,**
      not only the failing mechanism's own class. (from BUG-0117)
+  - Enforced by: tests/test_oracle_sqli_string.py::test_payload_independent_noise_never_confirms_any_sqli_strategy, tests/test_oracle_sqli_string.py::test_noise_discovery_guard_flags_a_control_less_signature_strategy, tests/test_oracle_sqli_string.py::test_noise_discovery_guard_flags_a_single_sample_differential
 
 - **PA-0122** — Strengthens `PA-0022` (related: BUG-0113, PA-0113), after BUG-0122: the
   session manager read any redirect containing "login" as a logout. PA-0022's
@@ -1492,6 +1621,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Each such rule is checked against the lab's own vocabulary** (the target app's
      page and field names, PA-0022's check made concrete), and that check is a test.
      (from BUG-0122)
+  - Enforced by: tests/test_logout_redirect.py::test_no_substring_test_decides_session_or_auth_state, tests/test_logout_redirect.py::test_the_guard_catches_a_synthetic_offender, tests/test_logout_redirect.py::test_the_lab_vocabulary_has_one_login_url
 
 - **PA-0123** — Strengthens `PA-0112` and `PA-0002` (related: BUG-0050, BUG-0111),
   after BUG-0123: the crawler's browser followed an open redirect to github.com (and,
@@ -1519,6 +1649,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   4. **Each clause of a safety NFR is traced on its own, per sending layer** (queue,
      static redirects, browser, API requests). A clause traced at one layer is not
      traced at the others. (from BUG-0123)
+  - Enforced by: tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped, tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders, tests/test_redirect_scope_sweep.py::test_a_later_post_login_hop_out_of_scope_is_never_fetched, tests/test_requirements_traceability.py::test_every_safety_nfr_is_traced_to_real_tests
 
 - **PA-0124** — Strengthens `PA-0002` (for classifiers) and `PA-0117` (for
   confirmers), after BUG-0124: Juice Shop's open redirect (`/redirect?to=`) was never
@@ -1533,6 +1664,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A confirmer that relies on one probe form states the server-side filters it
      cannot pass, or carries a stated second form** (here: a seeded canary for
      containment allowlists, sent only after the plain one fails). (from BUG-0124)
+  - Enforced by: tests/test_open_redirect_seed.py::test_every_shape_has_a_row_and_the_rules_match_the_table, tests/test_open_redirect_seed.py::test_a_containment_allowlist_confirms_on_the_seeded_canary
 
 - **PA-0125** — Strengthens `PA-0012` (teardown is bounded) and `PA-0035` (every
   subprocess step is bounded) from *bounded* to *complete*, after BUG-0125: 429 orphaned
@@ -1562,6 +1694,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      whose leader is gone is signalled only inside a still-held session, and an unknown
      start time (0) matches nothing. Each such kill path has a test that fakes a reused
      id and shows nothing is signalled. (from BUG-0125)
+  - Enforced by: tests/test_procutil_guard.py::test_every_child_process_goes_through_procutil, tests/test_procutil_guard.py::test_guard_flags_synthetic_offenders, tests/test_procutil.py::test_owner_sigkill_takes_child_and_escaped_grandchild, tests/test_procutil.py::test_a_stale_record_whose_pid_was_reused_is_never_signalled
 
 - **PA-0126** — Strengthens `PA-0035` (probe the real operation) and `PA-0123` (browser
   confinement), after BUG-0126: the M6 browser executor had never run against a real
@@ -1576,6 +1709,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      after `load`**, and waits by polling up to a stated window, never by a fixed sleep.
   3. **A browser that cannot start is "no verdict"** (`UnplaceableLocation`), remembered
      for the run: never a crash, never a negative. (from BUG-0126)
+  - Enforced by: tests/test_browser_scope.py::test_the_launch_sites_are_the_four_known_ones, tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium, tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load, tests/test_m6_navigation_failures.py::test_a_browser_that_cannot_start_stops_at_once
 
 - **PA-0127** — Strengthens `PA-0094` and `PA-0084`(2) (a recurrence of BUG-0093's
   root cause one layer out), and the BUG-0072 rule, after BUG-0127: a reflection in
@@ -1588,6 +1722,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **Its tests include a response that breaks each precondition** (for a markup
      signal: a JSON, plain-text, script and attachment echo of the same payload),
      alongside PA-0084(2)'s per-context fixtures. (from BUG-0127)
+  - Enforced by: tests/test_oracle_xss_structural.py::test_a_reflection_confirms_only_in_a_response_rendered_as_html
 
 - **PA-0128** — Strengthens and generalises `PA-0012`, after BUG-0128: browser teardown
   (`navguard.release`) unrouted while a page was still navigating, and the driver
@@ -1599,6 +1734,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   2. **A teardown has a test that starts it with work still in flight**, and a race
      that shows up intermittently is measured over enough runs to tell (here 80)
      before it is called fixed. (from BUG-0128)
+  - Enforced by: tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting, tests/test_oracle_oob.py::test_stop_returns_while_a_connection_sits_idle
 
 - **PA-0129** — Strengthens `PA-0117` at the executor layer, after BUG-0129: the M6
   browser executor counted any page dialog as the probe's hit, so an app's own `alert`
@@ -1609,6 +1745,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      is never evidence: it is handled (dismissed) and ignored.
   2. **Each executor evidence channel has a real-page test producing that channel's
      noise with an inert payload**, which must not confirm. (from BUG-0129)
+  - Enforced by: tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit
 
 - **PA-0130** — Strengthens `PA-0081` (one loopback gate, guarded by call shape) from
   fuzzlab's own listener calls to **every server it or its tests launch**, after
@@ -1646,6 +1783,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   through `importlib.import_module(...)` or bound to a variable first
   (`f = procutil.start_server; f(...)`) is not seen by the static pin rule. The
   boot-check lint and the runtime check still cover such a site.
+  - Enforced by: tests/test_loopback_listeners.py::test_every_server_launched_through_procutil_pins_loopback, tests/test_loopback_listeners.py::test_the_pin_rule_flags_synthetic_offenders, tests/test_loopback_listeners.py::test_every_server_site_checks_loopback_right_after_boot, tests/test_loopback_listeners.py::test_no_test_binds_a_wildcard_address_outside_a_private_netns
 
 - **PA-0131** — Strengthens `PA-0083(3)` (a gate matches normalised forms as well as the
   raw one), after BUG-0131: four gates judged a label, control name, entry or option by
@@ -1661,6 +1799,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Enforced by an AST guard** (`tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`):
      no URL-rule call in `fuzzlab/` takes an argument built with a `?`, except a listed,
      reasoned allowance; proven on synthetic offenders (PA-0034(2)). (from BUG-0131)
+  - Enforced by: tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url, tests/test_forms_phase4.py::test_a_hash_in_a_label_name_value_or_option_hides_nothing
 
 - **PA-0132** — Strengthens `PA-0111` (browser behaviour emulated rule by rule) and
   `PA-0006` (fixtures shaped like the real upstream), after BUG-0132: a browser login
@@ -1683,6 +1822,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **The PA-0002 sweep for this class lists every handoff point** of a session
      between clients, with a disposition each. A gap not fixed is pinned by a strict
      xfail (`PA-0054(3)`). (from BUG-0132)
+  - Enforced by: tests/test_session_browser_login.py::test_a_requests_send_reaches_a_page_that_reads_only_the_js_set_cookie, tests/test_session_browser_login.py::test_the_js_set_cookie_never_goes_to_another_host
 
 - **PA-0133** — Strengthens `PA-0084(1)` and `PA-0127(1)`, and extends `PA-0117` to the
   true-positive side, after BUG-0133: M4 refused Juice Shop's evaluated SSTI because the
@@ -1699,6 +1839,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      reflection disqualifies.
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
+  - Enforced by: tests/test_evaluation_marker_echo.py::test_no_strategy_judges_its_literal_by_a_raw_substring, tests/test_evaluation_marker_echo.py::test_the_literal_guard_catches_the_old_rule, tests/test_evaluation_marker_echo.py::test_the_prg_edit_form_confirms_like_juice_shops_profile
 
 
 - **PA-0134** — Strengthens `PA-0123` (scope is an origin), `PA-0099` (a floor binds every
@@ -1735,6 +1876,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      request, since its own jar fills from the answers it fetches, and it is made once
      per guard (concurrent handlers race on any lazy or retiring lifecycle).
   (from BUG-0134)
+  - Enforced by: tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts, tests/test_session_origin_scope.py::test_a_send_to_another_port_carries_no_session_and_never_logs_in_there
 
 - **PA-0135** — Strengthens `PA-0095(2)` and replaces its scope, after BUG-0135: a
   `scan_routes` linearity test asserted `t_large < 3.5 * t_small` and failed under
@@ -1752,6 +1894,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      two clock measurements scaled against each other, or their ratio. It is proven on
      BUG-0135's own lines. A timing property measured by the system under test (a
      side-channel test) is not a complexity claim and is out of scope. (from BUG-0135)
+  - Enforced by: tests/test_no_wall_clock_ratio.py::test_no_test_asserts_a_wall_clock_ratio, tests/test_no_wall_clock_ratio.py::test_the_guard_catches_bug_0135_and_each_synthetic_offender
 
 - **PA-0136** — Strengthens `PA-0003` / `PA-0087` (one policy decision, one place) for
   the browser guard, and generalises BUG-0134 T1 and the reveal window's choice, after
@@ -1768,6 +1911,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A fix of one branch of a shared mechanism sweeps every sibling branch in the
      same change** (here, every abort site), whatever feature the first fix was filed
      under. (from BUG-0136)
+  - Enforced by: tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation, tests/test_shared_primitives.py::test_route_aborts_happen_only_in_navguard
 
 
 - **PA-0137** — Strengthens `PA-0126(3)` (a browser that cannot start is no verdict) and
@@ -1791,6 +1935,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      mechanism goes on to its next probe within a stated bound. With no evidence and
      anything unobserved, the result is inconclusive, never a negative, so it never
      becomes a training negative.
+  - Enforced by: tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline, tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url, tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed
 
 - **PA-0138** — Strengthens `PA-0137(2)` from the M6 executor to the whole codebase,
   with enforcement, and widens `PA-0136(3)` / `PA-0002` for a rule about a shared
@@ -1825,6 +1970,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      - never another document's.
 
      The guard also covers `set_content`, `wait_for_event` and `expect_event`.
+  - Enforced by: tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper, tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders
 
 - **PA-0139** — Strengthens `PA-0124(2)` from the open redirect to every confirmer, after
   BUG-0139: every M6 payload called the sentinel with single quotes, so Juice Shop's
@@ -1845,3 +1991,4 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      (from BUG-0139)
   *(Review.)* Go-template SSTI now carries a second, raw-string form, so PA-0139(2)'s
   stated single-shape confirmers are XXE (`"`) and CRLF (raw `\r\n`).
+  - Enforced by: tests/test_m6_payload_quoting.py::test_the_sentinel_call_comes_in_three_quoting_shapes, tests/test_m6_payload_quoting.py::test_a_sink_behind_a_single_quoted_evaluation_is_confirmed
