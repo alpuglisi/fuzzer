@@ -913,6 +913,12 @@ class _FakePage:
     def goto(self, url, **kw):
         self.url = url
 
+    def on(self, event, fn):                      # navguard.navigate (BUG-0138)
+        pass
+
+    def wait_for_load_state(self, state, **kw):   # its bounded load wait
+        pass
+
     def wait_for_timeout(self, ms):
         if self.on_wait is not None:
             self.on_wait()
