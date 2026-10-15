@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Core seam: authenticated probes went out with python-requests' default headers (fixed, BUG-0119, PA-0119; ported on D69)
+- **Symptom:** the session manager logged in with the browser header set, but every probe through the core seam (`SeamProbeSender`; the auditor's and `fuzz`'s `--identity` paths) went out as `python-requests/x.y` with `Accept: */*`. The spider's isolated API form submit and the M6 stored plant also sent library defaults. Found in the forms phase 2 design review.
+- **Root cause:** the browser-header rule (PA-0061, PA-0062) was worded and swept as "every bare `requests.Session()`". The seam calls `requests.request` and the spider uses a Playwright API request context. Neither is a session, so neither was in scope, and nothing enforced the rule.
+- **Remediation:** `core.http.with_browser_headers` (SP-36), the one merge. It puts the request's own kind's browser set (SP-38) under the caller's headers. `HttpClient.send` uses it with `kind=request_kind(request.headers)`. An AST guard covers every non-browser HTTP client in `fuzzlab/`, with reasoned exceptions. First built on `bug-0118-v3` (dropped with the SQLi gate, D68). Ported without the gate on the owner's decision D69 (CC-CORE-0059).
+- **Status:** Fixed in the seam. Pending (strict xfails): the spider's API submit (applied at integration; it is DISC-CAPTURE's file) and the M6 plant (not in the port's scope).
+
 ## 2026-10-15 — Probe senders: JSON API probes went out with a navigation's headers (fixed, BUG-0152, PA-0158)
 - **Symptom:** every requests-based probe, JSON-body API probes included, carried `Accept: text/html,…`, `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. An app that negotiates its error format on `Accept` answered a generic HTML page instead of the JSON error detail its own client gets. Four documented negotiation styles reproduce this in `tests/test_browser_header_profiles.py`. It was recorded as a residual in BUG-0119 and not followed up (F-043). No lost finding on a real run is attributed to it (F-018).
 - **Root cause:** browser header emulation was one per-client constant (`DEFAULT_BROWSER_HEADERS`, PA-0061/PA-0062), not a per-request decision. Nothing tied a request's headers to the kind of request a browser makes for it, and the values were never measured.

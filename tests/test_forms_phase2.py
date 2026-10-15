@@ -630,9 +630,19 @@ def test_no_sqli_or_xss_payload_is_unsendable_in_a_header():
 
 
 # --- the header breaker (M1) --------------------------------------------------------------
+def _probed_ua(headers) -> bool:
+    """Does a sent header dict carry a User-Agent probe -- any User-Agent other than the
+    browser set's, which every seam send carries since BUG-0119?"""
+    from fuzzlab.core.http import DEFAULT_USER_AGENT
+    ua = next((v for k, v in headers.items() if k.lower() == "user-agent"), None)
+    return ua is not None and ua != DEFAULT_USER_AGENT
+
+
 class _UaBoundSite:
     """A target whose session dies on any request carrying a User-Agent other than the
-    one it logged in with (here: none). Logins go through CookieLoginFetcher."""
+    one it logged in with: the browser set's (`DEFAULT_USER_AGENT`), which the real
+    login fetcher and -- since BUG-0119 -- every seam send carry. Logins go through
+    CookieLoginFetcher."""
 
     def __init__(self):
         from tests.test_session_manager import CookieLoginFetcher
@@ -649,9 +659,11 @@ class _UaBoundSite:
 
     def transport(self, method, url, headers, body, timeout):
         from tests.test_session_manager import LOGIN_HTML
+        from fuzzlab.core.http import DEFAULT_USER_AGENT
         names = {k.lower() for k in headers}
         self.requests.append((url, dict(headers)))
-        if "user-agent" in names:
+        ua = next((v for k, v in headers.items() if k.lower() == "user-agent"), None)
+        if ua != DEFAULT_USER_AGENT:
             self.alive = False                     # a hijack, as the app sees it
         if not self.alive or "cookie" not in names:
             return 200, {}, LOGIN_HTML.encode()
@@ -682,7 +694,7 @@ def test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin(tmp_p
                         (run,))]
     reason = result.metrics["header_breaker"]
     assert reason.startswith("session bound to a probed header (User-Agent on /p0.php")
-    header_sends = [r for r in site.requests if "User-Agent" in r[1] or "Referer" in r[1]]
+    header_sends = [r for r in site.requests if _probed_ua(r[1]) or "Referer" in r[1]]
     assert len(header_sends) == 1                       # no header probe after the trip
     stopped = [s for s in result.metrics["skipped_points"] if s[3] == reason]
     assert {(s[0], s[2]) for s in stopped} == {(f"/p{i}.php", n) for i in range(3)
@@ -704,7 +716,7 @@ def test_a_logout_seen_on_the_first_main_send_after_a_header_probe_trips():
     sender.send("http://localhost/a.php", "id", "1")                # login, fine
 
     def transport(method, url, headers, body, timeout):           # dies, shows it later
-        if "User-Agent" in headers:
+        if _probed_ua(headers):
             site.alive = False
             return 200, {}, b"<html>welcome admin</html>"
         return site.transport(method, url, headers, body, timeout)
@@ -736,7 +748,7 @@ def test_a_logout_after_an_isolated_copy_login_does_not_trip():
     sender.send("http://localhost/a.php", "id", "1")
 
     def transport(method, url, headers, body, timeout):
-        if "User-Agent" in headers:
+        if _probed_ua(headers):
             copies[0] += 1                        # a copy login happened meanwhile
         return site.transport(method, url, headers, body, timeout)
     sender._client._transport = transport
@@ -762,7 +774,7 @@ def test_a_trip_on_the_last_header_probe_is_still_reported(tmp_path):
                           sender=sender, mode="manual", selected_categories=["xss"],
                           points_source="crawl", header_names=["User-Agent"])
     assert result.metrics["header_breaker"].startswith("session bound to a probed header")
-    assert len([r for r in site.requests if "User-Agent" in r[1]]) == 1
+    assert len([r for r in site.requests if _probed_ua(r[1])]) == 1
 
 
 def test_a_logout_on_another_host_or_port_does_not_trip():

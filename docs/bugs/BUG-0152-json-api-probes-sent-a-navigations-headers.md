@@ -21,8 +21,8 @@ body that way: an HTML form can submit only urlencoded, multipart or text/plain 
 the fetch header set.
 
 ## Where encountered
-- Recorded as a residual in BUG-0119's review round 1 (reviewer A, S5) on the unmerged
-  branch `bug-0118-v3`, and not followed up (`docs/claude_juicelab_failures.md`
+- Recorded as a residual in BUG-0119's review round 1 (reviewer A, S5) on branch
+  `bug-0118-v3`, which was then dropped (D68), and not followed up (`docs/claude_juicelab_failures.md`
   F-043).
 - The JSON-SEND design (session scratchpad, `json-send/design.md`) reports a by-hand
   observation on the Juice Shop development lab: with `Accept: application/json`, the
@@ -46,9 +46,11 @@ the fetch header set.
 - **Not established:** that this caused JUICE-0003's loss. F-018 records that the
   2026-10-15 baseline never sent that probe (the BUG-0118 gate refused it). This bug is
   a general defect, not that loss's cause.
-- **Not affected on this branch:** `SeamProbeSender` (the authenticated path).
-  `HttpClient.send` adds no browser set here (BUG-0119 is unmerged), so its probes
-  carry `requests`' own defaults (`Accept: */*`).
+- **The authenticated path** (`SeamProbeSender`): when this bug was found,
+  `HttpClient.send` added no browser set, and its probes carried `requests`' own
+  defaults. BUG-0119, ported in this lane on the owner's decision D69, adds the set,
+  with the kind from the request (FR-CORE-42). So the same JSON probe there carries the
+  fetch set, not the navigation set the dropped branch would have sent.
 
 ## What the bug was identified to be
 There was one browser header set, and it described one kind of request. The senders
@@ -228,8 +230,9 @@ browser-behaviour emulation and parked residuals.
 - **BUG-0059 / PA-0061, BUG-0060 / PA-0062:** these introduced the one navigation set
   for every bare `requests.Session()`. The root cause is the same: header emulation
   as one per-client constant. **A recurrence**, analysed below.
-- **BUG-0119 / PA-0119** (branch `bug-0118-v3`, unmerged): it applies the navigation
-  set to every seam send (`with_browser_headers` in `HttpClient.send`). Its review
+- **BUG-0119 / PA-0119** (built on `bug-0118-v3`, then dropped; ported in this lane on
+  D69, with this bug's kind): as written there, it applied the navigation set to every
+  seam send (`with_browser_headers` in `HttpClient.send`). Its review
   recorded this exact defect as a residual (S5) and did not fix it. **The same defect,
   known and parked.** Analysed below.
 - **BUG-0110 / PA-0111:** browser behaviour is emulated rule by rule, with a rule table
@@ -258,7 +261,7 @@ browser-behaviour emulation and parked residuals.
     built for form serialisation only (`core.forms.RULES`). The header set never had a
     rule table, so nothing asked which Fetch rules decide a request's headers.
   - **Not enforced for headers.** Its guard tests list form rules only.
-- **PA-0119** (BUG-0119, unmerged): it is about which clients carry the set, not which
+- **PA-0119** (BUG-0119; ported on D69): it is about which clients carry the set, not which
   set. Its review saw this defect and left it as prose.
   - **Not followed:** PA-0054(3) and PA-0056(3) require a known, unfixed instance to be
     pinned by a failing-by-design check in the same change that defers it. BUG-0119
@@ -302,5 +305,5 @@ supersedes PA-0062's one-set wording:
 | `session/manager.py::_requests_fetch_factory` (`get`, `post`) | login pages and forms | **not edited** (the BUG-0148 lane's file). Allowed: form logins are navigations. **Change needed there**: a JSON-API login POST should pass `requests_browser_headers(headers, kind=request_kind(headers))`. |
 | `tools/spider.py` (session defaults; `_isolated_submit`'s session copy) | crawl navigations | **not edited** (the DISC-CAPTURE lane's file). Allowed: navigations. A JSON-body isolated submit would need the same call. |
 | `tools/navguard.py::get_checked` | static page GET | **not edited** (locked). Allowed: a document fetch is a navigation. |
-| `core/http.py::HttpClient` / `SeamProbeSender` | authenticated probes | **not affected here**: no browser set on this branch. When BUG-0119 lands, its `with_browser_headers(request.headers)` must take `kind=request_kind(request.headers)`. The guard fails until it does. |
+| `core/http.py::HttpClient` / `SeamProbeSender` | authenticated probes | **fixed with the BUG-0119 port** (D69): `with_browser_headers(request.headers, kind=request_kind(request.headers))`. The kind-less form the dropped branch wrote fails the guard. |
 | `labgen/conformance/*live_boot*.py` (`req_headers.update`), `labgen/identifier_sqli_oracle.py` | generated-lab harnesses (urllib / `requests.get`) | **not clients of the browser set**: they check the toolkit's own generated labs |

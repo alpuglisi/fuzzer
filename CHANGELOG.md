@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0119 ported on D69: every seam send carries the browser header set)
+- **What:** `HttpClient.send` gives the transport `with_browser_headers(request.headers, kind=request_kind(...))`, so the authenticated seam no longer sends python-requests' defaults. `tests/test_seam_browser_headers.py` and its guard are ported. The work comes from the dropped branch `bug-0118-v3` (without the SQLi gate, D68). The spider's API submit is pending at integration and the M6 plant was not ported, each pinned by a strict xfail (CC-CORE-0059, PA-0119, SP-36).
+- **Why:** the owner's decision D69: "We are maintaining the use of real browser headers for every request".
+
 ## 2026-10-15 (BUG-0152: a JSON API probe carries a browser's fetch headers, not a navigation's)
 - **What:** `core/http.py` owns two browser header profiles. The navigation profile is unchanged; the fetch profile is measured from Chromium 141 (`Accept: */*`, `Sec-Fetch-Mode: cors`, `Sec-Fetch-Dest: empty`). `request_kind` chooses one from the request, and `requests_browser_headers` merges it under the caller's headers (SP-38). `RequestsProbeSender`, greybox's sender and the blind SQLi fuzzer use them, under an AST guard (CC-CORE-0061, CC-FUZZ-0090, PA-0158).
 - **Why:** a JSON API probe sent as a document navigation is a request no browser makes. Apps that negotiate on `Accept` answered it with a generic HTML page and hid their JSON error detail. Spring- and DRF-style apps now reveal it. Html-first Express- and Rails-style apps need the app's own captured `Accept` (follow-on, DISC-CAPTURE).

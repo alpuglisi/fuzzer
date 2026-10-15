@@ -752,14 +752,15 @@ def test_no_follow_up_once_the_header_breaker_stopped_header_probes():
     """The breaker gate (P3): a header probe whose own send stopped header probing (a
     logout attributed to it, e.g. seen by the listener during the send) gets no
     follow-up."""
-    from tests.test_forms_phase2 import _ua_bound_sender
+    from tests.test_forms_phase2 import _probed_ua, _ua_bound_sender
     site_, sender = _ua_bound_sender()
     sender.send("http://localhost/a.php", "id", "1")              # logs in
     sent = []
 
     def transport(method, url, headers, body, timeout):
         sent.append(urlsplit(url).path)
-        if "User-Agent" in headers:
+        if _probed_ua(headers):                       # every send carries the browser
+            # User-Agent since BUG-0119; only the probe's differs
             sender.header_stop_reason = "session bound to a probed header (test)"
             return 303, {"Location": "/show.php"}, b""
         return site_.transport(method, url, headers, body, timeout)
@@ -770,13 +771,13 @@ def test_no_follow_up_once_the_header_breaker_stopped_header_probes():
 
 
 def test_a_header_probes_follow_up_is_part_of_the_probe_for_the_breaker():
-    from tests.test_forms_phase2 import _ua_bound_sender
+    from tests.test_forms_phase2 import _probed_ua, _ua_bound_sender
     site_, sender = _ua_bound_sender()
     sender.send("http://localhost/a.php", "id", "1")              # logs in
     real = site_.transport
 
     def transport(method, url, headers, body, timeout):
-        if "User-Agent" in headers:                   # the probe kills the session,
+        if _probed_ua(headers):                       # the probe kills the session,
             site_.alive = False                       # which only its follow-up shows
             return 303, {"Location": "/show.php"}, b""
         return real(method, url, headers, body, timeout)

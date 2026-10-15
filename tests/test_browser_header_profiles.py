@@ -662,11 +662,12 @@ def kindless_merges(tree: ast.Module, rel: str) -> list[int]:
     return out
 
 
+OWNER = "fuzzlab/core/http.py"
+
+
 def _package():
     for path in sorted(PACKAGE.rglob("*.py")):
         rel = path.relative_to(ROOT).as_posix()
-        if rel == "fuzzlab/core/http.py":
-            continue
         yield rel, ast.parse(path.read_text(encoding="utf-8"), filename=rel)
 
 
@@ -681,14 +682,18 @@ def test_every_requests_sender_takes_its_headers_from_the_owner():
     reason; a stale exception fails. Stated limit: a session reached under a name that
     does not end in ``session`` (or is ``sess``) is not seen, nor a
     ``requests.request``/``requests.get`` module call: today the core seam's transport
-    (no browser set on this branch; BUG-0119, unmerged) and the labgen identifier-SQLi
-    runner (generated-lab harness; ``fuzzlab.labgen`` may not import ``core.http``)."""
+    (fed by ``HttpClient.send``'s ``with_browser_headers(kind=request_kind(...))``,
+    BUG-0119, whose kind this guard checks) and the labgen identifier-SQLi runner
+    (generated-lab harness; ``fuzzlab.labgen`` may not import ``core.http``). Those
+    module calls are covered by ``tests/test_seam_browser_headers.py``'s guard."""
     sends, constants, kindless = set(), set(), []
     for rel, tree in _package():
+        kindless += [f"{rel}:{n}" for n in kindless_merges(tree, rel)]   # the seam too
+        if rel == OWNER:
+            continue
         sends |= session_send_offenders(tree, rel)
         if constant_offenders(tree, rel):
             constants.add(rel)
-        kindless += [f"{rel}:{n}" for n in kindless_merges(tree, rel)]
     assert sends - set(SESSION_SEND_ALLOWED) == set()
     assert set(SESSION_SEND_ALLOWED) - sends == set(), "stale exception"
     assert constants - set(CONSTANT_ALLOWED) == set()
@@ -738,7 +743,7 @@ def test_the_header_guard_catches_synthetic_offenders():
         "            return sess.get(url)\n"
         "    return F\n")
     assert session_send_offenders(nested, "x.py") == {("x.py", "get")}
-    # the BUG-0119 branch's seam merge, unmerged here, states no kind: caught on merge
+    # BUG-0119's seam merge as the dropped branch wrote it states no kind: caught
     assert kindless_merges(ast.parse("with_browser_headers(request.headers)\n"), "x") == [1]
 
 

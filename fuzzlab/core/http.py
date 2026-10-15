@@ -20,7 +20,9 @@ from urllib.parse import urlparse
 from fuzzlab.core.budget import RequestBudget
 
 # Shared default browser headers for every tool that opens a bare
-# `requests.Session()` (crawler, auditor, blind-SQLi fuzzer). `requests`' own
+# `requests.Session()` (crawler, auditor, blind-SQLi fuzzer), and -- through
+# `with_browser_headers` -- for every send of the core seam (`HttpClient`, BUG-0119,
+# ported on the owner's decision D69). `requests`' own
 # defaults (`User-Agent: python-requests/x.y`, `Accept: */*`, no
 # `Accept-Language`) are trivially fingerprintable, and several real external
 # targets serve reduced/interstitial content -- or an outright 403 -- to a
@@ -165,10 +167,14 @@ def browser_headers(kind: str = "navigation") -> dict[str, str]:
 
 def with_browser_headers(headers: Mapping[str, str] | None = None, *,
                          kind: str = "navigation") -> dict[str, str]:
-    """The ``kind`` profile under ``headers``: every header the caller set wins, matched
+    """The ``kind`` profile under ``headers``: the full browser header set for a client
+    that keeps no session defaults (the core seam's transport, a Playwright API request
+    context; BUG-0119, SP-36). Every header the caller set wins, matched
     case-insensitively, so a header point's own value, a content type, a session's
     ``Cookie`` or the app's own ``Accept`` is never overridden and never sent twice. A
-    new dict; ``headers`` is not changed (SP-38, PA-0003)."""
+    new dict; ``headers`` is not changed. The one place this merge is made (PA-0003);
+    ``kind`` defaults to ``"navigation"``, and every caller in ``fuzzlab/`` states it
+    (SP-38, PA-0158)."""
     given = dict(headers or {})
     names = {str(k).lower() for k in given}
     merged = {k: v for k, v in browser_headers(kind).items() if k.lower() not in names}
@@ -340,8 +346,13 @@ class HttpClient:
 
         def _do() -> Response:
             start = time.perf_counter()
+            # the browser header set of the request's own kind on the wire, never
+            # `requests`' defaults (BUG-0119, ported on D69; BUG-0152): the caller's
+            # own headers win, and `request.headers` itself is not changed
             status, headers, body = self._transport(
-                request.method, request.url, request.headers, request.body, self._timeout
+                request.method, request.url,
+                with_browser_headers(request.headers, kind=request_kind(request.headers)),
+                request.body, self._timeout
             )
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return Response(status=status, headers=headers, body=body, elapsed_ms=elapsed_ms)

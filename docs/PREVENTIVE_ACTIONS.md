@@ -2390,6 +2390,46 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
 
+- **PA-0119** — Strengthens `PA-0062` (and through it `PA-0061`), after BUG-0119: the
+  core seam, the spider's API form submit and the labgen identifier runner sent
+  `requests`' or Playwright's default headers. PA-0062 named "every bare
+  `requests.Session()`", so clients of other shapes were outside its wording and its
+  sweep, and nothing enforced it. (Written on the dropped branch `bug-0118-v3`. Ported
+  on the owner's decision D69, amended for the two profiles of BUG-0152.)
+  1. **Every non-browser HTTP client that sends target traffic sends the full browser
+     header set, whatever its API shape.** The rule names the class (a non-browser
+     client), not a list of shapes. The shapes the guard checks today are:
+     - a `requests.Session`;
+     - a module-level `requests` call;
+     - a Playwright API request context or a `context.request.<verb>` call;
+     - a `urllib.request` client.
+
+     A client that is not target traffic (a lab-setup download, a conformance harness
+     against the toolkit's own generated lab, a reachability probe) is listed with its
+     reason.
+  2. **The merge is made in one place,** `core.http.with_browser_headers` (SP-36). The
+     caller's headers win, matched case-insensitively, and are sent once. The set is the
+     request's own kind's, navigation or fetch (`request_kind`, PA-0158). A client
+     inside a browser context keeps that browser's own User-Agent.
+  3. **An AST guard over `fuzzlab/` fails on a client without the set.**
+     - A `<x>.headers` counts as the set only when `<x>` is a session whose headers
+       were updated with it.
+     - A `requests.Session()` counts only when the name it is bound to is updated with
+       the set.
+     - An exception is listed with its reason, and a stale one fails.
+     - A known site not fixed is listed as pending and pinned by a strict xfail
+       (`PA-0054(3)`).
+     - The guard is proven on synthetic offenders (PA-0034(2)).
+
+     **Stated limits (PA-0130(4), PA-0081):** a client reached through another name
+     (`from requests import get`, `from urllib.request import Request`, an opener's
+     `open`) is not seen, nor is a session whose headers are replaced later. The
+     real-server tests are the proof; the guard is a lint.
+  4. **PA-0062's dual-use rule stands:** changing how the toolkit's traffic presents
+     itself needs the operator's confirmation (D11). It was given for this class
+     ("Apply PA-0062"; D69). (from BUG-0119)
+  - Enforced by: tests/test_seam_browser_headers.py::test_no_http_client_goes_out_without_the_browser_header_set, tests/test_seam_browser_headers.py::test_the_header_guard_flags_synthetic_offenders, tests/test_seam_browser_headers.py::test_the_header_guard_flags_the_round1_shapes, tests/test_seam_browser_headers.py::test_an_authenticated_seam_probe_carries_the_logins_browser_headers, tests/test_seam_browser_headers.py::test_a_header_point_value_wins_and_is_sent_once
+
 - **PA-0158** — Strengthens `PA-0062` and `PA-0111`, and supersedes PA-0062's one-set
   wording, after BUG-0152: JSON API probes went out with a top-level navigation's headers
   (`Accept: text/html`, `Sec-Fetch-Mode: navigate`), so an app negotiating on `Accept`

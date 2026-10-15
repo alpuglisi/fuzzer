@@ -28,8 +28,9 @@ Newest first.
   - `make_probe_sender` (the unauthenticated `auto`, `fuzz` and multitarget paths);
   - the multitarget and live-boot tests;
   - the conformance factories.
-  - No protocol change. `SeamProbeSender` is unchanged and carries no browser set on
-    this branch.
+  - No protocol change. `SeamProbeSender` is unchanged. Its seam
+    (`HttpClient.send`) gets the kind-aware set from the BUG-0119 port (CC-CORE-0059,
+    D69).
   - The `fuzzlab/harness/*`, `fuzzlab/session/*` and `tools/{navguard,spa,spider,store_adapter}.py`
     files are not edited (other lanes). The change needed in
     `session/manager.py` is reported in BUG-0152's sweep.

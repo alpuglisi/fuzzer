@@ -1431,6 +1431,9 @@ rewards) derives from it.
     probe's kind (a fetch follows its redirect as the same fetch).
   - `greybox.RequestsCorrelatingSender` and the blind SQLi fuzzer's `RequestsSender`:
     the same call. Neither builds a JSON body today, so both send the navigation set.
+  - `SeamProbeSender`: through `HttpClient.send`, which takes the kind from the
+    request's content type (FR-CORE-42). A JSON-leaf or JSON whole-body probe carries
+    the fetch set there too.
   - The probe's own headers win: a probed header (an `Accept` header point included),
     a content type, a session's `Cookie`.
   - Stated result, from the frameworks' documented negotiation (BUG-0152): under the

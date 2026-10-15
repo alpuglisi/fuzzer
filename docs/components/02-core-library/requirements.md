@@ -412,9 +412,47 @@ plugin registry. It is the layer that makes the store the integration bus.
     profiles, the caller's `Accept` winning, four framework-style negotiating apps, and
     the AST guard `test_every_requests_sender_takes_its_headers_from_the_owner`, proven
     on synthetic offenders).
-  - Not covered: the core seam (`HttpClient.send`) adds no browser set on this branch
-    (BUG-0119 is unmerged); when it lands, its merge must take
-    `kind=request_kind(...)` (the guard fails on a kind-less merge).
+  - The core seam takes its kind the same way (`HttpClient.send`, FR-CORE-42). The guard
+    fails on a kind-less merge anywhere in `fuzzlab/`, `core/http.py` included.
+- **FR-CORE-42** *(the browser header set on every seam send; `CC-CORE-0059`, 2026-10-15,
+  BUG-0119, PA-0062. Ported from the dropped branch `bug-0118-v3` on the owner's decision
+  D69 and amended for FR-CORE-44's two profiles).*
+  - `core.http.with_browser_headers(headers, kind=)` returns the `kind` profile under
+    `headers`. Every header the caller set wins, matched case-insensitively, so a header
+    point's value, a content type or a session's `Cookie` is never overridden and never
+    sent twice. It returns a new dict and never changes its input. It is the one place
+    this merge is made (PA-0003, SP-36), for a client that keeps no session defaults.
+  - `HttpClient.send` hands the transport
+    `with_browser_headers(request.headers, kind=request_kind(request.headers))`. So every
+    seam send carries a browser set, never `requests`' defaults: a JSON body gets the
+    fetch set, anything else the navigation set. That covers `SeamProbeSender` and the
+    auditor's and `fuzz`'s `--identity` paths through `tools.authhttp`.
+    - `Request.headers` itself is unchanged.
+    - A navigation send carries the **same set the session manager's requests-based
+      login sends**.
+    - A login made through the browser fallback (`session/browserlogin.py`, Chromium's
+      own User-Agent) is **not** matched: the seam still sends `DEFAULT_USER_AGENT`
+      after it (a residual, BUG-0119).
+  - Every non-browser HTTP client in `fuzzlab/` that sends target traffic carries the
+    set: a `requests.Session`, a module-level `requests` call, a Playwright API request
+    context or `context.request.<verb>` call, a `urllib.request` client.
+  - Listed exceptions, each with its reason:
+    - `core/http.py::_requests_transport` (fed by `HttpClient.send`);
+    - `tools/spider.py::_isolated_request` (forwards the browser request's own headers);
+    - `lab_fixtures/external.py::_fetch_locked` (a setup download, never target traffic);
+    - `labgen/identifier_sqli_oracle.py::default_http_runner` and the five
+      generated-lab conformance harnesses' `request`
+      (`labgen/conformance/{live_boot,rails_live_boot,live_boot_spring_boot,go_live_boot,
+      django_live_boot}.py`): traffic to the toolkit's own generated lab;
+    - `django_live_boot.external_http_probe` (a reachability probe).
+  - **Pending (not met yet), each pinned by a strict xfail:**
+    - the spider's API form submit (`LocalSpider._isolated_submit`, the DISC-CAPTURE
+      lane's file; to be applied at integration);
+    - the M6 executor's stored plant (`browserexec`, `context.request.post`; not part
+      of the D69 port).
+  - Stated limits: the AST guard is a lint with stated blind spots (PA-0119(3)).
+  - Enforced by: `tests/test_seam_browser_headers.py` (real loopback servers recording
+    the headers on the wire, a UA-bound app, and an AST guard over `fuzzlab/`).
 - **FR-CORE-41** *(a started server is up only when it owns its port; `CC-CORE-0057`,
   2026-10-15, BUG-0143).*
   - `procutil.start_server_on_free_port` picks a loopback port, starts the server, and

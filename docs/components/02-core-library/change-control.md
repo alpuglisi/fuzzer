@@ -33,10 +33,9 @@ Newest first.
     `DEFAULT_BROWSER_HEADERS`, unchanged. These files are owned by other lanes and
     listed in the guard with reasons.
   - Contract: `DEFAULT_BROWSER_HEADERS` keeps its value and identity.
-  - BUG-0119 (branch `bug-0118-v3`) also defines `with_browser_headers(headers)` here.
-    This signature is a superset (`kind` defaults to navigation). On a merge, its
-    `HttpClient.send` call must pass `kind=request_kind(request.headers)`, and the new
-    guard fails until it does.
+  - BUG-0119 is ported in the same lane on the owner's decision D69 (CC-CORE-0059).
+    Its `HttpClient.send` merge takes `kind=request_kind(request.headers)`, and the
+    guard fails on a kind-less merge.
 - Risk (level; mitigation or accepted-risk justification): low.
   - Headers only. The navigation set is unchanged.
   - A fetch-profile probe is what the browser itself sends for that request.
@@ -56,6 +55,65 @@ Newest first.
 - Effectiveness (assessed 2026-10-15): `tests/test_browser_header_profiles.py`: 43
   passed, 2 xfailed (strict: the html-first Express- and Rails-style apps). The
   verification counts are in the CHANGELOG line's commit report.
+
+### CC-CORE-0059 — Every seam send carries the browser header set: `with_browser_headers` (BUG-0119), ported on D69 (2026-10-15)
+Number reserved for BUG-0119 on the dropped branch `bug-0118-v3`. The change was
+ported in the JSON-SEND lane on the owner's decision D69 ("We are maintaining the use
+of real browser headers for every request", relayed by the coordinator). Nothing of
+the BUG-0118 SQLi gate was ported (D68).
+- Change:
+  - `core/http.py`: `with_browser_headers(headers, kind=)` (SP-36) returns the `kind`
+    profile (CC-CORE-0061) under the caller's headers, matched case-insensitively. The
+    caller's headers win and are sent once, and the input is not changed.
+  - `HttpClient.send` passes
+    `with_browser_headers(request.headers, kind=request_kind(request.headers))` to the
+    transport (it was `request.headers`). So `_requests_transport`'s `requests.request`
+    no longer adds python-requests' defaults: a JSON body gets the fetch set and
+    anything else the navigation set. `Request.headers` itself is unchanged.
+  - Tests:
+    - `tests/test_seam_browser_headers.py`, ported. It has real loopback servers, a
+      UA-bound app, header-point and content-type precedence, the AST guard over every
+      non-browser HTTP client in `fuzzlab/`, and the lab-harness and `_fetch_locked`
+      allowances.
+    - Adapted to the current code: the JSON probe carries the fetch set, and a new
+      JSON-leaf seam test. The guard recognises every owner call and both profile
+      names. Two pending sites (`_PENDING`) are pinned by strict xfails: the spider's
+      API submit (the DISC-CAPTURE lane's file) and the M6 plant (not in the port's
+      scope).
+    - `tests/test_forms_phase2.py` and `tests/test_prg_observation.py`: the `_probed_ua`
+      updates only.
+- Impact (other components / project):
+  - Consumers, found by searching `fuzzlab/` for `HttpClient(`, `authhttp` and
+    `with_browser_headers` (PA-0152): `tools/authhttp.py` builds every `HttpClient`
+    (`make_auth`, `make_auth_with_isolation`). Its users are
+    `tools/probesender.SeamProbeSender` (`fuzzlab auto --identity`), `tools/fetcher.py`
+    (auditor `--identity`) and `tools/blind_sqli_fuzzer.py` (`fuzz --identity`). All
+    their seam sends now carry a browser set.
+  - Plugins' `on_request` / `on_response` hooks still see `request.headers` without the
+    added headers (the merge is made at the transport call). The flow record stores no
+    request headers.
+  - A fake transport handed to `HttpClient` in a test now receives the browser headers.
+    Test fakes that read "any User-Agent" as a header probe were updated
+    (`_probed_ua`). The harness run on the committed tree is the check for the rest.
+  - Not ported, and listed in BUG-0119's "Port" section:
+    - CC-CRAWL-0031 (the spider's change, to be applied at integration);
+    - the M6 plant (CC-FUZZ-0085's BUG-0119 part);
+    - CC-LAB-0260 (no labgen change).
+  - No store, schema or interface change. `HttpClient.send`'s signature is unchanged.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - Authenticated traffic now presents the login's browser. That is dual-use
+    (PA-0062), and the owner decided it: "Apply PA-0062", and D69.
+  - A transport that must see only the caller's headers would now see more. None
+    exists in `fuzzlab/`.
+- Deliverables:
+  - [x] `core/http.py` — done
+  - [x] tests ported and adapted; the two `_probed_ua` updates — done
+  - [x] BUG-0119 (with "Port"), PA-0119, SP-36, FR-CORE-42 — done
+  - [ ] the spider's `_isolated_submit` change, applied at integration (exact change in
+    BUG-0119) — todo
+  - [ ] the M6 plant: port it or drop it (coordinator's call) — todo
+- Effectiveness (assessed 2026-10-15): `tests/test_seam_browser_headers.py` passes, with
+  its 3 strict xfails (the pending sites). Harness counts are in the lane's report.
 
 ### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
 - Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
