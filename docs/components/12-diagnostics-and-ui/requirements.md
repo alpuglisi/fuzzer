@@ -443,6 +443,80 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     (unknown / attached — run did not finish / FAILED: error / ok).
   - **Safety:** every value renders as text.
 
+- **FR-UI-500** *(added CC-UI-0500, 2026-10-15)* **Site tree: nodes.** `/sitetree`
+  browses what the store recorded by origin and URL path, like Burp's Site map
+  (`web/sitetree.py`):
+  - **host** -- the canonical origin of each run's first `target` row
+    (`core.runtarget`, FR-CORE-500), so loopback aliases on one port are one host and
+    other ports or 127/8 addresses are not; a run without a recorded origin (no target
+    row, or one with no usable host) is its own host, labelled "origin not recorded" /
+    "origin unreadable" -- never inferred from `run.config_hash` or a hostname.
+  - **path segments** -- every source's stored path through `sitetree.path_key` (the
+    text before its first `?`; an endpoint may be stored with its POST form action's or
+    captured request's raw query, which is never shown, searched or used for identity);
+    `""` is an index (`/a/` -> `a` -> `/`).
+  - **SPA routes** -- a stored `#/route` (`core.urls.to_route_path`) is one last
+    segment, a child of its document path, labelled as a route.
+  - **endpoint** -- path + method (`core.evidence.method_key`); a finding with no
+    recorded method is "(method not recorded)", never GET.
+  - **parameter** -- name + location. A finding records no location: it is the unique
+    location among the same run's candidates at that path, method, parameter and
+    category (`to_category(vuln_class)`), else among its candidates and parameter rows
+    without the category (parameter rows carry none), else "location not recorded"
+    (`sitetree.resolve_location`). A finding with no method matches any method.
+  - **items** -- findings (link `/findings/{id}`) and candidates.
+  - Candidates are placed by shape: FK (`parameter` -> `endpoint`), pipeline
+    (`core.evidence.parse_evidence`, path by `oracle.finding_url`); a parameter whose
+    endpoint is gone is *unplaced*, an auditor row without a url *no path*, anything
+    else *unreadable*. A row without a usable path is *unplaced*; a registered SQL
+    function that hits one of a named list of errors returns *error*. All four are
+    counted in the host's roll-up, never dropped silently.
+  - Scope limits: SPA routes without a route query are not stored, so not shown; a run's
+    rows sit under its one recorded origin; proxy `flow` rows are not in the tree; a
+    legacy endpoint not starting with `/` is unplaced.
+- **FR-UI-501** *(added CC-UI-0500)* **Site tree: roll-ups and filters.**
+  - Each node shows, over its subtree and under the active filters: findings
+    (`label = 1`, the only value any writer writes) by severity (the finding page's band,
+    `findingsview.derive_severity`) and by category (`to_category`); candidates by
+    `oracle_status` (`checked` = "oracle checked, confirmed or not"; NULL or unknown =
+    `unrecorded`, never checked); recorded endpoints; the last run seen; problem counts.
+  - Filters (repeatable query values; OR within a facet, AND across): `run`; `category`;
+    `severity` (findings only -- candidates are never banded, so it excludes them);
+    `status` (`confirmed`, every `core.oracle_status` value, `unrecorded`); `q`, an
+    ASCII case-insensitive substring of the stored path. With any item facet set only
+    findings and candidates count, and a node shows only if its subtree holds one.
+- **FR-UI-502** *(added CC-UI-0500)* **Site tree: lazy, bounded, paged.**
+  - A node's children load on expand (`GET /api/sitetree/children?node=&after=&limit=`),
+    paged by a keyset cursor (default 200, max 1000; parameter items 50/200 by
+    `(id, kind)`). Node keys, filters and cursors are validated (sizes bounded, unknown
+    fields refused: 400); a node that no longer resolves is 404 `gone`.
+  - Each request is a constant number of statements in one read transaction. Dir nodes
+    narrow endpoint/page/finding rows by index-usable ranges on the stored path; a page
+    after the first narrows by its cursor. Findings and candidates are scanned per
+    selected run (no path index), and an endpoint's parameters by a scan of `parameter`
+    (no `endpoint_id` index) -- the stated linear terms.
+  - A node's whole child list is built once and cached against the store's version
+    fingerprint (taken before the snapshot), at most 8 lists, 100 000 children each and
+    200 000 in total, so walking a wide node is linear.
+  - Enforced by `tests/test_web_sitetree_scale.py` (>= 50 000 endpoints; statement,
+    fetched-row, function-call and VM-step counts, never wall-clock).
+- **FR-UI-503** *(added CC-UI-0500)* **Site tree: the page.** A tree pane (WAI-ARIA
+  treeview) and a detail pane: the selected node's roll-up and a page of its subtree's
+  findings (`GET /api/sitetree/node`), each linking to the finding page. Everything is
+  rendered as text. Filter choices from `GET /api/sitetree/facets`.
+- **FR-UI-504** *(added CC-UI-0500)* **Site tree: what is never shown.** Only computed
+  paths, parameter names and locations, methods, categories, statuses, vuln classes,
+  mechanisms, ids, runs (id, tool, start) and canonical origins. Never a value column
+  (`parameter.example`, form entries, candidate evidence beyond its projected fields,
+  finding evidence), a query string, a target's raw `base_url`, run notes or config;
+  nothing is "un-redacted" or rebuilt from parts.
+- **FR-UI-505** *(added CC-UI-0500)* **Site tree: live.** The page polls
+  `GET /api/sitetree/version` (an `os.stat` + WAL-header fingerprint of the store; no
+  SQLite) while visible and, when it changes, re-fetches its expanded nodes and
+  selection, at most once per poll interval; a node that is gone is removed. SSE is not
+  used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
+  lifespan shutdown that stops launched jobs (BUG-0125).
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the
@@ -484,7 +558,7 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   one deliberate exception: it holds view *definitions* a person authored in
   the panel (filter/sort/column specs), never tool output, so writing it does
   not violate this invariant.
-  - Enforced by: `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
+  - Enforced by: `tests/test_web_sitetree.py::test_site_tree_routes_are_read_only`, `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
   - Not yet enforced: read-only by convention (a read-write `Store`); attempt/candidate counts and the /results, /runs/{id} and /proxy routes are unchecked; the Repeater writes `repeater_tab`/`run`/`flow`. (BUG-0111 sweep.)
 - **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
   PA-0065)* Every HTML page loads in a real browser with zero page errors, zero console
@@ -497,9 +571,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   cannot run, and `FUZZLAB_REQUIRE_BROWSER=1` turns that skip into a failure. A change to
   `fuzzlab/web/templates/` or `fuzzlab/web/static/` is verified with it set.
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
+  *(CC-UI-0500:)* the site tree polls a store fingerprint (FR-UI-505) and holds no
+  long-lived connection.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
   - Enforced by (at write time): `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`
-  - Not yet enforced: the Repeater returns and lists raw requests/responses; `run.html` renders plugin `config` unredacted; no UI test seeds a secret. (BUG-0111 sweep; reported to the operator.)
+  - Enforced by (site tree, CC-UI-0500): `tests/test_web_sitetree.py::test_no_planted_secret_reaches_any_sitetree_response`, `tests/test_web_sitetree.py::test_a_stored_query_is_never_shown_searched_or_split_into_nodes`, `tests/test_web_sitetree.py::test_host_labels_never_show_the_raw_base_url`
+  - Not yet enforced: the Repeater returns and lists raw requests/responses; `run.html` renders plugin `config` unredacted; outside the site tree no UI test seeds a secret. (BUG-0111 sweep; reported to the operator.)
 
 ## 5. Interfaces and data contracts
 A local HTTP server on loopback serving the control panel/dashboard. Reads the

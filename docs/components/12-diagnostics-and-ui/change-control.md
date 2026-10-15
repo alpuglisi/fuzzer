@@ -3,6 +3,62 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0500 — Site tree: browse findings by origin and URL path (2026-10-15)
+- Change:
+  - **Data layer** `fuzzlab/web/sitetree.py` (pure; no FastAPI): node keys (host ->
+    path segments -> SPA route -> endpoint -> parameter -> findings/candidates),
+    `path_key` (a stored endpoint's raw `?query` is cut off and never shown), candidate
+    projection by shape (FK / pipeline via `oracle.finding_url` / unplaced / no path /
+    unreadable, content-addressed cache with no raw evidence), finding-location
+    resolution keyed on run + path + method + param (+ category first), roll-ups,
+    filters (run, category, severity -- findings only, status, path text), keyset
+    pagination with stored-path range and cursor narrowing, one read transaction per
+    request, a version-keyed bounded child-list cache, and `store_version` (an `os.stat`
+    + WAL-header fingerprint). Registered SQL functions catch only a named error list
+    and count what they cannot judge.
+  - **Routes** `fuzzlab/web/sitetree_routes.py`: `GET /sitetree`,
+    `/api/sitetree/{children,node,facets,version}` (sync, GET-only, read through
+    `_with_store`); `web/app.py` registers them in one block plus one NAV link.
+  - **Page** `templates/sections/sitetree.html`, `static/js/sitetree.js`,
+    `static/css/sitetree.css` (see Deliverables).
+  - FR-UI-500..505; NFR-UI-read-only / NFR-UI-redacted gain the site tree's tests.
+- Design gate (components README): rev 1 -> rev 3, reviewers A and B (read-only),
+  3/3 agreed. Notable outcomes: SSE dropped for polling (a long-lived stream holds
+  uvicorn's graceful shutdown and the lifespan shutdown that stops launched jobs,
+  BUG-0125); severity is a findings-only facet (the finding band and a candidate's
+  category band disagree for `ssti`); one core target reader (CC-CORE-0500,
+  CC-ML-0500, CC-UI-0501). Divergence found in implementation, reflected here: a
+  candidate whose parameter row lost its endpoint is classified *unplaced* before the
+  "auditor dict without a url" (*no path*) check, since it did have a location (G3
+  listed the two the other way round); every row still lands in exactly one class.
+- Impact:
+  - Read-only over the store; no schema change, no writes.
+  - New web -> `fuzzlab.oracle.oracle` / `oracle.probe` dependency, imported lazily
+    inside the candidate projection (for `finding_url`).
+  - Reads `core.urls`, `core.evidence`, `core.oracle_status`, `core.runmode`,
+    `core.runtarget`, `web.findingsview` (severity band).
+  - The project-files session's store switching reaches the tree through
+    `_with_store`; the version fingerprint is taken from the same `store_path` config
+    value (follow-up: route both through their accessor).
+- Risk: medium (attacker-influenced strings; every result table read; large stores).
+  Mitigations: planted-marker test over every value column and every API response;
+  stored-query test; strict key/filter validation; operation-count scale test at
+  >= 50 000 endpoints; read-only test; real-browser tests under
+  `FUZZLAB_REQUIRE_BROWSER=1`.
+- Index request for the integrator (no migrations in this lane): `finding(run_id, url)`;
+  `parameter(endpoint_id)`; a stored `candidate` path column written by
+  `audit/engine.evaluate` (or an expression index) -- each removes a stated linear term.
+- Deliverables:
+  - [x] `web/sitetree.py` (~1 330 LOC incl. docstrings) — done
+  - [x] `web/sitetree_routes.py` + `app.py` block/NAV (~120 LOC) — done
+  - [x] tests: `tests/test_web_sitetree.py` (82), `tests/test_web_sitetree_scale.py` (4) — done
+  - [x] mutation checks: 15 mutants of 13 mechanisms, all killed — done
+  - [ ] page: template / JS (treeview, polling) / CSS + browser tests — todo
+  - [ ] final layout from the UI-research branch (re-reviewed delta) — todo
+  - [ ] code review (two reviewers) — todo
+  - [ ] docs: ARCHITECTURE views, README UI section — todo
+- Effectiveness: pending.
+
 ### CC-UI-0501 — The run page, finding detail, Repeater pivot and report read the run's target through core (2026-10-15)
 - Change: `web/results.run_detail` and `finding_detail`, `web/proxycontrol.
   create_from_finding` and `report/report.build_report` take a run's target from

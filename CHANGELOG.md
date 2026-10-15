@@ -4,6 +4,13 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (site tree: data layer and API)
+- **Why:** browse identified vulnerabilities by domain and URL path, like Burp's Site
+  map. **What:** `web/sitetree.py` + `/api/sitetree/*`: host (canonical origin) -> path
+  segments -> SPA routes -> endpoint -> parameter -> findings/candidates, roll-ups,
+  filters, lazy keyset paging bounded by operation counts at 50k endpoints, and never a
+  stored query or value column (CC-UI-0500, FR-UI-500..505). Page to follow.
+
 ## 2026-10-15 (one reader for a run's target; site-tree groundwork)
 - **Why:** the site tree needs each run's origin without the ML package, and its design
   gate found five private copies of "which `target` row is the run's" with three rules

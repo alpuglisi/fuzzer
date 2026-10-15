@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Site tree{% endblock %}
+{% block crumb %}Site tree{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="sitetree-h1">
+  <h1 id="sitetree-h1">Site tree</h1>
+  <div id="sitetree-root" data-poll-ms="{{ poll_ms }}"></div>
+</section>
+{% endblock %}

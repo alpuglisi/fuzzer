@@ -223,6 +223,8 @@ NAV: list[dict[str, Any]] = [
         {"id": "lab", "label": "Lab", "href": "/lab", "icon": "⏻"},
         {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
         {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑"},
+        # CC-UI-0500: the site tree (findings by origin and URL path).
+        {"id": "sitetree", "label": "Site tree", "href": "/sitetree", "icon": "⌥"},
         {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
     ]},
     {"group": "Analysis", "links": [
@@ -655,6 +657,16 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     def diagnostics_page(request: Request):
         return templates.TemplateResponse(
             request, "sections/diagnostics.html", _shell_context(cfg, active="diagnostics"))
+
+    # --- site tree (CC-UI-0500): its routes live in `web/sitetree_routes.py`; they read
+    # through this app's own store accessor (`_with_store`). -----------------------
+    from fuzzlab.web import sitetree_routes
+    sitetree_routes.register(
+        app, templates=templates,
+        shell_context=lambda: _shell_context(cfg, active="sitetree"),
+        with_store=lambda fn, default: _with_store(cfg, fn, default),
+        store_path=lambda: cfg.get("store_path", "fuzzlab.db"))
+    # --- end site tree -------------------------------------------------------------
 
     # --- diagnostics API (U5/CC-UI-0032) — cross-run trends, intra-run series,
     # snapshots; all read-only, no new backend beyond these routes (R-05/R-12). ---
