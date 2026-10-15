@@ -536,14 +536,68 @@ plugin registry. It is the layer that makes the store the integration bus.
     `report` (which shows it as `unknown`) and `train models` both use it, and it works
     in a no-ML build.
 
+- **FR-CORE-450** *(project files; `CC-CORE-0450`, 2026-10-15; migration 22).* A store
+  is a project. Migration 22 adds `project` (one metadata row: name, created_at — the
+  store's own creation time, `MIN(schema_version.applied_at)` — opened_at, notes,
+  targets, the fuzzlab versions that created and last opened it, the schema version it
+  was created at), `launch` (FR-CORE-451) and `run.launch_id`, and stamps the fuzzlab
+  SQLite `application_id` (`migrations.APPLICATION_ID`). The migration writes no
+  metadata row; `core.project.ensure_metadata` creates it on the first UI open (one
+  `BEGIN IMMEDIATE`, re-checked) and marks orphaned `running` launches `unknown`.
+  `core.project` is the one writer and parser of both tables; `inspect` reads a file
+  without writing its main file and refuses (typed `ProjectError`, from a named list of
+  errors) anything that is not a fuzzlab store, fails the allowlist below, or fails
+  `quick_check`; `create` makes a file 0600 / `O_EXCL` / `O_NOFOLLOW`; `copy_to` copies
+  with the SQLite backup API into a private temporary file (rollback journal), checks no
+  side file holds data, `quick_check`s, fsyncs and hard-links it into place;
+  `migrate_with_backup` writes a verified backup before migrating.
+  `Store(path, create=False)` / `open_store(..., create=False)` open an existing file
+  only (a `mode=rw` URI); every connection sets `trusted_schema=OFF`.
+  *(Code review round 2, BUG-0451:)* the untrusted-file check is an **allowlist**:
+  `reference_schema(version)` (fuzzlab's migrations run in memory) and `_foreign_objects`
+  refuse any `sqlite_master` row whose exact `(type, name, tbl_name)` is not fuzzlab's at
+  the file's version, or — *(code review round 3, BUG-0453; round 4, BUG-0456)* — whose
+  **definition** differs from the reference's **byte for byte** (no normalisation), **for every object including tables**
+  (`trusted_schema=OFF` stops application functions only, so an added generated column,
+  `CHECK` or `DEFAULT` would run SQLite's own functions); `sqlite_stat1`/`sqlite_stat4`
+  must carry SQLite's own definitions. `schema_version`'s definition is checked from
+  `sqlite_master` before any of its rows is read, and a file newer than this build is
+  returned as `newer` before anything else of it is read. A non-integer or < 1 schema
+  version, a foreign `application_id`, or a missing `run` table is refused too. The
+  inspecting and summarising connections cap string/blob length (4 MiB, 1 MiB). Every
+  value `core.project` reads back from such a file is typed before use (`_text`, `_int`,
+  `RecursionError` among the JSON errors; BUG-0454).
+- **FR-CORE-453** *(project identity; `CC-CORE-0450`, migration 23).* `project` gains
+  `uuid` (the file's own id, 32 hex — **display only**: nothing matches, dedupes or trusts
+  on it, since a file can claim any value), `origin_uuid`, `copied_at`, `copy_kind`
+  (`snapshot` | `save-as`); the post-step backfills `uuid` for an existing row.
+  `core.project.mark_copy` (one transaction) records a published copy: a new `uuid` plus
+  its origin, or — a saved temporary project — the same `uuid`. `file_facts` (size, last
+  write) and `summary` (bounded read-only counts for listings) serve the UI's lists.
+- **FR-CORE-451** *(launch provenance; `CC-CORE-0450`).* A job the web UI starts is a
+  `launch` row with a random 32-hex `token`; the UI gives the child
+  `FUZZLAB_LAUNCH_TOKEN`, and `Store.start_run` links each run it creates
+  (`launch_id`) only when that token names a `launch` row of the same store — anything
+  else links nothing. Every recorded value passes `core.redaction.redact_for_record`.
+  `store.is_aborted` is the one reader of `mark_aborted`'s `aborted: ` note.
+- **FR-CORE-452** *(newer schemas; `CC-CORE-0450`).* `migrations.migrate` raises
+  `SchemaTooNew` (before any write) when a store's schema is above this build's
+  `head_version()`; `Store` closes its connection on that or any migration error. Each
+  migration remains its own transaction, so a failed multi-version upgrade leaves the
+  store at the last version that completed (`migrate_with_backup` names it and the
+  backup).
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).
 - **NFR-CORE-central-connection** Every process and test that opens the store
   connection directly (not via `Store`) routes through the single central
   `open_store()` constructor (WAL, `busy_timeout=10000`, `synchronous=NORMAL`,
-  `foreign_keys=ON`, connect-time `timeout=10.0`), so the WAL/concurrency
-  design lives in one place. `connect()` is a backward-compatible alias for it.
+  `foreign_keys=ON`, `trusted_schema=OFF`, connect-time `timeout=10.0`), so the
+  WAL/concurrency design lives in one place. `connect()` is a backward-compatible alias
+  for it. One stated exception (CC-CORE-0450): `core.project.copy_to` opens its private
+  copy destination with a plain rollback-journal connection, because a WAL destination
+  could leave data in a `-wal` that the hard link publishing the copy does not carry.
 - **NFR-CORE-deterministic** Feature extraction is a pure function of
   (request, response, baseline); recomputable over history.
 - **NFR-CORE-secrets** Secrets are referenced, never stored in the store or
@@ -557,7 +611,8 @@ plugin registry. It is the layer that makes the store the integration bus.
 
 ## 5. Interfaces and data contracts
 Owns the store schema and migrations. Writes `run`, `schema_version`,
-`request_budget`, `model`, `metric_series`, `saved_views`. Exposes Python APIs
+`request_budget`, `model`, `metric_series`, `saved_views`, and (CC-CORE-0450) `project`
+and `launch`. Exposes Python APIs
 consumed by every tool and ML component.
 
 ## 6. Dependencies (components)

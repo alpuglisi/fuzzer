@@ -332,6 +332,121 @@ Newest first.
   - Full-suite counts: see CC-FUZZ-0400.
   - Effective.
 
+### CC-CORE-0450 — Project files: migrations 22 and 23 (project metadata, launch provenance, identity), `core.project`, untrusted-file allowlist, newer-schema refusal (2026-10-15)
+- Change:
+  - `core/migrations.py`: migration 22 — `project` (one metadata row), `launch` (a UI
+    job: random `token`, command, redacted argv, target, start/finish, status, exit code),
+    `run.launch_id`; post-step stamps `PRAGMA application_id = 0x467A4C62` ("FzLb",
+    `APPLICATION_ID`). New `head_version()`; `migrate()` raises `SchemaTooNew` before any
+    write when a store is newer than this build (FR-CORE-452).
+  - `core/store.py`: `open_store` / `connect` / `Store` take `create=False` (a `mode=rw`
+    URI: an existing file only); every connection sets `trusted_schema=OFF`; `Store`
+    closes its connection when `migrate()` raises; `start_run` links `launch_id` from
+    `FUZZLAB_LAUNCH_TOKEN` (`LAUNCH_TOKEN_ENV`) only to a `launch` row of the same store
+    (FR-CORE-451); `ABORTED_PREFIX` + `is_aborted`, the one reader of `mark_aborted`'s note.
+  - New `core/project.py` (FR-CORE-450): `inspect` (read-only on the main file; typed
+    `ProjectError` from a named error list; refuses non-fuzzlab files, triggers/views, a
+    failed `quick_check`), `version_state`, `create` (0600, `O_EXCL`, `O_NOFOLLOW`),
+    `ensure_metadata` (`BEGIN IMMEDIATE`; `created_at` = the store's real creation time;
+    orphaned `running` launches → `unknown`), `read_metadata` (one validating parser),
+    `set_meta` / `add_target` / `rename` (bounded, redacted), `insert_launch` /
+    `finish_launch` / `status_for`, `run_history`, `copy_to` (backup API → private
+    rollback-journal temp → side-file check → `quick_check` → fsync → hard link → dir
+    fsync), `migrate_with_backup`, `make_private`, `sidecar_dir`.
+  - `core/redaction.py`: `redact_for_record(dest, value)` — the one writer-side
+    redactor for what the UI records (URL userinfo, scheme-less `user:pw@`, sensitive
+    query values, a sensitive option's value).
+  - `core/secretfile.py`: `locked(path)` — the shared interprocess lock (per-path thread
+    lock + `flock` on `<path>.lock`, never mkdirs); `core/credentials.py` now uses it
+    (PA-0003; its own mkdir kept).
+  - `procutil.astart_server(..., umask=)` — set on the supervisor, inherited by the tree.
+- Impact (other components / project): **every store** gains two empty tables, one NULL
+  column and the application id on its next open (migration 22), and four project
+  columns (`uuid`, `origin_uuid`, `copied_at`, `copy_kind`; migration 23, whose post-step
+  gives an existing `project` row a `uuid`) — both additive. **A new refusal surface**:
+  the UI now refuses a store whose schema differs in any object definition from what
+  fuzzlab's migrations create at its version (the allowlist, BUG-0451/BUG-0453); a
+  hand-altered legitimate store is refused there (the CLI still opens it). **Every tool**: `start_run`
+  reads one environment variable (unset outside UI jobs → NULL, as before); a store from a
+  newer build is now refused instead of written. UI (CC-UI-0450) is the consumer. Tests
+  that fake older stores undo migration 22 through the new `tests/_downgrade.py`
+  (`test_holdout_seal_table.py`, `test_login_form_isolation.py`). No locked file changed.
+- Risk (level; mitigation or accepted-risk justification): medium (a migration and a
+  change to the shared `start_run`). Mitigation: additive and atomic (injected-failure
+  test, PA-0088), concurrent first opens tested with two processes, legacy-store upgrade
+  tested, `SchemaTooNew` mutation-checked; `trusted_schema=OFF` is safe because
+  migrations create no trigger, view or schema function (FTS5 works with it off). Stated
+  exception to NFR-CORE-central-connection: `copy_to`'s private destination (a WAL
+  destination could leave data in a `-wal` the hard link does not carry). Residual: the
+  CLI still migrates an older store silently, as before. The allowlist's risk of refusing
+  a legitimate store is mitigated by deriving it from the migrations themselves and by a
+  history check (all 15 past versions of `migrations.py` build today's schema at every
+  version) plus fixtures of every real shape (fresh, legacy v21, v22 migrated, `ANALYZE`d,
+  FTS rows); a store altered by hand (or by `ALTER … DROP/RENAME`) is refused with a
+  message naming the objects.
+- Deliverables:
+  - [x] migration 22 + post-step, `head_version`, `SchemaTooNew` — done
+  - [x] migration 23 (identity and lineage) + backfill post-step; `mark_copy`, `file_facts`, bounded `summary` — done
+  - [x] untrusted-file allowlist (`reference_schema`, `_foreign_objects`, `_version_table_trusted`; every definition compared) — done
+  - [x] `Store(create=False)`, `trusted_schema=OFF`, close on migrate failure, launch linkage, `is_aborted` — done
+  - [x] `core/project.py` — done
+  - [x] `redact_for_record`, `secretfile.locked` (+ credentials), `astart_server(umask=)` — done
+  - [x] tests: `tests/test_core_project.py` (new), `tests/_downgrade.py`, contract-writers tables (+`project`, `launch`) — done
+  - [x] FR-CORE-450..453, NFR-CORE-central-connection (exception), §5; ARCHITECTURE store-as-contract — done
+- Code review round 1 (with CC-UI-0450), fixed: `inspect` queries triggers and views on
+  their own (a trigger may share a table's name; reviewer B made one named
+  `schema_version` that deleted findings, and it was opened) and also refuses virtual
+  tables other than `flow_fts`/fts5, and a non-empty file whose `schema_version` is empty;
+  `redact_for_record` strips userinfo through the authority's **last** `@` (a password may
+  contain `@`), scheme-relative `//u:p@`, and redacts sensitive names in query-shaped
+  fragments and `;name=value` path parameters. Tests:
+  `tests/test_core_project.py::test_inspect_refuses_what_is_not_a_fuzzlab_store`
+  (same-name trigger, virtual table, empty schema version) and the extended
+  `test_redact_for_record_*` matrices.
+- Code review round 2 / layout pass: BUG-0451 — the schema check is now an allowlist
+  (`reference_schema`, `_foreign_objects`), with foreign `application_id`, non-integer
+  versions and a missing `run` table refused; migration 23 (`uuid`, `origin_uuid`,
+  `copied_at`, `copy_kind`, post-step backfill) instead of amending the already-pushed
+  migration 22 (a v22 store existed: BUG-0452's stray file); `mark_copy`, `file_facts`,
+  `summary` (bounded), `run_history` labels; `copy_to(timeout=)`; `redact_for_record`'s
+  userinfo pattern made linear (no `\b` scan) and values capped at 4096 characters.
+- Code review round 3 (on 8569187; a correctness and a security reviewer, fresh agents):
+  - (blocking) BUG-0453 — the allowlist matched tables by name only, so a crafted
+    generated column / `CHECK` / `DEFAULT` ran SQLite's own functions without bound on
+    open, listing and migrate (`trusted_schema=OFF` stops application functions only) →
+    every definition is compared; `schema_version`'s definition is checked before its
+    rows are read; a newer file is refused before any other read; length limits on the
+    inspect/summary connections. PA-0453.
+  - BUG-0454 — deep JSON (`RecursionError`) and oddly typed values (a BLOB `started_at`)
+    from a crafted file crashed `inspect` / `run_history` → every value typed at one
+    parser (`_text`, `_int`, `_JSON_ERRORS`). PA-0454.
+  - BUG-0455 — `redact_for_record` cut values before stripping userinfo, keeping a
+    straddling password → userinfo stripped from the whole value, cut last. PA-0455.
+  - Non-blocking, fixed: a malformed `copy_kind` / `copied_at` is flagged
+    (`identity_malformed`), never silently dropped; tests for migration 23's backfill on a
+    v22 row, a v22-migrated and an FTS store in the allowlist's non-vacuity fixture, the
+    "unknown exit" label.
+- Code review round 4 (on bffa9c1; the same two reviewers): correctness — APPROVE;
+  security — 1 blocking: BUG-0456, the definition check compared `str.split()`-normalised
+  text (a U+00A0 or a moved comment end compared equal while SQLite read a different
+  schema) → byte-for-byte comparison (`_exact_sql`); checked against fresh, `ANALYZE`d,
+  v21/v22-downgraded stores and all 15 past migration sets (byte-identical). PA-0456.
+  PA-0002 sweep: the only other `" ".join(….split())` in `fuzzlab/` is `core/forms.py`'s
+  option-label text (HTML, collapsed as a browser does; not a safety comparison).
+  `BACKUPS_DIRNAME` is now the one name for the backups directory (PA-0001).
+- Code review round 5 (on 4f6c46b): both reviewers **APPROVE**. Applied the correctness
+  reviewer's note: `reference_schema` bootstraps `schema_version` with the migrations' own
+  `_ensure_version_table` instead of a second copy of its text (with byte-exact
+  comparison, a drift in either copy would refuse every store; PA-0001). Verified: the
+  reference equals a fresh store's `sqlite_master` exactly. The security reviewer's
+  bypass attempts (NULL vs `''` sql, BLOB sql, NUL/invalid UTF-8, case and `tbl_name`
+  variants, a repointed rootpage — refused by `quick_check`, and above its 512 MiB cap only
+  wrong-but-typed rows) all failed. **Follow-up (not built; cross-component):**
+  `SQLITE_DBCONFIG_DEFENSIVE` on `open_store` and the inspect/summary connections
+  (Python ≥ 3.12 `setconfig`) as defence in depth for FTS5 shadow data `quick_check`
+  does not validate — a change to every tool's connection, for its own CC entry.
+- Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). Store-level: `tests/test_core_project.py` 90 passed.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

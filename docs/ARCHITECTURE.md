@@ -1727,6 +1727,16 @@ tracked in the requirements files, not here.
   runs and results, surfacing oracle findings and the advisory model scores with their
   flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
   and structured audit/debug logs are built.
+- **Project files** `[built — back end, start screen and pages laid out from the UI
+  research; three code-review rounds; unmerged]` (CC-UI-0450): `web/projects.py`
+  (`ProjectManager`: one open project, new / open / temporary / save as / snapshot /
+  close, use-default, the recent list, path confinement to the projects directory, busy
+  refusal under one lock, temporary-project discard; `ProjectBoundConfig` so every reader
+  follows the open project; `OPTION_CLASS`/`pin_values` pin each launched command to it),
+  `web/projectroutes.py` (`/projects` — the start screen when nothing is open, where `/`
+  redirects — and `/project`), the topbar project chip; the built-in default store is
+  opened only if it exists (FR-UI-458); store side in `core/project.py`
+  (FR-CORE-450..453; migrations 22 and 23).
 - **Revamp (in progress, `docs/UI_REVAMP_PLAN.md`):** growing the read-only panel into a
   full control plane over a **tabbed shell** (Launcher / Proxy / Results / ML /
   Diagnostics; jinja2 templates + a `/static` asset pipeline). Phase 0 foundations built:
@@ -1913,12 +1923,26 @@ tracked in the requirements files, not here.
 
 ## The store as the contract
 
+**A store is a project file** (CC-CORE-0450 / CC-UI-0450, migrations 22 and 23): the web UI opens
+one store at a time as its project (`<name>.fuzzlab`, SQLite `application_id` "FzLb",
+0600) and pins every command it launches to it (`--store <project>`, intermediates in
+`<project>.d/`). A store whose schema is newer than the build is refused by
+`migrations.migrate` (`SchemaTooNew`); the UI opens an older one only after a verified
+backup and an accepted migration. Copies use the SQLite backup API (`core.project.copy_to`).
+A project file from elsewhere is untrusted input: `core.project.inspect` admits only the
+schema objects fuzzlab's own migrations create, each with exactly the definition they
+give it — tables included (an allowlist, BUG-0451, BUG-0453) — checks `schema_version`'s
+definition before reading it, reads nothing of a newer file past its version, and types
+every value it reads back (BUG-0454).
+
 Core tables and their principal readers/writers (see the roadmap for schema
 detail):
 
 | Table | Written by | Read by |
 | --- | --- | --- |
-| `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, CC-CORE-0033), `schema_version` | core | everything |
+| `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, read by `store.is_aborted`, CC-CORE-0033; `launch_id` links a run to the UI job that created it, migration 22), `schema_version` | core (`launch_id`: `Store.start_run`, from the job's `FUZZLAB_LAUNCH_TOKEN`) | everything |
+| `project` (one metadata row: name, created / opened times, notes, targets, the fuzzlab versions that created / last opened it, the schema version it was created at; migration 22; display-only `uuid` and copy lineage `origin_uuid` / `copied_at` / `copy_kind`, migration 23) | `core.project` only (`ensure_metadata` on the first UI open, `set_meta`, `add_target`, `rename`; values via `redaction.redact_for_record`) | web UI (`/project`, the topbar) |
+| `launch` (a job the UI started: random `token`, command, redacted argv, target, start / finish, status `running`/`succeeded`/`failed`/`stopped`/`unknown`, exit code; migration 22) | `core.project.insert_launch` / `finish_launch` (called by `web.projects`); `ensure_metadata` marks orphaned `running` rows `unknown` | web UI run history (`core.project.run_history`) |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor | auditor, ranker, fuzzer |
 | `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader) |

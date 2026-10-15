@@ -454,6 +454,110 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - The resolved store is named on stderr, so stdout and `--json` stay the report.
   - A missing store is refused (exit 2) and never created.
 
+### Project files *(added CC-UI-0450, 2026-10-15; Burp/ZAP-style projects)*
+
+- **FR-UI-450** A project is one fuzzlab store file (`.fuzzlab`, the fuzzlab SQLite
+  `application_id`; FR-CORE-450). The UI has at most one open project; every page reads
+  it and every UI write goes into it (`web.projects.ProjectBoundConfig`:
+  `cfg.get("store_path")` is the open project, or `None` when none is open). At start-up
+  an explicitly configured `store_path` is the open project (an empty `store_path` starts
+  with none); the built-in default is opened only if it already exists, else it is offered
+  on the start screen (FR-UI-458 — *superseding, in the layout pass, this requirement's
+  original "the configured `store_path` is the open project" for the built-in default*).
+  Its metadata row is created on its first open (FR-CORE-450).
+- **FR-UI-451** Lifecycle, on `/projects` (plain POST forms, PRG): **new** (a name),
+  **open** (a file listed in the projects directory, a recent entry, or a leftover
+  temporary project), **temporary** (a throwaway file in `<projects_dir>/.temporary/`),
+  **save as** (a backup-API copy, FR-CORE-450, plus the project's own directory; the
+  copy becomes the open project), **snapshot** *(layout pass)* (a timestamped, verified
+  copy `<stem>-snapshot-<UTC>[-n].fuzzlab` in the projects directory — its name derived by
+  the server into `NAME_RE`; the project stays open; allowed while a job runs, when it
+  copies the project file and its databases as they are at that moment and skips the fuzz
+  CSV, saying so), **close**. The projects directory is
+  `cfg["projects_dir"]`, else `$FUZZLAB_PROJECTS_DIR`, else
+  `~/.local/share/fuzzlab/projects`; it is created only by an action that needs it.
+- **FR-UI-452** The **recent list** (`<projects_dir>/recent.json`, 10 entries, newest
+  first) is updated under an interprocess lock (`core.secretfile.locked`), replaced
+  atomically, and read through one validating parser (malformed entries skipped and
+  counted). An entry whose file is gone is shown as "not found", not dropped; **Remove
+  from list** drops one (matched by index and path; the file is untouched). Listings show
+  each file's run and finding counts from a bounded read-only summary (the untrusted-file
+  allowlist, a near-zero lock wait, a step budget; "unreadable" on any failure; may leave
+  empty `-wal`/`-shm` beside a WAL file). Open and Remove re-check index **and** path —
+  both are required (code review round 3). The Open list's size and modified time are
+  `core.project.file_facts`' (the file plus a non-empty `-wal`), as the chip's.
+- **FR-UI-453** Leaving a **temporary project** (close, open, new, another temporary)
+  deletes it and needs an explicit confirmation (`discard`); without it the action is
+  refused with a message offering Save as. Deletion removes exactly the files the
+  project owns: its file, its SQLite side files, the known files of its directory and
+  its own pre-migration backups (`backups/<stem>.pre-v…`; code review round 4),
+  each checked to be a regular file of this user, the main file matched to the inode
+  recorded at creation; anything else is left and reported. Shutdown deletes nothing;
+  leftover temporaries are listed for Open or Discard — Discard needs its own ticked box
+  ("delete it and its runs"), checked by the server too — and one another `fuzzlab web`
+  holds open (its owner lock) is refused.
+- **FR-UI-454** The open project is shown on **every page** (the topbar chip: name ▾, and
+  `temporary · not saved`, `not created yet`, or the last write time; linking to
+  `/projects`, where its path, size and last write are shown); when none is open, a
+  migration is waiting, or the file was refused, a banner says so. The last write is the
+  later of the file's mtime and a non-empty `-wal`'s (never `-shm`), rendered as of page
+  load: an open records its open time, and a checkpoint can show a later time, never an
+  earlier one (`core.project.file_facts`). Layout per the UI research
+  (`docs/research/ui-ia-competitive-analysis.md` §12.2/§13; the owner chose Save As **and**
+  Snapshot over the research's "no Save As").
+- **FR-UI-455** `/project` shows the open project's **metadata** (name, file, created,
+  last opened, schema and fuzzlab versions; editable notes and targets) and its **run
+  history** (`core.project.run_history`): each run's command (the UI launch's command
+  and redacted argv, or the tool name for a run made outside the UI), target, start
+  time, status (`aborted` from the run's own notes first; else the launch's
+  `succeeded` / `failed` / `stopped` / `unknown`, `running` only for a job live in this
+  UI; else `recorded`), finding and candidate counts, linked to `/runs/{id}` and its
+  findings. A launch that recorded no run is listed as "no run recorded". A launch whose UI
+  ended before it did reads **interrupted**; one whose exit status could not be read,
+  "unknown exit" (`core.project.run_history`'s `label`; residual: a second UI opening the
+  same file shows a job the first still runs as interrupted). The research's "Resume" is
+  left to the scan-profile work.
+- **FR-UI-456** **Jobs pin to the project.** Every launched command that has a
+  `--store` option runs with `--store <open project>`, and with its intermediate files
+  (crawl `--db`, `--spider-db`, audit `--out`, fuzz `--output`) in the project's own
+  directory (`<file>.d/`), overriding the form (`web.projects.pin_values`, from the
+  exhaustive `OPTION_CLASS` table). Each such job is recorded in the project's `launch`
+  table (command, redacted argv, redacted target; FR-CORE-451) and its target is added
+  to the project's targets; it runs with `umask 077`. Before it starts, its intermediate
+  files must be absent or plain, singly linked files of this user (a planted link is
+  refused). The dry run shows the pinned command when a project is open (with none open
+  it shows the form's values and `project_pinned: true`; the launch is then refused) and
+  creates nothing. A pinned command with no project open is refused (409).
+  Commands without a store (session, build-db, lab-generate) and lab switches are not
+  pinned, record nothing and keep the normal umask.
+- **FR-UI-457** **Schema mismatch.** A file whose schema is older than this build's is
+  not opened, read or written until the operator accepts the migration offer (shown on
+  `/projects` whether or not another project is open, which stays open meanwhile); accepting
+  writes a verified backup (`<file>.d/backups/`) and then migrates (FR-CORE-452 covers a
+  partial failure). A newer file (nothing of it is read past its version), a non-fuzzlab
+  SQLite file, a file holding any schema object fuzzlab's migrations do not create at its
+  version — or one whose **definition** differs, tables included (the allowlist,
+  FR-CORE-450; BUG-0451, BUG-0453) — a non-empty file with no recorded schema version, or
+  one failing `quick_check` is refused with the reason. Every value read back from an
+  accepted file is typed before use: an odd value reads as unknown or malformed, never a
+  crash (BUG-0454). A migrated leftover temporary stays temporary (its owner lock is taken
+  before the migration). With `--with-proxy`,
+  a start-up project that is waiting or refused stops the start with the remedy (start
+  once without `--with-proxy`).
+
+- **FR-UI-458** *(layout pass, CC-UI-0450)* **Start screen.** With no project open (and
+  nothing pending), `/` redirects to `/projects`, the start screen: Temporary project
+  (first), New project, Open (one form over the file list), Recent, leftover temporaries,
+  and — when the built-in default store does not exist yet — "Use ./fuzzlab.db" (its
+  absolute path shown; the path is the server's, never the form's). The built-in default
+  `store_path` counts as configured only if that file exists; any other configured path is
+  opened at start-up as before. Stated exception: `--with-proxy` binds the built-in default
+  and creates it at start-up when nothing else is configured (the proxy needs a store
+  before any page is opened; PA-0452(3)). The default card says whether the file exists.
+  After New, Temporary, Open or Use-default the UI goes to
+  `/` only if the requested project opened and no warning is waiting; otherwise it stays on
+  `/projects`, where the messages are. "Opening a project never sends traffic."
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the
@@ -491,10 +595,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - Enforced by: `web.app` (POST + `authorized` to run) — `tests/test_web_launcher.py::test_index_offers_both_modes_and_does_not_run`, `tests/test_web_lab.py::test_page_loading_does_not_touch_containers`, `tests/test_web_proxy_serve.py::test_web_main_requires_authorized_for_proxy`, `tests/test_web_launcher.py::test_automatic_blocked_without_authorization`, `tests/test_web_runner.py::test_launch_blocks_traffic_tool_without_authorization`, `tests/test_web_repeater.py::test_routes_list_create_and_send_gate`
 - **NFR-UI-read-only** The UI itself does not write result tables
   (`finding`/`attempt`/`candidate`); in automatic mode those are written by the
-  tools it invokes, not by the UI. `saved_views` (FR-UI-13, FR-CORE-9) is the
-  one deliberate exception: it holds view *definitions* a person authored in
+  tools it invokes, not by the UI. `saved_views` (FR-UI-13, FR-CORE-9) is a
+  deliberate exception: it holds view *definitions* a person authored in
   the panel (filter/sort/column specs), never tool output, so writing it does
-  not violate this invariant.
+  not violate this invariant. *(CC-UI-0450:)* so are the project records — the
+  `project` metadata row and the `launch` rows (what the UI started, never tool
+  output) — and deleting a temporary project the operator discarded.
   - Enforced by: `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
   - Not yet enforced: read-only by convention (a read-write `Store`); attempt/candidate counts and the /results, /runs/{id} and /proxy routes are unchecked; the Repeater writes `repeater_tab`/`run`/`flow`. (BUG-0111 sweep.)
 - **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
@@ -507,6 +613,36 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   (`tests/test_web_templates_csp.py`). Browser tests skip only when the real browser
   cannot run, and `FUZZLAB_REQUIRE_BROWSER=1` turns that skip into a failure. A change to
   `fuzzlab/web/templates/` or `fuzzlab/web/static/` is verified with it set.
+- **NFR-UI-project-private** *(added CC-UI-0450)* Every file and directory the UI
+  creates for a project is private from creation: project files, their SQLite side
+  files, copies and backups 0600; the projects directory, `.temporary/` and each
+  project's own directory 0700 (an existing directory that is not 0700 and ours is
+  refused); pinned jobs run with `umask 077`, so files the tools create there are 0600.
+  A legacy store readable by others is reported with a "make private" action, never
+  changed silently.
+  - Enforced by: `core.project.create` / `copy_to`, `web.projects.ProjectManager._ensure_dir`, `Runner.launch(umask=)` — `tests/test_core_project.py::test_create_is_private_exclusive_and_never_follows_a_link`, `tests/test_core_project.py::test_side_files_inherit_the_private_mode`, `tests/test_core_project.py::test_copy_is_complete_under_a_live_writer_and_private`, `tests/test_web_projects.py::test_a_real_job_records_provenance_privately_and_blocks_switching`, `tests/test_web_projects.py::test_a_launch_umask_reaches_the_whole_tree`, `tests/test_web_projects.py::test_lifecycle_new_open_save_as_close`, `tests/test_web_projects.py::test_a_shared_or_linked_projects_directory_is_refused`
+- **NFR-UI-project-paths-confined** *(added CC-UI-0450)* The browser never names a
+  project path: it sends a name (`NAME_RE`) or a listed file name (`FILE_RE`), placed
+  directly in the projects directory; an opened file must be a regular file of this user
+  there (no symlink, no subdirectory) or the operator's configured `store_path`; a recent
+  entry is re-validated on every reopen. No web module opens a store that can create
+  one, except the one creation site under the project lock.
+  - Enforced by: `web.projects` — `tests/test_web_projects.py::test_bad_project_names_are_refused`, `tests/test_web_projects.py::test_open_refuses_traversal_symlinks_and_foreign_files`, `tests/test_web_projects.py::test_a_recent_entry_outside_the_projects_directory_is_refused`, `tests/test_web_projects.py::test_no_web_module_opens_a_store_that_can_create`, `tests/test_web_projects.py::test_the_creating_open_guard_catches_synthetic_offenders`, `tests/test_web_projects.py::test_every_project_action_is_refused_cross_site`
+  - Not yet enforced: the window between validating a path and SQLite opening it (another process of the same user could swap the file) is a stated residual, and so is the window between `_check_sidecars` and a tool's own later `open()` of a pinned intermediate (the project directory is 0700 and this user's, so only this user's own processes could use it); other tools' own path flags (input paths such as `--ground-truth`) are typed by the operator, as before; a hard crash can leave a hidden, private `.copy-*.tmp` in the projects directory (never listed or opened). A snapshot's name is derived by the server (`_grammar_stem` / `_trim_stem` through `_named_path`), never from the form.
+- **NFR-UI-project-provenance-redacted** *(added CC-UI-0450)* What the UI records about
+  a job or a project (`launch.argv`, `launch.target`, `project.targets`) goes through
+  `core.redaction.redact_for_record` (URL userinfo, sensitive query values, a sensitive
+  option's value), written only by `core.project`; a project file never holds a
+  credential the UI handled.
+  - Enforced by: `core.project.insert_launch` / `set_meta` / `add_target` — `tests/test_web_projects.py::test_a_project_file_never_contains_a_credential_value`, `tests/test_web_projects.py::test_only_core_project_writes_the_project_record_tables`, `tests/test_core_project.py::test_redact_for_record_removes_every_planted_secret_shape`, `tests/test_core_project.py::test_redact_for_record_keeps_benign_values`
+  - Not yet enforced: `repeater_tab.raw_request` stores operator-typed requests as typed (an existing behaviour, see NFR-UI-redacted); notes are plain text the operator writes (labelled so on the page); a password containing a raw `/`, `?`, `#` or space inside a URL's authority (which no HTTP client would parse as credentials) keeps the part after it. Values are cut to 4096 characters **after** userinfo is stripped from the whole value (BUG-0455; `tests/test_core_project.py::test_a_credential_straddling_the_record_cut_is_still_removed`).
+- **NFR-UI-project-switch-safe** *(added CC-UI-0450)* A project is never switched, saved
+  as, closed or deleted while it is being written: one lock covers every transition and
+  every launch from the busy check to the act; a job counts as writing until its end is
+  recorded in its project; the in-process proxy and an automatic run count too. A
+  reader racing a discard can never recreate the file.
+  - Enforced by: `web.projects.ProjectManager` (`lock`, `busy_reasons`), `web.runner.Runner` (`recorded`) — `tests/test_web_projects.py::test_a_real_job_records_provenance_privately_and_blocks_switching`, `tests/test_web_projects.py::test_busy_lasts_until_the_jobs_end_is_recorded`, `tests/test_web_projects.py::test_a_switch_issued_during_a_launch_waits_and_is_refused`, `tests/test_web_projects.py::test_a_spawn_failure_marks_the_launch_failed_and_never_leaves_it_busy`, `tests/test_web_projects.py::test_the_in_process_proxy_creates_its_project_and_keeps_it_busy`, `tests/test_web_projects.py::test_temporary_project_discard_needs_confirmation_and_removes_only_its_files`
+  - Not yet enforced: a `fuzzlab` CLI process writing the same file outside the UI is not visible to it (stated residual).
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
   - Enforced by (at write time): `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`
@@ -515,7 +651,10 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
 ## 5. Interfaces and data contracts
 A local HTTP server on loopback serving the control panel/dashboard. Reads the
 store (all result tables) and structured logs; writes only the `run_metrics` table
-and its own view/UI state. No dependency on any tool's API — it reads the shared
+and its own view/UI state. *(CC-UI-0450:)* "the store" is the open project file;
+the UI also writes that project's `project` and `launch` rows and its
+`<projects_dir>/recent.json`, and passes `--store <project>` and
+`FUZZLAB_LAUNCH_TOKEN` to every pinned job it starts. No dependency on any tool's API — it reads the shared
 contract (D5). In automatic mode it invokes the tools as subprocesses/functions;
 they write their own results.
 

@@ -3,6 +3,20 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0450 — `fuzz` imports only the CSV its own run wrote (BUG-0450) (2026-10-15)
+- Change: `tools/blind_sqli_fuzzer.py`: `save_dataset` returns whether it wrote the file;
+  `main` imports `--output` into the store only when it did (`{"attempt": 0}` otherwise),
+  so an empty run never borrows an earlier run's attempts and a missing file no longer
+  aborts the oracle confirmation.
+- Impact (other components / project): none beyond the fuzzer; the web UI also pins
+  `--output` per project (CC-UI-0450).
+- Risk (level; mitigation or accepted-risk justification): low; mutation-checked test.
+- Deliverables:
+  - [x] fix — done
+  - [x] test `tests/test_core_project.py::test_fuzz_never_imports_a_stale_csv_when_its_run_collected_nothing` — done
+  - [x] ERROR_LOG, BUG-0450, PA-0450 (+ sweep) — done
+- Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). BUG-0450's regression test (`tests/test_core_project.py::test_fuzz_never_imports_a_stale_csv_when_its_run_collected_nothing`) passes and was mutation-checked.
+
 ### Bookkeeping-ID note: category 4's `CC-FUZZ`/`FR-FUZZ` entries renumbered `0027`-`0042`/`14`-`26` -> `0031`-`0046`/`18`-`30` at merge time (2026-09-23)
 
 Category 4 (`claude/category-4-build-t9uz3y`) independently assigned

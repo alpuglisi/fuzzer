@@ -432,6 +432,49 @@ changed, and the reason. Reference the commit hash where useful.
 - Pinned by strict xfails from a discovery round-trip test over every action of every
   registered parser. The fix is handed to the UI lane (BUG-0400, PA-0400).
 
+## 2026-10-15 (project files: code review round 4; CC-UI-0450, CC-CORE-0450, BUG-0456)
+- **Why:** the security reviewer's re-review found the new definition check compared
+  whitespace-normalised text, so a definition SQLite reads differently passed it.
+- **What:** definitions are compared byte for byte (BUG-0456); a discarded temporary's
+  pre-migration backups are removed with it; smaller fixes from the correctness re-review
+  (one refusal label on file creation, a clear message when leaving the previous project
+  fails, Not now proven to wait for the lock, an unreadable recent list is a refusal).
+
+## 2026-10-15 (project files: code review round 3; CC-UI-0450, CC-CORE-0450, BUG-0453, BUG-0454, BUG-0455)
+- **Why:** the third independent review (a correctness and a security reviewer) found that
+  a crafted project file could still run SQLite's own functions on open, crash the project
+  pages, or get part of a credential recorded; and that several living docs lagged.
+- **What:** the untrusted-file allowlist compares every object's definition, tables
+  included, and reads nothing before checking it (BUG-0453); every value read back from a
+  project file is typed (BUG-0454); the record redactor strips URL userinfo before cutting
+  a value (BUG-0455); a migrated leftover temporary stays temporary; SQLite's defect
+  classes propagate instead of becoming messages; the default-store test guard stays armed
+  when the file pre-exists; requirements, ARCHITECTURE and change-control brought current.
+
+## 2026-10-15 (project files: review round 2 and the layout pass; CC-UI-0450, CC-CORE-0450, BUG-0451, BUG-0452)
+- **Why:** both code reviewers' second round, and the page layout from the UI research
+  (owner: start screen when nothing is configured; Save As and Snapshot; recent.json kept).
+- **What:** the untrusted-file check is an allowlist of the objects fuzzlab creates (a
+  `TRIGGER` row had passed the denylist twice, BUG-0451); the built-in default store is
+  opened only if it already exists, otherwise offered on the start screen, and tests no
+  longer create `./fuzzlab.db` (BUG-0452, a
+  session guard); migration 23 adds a display-only project id and copy lineage; a start
+  screen, Snapshot, Remove from list, a truthful "last written" chip, interrupted labels;
+  stale pages and corrupt files are messages, not 500s; real-browser lifecycle tests.
+
+## 2026-10-15 (UI project files, Burp/ZAP-style; CC-UI-0450, CC-CORE-0450, CC-FUZZ-0450, BUG-0450)
+- **Why:** the owner wants the UI to work on saved project files: every run of a session
+  saved in that session's file, opened later to continue or review.
+- **What:** a project is one store (`.fuzzlab`, migration 22: `project` metadata,
+  `launch` provenance, `run.launch_id`); the UI gets new / open / temporary / save as
+  (SQLite backup API) / close, a recent list, the open project on every page, and a run
+  history; every launched store-writing command is pinned to the open project; paths are
+  confined to a private projects directory; files 0600; no switching while a job writes;
+  an older store is migrated only after a verified backup and the operator's consent, a
+  newer one refused (now in core too). Found in review and fixed: `fuzz` imported a
+  previous run's CSV when its own run collected nothing (BUG-0450, PA-0450). Design gate
+  3/3 (two reviewers, three rounds). Page layout waits for the UI research.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

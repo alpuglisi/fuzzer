@@ -2239,3 +2239,81 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **When the full suite is the backstop, it runs before the push of the commit it
      certifies**, on the clean committed tree. (from BUG-0403)
 
+- **PA-0450** — Strengthens `PA-0075` (a provenance claim is backed by a recorded fact)
+  from store rows to **file handoffs**, after BUG-0450: `fuzz` imported a previous run's
+  CSV as its own attempts because the file existed at the default path.
+  1. **A step imports, cites or attributes an artifact to the current run only on a
+     fact from its producer that this run wrote it** (a return value, a this-run token
+     or record) — never because the path exists.
+  2. **A fixed default output path shared by every run in a directory is a provenance
+     hazard.** A tool that writes one makes "wrote nothing" visible to its consumer; the
+     web UI pins such paths per project (`web.projects.OPTION_CLASS`, FR-UI-456), and a
+     new path option must be classified there (a discovery test fails otherwise).
+  3. **Each such handoff has a test that runs the producer empty over a pre-existing
+     file.** The PA-0002 sweep is by mechanism: every import of a file into the store,
+     with a disposition per site (recorded in BUG-0450). (from BUG-0450)
+
+- **PA-0451** — Strengthens `PA-0028` and `PA-0083(3)`, after BUG-0451: the untrusted
+  project-file check was a denylist (`type IN ('trigger','view')`), and a trigger got past
+  it twice — by sharing a table's name, then by being typed `TRIGGER`.
+  1. **A safety gate over untrusted structured input admits only an allowlist derived from
+     what this code itself creates or accepts** — exact identity, and an exact definition
+     wherever the object can execute (here `core.project.reference_schema`, built by
+     running the migrations). Never a denylist keyed on one field.
+  2. **Its tests include the platform's own equivalent spellings** (case, comments, shared
+     namespaces, direct schema writes) **and a non-vacuity fixture of every legitimate
+     shape** (here fresh, legacy, `ANALYZE`d stores). (from BUG-0451)
+
+- **PA-0452** — Strengthens `PA-0450`, after BUG-0452: tests created the UI's default
+  store `./fuzzlab.db` in the repository.
+  1. **A built-in default path is never written implicitly.** It counts as the operator's
+     choice only if it already exists; otherwise it is offered (the start screen's "Use
+     ./fuzzlab.db"), never used.
+  2. **A session-wide guard fails any test run that leaves a default output in the working
+     directory** (`tests/conftest.py::_no_default_store_in_the_working_directory`); a new
+     default output path gets the same guard. The guard compares the default path's state
+     (and its side files and project directory) before and after, so it stays armed when
+     the file already exists (code review round 3). (from BUG-0452)
+  3. **Stated exception:** an explicit operator flag that needs a store before any page
+     is opened (`fuzzlab web --with-proxy`) binds and creates the default at start-up
+     (`ProjectManager.adopt_default`, FR-UI-458). Any other exception is written here
+     first. (code review round 3)
+
+- **PA-0453** — Strengthens `PA-0451`, after BUG-0453: the allowlist that replaced
+  BUG-0451's denylist exempted tables from definition matching because `trusted_schema=OFF`
+  was believed to make them inert; a generated column, `CHECK` or `DEFAULT` ran SQLite's
+  own functions without bound on open, listing and migrate.
+  1. **An allowlist over untrusted structure compares the full definition of every
+     object.** No kind is exempted on the belief that a platform setting makes it inert;
+     a claim that a setting protects something is backed by an attack fixture showing the
+     protected case blocked and the unprotected case running.
+  2. **Nothing of an untrusted structure is read before the definition that computes it is
+     validated** (here `schema_version` before its rows), and a version this build cannot
+     validate is refused before any other read. (from BUG-0453)
+
+- **PA-0454** — Strengthens `PA-0108` and `PA-0101(2)`, after BUG-0454: a deeply nested or
+  oddly typed value in a project file from someone else crashed the project pages.
+  1. **Every value read from a store or file that can come from someone else is typed at
+     one parser before use**: its storage type checked (SQLite does not enforce a declared
+     column type), its size capped, JSON parsed with `RecursionError` handled; an odd value
+     reads as missing or malformed — never fabricated, never an exception.
+  2. **A fix for one parser-limit crash is swept across every parser of the same input
+     source in the same change** (PA-0002 applied at fix time, not later). (from BUG-0454)
+
+- **PA-0455** — Strengthens `PA-0101`, after BUG-0455: the record redactor truncated a
+  value before stripping its URL userinfo, so a credential straddling the cut was kept.
+  1. **A redactor never applies a lossy transformation (truncation, decoding, splitting)
+     before the redaction that depends on the whole value**; bound the work with
+     linear-time redaction first and cut last.
+  2. **Every bound a redactor introduces is tested with a secret straddling it.** (from
+     BUG-0455)
+
+- **PA-0456** — Strengthens `PA-0131` and `PA-0453`, after BUG-0456: the definition check
+  compared whitespace-normalised text (`str.split()`), and a definition SQLite reads
+  differently (a U+00A0 inside an identifier, a moved `--` comment end) compared equal.
+  1. **An equality or allowlist check over untrusted input compares the raw form, byte for
+     byte,** unless a normalisation is the consumer's own (its tokenizer or parser) — never
+     a convenience transform from another grammar.
+  2. **Its tests include inputs that differ only in what the consumer treats as
+     significant** (non-ASCII spaces, comment boundaries, quoting), each with a
+     non-vacuity step proving the consumer reads them differently. (from BUG-0456)

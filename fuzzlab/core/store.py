@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sqlite3
 import time
 import warnings
@@ -20,7 +21,19 @@ from typing import Any
 from fuzzlab.core import migrations
 
 
-def open_store(path: str | Path) -> sqlite3.Connection:
+#: Environment variable the web UI sets on a job it launches into a project: the random
+#: token of that job's ``launch`` row (migration 22). ``Store.start_run`` links each run the
+#: job creates to it (FR-CORE-451).
+LAUNCH_TOKEN_ENV = "FUZZLAB_LAUNCH_TOKEN"
+
+
+def _no_create_uri(path: str | Path) -> str:
+    """A ``mode=rw`` SQLite URI for an existing file: an open that never creates it
+    (`as_uri` quotes the path, so ``#``/``?``/spaces stay part of the name)."""
+    return Path(path).resolve().as_uri() + "?mode=rw"
+
+
+def open_store(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     """Open the store connection, the one central place the whole toolkit routes
     through (R-08). Every process *and test* that opens the SQLite file directly
     (rather than via ``Store``) should call this, not ``sqlite3.connect``.
@@ -40,13 +53,23 @@ def open_store(path: str | Path) -> sqlite3.Connection:
       ``REFERENCES``.
     - connect-time ``timeout=10.0`` (seconds) — the driver-level lock-wait
       ceiling backing ``busy_timeout``.
+    - ``trusted_schema=OFF`` — a project file may come from someone else (CC-CORE-0450);
+      no schema object may call an application function. Migrations create none.
+
+    ``create=False`` opens an existing file only (``sqlite3.OperationalError`` if it is
+    missing) — the web UI's readers use it so a racing reader can never recreate a
+    discarded project (CC-UI-0450).
     """
-    conn = sqlite3.connect(str(path), timeout=10.0)
+    if create:
+        conn = sqlite3.connect(str(path), timeout=10.0)
+    else:
+        conn = sqlite3.connect(_no_create_uri(path), timeout=10.0, uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=10000")
     _set_wal(conn)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA trusted_schema=OFF")
     return conn
 
 
@@ -67,26 +90,53 @@ def _set_wal(conn: sqlite3.Connection, deadline_s: float = 10.0) -> None:
             delay = min(delay * 2, 0.25)
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
+def connect(path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     """Back-compat alias for :func:`open_store` — same central connection."""
-    return open_store(path)
+    return open_store(path, create=create)
+
+
+def _is_launch_token(value: str) -> bool:
+    """A launch token is 32 lowercase hex characters (``secrets.token_hex(16)``)."""
+    return len(value) == 32 and all(c in "0123456789abcdef" for c in value)
+
+
+#: The ``run.notes`` prefix ``Store.mark_aborted`` writes; read only by :func:`is_aborted`.
+ABORTED_PREFIX = "aborted: "
+
+
+def is_aborted(notes: str | None) -> bool:
+    """Whether a run's ``notes`` say it stopped on an error (``Store.mark_aborted``) — the
+    one reader of that convention (PA-0003)."""
+    return isinstance(notes, str) and notes.startswith(ABORTED_PREFIX)
 
 
 class Store:
     """A small, dependency-light wrapper over a migrated SQLite connection."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, create: bool = True):
         self.path = Path(path)
-        self.conn = connect(self.path)
-        migrations.migrate(self.conn)
+        self.conn = connect(self.path, create=create)
+        try:
+            migrations.migrate(self.conn)
+        except BaseException:                    # e.g. SchemaTooNew: never leak the handle
+            self.conn.close()
+            raise
 
     # -- runs -------------------------------------------------------------
     def start_run(self, tool: str, config_hash: str, env_profile: str | None = None,
                   notes: str | None = None) -> int:
-        """Record a run and return its id. Every result row references a run."""
+        """Record a run and return its id. Every result row references a run.
+
+        A run started inside a job the web UI launched carries that job's ``launch`` id
+        (FR-CORE-451): the UI gives the child a random token (``LAUNCH_TOKEN_ENV``), and
+        the run links only when that token names a ``launch`` row of *this* store. Any
+        other value — absent, malformed, or another store's — links nothing (NULL)."""
+        token = os.environ.get(LAUNCH_TOKEN_ENV, "")
+        token = token if _is_launch_token(token) else None
         cur = self.conn.execute(
-            "INSERT INTO run (tool, config_hash, env_profile, notes) VALUES (?,?,?,?)",
-            (tool, config_hash, env_profile, notes),
+            "INSERT INTO run (tool, config_hash, env_profile, notes, launch_id) "
+            "VALUES (?,?,?,?,(SELECT id FROM launch WHERE token=?))",
+            (tool, config_hash, env_profile, notes, token),
         )
         self.conn.commit()
         return int(cur.lastrowid)
@@ -100,7 +150,7 @@ class Store:
         try:
             self.conn.rollback()                 # drop a half-written statement
             self.conn.execute("UPDATE run SET notes=? WHERE id=?",
-                              (f"aborted: {why}", run_id))
+                              (f"{ABORTED_PREFIX}{why}", run_id))
             self.conn.commit()
         except Exception:                        # noqa: BLE001 - never mask the cause
             pass

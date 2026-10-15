@@ -63,7 +63,7 @@ def _seed_flow(path):
         hw.flush()
 
 
-def test_launcher_dry_run_and_run_in_browser(tmp_path, monkeypatch):
+def test_launcher_dry_run_and_run_in_browser(tmp_path):
     port = _free_port()
     store = tmp_path / "s.db"
     _seed_flow(store)                       # a recorded flow for the Proxy History tab
@@ -89,18 +89,17 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path, monkeypatch):
             # Launch is a master-detail view: pick the activity to reveal its form.
             page.click('.actlist .act[data-for="report"]')
             page.locator(f"{report} [data-dest='store']").wait_for(state="visible")
-            # Dry-run: fill --store, preview shows the exact command, sends nothing.
+            # Dry-run: preview shows the exact command, sends nothing. A typed --store is
+            # overridden by the open project (FR-UI-456, CC-UI-0450): the job is pinned.
             page.fill(f"{report} [data-dest='store']", "x.db")
             page.click(f"{report} [data-action='dry-run']")
             preview = page.locator(f"{report} .launch-preview")
             preview.wait_for(state="visible")
-            assert "fuzzlab report --store x.db" in preview.inner_text()
+            assert f"fuzzlab report --store {store}" in preview.inner_text()
+            assert "x.db" not in preview.inner_text()
 
-            # Run: clear --store first so report exits fast and writes no file into the
-            # repo; its output must still stream to completion over SSE. --store is
-            # optional (FR-CORE-400): the child inherits FUZZLAB_STORE, pinned to an
-            # absent store, so it refuses ("no such store") whatever the host holds.
-            monkeypatch.setenv("FUZZLAB_STORE", str(tmp_path / "absent.db"))
+            # Run: report reads the (pinned) project and exits; its output must still
+            # stream to completion over SSE.
             page.fill(f"{report} [data-dest='store']", "")
             page.click(f"{report} [data-action='run']")
             output = page.locator(f"{report} .launch-output")

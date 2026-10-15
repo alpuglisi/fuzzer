@@ -76,6 +76,167 @@ Newest first.
   - The browser launcher test passes with `FUZZLAB_REQUIRE_BROWSER=1`.
   - Effective.
 
+### CC-UI-0450 — Project files: start screen, new / open / temporary / save as / snapshot / close, recent list, run history, jobs pinned to the project (2026-10-15)
+- Change:
+  - New `web/projects.py`: `ProjectManager` (one open project; startup binds an
+    explicitly configured `store_path` — or an existing `./fuzzlab.db` — only if its
+    schema is this build's; with only the built-in default and no such file nothing is
+    open and the start screen offers it (FR-UI-458) — an older file waits for
+    the migration offer, a newer/invalid one is refused; lifecycle under one
+    `asyncio.Lock` with a busy check; temporary projects with an owner `flock` and an
+    exact-file discard; the recent list under `secretfile.locked` + `replace_secret`;
+    names only from the browser, files confined to the projects directory),
+    `ProjectBoundConfig` (every existing `cfg.get("store_path")` follows the open
+    project, `None` when none is open), `open_reader` (never creates), `OPTION_CLASS` /
+    `pin_values` / `is_pinned` (every `str` option of every spec classified; `--store`
+    and intermediates pinned), `record_argv`.
+  - New `web/projectroutes.py`: `/projects`, `/project`, `/api/projects`,
+    `/api/project/history`, and PRG POSTs (`new`, `temporary`, `use-default`, `open`,
+    `save-as`, `snapshot`, `forget`, `close`, `migrate`, `dismiss`, `discard-temporary`,
+    `make-private`, `/project/meta`); refusals become a server-held message, never
+    reflected text; `/` redirects to the start screen when nothing is open.
+  - `web/app.py`: one registration call; `create_app` wraps the config, pops
+    `FUZZLAB_LAUNCH_TOKEN` from its own environment, readers use `open_reader`, writers
+    (saved views, Repeater, in-process proxy) call `require_writable()` first; pinned
+    launches go through `ProjectManager.launch` (409 with no project); the dry run shows
+    the pin; the automatic run holds a frozen path and counts as busy; `--with-proxy`
+    keeps the project busy and refuses a waiting/refused start-up project with the remedy;
+    nav gains "Project"; the shell context carries the project.
+  - `web/runner.py`: `launch(project=, command=, on_done=, umask=)`; `_Run.project` set
+    only after a successful spawn; `on_done` runs off the loop before `done` (always sent;
+    a named error list reported on the stream); `recorded`; `pinned_jobs`, `unrecorded`;
+    `shutdown` marks jobs stopping.
+  - `web/proxycontrol.py`: Repeater stores and run ids keyed by project path (a switch
+    gives the new project its own `repeater` run); opens never create; the proxy's history
+    store opens with `create=False`.
+  - Templates: `base.html` project chip + banner; new `sections/projects.html` (the start
+    screen and project manager, laid out from the UI research), `sections/project.html`
+    (metadata, lineage, run history), `static/css/projects.css`; `run.html` findings
+    anchor.
+- Impact (other components / project): **`fuzzlab web` with the built-in default config
+  no longer opens `./fuzzlab.db` unless that file exists** — it starts on the start screen,
+  which offers it (FR-UI-458; `--with-proxy` still creates it at start-up, PA-0452(3)); an
+  explicit `store_path` (env, config file, override) is bound as before. Tests that built a
+  default-config app now seed a private store or follow the redirect
+  (`test_web_frontend.py`, `test_web_runner.py`, `test_web_launcher.py`). Launched
+  store-writing commands now always write the open project; a typed `--store`, `--db`, `--spider-db`, `--out` (audit) or
+  `--output` (fuzz) is overridden, and the default intermediates move from the working
+  directory into `<project>.d/`. Site-tree session: its route reading
+  `cfg.get("store_path")` follows the project automatically, but must open the store with
+  `projects.open_reader` (or `Store(path, create=False)`) — the AST guard
+  `tests/test_web_projects.py::test_no_web_module_opens_a_store_that_can_create` fails on a
+  creating open in `fuzzlab/web/`. CLI-restructure session: no dependency (no CLI flag
+  added; a `fuzzlab web --project` flag is a follow-up for that session). Core:
+  CC-CORE-0450; fuzzer: CC-FUZZ-0450.
+- Risk (level; mitigation or accepted-risk justification): medium. Mitigations: path
+  confinement and name grammar, 0600/0700 + child umask, one lock + busy-until-recorded,
+  typed refusals, cross-site gate on every new POST (tested), browser page walk.
+  Residuals (stated in the NFRs): a path swap between validation and SQLite's open by a
+  process of the same user; a CLI process writing the same file is invisible to the UI;
+  the Repeater stores typed requests as typed; with `--with-proxy` the project cannot be
+  switched. The default-store change is mitigated by binding an existing `./fuzzlab.db`
+  exactly as before (an existing setup sees no change) and by the start screen's one-click
+  "Use it".
+- Deliverables:
+  - [x] `web/projects.py`, `web/projectroutes.py`, app/runner/proxycontrol wiring — done
+  - [x] pages + topbar chip/banner — done
+  - [x] tests: `tests/test_web_projects.py` (new); `test_web_launcher_browser.py` (pinned preview), `test_web_repeater.py` (controller never creates) updated — done
+  - [x] FR-UI-450..457, NFR-UI-project-{private,paths-confined,provenance-redacted,switch-safe}, NFR-UI-read-only amended, §5; traceability classification; runbook section — done
+  - [x] page layout from the UI research — done (layout pass, below): start screen + `/` redirect, use-default, Snapshot, Remove from list, leftover Discard confirmation, lineage, truthful last-written/size, labels
+  - [x] real-browser tests: `tests/test_web_projects_browser.py` — done
+- Review: design gate 3/3 (reviewers A and B, three rounds). Code review round 1 (on
+  9f1536e): A — 1 blocking, 10 non-blocking; B — 4 blocking, 9 non-blocking. Fixed in the
+  follow-up commit:
+  - (A1, blocking) opening an older/newer file while a project is open was a silent
+    no-op → the offer/refusal card shows whenever one is pending, with a message; the
+    migrate form carries the discard confirmation.
+  - (B1, blocking — CORE) a trigger named like a table hid from the trigger/view refusal
+    (one name → type map) → see CC-CORE-0450's review note.
+  - (B2/A3, blocking) New / Save as adopted, or on failure deleted, a stale
+    `<name>.fuzzlab.d` → both refuse when any file the project would own exists.
+  - (B3, blocking) a planted symlink (or hard link) at a pinned intermediate let a tool's
+    `open()` write outside the project → each is checked (absent, or a plain singly
+    linked file of ours, side files included) before the job starts.
+  - (B4, blocking — CORE) `redact_for_record` kept part of a password containing `@`, and
+    fragment / matrix / scheme-relative secrets → see CC-CORE-0450.
+  - Non-blocking, all fixed: discard leftovers reported on every transition (`_switch`
+    flashes; `current` set even if leaving raises); owner lock held until deletion ends;
+    exception lists narrowed (`_ACTION_ERRORS`, `_RECORD_ERRORS` = `OperationalError`;
+    OS errors converted to `ProjectError` at their sites; `ProjectError` → 409 on the API);
+    `recent.json` opened `O_NOFOLLOW | O_NONBLOCK`, regular files only, read capped;
+    missing parents of the projects directory created 0700; `.temporary` checked like the
+    projects directory; recent entries must match `FILE_RE`; `_temporary` releases and
+    removes on failure; a failure before the spawn marks the launch failed; `shutdown`
+    waits (≤ `RECORD_WAIT_S`) so stopped jobs record `stopped`; the whole `_pump` tail is
+    in its `finally`; thread-read dicts are snapshotted; Repeater state keyed by the
+    file's identity (path + inode); `_ensure_created` tolerates a CLI creating the file
+    meanwhile; AST guards track import aliases, `getattr`, openers passed as arguments,
+    `core_project.create`/`copy_to` outside their functions, and every SQL write form.
+  - Recorded deviation from design F18: refusals are a server-held, autoescaped message
+    queue (`manager.flash`), not `?notice=<code>`; the text may quote the name the
+    operator typed. One local operator; the next projects page consumes it.
+- Code review round 2 (on 1e81639; reviewers A and B, fresh agents after a container
+  restart): A — 1 blocking (narrowing the exception lists made stale pages and corrupt
+  files 500s → each project operation's worker converts OS/SQLite errors into a named
+  refusal via `projects._refusal`; recent ids must be ASCII digits), plus Repeater run ids
+  re-checked on a cache hit (inodes are reused), a long target refused before any launch
+  row, the pump tail always recording (`ProcUtilError` reported, `_RECORD_ERRORS` =
+  `DatabaseError`, `SchemaTooNew`), and test fixes; B — 1 blocking (BUG-0451, CORE), plus a
+  linear userinfo pattern and a 4096-character value cap, deep `recent.json` handled,
+  AST guards that resolve aliases, flag any non-call use of an opener and join split SQL,
+  `_copy_sidecars` single-link, `_temporary` cleanup by inode, `projects_dir` absolute, and
+  two stated residuals (pinned-file TOCTOU, odd-character passwords).
+- **Layout pass** (owner decisions: the research branch `claude/new-session-jqk4ku`;
+  startup = the configured store, else the start screen; Save As **and** Snapshot;
+  `recent.json` kept, the D21 global config DB a follow-up). Design gate: reviewers C and
+  D, two rounds, 3/3 (with D's redirect rule and C's "no queued warning" condition).
+  Built: the start screen (FR-UI-458) and `/` redirect; "Use ./fuzzlab.db" (BUG-0452's
+  fix); the chip (FR-UI-454); Snapshot; Remove from list; leftover Discard confirmation;
+  Open/Remove matched by index and path; listing summaries; interrupted labels; lineage on
+  `/project`; real-browser lifecycle tests (`tests/test_web_projects_browser.py`).
+  BUG-0452 (tests created `./fuzzlab.db`) recorded with PA-0452 and a session guard.
+- Code review round 3 (on 8569187; a correctness and a security reviewer, fresh agents):
+  - (blocking, CORE) BUG-0453 — see CC-CORE-0450.
+  - (blocking, docs) living docs behind the code → FR-UI-450 (startup) and FR-UI-457
+    (allowlist) brought current, ARCHITECTURE's build status, this entry's
+    Change/Impact/Risk/Deliverables, CC-CORE-0450's migration 23 + allowlist impact, the
+    CHANGELOG line and the module docstring.
+  - BUG-0454 (CORE) — crafted values crashed `/project`; BUG-0455 (CORE) — see CC-CORE-0450.
+  - Non-blocking, fixed: a migrated leftover temporary stays temporary (owner lock taken
+    before the migration, inode recorded, never in Recent; `Pending.project_kind`);
+    Not now takes the lock and a vanished offer is a refusal; `_refusal` no longer
+    converts SQLite's defect classes (`ProgrammingError`, `InterfaceError`,
+    `InternalError`, `IntegrityError`, `NotSupportedError`) and wraps the launch workers
+    (a database error while recording a job is a 409); a failure leaving the previous
+    project after a successful New/Open/Save as/migrate is a warning and the success's
+    bookkeeping (recent, pending) still runs; Open from Recent requires the path; the
+    already-open project from Recent is a no-op even while busy; the Open list's size and
+    time count a non-empty `-wal`; the default offer says whether the file exists; a
+    missing "last written" or metadata value reads "unknown"; `identity_malformed` is
+    shown; the BUG-0452 guard compares the default store's state (store, side files, `.d`)
+    so it stays armed when one pre-exists; `--with-proxy`'s start-up creation written
+    into PA-0452(3)/FR-UI-458. Tests named in each fix's commit.
+  - Follow-up (BUG-0454's sweep): the results pages that predate project files
+    (`/runs/{id}`, findings, flows) also read the open project and may 500 on an odd
+    value in a crafted file that passed the schema allowlist — a page error, not code
+    execution or a write; for the results-pages owner.
+  - Residual (stated): a migrated temporary's pre-migration backup (`<tmp>.d/backups/`)
+    is kept, and reported, when the temporary is discarded. *(Superseded in round 4: it
+    is now removed with the temporary.)*
+- Code review round 4 (on bffa9c1; the same two reviewers): correctness — APPROVE with
+  non-blocking items, all fixed: one `_refusal` on `_ensure_created` ("creating the
+  project file"); a failure leaving the previous project gets its own warning, not "was
+  discarded, but"; the dismiss test proves Not now waits for the lock; an unreadable
+  recent list in the already-open check is a refusal, not a 500; a discarded temporary's
+  own pre-migration backups (`backups/<stem>.pre-v<N>-<UTC>-<hex>.fuzzlab` and side files,
+  regular files of this user) are removed with it, anything else in `backups/` left and
+  reported (`_remove_own_backups`; also the security reviewer's item 2). Security — 1
+  blocking (BUG-0456, CORE; see CC-CORE-0450).
+- Code review round 5 (on 4f6c46b): correctness **APPROVE**, security **APPROVE** — the
+  review gate is closed (both agree). One CORE note applied and one CORE follow-up
+  recorded (CC-CORE-0450).
+- Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). UI: `tests/test_web_projects.py` + `tests/test_web_projects_browser.py` 122 passed.
+
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
   candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could

@@ -37,10 +37,12 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import sqlite3
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from fuzzlab import procutil
+from fuzzlab.core.migrations import SchemaTooNew
 from fuzzlab.web.sse import format_event
 
 if TYPE_CHECKING:
@@ -93,10 +95,22 @@ def display_command(spec: "CommandSpec", values: dict[str, Any]) -> str:
 
 # --- live execution --------------------------------------------------------
 
+#: What a job's completion hook may raise that is reported on its stream (PA-0106).
+#: The project file gone, locked, replaced by a non-database, or by a newer schema.
+_RECORD_ERRORS = (sqlite3.DatabaseError, SchemaTooNew)
+
+
 class _Run:
-    def __init__(self, token: str, argv: list[str]) -> None:
+    def __init__(self, token: str, argv: list[str], command: str = "") -> None:
         self.token = token
         self.argv = argv
+        self.command = command or (argv[3] if len(argv) > 3 else "")
+        # CC-UI-0450: the project a job writes (set only once its spawn succeeded) and
+        # whether its end is recorded there; until then it keeps the project busy.
+        self.project: str | None = None
+        self.on_done: Callable[[int | None, bool], None] | None = None
+        self.recorded = False
+        self.pump: asyncio.Task | None = None
         self.proc: asyncio.subprocess.Process | None = None
         self.handle: procutil.ServerHandle | None = None
         self.stopping = False
@@ -114,14 +128,23 @@ class Runner:
     def __init__(self) -> None:
         self._runs: dict[str, _Run] = {}
 
-    async def launch(self, argv: list[str], *, env: dict[str, str] | None = None) -> str:
+    async def launch(self, argv: list[str], *, env: dict[str, str] | None = None,
+                     project: str | None = None, command: str = "",
+                     on_done: Callable[[int | None, bool], None] | None = None,
+                     umask: int | None = None) -> str:
         """Start ``argv`` as a child process; return its run token.
 
         ``env`` is the child's complete environment (``None`` inherits this process's);
         the Lab page uses it to hand ``PFF_PROFILE`` to ``labctl.sh``.
+
+        A job launched into a project (CC-UI-0450) passes ``project`` (it keeps that
+        project busy until its end is recorded: `pinned_jobs`), ``on_done(returncode,
+        stopping)`` (run off the event loop before the ``done`` event, which is always
+        sent) and ``umask`` (the whole tree's file-creation mask).
         """
         token = secrets.token_hex(8)
-        run = _Run(token, argv)
+        run = _Run(token, argv, command)
+        run.on_done = on_done
         self._runs[token] = run
         run.handle = await procutil.astart_server(
             argv,
@@ -129,9 +152,11 @@ class Runner:
             stderr=asyncio.subprocess.STDOUT,
             env=env,
             allow_thread=True,  # the event-loop thread: lives as long as the UI (BUG-0125 D18)
+            umask=umask,
         )
+        run.project = project            # only after a successful spawn (design round 2)
         run.proc = run.handle.proc
-        asyncio.create_task(self._pump(run))
+        run.pump = asyncio.create_task(self._pump(run))
         return token
 
     async def _pump(self, run: _Run) -> None:
@@ -146,24 +171,37 @@ class Runner:
         # Read until the supervisor has exited, then drain for at most DRAIN_S
         # (BUG-0125 review round 2).
         reader = asyncio.ensure_future(lines())
-        code = await run.proc.wait()
-        if code == procutil.CODE_UNKNOWN:  # never shown as if it were a real status
-            await run.queue.put(("output", "[fuzzlab] exit status unknown: the job's "
-                                           "supervisor was reaped outside fuzzlab"))
-            code = None
-        run.returncode = code
-        run.finished = True
         try:
-            await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
-        except asyncio.TimeoutError:
-            reader.cancel()
-            await run.queue.put(("output", "[fuzzlab] output still held open by a process that "
-                                           "outlived the job; stopped reading it"))
-        try:
-            await procutil.astop_server(run.handle)  # collects the exited supervisor
-        except procutil.ServerLost as exc:  # stopped without a request: say so (loud)
-            await run.queue.put(("output", f"[fuzzlab] {exc}"))
-        await run.queue.put(("done", run.returncode))
+            code = await run.proc.wait()
+            if code == procutil.CODE_UNKNOWN:  # never shown as if it were a real status
+                await run.queue.put(("output", "[fuzzlab] exit status unknown: the job's "
+                                               "supervisor was reaped outside fuzzlab"))
+                code = None
+            run.returncode = code
+            run.finished = True
+            try:
+                await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
+            except asyncio.TimeoutError:
+                reader.cancel()
+                await run.queue.put(("output", "[fuzzlab] output still held open by a "
+                                               "process that outlived the job; stopped "
+                                               "reading it"))
+            try:
+                await procutil.astop_server(run.handle)  # collects the exited supervisor
+            except procutil.ProcUtilError as exc:  # lost / exposed / check failed: loud,
+                await run.queue.put(("output", f"[fuzzlab] {exc}"))  # and still recorded
+            if run.on_done is not None:
+                try:
+                    await asyncio.to_thread(run.on_done, run.returncode, run.stopping)
+                except _RECORD_ERRORS as exc:  # the named list; anything else propagates
+                    await run.queue.put(("output", "[fuzzlab] could not record the job's "
+                                                   f"end in its project: {exc}"))
+        finally:
+            # Whatever happened above (an error, a cancellation), the job no longer
+            # writes its project's record and its stream ends (code review A).
+            run.finished = True
+            run.recorded = True
+            run.queue.put_nowait(("done", run.returncode))
 
     async def stream(self, token: str):
         """Yield SSE events for a run: ``output`` lines, then a ``done`` event."""
@@ -209,10 +247,16 @@ class Runner:
             except procutil.ProcUtilError as exc:  # lost / exposed: say so on its stream
                 await run.queue.put(("output", f"[fuzzlab] {exc}"))
 
+    #: Seconds `shutdown` waits for stopped jobs to record their end in their project.
+    RECORD_WAIT_S = 10.0
+
     async def shutdown(self) -> None:
-        """Stop every live job (the UI is shutting down; BUG-0125 D18)."""
+        """Stop every live job (the UI is shutting down; BUG-0125 D18), then wait up to
+        `RECORD_WAIT_S` for each to record its end (``stopped``) in its project; a job
+        that does not is left ``running`` and read as ``unknown`` on the next open."""
         for run in list(self._runs.values()):
             if run.handle is not None and not run.finished:
+                run.stopping = True          # its project records "stopped"
                 try:
                     await procutil.astop_server(run.handle)
                 except procutil.NonLoopbackListener as exc:  # BUG-0130 (ExposedAndLost too)
@@ -221,6 +265,21 @@ class Runner:
                     pass  # already stopped without a request; reported on its stream
                 except procutil.ProcUtilError as exc:  # e.g. ListenerCheckFailed: loud
                     await run.queue.put(("output", f"[fuzzlab] {exc}"))
+        pumps = [r.pump for r in list(self._runs.values())
+                 if r.pump is not None and not r.pump.done()]
+        if pumps:
+            await asyncio.wait(pumps, timeout=self.RECORD_WAIT_S)
 
     def known(self, token: str) -> bool:
         return token in self._runs
+
+    def pinned_jobs(self, project: str) -> list[str]:
+        """The commands of jobs still writing ``project``: spawned into it and their end
+        not yet recorded there (CC-UI-0450)."""
+        return [r.command for r in list(self._runs.values())     # snapshot: read from
+                if r.project == project and not r.recorded]      # worker threads too
+
+    def unrecorded(self, token: str) -> bool:
+        """Whether the job ``token`` is still running or its end is not yet recorded."""
+        run = self._runs.get(token)
+        return run is not None and not run.recorded

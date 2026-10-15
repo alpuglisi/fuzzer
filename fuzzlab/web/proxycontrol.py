@@ -16,6 +16,7 @@ listener but sends nothing until a proxied client drives in-scope traffic throug
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -66,7 +67,9 @@ class ProxyController:
         if self.config.store_path:
             from fuzzlab.core.store import Store
             from fuzzlab.proxy.history import HistoryWriter
-            self._store = Store(self.config.store_path)
+            # The app's lifespan made the project file exist (ProjectManager.
+            # require_writable); never create one here (CC-UI-0450).
+            self._store = Store(self.config.store_path, create=False)
             run_id = self._store.start_run("proxy", self.config.host)
             # batch_size=1: each flow is persisted immediately so the panel sees it live.
             self._history = history = HistoryWriter(self._store, run_id, batch_size=1)
@@ -244,47 +247,86 @@ class RepeaterController:
     event-loop thread per call, or any future multi-threaded serving setup) — so the
     persistent store/``Repeater`` are kept **per calling thread** (``threading.local``)
     rather than as one shared instance attribute. All threads still share a single
-    ``repeater`` run row (``self._run_id``, created once under ``self._run_lock``) so
-    tabs created from any thread appear together.
+    ``repeater`` run row per project (``self._run_ids``, created once per project under
+    ``self._run_lock``) so tabs created from any thread appear together.
+
+    **Projects (CC-UI-0450).** ``cfg`` is the app's project-bound config, so the store is
+    the open project. Each thread's cached store/``Repeater`` and the shared run id are
+    keyed by that project's path: after a switch a thread drops (and closes, on its own
+    thread) the old project's handle and opens the new one, and the new project gets its
+    own ``repeater`` run. Nothing here creates a store: the routes call
+    ``ProjectManager.require_writable()`` before any write.
     """
 
     def __init__(self, cfg, sender=None) -> None:
         self.cfg = cfg
         self._sender = sender
-        self._run_id = None
+        self._run_ids: dict[tuple, int] = {}
         self._run_lock = threading.Lock()
         self._local = threading.local()
 
-    def _path(self) -> str:
-        return self.cfg.get("store_path", "fuzzlab.db")
+    def _path(self) -> str | None:
+        return self.cfg.get("store_path")
+
+    def _key(self):
+        """The open project's identity: its path and the file's ``(st_dev, st_ino)``, so a
+        project file replaced at the same path is a different project (code review A)."""
+        path = self._path()
+        if path is None:
+            return None
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return (path, None)
+        return (path, (st.st_dev, st.st_ino))
 
     def _thread_store(self):
-        """This calling thread's persistent store, if one was already created (else None)."""
-        return getattr(self._local, "store", None)
+        """This calling thread's persistent store for the open project, if this thread
+        already has one (else None). A handle cached for another project is closed."""
+        store = getattr(self._local, "store", None)
+        if store is not None and getattr(self._local, "path", None) != self._key():
+            try:
+                store.close()
+            finally:
+                self._local.store = self._local.rep = self._local.path = None
+            return None
+        return store
 
     def _writer(self):
         """Persistent store + Repeater for the *calling thread*, created lazily on first
         write. See the class docstring for why this is per-thread rather than shared.
         """
+        self._thread_store()                       # drops another project's handle
         rep = getattr(self._local, "rep", None)
         if rep is None:
             from fuzzlab.core.store import Store
+            from fuzzlab.web.projects import NoProject
             from fuzzlab.proxy.history import HistoryWriter
             from fuzzlab.proxy.repeater import Repeater
             sender = self._sender
             if sender is None:
                 from fuzzlab.proxy.socketsender import SocketSender
                 sender = SocketSender(verify_tls=False)
-            store = Store(self._path())
+            path = self._path()
+            if path is None:
+                raise NoProject("no project is open")
+            store = Store(path, create=False)
+            key = self._key()
             with self._run_lock:
-                if self._run_id is None:
-                    self._run_id = store.start_run(
+                cached = self._run_ids.get(key)
+                if cached is not None and (store.conn.execute(   # inodes are reused: the
+                        "SELECT tool FROM run WHERE id=?", (cached,)).fetchone() or  # id
+                        [None])[0] != "repeater":                  # must still be ours
+                    del self._run_ids[key]
+                if key not in self._run_ids:
+                    self._run_ids[key] = store.start_run(
                         "repeater", self.cfg.get("target_base_url", ""))
-            run_id = self._run_id
+                run_id = self._run_ids[key]
             rep = Repeater(store, run_id, sender,
                            history=HistoryWriter(store, run_id, batch_size=1))
             self._local.store = store
             self._local.rep = rep
+            self._local.path = key
         return rep
 
     @staticmethod
@@ -297,12 +339,11 @@ class RepeaterController:
 
     def list_tabs(self) -> list[dict[str, Any]]:
         """All saved tabs, newest first. Read-only; never creates the store."""
-        from fuzzlab.web import results
+        from fuzzlab.web.projects import open_reader
         thread_store = self._thread_store()
-        if thread_store is None and not results.store_exists(self._path()):
+        own = thread_store or open_reader(self._path())
+        if own is None:
             return []
-        from fuzzlab.core.store import Store
-        own = thread_store or Store(self._path())
         try:
             rows = own.conn.execute(
                 "SELECT id, name, host, port, use_tls, raw_request FROM repeater_tab "
@@ -321,12 +362,11 @@ class RepeaterController:
 
     def create_from_flow(self, flow_id: int) -> dict[str, Any] | None:
         """Seed a tab from a recorded flow's request (redacted bytes; edit to re-add auth)."""
-        from fuzzlab.web import results
+        from fuzzlab.web.projects import open_reader
         thread_store = self._thread_store()
-        if thread_store is None and not results.store_exists(self._path()):
+        own = thread_store or open_reader(self._path())
+        if own is None:
             return None
-        from fuzzlab.core.store import Store
-        own = thread_store or Store(self._path())
         try:
             row = own.conn.execute(
                 "SELECT url, host, req_raw_sha FROM flow WHERE id=?", (flow_id,)).fetchone()
@@ -357,12 +397,11 @@ class RepeaterController:
         ``None`` if the finding (or the store) does not exist. It is never a
         byte-exact replay of the original traffic.
         """
-        from fuzzlab.web import results
+        from fuzzlab.web.projects import open_reader
         thread_store = self._thread_store()
-        if thread_store is None and not results.store_exists(self._path()):
+        own = thread_store or open_reader(self._path())
+        if own is None:
             return None
-        from fuzzlab.core.store import Store
-        own = thread_store or Store(self._path())
         try:
             row = own.conn.execute(
                 "SELECT f.url, f.method, f.param, f.evidence, t.base_url "
@@ -378,6 +417,7 @@ class RepeaterController:
             if own is not thread_store:
                 own.close()
         base_url = row["base_url"] or self.cfg.get("target_base_url", "")
+        from fuzzlab.web import results
         raw, host, port, use_tls = results.build_finding_raw_request(
             row["url"], row["method"], row["param"], evidence.get("payload", ""), base_url)
         return self.create_tab(f"finding #{finding_id}", host, port, raw, use_tls=use_tls)

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Project{% endblock %}
+{% block crumb %}Project{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/projects.css">{% endblock %}
+{% block content %}
+{# CC-UI-0450 (FR-UI-450, FR-UI-455): the open project's metadata and run history. #}
+<section class="panel" aria-labelledby="project-h1" id="project-root">
+  <h1 id="project-h1" class="visually-hidden">Project</h1>
+
+  {% for f in flash %}
+  <p class="card flash {{ 'ok' if f.level == 'ok' else ('warn' if f.level == 'warn' else 'bad') }}"
+     role="status">{{ f.text }}</p>
+  {% endfor %}
+
+  {% if project.status != 'open' %}
+  <div class="card"><p class="muted">No project is open. <a href="/projects">Projects</a></p></div>
+  {% elif meta is none %}
+  <div class="card"><h2>{{ project.name }}</h2>
+    <p class="muted">This project has no data yet: it is created by its first run.</p></div>
+  {% else %}
+  <div class="card" id="project-meta">
+    <h2>{{ meta.name or project.name }}{% if project.kind == 'temporary' %} <span class="pill">temporary</span>{% endif %}</h2>
+    <dl class="project-facts">
+      <dt>file</dt><dd><code>{{ project.path }}</code></dd>
+      <dt>created</dt><dd>{{ meta.created_at or "unknown" }}</dd>
+      <dt>last opened</dt><dd>{{ meta.opened_at or "unknown" }}</dd>
+      <dt>schema</dt><dd>v{{ meta.schema_version }} (created at v{{ meta.created_schema_version or "?" }})</dd>
+      <dt>fuzzlab</dt><dd>{{ meta.opened_by_version or "unknown" }} (created by {{ meta.created_by_version or "unknown" }})</dd>
+      {% if meta.uuid %}<dt>project id</dt><dd><code>{{ meta.uuid[:8] }}</code>
+        <span class="muted">(display only)</span></dd>{% endif %}
+      {% if meta.copy_kind %}<dt>copied</dt><dd>{{ 'snapshot' if meta.copy_kind == 'snapshot' else 'saved as' }}
+        of project <code>{{ (meta.origin_uuid or '')[:8] }}</code>, {{ meta.copied_at or 'time unknown' }}</dd>{% endif %}
+      {% if meta.identity_malformed %}<dt>identity</dt><dd class="warn" id="project-identity-malformed">The
+        stored project id or copy record is unreadable; it is shown as unknown.</dd>{% endif %}
+    </dl>
+    <form method="post" action="/project/meta" class="project-meta-form">
+      <label>Targets (one per line; credentials in URLs are removed)
+        <textarea name="targets" rows="3">{{ meta.targets | join('\n') }}</textarea></label>
+      {% if meta.targets_malformed %}<p class="warn">The stored target list was unreadable and is shown empty.</p>{% endif %}
+      <label>Notes (stored in the project file as plain text &mdash; never put secrets here)
+        <textarea name="notes" rows="4" maxlength="10000">{{ meta.notes or "" }}</textarea></label>
+      <button type="submit">Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Run history</h2>
+    {% if history %}
+    <table id="project-history">
+      <caption class="visually-hidden">Runs in this project, newest first</caption>
+      <thead><tr><th scope="col">run</th><th scope="col">command</th><th scope="col">target</th>
+        <th scope="col">started</th><th scope="col">status</th><th scope="col">findings</th>
+        <th scope="col">candidates</th></tr></thead>
+      <tbody>
+      {% for h in history %}
+        <tr>
+          <td>{% if h.run_id %}<a href="/runs/{{ h.run_id }}">#{{ h.run_id }}</a>{% else %}<span class="muted">no run recorded</span>{% endif %}</td>
+          <td><b>{{ h.command }}</b>{% if h.source == 'cli' %} <span class="muted">(outside the UI)</span>{% endif %}
+            {% if h.argv %}<br><code class="argv">{{ h.argv | join(' ') }}</code>{% endif %}</td>
+          <td><code>{{ h.target }}</code></td>
+          <td>{{ h.started_at or '' }}</td>
+          <td><span class="status-{{ h.status }}{% if h.label == 'interrupted' %} status-interrupted{% endif %}"
+                {% if h.label == 'interrupted' %}title="The UI ended before the job did"{% endif %}>{{ h.label }}</span></td>
+          <td>{% if h.run_id and h.findings %}<a href="/runs/{{ h.run_id }}#findings">{{ h.findings }}</a>{% else %}{{ h.findings }}{% endif %}</td>
+          <td>{{ h.candidates }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No runs yet. Launch one from the <a href="/launcher">Launcher</a>; it is
+      recorded in this project.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

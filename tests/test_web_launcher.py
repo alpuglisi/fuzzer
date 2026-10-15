@@ -10,7 +10,11 @@ from tests._webclient import web_client  # noqa: E402
 
 
 def _client(authorized=False, pipeline=None):
+    # An explicit, private store (CC-UI-0450): never the default `./fuzzlab.db`.
+    import os
+    import tempfile
     cfg = load_config(overrides={"authorized": authorized,
+                                 "store_path": os.path.join(tempfile.mkdtemp(), "s.db"),
                                  "target_base_url": "http://localhost"}, environ={})
     return web_client(create_app(cfg, pipeline=pipeline))
 

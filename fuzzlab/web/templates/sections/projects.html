@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Projects{% endblock %}
+{% block crumb %}Projects{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/projects.css">{% endblock %}
+{% block content %}
+{# CC-UI-0450 (FR-UI-450..458), layout from docs/research/ui-ia-competitive-analysis.md
+   §12.2 / §13: with no project open this is the start screen (Temporary · New · Open ·
+   Recent); with one open, "This project" comes first. Every action is a plain POST form
+   (PRG). Leaving a temporary project deletes it, so each form that would leave one
+   carries an explicit, required confirmation (also enforced by the server). #}
+{% macro discard_box() %}{% if project.kind == 'temporary' %}<label class="discard"><input
+  type="checkbox" name="discard" value="1" required> discard the open temporary
+  project and its runs</label>{% endif %}{% endmacro %}
+{% macro size(n) %}{% if n is none %}&mdash;{% elif n < 1024 %}{{ n }} B{% elif n < 1048576 %}{{ '%.1f' | format(n / 1024) }} KB{% else %}{{ '%.1f' | format(n / 1048576) }} MB{% endif %}{% endmacro %}
+<section class="panel" aria-labelledby="projects-h1" id="projects-root">
+  <h1 id="projects-h1" class="{{ 'start-title' if project.status != 'open' else 'visually-hidden' }}">
+    {{ 'Start' if project.status != 'open' else 'Projects' }}</h1>
+
+  {% for f in flash %}
+  <p class="card flash {{ 'ok' if f.level == 'ok' else ('warn' if f.level == 'warn' else 'bad') }}"
+     role="status">{{ f.text }}</p>
+  {% endfor %}
+
+  {% if project.pending %}
+  <div class="card" id="project-pending">
+    {% if project.pending.kind == 'older' %}
+    <h2>Migration needed</h2>
+    <p class="warn" id="project-migrate-offer"><b>{{ project.pending.path }}</b> uses store
+      schema v{{ project.pending.schema_version }}; this fuzzlab is
+      v{{ project.pending.head_version }}. It has not been opened or changed.</p>
+    <div class="project-actions">
+      <form method="post" action="/projects/migrate">
+        {{ discard_box() }}
+        <button type="submit">Migrate and open (a verified backup is made first)</button>
+      </form>
+      <form method="post" action="/projects/dismiss"><button type="submit">Not now</button></form>
+    </div>
+    {% else %}
+    <h2>Not opened</h2>
+    <p class="bad" id="project-refused">Refused: <b>{{ project.pending.path }}</b> &mdash;
+      {{ project.pending.detail }}</p>
+    <form method="post" action="/projects/dismiss"><button type="submit">Dismiss</button></form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if project.status == 'open' %}
+  <div class="card" id="project-current">
+    <h2>This project</h2>
+    <p class="project-headline"><b>{{ project.name }}</b>
+      {% if project.kind == 'temporary' %}<span class="pill">temporary</span>{% endif %}</p>
+    <dl class="project-facts">
+      <dt>file</dt><dd><code>{{ project.path }}</code></dd>
+      {% if not project.exists %}
+      <dt>state</dt><dd class="muted">not created yet &mdash; its first run creates it</dd>
+      {% elif project.kind == 'temporary' %}
+      <dt>state</dt><dd class="warn">not saved &mdash; use Save as&hellip; to keep it</dd>
+      {% else %}
+      <dt>last written</dt><dd>{% if project.written_at %}<time datetime="{{ project.written_at }}">{{ project.written_at }}</time>
+        <span class="muted">(as of this page load)</span>{% else %}<span class="muted">unknown</span>{% endif %}</dd>
+      {% endif %}
+      <dt>size</dt><dd>{{ size(project.size) }}</dd>
+    </dl>
+    {% if project.private == false %}
+    <form method="post" action="/projects/make-private" class="inline">
+      <p class="warn">This file can be read by other users on this machine.
+        <button type="submit">Make it private (0600)</button></p>
+    </form>
+    {% endif %}
+    {% if project.busy %}
+    <p class="warn" id="project-busy">Being written by: {{ project.busy | join('; ') }}.
+      Switching, Save as and Close wait until that ends; a Snapshot does not.</p>
+    {% endif %}
+    <div class="project-actions">
+      <form method="post" action="/projects/save-as">
+        <label>Save as <input name="name" required maxlength="64" placeholder="name"
+          pattern="[A-Za-z0-9]([A-Za-z0-9._ \-]{0,62}[A-Za-z0-9_\-])?"></label>
+        <button type="submit">Save as&hellip;</button>
+      </form>
+      <form method="post" action="/projects/snapshot">
+        <button type="submit" title="A timestamped copy in the projects directory; this project stays open">Snapshot</button>
+      </form>
+      <form method="post" action="/projects/close">
+        {{ discard_box() }}
+        <button type="submit">Close</button>
+      </form>
+    </div>
+    <p class="muted"><a href="/project">Notes, targets and run history &rarr;</a></p>
+  </div>
+  {% endif %}
+
+  <div class="start-grid">
+    <div class="card start-card" id="start-temporary">
+      <h2>Temporary project</h2>
+      <p class="muted">A scratch project: discarded when you leave it unless you save it.</p>
+      <form method="post" action="/projects/temporary">
+        {{ discard_box() }}
+        <button type="submit" class="primary">Start a temporary project</button>
+      </form>
+    </div>
+
+    <div class="card start-card" id="start-new">
+      <h2>New project</h2>
+      <form method="post" action="/projects/new">
+        <label>Name <input name="name" required maxlength="64"
+          pattern="[A-Za-z0-9]([A-Za-z0-9._ \-]{0,62}[A-Za-z0-9_\-])?" placeholder="e.g. pff-oct"></label>
+        {{ discard_box() }}
+        <button type="submit">Create</button>
+      </form>
+      <p class="muted">Saved in <code>{{ projects_dir }}</code>, readable by you only.</p>
+    </div>
+
+    {% if project.default_offer %}
+    <div class="card start-card" id="start-default">
+      <h2>Default project</h2>
+      <p class="muted"><code>{{ project.default_offer }}</code> &mdash; the configured
+        store{% if project.default_exists %}.{% else %}; created by its first run.{% endif %}</p>
+      <form method="post" action="/projects/use-default">
+        <button type="submit">Use it</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card" id="start-open">
+    <h2>Open a project</h2>
+    {% if files %}
+    <form method="post" action="/projects/open">
+    <table id="project-files">
+      <caption class="visually-hidden">Project files in the projects directory</caption>
+      <thead><tr><th scope="col"></th><th scope="col">file</th><th scope="col">runs</th>
+        <th scope="col">findings</th><th scope="col">size</th><th scope="col">modified</th></tr></thead>
+      <tbody>
+      {% for f in files %}
+        <tr><td>{% if f.current %}<span class="muted">open</span>{% else %}<input type="radio"
+              name="file" value="{{ f.file }}" id="file-{{ loop.index }}" required>{% endif %}</td>
+          <td><label for="file-{{ loop.index }}"><code>{{ f.file }}</code></label></td>
+          <td>{{ f.summary.runs if f.summary.readable else '' }}</td>
+          <td>{{ f.summary.findings if f.summary.readable else '' }}</td>
+          <td>{{ size(f.size) }}</td><td>{{ f.modified }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {{ discard_box() }}
+    <button type="submit">Open</button>
+    </form>
+    {% else %}<p class="muted">No project files yet.</p>{% endif %}
+  </div>
+
+  <div class="card" id="start-recent">
+    <h2>Recent</h2>
+    {% if recent %}
+    <table id="project-recent">
+      <caption class="visually-hidden">Recently opened projects, newest first</caption>
+      <thead><tr><th scope="col">name</th><th scope="col">runs</th><th scope="col">findings</th>
+        <th scope="col">opened</th><th scope="col"></th><th scope="col"></th></tr></thead>
+      <tbody>
+      {% for r in recent %}
+        <tr><td>{{ r.name }}<br><code class="muted">{{ r.path }}</code></td>
+          <td>{{ r.summary.runs if r.summary and r.summary.readable else '' }}</td>
+          <td>{{ r.summary.findings if r.summary and r.summary.readable else '' }}</td>
+          <td>{{ r.opened_at }}</td>
+          <td>{% if not r.exists %}<span class="muted">not found</span>
+            {% elif r.where %}<span class="muted">{{ r.where }}</span>
+            {% else %}<form method="post" action="/projects/open">
+              <input type="hidden" name="recent" value="{{ r.id }}">
+              <input type="hidden" name="path" value="{{ r.path }}">
+              {{ discard_box() }}
+              <button type="submit">Open</button></form>{% endif %}</td>
+          <td><form method="post" action="/projects/forget"
+                    title="Removes the entry from this list; the file is not touched">
+              <input type="hidden" name="recent" value="{{ r.id }}">
+              <input type="hidden" name="path" value="{{ r.path }}">
+              <button type="submit" class="ghost">Remove from list</button></form></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nothing opened yet.</p>{% endif %}
+  </div>
+
+  {% if leftovers %}
+  <div class="card" id="project-leftovers">
+    <h2>Unsaved temporary projects</h2>
+    <p class="muted">Left by an earlier session. Open one to keep working (then Save as), or
+      discard it.</p>
+    <table>
+      <caption class="visually-hidden">Leftover temporary projects</caption>
+      <tbody>
+      {% for t in leftovers %}
+        <tr><td><code>{{ t }}</code></td>
+          <td><form method="post" action="/projects/open">
+            <input type="hidden" name="temporary" value="{{ t }}">
+            {{ discard_box() }}
+            <button type="submit">Open</button></form></td>
+          <td><form method="post" action="/projects/discard-temporary">
+            <input type="hidden" name="temporary" value="{{ t }}">
+            <label class="discard"><input type="checkbox" name="discard" value="1" required>
+              delete it and its runs</label>
+            <button type="submit">Discard</button></form></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <p class="muted start-foot">Opening a project never sends traffic. Runs are started only
+    by you.</p>
+</section>
+{% endblock %}
