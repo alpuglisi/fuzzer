@@ -11,7 +11,11 @@ changed, and the reason. Reference the commit hash where useful.
 - **What:** two payloads call the sentinel without a single quote: one with backticks,
   and one with no quote character at all (`/TOKEN/.source`). That makes 6 payloads;
   the token is checked as before. A sweep of every confirmer's payload shapes is in the
-  bug report. CC-FUZZ-0084; BUG-0139, PA-0139.
+  bug report.
+  - Go-template SSTI also gets a raw-string (backtick) second round. It costs 2
+    requests to confirm by `"` (unchanged), and 4 to confirm by backtick or to give no
+    verdict (the worst case, up from 2).
+  - CC-FUZZ-0084; BUG-0139, PA-0139.
 
 ## 2026-10-15 (core change control for `core.urls.document_key`)
 - `core.urls.document_key` (origin, path and query: which document a URL loads), added in

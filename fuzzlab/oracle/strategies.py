@@ -1090,12 +1090,18 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
     def _random_length(self) -> int:
         return secrets.randbelow(self._LEN_RANGE) + 100
 
-    @staticmethod
-    def _expr(n: int) -> str:
-        return '{{ len "%s" }}' % ("A" * n)
+    #: The string literal's quoting forms, tried in order (BUG-0139, PA-0139): Go's
+    #: interpreted string ``"..."``, then its raw string ```...```, for a data path
+    #: that filters or escapes ``"`` before the template is parsed. The second runs only
+    #: when the first did not confirm.
+    QUOTES = ('"', "`")
 
-    def _payload(self, candidate: Candidate, n: int) -> str:
-        expr = self._expr(n)
+    @staticmethod
+    def _expr(n: int, quote: str = '"') -> str:
+        return "{{ len %s%s%s }}" % (quote, "A" * n, quote)
+
+    def _payload(self, candidate: Candidate, n: int, quote: str = '"') -> str:
+        expr = self._expr(n, quote)
         if candidate.content_type == "application/json":
             import json
             return json.dumps({self._JSON_FIELD: expr})
@@ -1106,12 +1112,24 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         return _contains_number(text, n)
 
     def confirm(self, candidate, sender):
+        """One two-probe round per quoting form (`QUOTES`), each with fresh lengths and
+        the same rules; the raw-string round runs only when the interpreted-string
+        round did not confirm (BUG-0139). Requests: 2 to confirm by ``"``, 4 to
+        confirm by a backtick or to give no verdict."""
+        for quote in self.QUOTES:
+            verdict = self._round(candidate, sender, quote)
+            if verdict is not None:
+                return verdict
+        return None
+
+    def _round(self, candidate, sender, quote):
         n1 = self._random_length()
         n2 = self._random_length()
         while n2 == n1:                            # degenerate collision; redraw rather than reuse
             n2 = self._random_length()
-        expr1, expr2 = self._expr(n1), self._expr(n2)
-        payload1, payload2 = self._payload(candidate, n1), self._payload(candidate, n2)
+        expr1, expr2 = self._expr(n1, quote), self._expr(n2, quote)
+        payload1 = self._payload(candidate, n1, quote)
+        payload2 = self._payload(candidate, n2, quote)
         first = self._send(sender, candidate, payload1)
         text1 = _observed(first).text or ""
         second = self._send(sender, candidate, payload2)
@@ -1123,6 +1141,8 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         cross1, cross2 = self._contains_token(text1, n2), self._contains_token(text2, n1)
         if own1 and own2 and not cross1 and not cross2:
             evidence = {"lengths": [n1, n2], "payloads": [payload1, payload2]}
+            if quote != '"':
+                evidence["string_form"] = "raw (backtick)"          # BUG-0139
             if _via_prg(first) or _via_prg(second):
                 evidence["observation"] = "prg"
             return Verdict(True, self.vuln_class, self.mechanism, evidence)

@@ -1843,3 +1843,5 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      that rejects or breaks on a character the payloads might use. Every new payload
      shape is checked against the existing negatives (escaped render, JSON echo).
      (from BUG-0139)
+  *(Review.)* Go-template SSTI now carries a second, raw-string form, so PA-0139(2)'s
+  stated single-shape confirmers are XXE (`"`) and CRLF (raw `\r\n`).

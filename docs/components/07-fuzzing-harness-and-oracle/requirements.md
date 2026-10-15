@@ -512,6 +512,16 @@ rewards) derives from it.
     cached/stale/echo-everything response that would otherwise pass the
     first three checks without actually computing a fresh,
     request-specific `len()` each time).
+  - *(CC-FUZZ-0084 amendment, BUG-0139's PA-0002 sweep:)* **two quoting forms.**
+    - The probe's string literal is Go's interpreted string, `{{ len "AAA..." }}`,
+      in a first two-probe round. When that round does not confirm, a second round
+      uses Go's raw string, `{{ len `AAA...` }}`. It has fresh lengths and the same
+      rules: both probes evaluated, no cross-bleed, the BUG-0133 echo rules.
+    - So a data path that filters or escapes `"` before the template is parsed is no
+      longer a guaranteed miss.
+    - A raw-string confirmation's evidence says `string_form: raw (backtick)`.
+    - **Cost:** 2 requests to confirm by the `"` form (as before); 4 to confirm by
+      the raw string or to give no verdict (the worst case, up from 2).
   - **Design decision: a new strategy under the same category, not a
     widened `SstiStrategy`** — checked against this project's own
     established architecture (`default_strategies()`'s own registration
@@ -581,6 +591,7 @@ rewards) derives from it.
     scored recall moves from `9/12` to `10/12` (only `webhook_signature`
     and `path_traversal` remain undetected, each for its own distinct,
     tracked reason).
+  - Enforced by (two quoting forms; CC-FUZZ-0084, BUG-0139): `GoTemplateSstiStrategy.confirm` / `QUOTES` — `tests/test_go_ssti_quoting.py::test_a_filtered_double_quote_is_confirmed_by_the_raw_string`, `tests/test_go_ssti_quoting.py::test_a_confirmation_by_the_double_quoted_form_costs_what_it_did`, `tests/test_go_ssti_quoting.py::test_an_echo_only_page_is_never_confirmed_in_either_form`, `tests/test_go_ssti_quoting.py::test_the_raw_string_round_keeps_the_echo_rules`, `tests/test_go_ssti_quoting.py::test_a_stale_raw_string_render_is_never_confirmed`
 
 - **FR-FUZZ-29** *(`HttpHeaderInjectionCrlfStrategy`; `CC-FUZZ-0045`,
   2026-09-23).* The oracle supports real **CRLF response-header-injection

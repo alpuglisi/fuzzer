@@ -148,3 +148,12 @@ and an enforcing test for M6), in `docs/PREVENTIVE_ACTIONS.md`.
 - The M6 HTML wrappers are fixed strings. A sink that needs a different context (for
   example inside a JS string) is still a miss for M6. That is not a quoting question,
   and it is unchanged.
+
+## Sweep follow-up: Go-template SSTI (added in review)
+The coordinator decided to build the flagged row. `GoTemplateSstiStrategy` now runs a
+second two-probe round with Go's raw string, `{{ len `AAA…` }}`, when the
+interpreted-string round did not confirm. It is just as strict: fresh lengths, both
+evaluated, no cross-bleed, BUG-0133's echo rules. The cost is 2 requests to confirm by
+`"` (as before), and 4 to confirm by the raw string or to give no verdict. The sweep
+row "`GoTemplateSstiStrategy` … flagged, not built" is now **fixed** (CC-FUZZ-0084
+amendment, FR-FUZZ-28). XXE (`"`) and CRLF (raw `\r\n`) remain stated residuals.

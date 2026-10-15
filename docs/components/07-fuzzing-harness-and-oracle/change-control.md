@@ -60,6 +60,29 @@ note of the same date.
     every test file importing `oracle/strategies.py` or the `fuzzlab.oracle` package,
     plus the M6 test files and the traceability guard. 56 files: 1219 passed, 0
     failed, 0 skipped.
+- Amendment, the PA-0002 sweep's Go-template row (2026-10-15; the coordinator's
+  decision): `GoTemplateSstiStrategy` gets a second quoting form, and its sweep row is
+  now **fixed**.
+  - `confirm` runs one two-probe round per `QUOTES` form: Go's interpreted string
+    `{{ len "AAA..." }}`, then, only when that round did not confirm, its raw string
+    `{{ len `AAA...` }}`.
+  - Each round has fresh lengths and the same rules (both evaluated, no cross-bleed,
+    BUG-0133's echo rules via `_evaluated` / `_echoed_outside_form_controls`).
+  - A raw-string confirmation's evidence carries `string_form: raw (backtick)`.
+  - **Cost:** 2 requests to confirm by `"` (unchanged); 4 to confirm by the raw string
+    or to give no verdict (the worst case, up from 2).
+  - Tests (`tests/test_go_ssti_quoting.py`, 14):
+    - a sink that HTML-escapes `"` before parsing is confirmed by the raw string (4
+      requests);
+    - an ordinary sink confirms in 2 requests, with no raw-string probe;
+    - an echo-only page is never confirmed (4 requests);
+    - all of BUG-0133's page shapes give the same answer in the raw-string round;
+    - a stale raw-string render is never confirmed.
+
+    `tests/test_evaluation_marker_echo.py` is unchanged and passes.
+  - Mutation (`QUOTES = ('"',)`): the filtered-quote confirmation, the worst-case cost
+    pin and the three edit-form shapes that must confirm fail. FR-FUZZ-28 is edited in
+    place.
 
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
