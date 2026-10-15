@@ -2573,7 +2573,7 @@ class LocalSpider:
 
                 # a seed or probe load runs inside its window (FR-CRAWL-17, Q4)
                 window = contextlib.ExitStack()
-                win, visited = None, False
+                win, visited, bare_refused = None, False, False
                 try:
                     self._current_url = current_url
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
@@ -2593,8 +2593,17 @@ class LocalSpider:
                             # (its captures are filed under the bare route, never the
                             # seed or the probe)
                             self._current_url = _route_key(current_url)
+                            self._rendered_ok = False
                             self._goto_recording(self._current_url)
                             self._current_url = current_url
+                            if not self._rendered_ok:
+                                # S3 (BUG-0138 merge): the bare route did not load (its
+                                # loading stopped -- a refused script navigation -- or
+                                # never completed): no stable document to change the hash
+                                # of, so the window is never entered; refused, counted
+                                self._refuse_query("bare route did not load")
+                                bare_refused = True
+                                continue
                         win = window.enter_context(self._window(
                             self._page, self._context, current_url, query=source))
                         self._probe = probe
@@ -2698,7 +2707,7 @@ class LocalSpider:
                     queue.extend(self._take_query_navs(depth))
                     if win is not None:
                         self._after_query_window(win, current_url, visited)
-                    elif source == spa.SEED_SOURCE:
+                    elif source == spa.SEED_SOURCE and not bare_refused:
                         # its bare route's load (P1(a)) failed before the window
                         # opened: a failed visit, kept as a page (B3-N2: counted)
                         self.spa_counts["spa_query_write_seeds"] += 1

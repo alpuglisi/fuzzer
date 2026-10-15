@@ -1782,3 +1782,73 @@ def test_only_a_bare_routes_load_is_its_baseline():
     assert _is_bare_route("http://h/#/poster") and _is_bare_route("http://h/next1")
     assert not _is_bare_route("http://h/#/poster?msg=hi")
     assert not _is_bare_route("http://h/next1?y=1")
+
+
+# =====================================================================================
+# The merge with BUG-0138 (guarded navigation): S3, reviewer A's N1
+# =====================================================================================
+def test_a_query_load_whose_bare_route_did_not_load_is_refused(monkeypatch, tmp_path):
+    """S3 (BUG-0138 merge), real Chromium, `HeadNavSpa`: the shell's head script
+    navigates to ``/logout.php`` on every load; the guard refuses it, so the bare
+    route's load never completes. The ``#/track?id=`` seed is refused ("bare route did
+    not load", counted) and its window never entered: no seed is promoted, none stored."""
+    from tests._spa_query_fixture import HeadNavSpa
+    chromium_or_skip(monkeypatch)
+    seen = _window_spy(monkeypatch)
+    lab = HeadNavSpa()
+    try:
+        from fuzzlab.tools.spider import LocalSpider
+        sp = LocalSpider(lab.base + "#/home", max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000)
+        run_crawl(sp)
+    finally:
+        lab.close()
+    db = str(tmp_path / "s.db")
+    assert lab.seen("GET", "/logout.php") == []                 # the guard refused it
+    assert sp.spa_counts["spa_query_pairs"] == 1                 # the seed was planned
+    assert sp.spa_query_refused.get("bare route did not load", 0) >= 1
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    assert not [u for u, s in sources.items()
+                if s in (spa.SEED_SOURCE, spa.WRITE_SEED_SOURCE)]
+    assert seen == []                                            # no window entered
+    stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
+    assert stats["spa_query_refused[bare route did not load]"] >= 1
+
+
+class _ReadPage(_FakePage):
+    """A page double `_goto_and_parse` can read."""
+
+    def title(self):
+        return "t"
+
+    def content(self):
+        return "<html><body><p>own</p></body></html>"
+
+    def evaluate(self, script, *a):
+        return "own" if "innerText" in script else None
+
+    def eval_on_selector_all(self, sel, script):
+        return []
+
+
+@pytest.mark.parametrize("shows_own,committed", [(True, True), (False, False)])
+def test_a_load_that_committed_but_did_not_complete_is_committed(
+        monkeypatch, tmp_path, shows_own, committed):
+    """Reviewer A N1 (BUG-0138 merge): `_load_committed` comes from the Navigation
+    result -- a navigation that committed but whose load did not complete (superseded)
+    is committed while the page still shows its own document, and not once another
+    document replaced it."""
+    from fuzzlab.tools import navguard
+    sp = _requests_spider(tmp_path)
+    url = "http://127.0.0.1:9/next1?y=fuzzlab"
+    resp = type("Resp", (), {"status": 200, "headers": {"content-type": "text/html"}})()
+    monkeypatch.setattr(navguard, "navigate", lambda page, u, **kw: navguard.Navigation(
+        resp, False, True, 0.0, "<html><title>r</title><body>got</body></html>"))
+    monkeypatch.setattr(navguard, "shows_own_document", lambda page, u, r: shows_own)
+    try:
+        sp._page = _ReadPage(url if shows_own else "http://127.0.0.1:9/other")
+        sp._goto_recording(url)
+        assert sp._load_committed is committed
+        assert sp._rendered_ok is False                         # not reached
+    finally:
+        sp.storage.close()

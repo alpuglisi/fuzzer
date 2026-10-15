@@ -357,3 +357,20 @@ class BaselineSpa(_Lab):
                         "<a href='/#/poster?msg=hi'>poster</a> "
                         "<a href='/#/search?q=foo'>search</a> <a href='/'>app</a>"
                         "</body></html>")}
+
+
+_HEAD_NAV_JS = r"""
+const routes = [{path:'track'}];
+class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}})}}
+"""
+
+
+class HeadNavSpa(_Lab):
+    """A hash app whose shell's head script navigates to ``/logout.php`` on every load
+    (S3, BUG-0138 merge): the guard refuses it, so no load of the app completes -- a
+    seed's bare route never loads, and the seed is refused, never entered."""
+    index = ("<!doctype html><html><head><title>headnav</title>"
+             "<script src='/hn.js'></script>"
+             "<script>location.href = '/logout.php';</script></head>"
+             "<body><a href='#/track'>track</a><div id='app'></div></body></html>")
+    script = ("/hn.js", _HEAD_NAV_JS)

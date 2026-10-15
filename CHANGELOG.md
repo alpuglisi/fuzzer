@@ -4,6 +4,13 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (FR-CRAWL-17 merged with BUG-0138's guarded navigation; a seed whose bare route did not load is refused)
+- spa-query merged bug-0138 (e51a3d4). SPA query loads now navigate through
+  `navguard.navigate`. A hash seed or probe whose bare route never finished loading (a
+  refused script navigation stopped it) is refused rather than loaded into a stopped
+  page. A load counts as committed only while the page still shows its own document
+  (CC-CRAWL-0027 merge amendment).
+
 ## 2026-10-15 (BUG-0138 review of 8350ab1: a document is its path and query)
 - **Why:** the guard's "is this still my document" check keyed URLs without their
   query, so `/p?a=2` passed for `/p?a=1`. The failure watch armed on `goto`'s return,

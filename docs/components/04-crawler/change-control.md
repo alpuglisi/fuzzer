@@ -678,6 +678,37 @@ Newest first.
       `("POST", "/api/send")` in `#/poster`'s baseline.
     - B2 (`_carries` always false): the real-browser test fails (`#/find?q=fuzzlab`
       promoted to `spa-query`), and so does the unit test.
+- **Merge amendment, BUG-0138 (2026-10-15; bug-0138 @ e51a3d4 -- guarded navigation,
+  CC-CRAWL-0030 -- merged into spa-query as 0d03e12).** Appended. The merge commit holds
+  the conflict resolutions only:
+  - navguard: the P4 `_scrubbed` observer log line, then BUG-0138's `_note_received`
+    block. `make_ws_handler` keeps `on_drop(url, message)` and the suppressed `on_send`.
+  - `_goto_and_parse`: BUG-0138's Q2 body, then `_load_committed = (response is not None
+    or same_document) and own`. `own` starts as True for a non-HTML response, which
+    has no Q2 reading.
+  - The query pre-step: `navguard.navigate(about:blank, wait_until="load")`, then the
+    P1(a) bare-route block, with no raw `page.goto`. `core.urls.document_key` and
+    `_nav_key` returning it are kept.
+  - CHANGELOG: both sides' entries, newest on top by commit time.
+  Follow-up:
+  - **S3:** a hash seed or probe whose bare route did not load is refused with "bare
+    route did not load" (`spa_query_refused`), and its window is never entered. Not
+    loaded means `_rendered_ok` is false after `_goto_recording`: the load stopped,
+    because a refused script navigation superseded it, or never completed. A refused
+    seed is neither stored nor counted as a write seed.
+  - **Reviewer A N1:** `_load_committed` comes from the Navigation result. A navigation
+    that committed but whose load did not complete is committed while the page still
+    shows its own document (`own`), and is not once another document replaced it.
+    `_goto_recording`'s `finally` still wraps the `navigate` path.
+  - Tests (`tests/test_spa_query.py`, +2; fixture `HeadNavSpa`):
+    - `test_a_query_load_whose_bare_route_did_not_load_is_refused` (real Chromium):
+      the shell's head script navigates to `/logout.php`; the refusal is counted (also
+      in `crawl_stats`); no seed is stored or promoted; no window is entered.
+    - `test_a_load_that_committed_but_did_not_complete_is_committed`: N1, both cases.
+  - Effectiveness (2026-10-15): `tests/test_guarded_navigation.py` and
+    `tests/test_spa_query.py` run together: 136 passed (real Chromium). Mutations, each
+    reverted: S3 off fails the S3 test (no refusal counted); dropping `and own` fails
+    N1's replaced-document case.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:
