@@ -524,7 +524,8 @@ the oracle owns truth (the oracle/advisory split).
   - **From the calibration JSON:** only `LISTING_KEYS` (`trained_on`, the `run_id`
     scope, `source_model_id`, the count of `scored_run_ids`). `trained_on` is read by
     `core.modelinfo.trained_on`, shared with `report`: absent = `run` (run-mode and
-    legacy rows never record it); an unknown value is unknown (`None`), never a default.
+    legacy rows never record it); `run`/`earlier`/`saved` as recorded; any other value is
+    unknown (`None`), never a default.
   - **Never read:** a metric, `holdout.*`, `params`, or a sealed table (PA-0092).
   - **Malformed:** an unparsable calibration is reported `unreadable` (PA-0108).
 

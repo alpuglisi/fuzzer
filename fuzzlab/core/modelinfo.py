@@ -15,4 +15,4 @@ def trained_on(calibration: dict) -> str | None:
     if "trained_on" not in calibration:
         return "run"
     value = calibration["trained_on"]
-    return value if value in ("earlier", "saved") else None
+    return value if value in ("run", "earlier", "saved") else None

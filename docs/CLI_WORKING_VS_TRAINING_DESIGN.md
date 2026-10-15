@@ -873,3 +873,9 @@ below is built and tested (CC-*-0402).
 | G12 | B7 | FR-FUZZ-37 `[--store S]`; the CHANGELOG lists BUG-0400's four shapes. |
 | G13 | B8 | The help never breaks a command name (`break_on_hyphens=False`); tested on the raw text. |
 | G14 | B9 | The metric-key check reads code constants only. |
+
+Round 3: reviewer A approved. Reviewer B requested one change: the "Older names" line
+still wrapped at the space inside `(= train flow-anomaly)`, so the G13 test failed on the
+unmutated tree. Each `old (= new)` entry is now wrapped as one unit, and an explicit
+`trained_on: run` is accepted as `run` (B's nit). The mutation script now also requires
+each named test to pass on the restored tree.

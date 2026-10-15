@@ -5,8 +5,9 @@ Newest first.
 
 ### CC-CORE-0402 — `modelinfo.trained_on`: an unknown value is unknown; the guard's wiring is tested (PA-0402(3)) (2026-10-15)
 - Change:
-  - **`core/modelinfo.trained_on`:** absent is `run`, `earlier`/`saved` are themselves,
-    and any other recorded value is `None`. It used to be `run`, a default standing in
+  - **`core/modelinfo.trained_on`:** absent is `run`; `run`, `earlier` and `saved` are
+    themselves (an explicit `run` is valid, reviewer B round 3); any other recorded value
+    is `None`. It used to be `run`, a default standing in
     for malformed data (PA-0108(2), review A round 2).
   - **`tests/_store_guard.py`:** `guard_kwargs(basetemp)` is the fixture's wiring, now
     tested from a cwd outside and inside the repository.

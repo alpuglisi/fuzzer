@@ -231,6 +231,7 @@ def test_a_malformed_trained_on_is_unknown_never_a_default():
     assert trained_on({}) == "run"
     assert trained_on({"trained_on": "earlier"}) == "earlier"
     assert trained_on({"trained_on": "saved"}) == "saved"
+    assert trained_on({"trained_on": "run"}) == "run"
     for bad in (5, "bogus", None, ["run"]):
         assert trained_on({"trained_on": bad}) is None
         assert _training({"trained_on": bad})["trained_on"] == "unknown"

@@ -31,7 +31,9 @@ note of the same date.
     otherwise. It was latent: no Phase 1 command uses the working view. It was caught
     before push.
   - The copied `--store` help keeps the source's text and appends the default rule.
-  - The grouped help never breaks a command name across lines (`break_on_hyphens=False`).
+  - The grouped help never breaks a command name across lines. Summaries use
+    `break_on_hyphens=False`, and each `old (= new)` entry in "Older names" is wrapped as
+    one unbreakable unit.
   - Tests:
     - the forwarding round trip now compares the engine's namespace with the values
       `train run` validated; the old version parsed the same argv twice;
@@ -54,8 +56,14 @@ note of the same date.
 - Effectiveness (assessed 2026-10-15):
   - Mutation checks, 7 of 7 killed: the old always-saved bug, a `forward` that drops an
     argument (which the old test could not see), the guard's basetemp exclusion, the
-    session clear, a malformed `trained_on` read as `run`, help hyphen breaks, and the
-    proxy dry-run order.
+    session clear, a malformed `trained_on` read as `run`, a split old-name entry, and
+    the proxy dry-run order. Each named test was also confirmed passing on the restored
+    tree.
+  - **Correction (reviewer B, round 3):** the first version of this change wrapped
+    "Older names" at the space inside `(= train flow-anomaly)`. The new raw-text help
+    test therefore failed on the *unmutated* tree, and the mutation script, which lacked
+    a restore check, had counted that failing test as a killed mutation. The entry
+    wrapping was fixed, and the script now also asserts the restored test passes.
   - Clean-tree suite: COUNTS_PENDING.
 
 ### CC-FUZZ-0401 — CLI Phase 1 code-review fixes: D-9 counts only effective choices; the engine opens the store printed (BUG-0401); `train models` via `import_ml` (BUG-0403) (2026-10-15)

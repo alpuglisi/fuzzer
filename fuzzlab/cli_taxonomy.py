@@ -124,9 +124,12 @@ def render_help() -> str:
                                      break_on_hyphens=False) or [""]
                 lines.append(f"  {c.usage.ljust(width)}{body[0]}")
                 lines += [" " * (2 + width) + more for more in body[1:]]
-    lines += [""] + textwrap.wrap("Older names (still work): " + ", ".join(
-        f"{old} (= {new})" for old, new in OLD_NAMES.items()), _HELP_COLUMNS,
-        break_on_hyphens=False)
+    # each "old (= new)" entry is one unbreakable unit: wrap on the separators only
+    nbsp = "\u00a0"
+    entries = [f"{old} (= {new})".replace(" ", nbsp) for old, new in OLD_NAMES.items()]
+    lines += [""] + [ln.replace(nbsp, " ") for ln in textwrap.wrap(
+        "Older names (still work): " + ", ".join(entries), _HELP_COLUMNS,
+        break_on_hyphens=False)]
     from fuzzlab.core.storepath import DEFAULT_RULE
     lines += [""] + textwrap.wrap(
         f"Store: --store PATH, else {DEFAULT_RULE} in the current directory (the web UI "
