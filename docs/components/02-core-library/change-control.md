@@ -3,6 +3,32 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0300 — procutil: a public host LISTEN-table reader; the spawn guard knows shells and container CLIs (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 for this session (PA-0031); see CC-LAB-0300.
+- Pre-change gate: part of design rev 2 (reviewers A and B, 3/3), as CC-LAB-0300.
+- Change:
+  - `fuzzlab/procutil.py`: `host_listen_sockets()` returns a `Listener` (pid 0) for every
+    LISTEN socket of this process's network namespace, through the existing
+    `_listen_table` parser (PA-0087: no second parser). 10 lines. FR-CORE-300.
+  - `tests/test_procutil_guard.py`: `FORKING_TOOLS` gains `bash`, `sh`, `docker`,
+    `podman`, `docker-compose`, `podman-compose`, with six synthetic offenders
+    (PA-0034(2)). The sweep (the guard's own AST scan with the new list) found one site,
+    `tests/test_lab_labctl_profile_parsing.py`'s `subprocess.run(["bash", ...],
+    timeout=10)`, migrated to `run_bounded`.
+- Impact: CORE helper consumed by LAB's exposure check (CC-LAB-0300); no existing caller
+  changes. The guard flags `subprocess.run`-family calls with a `timeout=` only; an
+  unbounded `docker`/`compose` call is held to `run_bounded` by review, not enforced
+  (stated in FR-CORE-300 and NFR-LAB-cleanup).
+- Risk: low.
+- Deliverables:
+  - [x] `host_listen_sockets` + real-socket test — done
+  - [x] guard extension, offenders, sweep (1 site migrated) — done
+  - [x] FR-CORE-300, NFR-LAB-cleanup `Enforced by:` line, CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): `host_listen_sockets` sees a real
+  loopback listener (`tests/test_external_labs_static.py::test_host_listen_sockets_sees_a_real_loopback_listener`);
+  `tests/test_procutil_guard.py` 30 passed, the migrated test 5 passed; the mutation check
+  kills an empty host table and a guard without `bash`.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

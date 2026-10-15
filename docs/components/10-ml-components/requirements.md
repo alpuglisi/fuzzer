@@ -544,6 +544,13 @@ the oracle owns truth (the oracle/advisory split).
     training, selection and calibration never read that run's labels, pinned by
     model-identity tests. Such scores are labelled "not trained on this run's labels",
     not out-of-sample (FR-ML-14).
+  - Not yet enforced *(CC-ML-0300, 2026-10-15)*: runs against the external lab fixtures
+    (FR-LAB-300; bWAPP on `127.0.0.1:${BWAPP_PORT:-8092}`, Juice Shop on
+    `127.0.0.1:${JUICE_PORT:-3000}`) produce candidates whose URLs leak their class
+    (bWAPP's `sqli_1.php`, `xss_get.php`), and D10 treats external targets as validation
+    only. Nothing stops a trainer reading those runs; until the operator decides the
+    training question (flagged), exclude runs whose target is a registered external
+    fixture's host:port.
 - **NFR-ML-calibrated** Classifier probabilities are calibrated; abstention is
   preferred to a confident wrong screen.
 

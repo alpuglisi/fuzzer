@@ -11,8 +11,9 @@ own real logic (PA-0027), not a second, hand-reimplemented copy of it.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from fuzzlab.procutil import run_bounded
 
 LABCTL_PATH = Path("lab/labctl.sh")
 
@@ -30,9 +31,8 @@ def _profile_args_for(pff_profile: str | None) -> list[str]:
     env = {}
     if pff_profile is not None:
         env["PFF_PROFILE"] = pff_profile
-    result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, timeout=10, env=env,
-    )
+    # run_bounded: a timed-out shell takes its whole tree down (PA-0125, CC-CORE-0300).
+    result = run_bounded(["bash", "-c", script], timeout=10, env=env)
     assert result.returncode == 0, f"block failed: {result.stderr}"
     return [line for line in result.stdout.split("\n") if line]
 

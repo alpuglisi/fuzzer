@@ -29,7 +29,10 @@ SPAWN_ATTRS = {"Popen", "create_subprocess_exec", "create_subprocess_shell",
                "posix_spawn", "posix_spawnp"}
 SPAWN_MODULES = {"subprocess", "asyncio", "os", "pty", "asyncio.subprocess"}
 RUN_FUNCS = {"run", "call", "check_call", "check_output"}
-FORKING_TOOLS = {"npm", "npx", "go", "mvn", "gradle", "composer", "bundle", "cargo", "make"}
+FORKING_TOOLS = {"npm", "npx", "go", "mvn", "gradle", "composer", "bundle", "cargo", "make",
+                 # CC-CORE-0300: a shell runs whatever its script forks, and a container CLI
+                 # (compose above all) forks helpers -- a timeout must take the whole tree.
+                 "bash", "sh", "docker", "podman", "docker-compose", "podman-compose"}
 
 #: file -> (number of flagged sites, reason). Exact counts: a new site in an
 #: allowlisted file fails, and so does an entry that no longer matches.
@@ -137,6 +140,12 @@ def test_every_child_process_goes_through_procutil() -> None:
     "import subprocess\nsubprocess.run(['go', 'run', 'main.go'], timeout=5)\n",
     "import subprocess\nsubprocess.check_output(['npm', 'install'], timeout=5)\n",
     "from subprocess import run\nrun(['/usr/bin/mvn', 'package'], timeout=5)\n",
+    "import subprocess\nsubprocess.run(['bash', '-c', 'x'], timeout=5)\n",
+    "import subprocess\nsubprocess.run(\n    ['sh', 'x.sh'], capture_output=True, timeout=5)\n",
+    "import subprocess\nsubprocess.run(['docker', 'compose', 'up'], timeout=5)\n",
+    "from subprocess import check_output\ncheck_output(['/usr/bin/podman', 'ps'], timeout=5)\n",
+    "import subprocess\nsubprocess.call(['docker-compose', 'up'], timeout=5)\n",
+    "import subprocess\nsubprocess.run(['podman-compose', 'up'], timeout=5)\n",
 ])
 def test_guard_flags_synthetic_offenders(src: str) -> None:
     assert _offences(src), src

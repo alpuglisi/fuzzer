@@ -1,0 +1,57 @@
+# fuzzlab expected results (Benchmark-style) for bWAPP v2.2 at security level 0
+# (external lab fixture lab/external/bwapp), CC-LAB-0300. Derived from labels.json;
+# the loader cross-checks the two. Single-location cases. URLs keep bWAPP's /bWAPP/
+# sub-path; a ground-truth-points run must use the origin as its base (BUG-0300).
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+BWAPP-0001,/bWAPP/sqli_1.php,GET,title,query,sqli,true,/bWAPP/sqli_1.php,sink,,direct
+BWAPP-0002,/bWAPP/sqli_2.php,GET,movie,query,sqli,true,/bWAPP/sqli_2.php,sink,,direct
+BWAPP-0003,/bWAPP/sqli_6.php,POST,title,body,sqli,true,/bWAPP/sqli_6.php,sink,,direct
+BWAPP-0004,/bWAPP/sqli_13.php,POST,movie,body,sqli,true,/bWAPP/sqli_13.php,sink,,direct
+BWAPP-0005,/bWAPP/sqli_10-2.php,GET,title,query,sqli,true,/bWAPP/sqli_10-2.php,sink,,direct
+BWAPP-0006,/bWAPP/sqli_3.php,POST,login,body,sqli,true,/bWAPP/sqli_3.php,sink,,direct
+BWAPP-0007,/bWAPP/sqli_3.php,POST,password,body,sqli,true,/bWAPP/sqli_3.php,sink,,direct
+BWAPP-0008,/bWAPP/sqli_16.php,POST,login,body,sqli,true,/bWAPP/sqli_16.php,sink,,direct
+BWAPP-0009,/bWAPP/xss_login.php,POST,login,body,sqli,true,/bWAPP/xss_login.php,sink,,direct
+BWAPP-0010,/bWAPP/xss_login.php,POST,password,body,sqli,true,/bWAPP/xss_login.php,sink,,direct
+BWAPP-0011,/bWAPP/sqli_11.php,GET,title,query,sqli,true,/bWAPP/sqli_11.php,sink,,direct
+BWAPP-0012,/bWAPP/sqli_14.php,GET,title,query,sqli,true,/bWAPP/sqli_14.php,sink,,direct
+BWAPP-0013,/bWAPP/sqli_4.php,GET,title,query,sqli,true,/bWAPP/sqli_4.php,sink,,direct
+BWAPP-0014,/bWAPP/sqli_15.php,GET,title,query,sqli,true,/bWAPP/sqli_15.php,sink,,direct
+BWAPP-0015,/bWAPP/sqli_7.php,POST,entry,body,sqli,true,/bWAPP/sqli_7.php,sink,,direct
+BWAPP-0016,/bWAPP/sqli_12.php,POST,entry,body,sqli,true,/bWAPP/sqli_12.php,sink,,direct
+BWAPP-0017,/bWAPP/sqli_17.php,GET,User-Agent,header,sqli,true,/bWAPP/sqli_17.php,sink,,direct
+BWAPP-0018,/bWAPP/xss_get.php,GET,firstname,query,xss-reflected,true,/bWAPP/xss_get.php,sink,,direct
+BWAPP-0019,/bWAPP/xss_get.php,GET,lastname,query,xss-reflected,true,/bWAPP/xss_get.php,sink,,direct
+BWAPP-0020,/bWAPP/htmli_get.php,GET,firstname,query,xss-reflected,true,/bWAPP/htmli_get.php,sink,,direct
+BWAPP-0021,/bWAPP/htmli_get.php,GET,lastname,query,xss-reflected,true,/bWAPP/htmli_get.php,sink,,direct
+BWAPP-0022,/bWAPP/xss_post.php,POST,firstname,body,xss-reflected,true,/bWAPP/xss_post.php,sink,,direct
+BWAPP-0023,/bWAPP/xss_post.php,POST,lastname,body,xss-reflected,true,/bWAPP/xss_post.php,sink,,direct
+BWAPP-0024,/bWAPP/htmli_post.php,POST,firstname,body,xss-reflected,true,/bWAPP/htmli_post.php,sink,,direct
+BWAPP-0025,/bWAPP/htmli_post.php,POST,lastname,body,xss-reflected,true,/bWAPP/htmli_post.php,sink,,direct
+BWAPP-0026,/bWAPP/xss_php_self.php,GET,firstname,query,xss-reflected,true,/bWAPP/xss_php_self.php,sink,,direct
+BWAPP-0027,/bWAPP/xss_php_self.php,GET,lastname,query,xss-reflected,true,/bWAPP/xss_php_self.php,sink,,direct
+BWAPP-0028,/bWAPP/xss_json.php,GET,title,query,xss-reflected,true,/bWAPP/xss_json.php,sink,,direct
+BWAPP-0029,/bWAPP/xss_ajax_2-2.php,GET,title,query,xss-reflected,true,/bWAPP/xss_ajax_2-2.php,sink,,direct
+BWAPP-0030,/bWAPP/xss_eval.php,GET,date,query,xss-reflected,true,/bWAPP/xss_eval.php,sink,,direct
+BWAPP-0031,/bWAPP/xss_href-2.php,GET,name,query,xss-reflected,true,/bWAPP/xss_href-2.php,sink,,direct
+BWAPP-0032,/bWAPP/hpp-2.php,GET,name,query,xss-reflected,true,/bWAPP/hpp-2.php,sink,,direct
+BWAPP-0033,/bWAPP/xss_back_button.php,GET,Referer,header,xss-reflected,true,/bWAPP/xss_back_button.php,sink,,direct
+BWAPP-0034,/bWAPP/xss_referer.php,GET,Referer,header,xss-reflected,true,/bWAPP/xss_referer.php,sink,,direct
+BWAPP-0035,/bWAPP/xss_user_agent.php,GET,User-Agent,header,xss-reflected,true,/bWAPP/xss_user_agent.php,sink,,direct
+BWAPP-0036,/bWAPP/xss_custom_header.php,GET,bWAPP,header,xss-reflected,true,/bWAPP/xss_custom_header.php,sink,,direct
+BWAPP-0037,/bWAPP/xss_stored_1.php,POST,entry,body,xss-reflected,true,/bWAPP/xss_stored_1.php,sink,,direct
+BWAPP-0038,/bWAPP/htmli_stored.php,POST,entry,body,xss-reflected,true,/bWAPP/htmli_stored.php,sink,,direct
+BWAPP-0039,/bWAPP/sqli_7.php,POST,entry,body,xss-reflected,true,/bWAPP/sqli_7.php,sink,,direct
+BWAPP-0040,/bWAPP/sqli_12.php,POST,entry,body,xss-reflected,true,/bWAPP/sqli_12.php,sink,,direct
+BWAPP-0041,/bWAPP/xss_stored_4.php,GET,User-Agent,header,xss-reflected,true,/bWAPP/xss_stored_4.php,sink,,direct
+BWAPP-0042,/bWAPP/unvalidated_redir_fwd_1.php,GET,url,query,open_redirect,true,/bWAPP/unvalidated_redir_fwd_1.php,sink,,direct
+BWAPP-0043,/bWAPP/unvalidated_redir_fwd_2.php,GET,ReturnUrl,query,open_redirect,true,/bWAPP/unvalidated_redir_fwd_2.php,sink,,direct
+BWAPP-0044,/bWAPP/http_response_splitting.php,GET,url,query,open_redirect,true,/bWAPP/http_response_splitting.php,sink,,direct
+BWAPP-0045,/bWAPP/directory_traversal_1.php,GET,page,query,path_traversal,true,/bWAPP/directory_traversal_1.php,sink,,direct
+BWAPP-0046,/bWAPP/directory_traversal_2.php,GET,directory,query,path_traversal,true,/bWAPP/directory_traversal_2.php,sink,,direct
+BWAPP-0047,/bWAPP/sqli_17.php,GET,User-Agent,header,xss-reflected,false,/bWAPP/sqli_17.php,sink,,direct
+BWAPP-0048,/bWAPP/xss_stored_4.php,GET,User-Agent,header,sqli,false,/bWAPP/xss_stored_4.php,sink,,direct
+BWAPP-0049,/bWAPP/xss_stored_1.php,POST,entry,body,sqli,false,/bWAPP/xss_stored_1.php,sink,,direct
+BWAPP-0050,/bWAPP/htmli_stored.php,POST,entry,body,sqli,false,/bWAPP/htmli_stored.php,sink,,direct
+BWAPP-0051,/bWAPP/sqli_2.php,GET,movie,query,xss-reflected,true,/bWAPP/sqli_2.php,sink,,direct
+BWAPP-0052,/bWAPP/sqli_13.php,POST,movie,body,xss-reflected,true,/bWAPP/sqli_13.php,sink,,direct

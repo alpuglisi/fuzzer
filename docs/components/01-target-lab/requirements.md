@@ -6268,6 +6268,82 @@ lane) can submit a payload as
   container-naming scheme). The project name is read from `compose.yaml`'s `name:` key
   (`PA-0059`(2)). A service name is validated against a strict identifier pattern
   before it reaches any compose or engine command line. Consumer: `FR-UI-15`.
+- **FR-LAB-300** *(external lab fixtures; `CC-LAB-0300`, 2026-10-15).* Two third-party
+  vulnerable apps run as permanent, reproducible lab fixtures under `lab/external/<lab>/`,
+  each its own compose project: **bWAPP v2.2** (`fuzzlab-bwapp`: `php:5.6-apache` +
+  `mysql:5.7`, port `BWAPP_PORT`, default 8092, app under `/bWAPP/`) and **OWASP Juice Shop
+  v20.3.0** (`fuzzlab-juice-shop`: the official image, port `JUICE_PORT`, default 3000).
+  Every image is registry-qualified and pinned by digest; the pins live once in
+  `fuzzlab/lab_fixtures/external.py` and the Dockerfile/compose files must equal them.
+  bWAPP (CC BY-NC-ND) is **never committed**: the host fetches `bWAPP_latest.zip` into the
+  gitignored `lab/external/bwapp/.cache/`, verified by sha256 and size, and the image build
+  verifies the sha256 again (`sha256sum -c`) before extracting it in a pinned busybox stage;
+  a mismatch fails, never substitutes. The extracted tree is used unmodified: bWAPP's
+  `localhost` DB connection reaches a `mysql:5.7` with **no network** (`network_mode:
+  none`) through a unix socket on a shared tmpfs volume, set by our own php ini; our own
+  Apache config redirects the origin root to `/bWAPP/portal.php` (so an origin base URL
+  finds the login while `BUG-0300` stands). Juice Shop runs with `NODE_ENV=unsafe` (its own
+  `config/unsafe.yml`, `challenges.safetyMode: disabled`): the official image otherwise
+  disables, inside Docker, the challenges the ground truth relies on. Containers drop all
+  capabilities (bWAPP adds back the few Apache/MySQL need) and set `no-new-privileges`.
+- **FR-LAB-301** *(external lab lifecycle; `CC-LAB-0300`).* `lab/labctl.sh
+  {up|down|status|reset} <lab> [--authorized]` and `bootstrap <lab> --authorized` hand an
+  external lab to `lab/external/extctl.sh` with the provider `labctl.sh` chose; the
+  dispatch fires only for those five operations **and** a lab name that is a directory of
+  `lab/external/` with a `compose.yaml`, so every existing subcommand keeps its meaning. The
+  registry is the directory layout. `up`: (bWAPP) fetch → pre-flight (the resolved compose
+  config is refused if any port is published on a non-loopback or unnamed host IP, or a
+  service uses the host network/pid namespace, is privileged, or joins a foreign
+  container) → `up -d --build` (one retry through the force-clean) → exposure check (every
+  container of the project inspected, fail closed: no container, an empty or non-loopback
+  `HostIp`, host networking, or a non-loopback host LISTEN row on a published port; a
+  failure tears the stack down, exit 3) → bootstrap with `--authorized` only. `down`:
+  exposure check first (reported, never aborts), `down`, then the real post-state (any
+  container still carrying the project label → force-clean → exit 1 if any remain).
+  `reset`: drop everything including volumes, then `up`. `status`: 0 running and
+  loopback-only, 1 not running, 3 exposed. One force-clean helper removes the project's
+  containers, pod, networks and (on reset) volumes by the exact compose project label,
+  never by a name pattern. `FUZZLAB_EXT_PROJECT_SUFFIX` isolates a test run's project.
+- **FR-LAB-302** *(external lab bootstrap and identities; `CC-LAB-0300`).* `bootstrap`
+  sends traffic to the lab and needs `--authorized`. bWAPP: wait for any HTTP answer from
+  `login.php`, run its installer until it reports success or "already exists", then verify
+  a level-0 login by a positive differential (`portal.php` 302→`login.php` anonymously, the
+  login 302→`portal.php` with cookie `security_level=0`, `portal.php` 200 with the
+  session). Juice Shop: require `challenges.safetyMode == "disabled"`, log in or register the
+  account through `POST /api/Users`, then verify (`whoami` names it; `/profile` 200 with the
+  `token` cookie, not without). Identities `bwapp-bee` (user `bee`) and `juice-user`
+  (`juice-user@fuzzlab.lab`) on host `127.0.0.1`. The credential comes from the keyring,
+  else the operator's gated `FUZZLAB_CRED_<HOST>_<IDENTITY>` channel (through
+  `CredentialStore.open`, so `allow_env_credentials` governs it), else a TTY prompt, else
+  (Juice Shop only) a fresh random password; it is stored in the keyring **only after** a
+  verified login, and never printed, logged or passed in argv. The bootstrap client sends
+  only to the loopback base origin, follows no redirect, ignores proxy environment
+  variables and times out every request. A failed login with an existing account says to
+  `reset` the lab and stores nothing.
+- **FR-LAB-303** *(external lab ground truth; `CC-LAB-0300`).* `lab/ground-truth-bwapp/`
+  and `lab/ground-truth-juice-shop/` (the three contract files; opaque `BWAPP-`/`JUICE-`
+  ids) hold only **scoreable** classes: in the labels-schema enum, recorded by some default
+  strategy, and with a rule for their category (computed, not listed). Every case's notes
+  begin with `[reach: crawl|gt|crawl,gt|none - <reason>]` (which scored pass can reach it:
+  a ground-truth point carries no sibling form fields and no crawled example) and
+  `[prov: <bWAPP bug name | Juice Shop challenge key>]`, then a page:line citation (no
+  bWAPP source is quoted). A stored sink that renders in the storing response is keyed with
+  the class the oracle records (`xss-reflected`). Negatives are source-proven and of a
+  category the positives make the run test. Every point passes the destructive and
+  transaction rules. bWAPP urls keep the `/bWAPP/` sub-path, so a ground-truth-points run
+  uses the origin as its base (`BUG-0300`). Juice Shop's labels assume `safetyMode`
+  disabled; bWAPP's assume security level 0. **Data role:** these are external validation
+  targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
+  for them and a model trained on runs against them would learn from the URL (recorded as
+  not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-304** *(external lab live verification; `CC-LAB-0300`).*
+  `tests/test_external_labs_live.py`, gated by `FUZZLAB_LIVE_EXTERNAL_LABS=1` (skips with
+  that reason otherwise; with it, a missing engine or a failed pull/build fails), brings
+  each fixture up under its own project and port with a throwaway keyring, runs a **crawl
+  pass** and a **gt pass**, and asserts a stated floor of matched case ids, no flagged
+  negative, and a checked candidate for every positive tagged for that pass. Juice Shop's
+  SSRF (`JUICE-0005`) is pinned as a documented miss: the bridge network cannot reach the
+  loopback-only OOB listener; the test asserts the probe was made and no callback arrived.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -6279,6 +6355,9 @@ lane) can submit a payload as
   - Enforced by (BUG-0130 follow-up: "checked after boot, and at stop while live". The runtime check is authoritative and the source rules are lints. Exposed means non-loopback in the host's network namespace. A deliberate wildcard bind in a test happens only in a private netns): `tests/test_loopback_listeners.py::test_every_server_site_checks_loopback_right_after_boot`, `tests/test_loopback_listeners.py::test_the_boot_check_rule_flags_synthetic_offenders`, `tests/test_loopback_listeners.py::test_no_test_binds_a_wildcard_address_outside_a_private_netns`, `tests/test_loopback_listeners.py::test_the_netns_rule_flags_synthetic_offenders`, `tests/test_procutil.py::test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed`, `tests/test_procutil.py::test_a_failing_listener_check_never_aborts_the_stop`, `tests/test_procutil.py::test_an_exposed_server_that_was_also_lost_reports_both`
   - Enforced by (dual-use services default off): compose profiles — `tests/test_lab_downgrade.py::test_frontend_is_gated_off_by_a_profile`, `tests/test_web_lab.py::test_profiled_services_carry_their_compose_profile`
   - Enforced by (the identifier-SQLi oracle stays on its loopback target; CC-LAB-0253, BUG-0123): `default_http_runner` same-origin redirects only, `_build_url` origin check — `tests/test_redirect_scope_sweep.py::test_the_oracle_runner_never_follows_a_redirect_off_its_origin`, `tests/test_redirect_scope_sweep.py::test_an_absolute_endpoint_path_cannot_replace_the_checked_base`
+  - Enforced by (bound to localhost: the external lab fixtures, bWAPP and Juice Shop; CC-LAB-0300, CC-LAB-0301): every compose file under `lab/` and every `docker|podman run` in `lab/` and `scripts/` linted, a pre-flight of the resolved compose config before `up`, and a fail-closed post-boot exposure check of the running project (engine inspect + the host LISTEN table) that tears an exposed stack down — `tests/test_external_labs_static.py::test_every_compose_file_publishes_on_loopback_only`, `tests/test_external_labs_static.py::test_the_compose_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_no_shell_script_publishes_beyond_loopback`, `tests/test_external_labs_static.py::test_the_shell_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_the_exposure_check_fails_closed`, `tests/test_external_labs_static.py::test_check_exposure_fails_closed_on_engine_errors`, `tests/test_external_labs_extctl.py::test_up_refuses_a_config_that_fails_the_preflight`, `tests/test_external_labs_extctl.py::test_up_tears_down_an_exposed_stack_and_exits_3`, `tests/test_external_labs_static.py::test_the_bwapp_db_has_no_network_and_its_socket_volume_is_tmpfs`
+  - Enforced by (nothing is sent to an external lab without `--authorized`; credentials only to the loopback origin, CC-LAB-0300): `tests/test_external_labs_extctl.py::test_bootstrap_without_authorized_sends_nothing`, `tests/test_external_labs_static.py::test_the_cli_bootstrap_without_authorized_sends_nothing`, `tests/test_external_labs_static.py::test_the_lab_client_refuses_anything_but_a_loopback_http_origin`, `tests/test_external_labs_static.py::test_bwapp_bootstrap_stores_only_after_a_verified_level_0_login`
+  - Not yet enforced (external lab fixtures, CC-LAB-0300): their bridge networks have egress (Juice Shop fetches external URLs at startup and on its web3 routes; both apps have SSRF-capable code), and Juice Shop's `NODE_ENV=unsafe` and bWAPP's command/code-injection pages are code execution inside their containers (contained by dropped capabilities, `no-new-privileges` and a loopback-only publish, not by a network boundary). The podman / podman-compose / SELinux / netavark / pasta paths of these fixtures were not run (only docker was available): `network_mode: none` under podman-compose's pod mode, the cross-container unix socket under SELinux MCS labels, bridge isolation under netavark and pasta's host-loopback mapping are unverified (`Not yet verified`).
   - Not yet enforced: **no outbound route** — the app networks are ordinary bridges with egress, and the lab has real outbound sinks (SSRF, webhooks); it needs an internal backend network or a host firewall. There is no lab-level "destructive class" beyond profiles. (BUG-0111 sweep, 2026-10-13; reported to the operator.)
 - **NFR-LAB-no-leak** No vulnerability class name in any URL, filename, or
   parameter a tool can see.
@@ -6299,6 +6378,8 @@ lane) can submit a payload as
   - Enforced by (an id is trusted only while its leader pid is held; BUG-0125 review, CC-CORE-0050): `tests/test_procutil.py::test_the_supervisor_signals_the_servers_group_only_while_its_leader_is_held`, `tests/test_procutil.py::test_a_reaped_supervisors_session_is_never_swept`, `tests/test_procutil.py::test_the_fallback_never_signals_a_reused_server_group_outside_the_session`, `tests/test_procutil.py::test_a_killed_supervisors_leftovers_are_swept_while_its_pid_is_held`, `tests/test_procutil.py::test_an_async_handle_is_swept_before_it_is_reaped`, `tests/test_procutil.py::test_an_unknown_start_time_never_signals_anything`, `tests/test_procutil.py::test_start_server_refuses_a_server_whose_identity_cannot_be_recorded`
   - Enforced by (forking tools on timeout): `procutil.run_bounded` — `tests/test_procutil.py::test_run_bounded_timeout_kills_the_whole_tree`
   - Enforced by (nothing spawns around it; a leak fails the run): `tests/test_procutil_guard.py::test_every_child_process_goes_through_procutil`, `tests/test_procutil_guard.py::test_guard_flags_synthetic_offenders`, `tests/test_procutil.py::test_the_conftest_safety_net_fails_the_session_and_kills_the_leak`
+  - Enforced by (every shell and container CLI a test runs with a timeout goes through `run_bounded`; CC-CORE-0300): `tests/test_procutil_guard.py::test_every_child_process_goes_through_procutil`, `tests/test_procutil_guard.py::test_guard_flags_synthetic_offenders`
+  - Not yet enforced (external lab fixtures, CC-LAB-0300): their containers belong to the container engine, not to the test's process tree, so a SIGKILLed live test leaves them running (recovery: `./labctl.sh down <lab>`, or remove by the project label); an unbounded `docker`/`compose` call (no `timeout=`) is not flagged by the guard and is held to `run_bounded` by review only.
   - Not yet enforced: the Rails, Spring Boot and Django harnesses' real boots and the npm/mvn test servers were not run against this change offline (network installs); they share the code path above and are checked by source. Playwright's own driver and browser processes rely on Playwright's cleanup when their owner is SIGKILLed: measured once (BUG-0125 review S2: a pytest SIGKILLed mid browser test left 0 of its 9 recorded descendants -- the node driver in its session and 8 chrome processes in their own detached session -- after 5 s), not a standing test; follow-up owner: the crawler component (04, owner of the Playwright launch sites), to add one under `FUZZLAB_REQUIRE_BROWSER=1`. A supervisor already at `oom_score_adj` 1000 cannot have a likelier server. (BUG-0125.)
 - **NFR-LAB-label-accuracy** Labels derived, not hand-asserted; env settings that
   affect labels (e.g. `display_errors`, libxml entity handling, `open_basedir`)

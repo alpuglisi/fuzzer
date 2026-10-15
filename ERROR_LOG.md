@@ -18,6 +18,33 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — External lab fixtures: build-time failures met while making bWAPP / Juice Shop permanent (fixed, CC-LAB-0300; environment)
+- **Symptom:** (1) no Docker daemon in the cloud build container (`docker info`: no
+  `/var/run/docker.sock`); (2) the first bWAPP image prototype served every page as binary
+  garbage with a 200; (3) the official Juice Shop image did not evaluate the SSTI the
+  brief lists as confirmed (`#{7*191}` came back literal); (4) the first live
+  `bootstrap` reported bWAPP's portal "does not require a login" and Juice Shop's
+  `whoami` "does not name the account"; (5) the bWAPP ground-truth-points run could not
+  log in (origin base) and the crawl-points run was refused for its request budget.
+- **Root cause:** (1) environment: `dockerd` not started; (2) PHP 5.6's `PharData`
+  extracted this zip's entries still deflated (the php:5.6 base has no `unzip` and no zip
+  extension); (3) the image's `safetyMode: auto` disables Docker-tagged challenges inside a
+  container (`challenges.yml` `disabledEnv`; the brief's run was a source build); (4) in the
+  new, uncommitted bootstrap: bWAPP's relative `Location: login.php` was resolved against
+  the origin root, and `whoami` reads the `token` cookie, not the bearer; (5) login
+  discovery looks at the base page (bWAPP is under `/bWAPP/`; the ground-truth join doubles
+  a sub-path base, BUG-0300), and header points over ~150 pages need ~9700 requests.
+- **Remediation:** (1) `dockerd` started in the session (pid recorded, stopped at the
+  end); (2) a pinned busybox fetch stage does `sha256sum -c` + `unzip`; (3) the fixture
+  sets `NODE_ENV=unsafe` (Juice Shop's own `config/unsafe.yml`), asserted by a static test
+  and by bootstrap; (4) redirects resolved against the request URL, `whoami`/`/profile`
+  checked with the cookie (both caught before commit, by the first live run, and covered
+  by unit tests); (5) the fixture's own Apache config redirects `/` to
+  `/bWAPP/portal.php`, and the crawl pass sets `FUZZLAB_BUDGET_TOTAL=30000`.
+- **Status:** Fixed (2)-(5) in CC-LAB-0300; (1) Environment. None was a defect in
+  committed code (no BUG report); the locked-file defects found alongside are BUG-0300
+  and BUG-0301.
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.
