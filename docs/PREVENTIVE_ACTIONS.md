@@ -2132,6 +2132,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      counts as unswept (`PA-0067(1)`).
   3. **A recurrence in a site a prior sweep cleared re-sweeps every site that sweep
      cleared** (`PA-0067(3)`), recorded in the bug report. (from BUG-0300)
+  - Enforced by: tests/test_base_url_subpath_registry.py::test_the_registry_guard_catches_synthetic_offenders, tests/test_base_url_subpath_registry.py::test_identifier_sqli_route_paths_join_the_base_path
 
 - **PA-0301** — Strengthens `PA-0114` and `PA-0022` (related: `PA-0122`), after
   BUG-0301: the destructive rule missed Juice Shop's `/dataerasure` (one token) and
@@ -2156,6 +2157,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      the request/method gate, the body gate, the form gate or the SPA form gate,
      whichever must stop it. A residual's verdict is pinned to None, so the row is
      revisited when a rule starts refusing it. (from BUG-0301)
+  - Enforced by: tests/test_destructive_routes_external_labs.py::test_the_generated_labs_state_changing_routes_are_enumerated_and_judged, tests/test_destructive_routes_external_labs.py::test_bug_0301_compensating_controls_hold_meanwhile
 
 - **PA-0310** — Strengthens `PA-0025`, `PA-0059(1)` and `PA-0130` for container
   engines, after BUG-0310. The external labs' loopback checks refused only docker's
@@ -2175,6 +2177,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      fail-closed branch is mutation-checked.
   4. **The PA-0002 sweep covers every safety check over that system's state**, shell and
      Python, and records any it could not fix in this change. (from BUG-0310)
+  - Enforced by: tests/test_external_labs_static.py::test_the_exposure_check_allows_only_project_network_modes, tests/test_external_labs_static.py::test_a_container_in_the_host_netns_is_exposed_whatever_its_mode_says, tests/test_external_labs_static.py::test_check_exposure_fails_closed_on_engine_errors
 
 - **PA-0311** — Strengthens `PA-0013` and carries `PA-0117(1)` to ground-truth labels,
   after BUG-0311. A bWAPP negative was "proven" from the escaped display path while the
@@ -2195,6 +2198,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      done.
   3. **A status or enum filter names the value it means**, imported from its defining
      module (`PA-0001`), never a list of values to exclude. (from BUG-0311)
+  - Enforced by: tests/test_external_labs_static.py::test_the_level_log_check_flags_synthetic_offenders, tests/test_external_labs_static.py::test_the_bwapp_image_logs_each_requests_level_cookie
 
 - **PA-0400** — Strengthens `PA-0026` (enumerate an adapter's input shapes) and `PA-0036`
   (never assume a round trip without checking), after BUG-0400: the launcher's argv builder
@@ -2207,6 +2211,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **A shape it cannot express fails closed (raises)**; it never emits a different argv.
   3. **Prefer forwarding the user's own argv verbatim** over re-serialising a parsed namespace.
   (from BUG-0400)
+  - Enforced by: tests/test_cli_argv_roundtrip.py::test_discovery_reaches_every_registered_parser_and_the_broken_shapes, tests/test_cli_taxonomy.py::test_a_copy_parses_every_action_exactly_like_its_source
 
 - **PA-0401** — Strengthens `PA-0400(3)` (forward verbatim) and `PA-0021` (one derivation
   per convention), after BUG-0401: `train run` printed and checked the resolved store while
@@ -2218,6 +2223,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Its test parses the forwarded argv with the downstream's own parser** and compares
      that value with the one the wrapper reported, over every spelling the user can give
      (`~`, `..`, `=`, an abbreviation). (from BUG-0401)
+  - Enforced by: tests/test_train_cli.py::test_the_engine_opens_exactly_the_store_resolved_and_printed
 
 - **PA-0402** — A test-suite guard that observes the filesystem is bounded to what the suite
   owns, after BUG-0402: the store guard walked the whole invocation cwd and reported tests'
@@ -2227,6 +2233,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **It excludes the test framework's own scratch area** (pytest's basetemp).
   3. **Its tests run it from a cwd outside the repository and with the basetemp inside the
      walked tree.** (from BUG-0402)
+  - Enforced by: tests/test_storepath.py::test_the_store_guard_never_walks_pytests_temp_base_nor_an_outside_cwd, tests/test_storepath.py::test_the_guard_watches_an_outside_cwd_and_excludes_pytests_basetemp
 
 - **PA-0403** — Strengthens `PA-0040` and `PA-0044` (narrowed test sets miss cross-cutting
   checks) from per-trigger rules into a rule about the verification set, after BUG-0403: a
@@ -2238,6 +2245,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      changed modules. An import-based list cannot find a guard that judges a *new* module.
   2. **When the full suite is the backstop, it runs before the push of the commit it
      certifies**, on the clean committed tree. (from BUG-0403)
+  - Enforced by: tests/test_verify_change.py::test_a_module_change_selects_its_importers_and_every_guard, tests/test_verify_change.py::test_guards_are_always_selected_even_for_no_package_change
 
 - **PA-0450** — Strengthens `PA-0075` (a provenance claim is backed by a recorded fact)
   from store rows to **file handoffs**, after BUG-0450: `fuzz` imported a previous run's
@@ -2252,6 +2260,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **Each such handoff has a test that runs the producer empty over a pre-existing
      file.** The PA-0002 sweep is by mechanism: every import of a file into the store,
      with a disposition per site (recorded in BUG-0450). (from BUG-0450)
+  - Enforced by: tests/test_core_project.py::test_fuzz_never_imports_a_stale_csv_when_its_run_collected_nothing
 
 - **PA-0451** — Strengthens `PA-0028` and `PA-0083(3)`, after BUG-0451: the untrusted
   project-file check was a denylist (`type IN ('trigger','view')`), and a trigger got past
@@ -2263,6 +2272,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Its tests include the platform's own equivalent spellings** (case, comments, shared
      namespaces, direct schema writes) **and a non-vacuity fixture of every legitimate
      shape** (here fresh, legacy, `ANALYZE`d stores). (from BUG-0451)
+  - Enforced by: tests/test_core_project.py::test_a_case_variant_trigger_never_fires_on_open, tests/test_web_projects.py::test_a_case_variant_trigger_never_fires_through_the_ui
 
 - **PA-0452** — Strengthens `PA-0450`, after BUG-0452: tests created the UI's default
   store `./fuzzlab.db` in the repository.
@@ -2278,6 +2288,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      is opened (`fuzzlab web --with-proxy`) binds and creates the default at start-up
      (`ProjectManager.adopt_default`, FR-UI-458). Any other exception is written here
      first. (code review round 3)
+  - Enforced by: none — enforced by the session-wide fixtures `tests/conftest.py::_no_default_store_in_the_working_directory` and `tests/_store_guard.py::default_store_untouched`, which fail any test run that writes a default store (fixtures, not test functions)
 
 - **PA-0453** — Strengthens `PA-0451`, after BUG-0453: the allowlist that replaced
   BUG-0451's denylist exempted tables from definition matching because `trusted_schema=OFF`
@@ -2290,6 +2301,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Nothing of an untrusted structure is read before the definition that computes it is
      validated** (here `schema_version` before its rows), and a version this build cannot
      validate is refused before any other read. (from BUG-0453)
+  - Enforced by: tests/test_core_project.py::test_an_allowed_table_with_a_changed_definition_is_refused_before_any_row_is_read
 
 - **PA-0454** — Strengthens `PA-0108` and `PA-0101(2)`, after BUG-0454: a deeply nested or
   oddly typed value in a project file from someone else crashed the project pages.
@@ -2299,6 +2311,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      reads as missing or malformed — never fabricated, never an exception.
   2. **A fix for one parser-limit crash is swept across every parser of the same input
      source in the same change** (PA-0002 applied at fix time, not later). (from BUG-0454)
+  - Enforced by: tests/test_core_project.py::test_deep_json_in_a_project_file_reads_as_malformed, tests/test_core_project.py::test_odd_types_in_a_project_file_are_never_a_crash
 
 - **PA-0455** — Strengthens `PA-0101`, after BUG-0455: the record redactor truncated a
   value before stripping its URL userinfo, so a credential straddling the cut was kept.
@@ -2307,6 +2320,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      linear-time redaction first and cut last.
   2. **Every bound a redactor introduces is tested with a secret straddling it.** (from
      BUG-0455)
+  - Enforced by: tests/test_core_project.py::test_a_credential_straddling_the_record_cut_is_still_removed
 
 - **PA-0456** — Strengthens `PA-0131` and `PA-0453`, after BUG-0456: the definition check
   compared whitespace-normalised text (`str.split()`), and a definition SQLite reads
@@ -2317,6 +2331,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Its tests include inputs that differ only in what the consumer treats as
      significant** (non-ASCII spaces, comment boundaries, quoting), each with a
      non-vacuity step proving the consumer reads them differently. (from BUG-0456)
+  - Enforced by: tests/test_core_project.py::test_a_definition_that_only_normalises_equal_is_refused
 
 - **PA-0500** — Strengthens `PA-0096` and generalises `PA-0131(2)` and `PA-0108(1)`, after
   BUG-0500: `canonical_origin` promised ``None`` for an unusable URL but raised on a
@@ -2331,4 +2346,5 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **The PA-0002 sweep lists every caller of the non-total function with a
      disposition**; a known instance not fixed (here in a locked file) is pinned by a
      strict xfail (`PA-0054(3)`). (from BUG-0500)
+  - Enforced by: tests/test_core_runtarget.py::test_origin_of_is_total, tests/test_web_sitetree.py::test_a_malformed_stored_base_url_is_an_unreadable_origin_not_a_crash
 
