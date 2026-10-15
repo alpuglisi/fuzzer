@@ -14,7 +14,9 @@
 # traffic to a lab without --authorized (D11). Containers are removed only by the exact
 # compose project label, never by a name pattern.
 #
-# Environment: LABCTL_COMPOSE (set by labctl.sh), FUZZLAB_PYTHON (default python3),
+# Environment: LABCTL_COMPOSE (set by labctl.sh), FUZZLAB_PYTHON (default python3; a
+# bare name is looked up on PATH, a relative path resolves against the repo root, where
+# Python runs -- give an absolute path to be sure),
 # FUZZLAB_EXT_PROJECT_SUFFIX (isolates a test run's project), BWAPP_PORT / JUICE_PORT.
 set -euo pipefail
 

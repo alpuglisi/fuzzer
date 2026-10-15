@@ -152,6 +152,35 @@ Component code: **LAB**. Entry format and required fields: see
     on an engine error (PA-0310(2)); the generated labs' negatives were not re-swept for
     error-path echoes (PA-0311(1)); a repo-wide guard for hand-written oracle-status
     strings (PA-0311(3)) would also cover locked files.
+- Code review round 2 (reviewer A AGREE with nits; reviewer B REVISE on N1-N4):
+  - B N1: the bug protocol above. B N2: lane B's BUG-0301 overstated what its tables
+    proved; corrected in that report (appended "Correction") and in CC-CORE-0301's
+    Risk field.
+  - B N3/N4: "Effectiveness, final" below quotes each count from its own run, and
+    FR-LAB-304 now states the live assertions as they are.
+  - Live run 3 (from e74fba8) failed only on round 1's B2 replacement. The crawl pass
+    probed the login form's `security_level` field through the isolated anonymous
+    client. Root cause and revision are in BUG-0311 ("Corrective action, revised"). The
+    fixture now writes a per-request log of the level cookie (new
+    `lab/external/bwapp/apache-level-log.conf`, `GlobalLog`, `apache2ctl -t` at build,
+    spiked first). The live test asserts that no request of either pass carried level
+    1 or 2, that the log saw at least 1000 requests, and that a level-1 control request
+    appears in it.
+  - A L1: lane B's PA-0300 pointer check accepted any URL with a path. It now requires
+    a directory (`http://h/<dir>/`), with an origin-level offender
+    (`test_an_origin_level_page_url_is_not_a_subpath_literal`); every current pointer
+    still passes. L2: `origin` parameters are a stated limit in that module's
+    docstring. L3: the 4-letter-stem limit is stated in the test and in PA-0301(1).
+    L4: the generated-labs test's docstring says what a failure means.
+  - A N1: `fetch_bwapp` holds an exclusive `flock` on the cache directory, so a
+    concurrent fetch neither sweeps the other's part file nor races its rename. N2:
+    `published_port` fails closed on every engine error `check_exposure` handles and
+    returns the binding's own host (`::1` stays `::1`); the bootstrap targets it. N3:
+    the shell lint matches clustered short flags (`-dp`, `-dP`) and any engine
+    variable. N4: the live teardown counts built images as leftovers; an overrun
+    in-process pass is a stated limit (its thread cannot be stopped; its later sends
+    hit the stopped loopback lab). N5: the extctl header says how a relative
+    `FUZZLAB_PYTHON` resolves.
 - Impact: LAB, plus a read-only use of CORE (`core.net`, `core.http` headers,
   `core.credentials`, the new `procutil.host_listen_sockets`, CC-CORE-0300). Existing
   `labctl.sh` subcommands unchanged (tested). Consumers: `harness.multitarget`,

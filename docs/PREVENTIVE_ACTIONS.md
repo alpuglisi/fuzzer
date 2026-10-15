@@ -1734,7 +1734,8 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      `tests/test_destructive_routes_external_labs.py::test_no_lab_route_hides_a_destructive_word_in_a_compound`
      scans every lab route, and each hit the rule does not refuse needs a written
      disposition. A stale disposition fails. Proven on synthetic offenders
-     (`PA-0034(2)`).
+     (`PA-0034(2)`). Stated limit: stems shorter than five letters (`wipe`, `drop`)
+     are not scanned inside compounds; such a word is only caught standing alone.
   2. **The PA-0002 sweep for this class runs the rule over every lab's enumerated
      state-changing routes**: the generated labs' manifests and ground truth, and each
      adopted third-party lab's PA-0114 table. Each route the rule does not refuse is
@@ -1773,8 +1774,9 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      probe that drives those paths, and its note cites each path checked.
   2. **A live or integration assertion of a premise names the observation that would
      differ if the premise were false, and confirms the observed channel can carry
-     it.** An assertion on a channel that cannot carry the violation is replaced by one
-     on a channel that can, or by a stated structural argument plus a check of that
-     argument's own premise.
+     it**, with a positive control where one can be sent. An assertion on a channel
+     that cannot carry the violation is replaced by one on a channel that can. A
+     stand-in condition expected to imply the premise does not count. The check is run
+     live before it is called done.
   3. **A status or enum filter names the value it means**, imported from its defining
      module (`PA-0001`), never a list of values to exclude. (from BUG-0311)

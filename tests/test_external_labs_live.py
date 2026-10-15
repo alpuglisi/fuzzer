@@ -137,7 +137,8 @@ class Lab:
                     run_bounded([self.engine, *rm, *ids], timeout=300)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{kind}: {exc!r}")
-        left = self.project_ids("ps") + self.project_ids("volume") + self.project_ids("network")
+        left = [i for kind in ("ps", "volume", "network", "image")
+                for i in self.project_ids(kind)]
         return errors + [f"{self.project} left {left}"] if left else errors
 
     def store_credential(self, username: str, password: str) -> None:
@@ -237,17 +238,29 @@ def _checked_candidates(store, run_id: int) -> set[tuple[str, str, str, str]]:
     return out
 
 
-def _probed_params(store_path: Path) -> set[str]:
-    from fuzzlab.core.store import Store
-    with Store(str(store_path)) as s:
-        run = s.conn.execute("SELECT MAX(id) m FROM run").fetchone()["m"]
-        return {json.loads(r["evidence"] or "{}").get("param") or "" for r in s.conn.execute(
-            "SELECT evidence FROM candidate WHERE run_id = ?", (run,))}
+_LEVEL_LINE = re.compile(r'^fuzzlab-level (\S+) "(.*)"$')
+
+
+def _level_log(lab: Lab) -> list[tuple[str, str]]:
+    """``(security_level cookie, request line)`` of every request the bWAPP web container
+    served, from the fixture's own level log (``-``: no cookie)."""
+    ids = run_bounded([lab.engine, "ps", "-q", "--filter",
+                       f"label=com.docker.compose.project={lab.project}", "--filter",
+                       "label=com.docker.compose.service=web"], timeout=60).stdout.split()
+    assert len(ids) == 1, ids
+    res = run_bounded([lab.engine, "logs", ids[0]], timeout=300)
+    assert res.returncode == 0, res.stderr[-2000:]
+    return [(m.group(1), m.group(2)) for line in (res.stdout + res.stderr).splitlines()
+            if (m := _LEVEL_LINE.match(line.strip()))]
 
 
 def _run_auto_bounded(deadline: float = 3600, **kw) -> None:
     """``run_auto`` in-process (the test owns the OOB listener and the session), on a
-    thread with a deadline: a hung pass fails the test instead of blocking pytest."""
+    thread with a deadline: a hung pass fails the test instead of blocking pytest.
+
+    Stated limit (review N4): Python cannot stop the thread, so a pass that overruns
+    keeps sending until the process exits. It sends only to the loopback lab, which the
+    test's teardown then stops, so its later sends are refused connections."""
     import threading
 
     from fuzzlab.harness.auto import run_auto
@@ -435,8 +448,15 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-3000:]
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_CRAWL_FLOOR, "crawl")
-    # The labels rest on security level 0, kept in the login-time `security_level` cookie.
-    # It stays 0 structurally: the senders adopt no response cookie, so only a probe of
-    # the level form itself could matter -- and neither pass probed it (review B2).
-    for path in (lab.tmp / "bwapp_gt.db", store):
-        assert not {"security_level", "form_security_level"} & _probed_params(path), path
+    # The labels rest on bWAPP's level-0 code, which every `security_level` cookie value
+    # but "1" and "2" selects (the level switch's default, e.g. sqli_1.php:28-47). The
+    # fixture logs each request's cookie (apache-level-log.conf); no request of either
+    # pass may have carried level 1 or 2 (BUG-0311). The control shows the log carries
+    # the violation the check looks for.
+    control = f"fuzzlab-level-control={secrets.token_hex(4)}"
+    _get(f"{lab.base}/bWAPP/portal.php?{control}", {"Cookie": "security_level=1"})
+    levels = _level_log(lab)
+    assert ("1", control) in [(lvl, line) for lvl, line in levels if control in line]
+    sent = [(lvl, line) for lvl, line in levels if control not in line]
+    assert len(sent) >= 1000, f"the level log saw only {len(sent)} requests"
+    assert not [x for x in sent if x[0] in ("1", "2")][:5]

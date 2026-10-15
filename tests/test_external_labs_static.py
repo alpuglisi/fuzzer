@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -106,10 +107,12 @@ def test_the_compose_lint_passes_loopback_bindings(ports):
 
 # --- 2. shell publish lint (lab/ and scripts/) --------------------------------------------
 
-_RUN_LINE = re.compile(r"(?:\b(?:docker|podman)\b|\$\{?ENGINE\}?\"?)\s+"
+# The engine is a literal name or any shell variable (``$ENGINE``, ``"${eng}"``).
+_RUN_LINE = re.compile(r"(?:\b(?:docker|podman)\b|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\"?)\s+"
                        r"(?:container\s+|pod\s+)?(?:run|create)\b")
-_PUBLISH = re.compile(r"(?:^|\s)(?:-p\s*|--publish(?:\s+|=))(\S+)")
-_PUBLISH_ALL = re.compile(r"(?:^|\s)(?:-P|--publish-all)(?:\s|=|$)")
+# ``-p`` alone or ending a cluster of short flags (``-dp 80:80``), or ``--publish``.
+_PUBLISH = re.compile(r"(?:^|\s)(?:-[A-Za-z]*p\s*|--publish(?:\s+|=))(\S+)")
+_PUBLISH_ALL = re.compile(r"(?:^|\s)(?:-[A-Za-z]*P[A-Za-z]*|--publish-all)(?:\s|=|$)")
 _HOST_NET = re.compile(r"--(?:network|net)(?:\s+|=)[\"']?host\b")
 
 
@@ -158,6 +161,10 @@ def test_no_shell_script_publishes_beyond_loopback():
     'docker run --network="host" img\n',
     '"$ENGINE" run -p 80:80 img\n',
     "${ENGINE} run -p 80:80 img\n",
+    "docker run -dp 80:80 img\n",
+    "docker run -itp8080:80 img\n",
+    "docker run -dP img\n",
+    '"$eng" run -p 80:80 img\n',
 ])
 def test_the_shell_lint_flags_synthetic_offenders(src):
     assert shell_publish_problems(src), src
@@ -166,6 +173,7 @@ def test_the_shell_lint_flags_synthetic_offenders(src):
 def test_the_shell_lint_passes_loopback_publishes():
     assert shell_publish_problems("docker run -p 127.0.0.1:3000:3000 img\n"
                                   "docker run -p127.0.0.1:1:1 --network bwapp-net img\n"
+                                  "docker run -dp 127.0.0.1:80:80 --rm img\n"
                                   "# docker run -p 80:80 (a comment)\n") == []
 
 
@@ -481,6 +489,17 @@ def test_the_bwapp_db_has_no_network_and_its_socket_volume_is_tmpfs():
     assert doc["volumes"]["bwapp-mysqld-sock"]["driver_opts"]["type"] == "tmpfs"
 
 
+def test_the_bwapp_image_logs_each_requests_level_cookie():
+    """The live level check (BUG-0311) reads a per-request log of the `security_level`
+    cookie. It is configured in every virtual host (GlobalLog) and checked at build."""
+    conf = (EXTERNAL / "bwapp/apache-level-log.conf").read_text("utf-8")
+    assert re.search(r'^GlobalLog \S+ "fuzzlab-level %\{security_level\}C \\"%r\\""$',
+                     conf, re.M), conf
+    dockerfile = (EXTERNAL / "bwapp/Dockerfile").read_text("utf-8")
+    assert re.search(r"^COPY apache-level-log\.conf /etc/apache2/conf-enabled/\S+\.conf\n"
+                     r"RUN apache2ctl -t$", dockerfile, re.M)
+
+
 def test_every_external_service_drops_capabilities():
     for path in sorted(EXTERNAL.glob("*/compose.yaml")):
         for name, svc in yaml.safe_load(path.read_text("utf-8"))["services"].items():
@@ -563,6 +582,30 @@ def test_fetch_sweeps_a_killed_downloads_part_files(tmp_path):
     ext.fetch_bwapp(session=_FetchSession([_Resp(200, body)]), dest=tmp_path / "z.zip",
                     sha256=hashlib.sha256(body).hexdigest(), size=10)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["z.zip"]
+
+
+def test_a_fetch_waits_for_a_concurrent_fetch_of_the_same_cache(tmp_path):
+    """Review N1: while another fetch holds the cache, a second one neither sweeps the
+    other's in-progress part file nor starts; it runs once the first releases."""
+    import fcntl
+    import threading
+    body = b"x" * 10
+    holder = os.open(tmp_path, os.O_RDONLY)
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    part = tmp_path / ".bwapp-inflight.part"
+    part.write_bytes(b"partial")
+    sess = _FetchSession([_Resp(200, body)])
+    t = threading.Thread(target=ext.fetch_bwapp, kwargs=dict(
+        session=sess, dest=tmp_path / "z.zip", sha256=hashlib.sha256(body).hexdigest(),
+        size=10), daemon=True)
+    try:
+        t.start()
+        t.join(0.5)
+        assert t.is_alive() and part.exists() and sess.calls == []
+    finally:
+        os.close(holder)
+    t.join(10)
+    assert not t.is_alive() and (tmp_path / "z.zip").read_bytes() == body
 
 
 def test_fetch_refuses_a_directory_in_place_of_the_cache_file(tmp_path):
@@ -722,13 +765,41 @@ def test_published_port_reads_the_running_project():
     c = {"HostConfig": {"PortBindings": {"3000/tcp": [{"HostIp": "127.0.0.1",
                                                        "HostPort": "3005"}]}}}
     r = _Runner(ps="id1\n", inspect=json.dumps([c]))
-    assert ext.published_port(meta, "fuzzlab-juice-shop", "docker", runner=r) == 3005
+    assert ext.published_port(meta, "fuzzlab-juice-shop", "docker", runner=r) == \
+        ("127.0.0.1", 3005)
     assert "label=com.docker.compose.service=app" in r.calls[0]
+    v6 = {"HostConfig": {"PortBindings": {"3000/tcp": [{"HostIp": "::1", "HostPort": "3006"}]}}}
+    assert ext.published_port(meta, "p", "docker", runner=_Runner(
+        ps="id1\n", inspect=json.dumps([v6]))) == ("::1", 3006)
     for bad in ([], [{"HostConfig": {"PortBindings": {"3000/tcp": [{"HostIp": "0.0.0.0",
                                                                      "HostPort": "3005"}]}}}]):
         with pytest.raises(ext.ExternalLabError):
             ext.published_port(meta, "p", "docker",
                                runner=_Runner(ps="id1\n", inspect=json.dumps(bad)))
+
+
+@pytest.mark.parametrize("exc", ["timeout", "procutil", "oserror"])
+def test_published_port_turns_every_engine_error_into_a_lab_error(exc):
+    """Review N2: the same errors `check_exposure` fails closed on end as one
+    ExternalLabError (a one-line CLI message), never a traceback."""
+    from fuzzlab.procutil import ProcUtilError
+
+    def runner(argv, timeout):
+        raise {"timeout": subprocess.TimeoutExpired(argv, timeout),
+               "procutil": ProcUtilError("spawn refused"),
+               "oserror": FileNotFoundError("docker")}[exc]
+    with pytest.raises(ext.ExternalLabError):
+        ext.published_port(ext.LAB_META["juice-shop"], "p", "docker", runner=runner)
+
+
+def test_bootstrap_targets_the_published_host_as_given():
+    class Down(dict):                    # a lab that answers 503 everywhere
+        def __missing__(self, key):
+            return lambda s, kw: _Resp(503)
+    log = []
+    with pytest.raises(ext.ExternalLabError):
+        _boot("juice-shop", Down(), _Store(), _Store(), log, port=3006, host="::1")
+    assert log and all(url.startswith("http://[::1]:3006/") for _m, url, _kw, _s in log)
 
 
 def test_host_listen_sockets_sees_a_real_loopback_listener():

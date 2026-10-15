@@ -88,6 +88,32 @@ Commit e74fba8 (CC-LAB-0300 "Code review round 1", B1-B3):
 - B8 (same review): a flagged negative fails the test in any pass, not only the pass
   its reach tag names.
 
+## Corrective action, revised (2026-10-15, live run 3)
+The replacement level check above was wrong too, and the third live run failed on it.
+Everything before it passed, including both floors and no flagged negative. The crawl
+pass did probe `security_level`: twice, as the body field of bWAPP's login form (that
+form carries a level select). The tool sends login-shaped forms through its isolated
+anonymous client (`tests/test_login_form_isolation.py::test_bwapps_login_shaped_forms_are_imported_and_isolated`),
+so the run's session was not affected. The new check below observes that directly
+rather than relying on it. "No probe of the level parameters" was
+a condition I expected to hold. It is not the argument's premise, and it was false.
+The premise that matters is that no request of the run carried a level other than 0.
+That is now observed directly:
+- The fixture logs the `security_level` cookie of every request
+  (`lab/external/bwapp/apache-level-log.conf`, a `GlobalLog` line checked by
+  `apache2ctl -t` at build and by a static test). It was spiked in a throwaway
+  container first.
+- The live test asserts that no logged request of either pass carried `1` or `2`. In
+  bWAPP, every other value selects the level-0 code path: the level switch's default,
+  e.g. `sqli_1.php:28-47`; `666` is display-only.
+- It also asserts that the log saw at least 1000 requests, and it sends a control
+  request with `security_level=1` that must appear in the log. That proves the channel
+  carries the violation the check looks for.
+
+This is the same root cause, found by the same rule's own requirement to run the check
+live, before merge. PA-0311(2) is sharpened below: the check observes the premise
+itself, not a condition expected to imply it.
+
 ## Recurrence review
 Searched `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for the same bug or the same root
 cause:
@@ -126,10 +152,12 @@ Result: a recurrence of PA-0013's root cause, plus a violation of PA-0001, in a 
    probe that drives those paths (a quote-breaking value), and its note cites each path
    it checked.
 2. **Every live or integration assertion of a premise names the observation that would
-   differ if the premise were false, and confirms the observed channel can carry it.**
-   An assertion on a channel that cannot carry the violation is replaced by one on a
-   channel that can, or by a stated structural argument with a check of the argument's
-   own premise (here: no probe of the level parameters).
+   differ if the premise were false, and confirms the observed channel can carry it**,
+   with a positive control where one can be sent. An assertion on a channel that cannot
+   carry the violation is replaced by one on a channel that can. A stand-in condition
+   expected to imply the premise does not count: the first replacement here ("no probe
+   of the level parameters") was such a stand-in, and it was false. The check is run
+   live before it is called done.
 3. **A status or enum filter names the value it means**, imported from the defining
    module (PA-0001), never a list of values to exclude.
 

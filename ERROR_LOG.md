@@ -29,8 +29,11 @@ Format per entry:
   hand-written instead of using `oracle_status.CHECKED`.
 - **Remediation:** BWAPP-0047 is now a positive, plus BWAPP-0057/0058 (the same echo),
   all verified live. The level checks became "no probe of the level parameters" plus a
-  stated structural reason. The filter uses `CHECKED` (commit e74fba8). Full RCA in
-  `docs/bugs/BUG-0311-*`, rule PA-0311.
+  stated structural reason. The filter uses `CHECKED` (commit e74fba8). That
+  replacement was wrong too: live run 3 showed the crawl pass probing the login form's
+  `security_level` field through the isolated client. It now reads a per-request log of
+  the level cookie that the fixture writes, with a positive control (round 3). Full RCA
+  in `docs/bugs/BUG-0311-*`, rule PA-0311.
 - **Status:** Fixed
 
 ## 2026-10-15 — External lab fixtures: the loopback exposure checks failed open (fixed, BUG-0310 / PA-0310, CC-LAB-0300, CC-CORE-0300)

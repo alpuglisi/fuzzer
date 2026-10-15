@@ -22,7 +22,10 @@ an operator base URL:
 
 Not discovered (stated limits): a request URL (``url``, ``page_url``, ``login_url``)
 is not a base; a base read from CLI arguments or config inside a function is covered
-where that function passes it on, under one of the names above.
+where that function passes it on, under one of the names above. An ``origin`` /
+``*_origin`` parameter is not discovered: an origin has no path by definition, and the
+one such function today (`fuzzlab.lab_fixtures.external._LabClient`) refuses a URL with
+a path (tested in ``tests/test_external_labs_static.py``).
 
 Each discovered function (``module:Qualified.name``) has exactly one `REGISTRY` entry:
 
@@ -58,8 +61,9 @@ BASE_QUALIFIERS = frozenset({"base", "start", "target", "root", "app", "site", "
 BARE_BASE_NAMES = frozenset({"base", "start", "root"})
 URL_FUNCTIONS = frozenset({"urljoin", "urlsplit", "urlparse", "canonical_origin",
                            "to_path"})
-#: A URL with a path segment after its authority (``http://h/app/``, ``…/bWAPP/x``).
-SUBPATH_URL = re.compile(r"https?://[^/\s'\"]+/[A-Za-z][\w.-]*")
+#: A URL whose path has a directory after its authority (``http://h/app/``,
+#: ``…/bWAPP/x``). An origin-level page (``http://h/login.php``) is not a sub-path base.
+SUBPATH_URL = re.compile(r"https?://[^/\s'\"]+/[A-Za-z][\w.-]*/")
 #: Or an app mount prefix a fixture serves under (``prefix="/app/"``).
 MOUNT_PREFIX = re.compile(r"^/[A-Za-z][\w.-]*/$")
 
@@ -343,7 +347,16 @@ def k(base: dict): return {**base}
     assert pointer_problems({"x": XFail("BUG-9999",
                                         f"{me}::test_ground_truth_points_join_absolute_paths_to_the_origin")})
     assert pointer_problems({"x": Covered(
+        f"{me}::test_an_origin_level_page_url_is_not_a_subpath_literal")})
+    assert pointer_problems({"x": Covered(
         f"{me}::test_a_finding_raw_request_keeps_its_stored_path_under_a_subpath_base")}) == []
+
+
+def test_an_origin_level_page_url_is_not_a_subpath_literal():
+    """Review L1: a URL with a path but no directory is an origin-level page, so a test
+    whose only URLs look like this one does not drive a sub-path base. (This test is
+    itself the pointer offender above: keep its only URL origin-level.)"""
+    assert not _is_subpath_literal("http://127.0.0.1/login.php")
 
 
 # --- BUG-0300 (strict xfails; the corrective action is the auto.py lock owner's) -------

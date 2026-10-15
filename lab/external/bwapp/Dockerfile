@@ -30,6 +30,8 @@ RUN docker-php-ext-install mysql mysqli >/dev/null \
  && php -m | grep -qix mysqli && php -m | grep -qix mysql
 COPY php-bwapp.ini /usr/local/etc/php/conf.d/zz-fuzzlab-bwapp.ini
 COPY apache-root.conf /etc/apache2/conf-enabled/zz-fuzzlab-root.conf
+COPY apache-level-log.conf /etc/apache2/conf-enabled/zz-fuzzlab-level-log.conf
+RUN apache2ctl -t
 RUN php -r 'exit(ini_get("mysqli.default_socket") === "/var/run/mysqld/mysqld.sock" && ini_get("mysql.default_socket") === "/var/run/mysqld/mysqld.sock" ? 0 : 1);'
 COPY --from=fetch /src/bWAPP /var/www/html/bWAPP
 # Runtime write locations (bWAPP source): passwords/, images/, documents/, logs/, db/

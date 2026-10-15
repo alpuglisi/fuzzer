@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0302 — PA-0301's spelling scan states its short-stem limit (review L3/L4) (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 (PA-0031); see CC-LAB-0300. Test and docs
+  only, no gate needed.
+- Change: `tests/test_destructive_routes_external_labs.py` states that `MIN_STEM = 5`
+  never finds a 4-letter word (`wipe`, `drop`) inside a compound, and the rule's own
+  token match still sees it standing alone (L3). PA-0301(1) states the same limit.
+  `test_the_generated_labs_state_changing_routes_are_enumerated_and_judged` says that a
+  failure means a scored cell became unscorable (L4). No assertion changed.
+- Impact: none outside the comments; no production code.
+- Risk: none (comments and a docstring).
+- Deliverables:
+  - [x] comment, docstring, PA-0301(1) limit — done
+- Effectiveness (assessed 2026-10-15): TBD-CORE
+
 ### CC-CORE-0301 — BUG-0301 recorded: the destructive rule misses Juice Shop's GET password change and data erasure (deferred to the `core/urls.py` lock owner); PA-0301's sweep (2026-10-15)
 - Change: documentation and tests only; no production code changes (`fuzzlab/core/urls.py`
   is locked by another session).

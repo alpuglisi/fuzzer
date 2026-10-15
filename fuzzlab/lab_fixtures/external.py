@@ -28,6 +28,7 @@ Safety:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import getpass
 import hashlib
 import json
@@ -170,13 +171,28 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
     the download to a mirror) are followed by hand, https only, at most ``max_hops``.
     This is an anonymous public download, so the host's own proxy/CA environment
     applies. On any mismatch the partial file is removed and ``ExternalLabError``
-    raised -- never a substitute."""
+    raised -- never a substitute.
+
+    One fetch runs at a time per cache directory (an exclusive ``flock`` on the
+    directory itself): the stale-part sweep and the cache check would otherwise race a
+    concurrent fetch, e.g. an operator's ``up bwapp`` beside a live test."""
     dest = cache_path() if dest is None else dest
     if dest.exists() and not dest.is_file():
         raise ExternalLabError(f"{dest} exists and is not a file")
-    if dest.parent.is_dir():                    # a killed download's leftovers
-        for stale in dest.parent.glob(".bwapp-*.part"):
-            stale.unlink()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lock = os.open(dest.parent, os.O_RDONLY)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _fetch_locked(session=session, dest=dest, timeout=timeout,
+                             max_hops=max_hops, url=url, sha256=sha256, size=size)
+    finally:
+        os.close(lock)                          # releases the lock
+
+
+def _fetch_locked(*, session: Any, dest: Path, timeout: float, max_hops: int, url: str,
+                  sha256: str, size: int) -> Path:
+    for stale in dest.parent.glob(".bwapp-*.part"):     # a killed download's leftovers
+        stale.unlink()
     if dest.is_file():
         digest, got = _sha256_file(dest)
         if digest == sha256 and got == size:
@@ -185,7 +201,6 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
     if session is None:
         import requests
         session = requests.Session()
-    dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=".bwapp-", suffix=".part", dir=dest.parent)
     tmp = Path(tmp_name)
     try:
@@ -402,11 +417,15 @@ def exposure_problems(inspects: list[Mapping[str, Any]], host_listeners: Iterabl
 
 
 def published_port(meta: LabMeta, project: str, engine: str, *,
-                   runner: Callable[..., Any] | None = None) -> int:
-    """The loopback host port the running project actually publishes for the lab's app
-    (review A9: the bootstrap must target the running lab, not whatever the port
-    variable says now). Raises when there is none, or it is not on loopback."""
+                   runner: Callable[..., Any] | None = None) -> tuple[str, int]:
+    """``(host, port)``: the loopback address the running project actually publishes for
+    the lab's app (review A9: the bootstrap must target the running lab, not whatever
+    the port variable says now), host as the binding names it (``127.0.0.1``, ``::1``).
+    Raises on any engine error, when there is none, or when it is not on loopback."""
+    import subprocess
+
     from fuzzlab.core.net import is_loopback_host
+    from fuzzlab.procutil import ProcUtilError
     if runner is None:
         from fuzzlab.procutil import run_bounded as runner
     try:
@@ -415,16 +434,19 @@ def published_port(meta: LabMeta, project: str, engine: str, *,
                                     f"label=com.docker.compose.service={meta.service}"],
                            runner).split()
         inspects = json.loads(_engine_json(engine, ["inspect", *ids], runner)) if ids else []
-    except (ExternalLabError, ValueError, OSError) as exc:
-        raise ExternalLabError(f"cannot read the published port of {project}: {exc}") from None
+    except (ExternalLabError, ValueError, OSError, subprocess.TimeoutExpired,
+            ProcUtilError) as exc:
+        raise ExternalLabError(f"cannot read the published port of {project}: "
+                               f"{type(exc).__name__}: {exc}") from None
     for c in inspects if isinstance(inspects, list) else []:
         sources = ((c.get("HostConfig") or {}).get("PortBindings") or {},
                    (c.get("NetworkSettings") or {}).get("Ports") or {})
         for source in sources:
             for b in source.get(f"{meta.container_port}/tcp") or []:
                 port = str((b or {}).get("HostPort") or "")
-                if port.isdigit() and is_loopback_host(str((b or {}).get("HostIp") or "")):
-                    return int(port)
+                host = str((b or {}).get("HostIp") or "")
+                if port.isdigit() and is_loopback_host(host):
+                    return host, int(port)
     raise ExternalLabError(f"{project}: no running {meta.service} container publishes "
                            f"{meta.container_port} on loopback (is the lab up?)")
 
@@ -713,14 +735,17 @@ _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
-              port: int | None = None, keyring_store: Any = None, opened_store: Any = None,
+              port: int | None = None, host: str = "127.0.0.1",
+              keyring_store: Any = None, opened_store: Any = None,
               prompt: Callable[[str], str] | None = None, generate: bool = True,
               session_factory: Callable[[], Any] | None = None,
               deadline: float = 180.0) -> BootstrapResult:
     """Bring ``name`` to a usable state and store its lab identity (only after a verified
-    login)."""
+    login). ``host``/``port`` name the running lab's published address (default: the
+    port variable's ``127.0.0.1`` base)."""
     meta = lab_meta(name)
-    origin = f"http://127.0.0.1:{port}" if port else base_url(meta, environ)
+    shown = f"[{host}]" if ":" in host else host
+    origin = f"http://{shown}:{port}" if port else base_url(meta, environ)
     client = _LabClient(origin, session_factory=session_factory)
     host = urlsplit(client.origin).hostname or "127.0.0.1"
     if keyring_store is None or opened_store is None:
@@ -800,10 +825,10 @@ def main(argv: list[str] | None = None) -> int:
                 print("bootstrap sends traffic to the lab: pass --authorized "
                       "(lab-only, your own loopback lab)", file=sys.stderr)
                 return 2
-            port = None
+            host, port = "127.0.0.1", None
             if args.project and args.engine:
-                port = published_port(meta, args.project, args.engine)
-            res = bootstrap(meta.name, port=port, prompt=_tty_prompt())
+                host, port = published_port(meta, args.project, args.engine)
+            res = bootstrap(meta.name, port=port, host=host, prompt=_tty_prompt())
             print(f"{res.lab}: identity {res.identity!r} ready "
                   f"({res.credential_source}{', stored' if res.stored else ''}); "
                   + "; ".join(res.notes))

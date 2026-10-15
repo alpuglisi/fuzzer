@@ -22,6 +22,25 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0301 — PA-0300's pointer check requires a directory-form sub-path URL (review L1/L2) (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 (PA-0031); see CC-LAB-0300. Test-only, no gate
+  needed (README: tests/docs).
+- Change: `tests/test_base_url_subpath_registry.py`:
+  - `SUBPATH_URL` now requires a directory after the authority
+    (`https?://host/<dir>/`). Code review round 2 (reviewer A, L1) showed that
+    `http://127.0.0.1/login.php` counted as a sub-path literal, so a `Covered` pointer to
+    a test with only origin-level URLs would have passed.
+  - New offender `test_an_origin_level_page_url_is_not_a_subpath_literal`, which is also
+    the pointer the guard must refuse.
+  - The module docstring states the `origin` / `*_origin` limit (L2).
+- Impact: FUZZ tests only; no production code. Every existing registry pointer passes
+  the stricter pattern.
+- Risk: low. A stricter guard can only fail a pointer; none fails today.
+- Deliverables:
+  - [x] stricter pattern, offender, docstring limit — done
+  - [x] mutation check (the old pattern makes the offender test fail) — done
+- Effectiveness (assessed 2026-10-15): TBD-FUZZ
+
 ### CC-FUZZ-0300 — BUG-0300 recorded: ground-truth points double an operator sub-path (deferred to the `auto.py` lock owner); PA-0300's base-URL registry (2026-10-15)
 - Change: documentation and tests only; no production code changes (`fuzzlab/harness/auto.py`
   and `fuzzlab/greybox/run.py` are locked by another session).

@@ -6350,10 +6350,25 @@ lane) can submit a payload as
   `tests/test_external_labs_live.py`, gated by `FUZZLAB_LIVE_EXTERNAL_LABS=1` (skips with
   that reason otherwise; with it, a missing engine or a failed pull/build fails), brings
   each fixture up under its own project and port with a throwaway keyring, runs a **crawl
-  pass** and a **gt pass**, and asserts a stated floor of matched case ids, no flagged
-  negative, and a checked candidate for every positive tagged for that pass. Juice Shop's
-  SSRF (`JUICE-0005`) is pinned as a documented miss: the bridge network cannot reach the
-  loopback-only OOB listener; the test asserts the probe was made and no callback arrived.
+  pass** and a **gt pass**, and asserts:
+  - a stated floor of matched case ids, which a static test keeps inside that pass's
+    reach tags;
+  - no flagged negative in any pass;
+  - a candidate the oracle `CHECKED` (`fuzzlab.core.oracle_status`) for every positive
+    tagged for that pass.
+  For bWAPP it also asserts, from the fixture's per-request log of the
+  `security_level` cookie (`apache-level-log.conf`), that no request of either pass
+  carried level 1 or 2. Those are the only values that leave bWAPP's level-0 code, on
+  which the labels rest. The log must have seen at least 1000 requests, and a control
+  request with level 1 must appear in it (BUG-0311).
+  Juice Shop's SSRF (`JUICE-0005`) is pinned as a documented miss. The bridge network
+  cannot reach the loopback-only OOB listener, so the test asserts that OOB callbacks
+  were sent in `/profile/image/url`'s `imageUrl` (tied to their sends) and that none
+  arrived.
+  The in-process passes run under a deadline. Teardown is exception-safe and removes
+  the project's containers, pods, networks, volumes and built images, and asserts that
+  none of them is left. bWAPP additionally survives a restart and a killed DB, and its
+  build fails on a wrong zip hash.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

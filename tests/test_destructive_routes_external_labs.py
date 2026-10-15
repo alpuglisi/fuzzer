@@ -544,7 +544,10 @@ def test_the_generated_labs_state_changing_routes_are_enumerated_and_judged():
     refused by the rule or a scored cell -- a ground-truth run sends it as an explicit
     point, and a crawl run fuzzing it exercises the cell's own sink, which is the lab's
     purpose (the lab is disposable: `labctl.sh reset`). No generated lab serves a
-    logout, delete or reset route at all."""
+    logout, delete or reset route at all.
+
+    A failure here does not mean the rule is wrong: a destructive refusal of a scored
+    route would make that cell unscorable, so the cell or the rule needs a look."""
     routes = _generated_lab_routes()
     assert len(routes) >= 30                       # the enumeration found the labs
     for _src, method, path in routes:
@@ -556,7 +559,9 @@ def test_the_generated_labs_state_changing_routes_are_enumerated_and_judged():
 
 # --- PA-0301: compound and verb-object spellings, over every lab's routes -------------
 #: A destructive or transaction word this short is too common inside other words to
-#: scan for as a substring (``del`` in ``model``, ``pay`` in ``display``).
+#: scan for as a substring (``del`` in ``model``, ``pay`` in ``display``). Stated limit
+#: (review L3): a 4-letter word (``wipe``, ``drop``) is never found inside a compound
+#: (``accountwipe``); the rule's own token match still sees it standing alone.
 MIN_STEM = 5
 #: Words the rule does not have yet but a compound spelling has shown to need
 #: (BUG-0301: ``erasure``); scanned as stems only.
