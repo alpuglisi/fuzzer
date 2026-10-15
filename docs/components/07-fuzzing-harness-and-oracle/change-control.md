@@ -3,6 +3,53 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0090 — A probe carries its own kind of browser headers: a JSON API probe is a fetch (BUG-0152) (2026-10-15)
+- Change (FR-FUZZ-53):
+  - `tools/probesender.py::RequestsProbeSender`: `send` computes
+    `kind = request_kind(headers, location)`. `_request(method, url, kwargs, kind)` sends
+    `requests_browser_headers(headers, kind=kind)`. `_follow` keeps the probe's kind (a
+    fetch's redirect is followed as the same fetch). The default session's navigation
+    defaults now come through `browser_headers("navigation")`.
+  - `greybox/run.py::RequestsCorrelatingSender.send_correlated` and
+    `tools/blind_sqli_fuzzer.py::RequestsSender.get` (and `main`): the same owner call.
+    Neither builds a JSON body, so both send the navigation set.
+  - Tests:
+    - `tests/test_browser_header_profiles.py` (new). Four loopback apps in the
+      negotiation styles of Spring Boot, DRF, Express and Rails, each cited from its
+      documentation. A JSON probe gets the JSON detail under the fetch profile for
+      Spring and DRF; Express and Rails (html first) are strict xfails. A form probe
+      keeps the navigation set and gets the generic page. M2 confirms a JSON point only
+      with the fetch set. There is also an AST guard over every requests-session send.
+    - `tests/test_probesender.py` and `tests/test_fuzzer_seam.py` were updated for the
+      per-request headers.
+- Impact (other components / project). Consumers, found by searching
+  `RequestsProbeSender(`, `RequestsCorrelatingSender(` and `RequestsSender(` over
+  `fuzzlab/` and `tests/` (PA-0152):
+  - `make_probe_sender` (the unauthenticated `auto`, `fuzz` and multitarget paths);
+  - the multitarget and live-boot tests;
+  - the conformance factories.
+  - No protocol change. `SeamProbeSender` is unchanged and carries no browser set on
+    this branch.
+  - The `fuzzlab/harness/*`, `fuzzlab/session/*` and `tools/{navguard,spa,spider,store_adapter}.py`
+    files are not edited (other lanes). The change needed in
+    `session/manager.py` is reported in BUG-0152's sweep.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - A JSON-body probe's response may now differ from before: JSON where an HTML error
+    page was. That is the app's answer to its own kind of client.
+  - Oracle tests that read JSON echoes still pass (`test_json_points`,
+    `test_prg_observation`, `test_evaluation_marker_echo`).
+- Deliverables:
+  - [x] the three senders; the PRG kind; the tests — done
+  - [ ] follow-on: the app's captured `Accept` passed through the sender (DISC-CAPTURE)
+    — todo
+- Effectiveness (assessed 2026-10-15): `tests/test_browser_header_profiles.py` 43 passed
+  and 2 xfailed. `test_probesender`, `test_fuzzer_seam`, `test_sender_conformance`,
+  `test_destructive_urls`, `test_prg_observation`, `test_probe_unobserved`,
+  `test_forms_phase1`, `test_forms_phase2`, `test_json_points`, `test_greybox_live`,
+  `test_session_transport_binding`, `test_login_form_isolation` and
+  `test_evaluation_marker_echo` pass, each run alone. Harness counts are in the commit
+  report.
+
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
 - Change:
   - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no

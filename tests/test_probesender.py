@@ -89,7 +89,9 @@ def test_requests_probe_sender_header_location():
         method="POST", location="header")
     call = session.calls[0]
     assert call["method"] == "POST"
-    assert call["headers"] == {"X-Signature-256": "deadbeef"}
+    # the probed header, once, over the navigation profile (BUG-0152, SP-38)
+    assert call["headers"]["X-Signature-256"] == "deadbeef"
+    assert call["headers"]["Sec-Fetch-Mode"] == "navigate"
     assert call["params"] is None and call["data"] is None
 
 
@@ -103,7 +105,9 @@ def test_requests_probe_sender_whole_body_json():
     call = session.calls[0]
     assert call["method"] == "POST"
     assert call["data"] == b'["java.util.HashMap",{}]'
-    assert call["headers"] == {"Content-Type": "application/json"}
+    # a JSON body is a script's fetch: the measured fetch profile (BUG-0152, SP-38)
+    assert call["headers"]["Content-Type"] == "application/json"
+    assert call["headers"]["Accept"] == "*/*" and call["headers"]["Sec-Fetch-Mode"] == "cors"
     assert call["params"] is None
 
 

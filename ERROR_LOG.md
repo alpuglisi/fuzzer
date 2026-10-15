@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Probe senders: JSON API probes went out with a navigation's headers (fixed, BUG-0152, PA-0158)
+- **Symptom:** every requests-based probe, JSON-body API probes included, carried `Accept: text/html,…`, `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. An app that negotiates its error format on `Accept` answered a generic HTML page instead of the JSON error detail its own client gets. Four documented negotiation styles reproduce this in `tests/test_browser_header_profiles.py`. It was recorded as a residual in BUG-0119 and not followed up (F-043). No lost finding on a real run is attributed to it (F-018).
+- **Root cause:** browser header emulation was one per-client constant (`DEFAULT_BROWSER_HEADERS`, PA-0061/PA-0062), not a per-request decision. Nothing tied a request's headers to the kind of request a browser makes for it, and the values were never measured.
+- **Remediation:** `core/http.py` owns two profiles, navigation and fetch. The fetch profile is measured from Chromium 141: `Accept: */*`, `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`, `Sec-Fetch-Site: same-origin`. `request_kind` picks one from the request (a JSON body or point is a fetch), and `requests_browser_headers` merges it, with the caller's headers winning. Every requests-based sender uses it, enforced by an AST guard (SP-38). The JSON-SEND design's `application/json, text/plain, */*` turned out to be the axios / Angular default and was corrected. Html-first Express and Rails apps still answer HTML under `*/*` (strict xfail). The follow-on is to replay the app's captured `Accept` (DISC-CAPTURE).
+- **Status:** Fixed.
+
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
 - **Root cause:**

@@ -388,6 +388,33 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
+- **FR-CORE-44** *(two browser header profiles, chosen from the request; `CC-CORE-0061`,
+  2026-10-15, BUG-0152, SP-38).* `core/http.py` owns the browser header sets:
+  - `NAVIGATION_HEADERS`: a top-level navigation (the BUG-0060 set, unchanged;
+    `DEFAULT_BROWSER_HEADERS` is the same dict, kept for the session defaults of the
+    login client and the crawler);
+  - `FETCH_HEADERS`: a script's same-origin `fetch()`/XHR, **as measured** from Chromium
+    141: `Accept: */*`, `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`,
+    `Sec-Fetch-Site: same-origin`, no `Sec-Fetch-User`, no `Upgrade-Insecure-Requests`;
+    the same User-Agent and Accept-Language;
+  - `request_kind(headers, location)`: `"fetch"` for a JSON body (`application/json`
+    or a `+json` suffix, `is_json_media_type`) or `location == "json"`, else
+    `"navigation"`. Decided from the request only, never from the app's source;
+  - `browser_headers(kind)` (a fresh copy; an unknown kind raises), and the merges
+    `with_browser_headers(headers, kind=)` and `requests_browser_headers(headers,
+    kind=)`. The caller's headers always win, case-insensitively, and each name is sent
+    once. The `requests` form also sets every other profile's header that this kind
+    does not send to `None`, so a session's navigation defaults never leak onto a
+    fetch.
+  - The emulated rules are listed with their spec step or measurement in
+    `BROWSER_HEADER_RULES` (PA-0111); each has a fixture.
+  - Enforced by: `tests/test_browser_header_profiles.py` (wire-level sets for both
+    profiles, the caller's `Accept` winning, four framework-style negotiating apps, and
+    the AST guard `test_every_requests_sender_takes_its_headers_from_the_owner`, proven
+    on synthetic offenders).
+  - Not covered: the core seam (`HttpClient.send`) adds no browser set on this branch
+    (BUG-0119 is unmerged); when it lands, its merge must take
+    `kind=request_kind(...)` (the guard fails on a kind-less merge).
 - **FR-CORE-41** *(a started server is up only when it owns its port; `CC-CORE-0057`,
   2026-10-15, BUG-0143).*
   - `procutil.start_server_on_free_port` picks a loopback port, starts the server, and

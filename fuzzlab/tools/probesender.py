@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 
-from fuzzlab.core.http import check_send_header
+from fuzzlab.core.http import check_send_header, request_kind, requests_browser_headers
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
@@ -793,9 +793,10 @@ class RequestsProbeSender(_ExplicitAllowance):
         self._isolated_keys: frozenset[str] = frozenset()
         self._isolated_sends = 0
         if session is None:
-            from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
+            from fuzzlab.core.http import browser_headers
             session = requests.Session()
-            session.headers.update(DEFAULT_BROWSER_HEADERS)
+            # session defaults only; every send passes its own kind's set (SP-38)
+            session.headers.update(browser_headers("navigation"))
         self._session = session
         self._timeout = timeout
 
@@ -857,9 +858,12 @@ class RequestsProbeSender(_ExplicitAllowance):
             kwargs["data"] = {param: value}          # form-encoded body
         else:
             kwargs["params"] = {param: value}        # query string
-        probe = self._request(method.upper(), url, kwargs)
+        # The browser header profile from the request itself (BUG-0152, SP-38): a JSON
+        # body or a JSON-body point is a script's fetch, anything else a navigation.
+        kind = request_kind(kwargs.get("headers"), location)
+        probe = self._request(method.upper(), url, kwargs, kind)
         if prg and not timing:                 # FR-FUZZ-49; a timing send never follows
-            self._follow(probe, url, method)
+            self._follow(probe, url, method, kind)
         return probe
 
     #: Methods re-sent once after a connection failed with no response (RFC 9110
@@ -868,8 +872,12 @@ class RequestsProbeSender(_ExplicitAllowance):
     #: server had already answered.
     RETRY_ON_RESET = frozenset({"GET", "HEAD", "OPTIONS"})
 
-    def _request(self, method: str, url: str, kwargs: dict) -> Probe:
+    def _request(self, method: str, url: str, kwargs: dict, kind: str) -> Probe:
+        """One send with ``kind``'s browser header set under the probe's own headers
+        (`core.http.requests_browser_headers`, SP-38: the caller's headers win)."""
         import requests
+        kwargs = {**kwargs, "headers": requests_browser_headers(kwargs.get("headers"),
+                                                                kind=kind)}
         for attempt in (1, 2):
             start = time.perf_counter()
             try:
@@ -891,9 +899,11 @@ class RequestsProbeSender(_ExplicitAllowance):
                 raise unobserved from exc   # no response: no verdict, the run goes on
         raise AssertionError("unreachable")
 
-    def _follow(self, probe: Probe, url: str, method: str) -> None:
+    def _follow(self, probe: Probe, url: str, method: str, kind: str) -> None:
         """One plain GET of the probe's PRG target (`prg_target`), anonymous like the
-        probe: the jar is cleared first (BUG-0112), no redirect is followed."""
+        probe: the jar is cleared first (BUG-0112), no redirect is followed. It keeps
+        the probe's header kind: a browser follows a fetch's redirect in the same fetch
+        (``BROWSER_HEADER_RULES['redirect-keeps-kind']``)."""
         target, why = prg_target(probe, url, method, self._explicit)
         if target is None:
             probe.prg = why
@@ -905,7 +915,7 @@ class RequestsProbeSender(_ExplicitAllowance):
             jar.clear()
         try:
             followed = self._request("GET", target, {"timeout": self._timeout,
-                                                     "allow_redirects": False})
+                                                     "allow_redirects": False}, kind)
         except ProbeUnobserved as exc:         # the follow-up got no response (BUG-0147)
             probe.prg, probe.resent = PRG_UNOBSERVED, probe.resent + exc.resent
             return

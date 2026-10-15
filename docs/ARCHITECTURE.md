@@ -1149,7 +1149,10 @@ tracked in the requirements files, not here.
 
 ### 2. `core/` shared library `[built]` (plugin registry: component 13)
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
-  session context; records raw bytes (`core/http.py`).
+  session context; records raw bytes (`core/http.py`). It also owns the browser header
+  profiles (navigation, and fetch as measured from Chromium), chosen per request by
+  `request_kind`; every requests-based sender takes its headers from
+  `requests_browser_headers` (SP-38, FR-CORE-44).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
   (`core/store.py`, `core/migrations.py`; head = migration 5 — core, finding
   url/method/param, session_state, evaluation, bandit cost columns).

@@ -548,9 +548,9 @@ def bwapp_level_problems(log_text: str, controls: Iterable[str], *,
 def _default_session() -> Any:
     import requests
 
-    from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
+    from fuzzlab.core.http import browser_headers
     s = requests.Session()
-    s.headers.update(DEFAULT_BROWSER_HEADERS)
+    s.headers.update(browser_headers("navigation"))   # the lab's own pages (SP-38)
     return s
 
 

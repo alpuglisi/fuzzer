@@ -1421,6 +1421,26 @@ rewards) derives from it.
 
   Enforced by `tests/test_probe_unobserved.py`.
 
+- **FR-FUZZ-53** *(a probe carries its own kind of browser headers; `CC-FUZZ-0090`,
+  2026-10-15, BUG-0152).* Every requests-based sender takes each request's headers from
+  `core.http.requests_browser_headers(headers, kind=request_kind(headers, location))`
+  (FR-CORE-44):
+  - `RequestsProbeSender`: a JSON-leaf probe (`location == "json"`) or a whole-body
+    probe declared JSON (`+json` included) sends the measured fetch set; a query, form,
+    header or other body probe sends the navigation set. A PRG follow-up keeps its
+    probe's kind (a fetch follows its redirect as the same fetch).
+  - `greybox.RequestsCorrelatingSender` and the blind SQLi fuzzer's `RequestsSender`:
+    the same call. Neither builds a JSON body today, so both send the navigation set.
+  - The probe's own headers win: a probed header (an `Accept` header point included),
+    a content type, a session's `Cookie`.
+  - Stated result, from the frameworks' documented negotiation (BUG-0152): under the
+    browser's own `Accept: */*`, a Spring Boot- or DRF-style API answers its JSON error
+    detail; an html-first Express `res.format` or Rails `respond_to` answers HTML. For
+    those, only the app's own client `Accept` reveals the detail. Follow-on: replay the
+    app's captured `Accept` per endpoint (DISC-CAPTURE).
+  - Enforced by `tests/test_browser_header_profiles.py` (the html-first styles are
+    strict xfails).
+
 - **FR-FUZZ-400** *(training and benchmark group; `CC-FUZZ-0400`, 2026-10-15).*
   `fuzzlab train <sub>` holds the training/benchmark runs (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).
   - **`train run <url>`** is the `auto` engine with every one of its flags.

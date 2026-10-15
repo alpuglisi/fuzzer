@@ -128,9 +128,10 @@ class RequestsCorrelatingSender:
                              "(cookie_origins; FR-SESS-20): it would be sent nowhere")
         self._requests = requests
         if session is None:
-            from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
+            from fuzzlab.core.http import browser_headers
             session = requests.Session()
-            session.headers.update(DEFAULT_BROWSER_HEADERS)
+            # session defaults only; every send passes its own kind's set (SP-38)
+            session.headers.update(browser_headers("navigation"))
         self._session = session
         self._header = header
         self._timeout = timeout
@@ -194,6 +195,11 @@ class RequestsCorrelatingSender:
             kwargs["data"] = {param: value}
         else:
             kwargs["params"] = {param: value}
+        # The browser header profile from the request itself (BUG-0152, SP-38); greybox
+        # never builds a JSON body, so this is a navigation's set today.
+        from fuzzlab.core.http import request_kind, requests_browser_headers
+        kwargs["headers"] = requests_browser_headers(
+            headers, kind=request_kind(headers, location))
         start = time.perf_counter()
         try:
             r = self._session.request(method.upper(), url, **kwargs)

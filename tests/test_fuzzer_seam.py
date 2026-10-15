@@ -18,8 +18,9 @@ class FakeSession:
     def __init__(self):
         self.calls = []
 
-    def get(self, url, params=None, timeout=None, allow_redirects=None):
+    def get(self, url, params=None, timeout=None, allow_redirects=None, headers=None):
         self.calls.append((url, params, timeout, allow_redirects))
+        self.headers = headers
 
         class R:
             status_code = 200
@@ -36,6 +37,8 @@ def test_requests_sender_unchanged_standalone_behavior():
     # would add an unrelated round trip into this timing-sensitive
     # measurement.
     assert sess.calls == [("http://localhost/p.php", {"id": "1"}, 15, False)]
+    # a query probe carries the navigation profile (BUG-0152, SP-38)
+    assert sess.headers["Sec-Fetch-Mode"] == "navigate"
 
 
 def test_seam_sender_authenticates_and_measures():

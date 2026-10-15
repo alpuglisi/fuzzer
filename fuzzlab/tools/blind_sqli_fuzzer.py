@@ -55,8 +55,12 @@ class RequestsSender:
             # measured elapsed time -- exactly the kind of client default
             # PA-0030 already forbids silently applying to a timing-
             # sensitive real response.
+            # a query probe: the browser header profile its request takes (SP-38)
+            from fuzzlab.core.http import request_kind, requests_browser_headers
             resp = self._session.get(url, params={param: value}, timeout=timeout,
-                                      allow_redirects=False)
+                                      allow_redirects=False,
+                                      headers=requests_browser_headers(
+                                          None, kind=request_kind(None, "query")))
             return time.perf_counter() - start, resp.status_code, len(resp.text)
         except requests.Timeout:
             return float(timeout), 504, 0
@@ -283,9 +287,9 @@ def main(argv=None):
         sender = SeamSender(client, args.identity, explicit=_explicit_url(args.url))
     else:
         # Realistic browser UA, same rationale/constant as the crawler (BUG-0059).
-        from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
+        from fuzzlab.core.http import browser_headers
         _session = requests.Session()
-        _session.headers.update(DEFAULT_BROWSER_HEADERS)
+        _session.headers.update(browser_headers("navigation"))
         sender = RequestsSender(_session, explicit=_explicit_url(args.url))
 
     try:

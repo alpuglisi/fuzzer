@@ -3,6 +3,60 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0061 — Two browser header profiles, navigation and fetch, chosen per request (BUG-0152) (2026-10-15)
+- Change: `fuzzlab/core/http.py` (FR-CORE-44, SP-38):
+  - `NAVIGATION_HEADERS`: the old set, unchanged. `DEFAULT_BROWSER_HEADERS` is now an
+    alias of the same dict.
+  - `FETCH_HEADERS`, as measured from Chromium 141.0.7390.37 (BUG-0152): `Accept: */*`,
+    `Sec-Fetch-Dest: empty`, `Sec-Fetch-Mode: cors`, `Sec-Fetch-Site: same-origin`, and
+    the same User-Agent and Accept-Language.
+  - `BROWSER_HEADER_PROFILES` and `BROWSER_HEADER_RULES` (each rule with its spec step
+    or measurement, PA-0111).
+  - `is_json_media_type`, and `request_kind(headers, location)`: fetch for a JSON body
+    or a JSON-body point, else navigation.
+  - `browser_headers(kind)`, `with_browser_headers(headers, kind=)` and
+    `requests_browser_headers(headers, kind=)`. The caller's headers win
+    case-insensitively and are sent once. The `requests` form sets the other profile's
+    names to `None`, which removes session-level keys.
+- Design correction, recorded in BUG-0152: the JSON-SEND design's fetch `Accept`
+  (`application/json, text/plain, */*`) was the axios / Angular default, not the
+  browser's. The measured `*/*` is used, by the coordinator's decision.
+- Impact (other components / project). Consumers, found by searching
+  `DEFAULT_BROWSER_HEADERS`, `headers.update(` and `requests.Session(` over `fuzzlab/`
+  (PA-0152):
+  - FUZZ (`tools/probesender.py`, `greybox/run.py`, `tools/blind_sqli_fuzzer.py`; see
+    CC-FUZZ-0090);
+  - AUD (`tools/fetcher.py`, navigation defaults through the owner; no behaviour
+    change);
+  - LAB fixtures (`lab_fixtures/external.py`, the same);
+  - SESS (`session/manager.py`) and CRAWL (`tools/spider.py`): still read
+    `DEFAULT_BROWSER_HEADERS`, unchanged. These files are owned by other lanes and
+    listed in the guard with reasons.
+  - Contract: `DEFAULT_BROWSER_HEADERS` keeps its value and identity.
+  - BUG-0119 (branch `bug-0118-v3`) also defines `with_browser_headers(headers)` here.
+    This signature is a superset (`kind` defaults to navigation). On a merge, its
+    `HttpClient.send` call must pass `kind=request_kind(request.headers)`, and the new
+    guard fails until it does.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - Headers only. The navigation set is unchanged.
+  - A fetch-profile probe is what the browser itself sends for that request.
+  - PA-0062's dual-use clause covers changing how the toolkit's traffic presents
+    itself. This change targets the owner's own labs, under the owner's recorded
+    "Apply PA-0062" decision (`docs/DECISIONS_AND_ROADMAP.md`, BUG-0119). The combined
+    review should confirm it applies here.
+- Deliverables:
+  - [x] the profiles, the kind rule, the merges and the rule table — done
+  - [x] `tests/test_browser_header_profiles.py` (wire, owner, negotiation styles, AST
+    guard with synthetic offenders) — done
+  - [x] SP-38 row; FR-CORE-44; BUG-0152; PA-0158 — done
+  - [ ] follow-on: replay the app's captured `Accept` per endpoint (DISC-CAPTURE) — todo
+    (another lane)
+  - [ ] follow-on: carry a request `kind` from discovery (XHR-observed endpoints) —
+    todo (needs `fuzzlab/harness/*`)
+- Effectiveness (assessed 2026-10-15): `tests/test_browser_header_profiles.py`: 43
+  passed, 2 xfailed (strict: the html-first Express- and Rails-style apps). The
+  verification counts are in the CHANGELOG line's commit report.
+
 ### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
 - Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
   subquery. It reads `runtarget.run_target_rows()` once per listing, the one reader the

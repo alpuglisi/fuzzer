@@ -29,12 +29,20 @@ from fuzzlab.core.budget import RequestBudget
 # `Accept-Language` is itself a mismatch several WAFs specifically check for,
 # a UA fix alone does not clear it. A single shared dict here means fixing or
 # rotating this never needs a per-tool hand-maintained copy (PA-0027).
+#
+# There are two profiles, as a browser has two kinds of request (BUG-0152, SP-38): a
+# navigation, and a script's fetch/XHR. A JSON API probe sent with the navigation set
+# (`Accept: text/html`, `Sec-Fetch-Mode: navigate`) is a request no browser makes, and an
+# app that negotiates on `Accept` (RFC 9110 §12) may answer it with a generic HTML page
+# instead of the JSON its own client gets.
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-DEFAULT_BROWSER_HEADERS = {
+#: A top-level **navigation** (a typed URL, a link, a server-rendered form): what a
+#: browser sends for a document request. The set BUG-0059/BUG-0060 introduced.
+NAVIGATION_HEADERS = {
     "User-Agent": DEFAULT_USER_AGENT,
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;q=0.9,"
@@ -47,6 +55,143 @@ DEFAULT_BROWSER_HEADERS = {
     "Sec-Fetch-User": "?1",
     "Upgrade-Insecure-Requests": "1",
 }
+
+#: A script's same-origin ``fetch()`` / ``XMLHttpRequest`` (an API call), as **measured**
+#: from real Chromium 141.0.7390.37 (full build and headless shell, a loopback recorder;
+#: BUG-0152): ``Accept: */*`` (the Fetch standard's default for a request whose
+#: destination is the empty string), ``Sec-Fetch-Dest: empty``, ``Sec-Fetch-Mode: cors``,
+#: ``Sec-Fetch-Site: same-origin``, and neither ``Sec-Fetch-User`` nor
+#: ``Upgrade-Insecure-Requests`` (both are sent for navigations only). The same
+#: User-Agent and Accept-Language as the navigation set, so both present one client.
+#: Not ``application/json, text/plain, */*``: that is the axios / Angular HttpClient
+#: default, which an app's own client may add; a caller passing the app's own
+#: ``Accept`` (e.g. a captured one) wins over this value.
+FETCH_HEADERS = {
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+#: Kept for the callers that set a navigation client's session defaults (the session
+#: manager's login client, the crawler): the same dict as ``NAVIGATION_HEADERS``.
+DEFAULT_BROWSER_HEADERS = NAVIGATION_HEADERS
+
+#: The header profiles by kind (SP-38). ``request_kind`` decides which one a request takes.
+BROWSER_HEADER_PROFILES: dict[str, Mapping[str, str]] = {
+    "navigation": NAVIGATION_HEADERS,
+    "fetch": FETCH_HEADERS,
+}
+
+#: The browser behaviour the profiles emulate, rule by rule (PA-0111), each with the
+#: spec step or measurement it follows. Every rule has a fixture in
+#: ``tests/test_browser_header_profiles.py`` (a guard fails on one without).
+BROWSER_HEADER_RULES: dict[str, str] = {
+    "fetch-accept-any": "Fetch standard, fetch step 'if request's header list does not "
+                        "contain Accept': */*, unless the request's destination selects "
+                        "another value (document, image, style, ...); the empty "
+                        "destination of fetch() and XHR keeps */*; measured: Chromium "
+                        "141 fetch() and XHR send Accept: */*",
+    "fetch-dest-empty": "Fetch Metadata Request Headers §2.1: Sec-Fetch-Dest is the "
+                        "request's destination, the empty string (empty) for fetch() "
+                        "and XHR; measured",
+    "fetch-mode-cors": "Fetch Metadata §2.3: Sec-Fetch-Mode is the request's mode, cors "
+                       "for fetch() (its default mode) and XHR; measured",
+    "fetch-site-same-origin": "Fetch Metadata §2.4: same-origin for a script calling its "
+                              "own origin's API; measured",
+    "fetch-no-user-activation": "Fetch Metadata §2.5: Sec-Fetch-User is sent only for "
+                                "user-activated navigation requests; measured absent",
+    "fetch-no-upgrade-insecure": "Upgrade Insecure Requests §3.2.1: the header is "
+                                 "appended to navigation requests only; measured absent",
+    "navigation-document": "Fetch Metadata §2.1/§2.3: a top-level navigation is "
+                           "Sec-Fetch-Dest document, Sec-Fetch-Mode navigate, with an "
+                           "HTML-first Accept (measured, minus image/apng and "
+                           "signed-exchange: the BUG-0060 set is kept as it was)",
+    "kind-json-body-is-fetch": "HTML §4.10.21.7 (form submission): a form submits only "
+                               "application/x-www-form-urlencoded, multipart/form-data "
+                               "or text/plain, so a JSON body (application/json or "
+                               "a +json suffix, RFC 6839 §3.1) is a script's request",
+    "kind-json-location-is-fetch": "a probe at a JSON-body point (location json, "
+                                   "FR-CORE-36) rebuilds a JSON body: a script's request",
+    "kind-otherwise-navigation": "anything else (a link, a query, a form body, a header "
+                                 "point) is what a navigation or form submission sends",
+    "redirect-keeps-kind": "Fetch 'HTTP-redirect fetch': a redirect is followed by the "
+                           "same fetch (same mode and destination), so a PRG follow-up "
+                           "GET keeps the probe's kind though its body headers are gone",
+    "caller-wins": "a header the caller set (a probed header, a content type, the "
+                   "session's Cookie, an Accept the app's own client sent) is kept, "
+                   "matched case-insensitively (RFC 9110 §5.1), and sent once",
+}
+
+
+def is_json_media_type(value) -> bool:
+    """Is a Content-Type value JSON: ``application/json`` or any ``+json`` structured
+    suffix (RFC 6839 §3.1), parameters ignored, case-insensitive? Total: a non-string
+    is False."""
+    if isinstance(value, bytes):
+        value = value.decode("latin-1")
+    if not isinstance(value, str):
+        return False
+    essence = value.split(";", 1)[0].strip().lower()
+    if "/" not in essence:
+        return False
+    kind, _, subtype = essence.partition("/")
+    return bool(kind) and (essence == "application/json" or subtype.endswith("+json"))
+
+
+def request_kind(headers: Mapping[str, str] | None = None,
+                 location: str | None = None) -> str:
+    """Which browser header profile a request takes, from the request itself (SP-38):
+    ``"fetch"`` for a JSON body (its Content-Type) or a probe at a JSON-body point
+    (``location == "json"``), else ``"navigation"``. Never from the app's source: a
+    form can only submit urlencoded, multipart or text/plain bodies, so a JSON body is
+    a script's ``fetch``/XHR (``BROWSER_HEADER_RULES``)."""
+    if location == "json":
+        return "fetch"
+    return "fetch" if is_json_media_type(_content_type(headers)) else "navigation"
+
+
+def browser_headers(kind: str = "navigation") -> dict[str, str]:
+    """A fresh copy of the ``kind`` profile (``"navigation"`` or ``"fetch"``). The one
+    place a browser header set is chosen (SP-38); an unknown kind raises."""
+    try:
+        return dict(BROWSER_HEADER_PROFILES[kind])
+    except (KeyError, TypeError):
+        raise ValueError(f"unknown browser header kind {kind!r}; "
+                         f"expected one of {sorted(BROWSER_HEADER_PROFILES)}") from None
+
+
+def with_browser_headers(headers: Mapping[str, str] | None = None, *,
+                         kind: str = "navigation") -> dict[str, str]:
+    """The ``kind`` profile under ``headers``: every header the caller set wins, matched
+    case-insensitively, so a header point's own value, a content type, a session's
+    ``Cookie`` or the app's own ``Accept`` is never overridden and never sent twice. A
+    new dict; ``headers`` is not changed (SP-38, PA-0003)."""
+    given = dict(headers or {})
+    names = {str(k).lower() for k in given}
+    merged = {k: v for k, v in browser_headers(kind).items() if k.lower() not in names}
+    merged.update(given)
+    return merged
+
+
+def requests_browser_headers(headers: Mapping[str, str] | None = None, *,
+                             kind: str = "navigation") -> dict[str, str | None]:
+    """``with_browser_headers`` for a ``requests`` call: also every header of another
+    profile that this one does not send (``Sec-Fetch-User``, ``Upgrade-Insecure-Requests``
+    on a fetch) set to ``None``, which ``requests`` documents as removing a session-level
+    key, so a session whose defaults carry the navigation set still sends exactly
+    ``kind``'s set. Every requests-based sender passes its per-request headers through
+    this (SP-38)."""
+    merged: dict[str, str | None] = dict(with_browser_headers(headers, kind=kind))
+    names = {k.lower() for k in merged}
+    for profile in BROWSER_HEADER_PROFILES.values():
+        for name in profile:
+            if name.lower() not in names:
+                merged[name] = None
+                names.add(name.lower())
+    return merged
 
 
 class OutOfScope(RuntimeError):

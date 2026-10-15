@@ -2389,3 +2389,27 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A hand-written HTTP response that closes its connection says
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
+
+- **PA-0158** — Strengthens `PA-0062` and `PA-0111`, and supersedes PA-0062's one-set
+  wording, after BUG-0152: JSON API probes went out with a top-level navigation's headers
+  (`Accept: text/html`, `Sec-Fetch-Mode: navigate`), so an app negotiating on `Accept`
+  answered a generic HTML page instead of its JSON error detail. PA-0062 assumed each
+  client makes one kind of request, PA-0111's rule table covered forms only, and the
+  BUG-0119 review left the gap as prose.
+  1. **A client that emulates a browser sends, per request, the header set of the kind
+     of request a browser makes for it** (navigation or fetch). The kind is decided by
+     one owner from observable facts of the request (`core.http.request_kind`: the
+     body's content type, the point's location), never from the app's source and never
+     one set for every request.
+  2. **Each emulated header value is measured from a real browser** and cited, with its
+     spec step, in the owner's rule table (`core.http.BROWSER_HEADER_RULES`), each rule
+     with a fixture. A library's default (axios, Angular HttpClient) is not a browser's.
+  3. **Every requests-based sender takes its per-request headers from the owner**
+     (`requests_browser_headers(headers, kind=request_kind(...))`, SP-38). An AST guard
+     over `fuzzlab/` enforces it and is proven on synthetic offenders (PA-0034(2)).
+     Exceptions are listed with reasons, and a stale one fails. A module naming a
+     profile constant fails, and so does a merge that leaves its kind to the default.
+  4. **A known emulation gap is pinned by a strict xfail in the change that records it**
+     (`PA-0054(3)` applied to this class). Here: the html-first Express and Rails
+     styles, which the browser's own `Accept: */*` does not reveal. (from BUG-0152)
+  - Enforced by: tests/test_browser_header_profiles.py::test_every_requests_sender_takes_its_headers_from_the_owner, tests/test_browser_header_profiles.py::test_the_header_guard_catches_synthetic_offenders, tests/test_browser_header_profiles.py::test_every_rule_has_a_fixture, tests/test_browser_header_profiles.py::test_a_json_probe_sends_the_measured_fetch_set
