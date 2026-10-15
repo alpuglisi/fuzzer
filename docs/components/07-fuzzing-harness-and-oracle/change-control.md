@@ -117,6 +117,11 @@ note of the same date.
     `oracle/strategies.py` or the `fuzzlab.oracle` package, plus the M6 and SSTI test
     files and the traceability guard. 58 files: 1345 passed, 0 failed, 0 skipped.
 
+- Amendment (2026-10-15, full-suite run): `test_lint.py::test_fuzzlab_is_pyflakes_clean` failed on bfbf176's
+  loop variable `quote` shadowing `urllib.parse.quote` in `GoTemplateSstiStrategy`; renamed
+  to `delim` (no behaviour change). The lane's test list (files importing the changed module)
+  could not include `test_lint.py`, which scans the package without importing it.
+
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
   - **(a)** The observe `goto` uses `wait_until="commit"`, then

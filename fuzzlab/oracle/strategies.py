@@ -1116,20 +1116,20 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         the same rules; the raw-string round runs only when the interpreted-string
         round did not confirm (BUG-0139). Requests: 2 to confirm by ``"``, 4 to
         confirm by a backtick or to give no verdict."""
-        for quote in self.QUOTES:
-            verdict = self._round(candidate, sender, quote)
+        for delim in self.QUOTES:
+            verdict = self._round(candidate, sender, delim)
             if verdict is not None:
                 return verdict
         return None
 
-    def _round(self, candidate, sender, quote):
+    def _round(self, candidate, sender, delim):
         n1 = self._random_length()
         n2 = self._random_length()
         while n2 == n1:                            # degenerate collision; redraw rather than reuse
             n2 = self._random_length()
-        expr1, expr2 = self._expr(n1, quote), self._expr(n2, quote)
-        payload1 = self._payload(candidate, n1, quote)
-        payload2 = self._payload(candidate, n2, quote)
+        expr1, expr2 = self._expr(n1, delim), self._expr(n2, delim)
+        payload1 = self._payload(candidate, n1, delim)
+        payload2 = self._payload(candidate, n2, delim)
         first = self._send(sender, candidate, payload1)
         text1 = _observed(first).text or ""
         second = self._send(sender, candidate, payload2)
@@ -1141,7 +1141,7 @@ class GoTemplateSstiStrategy(ConfirmationStrategy):
         cross1, cross2 = self._contains_token(text1, n2), self._contains_token(text2, n1)
         if own1 and own2 and not cross1 and not cross2:
             evidence = {"lengths": [n1, n2], "payloads": [payload1, payload2]}
-            if quote != '"':
+            if delim != '"':
                 evidence["string_form"] = "raw (backtick)"          # BUG-0139
             if _via_prg(first) or _via_prg(second):
                 evidence["observation"] = "prg"
