@@ -95,6 +95,10 @@ probe passing is never relied on alone to guarantee those won't hang.
 
 from __future__ import annotations
 
+import fcntl
+import functools
+import hashlib
+import os
 import shutil
 import socket
 import subprocess
@@ -144,6 +148,9 @@ class LiveBootError(RuntimeError):
 NETWORK_PROBE_TIMEOUT_S = 20.0
 
 
+# BUG-0142: one real round trip per process, not one per importing test module
+# (24 Maven probes alone cost 66 s of every collection).
+@functools.lru_cache(maxsize=None)
 def _composer_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`live_boot_available` must
     predict the outcome of -- a real Packagist metadata round trip through
@@ -663,6 +670,109 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
         ) from exc
 
 
+#: BUG-0142: where the locked Laravel dependencies are installed once per host.
+#: Overridable for tests and for hosts whose home directory is not writable.
+VENDOR_CACHE_ENV = "FUZZLAB_LARAVEL_VENDOR_CACHE"
+#: The files ``composer dump-autoload`` rewrites in place. They are copied into each app,
+#: never hard-linked, so one app's autoloader can never rewrite the shared cache.
+_VENDOR_PER_APP = ("composer", "autoload.php")
+
+
+def _vendor_cache_root() -> Path:
+    env = os.environ.get(VENDOR_CACHE_ENV)
+    if env:
+        return Path(env)
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "fuzzlab" / "laravel-vendor"
+
+
+@functools.lru_cache(maxsize=1)
+def _toolchain_versions() -> str:
+    """php and composer versions: part of the cache key, so an upgrade reinstalls."""
+    out = []
+    for cmd in (["php", "-r", "echo PHP_VERSION;"], ["composer", "--version", "--no-ansi"]):
+        try:
+            out.append(subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            out.append("?")
+    return "\n".join(out)
+
+
+def vendor_cache_key() -> str:
+    """The skeleton's composer.json + composer.lock and the toolchain versions. The lock
+    pins every package, so the same key always installs the same ``vendor/``."""
+    digest = hashlib.sha256()
+    for name in ("composer.json", "composer.lock"):
+        digest.update(name.encode() + b"\0" + (SKELETON_DIR / name).read_bytes() + b"\0")
+    digest.update(_toolchain_versions().encode())
+    return digest.hexdigest()[:32]
+
+
+def cached_vendor(install_timeout: float) -> Path:
+    """The installed ``vendor/`` for the skeleton's lock file, built by a real
+    ``composer install`` the first time on this host and reused afterwards (BUG-0142:
+    every boot used to reinstall the same 409 MB, 16,000 files: 27-52 s per test).
+
+    Built under an exclusive file lock (concurrent pytest workers wait, never
+    duplicate or race) into a scratch directory, and published only after a
+    successful install, by renaming it into place and writing ``complete``. A
+    directory without ``complete`` is a failed or interrupted build and is rebuilt."""
+    root = _vendor_cache_root()
+    key = vendor_cache_key()
+    entry = root / key
+    if (entry / "complete").is_file():
+        return entry / "vendor"
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / f"{key}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if (entry / "complete").is_file():
+            return entry / "vendor"
+        if entry.exists():
+            shutil.rmtree(entry)
+        scratch = Path(tempfile.mkdtemp(prefix=f"{key}.build-", dir=root))
+        try:
+            app = scratch / "app"
+            shutil.copytree(SKELETON_DIR, app)
+            # Scripts (package:discover) need an app's .env; each app runs them itself
+            # through ``composer dump-autoload`` (see :func:`materialize_vendor`).
+            result = _run(
+                ["composer", "install", "--no-dev", "--no-interaction", "--no-progress",
+                 "--prefer-dist", "--no-scripts"],
+                cwd=app, timeout=install_timeout,
+            )
+            if result.returncode != 0:
+                raise LiveBootError(
+                    f"composer install failed (exit {result.returncode}):\n"
+                    f"{result.stdout[-4000:]}\n{result.stderr[-4000:]}"
+                )
+            staged = scratch / "entry"
+            staged.mkdir()
+            (app / "vendor").rename(staged / "vendor")
+            staged.rename(entry)
+            (entry / "complete").write_text(key + "\n", encoding="utf-8")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+    return entry / "vendor"
+
+
+def _link_or_copy(src: str, dst: str) -> None:
+    try:
+        os.link(src, dst)
+    except OSError:  # another filesystem, or links not allowed: a real copy
+        shutil.copy2(src, dst)
+
+
+def materialize_vendor(cached: Path, dest: Path) -> None:
+    """Give one app its own ``vendor/``: package files hard-linked from the cache (nothing
+    writes to them at run time), and the autoloader files copied so that
+    ``composer dump-autoload`` can regenerate them for this app's classes."""
+    shutil.copytree(cached, dest, symlinks=True, copy_function=_link_or_copy,
+                    ignore=lambda d, names: [n for n in names if Path(d) == cached
+                                             and n in _VENDOR_PER_APP])
+    shutil.copytree(cached / "composer", dest / "composer", symlinks=True)
+    shutil.copy2(cached / "autoload.php", dest / "autoload.php")
+
+
 def _php_server_argv(app_dir: Path, port: int) -> list[str]:
     """The command ``php artisan serve`` itself runs (Laravel's ``ServeCommand``:
     the app's own ``server.php`` if it has one, else the framework's bundled
@@ -904,14 +1014,18 @@ class LiveBootHarness:
         self._assemble()
         self._write_env()
 
+        # BUG-0142: the locked dependencies are installed once per host (a real
+        # ``composer install``); each app gets a linked copy and its own optimized
+        # autoloader, which also runs the post-autoload-dump scripts as install did.
+        materialize_vendor(cached_vendor(self._install_timeout), self._app_dir / "vendor")
         composer_result = _run(
-            ["composer", "install", "--no-dev", "--no-interaction", "--no-progress", "--prefer-dist"],
+            ["composer", "dump-autoload", "--optimize", "--no-dev", "--no-interaction"],
             cwd=self._app_dir,
-            timeout=self._install_timeout,
+            timeout=120.0,
         )
         if composer_result.returncode != 0:
             raise LiveBootError(
-                f"composer install failed (exit {composer_result.returncode}):\n"
+                f"composer dump-autoload failed (exit {composer_result.returncode}):\n"
                 f"{composer_result.stdout[-4000:]}\n{composer_result.stderr[-4000:]}"
             )
 

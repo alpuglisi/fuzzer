@@ -44,6 +44,8 @@ not restated here.
 
 from __future__ import annotations
 
+import functools
+
 import hashlib
 import json
 import shutil
@@ -110,6 +112,9 @@ REQUEST_TIMEOUT_S = 15.0
 NETWORK_PROBE_TIMEOUT_S = 30.0
 
 
+# BUG-0142: one real round trip per process, not one per importing test module
+# (24 Maven probes alone cost 66 s of every collection).
+@functools.lru_cache(maxsize=None)
 def _pip_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`django_boot_available`
     must predict the outcome of -- a real, bounded ``pip download

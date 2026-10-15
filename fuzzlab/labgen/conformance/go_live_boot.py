@@ -49,6 +49,8 @@ guarantee those won't hang (``PA-0035``'s second half).
 
 from __future__ import annotations
 
+import functools
+
 import shutil
 import socket
 import subprocess
@@ -98,6 +100,9 @@ class GoLiveBootError(RuntimeError):
     error)."""
 
 
+# BUG-0142: one real round trip per process, not one per importing test module
+# (24 Maven probes alone cost 66 s of every collection).
+@functools.lru_cache(maxsize=None)
 def _go_module_proxy_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`go_boot_available` must
     predict the outcome of -- a real Go module proxy round trip (``go list
