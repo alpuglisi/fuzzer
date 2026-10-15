@@ -24,6 +24,7 @@ import pytest
 
 from fuzzlab.oracle.browser import SENTINEL, ExecRequest, NotObserved
 from fuzzlab.oracle.probe import Probe, UnplaceableLocation
+from fuzzlab.oracle.strategies import _xss_exec_payloads
 from tests.test_navigation_aborts import _chromium_or_skip, _m6_run, _Site
 
 _NAV = "location.href = '/logout.php'"
@@ -303,7 +304,7 @@ def test_every_payload_observed_without_a_hit_is_a_plain_negative():
     """Z4: all observed, no hit: None (a real negative), as before."""
     executor = _ScriptedExecutor("miss")
     assert _dom_confirm(executor) is None
-    assert executor.calls == 4
+    assert executor.calls == len(_xss_exec_payloads("t0"))   # every payload (6, BUG-0139)
 
 
 def test_a_browser_that_cannot_start_stops_at_once():

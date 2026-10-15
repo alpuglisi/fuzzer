@@ -1825,3 +1825,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      - never another document's.
 
      The guard also covers `set_content`, `wait_for_event` and `expect_event`.
+
+- **PA-0139** — Strengthens `PA-0124(2)` from the open redirect to every confirmer, after
+  BUG-0139: every M6 payload called the sentinel with single quotes, so Juice Shop's
+  track-result DOM XSS (its id evaluated in a single-quoted server-side string; 500 on a
+  `'`) was a guaranteed false negative.
+  1. **A confirmer's probe set never shares one quoting or encoding shape where the
+     vulnerability does not require it.** Where the effect does not depend on a quote
+     (calling a sentinel, computing a marker), at least one probe carries no quote
+     character at all, and the probes span the quote kinds. The M6 set is pinned by
+     `tests/test_m6_payload_quoting.py::test_the_sentinel_call_comes_in_three_quoting_shapes`.
+  2. **A confirmer that keeps one shape states the upstream filter it cannot pass**
+     (in its requirement and the bug sweep that found it): today Go-template SSTI
+     (`"`), XXE (`"`) and CRLF (raw `\r\n`).
+  3. **A confirmer's true positive is tested through a realistic data path**, not only
+     a direct echo: at least one fixture puts a step between the input and the sink
+     that rejects or breaks on a character the payloads might use. Every new payload
+     shape is checked against the existing negatives (escaped render, JSON echo).
+     (from BUG-0139)

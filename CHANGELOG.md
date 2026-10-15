@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0139: M6 payloads no longer all single-quoted)
+- **Why:** every M6 payload called the sentinel as `__fzlbHit('TOKEN')`. Juice Shop's
+  track-result DOM XSS passes its id through a single-quoted server-side evaluation
+  (500 on a `'`), so it was a guaranteed miss.
+- **What:** two payloads call the sentinel without a single quote: one with backticks,
+  and one with no quote character at all (`/TOKEN/.source`). That makes 6 payloads;
+  the token is checked as before. A sweep of every confirmer's payload shapes is in the
+  bug report. CC-FUZZ-0084; BUG-0139, PA-0139.
+
 ## 2026-10-15 (core change control for `core.urls.document_key`)
 - `core.urls.document_key` (origin, path and query: which document a URL loads), added in
   BUG-0138's review, is now filed in the core library's own log (CC-CORE-0055, FR-CORE-40),

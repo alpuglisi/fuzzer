@@ -22,6 +22,41 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0084 — The M6 sentinel call in three quoting shapes: a quote-sensitive sink is never a guaranteed miss (BUG-0139) (2026-10-15)
+- Change: `oracle/strategies._xss_exec_payloads` keeps its four payloads, unchanged
+  and first. It adds `<img src=x onerror="__fzlbHit(`TOKEN`)">` (backticks, no single
+  quote) and `<img src=x onerror=__fzlbHit(/TOKEN/.source)>` (no quote character at
+  all: a regex literal's `.source` is the token). It refuses a token that is not
+  alphanumeric (`_SENTINEL_TOKEN`). The token is still `_token`'s fresh 8 hex
+  characters, checked by the sentinel binding as before.
+- Impact (other components / project):
+  - Juice Shop's `#/track-result?id=` (the id evaluated in a single-quoted
+    server-side string, 500 on `'`) and any sink behind a quote-sensitive data path
+    can now be confirmed by M6, DOM and stored alike.
+  - An unconfirmed DOM candidate costs 6 browser loads instead of 4 (about 24 s, up
+    from 16 s, at the default `SETTLE_MS`).
+  - An unobservable page still costs at most `MAX_NOT_OBSERVED` (2) loads (BUG-0137).
+  - No contract change. `tests/test_m6_navigation_failures.py`'s all-observed pin
+    counts the payload set instead of a literal 4.
+- Risk: low. A new payload could in principle execute where the old ones did not
+  without a real flaw; mitigated by the escaped-render and JSON-echo negatives over
+  all six payloads, and by the token check being unchanged.
+- Deliverables:
+  - [x] code (`oracle/strategies.py`) — done
+  - [x] tests (`tests/test_m6_payload_quoting.py`: the quote-sensitive fixture app,
+    per-payload behavior, two negatives, the shape and token pins) — done
+  - [x] BUG-0139 (RCA, recurrence review, prior-PA analysis, PA-0002 sweep), PA-0139,
+    ERROR_LOG, CHANGELOG, FR-FUZZ-48 edited in place — done
+  - [x] mutation check — done
+- Effectiveness (assessed 2026-10-15, offline):
+  - `tests/test_m6_payload_quoting.py` 10 passed. On the quote-sensitive fixture, the
+    four quoted payloads never execute and both quote-free ones do; `DomXssStrategy`
+    confirms.
+  - Mutation (the old four-payload list): the confirmation test, the per-payload
+    test and the shape pin fail.
+  - The related run on the committed tree is recorded below. The live Juice Shop
+    re-run is the coordinator's.
+
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
   - **(a)** The observe `goto` uses `wait_until="commit"`, then

@@ -2167,14 +2167,36 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
 
 
 # --- browser-execution XSS (M6): stored + DOM. Need an injected BrowserExecutor. ---
+#: The sentinel token's alphabet: safe inside a JS string of any quote and inside a
+#: regular-expression literal (BUG-0139). `_token` draws hex.
+_SENTINEL_TOKEN = re.compile(r"[0-9A-Za-z]+")
+
+
 def _xss_exec_payloads(token: str) -> list[str]:
-    """Payloads that, if they execute, call the sentinel with the token."""
+    """Payloads that, if they execute, call the sentinel with the token.
+
+    BUG-0139 (PA-0139): the sentinel call comes in three quoting shapes, so a sink
+    whose data path breaks on one quote character is never a guaranteed miss (Juice
+    Shop's ``/rest/track-order/:id`` evaluates the id inside a single-quoted string:
+    a ``'`` answers 500 and nothing renders):
+    - ``'TOKEN'`` (the first four, as before);
+    - backticks, no single quote (the fifth);
+    - no quote character at all (the sixth): ``/TOKEN/.source`` is the token itself,
+      in an unquoted attribute value.
+
+    The token is still the one fresh, random token the sentinel binding checks."""
+    if not _SENTINEL_TOKEN.fullmatch(token or ""):
+        raise ValueError("the sentinel token must be alphanumeric")
     call = f"{SENTINEL}('{token}')"
+    backtick = f"{SENTINEL}(`{token}`)"
+    bare = f"{SENTINEL}(/{token}/.source)"
     return [
         f"<img src=x onerror=\"{call}\">",
         f"\"><img src=x onerror=\"{call}\">",
         f"<svg onload=\"{call}\">",
         f"<script>{call}</script>",
+        f"<img src=x onerror=\"{backtick}\">",          # no single quote
+        f"<img src=x onerror={bare}>",                   # no quote character at all
     ]
 
 
