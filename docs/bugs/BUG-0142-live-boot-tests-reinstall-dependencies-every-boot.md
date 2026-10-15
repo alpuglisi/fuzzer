@@ -111,9 +111,10 @@ Commit `deecf49` and the bookkeeping commit after it (CC-LAB-0256, FR-LAB-173):
 - **Serial pass:** 61 min 28 s (`ser8`) → 38 min 45 s (`ser9`, Laravel fix only, with
   the probe-cache regression above, since fixed).
 - **The serial pass removed.**
-  - Run in parallel (3 workers), the former serial files hit one failure. It was a real
-    defect: a live boot could run against another test's server. Root-caused and fixed
-    as BUG-0143, not re-run.
+  - Run in parallel (3 workers), the former serial files hit one failure. Its
+    investigation found a real defect: a live boot could run against another test's
+    server (BUG-0143, fixed). **Correction:** that failure itself recurred later with the
+    fix in place; its cause is open as BUG-0147.
   - A second failure, BUG-0144, was a racy test oracle, fixed the same way.
   - On the fixed commit `6e44a3f`, two consecutive parallel runs of those files passed:
     1716 passed, 0 failed, 14 min 20 s each.

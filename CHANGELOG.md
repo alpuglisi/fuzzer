@@ -34,8 +34,9 @@ changed, and the reason. Reference the commit hash where useful.
   which 51.6 s was `composer install` of the same locked dependencies. Django rebuilt a
   pinned venv on every boot. Collecting the live-boot files took 121 s of repeated
   network probes. The serial pass existed because live-boot tests failed under
-  concurrency, and that failure was a real defect: a boot accepted any process on its
-  port as its own server (BUG-0143).
+  concurrency. Investigating that found a real defect (BUG-0143): a boot accepted any
+  process on its port as its own server. **Correction:** the original failure later
+  recurred with that fix in place; it is open as BUG-0147.
 - **What:**
   - **Pinned dependencies once per host** (Laravel `vendor/`, Django venv; locked,
     atomic, keyed), with per-process availability checks (CC-LAB-0256, FR-LAB-173).

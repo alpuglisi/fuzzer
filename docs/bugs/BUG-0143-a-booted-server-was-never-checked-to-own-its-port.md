@@ -29,6 +29,12 @@ failed with `ConnectionResetError` inside the oracle's probe to the Twitch clone
 load, on 2026-10-14. The decision log recorded it then as a "WATCH" item: "pass
 isolated … if it fails in the serial full suite → investigate".
 
+**Correction (later on 2026-10-15).** This report first treated BUG-0143 as the cause of
+that test's resets. That was a hypothesis, never shown: the wrong-server hazard below
+was proven and is fixed, but the same test failed the same way, with the fix in place,
+in the integration branch's full suite. Its cause is open as BUG-0147. BUG-0143 stands
+on its own deterministic reproduction.
+
 ## What it caused to fail
 - Parallel test runs could not be trusted for any of the 16 boot sites.
 - The suite's slowest pass had to stay serial, about 39 minutes instead of about 15.

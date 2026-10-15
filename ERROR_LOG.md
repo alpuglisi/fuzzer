@@ -18,6 +18,14 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Tests: `test_multitarget_category4` connection reset under the full parallel suite (OPEN, BUG-0147)
+- **Symptom:** `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
+- **Root cause:** unknown.
+  - It is not reproduced in isolation or under CPU load (10/10 pass).
+  - It is not the OOM killer (`oom_kill 0`), not a Go idle timeout (none set), and not BUG-0143 (it recurred with that fix in place).
+- **Remediation:** none yet. Investigation continues with the three hypotheses in `docs/bugs/BUG-0147-multitarget-category4-connection-reset-under-full-parallel-load.md`. Not moved to a serial pass.
+- **Status:** Open.
+
 ## 2026-10-15 — Integration of the five session lanes: cross-lane defects found by the merged full suite (fixed, BUG-0145/0146, PA-0151/0152)
 - **Symptom:** merging the five lane branches onto the dev branch gave 14 failures in the full suite.
 - **Root cause:** each lane was built against the 10-14 base and was green there. Merged:
@@ -38,7 +46,7 @@ Format per entry:
 - **Status:** Fixed (merged full suite re-run before push).
 
 ## 2026-10-15 — Test harness: a live boot accepted another process on its port as its own server (fixed, BUG-0143/PA-0149)
-- **Symptom:** run in parallel, `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed with `ConnectionResetError` probing the Twitch clone. It had failed the same way twice on 10-14 and was parked as a WATCH item.
+- **Symptom:** run in parallel, `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed with `ConnectionResetError` probing the Twitch clone. It had failed the same way twice on 10-14 and was parked as a WATCH item. **Correction:** that test's resets recurred with this fix in place, so they are not explained by it (open as BUG-0147); the hazard fixed here was reproduced on its own.
 - **Root cause:** all 5 live-boot harnesses and 11 test-side server starts picked a free port, released it, then accepted any successful connect as "booted". Reproduced deterministically: with a stand-in server on the port, the Go harness booted "successfully" and its URL answered the stand-in.
 - **Remediation:** `procutil.port_owner`, `wait_until_listening` and `start_server_on_free_port` check ownership through the server tree's own sockets and retry a taken port. All 16 sites were converted. An AST guard flags the 16 pre-fix sites; the BUG-0130 loopback guards now also see the new launcher. See `docs/bugs/BUG-0143-a-booted-server-was-never-checked-to-own-its-port.md`.
 - **Status:** Fixed.

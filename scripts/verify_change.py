@@ -88,9 +88,11 @@ EXPLICIT_GUARDS: tuple[str, ...] = (
 # Empty by measurement: the 105 files once kept serial (live boots, multitarget labs,
 # procutil, browser suites) passed in parallel (-n 3 --dist loadfile) on 6e44a3f, in
 # two consecutive runs: 1716 passed, 0 failed, about 14 min 20 s each (38 min 45 s
-# serially). The two causes of their concurrency failures were defects, now fixed:
-# a live boot could run against another test's server (BUG-0143), and a test's exact
-# count raced the supervisor (BUG-0144).
+# serially). Two concurrency defects found on the way are fixed: a live boot could run
+# against another test's server (BUG-0143), and a test's exact count raced the
+# supervisor (BUG-0144). One intermittent failure under full parallel load is still
+# open and not yet reproduced on its own: test_multitarget_category4's connection
+# reset (BUG-0147). It is investigated, not moved to a serial pass.
 #
 # A file goes back on this list only with its reason, and only after a reproduced
 # failure under parallel load that cannot be fixed in the test or the code

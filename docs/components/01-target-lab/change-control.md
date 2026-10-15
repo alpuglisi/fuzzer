@@ -52,9 +52,11 @@ Component code: **LAB**. Entry format and required fields: see
 - Deliverables:
   - [x] the five harnesses — done
   - [x] FR-LAB-174 — done
-- Effectiveness (assessed 2026-10-15): `test_multitarget_category4`'s concurrent-load
-  failure (a connection reset from the wrong server) does not occur in the two parallel
-  runs of the former serial list on `6e44a3f`; see the CHANGELOG entry.
+- Effectiveness (assessed 2026-10-15): the deterministic wrong-server reproduction now
+  retries and boots the real app. **Correction:** this entry first credited the fix with
+  `test_multitarget_category4`'s connection resets, which were absent from two parallel
+  runs. They recurred with the fix in place in the integration's full suite, so their
+  cause is open as BUG-0147.
 
 ### CC-LAB-0256 — Live boots install their pinned dependencies once per host; toolchain checks run once per process (BUG-0142) (2026-10-15)
 - Change:
