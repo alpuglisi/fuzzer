@@ -490,6 +490,52 @@ Newest first.
     - P2 off: the parametrised unit test and the RedirectSeedSpa crawl fail (the goaway
       seed's write is not counted).
     - Seed-forms deferral off: the S1 M6 test and the shell-writes test fail.
+- **Baseline amendment (2026-10-15; review of 5e0dc5a: reviewers A and B both
+  AGREE-with-changes, the same two holes found independently; the fix list B1-B3, D60).**
+  Appended. Both holes let a seed whose query causes a write be promoted, so M6 would
+  replay that write.
+  - **B1 (A-M1 = B-S2):** only a load of a **bare** route (`_is_bare_route`: a hash
+    route whose fragment has no query, or a URL with no query) records into
+    `_write_baseline`. Before this, a crawled link such as `#/poster?msg=hi` put its
+    query-caused POST into `#/poster`'s baseline, and the seed was then promoted.
+  - **B2 (A-S1 = B-S1):** a write in a query window that carries the load's own query
+    values always counts, a baseline endpoint's included. The values are the seed's text
+    filler or the probe's markers (`win["taint"]`), checked in:
+    - the URL, also percent-decoded;
+    - the HTTP body, read by the page's `request` event while the window is open;
+      `_note_tainted` handles either event order, moving a write already set aside as a
+      baseline one into `writes`;
+    - the WebSocket message text. navguard's `on_drop` is now `on_drop(url, message)`
+      (CC-CRAWL-0026 amendment).
+  - **B3:** navguard's `on_send` call is wrapped in `contextlib.suppress(Exception)`.
+    FR-CRAWL-17 now states three residuals and costs:
+    - a bare-route load's late requests may be captured under the seed's URL (harmless);
+    - each seed and probe makes the shell's start-up writes once more (A-N2);
+    - an app that reads a query only at bootstrap shows a hash seed nothing.
+    It also restates the (method, path) residual: a query-caused write on a baseline
+    endpoint that does not carry the value literally is still not counted.
+  - Not done here, as instructed: the MERGE step with BUG-0138.
+  - Fixture: `BaselineSpa`.
+    - The crawl starts at `/start`, so the query links `#/poster?msg=hi` and
+      `#/search?q=foo` are crawled before any seed.
+    - The shell POSTs `/api/events` and pings a socket.io socket on every load.
+    - `#/find?q=` POSTs `{"q": q}` to `/api/events`; `#/talk?q=` emits `q` on the shell's
+      socket; `#/calm?q=` only renders.
+    - `tests/test_forms_phase4.py`'s forwarder test now takes `on_drop(url, message)`.
+  - Tests (`tests/test_spa_query.py`, +3, 1 extended):
+    - `test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_counts`
+      (real Chromium): the poster, search, find and talk seeds are all write seeds, none
+      imported (`write_seed_skipped` >= 4); calm is promoted and imported as a fragment
+      point.
+    - the B2 unit test: both event orders, a percent-encoded URL, str and bytes WS text;
+    - the B1 predicate test;
+    - the forwarder test, extended for the message text and a failing `on_send`.
+  - Effectiveness (B1-B3, assessed 2026-10-15): `tests/test_spa_query.py` 112 passed, 0
+    skipped (real Chromium). Mutations, each reverted:
+    - B1 (record every load outside a window): the real-browser test fails, with
+      `("POST", "/api/send")` in `#/poster`'s baseline.
+    - B2 (`_carries` always false): the real-browser test fails (`#/find?q=fuzzlab`
+      promoted to `spa-query`), and so does the unit test.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:
@@ -601,6 +647,15 @@ Newest first.
   - The session and origin rules are unchanged.
   - Tests: `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`,
     `::test_the_guards_url_log_lines_never_carry_a_probe_marker`.
+- Amendment (2026-10-15; FR-CRAWL-17 baseline fix list D60, recorded in full under
+  CC-CRAWL-0027's baseline amendment): `tools/navguard.py` only.
+  - The WebSocket forwarder tells `on_drop(url, message)` the held message's text, so
+    the crawler can read it for a query load's values (B2).
+  - `on_send` runs inside `contextlib.suppress(Exception)`, so a failing hook never
+    breaks forwarding (B3).
+  - Callers updated: the spider's `_note_ws_drop(url, message=None)` and
+    `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`.
+  - Tests: `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`.
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

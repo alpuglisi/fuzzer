@@ -53,6 +53,7 @@ forwarded only while ``ws_hold()`` is false, else dropped and reported).
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
@@ -408,7 +409,7 @@ def release(target) -> None:
 def make_ws_handler(in_scope: Callable[[str], bool],
                     on_out_of_scope: Callable[[str], None] | None = None, *,
                     hold: Callable[[], bool] | None = None,
-                    on_drop: Callable[[str], None] | None = None,
+                    on_drop: Callable[[str, object], None] | None = None,
                     cookie_scope: Callable[[str], bool] | None = None,
                     on_session_withheld: Callable[[str, str, str], None] | None = None,
                     on_send: Callable[[str], None] | None = None):
@@ -420,8 +421,9 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     ``hold`` (the crawler's reveal window, W3): an in-scope socket goes through a
     forwarding handler -- ``connect_to_server()``, then each page-to-server message is
     forwarded (``send``, a no-reply call that is safe in a sync handler) only while
-    ``hold()`` is false; while it is true the message is dropped and ``on_drop(url)``
-    told; a forwarded one is reported to ``on_send(url)`` (the crawler's write baseline,
+    ``hold()`` is false; while it is true the message is dropped and ``on_drop(url,
+    message)`` told (the crawler reads the text for a query load's values, FR-CRAWL-17
+    B2); a forwarded one is reported to ``on_send(url)`` (the crawler's write baseline,
     FR-CRAWL-17 P1(b)). Server-to-page messages and closes are forwarded as Playwright
     does by default.
 
@@ -447,11 +449,13 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                                      f"{urlsplit(url).hostname or '?'!r} in the reveal "
                                      f"window")
                         if on_drop is not None:
-                            on_drop(url)
+                            on_drop(url, message)
                         return
                     server.send(message)
                     if on_send is not None:
-                        on_send(url)
+                        # a hook never breaks the forwarder (B3)
+                        with contextlib.suppress(Exception):
+                            on_send(url)
                 ws.on_message(from_page)
             return
         logging.info(f"blocked out-of-scope WebSocket to "
@@ -473,7 +477,7 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                header_scope: Callable[[str], bool] | None = None,
                window: Callable[[str, str, bool], str | None] | None = None,
                ws_hold: Callable[[], bool] | None = None,
-               on_ws_drop: Callable[[str], None] | None = None,
+               on_ws_drop: Callable[[str, object], None] | None = None,
                on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,

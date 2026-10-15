@@ -297,3 +297,63 @@ class RedirectSeedSpa(_Lab):
     script = ("/redir.js", _REDIRECT_SEED_JS)
     history = True
     responders = {"/goaway": _goaway, "/rest/late": _late, "/socket.io/": _socketio}
+
+
+_BASELINE_JS = r"""
+const routes = [{path:'poster'}, {path:'search'}, {path:'find'}, {path:'talk'},
+  {path:'calm'}];
+class Navigations{go(t){this.router.navigate([`/poster`],{queryParams:{msg:t}});
+this.router.navigate([`/search`],{queryParams:{q:t}});
+this.router.navigate([`/find`],{queryParams:{q:t}});
+this.router.navigate([`/talk`],{queryParams:{q:t}});
+this.router.navigate([`/calm`],{queryParams:{q:t}})}}
+// the shell, on EVERY load: an analytics POST to /api/events, a socket.io polling POST,
+// then a socket that pings every 100 ms (the baseline's endpoints, B1/B2)
+const post = (path, body) => fetch(path, {method: 'POST', headers: {'Content-Type':
+  'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+post('/api/events', {page: 'load'});
+fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), {method: 'POST', body: '40'})
+  .catch(() => {});
+window.__sock = new WebSocket('ws://' + location.host +
+  '/socket.io/?EIO=4&transport=websocket');
+__sock.onopen = () => { __sock.send('2probe'); setInterval(() => __sock.send('3'), 100); };
+const emit = m => __sock.readyState === 1 ? __sock.send(m)
+  : __sock.addEventListener('open', () => __sock.send(m));
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '').split('?')[0];
+  const p = new URLSearchParams(location.hash.split('?')[1] || '');
+  const q = p.get('q'), app = document.getElementById('app');
+  app.textContent = name || 'home';
+  fetch('/rest/marker/' + (name || 'home') + (location.hash.indexOf('?') >= 0 ? '-query' : ''))
+    .catch(() => {});
+  // B1: a query-caused POST to an endpoint of its own
+  if (name === 'poster' && p.get('msg')) post('/api/send', {msg: p.get('msg')});
+  if (name === 'search' && q) post('/api/s', {q: q});
+  // B2: a query-caused write to the shell's own endpoints
+  if (name === 'find' && q) post('/api/events', {q: q});
+  if (name === 'talk' && q) emit('42["search","' + q + '"]');
+  if (name === 'calm') app.textContent = 'calm ' + (q || '');
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+_BASELINE_INDEX = _HASH_INDEX.replace("/main.js", "/b.js").replace(
+    "<a href='#/about'>About</a>", "<a href='#/calm'>Calm</a>")
+
+
+class BaselineSpa(_Lab):
+    """The write baseline's holes (FR-CRAWL-17, D60). The crawl starts at ``/start``, a
+    plain page whose links ``#/poster?msg=hi`` and ``#/search?q=foo`` are crawled before
+    any seed: their query-caused POSTs (``/api/send``, ``/api/s``) are never a baseline
+    (B1). The shell POSTs ``/api/events`` and pings a socket.io WebSocket on every load;
+    ``#/find?q=`` POSTs ``{"q": q}`` to ``/api/events`` and ``#/talk?q=`` emits ``q`` on
+    the shell's socket: writes carrying the seed's filler on baseline endpoints (B2).
+    ``#/calm?q=`` only renders ``q``."""
+    index = _BASELINE_INDEX
+    script = ("/b.js", _BASELINE_JS)
+    responders = {"/socket.io/": _socketio}
+    pages = {"/start": ("<!doctype html><html><head><title>start</title></head><body>"
+                        "<a href='/#/poster?msg=hi'>poster</a> "
+                        "<a href='/#/search?q=foo'>search</a> <a href='/'>app</a>"
+                        "</body></html>")}

@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (FR-CRAWL-17 baseline fixes B1-B3: a query-caused write is never baselined)
+- Only a bare route's own load (no query) now records into the write baseline, so a
+  crawled link's query-caused POST can never excuse its seed. A write carrying the seed's
+  filler or the probe's markers always counts, whether in its URL, body or WebSocket
+  message, even on a baseline endpoint. Either hole let a seed whose query writes get
+  promoted, so M6 would replay that write. (CC-CRAWL-0027 baseline amendment,
+  CC-CRAWL-0026 amendment.)
+
 ## 2026-10-15 (FR-CRAWL-17 post-merge fixes P1-P4: an app shell's own writes no longer demote seeds)
 - A hash-route seed or probe now loads its bare route outside its window and then makes
   the hash change inside it. A per-route baseline of the bare route's own writes

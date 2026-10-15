@@ -313,6 +313,33 @@ def _route_key(url):
     return head.split("?", 1)[0]
 
 
+def _is_bare_route(url):
+    """Is ``url`` a route with no query of its own (B1)? A hash route: its fragment has
+    no ``?``; otherwise the URL has no query. Only such a load is a route's baseline: a
+    crawled ``#/poster?msg=hi`` link's POST is caused by its query, never the shell's."""
+    frag = spa.spa_fragment(url)
+    if frag is not None:
+        return "?" not in frag
+    return not urlparse(url or "").query
+
+
+def _carries(tokens, *texts):
+    """Does any of ``texts`` (a URL, a body, a WebSocket message; ``bytes`` decoded)
+    carry one of ``tokens`` -- the seed's filler or the probe's markers (B2)? A URL is
+    also read percent-decoded."""
+    from urllib.parse import unquote_plus
+    for text in texts:
+        if text is None:
+            continue
+        if isinstance(text, (bytes, bytearray)):
+            text = bytes(text).decode("utf-8", "replace")
+        text = str(text)
+        for form in (text, unquote_plus(text)):
+            if any(t and t in form for t in tokens):
+                return True
+    return False
+
+
 def _write_key(method, url):
     """A write's identity for the baseline (P1(b)): its method (``WS`` for a WebSocket
     message) and its URL's path."""
@@ -726,13 +753,14 @@ class LocalSpider:
         return win is not None and not (win["lifted_for"] is not None
                                         and context is win["lifted_for"])
 
-    def _note_ws_drop(self, url):
+    def _note_ws_drop(self, url, message=None):
         self.spa_counts["reveal_ws_dropped"] += 1
         if self._win is not None:
             self._win["aborted"] += 1
             if self._win.get("query"):
-                # a held page-to-server WebSocket message is a write (U1)
-                self._count_query_write(self._win, "WS", url)
+                # a held page-to-server WebSocket message is a write (U1); its text is
+                # read for the load's query values (B2)
+                self._count_query_write(self._win, "WS", url, message)
 
     def _note_ws_send(self, url):
         """P1(b): a page-to-server WebSocket message forwarded outside any window; one
@@ -740,16 +768,32 @@ class LocalSpider:
         if self._recording:
             self._load_writes.add(_write_key("WS", url))
 
-    def _count_query_write(self, win, method, url):
+    def _count_query_write(self, win, method, url, text=None):
         """A write in a query window (U1), unless the bare route's own loads made the
         same one outside any window (P1(b): the app shell's start-up or periodic writes,
         Juice Shop's socket.io polling POST and WebSocket pings): that one is blocked
         all the same, counted ``spa_query_baseline_writes``, and does not demote the
         seed."""
+        if _carries(win.get("taint", ()), url, text) or url in win.get("tainted", ()):
+            # B2 (review A-S1 = B-S1): a write carrying this load's own query values
+            # always counts, a baseline endpoint's included
+            win["writes"] = win.get("writes", 0) + 1
+            return
         if _write_key(method, url) in win.get("baseline", ()):
             self.spa_counts["spa_query_baseline_writes"] += 1
+            held = win.setdefault("baselined", {})
+            held[url] = held.get(url, 0) + 1
             return
         win["writes"] = win.get("writes", 0) + 1
+
+    def _note_tainted(self, win, url):
+        """B2: the page's request to ``url`` carried this load's query values (seen by
+        the ``request`` event, with its body). A write already set aside as a baseline
+        one is counted after all, whichever event came first."""
+        win.setdefault("tainted", set()).add(url)
+        held = win.get("baselined", {}).pop(url, 0)
+        if held:
+            win["writes"] = win.get("writes", 0) + held
 
     @contextlib.contextmanager
     def _window(self, page, context, page_url, *, query=None):
@@ -961,6 +1005,11 @@ class LocalSpider:
                         spa.window_request_refusal(method, request.url,
                                                    navigation) is not None:
                     self._load_writes.add(_write_key(method, request.url))
+            win = self._win
+            if win is not None and win.get("taint"):
+                body = request.post_data_buffer
+                if _carries(win["taint"], request.url, body):
+                    self._note_tainted(win, request.url)
             if self._probe is not None:
                 # FR-CRAWL-17 (Q5): a probe load's requests -- aborted ones included,
                 # this event comes before the route -- are correlated in memory only
@@ -1246,9 +1295,11 @@ class LocalSpider:
         return bool(committed) and self._other_origin(committed)
 
     def _goto_recording(self, url):
-        """`_goto_and_parse`; outside any window, the writes the load makes (what a
-        query window would have counted) join its bare route's baseline (P1(b))."""
-        self._load_writes, self._recording = set(), self._win is None
+        """`_goto_and_parse`; outside any window, the writes a load of a **bare** route
+        makes (what a query window would have counted) join that route's baseline
+        (P1(b)); a load of a URL with its own query never does (B1)."""
+        self._load_writes = set()
+        self._recording = self._win is None and _is_bare_route(url)
         try:
             return self._goto_and_parse(url)
         finally:
@@ -2497,6 +2548,10 @@ class LocalSpider:
                         win = window.enter_context(self._window(
                             self._page, self._context, current_url, query=source))
                         self._probe = probe
+                        # B2: what this load's query carries -- the probe's markers, or
+                        # the seed's text filler (a redirect-ish name's ``/`` is not)
+                        win["taint"] = frozenset(probe["markers"]) if probe is not None \
+                            else frozenset({spa.query_filler()})
                     if probe is not None:
                         # rendered only: a probe never falls back to a static request
                         self._xhr_urls = []

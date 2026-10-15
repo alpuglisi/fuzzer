@@ -154,7 +154,7 @@ def test_the_websocket_forwarder_drops_page_messages_only_inside_the_window():
     from fuzzlab.tools.navguard import make_ws_handler
     state, dropped = {"on": False}, []
     handler = make_ws_handler(lambda u: True, hold=lambda: state["on"],
-                              on_drop=dropped.append)
+                              on_drop=lambda url, message: dropped.append(url))
     ws = _WS("ws://h/socket")
     handler(ws)
     ws.handler("hello")

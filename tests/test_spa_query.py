@@ -1598,18 +1598,29 @@ def test_the_baseline_is_what_a_load_outside_a_window_would_have_written(tmp_pat
 
 def test_the_websocket_forwarder_reports_each_forwarded_message():
     """P1(b): a page-to-server message forwarded outside the window is reported to
-    ``on_send`` (the baseline); a held one only to ``on_drop``."""
+    ``on_send`` (the baseline); a held one only to ``on_drop``, with its text (B2). A
+    failing ``on_send`` never breaks the forwarder (B3)."""
     from fuzzlab.tools.navguard import make_ws_handler
     from tests.test_forms_phase4 import _WS
     state, sent, dropped = {"on": False}, [], []
     handler = make_ws_handler(lambda u: True, hold=lambda: state["on"],
-                              on_drop=dropped.append, on_send=sent.append)
+                              on_drop=lambda u, m: dropped.append((u, m)),
+                              on_send=sent.append)
     ws = _WS("ws://h/socket.io/")
     handler(ws)
     ws.handler("2probe")
     state["on"] = True
+    ws.handler('42["search","fuzzlab"]')
+    assert sent == ["ws://h/socket.io/"]
+    assert dropped == [("ws://h/socket.io/", '42["search","fuzzlab"]')]
+
+    def boom(url):
+        raise RuntimeError("hook failed")
+    handler = make_ws_handler(lambda u: True, hold=lambda: False, on_send=boom)
+    ws = _WS("ws://h/socket.io/")
+    handler(ws)
     ws.handler("3")
-    assert sent == ["ws://h/socket.io/"] and dropped == ["ws://h/socket.io/"]
+    assert ws.server.sent == ["3"]                       # forwarded all the same
 
 
 def test_the_guards_url_log_lines_never_carry_a_probe_marker(caplog):
@@ -1655,3 +1666,113 @@ def test_a_seeds_forms_are_stored_only_when_it_is_promoted(tmp_path):
         assert rows == [("http://127.0.0.1:9/#/b?go2=fuzzlab",)]
     finally:
         sp.storage.close()
+
+
+# =====================================================================================
+# The write baseline's holes (D60, B1-B3)
+# =====================================================================================
+def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_counts(
+        monkeypatch, tmp_path):
+    """B1 + B2, real Chromium, `BaselineSpa`. B1 (review A-M1 = B-S2): the crawled links
+    ``#/poster?msg=hi`` and ``#/search?q=foo`` POST to ``/api/send`` and ``/api/s``
+    because of their query; only a bare route's load is its baseline, so neither is,
+    and both seeds stay write seeds, never imported. B2 (A-S1 = B-S1): ``#/find?q=``
+    POSTs ``{"q": "fuzzlab"}`` to the shell's own ``/api/events`` and ``#/talk?q=`` emits
+    the filler on the shell's socket.io socket: both baseline endpoints, but carrying
+    the seed's filler, so both are writes. ``#/calm?q=`` (the shell's writes only) is
+    still promoted and imported as a fragment point."""
+    from fuzzlab.tools.spider import LocalSpider
+    from tests._spa_query_fixture import BaselineSpa
+    chromium_or_skip(monkeypatch)
+    seen = _window_spy(monkeypatch)
+    lab = BaselineSpa()
+    try:
+        sp = LocalSpider(lab.base + "start", max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000)
+        run_crawl(sp)
+    finally:
+        lab.close()
+    db, base = str(tmp_path / "s.db"), lab.base
+    pages = _pages(db)
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    # the query links were crawled first, outside any window: their POSTs were sent
+    assert pages.index(base + "#/poster?msg=hi") < pages.index(base + "#/poster?msg=fuzzlab")
+    assert pages.index(base + "#/search?q=foo") < pages.index(base + "#/search?q=fuzzlab")
+    assert lab.seen("POST", "/api/send") and lab.seen("POST", "/api/s")
+    # B1: never a baseline
+    assert ("POST", "/api/send") not in sp._write_baseline.get(base + "#/poster", set())
+    assert ("POST", "/api/s") not in sp._write_baseline.get(base + "#/search", set())
+    assert ("POST", "/api/events") in sp._write_baseline[base + "#/find"]
+    assert ("WS", "/socket.io/") in sp._write_baseline[base + "#/talk"]
+    windows = {w["url"]: w for w in seen}
+    for seed in ("#/poster?msg=fuzzlab", "#/search?q=fuzzlab",      # B1
+                 "#/find?q=fuzzlab", "#/talk?q=fuzzlab"):            # B2
+        assert sources[base + seed] == spa.WRITE_SEED_SOURCE, seed
+        assert windows[base + seed]["writes"] >= 1, seed
+    assert sources[base + "#/calm?q=fuzzlab"] == spa.SEED_SOURCE
+    assert sp.spa_counts["spa_query_baseline_writes"] >= 1
+    store, run, counts = _import(db, tmp_path / "u.db")
+    try:
+        params = _params(store, run)
+        examples = {(r["url"], r["name"]): r["example"] for r in store.conn.execute(
+            "SELECT e.url, p.name, p.example FROM parameter p JOIN endpoint e "
+            "ON e.id = p.endpoint_id WHERE p.run_id = ?", (run,))}
+    finally:
+        store.close()
+    assert ("/#/calm", "q", "fragment") in params
+    assert counts["write_seed_skipped"] >= 4                # the four seeds: pages only
+    for route in ("find", "talk"):
+        assert not [p for p in params if p[0] == f"/#/{route}"], route
+    # the crawled links are points of their own (a stated residual: a crawled link
+    # whose load writes is imported until FR-FUZZ-50's M6 window); never the seeds
+    assert examples[("/#/poster", "msg")] == "hi"
+    assert examples[("/#/search", "q")] == "foo"
+
+
+def test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint(tmp_path):
+    """B2, unit: on a baseline endpoint, a write whose URL, body (seen by the ``request``
+    event, before or after the window refused it) or WebSocket text carries the load's
+    filler or markers counts; the shell's own does not."""
+    sp = _requests_spider(tmp_path)
+
+    def req(url, body=None):
+        return type("R", (), {"url": url, "method": "POST", "resource_type": "fetch",
+                              "is_navigation_request": lambda s: False,
+                              "post_data_buffer": body})()
+    try:
+        sp._write_baseline["http://h/#/find"] = {("POST", "/api/events"),
+                                                 ("WS", "/socket.io/")}
+        ctx = object()
+        with sp._window(_FakePage("http://h/#/find?q=fuzzlab"), ctx,
+                        "http://h/#/find?q=fuzzlab", query=spa.SEED_SOURCE) as win:
+            win["taint"] = frozenset({"fuzzlab"})
+            # the shell's own: baseline, not counted
+            sp._on_request(req("http://h/api/events", b'{"page":"load"}'))
+            sp._window_refusal("POST", "http://h/api/events", False, context=ctx)
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4", "3")
+            assert not win.get("writes")
+            # request event first, then the refusal
+            sp._on_request(req("http://h/api/events?a=1", b'{"q":"fuzzlab"}'))
+            sp._window_refusal("POST", "http://h/api/events?a=1", False, context=ctx)
+            assert win["writes"] == 1
+            # the refusal first, then the request event
+            sp._window_refusal("POST", "http://h/api/events?a=2", False, context=ctx)
+            assert win["writes"] == 1
+            sp._on_request(req("http://h/api/events?a=2", b'{"q":"fuzzlab"}'))
+            assert win["writes"] == 2
+            # in the URL (percent-encoded), and in a WebSocket message
+            sp._window_refusal("POST", "http://h/api/events?x=%66uzzlab", False,
+                               context=ctx)
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4", '42["search","fuzzlab"]')
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4", b'42["search","fuzzlab"]')
+            assert win["writes"] == 5
+    finally:
+        sp.storage.close()
+
+
+def test_only_a_bare_routes_load_is_its_baseline():
+    """B1, unit: the predicate."""
+    from fuzzlab.tools.spider import _is_bare_route
+    assert _is_bare_route("http://h/#/poster") and _is_bare_route("http://h/next1")
+    assert not _is_bare_route("http://h/#/poster?msg=hi")
+    assert not _is_bare_route("http://h/next1?y=1")
