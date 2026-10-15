@@ -157,3 +157,30 @@ evaluated, no cross-bleed, BUG-0133's echo rules. The cost is 2 requests to conf
 `"` (as before), and 4 to confirm by the raw string or to give no verdict. The sweep
 row "`GoTemplateSstiStrategy` … flagged, not built" is now **fixed** (CC-FUZZ-0084
 amendment, FR-FUZZ-28). XXE (`"`) and CRLF (raw `\r\n`) remain stated residuals.
+
+## Review of the fix (added in review)
+Reviewers A and B agreed, with should-fixes (D62):
+- **The regex form could be cut (A-S1).** `/TOKEN/.source` carries a `/`. A sink that
+  takes the value as **one path segment** (a client building `'/rest/…/' + id`
+  unencoded, an Express `:id`) split it there, so the "no quote at all" payload was
+  itself shape-sensitive. It is replaced by `String.fromCharCode(...)` of the token:
+  no quote, no `/` and no whitespace in the call. The fixture's API now matches one
+  segment, and a stricter variant (backticks refused too) is reached only by this
+  form.
+- **Order by reach (A-S2):** the quoted `<img>`, then backtick, then `fromCharCode`,
+  then the three other quoted wrappers.
+- **The last quote-free try (B-S1):** a path that fails on a quote can make the quoted
+  payloads' **loads** fail (not observed), so `MAX_NOT_OBSERVED` could stop the loop
+  before a quote-free payload ran. One more load of the first untried fully
+  quote-free payload is now always made (at most 1 extra).
+- **A query point (B):** both quote-free payloads also execute through the
+  quote-sensitive path when placed in the query (`+`, `%2F`, `%60` decoded by the
+  page).
+- **Cost (V5):** stated in FR-FUZZ-48.
+
+Residual added in review (V6): **values in URL path segments are sensitive to `/`,
+`#` and `?`.** The `fromCharCode` form avoids `/` and every quote. A sink that splits
+on `#` or `?` (a client that concatenates them unencoded) still needs the app to
+encode, and the payloads carry none of the three in that form. The HTML wrappers' own
+spaces remain: HTML separates attributes only by whitespace or `/`, and a space in a
+path segment is percent-encoded.

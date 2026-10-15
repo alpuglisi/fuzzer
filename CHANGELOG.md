@@ -4,6 +4,20 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0139 review: a path-segment-safe quote-free payload, ordered by reach)
+- **Why:** the quote-free payload `/TOKEN/.source` was cut by a sink that takes the
+  value as one path segment, and the payload loop could stop before any quote-free
+  payload ran.
+- **What:**
+  - `String.fromCharCode(...)` of the token replaces the regex form;
+  - the payloads are ordered by reach (quoted `<img>`, backtick, `fromCharCode`, …);
+  - after the unobserved stop, the first quote-free payload still gets one load;
+  - a query-point test;
+  - cost: up to 6 loads per unconfirmed candidate (about +50% M6 time), at most 3 for
+    an unobservable page.
+
+  CC-FUZZ-0084 amendment.
+
 ## 2026-10-15 (BUG-0139: M6 payloads no longer all single-quoted)
 - **Why:** every M6 payload called the sentinel as `__fzlbHit('TOKEN')`. Juice Shop's
   track-result DOM XSS passes its id through a single-quoted server-side evaluation

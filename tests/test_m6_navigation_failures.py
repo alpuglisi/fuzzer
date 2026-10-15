@@ -286,10 +286,11 @@ def test_a_later_payload_is_tried_after_an_unobserved_one(answers):
 
 def test_two_unobserved_payloads_in_a_row_stop_and_are_inconclusive():
     """Z1's cost bound and Z4: with every page unobservable the strategy stops after
-    two loads and is inconclusive (FR-FUZZ-45), never a negative."""
+    two loads, plus one last load of the first untried quote-free payload (BUG-0139
+    review B-S1), and is inconclusive (FR-FUZZ-45), never a negative."""
     executor = _ScriptedExecutor("unobserved")
     verdict = _dom_confirm(executor)
-    assert executor.calls == 2
+    assert executor.calls == 3
     assert verdict is not None and not verdict.confirmed and verdict.inconclusive
     assert "could not load" in verdict.evidence["not_observed"]
 

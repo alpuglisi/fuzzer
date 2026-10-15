@@ -2187,8 +2187,8 @@ class GreyboxConfirmationStrategy(ConfirmationStrategy):
 
 
 # --- browser-execution XSS (M6): stored + DOM. Need an injected BrowserExecutor. ---
-#: The sentinel token's alphabet: safe inside a JS string of any quote and inside a
-#: regular-expression literal (BUG-0139). `_token` draws hex.
+#: The sentinel token's alphabet: safe inside a JS string of any quote (BUG-0139).
+#: `_token` draws hex.
 _SENTINEL_TOKEN = re.compile(r"[0-9A-Za-z]+")
 
 
@@ -2199,25 +2199,34 @@ def _xss_exec_payloads(token: str) -> list[str]:
     whose data path breaks on one quote character is never a guaranteed miss (Juice
     Shop's ``/rest/track-order/:id`` evaluates the id inside a single-quoted string:
     a ``'`` answers 500 and nothing renders):
-    - ``'TOKEN'`` (the first four, as before);
-    - backticks, no single quote (the fifth);
-    - no quote character at all (the sixth): ``/TOKEN/.source`` is the token itself,
-      in an unquoted attribute value.
+    - ``'TOKEN'``;
+    - backticks, with no single quote;
+    - ``String.fromCharCode(...)`` of the token: no quote character, no ``/``, no
+      whitespace, in an unquoted attribute value. It survives a path-segment sink,
+      where a ``/`` would cut the value (review A-S1).
 
-    The token is still the one fresh, random token the sentinel binding checks."""
+    Ordered by reach (review A-S2): the quoted ``<img>`` first, as before, then the
+    backtick and the ``fromCharCode`` forms, then the other three quoted wrappers. The
+    token is still the one fresh, random token the sentinel binding checks."""
     if not _SENTINEL_TOKEN.fullmatch(token or ""):
         raise ValueError("the sentinel token must be alphanumeric")
     call = f"{SENTINEL}('{token}')"
     backtick = f"{SENTINEL}(`{token}`)"
-    bare = f"{SENTINEL}(/{token}/.source)"
+    codes = ",".join(str(ord(c)) for c in token)
+    bare = f"{SENTINEL}(String.fromCharCode({codes}))"
     return [
         f"<img src=x onerror=\"{call}\">",
+        f"<img src=x onerror=\"{backtick}\">",          # no single quote
+        f"<img src=x onerror={bare}>",                   # no quote, no /, no space
         f"\"><img src=x onerror=\"{call}\">",
         f"<svg onload=\"{call}\">",
         f"<script>{call}</script>",
-        f"<img src=x onerror=\"{backtick}\">",          # no single quote
-        f"<img src=x onerror={bare}>",                   # no quote character at all
     ]
+
+
+def _quote_free(payload: str) -> bool:
+    """No quote character of any kind (BUG-0139 review B-S1)."""
+    return not set("'\"`") & set(payload)
 
 
 class _BrowserXssStrategy(ConfirmationStrategy):
@@ -2233,6 +2242,23 @@ class _BrowserXssStrategy(ConfirmationStrategy):
     def _observe(self, candidate: Candidate, payload: str, token: str) -> ExecObservation:
         raise NotImplementedError
 
+    def _last_try(self, candidate, payloads, tried, token, not_observed):
+        """After `MAX_NOT_OBSERVED` unobserved payloads in a row: one more load, of the
+        first untried quote-free payload, if any (at most 1 extra load). A hit
+        confirms; anything else leaves the candidate inconclusive (Z4)."""
+        nxt = next((i for i, p in enumerate(payloads)
+                    if i not in tried and _quote_free(p)), None)
+        if nxt is not None:
+            try:
+                obs = self._observe(candidate, payloads[nxt], token)
+            except UnplaceableLocation:              # NotObserved, or no browser now
+                obs = None
+            if obs is not None and obs.executed:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"payload": payloads[nxt], "detail": obs.detail})
+        return Verdict(False, self.vuln_class, self.mechanism,
+                       {"not_observed": not_observed[:200]}, inconclusive=True)
+
     def confirm(self, candidate, sender):
         if self._executor is None:
             # no browser: this mechanism observed nothing, at any location, so it gives
@@ -2243,7 +2269,10 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                                       "a fragment point is placed by the browser only")
         not_observed: str | None = None
         misses = 0                                   # payloads not observed in a row
-        for payload in _xss_exec_payloads((token := _token())):
+        payloads = _xss_exec_payloads((token := _token()))
+        tried: set[int] = set()
+        for index, payload in enumerate(payloads):
+            tried.add(index)
             try:
                 obs = self._observe(candidate, payload, token)
             except NotObserved as exc:
@@ -2253,7 +2282,10 @@ class _BrowserXssStrategy(ConfirmationStrategy):
                 not_observed = not_observed or str(exc)
                 misses += 1
                 if misses >= self.MAX_NOT_OBSERVED:  # cost bound (FR-FUZZ-48)
-                    break
+                    # still the first untried quote-free payload: a path that fails on
+                    # a quote may fail the quoted payloads' loads (review B-S1)
+                    return self._last_try(candidate, payloads, tried, token,
+                                          not_observed)
                 continue
             except UnplaceableLocation:
                 # the browser cannot start (BUG-0126) after a payload went unobserved:

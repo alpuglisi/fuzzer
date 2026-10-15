@@ -5,11 +5,13 @@ Every M6 payload called ``__fzlbHit('TOKEN')`` with single quotes. Juice Shop's
 MongoDB-style ``$where``): a ``'`` answers 500, so nothing is echoed and nothing
 renders. Its ``#/track-result?id=`` DOM XSS, a true positive, was therefore checked
 and never confirmed. Two payloads now carry the call without a single quote: one
-with backticks, one with no quote character at all (``/TOKEN/.source``).
+with backticks, and one with no quote character, ``/`` or whitespace at all
+(``String.fromCharCode(...)`` of the token).
 
-The fixture here is that data path, on loopback: a hash-route page that fetches
-``/rest/track-order/<id>``. The server answers 500 on a ``'`` in the id, else echoes
-the id as JSON, and the page writes it with ``innerHTML``.
+The fixture here is that data path, on loopback: a page that fetches
+``/rest/track-order/<id>``, with the id put into one path segment unencoded. The
+server answers 500 on a ``'`` in the id, else echoes the id as JSON, and the page
+writes it with ``innerHTML``.
 """
 
 from __future__ import annotations
@@ -26,24 +28,37 @@ from fuzzlab.oracle.browser import SENTINEL
 from fuzzlab.oracle.strategies import _xss_exec_payloads
 from tests.test_navigation_aborts import _chromium_or_skip
 
+#: The client puts the id into the API path **unencoded**, as Juice Shop's does
+#: (`'/rest/track-order/' + id`): a ``/`` in it would split the path segment.
 _RENDER_JS = """
-const p = new URLSearchParams(location.hash.split('?')[1] || '');
+const p = new URLSearchParams(%(source)s);
 const id = p.get('id');
-if (id !== null) fetch('/rest/track-order/' + encodeURIComponent(id))
+if (id !== null) fetch('%(api)s' + id)
   .then(r => r.ok ? r.json() : null)
-  .then(j => { if (j) document.getElementById('out').%s = j.data[0].orderId; });
+  .then(j => { if (j) document.getElementById('out').%(sink)s = j.data[0].orderId; });
 """
+_HASH = "location.hash.split('?')[1] || ''"
 
 
-def _page(sink):
-    return (f"<html><body><div id='out'></div><script>{_RENDER_JS % sink}</script>"
-            f"</body></html>").encode()
+def _page(sink, api="/rest/track-order/", source=_HASH):
+    js = _RENDER_JS % {"source": source, "api": api, "sink": sink}
+    return f"<html><body><div id='out'></div><script>{js}</script></body></html>".encode()
 
 
 class _TrackApp:
-    """``/`` renders the echoed id with ``innerHTML``; ``/escaped`` with
-    ``textContent``; ``/rest/track-order/<id>`` evaluates the id in a single-quoted
-    string (500 on a ``'``); ``/json?q=`` is a JSON document echoing ``q``."""
+    """The pages, each fetching the id from one of the APIs and writing it into the
+    page:
+    - ``/`` (``innerHTML``) and ``/escaped`` (``textContent``), the id from the hash
+      route's query;
+    - ``/strict`` (``innerHTML``), through the stricter API;
+    - ``/q?id=`` (``innerHTML``), the id from the page's own query (a query point).
+
+    The APIs match **one** path segment, as Express's ``:id`` does:
+    - ``/rest/track-order/<id>`` evaluates the id in a single-quoted string (500 on a
+      ``'``);
+    - ``/rest/strict-order/<id>`` also refuses a backtick.
+
+    ``/json?q=`` is a JSON document echoing ``q``."""
 
     def __init__(self):
         require_loopback("127.0.0.1")                  # PA-0130
@@ -64,12 +79,24 @@ class _TrackApp:
                     return self._send(200, "text/html", _page("innerHTML"))
                 if parts.path == "/escaped":
                     return self._send(200, "text/html", _page("textContent"))
-                if parts.path.startswith("/rest/track-order/"):
-                    order_id = unquote(parts.path[len("/rest/track-order/"):])
+                if parts.path == "/strict":
+                    return self._send(200, "text/html", _page(
+                        "innerHTML", api="/rest/strict-order/"))
+                if parts.path == "/q":
+                    return self._send(200, "text/html", _page(
+                        "innerHTML", source="location.search"))
+                for api, refused in (("/rest/track-order/", "'"),
+                                     ("/rest/strict-order/", "'`")):
+                    if not parts.path.startswith(api):
+                        continue
+                    segment = parts.path[len(api):]
+                    if not segment or "/" in segment:        # one segment, as `:id`
+                        return self._send(404, "text/plain", b"no route")
+                    order_id = unquote(segment)
                     app.track_requests.append(order_id)
                     # `$where: "this.orderId === '" + id + "'"`: a quote ends the
                     # string early, and the evaluation throws
-                    if "'" in order_id:
+                    if set(refused) & set(order_id):
                         return self._send(500, "application/json",
                                           b'{"error":"SyntaxError: Unexpected identifier"}')
                     return self._send(200, "application/json", json.dumps(
@@ -123,24 +150,35 @@ def _confirm(executor, url, param, location):
 
 # --- the payload set ----------------------------------------------------------------
 def test_the_sentinel_call_comes_in_three_quoting_shapes():
-    """PA-0139: not one quoting shape. At least one payload has no single quote, and
-    one has no quote character at all; every payload carries the token. Six
-    payloads (four as before, two added)."""
-    payloads = _xss_exec_payloads("a1b2c3d4")
-    assert len(payloads) == 6
-    assert all("a1b2c3d4" in p and SENTINEL in p for p in payloads)
-    assert any("'" not in p for p in payloads)
-    assert any(not set("'\"`") & set(p) for p in payloads)
-    call = f"{SENTINEL}('a1b2c3d4')"
-    assert payloads[:4] == [f"<img src=x onerror=\"{call}\">",      # as before, kept
-                            f"\"><img src=x onerror=\"{call}\">",
-                            f"<svg onload=\"{call}\">", f"<script>{call}</script>"]
+    """PA-0139: not one quoting shape, ordered by reach (review A-S2): the quoted
+    ``<img>``, the backtick call, the ``String.fromCharCode`` call (no quote, no ``/``,
+    no whitespace: a path segment carries it whole, review A-S1), then the other three
+    quoted wrappers. Six payloads; the token in every one."""
+    token = "a1b2c3d4"
+    payloads = _xss_exec_payloads(token)
+    call = f"{SENTINEL}('{token}')"
+    codes = ",".join(str(ord(c)) for c in token)
+    assert payloads == [
+        f"<img src=x onerror=\"{call}\">",
+        f"<img src=x onerror=\"{SENTINEL}(`{token}`)\">",
+        f"<img src=x onerror={SENTINEL}(String.fromCharCode({codes}))>",
+        f"\"><img src=x onerror=\"{call}\">",
+        f"<svg onload=\"{call}\">",
+        f"<script>{call}</script>"]
+    bare = payloads[2]
+    # the sentinel call has no quote, no ``/`` and no whitespace; the whole payload no
+    # quote and nothing that splits a path segment or a URL (``/``, ``#``, ``?``). The
+    # tag's own spaces stay: HTML separates attributes only by whitespace or ``/``.
+    call_bare = bare[bare.index(SENTINEL):-1]
+    assert not set("'\"`/ \t\r\n") & set(call_bare)
+    assert not set("'\"`/#?") & set(bare)
+    assert all(token in p for p in payloads if p != bare)
 
 
 @pytest.mark.parametrize("token", ["", "a b", "x')//", "/x/", "tok-1"])
 def test_a_token_that_could_break_its_quoting_is_refused(token):
-    """The token goes into JS strings of every quote and a regex literal: only an
-    alphanumeric token (`_token` draws hex) is accepted."""
+    """The token goes into JS strings of every quote: only an alphanumeric token
+    (`_token` draws hex) is accepted."""
     with pytest.raises(ValueError):
         _xss_exec_payloads(token)
 
@@ -156,20 +194,72 @@ def test_a_sink_behind_a_single_quoted_evaluation_is_confirmed(track_app):
     assert any("'" in i for i in track_app.track_requests)
 
 
-def test_each_payload_against_the_quote_sensitive_path(track_app):
-    """Which payloads carry the call there: none with a single quote (the server's 500
-    renders nothing), and both quote-free ones (the backtick call and
-    ``/TOKEN/.source`` really call the sentinel with the token)."""
+def _fired(app, path, location="fragment"):
     from fuzzlab.oracle.browser import ExecRequest
     executor = _executor()
     executor.SETTLE_MS = 800
     token = "c0ffee42"
-    fired = []
-    for payload in _xss_exec_payloads(token):
-        obs = executor.run(ExecRequest(url=track_app.base + "#/track-result", param="id",
-                                       value=payload, location="fragment"), token)
-        fired.append(obs.executed)
-    assert fired == [False, False, False, False, True, True]
+    return [executor.run(ExecRequest(url=app.base + path, param="id", value=payload,
+                                     location=location), token).executed
+            for payload in _xss_exec_payloads(token)]
+
+
+def test_each_payload_against_the_quote_sensitive_path(track_app):
+    """Which payloads carry the call there, through one path segment: none with a
+    single quote (the server's 500 renders nothing), and both quote-free ones (the
+    backtick call, and ``String.fromCharCode`` really calls the sentinel with the
+    token)."""
+    assert _fired(track_app, "#/track-result") == [False, True, True, False, False, False]
+
+
+def test_only_the_fully_quote_free_payload_passes_a_stricter_path(track_app):
+    """Review A-S1: a path that refuses backticks too: only the ``fromCharCode``
+    payload (no quote, no ``/``) reaches the sink, and the strategy confirms by it."""
+    assert _fired(track_app, "strict#/track-result") == [False, False, True, False,
+                                                         False, False]
+    verdict = _confirm(_executor(), track_app.base + "strict#/track-result", "id",
+                       "fragment")
+    assert verdict is not None and "fromCharCode" in verdict.evidence["payload"]
+
+
+def test_the_quote_free_payloads_at_a_query_point(track_app):
+    """Review B (gap): at a query point the payload is form-encoded (``+``, ``%2F``,
+    ``%60``) and decoded by the page; both quote-free payloads still execute through
+    the quote-sensitive path, and the strategy confirms."""
+    assert _fired(track_app, "q", location="query") == [False, True, True, False,
+                                                        False, False]
+    verdict = _confirm(_executor(), track_app.base + "q", "id", "query")
+    assert verdict is not None and verdict.confirmed
+
+
+class _QuoteBreaksTheLoad:
+    """An executor whose page load fails for any payload carrying ``'`` or a backtick
+    (the path errors before anything is observed) and fires for a fully quote-free
+    one."""
+
+    def __init__(self):
+        self.calls = []
+
+    def run(self, request, token):
+        from fuzzlab.oracle.browser import ExecObservation, NotObserved
+        self.calls.append(request.value)
+        if set("'`") & set(request.value):
+            raise NotObserved("the browser could not load the page (TimeoutError: x)")
+        return ExecObservation(executed=True, detail="scripted")
+
+
+def test_the_quote_free_payload_is_still_tried_after_the_unobserved_stop():
+    """Review B-S1: `MAX_NOT_OBSERVED` stops the loop after the quoted ``<img>`` and
+    the backtick payload went unobserved; the first untried quote-free payload still
+    gets its one load, and confirms."""
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import DomXssStrategy
+    executor = _QuoteBreaksTheLoad()
+    cand = Candidate(url="http://127.0.0.1:9/p", param="q", category="xss",
+                     location="query")
+    verdict = DomXssStrategy(executor).confirm(cand, None)
+    assert verdict is not None and verdict.confirmed
+    assert len(executor.calls) == 3 and "fromCharCode" in executor.calls[2]
 
 
 # --- no false positive from a quote-free payload ------------------------------------

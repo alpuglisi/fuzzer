@@ -1213,15 +1213,25 @@ rewards) derives from it.
   BUG-0129). After `load` the executor waits up
   to `SETTLE_MS` (4 s), ending on the hit, so a sink that a single-page app renders
   after its own API calls is seen; a page that closes under the wait is "not yet",
-  never an error. *(CC-FUZZ-0084, BUG-0139:)* **The payload set** is six HTML payloads
-  calling the sentinel with the probe's fresh token. The first four (an `<img
-  onerror>`, an attribute break-out, `<svg onload>`, `<script>`) call it as
-  `__fzlbHit('TOKEN')`. The fifth calls it with backticks (no single quote). The sixth
-  has no quote character at all: `<img src=x onerror=__fzlbHit(/TOKEN/.source)>`. So a
-  sink whose data path breaks on a quote (a server-side string evaluation that answers
-  500 on `'`) is never a guaranteed miss. The token must be alphanumeric (`_token`
-  draws hex). **Cost:** a negative waits the full window per payload, about 24 s
-  for an unconfirmed DOM candidate (6 payloads, a browser launched per probe); stated,
+  never an error. *(CC-FUZZ-0084, BUG-0139, with its review D62:)* **The payload set**
+  is six HTML payloads calling the sentinel with the probe's fresh token, ordered by
+  reach:
+  1. `<img src=x onerror="__fzlbHit('TOKEN')">`;
+  2. the same with backticks (no single quote);
+  3. `<img src=x onerror=__fzlbHit(String.fromCharCode(...))>` of the token's
+     character codes: no quote, no `/`, `#` or `?`, and no whitespace in the call, so
+     a path-segment sink carries it whole;
+  4. – 6. an attribute break-out, `<svg onload>` and `<script>`, each with `'TOKEN'`.
+
+  So a sink whose data path breaks on a quote (a server-side string evaluation that
+  answers 500 on `'`) or on a `/` is never a guaranteed miss. The token must be
+  alphanumeric (`_token` draws hex). When `MAX_NOT_OBSERVED` stops the loop, the first
+  untried fully quote-free payload still gets one load (review B-S1). **Cost:** a
+  negative waits the full window per payload: up to 6 loads per unconfirmed candidate,
+  about 24 s (about +50% M6 time against the old 4). An unobservable page costs at most
+  3 loads (2 plus the quote-free last try). On a quote-sensitive path a confirmation
+  now typically comes at payload 2 or 3. A browser is launched per probe; this is
+  stated,
   with one browser per candidate a possible later saving (CC-FUZZ-0073, reviewers A
   and B). Without a browser the DOM and stored XSS strategies give no verdict at **any**
   location, and an unplaceable DOM location or a stored candidate with no store URL is
@@ -1296,7 +1306,7 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
   - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict`
-  - Enforced by (the payload set's quoting shapes; CC-FUZZ-0084, BUG-0139): `oracle.strategies._xss_exec_payloads` — `tests/test_m6_payload_quoting.py::test_the_sentinel_call_comes_in_three_quoting_shapes`, `tests/test_m6_payload_quoting.py::test_a_token_that_could_break_its_quoting_is_refused`, `tests/test_m6_payload_quoting.py::test_a_sink_behind_a_single_quoted_evaluation_is_confirmed`, `tests/test_m6_payload_quoting.py::test_each_payload_against_the_quote_sensitive_path`, `tests/test_m6_payload_quoting.py::test_an_escaped_render_is_never_confirmed`, `tests/test_m6_payload_quoting.py::test_a_json_echo_is_never_confirmed`
+  - Enforced by (the payload set's quoting shapes; CC-FUZZ-0084, BUG-0139): `oracle.strategies._xss_exec_payloads` — `tests/test_m6_payload_quoting.py::test_the_sentinel_call_comes_in_three_quoting_shapes`, `tests/test_m6_payload_quoting.py::test_a_token_that_could_break_its_quoting_is_refused`, `tests/test_m6_payload_quoting.py::test_a_sink_behind_a_single_quoted_evaluation_is_confirmed`, `tests/test_m6_payload_quoting.py::test_each_payload_against_the_quote_sensitive_path`, `tests/test_m6_payload_quoting.py::test_an_escaped_render_is_never_confirmed`, `tests/test_m6_payload_quoting.py::test_a_json_echo_is_never_confirmed`, `tests/test_m6_payload_quoting.py::test_only_the_fully_quote_free_payload_passes_a_stricter_path`, `tests/test_m6_payload_quoting.py::test_the_quote_free_payloads_at_a_query_point`, `tests/test_m6_payload_quoting.py::test_the_quote_free_payload_is_still_tried_after_the_unobserved_stop`
   - Enforced by (a page the executor could not observe is no verdict, never the end of the run; CC-FUZZ-0083, BUG-0137): `PlaywrightBrowserExecutor.run` (`wait_until="commit"`, `LOAD_WAIT_MS`, `except PlaywrightError`) — `tests/test_m6_navigation_failures.py::test_a_before_load_navigation_is_no_verdict_well_under_the_timeout`, `tests/test_m6_navigation_failures.py::test_a_hit_after_a_before_load_navigation_counts`, `tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline`, `tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url`, `tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed`
   - Enforced by (per payload, inconclusive, the driver's stop, a slow page's settle; BUG-0137 review D54): `_BrowserXssStrategy.confirm` (`NotObserved`, `MAX_NOT_OBSERVED`), `PlaywrightBrowserExecutor._stop_driver` / `_wait_for_token` — `tests/test_m6_navigation_failures.py::test_a_later_payload_is_tried_after_an_unobserved_one`, `tests/test_m6_navigation_failures.py::test_two_unobserved_payloads_in_a_row_stop_and_are_inconclusive`, `tests/test_m6_navigation_failures.py::test_a_partly_observed_candidate_without_a_hit_is_inconclusive`, `tests/test_m6_navigation_failures.py::test_every_payload_observed_without_a_hit_is_a_plain_negative`, `tests/test_m6_navigation_failures.py::test_a_browser_that_cannot_start_stops_at_once`, `tests/test_m6_navigation_failures.py::test_a_failed_driver_stop_keeps_the_result`, `tests/test_m6_navigation_failures.py::test_a_driver_that_never_stops_cleanly_makes_the_browser_unavailable`, `tests/test_m6_navigation_failures.py::test_a_sink_that_fires_after_a_slow_load_is_seen`
   - Enforced by (the reason carries no URL; a late launch failure; M6's inconclusive in the oracle's order; review of 1702c29): `browserexec._failure_reason`, `_BrowserXssStrategy.confirm`, `pipeline._confirm` — `tests/test_m6_navigation_failures.py::test_the_reason_never_carries_a_url_or_the_payload`, `tests/test_m6_navigation_failures.py::test_a_launch_failure_after_an_unobserved_payload_is_still_inconclusive`, `tests/test_m6_navigation_failures.py::test_an_m6_inconclusive_first_never_hides_a_later_confirmation`, `tests/test_m6_navigation_failures.py::test_the_first_inconclusive_is_kept_before_an_m6_one`

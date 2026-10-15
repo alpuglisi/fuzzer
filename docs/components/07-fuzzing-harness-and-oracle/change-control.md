@@ -83,6 +83,35 @@ note of the same date.
   - Mutation (`QUOTES = ('"',)`): the filtered-quote confirmation, the worst-case cost
     pin and the three edit-form shapes that must confirm fail. FR-FUZZ-28 is edited in
     place.
+- Amendment, BUG-0139 review (2026-10-15; reviewers A and B AGREE; D62 V1–V6):
+  - **V1 (A-S1):** the regex form `/TOKEN/.source` is replaced by
+    `String.fromCharCode(...)` of the token's character codes. A path-segment sink (a
+    client putting the id into `'/rest/…/' + id` unencoded, an Express `:id`) cut the
+    regex form at its `/`. The new call has no quote, no `/` and no whitespace; the
+    payload has no quote, `/`, `#` or `?`.
+    - The pin cannot require a whitespace-free **payload**: HTML separates a tag's
+      attributes only by whitespace or `/`. Whitespace in a path segment is
+      percent-encoded, so it is harmless there.
+    - `_SENTINEL_TOKEN` no longer mentions a regex literal.
+  - **V2 (A-S2):** the order is by reach: quoted `<img>`, backtick, `fromCharCode`,
+    then the other three quoted wrappers. Still 6 payloads.
+  - **V3 (B-S1):** when `MAX_NOT_OBSERVED` stops the loop, `_last_try` gives the first
+    untried fully quote-free payload (`_quote_free`: no `'`, `"` or backtick) one more
+    load. A hit confirms; otherwise the candidate is inconclusive (Z4).
+    `test_m6_navigation_failures.py`'s stop test now expects 3 loads.
+  - **V4 (B gap):** a real-browser query-point test (`_with_query`'s `+`, `%2F`, `%60`).
+  - **V5:** FR-FUZZ-48 states the cost: up to 6 loads per unconfirmed candidate (about
+    +50% M6 time), at most 3 for an unobservable page, and confirmations on a
+    quote-sensitive path typically at payload 2 or 3.
+  - **V6:** the path-segment residual is in BUG-0139.
+  - The fixture's API now matches **one** path segment, and the client concatenates
+    the id unencoded. A `/strict` variant also refuses backticks: only `fromCharCode`
+    reaches it.
+  - Mutations:
+    - **V1** (the regex form back): the shape pin, the per-payload test, the strict-path
+      test, the query-point test and the last-try test fail (5);
+    - **V3** (a plain `break`): the last-try test and the BUG-0137 stop test fail.
+  - Effectiveness: the related run on the committed tree is recorded below.
 
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
