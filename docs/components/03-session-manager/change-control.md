@@ -63,8 +63,13 @@ Newest first.
     BUG-0148; PA-0154 (PA-0122(4) marked superseded); ERROR_LOG; CHANGELOG — done
 - Effectiveness (assessed 2026-10-15): the framework matrix run against the base tree
   and the fix: browser login 7 of 12 shapes failed before, 0 after; requests side 4 of
-  7 not found before, 0 after (BUG-0148, "Before and after"). Verification counts are
-  in the lane report. The held-out lab is not re-run by this lane (blind).
+  7 not found before, 0 after (BUG-0148, "Before and after"). The first harness run
+  (`verify_change.py --base 13b1cff` on 223518b: 69 files, 2794 passed, 2 failed,
+  1 skipped, 19 xfailed) failed two whole-package guards on this change's own code: the
+  origin-scope lint (a `not in` on a host-derived diagnosis name; now an ordered dict)
+  and the base-URL registry (`_Discovery.__init__` registered, the stale
+  `_login_routes` entry removed); fixed in c169a06. Final verification counts are in
+  the lane report. The held-out lab is not re-run by this lane (blind).
 
 ### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
 - Change: `session/browserlogin.py` `_drive` loads the base page and each login route
