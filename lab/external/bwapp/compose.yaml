@@ -1,0 +1,75 @@
+# bWAPP v2.2 (external lab fixture, CC-LAB-0300 / FR-LAB-300). Lab-only.
+#
+# Safety: the web tier is published on LOOPBACK ONLY (127.0.0.1) and the database has
+# no network at all (network_mode: none) -- bWAPP reaches it through a unix socket on a
+# shared tmpfs volume. bWAPP is deliberately vulnerable, including OS command and PHP
+# code injection: never expose this stack.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up bwapp [--authorized]
+#                             ./labctl.sh reset bwapp [--authorized]
+# Port 8092 by default (8090 is forgecart's in lab/compose.yaml); BWAPP_PORT overrides.
+name: fuzzlab-bwapp
+
+x-podman:
+  # Not verified on podman (CC-LAB-0300 Risk): keep each service out of a shared pod so
+  # the db's network_mode: none is honoured.
+  in_pod: false
+
+services:
+  db:
+    # mysql:5.7 is published for amd64 only.
+    image: docker.io/library/mysql:5.7@sha256:4bc6bc963e6d8443453676cae56536f4b8156d78bae03c0145cbe47c2aad73bb
+    network_mode: none
+    environment:
+      # bWAPP's own published default, hard-coded in its admin/settings.php; not a
+      # secret of ours (the db is reachable only through the socket volume).
+      MYSQL_ROOT_PASSWORD: bug
+    volumes:
+      - bwapp-mysql-data:/var/lib/mysql
+      - bwapp-mysqld-sock:/var/run/mysqld
+    healthcheck:
+      # TCP, not the socket: the image's init-time temporary server runs with
+      # --skip-networking, so only the final server answers. 127.0.0.1 is the db
+      # container's own (otherwise empty) network namespace.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--protocol=tcp", "-uroot", "-pbug", "--silent"]
+      interval: 3s
+      timeout: 5s
+      retries: 80
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - bwapp-mysqld-sock:/var/run/mysqld
+    networks: [bwapp-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${BWAPP_PORT:-8092}:80"
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+volumes:
+  bwapp-mysql-data: {}
+  # tmpfs: no stale socket or lock file survives a killed db, and no first-mounter
+  # permission race.
+  bwapp-mysqld-sock:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "mode=1777"
+
+networks:
+  bwapp-net: {}

@@ -15,6 +15,11 @@
 #   ./labctl.sh stop <service>   stop one service's container (kept; `start` resumes it)
 #   ./labctl.sh ps       one line per project container: <name> TAB <state> TAB <status>
 #                        (start/stop/ps back the web panel's Lab page, CC-LAB-0250)
+#   ./labctl.sh {up|down|status|reset} <lab> [--authorized]
+#   ./labctl.sh bootstrap <lab> --authorized
+#                        external lab fixtures under external/ (bwapp, juice-shop;
+#                        CC-LAB-0300): see external/extctl.sh. --authorized also installs /
+#                        registers the lab identity (sends traffic to the lab).
 #
 # Uses `docker compose` (Podman-compatible: `podman compose` or podman-compose
 # also work against compose.yaml).
@@ -139,6 +144,21 @@ _check_service_name() {
   fi
 }
 # SERVICE_NAME_CHECK_BLOCK_END
+
+# External lab fixtures (CC-LAB-0300): `up|down|status|reset|bootstrap <lab>` for a
+# directory lab/external/<lab>/ with a compose.yaml is handed to external/extctl.sh with
+# the provider chosen above. Keyed on BOTH the operation and a registered lab, so
+# `snapshot <name>`, `start <service>` and a bare `up` keep their meaning.
+# tests/test_external_labs_extctl.py exercises this block.
+# EXTERNAL_DISPATCH_BLOCK_BEGIN
+case "${1:-}" in
+  up|down|status|reset|bootstrap)
+    if [[ "${2:-}" =~ ^[a-z0-9][a-z0-9-]*$ ]] && [ -f "external/${2}/compose.yaml" ]; then
+      LABCTL_COMPOSE="${COMPOSE[*]}" exec external/extctl.sh "$@"
+    fi
+    ;;
+esac
+# EXTERNAL_DISPATCH_BLOCK_END
 
 case "${1:-}" in
   up)

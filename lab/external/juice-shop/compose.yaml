@@ -1,0 +1,35 @@
+# OWASP Juice Shop v20.3.0 (external lab fixture, CC-LAB-0300 / FR-LAB-300). Lab-only.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1), on its own bridge network. The image
+# is pinned by digest (tag kept for readability; the digest is what resolves).
+#
+# NODE_ENV=unsafe loads Juice Shop's own config/unsafe.yml (challenges.safetyMode:
+# disabled). Without it the official image disables, inside Docker, the challenges the
+# ground truth relies on (SSTI, track-result / feedback / username XSS, XXE). It also
+# enables Juice Shop's code-execution and file-read challenges INSIDE this container:
+# contained by dropped capabilities, no-new-privileges and the loopback-only publish.
+# The bridge has egress (not blocked; NFR-LAB-safety "Not yet enforced").
+#
+# Run through lab/labctl.sh:  ./labctl.sh up juice-shop [--authorized]
+# Reset = remove the container (its database is rebuilt on every start).
+name: fuzzlab-juice-shop
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    image: docker.io/bkimminich/juice-shop:v20.3.0@sha256:cea5a4af4aacee498c491491af0408934ec81d004035c0a02ef3e54395e3bf27
+    environment:
+      NODE_ENV: unsafe
+    networks: [juice-shop-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${JUICE_PORT:-3000}:3000"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 1g
+
+networks:
+  juice-shop-net: {}

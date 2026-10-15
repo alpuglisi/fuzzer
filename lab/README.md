@@ -75,4 +75,50 @@ lands (Phase 3).
 Bind mounts use the `:Z` / `:ro,Z` relabel option so the container can read the
 app and the seed file under SELinux. If a mount is shared between containers, use
 `:z` instead.
+
+## External lab fixtures: bWAPP and OWASP Juice Shop (CC-LAB-0300)
+
+Two third-party vulnerable apps run as permanent, reproducible fixtures, each its own
+compose project under `external/`, driven through this directory's `labctl.sh`:
+
+```bash
+cd lab
+./labctl.sh up bwapp --authorized        # http://127.0.0.1:8092/bWAPP/  (BWAPP_PORT)
+./labctl.sh up juice-shop --authorized   # http://127.0.0.1:3000/        (JUICE_PORT)
+./labctl.sh status <lab>                 # 0 running + loopback-only, 1 down, 3 exposed
+./labctl.sh reset <lab> --authorized     # drop everything (incl. data), up again
+./labctl.sh down <lab>                   # stop and remove (bWAPP's DB volume kept)
+./labctl.sh bootstrap <lab> --authorized # installer / account only
 ```
+
+- **Loopback only.** Each `up` refuses a resolved compose config that would publish a port
+  on anything but loopback, then inspects the running project and tears it down if any
+  port is exposed. bWAPP's database has no network at all (a unix socket on a shared tmpfs
+  volume).
+- **Nothing is sent to a lab without `--authorized`.** With it, `up`/`reset` also run the
+  bootstrap: bWAPP's installer and a level-0 login check for identity `bwapp-bee` (user
+  `bee`); Juice Shop's `safetyMode` check and an account for identity `juice-user`
+  (`juice-user@fuzzlab.lab`), registered through its own API. The credential comes from the
+  keyring (`fuzzlab session set-credential --host 127.0.0.1 --identity <id> --username
+  <user>`), the operator's gated env channel, or a prompt; Juice Shop's may be generated.
+  It is stored in the keyring only after a verified login, and never printed. Use
+  `http://127.0.0.1:<port>` (not `localhost`) as the base URL: the keyring keys by host.
+- **bWAPP is CC BY-NC-ND and never committed.** `up` downloads `bWAPP_latest.zip` from its
+  SourceForge project into the gitignored `external/bwapp/.cache/` (sha256 and size
+  pinned) and the image build verifies the sha256 again before extracting. bWAPP is served
+  under `/bWAPP/`; the origin root redirects to its portal.
+- **Juice Shop runs with `NODE_ENV=unsafe`** (its own config): the official image otherwise
+  disables, in Docker, the challenges the ground truth relies on (SSTI, several XSS, XXE).
+  That also enables its code-execution challenges inside the container (capabilities
+  dropped, `no-new-privileges`, loopback-only publish). Both fixtures' networks have
+  egress.
+- **Reset is cheap.** bWAPP's `update.php` drops its whole database on an unauthenticated
+  GET; `./labctl.sh reset bwapp --authorized` restores a clean install. Juice Shop rebuilds
+  its database on every start.
+- **Ground truth:** `ground-truth-bwapp/` and `ground-truth-juice-shop/` (validation
+  targets, D10). A ground-truth-points run against bWAPP uses the origin as its base URL
+  (`--base-url http://127.0.0.1:8092`, BUG-0300). Each case's notes say which scored pass
+  can reach it (`[reach: crawl|gt|…]`).
+- **Verified here with docker only.** The podman / podman-compose / SELinux paths are not
+  verified (`docs/ON_HOST_RUNBOOK.md`).
+- Live tests: `FUZZLAB_LIVE_EXTERNAL_LABS=1 pytest tests/test_external_labs_live.py`.

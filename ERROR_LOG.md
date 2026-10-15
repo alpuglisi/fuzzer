@@ -105,6 +105,93 @@ Format per entry:
 - **Remediation:** `SessionState.origins` (base, login page, credential destination, `auth_origins`; in memory only); every carrier checks origin membership; another origin goes out anonymously, never logs in there, is counted and stamped `anonymous (out of origin)`; the browser route withholds the port-agnostic jar from another origin. CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023. `docs/bugs/BUG-0134-session-sent-to-another-port-of-the-host.md`.
 - **Status:** Fixed (real loopback servers on two ports and real Chromium; residuals in the bug's sweep table)
 
+## 2026-10-15 — Cloud container: 14 `lab-generate --check` tests failed because gitleaks was missing (environment)
+- **Symptom:** the clean-tree full-suite run for CC-LAB-0300 (`-m "not slow"`, at
+  64d69a2) failed 14 labgen tests (`test_cli_check_passes_end_to_end*`,
+  `test_lab_generate_check_passes_on_the_clean_example_manifest`,
+  `test_run_checks_generic_weakened_twin_pairing_passes_for_an_arbitrary_cell`), each
+  with `secret scanner: 'gitleaks' executable not found on PATH`.
+- **Root cause:** environment. The session's container has no `gitleaks`, and the
+  `--check` secret-scanner gate correctly fails closed without it
+  (NFR-LAB-no-secret-leak). The same 14 failed identically at the base commit cdde39f,
+  before this change.
+- **Remediation:** `apt-get install gitleaks` (8.16.0) in the session container. The 14
+  then passed at 64d69a2, and the full suite was rerun with it present (CC-LAB-0300
+  "Effectiveness, final").
+- **Status:** Environment (fixed outside the repo)
+
+## 2026-10-15 — External lab fixtures: an external-lab negative and three live checks rested on premises nobody had observed (fixed, BUG-0311 / PA-0311, CC-LAB-0300)
+- **Symptom:** code review found that BWAPP-0047 (sqli_17 `User-Agent`, reflected XSS)
+  was labelled a negative although a quote-breaking value comes back raw in the MySQL
+  error. Of the live test's two security-level checks, one could not fail and one failed
+  on a harmless GET. The "checked candidate" filter also counted undecided statuses.
+- **Root cause:** a negative proven only on the display path, never the error path, and
+  live assertions on channels that cannot carry the violation they test for. The session
+  adopts no response cookies, and access logs hold no POST bodies. The status filter was
+  hand-written instead of using `oracle_status.CHECKED`.
+- **Remediation:** BWAPP-0047 is now a positive, plus BWAPP-0057/0058 (the same echo),
+  all verified live. The level checks became "no probe of the level parameters" plus a
+  stated structural reason. The filter uses `CHECKED` (commit e74fba8). That
+  replacement was wrong too: live run 3 showed the crawl pass probing the login form's
+  `security_level` field through the isolated client. It now reads a per-request log of
+  the level cookie that the fixture writes, through an allowlist predicate that is
+  unit-tested offline, with level-1 controls before and after the passes (code review
+  rounds 2-3; the first version's control could never pass). Full RCA in
+  `docs/bugs/BUG-0311-*`, rule PA-0311.
+- **Status:** Fixed (revised check verified live: live run 5 at 859bcfd, 4 passed)
+
+## 2026-10-15 — External lab fixtures: the loopback exposure checks failed open (fixed, BUG-0310 / PA-0310, CC-LAB-0300, CC-CORE-0300)
+- **Symptom:** code review found that the pre-flight and post-boot checks passed podman's
+  `ns:/proc/1/ns/net`, `slirp4netns:allow_host_loopback=true` and `pasta`, and an
+  external network named `host`. Engine errors read as "nothing left" (`down` exit 0)
+  or "not running", and a non-loopback binding seen only in `NetworkSettings.Ports` was
+  never judged.
+- **Root cause:** the checks were a denylist of docker's bad modes, and "the engine
+  could not answer" defaulted to "safe".
+- **Remediation:** allowlists in the pre-flight and the post-check, a comparison of each
+  container's network namespace with the host's, both inspect port sources combined,
+  and every engine error treated as a failure (commit e74fba8). Full RCA in
+  `docs/bugs/BUG-0310-*`, rule PA-0310.
+- **Status:** Fixed
+
+## 2026-10-15 — External lab fixtures: build-time failures met while making bWAPP / Juice Shop permanent (fixed, CC-LAB-0300; environment)
+- **Symptom:** (1) no Docker daemon in the cloud build container (`docker info`: no
+  `/var/run/docker.sock`); (2) the first bWAPP image prototype served every page as binary
+  garbage with a 200; (3) the official Juice Shop image did not evaluate the SSTI the
+  brief lists as confirmed (`#{7*191}` came back literal); (4) the first live
+  `bootstrap` reported bWAPP's portal "does not require a login" and Juice Shop's
+  `whoami` "does not name the account"; (5) the bWAPP ground-truth-points run could not
+  log in (origin base) and the crawl-points run was refused for its request budget.
+- **Root cause:** (1) environment: `dockerd` not started; (2) PHP 5.6's `PharData`
+  extracted this zip's entries still deflated (the php:5.6 base has no `unzip` and no zip
+  extension); (3) the image's `safetyMode: auto` disables Docker-tagged challenges inside a
+  container (`challenges.yml` `disabledEnv`; the brief's run was a source build); (4) in the
+  new, uncommitted bootstrap: bWAPP's relative `Location: login.php` was resolved against
+  the origin root, and `whoami` reads the `token` cookie, not the bearer; (5) login
+  discovery looks at the base page (bWAPP is under `/bWAPP/`; the ground-truth join doubles
+  a sub-path base, BUG-0300), and header points over ~150 pages need ~9700 requests.
+- **Remediation:** (1) `dockerd` started in the session (pid recorded, stopped at the
+  end); (2) a pinned busybox fetch stage does `sha256sum -c` + `unzip`; (3) the fixture
+  sets `NODE_ENV=unsafe` (Juice Shop's own `config/unsafe.yml`), asserted by a static test
+  and by bootstrap; (4) redirects resolved against the request URL, `whoami`/`/profile`
+  checked with the cookie (both caught before commit, by the first live run, and covered
+  by unit tests); (5) the fixture's own Apache config redirects `/` to
+  `/bWAPP/portal.php`, and the crawl pass sets `FUZZLAB_BUDGET_TOTAL=30000`.
+- **Status:** Fixed (2)-(5) in CC-LAB-0300; (1) Environment. None was a defect in
+  committed code (no BUG report); the locked-file defects found alongside are BUG-0300
+  and BUG-0301.
+## 2026-10-15 — core/urls: the destructive rule misses Juice Shop's GET password change and `/dataerasure` (open, deferred, BUG-0301/PA-0301)
+- **Symptom:** the PA-0114 enumeration of Juice Shop's routes (before adopting it as a permanent fixture) found `destructive_reason` and `transaction_reason` both None for `GET /rest/user/change-password?current=a&new=b&repeat=b` (changes the bearer's password; `current` is optional) and `/dataerasure` (GET and POST; files an erasure request and clears the token cookie). The send gate lets both through, and the real `dataErasureForm.hbs` form passes `form_skip_reason`, so the POST would be imported and fuzzed. Latent: neither is captured by a crawl today.
+- **Root cause:** the rule matches whole tokens and listed pairs only, and is validated only against the spellings it was written for: `dataerasure` is one token (`erasure` is not `erase`), and `(change, password)` is not a listed pair. A recurrence of BUG-0114's class.
+- **Remediation:** none to the rule yet: `fuzzlab/core/urls.py` is locked by another session, so the corrective action is deferred to its owner (CC-CORE-0301). Pinned by strict xfails, a computed Juice Shop / bWAPP PA-0114 table, and the PA-0301 compound-spelling scan over every lab's routes (`tests/test_destructive_routes_external_labs.py`). `docs/bugs/BUG-0301-destructive-rule-missed-juice-password-change-and-data-erasure.md`.
+- **Status:** Open (deferred to the `core/urls.py` lock owner; compensating controls stated in BUG-0301)
+
+## 2026-10-15 — Harness: ground-truth points double an operator base URL's sub-path (open, deferred, BUG-0300/PA-0300)
+- **Symptom:** `points_from_ground_truth(gt, "http://127.0.0.1:8092/bWAPP/")` with a ground-truth url `/bWAPP/sqli_1.php` builds `http://127.0.0.1:8092/bWAPP/bWAPP/sqli_1.php` (every branch: server, DOM and stored-XSS points); greybox's `points_with_classes` inherits it and keys its class lookup the same way. A ground-truth run against a sub-path base would probe 404s and score every case as missed.
+- **Root cause:** the join is `base_url.rstrip("/") + path`, treating a ground-truth url as app-relative, while findings (and so the scored keys) are full request paths (`to_path`). The convention was never written down, every generated lab serves at `/`, and BUG-0113's sweep cleared this function "by contract" without a sub-path test: PA-0113(3) had no enforcement.
+- **Remediation:** none to the code yet: `fuzzlab/harness/auto.py` and `fuzzlab/greybox/run.py` are locked by another session, so the corrective action is deferred to their owner (CC-FUZZ-0300). Operators pass the origin as `--base-url` for ground-truth runs meanwhile. Pinned by strict xfails, and PA-0300's registry (`tests/test_base_url_subpath_registry.py`) now lists every function that takes an operator base URL with its sub-path test or its bug. `docs/bugs/BUG-0300-ground-truth-points-doubled-an-operator-sub-path.md`.
+- **Status:** Open (deferred to the `harness/auto.py` lock owner)
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.

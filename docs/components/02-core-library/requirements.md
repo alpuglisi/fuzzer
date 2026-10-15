@@ -482,6 +482,18 @@ plugin registry. It is the layer that makes the store the integration bus.
     (a container's, joined with nsenter) would not count as exposed, even though that
     namespace may be bridged with published ports. Nothing launches servers that way
     today.
+- **FR-CORE-300** *(host LISTEN table; `CC-CORE-0300`, 2026-10-15).*
+  `procutil.host_listen_sockets()` returns a `Listener` (pid 0: the owner is not looked
+  up) for every LISTEN socket in the calling process's network namespace, through the same
+  `/proc/net/tcp{,6}` parser as `listeners()` (PA-0087); `netns_of(pid)` and
+  `host_netns()` name a process's and this process's network namespace. Consumer: the
+  external lab
+  fixtures' exposure check (FR-LAB-301), which judges a container engine's published
+  ports -- sockets this process did not start. The spawn guard
+  (`tests/test_procutil_guard.py`) treats `bash`, `sh`, `docker`, `podman`,
+  `docker-compose` and `podman-compose` as forking tools: a `subprocess.run`-family call
+  of them with a `timeout=` must go through `run_bounded` (an unbounded call is held to it
+  by review, not by the guard).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

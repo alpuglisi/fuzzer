@@ -61,3 +61,12 @@ docs/research/corpus-validation-audit.jsonl
 on_host_results*.txt
 # BUG-0141 / PA-0141: the orchestration ledger is local session state, never committed
 .claude/orchestration/
+
+# CC-LAB-0300: the external lab fixtures' ground truth is tracked, same BUG-0036 trap
+!lab/ground-truth-bwapp/*.csv
+!lab/ground-truth-juice-shop/*.csv
+# CC-LAB-0300: bWAPP is CC BY-NC-ND and is never committed -- its downloaded zip lives
+# in a local cache, and no extracted tree or archive may enter the repo
+lab/external/**/.cache/
+lab/external/**/bWAPP/
+lab/external/**/*.zip

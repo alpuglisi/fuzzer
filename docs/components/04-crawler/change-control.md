@@ -833,6 +833,26 @@ Newest first.
     `tests/test_forms_phase4.py::test_the_websocket_forwarder_drops_page_messages_only_inside_the_window`.
   - Tests: `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`.
 
+### CC-CRAWL-0300 — NFR-CRAWL-safe records BUG-0301's import risk (doc-only) (2026-10-15)
+- Change: `requirements.md` NFR-CRAWL-safe gains two lines:
+  - an `Enforced by:` line for the PA-0114/PA-0301 tables and the spelling scan
+    (`tests/test_destructive_routes_external_labs.py`);
+  - a `Not yet enforced:` line (BUG-0301). A crawl that reaches Juice Shop's
+    `/dataerasure` would visit it and import its server-rendered erasure form, and the
+    deny rule does not refuse the GET password change. It names the strict xfails that
+    pin both.
+  No crawler code changes.
+- Impact: documentation only; the spec now states the gap (PA-0112(2)).
+  `tests/test_requirements_traceability.py` checks the cited tests exist.
+- Risk: none (doc-only).
+- Deliverables:
+  - [x] NFR-CRAWL-safe lines — done
+  - [x] traceability test run — done
+- Review: the pre-change gate was cleared by design rev 2 (3/3 AGREE, §12); the drafts are in its §10 (CC-FUZZ-0300, CC-CORE-0301) and §12 (CC-CRAWL-0300).
+- Effectiveness (assessed 2026-10-15): the traceability guard passes with the new lines
+  (counts in CC-FUZZ-0300's report). The line is removed when CC-CORE-0301's corrective
+  action lands.
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

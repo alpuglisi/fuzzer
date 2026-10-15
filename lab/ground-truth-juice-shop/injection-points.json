@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "target": "juice_shop_v20_3_0",
+  "points": [
+    {
+      "url": "/rest/products/search",
+      "method": "GET",
+      "param": "q",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/rest/user/login",
+      "method": "POST",
+      "param": "email",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/#/search",
+      "method": "GET",
+      "param": "q",
+      "location": "fragment",
+      "rendering": "js"
+    },
+    {
+      "url": "/profile/image/url",
+      "method": "POST",
+      "param": "imageUrl",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/profile",
+      "method": "POST",
+      "param": "username",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/#/track-result",
+      "method": "GET",
+      "param": "id",
+      "location": "fragment",
+      "rendering": "js"
+    }
+  ]
+}

@@ -120,6 +120,109 @@ Newest first.
   under the auditor as **CC-AUD-0041** (the importer's owner by precedent, CC-AUD-0035 /
   CC-AUD-0040); this entry's core change is the `REDIRECT_PARAMS` move (FR-CORE-39).
 
+### CC-CORE-0302 — PA-0301's spelling scan states its short-stem limit (review L3/L4) (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 (PA-0031); see CC-LAB-0300. Test and docs
+  only, no gate needed.
+- Change: `tests/test_destructive_routes_external_labs.py` states that `MIN_STEM = 5`
+  never finds a 4-letter word (`wipe`, `drop`) inside a compound, and the rule's own
+  token match still sees it standing alone (L3). PA-0301(1) states the same limit.
+  `test_the_generated_labs_state_changing_routes_are_enumerated_and_judged` says that a
+  failure means a scored cell became unscorable (L4). No assertion changed.
+- Impact: none outside the comments; no production code.
+- Risk: none (comments and a docstring).
+- Deliverables:
+  - [x] comment, docstring, PA-0301(1) limit — done
+- Effectiveness (assessed 2026-10-15): effective (comments only).
+  `tests/test_destructive_routes_external_labs.py`, run alone on a clean worktree at
+  64d69a2: 83 passed, 4 xfailed (strict, BUG-0301). No assertion changed.
+
+### CC-CORE-0301 — BUG-0301 recorded: the destructive rule misses Juice Shop's GET password change and data erasure (deferred to the `core/urls.py` lock owner); PA-0301's sweep (2026-10-15)
+- Change: documentation and tests only; no production code changes (`fuzzlab/core/urls.py`
+  is locked by another session).
+  - BUG-0301 recorded in full: `ERROR_LOG.md`,
+    `docs/bugs/BUG-0301-destructive-rule-missed-juice-password-change-and-data-erasure.md`,
+    and PA-0301. `destructive_reason` and `transaction_reason` return None for
+    `GET /rest/user/change-password?current=&new=&repeat=` and `/dataerasure`, so the
+    send gate passes both, and the real erasure form passes `form_skip_reason`.
+  - New `tests/test_destructive_routes_external_labs.py`:
+    - strict xfails for both URLs: the URL rule, the send gate, and the erasure form as a
+      POST action;
+    - `test_bug_0301_is_what_the_xfails_claim`, and the compensating controls computed;
+    - the Juice Shop PA-0114 table (36 routes) and the bWAPP table (39 routes; the
+      existing `BWAPP_DESTRUCTIVE_GETS` checked as a subset), each row with its real
+      gate's computed verdict, or a residual pinned to None;
+    - the generated labs' state-changing routes, enumerated from `lab/manifests/*.yaml`
+      and `lab/ground-truth*/`;
+    - PA-0301's compound and verb-object spelling scan over every lab route, with
+      synthetic offenders.
+- Impact: CORE's rule is unchanged. Its consumers CRAWL (link and form gates), AUD
+  (captured-request import) and FUZZ (send gate) keep today's behaviour. They gain the
+  pinned gap and the tables. The requirement lines are under CC-CRAWL-0300 and
+  CC-FUZZ-0300.
+- Risk: medium until fixed: an imported change-password URL, or a crawled erasure form,
+  would be fuzzed. Mitigated meanwhile by the compensating controls stated in BUG-0301
+  (not by a live assertion: the design §5.6 one was not built, see BUG-0301's
+  correction; one exploratory full crawl stored neither path). Uncovered residual: a full
+  crawl that reaches `/dataerasure` would import and fuzz its server-rendered form. The
+  tests carry no risk. The strict xfails turn into hard failures (XPASS(strict)) when
+  the rule is fixed. That is intended: per MULTI_AGENT §6 the fixing lane deletes them in
+  its own merge, and the stale-disposition check then asks it to drop the two
+  `SPELLING_DISPOSITIONS` entries. **The orchestrator (Lane A) must tell the session
+  that owns `core/urls.py` about these four markers before this branch merges**. This
+  lane cannot reach that session, so the relay is Lane A's.
+- Deliverables:
+  - [x] BUG-0301 report, ERROR_LOG line, PA-0301 — done
+  - [x] strict xfails, reason check, compensating-control test — done
+  - [x] Juice Shop and bWAPP PA-0114 tables, generated-lab sweep, spelling scan with
+    synthetic offenders — done
+  - [ ] lock owner told about the strict-xfail markers (relayed by Lane A) — todo
+  - [ ] corrective action in `core/urls.py` (lock owner; suggested fix in BUG-0301) — todo
+- Review: the pre-change gate was cleared by design rev 2 (3/3 AGREE, §12); the drafts are in its §10 (CC-FUZZ-0300, CC-CORE-0301) and §12 (CC-CRAWL-0300).
+- Effectiveness (assessed 2026-10-15): BUG-0301 itself stays pending until the corrective
+  action lands. The tests are effective:
+  - `tests/test_destructive_routes_external_labs.py` run alone: 83 passed, 4 xfailed;
+  - the sweep found no further gap (BUG-0302..0305 unused).
+  - Mutation checks, each restored after:
+    - the compound scan matching whole tokens only fails
+      `test_no_lab_route_hides_a_destructive_word_in_a_compound` and
+      `test_the_spelling_scan_catches_synthetic_offenders`; so does disabling the
+      verb-object branch;
+    - dropping the `/dataerasure` disposition fails the scan test;
+    - removing the `reset_code` field from bWAPP's real `secret_change` form fails that
+      table row (its verdict is computed, not asserted).
+  - With the corrective action simulated in memory (`dataerasure` token, `(change,
+    password)` pair; no file edited), exactly the four strict xfails turn
+    XPASS(strict). The reason pin and the stale-disposition check also fail. Those are
+    the markers and entries the fixing lane must update in its own merge.
+### CC-CORE-0300 — procutil: a public host LISTEN-table reader; the spawn guard knows shells and container CLIs (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 for this session (PA-0031); see CC-LAB-0300.
+- Pre-change gate: part of design rev 2 (reviewers A and B, 3/3), as CC-LAB-0300.
+- Change:
+  - `fuzzlab/procutil.py`: `host_listen_sockets()` returns a `Listener` (pid 0) for every
+    LISTEN socket of this process's network namespace, through the existing
+    `_listen_table` parser (PA-0087: no second parser); `netns_of(pid)` / `host_netns()`
+    expose the existing namespace readers (added in code review A1: the exposure check
+    compares each container's namespace with the host's; BUG-0310, PA-0310(1)). ~20
+    lines. FR-CORE-300.
+  - `tests/test_procutil_guard.py`: `FORKING_TOOLS` gains `bash`, `sh`, `docker`,
+    `podman`, `docker-compose`, `podman-compose`, with six synthetic offenders
+    (PA-0034(2)). The sweep (the guard's own AST scan with the new list) found one site,
+    `tests/test_lab_labctl_profile_parsing.py`'s `subprocess.run(["bash", ...],
+    timeout=10)`, migrated to `run_bounded`.
+- Impact: CORE helper consumed by LAB's exposure check (CC-LAB-0300); no existing caller
+  changes. The guard flags `subprocess.run`-family calls with a `timeout=` only; an
+  unbounded `docker`/`compose` call is held to `run_bounded` by review, not enforced
+  (stated in FR-CORE-300 and NFR-LAB-cleanup).
+- Risk: low.
+- Deliverables:
+  - [x] `host_listen_sockets` + real-socket test — done
+  - [x] guard extension, offenders, sweep (1 site migrated) — done
+  - [x] FR-CORE-300, NFR-LAB-cleanup `Enforced by:` line, CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): `host_listen_sockets` sees a real
+  loopback listener (`tests/test_external_labs_static.py::test_host_listen_sockets_sees_a_real_loopback_listener`);
+  `tests/test_procutil_guard.py` 30 passed, the migrated test 5 passed; the mutation check
+  kills an empty host table and a guard without `bash`.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

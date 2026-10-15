@@ -469,6 +469,28 @@ def exposed_listeners(h: "ServerHandle", *, host_netns: str | None = None) -> li
     return [lst for lst in listeners(h) if _is_exposed(lst, ns)]
 
 
+def netns_of(pid: int) -> str:
+    """``net:[inode]`` of ``pid``'s network namespace, or ``""`` when unreadable
+    (CC-CORE-0300: lets a caller tell a container that shares the host's namespace)."""
+    return _netns(pid)
+
+
+def host_netns() -> str:
+    """This process's network namespace (CC-CORE-0300)."""
+    return _host_netns()
+
+
+def host_listen_sockets() -> list[Listener]:
+    """Every LISTEN socket in this process's network namespace, whoever holds it
+    (``pid`` 0: the owner is not looked up). For servers this code did not start --
+    e.g. a container engine's published port (CC-CORE-0300, the external lab fixtures'
+    exposure check). Built on the same ``/proc/net/tcp{,6}`` parser as
+    :func:`listeners` (PA-0087: one parser)."""
+    ns = _host_netns()
+    return [Listener(pid=0, address=address, port=port, netns=ns)
+            for address, port in _listen_table(os.getpid()).values()]
+
+
 def assert_loopback_only(h: "ServerHandle", *, host_netns: str | None = None) -> list[Listener]:
     """Raise :class:`NonLoopbackListener` if any process of the server's tree is
     exposed beyond loopback; return its listeners otherwise. The rule: **checked

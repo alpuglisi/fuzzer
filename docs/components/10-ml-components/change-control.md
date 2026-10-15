@@ -3,6 +3,22 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0300 — NFR-ML-no-leak: runs against the external lab fixtures are not yet excluded from training (documentation) (2026-10-15)
+- Reserved range: CC-<CODE>-0300..0349 for this session (PA-0031); see CC-LAB-0300.
+- Change: NFR-ML-no-leak gains a dated `Not yet enforced` line: runs against the new
+  external fixtures (bWAPP, Juice Shop; CC-LAB-0300) produce candidates whose URLs carry
+  their class (bWAPP's page names), and D10 treats external targets as validation only;
+  nothing stops a trainer reading those runs. Until the operator decides whether these
+  targets may be used for training (flagged in the session report), runs against a
+  registered external fixture's host:port should be excluded. No code change.
+- Impact: ML (documentation only); LAB's FR-LAB-303 states the same data role.
+- Risk: low (documentation); the gap itself is a leak risk for any trainer fed those runs.
+- Deliverables:
+  - [x] NFR-ML-no-leak line — done
+- Effectiveness (assessed 2026-10-15): the line is in place and
+  `tests/test_requirements_traceability.py` passes; enforcement awaits the operator's
+  decision.
+
 ### CC-ML-0030 — Note: the `loc_body` feature counts `json` points as body (forms phase 3; documentation) (2026-10-14)
 - Change: FR-ML-5 gains a dated note: the candidate feature `loc_body`
   (`core/features.extract_candidate_v1`) is 1 for location `json` (one leaf of a JSON

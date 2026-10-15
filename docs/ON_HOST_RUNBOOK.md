@@ -126,6 +126,56 @@ the `apps` compose profile, same convention as the `desync` frontend.
    errors, `labctl.sh` already self-heals (`BUG-0057`/`PA-0059`) — re-run `./labctl.sh
    status` afterward to confirm nothing is left running.
 
+## Part A3 — External lab fixtures: bWAPP and Juice Shop (`CC-LAB-0300`) `[run]` (docker) / `[design]` (podman)
+
+Executed on 2026-10-15 under `docker compose` (Docker Engine 29.8, compose v5.6). Not run
+under podman / podman-compose: on a podman host treat these steps as `[design]` and check
+the unverified points listed in `docs/components/01-target-lab/requirements.md`
+(NFR-LAB-safety) — `network_mode: none` under podman-compose's pod mode, the shared unix
+socket under SELinux, netavark bridge isolation.
+
+1. **Identities** (keyring only; bWAPP's is its published default `bee`/`bug`, Juice Shop's
+   is created on first bootstrap if you skip this):
+   ```bash
+   fuzzlab session set-credential --host 127.0.0.1 --identity bwapp-bee --username bee
+   ```
+2. **Bring each up** (pre-flight, build, exposure check, then the bootstrap). `extctl.sh`
+   runs its Python helper with `${FUZZLAB_PYTHON:-python3}`; if fuzzlab lives in a venv,
+   export `FUZZLAB_PYTHON=/path/to/venv/bin/python` first:
+   ```bash
+   cd lab
+   ./labctl.sh up bwapp --authorized
+   # ... bwapp: identity 'bwapp-bee' ready (keyring); bWAPP has been installed successfully!; level-0 login verified
+   # bwapp up: http://127.0.0.1:8092/bWAPP/  (loopback only)
+   ./labctl.sh up juice-shop --authorized
+   # juice-shop: identity 'juice-user' ready (...); safetyMode disabled; account registered; login verified
+   ./labctl.sh status bwapp; ./labctl.sh status juice-shop   # "running, loopback only", exit 0
+   ```
+   bWAPP's first `up` downloads its zip (15 MB, sha256-pinned) into
+   `lab/external/bwapp/.cache/` and builds the image. Ports: `BWAPP_PORT` (8092),
+   `JUICE_PORT` (3000).
+3. **Benchmark runs** (ground-truth points; bWAPP's base is the **origin**, BUG-0300):
+   ```bash
+   fuzzlab auto --base-url http://127.0.0.1:8092 --store bwapp.db \
+     --ground-truth lab/ground-truth-bwapp --points ground-truth \
+     --identity bwapp-bee --browser --authorized
+   # executed 2026-10-15, scored against the final contract (58 cases): tp=20 fp=0 tn=3
+   # (the run's two then-unlisted detections are now BWAPP-0051/0052)
+   fuzzlab auto --base-url http://127.0.0.1:3000 --store juice.db \
+     --ground-truth lab/ground-truth-juice-shop --points ground-truth \
+     --identity juice-user --browser --oob --authorized
+   # executed: tp=4 fp=0 tn=3 (JUICE-0002/0003/0004/0006); JUICE-0005 (SSRF) is a documented
+   # miss: the container's bridge network cannot reach the loopback-only OOB listener
+   ```
+4. **Reset** after anything destructive (bWAPP's `update.php` drops its database on a GET):
+   `./labctl.sh reset bwapp --authorized`. **Tear down:** `./labctl.sh down <lab>`.
+5. **Live tests:** `FUZZLAB_LIVE_EXTERNAL_LABS=1 FUZZLAB_REQUIRE_BROWSER=1 pytest -q
+   tests/test_external_labs_live.py` (set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to your
+   Chromium if Playwright's own is not installed). Each test uses its own compose
+   project and port, and cleans up after itself. Executed 2026-10-15 under docker: 4
+   passed in about 25 minutes, most of it bWAPP's crawl pass with header points. Run
+   one pytest process at a time.
+
 ## Part B — Install the toolkit
 
 From the repo root, in a Python 3.11+ venv:
@@ -686,8 +736,9 @@ Everything stays loopback, on infrastructure you own.
    fuzzlab report --store auto.db            # human summary
    fuzzlab report --store auto.db --json     # canonical JSON for diffing
    ```
-4. **Transfer to a second target (T10.6).** Stand up an external validation lab (OWASP
-   Juice Shop / WAVSEP, per D10) with a ground-truth contract, then run the multi-target
+4. **Transfer to a second target (T10.6).** Stand up an external validation lab — the
+   permanent Juice Shop fixture (Part A3, `./labctl.sh up juice-shop --authorized`) has a
+   ground-truth contract at `lab/ground-truth-juice-shop` — then run the multi-target
    harness over both:
    ```bash
    python - <<'PY'
@@ -699,7 +750,7 @@ Everything stays loopback, on infrastructure you own.
        TargetSpec("pff", "http://127.0.0.1:8080",
                   ground_truth=contract.load("lab/ground-truth"), points_source="ground-truth"),
        TargetSpec("juice", "http://127.0.0.1:3000",
-                  ground_truth=contract.load("path/to/juice-ground-truth"), points_source="ground-truth"),
+                  ground_truth=contract.load("lab/ground-truth-juice-shop"), points_source="ground-truth"),
    ]
    with Store("transfer.db") as s:
        outs = run_targets(specs, s, sender_for=lambda spec: make_probe_sender(spec.base_url, None))
@@ -707,6 +758,11 @@ Everything stays loopback, on infrastructure you own.
    PY
    ```
    **Exit:** non-trivial recall on the second target (`generalizes=True`).
+   Executed for the Juice Shop half on 2026-10-15 (CC-LAB-0300): this snippet's sender is
+   anonymous and has no browser, so it reached `juice: tp=2 fp=0 fn=8` (JUICE-0002/0003);
+   the identity- and browser-dependent rows (SSTI on `/profile`, DOM XSS) need
+   `make_probe_sender(base, "juice-user")` and a browser executor — Part A3's step 3 got
+   tp=4 that way. A bWAPP `TargetSpec` takes the **origin** as `base_url` (BUG-0300).
 
 ## Running everything in one pass (Parts A, C–L)
 

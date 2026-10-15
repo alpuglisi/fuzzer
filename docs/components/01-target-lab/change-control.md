@@ -67,6 +67,315 @@ Component code: **LAB**. Entry format and required fields: see
   - collecting the Laravel live-boot files: 10 s (was 121 s);
   - serial pass: 38 min 45 s (was 61 min 28 s), before the parallel split (CHANGELOG).
 
+### CC-LAB-0301 — The loopback lint covers every compose file and shell script under lab/ and scripts/ (2026-10-15)
+- Change: `tests/test_external_labs_static.py` lints every `lab/**/compose*.y*ml` with
+  `fuzzlab.lab_fixtures.external.config_problems` (short and long port syntax, ranges,
+  IPv6, interpolated or missing host IPs, `localhost` by name, host network/pid,
+  privileged, foreign container namespaces) and every `docker|podman run` in `lab/**/*.sh`
+  and `scripts/**/*.sh` (publish without `127.0.0.1:`, host network), each proven on
+  synthetic offenders (PA-0034(2)). `tests/test_lab_compose_network_isolation.py` is
+  unchanged; the new rule is the same function the pre-flight runs (PA-0003). ~150 lines.
+- Impact: tests only; the existing `lab/compose.yaml` and every script pass unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] compose + shell lint with offenders — done
+- Effectiveness (assessed 2026-10-15): the lint passes over every compose
+  file under `lab/` (3) and every shell script under `lab/` and `scripts/`, flags all 17
+  compose and 6 shell synthetic offenders, and the mutation check kills a lint that
+  accepts a non-loopback host, a host network, or an unchecked publish.
+
+### CC-LAB-0300 — bWAPP and OWASP Juice Shop as permanent loopback lab fixtures with ground truth (2026-10-15)
+- Reserved range: this session's change-control numbers are CC-<CODE>-0300..0349 (and
+  BUG/PA-0300..0349, FR-<CODE>-300+), pre-assigned for concurrent sessions (PA-0031);
+  hence the jump from CC-LAB-0255.
+- Pre-change gate: design rev 2 reviewed by reviewers A and B (A agreed in round 2, B in
+  round 3, author agreed; 3/3). The design and both reviews are in the session record.
+- Change:
+  - **Fixtures** `lab/external/bwapp/` (`compose.yaml` project `fuzzlab-bwapp`;
+    `Dockerfile`: a pinned busybox stage re-verifies the host-fetched zip with
+    `sha256sum -c` before `unzip`, then `php:5.6-apache@digest` with `mysql`/`mysqli`
+    verified in the same step; `php-bwapp.ini` points PHP's `localhost` MySQL at a shared
+    unix socket; `apache-root.conf` redirects the origin root to `/bWAPP/portal.php`) and
+    `lab/external/juice-shop/compose.yaml` (`fuzzlab-juice-shop`, the official image by
+    digest, `NODE_ENV: unsafe`). bWAPP's db is `mysql:5.7@digest` with `network_mode:
+    none`, a TCP healthcheck inside its own namespace, and a tmpfs socket volume. Every
+    service drops all capabilities (bWAPP adds back the few Apache/MySQL need, settled
+    live) and sets `no-new-privileges`. Ports 127.0.0.1:8092 (8090 is forgecart's) and
+    127.0.0.1:3000.
+  - **Lifecycle** `lab/external/extctl.sh` and the `EXTERNAL_DISPATCH` block in
+    `lab/labctl.sh` (only `up|down|status|reset|bootstrap` + a registered lab).
+  - **Python** new LAB-owned package `fuzzlab/lab_fixtures/` (`external.py`, ~600 lines):
+    registry from the directory layout, the pins, `fetch_bwapp`, `config_problems`
+    (pre-flight), `exposure_problems`/`check_exposure` (fail closed), the bootstrap client
+    and `bootstrap_bwapp`/`bootstrap_juice_shop`, a CLI.
+  - **Ground truth** `lab/ground-truth-bwapp/` (58 cases: 55 positives, 3 negatives) and
+    `lab/ground-truth-juice-shop/` (13 cases: 10 positives, 3 negatives), with `[reach:]`
+    and `[prov:]` tags; `.gitignore` negations (PA-0038) and licence ignores.
+  - **Tests** `tests/test_external_labs_static.py`, `tests/test_external_labs_extctl.py`
+    (hermetic, stub PATH), `tests/test_external_labs_live.py` (gated).
+  - **Docs** FR-LAB-300..304, NFR-LAB-safety and NFR-LAB-cleanup lines,
+    `docs/ARCHITECTURE.md`, `lab/README.md` (also removed a stray trailing code fence that
+    would have swallowed the new section), `docs/ON_HOST_RUNBOOK.md` Part A3 and T10.6.
+- Changes from the agreed design, found while building (each verified live):
+  - bWAPP's `Location: login.php` is relative: the bootstrap resolves a redirect against
+    the request URL, not the origin root (caught by the first live bootstrap).
+  - Juice Shop's `whoami` reads the `token` cookie, not the bearer header.
+  - Origin-root redirect added to the bWAPP image: with an origin base URL (needed for
+    ground-truth points, BUG-0300) the session manager found no login form; a redirect to
+    the login page then failed login confirmation (it re-reads the base page); a redirect
+    to `portal.php` works (anonymous → login, logged in → 200).
+  - Reach tags were narrowed to what the live passes reach: the crawler never records
+    Juice Shop's `/redirect?to=` link (side-nav reveal queues the navigation, which then
+    answers 302 off-origin), so JUICE-0001 is `[reach: none]` (follow-up for the crawler);
+    the captured login is a `json` point, which the reflected-XSS rule does not select, so
+    JUICE-0013 is `gt` only; the ssrf negative on `/redirect` was dropped (no candidate
+    without a crawled example).
+  - The gt pass found two real reflections bWAPP does not list (its MySQL error prints the
+    input raw on `sqli_2`/`sqli_13`): added as BWAPP-0051/0052 after a manual check. The
+    crawl pass found four bWAPP bugs the first table had excluded, each verified by hand:
+    `iframei.php` ParamUrl/ParamWidth/ParamHeight (structurally reflected XSS in an
+    attribute; BWAPP-0053..0055) and `sqli_5.php` title (SOAP to the container's own
+    localhost works, time-based SQLi; BWAPP-0056).
+  - The Juice Shop crawl pass was narrowed to the login route (`--start /#/login
+    --max-depth 0 --no-reveal --submit-spa-forms login`, about a minute): a full reveal
+    crawl took ~22 min and reached no further in-class point (no `/profile`, no search
+    example, no `/redirect` link), so JUICE-0002/0004/0006/0008/0011/0012 lost the
+    design's `crawl` tag and are `gt` only.
+  - Not built from the design: the §5.2(d) `run_targets` call in the live test (parity
+    was shown by an executed `run_targets` run instead: the runbook's T10.6 snippet,
+    tp=2 fp=0 with the same keys as the CLI); and the §5.6 BUG-0301 compensating-control
+    assertion (vacuous under a login-route crawl; the exploratory full crawl's store had
+    no point or form for either path, and lane B computes the gates in
+    `tests/test_destructive_routes_external_labs.py`). Follow-up recorded for the schema:
+    an optional `entries` (sibling fields) on ground-truth points, which needs the points
+    schema and the locked `harness/auto.py`.
+- Excluded from the ground truth, with reasons (design §5.5):
+  - bWAPP `sqli_8-2.php` / `xxe-2.php`: SQL injection inside an `UPDATE users` (a probe can
+    rewrite every account); their XXE is not exploitable here (libxml2 2.9.4 substitutes
+    no entity, verified live).
+  - `sqli_9.php` (behind an image CAPTCHA); `ws_soap.php` (raw SOAP body, no point shape);
+    `xss_ajax_1-2.php` (XML response, class ambiguous); `htmli_current_url.php` (fires only
+    on unencoded raw URIs); `xss_php_self.php` via PATH_INFO (a path location);
+    `test.php`, the `login` attribute reflections of `xss_stored_3`/`csrf_3`/
+    `insecure_direct_object_ref_1`/`ldap_connect` and the smgmt cookie reflections
+    (state-changing or out of crawl reach); `ssii.php` (out-of-class bug name, structurally
+    stored XSS: follow-up).
+  - Command injection, file inclusion and PHP code injection (not in the labels enum;
+    their strategies' hyphenated `vuln_class` also breaks PA-0047(2), in the locked
+    `strategies.py`): follow-up. `iframei.php` and `sqli_5.php`, first excluded, were
+    re-included after the crawl pass confirmed them.
+  - Cross-check with the 2026-10-14 50-finding run: its notes (CC-FUZZ-0063..0065) list
+    only the new findings by page, and each in-class one maps to a positive here --
+    sqli_17 User-Agent SQLi (BWAPP-0017), xss_user_agent / xss_stored_4 User-Agent and
+    xss_referer Referer XSS (0035, 0041, 0034), sqli_13 SQLi and XSS (0004, 0052), the three
+    iframei parameters (0053-0055), sqli_11/sqli_14/sqli_12 (0011, 0012, 0016) and the
+    login-form SQLi on sqli_3/sqli_16/xss_login (0006, 0008, 0009); `commandi`,
+    `commandi_blind` and `rlfi` are the excluded classes above. The run's full finding
+    list was not recorded, so the rest of its 50 cannot be cross-checked.
+- Code review (reviewers A and B, round 1, both REVISE; fixed on this branch before merge):
+  - A1 (must): the network-mode checks were a denylist: podman `ns:/proc/1/ns/net`,
+    `slirp4netns:allow_host_loopback`, `pasta` and an external network named `host`
+    passed the pre-flight and the post-check. Now an allowlist in both, an external or
+    host-driver network is refused, and every container's network namespace is compared
+    with the host's (`procutil.netns_of`/`host_netns`).
+  - A2/A3: an engine error read as "nothing left" (`down` exit 0) or "not running"; the
+    exposed-stack teardown never checked it worked. Now leftovers on error, `status` exit
+    2, and a loud message if an exposed stack survives the teardown.
+  - A4/A5: the two inspect port sources are combined (not `setdefault`), and the check
+    fails closed on every engine/OS/timeout error. A6: the shell lint covers `create`,
+    `pod create`, attached `-p`, `-P`/`--publish-all`, quoted `host` and a variable engine.
+  - A7: the secret-leak test runs the CLI on success and failed-login paths with a
+    distinctive secret. A9: the bootstrap targets the port the running project publishes
+    (`published_port`). A8/A16: the live teardown is exception-safe, removes podman pods
+    and built images, and cookie-bearing checks ignore proxy env. A10-A18: project-name
+    validation, `podman-compose` stubbed, `is None` store selection, CLI errors mapped,
+    fetch closes responses, sweeps stale parts and fsyncs the directory, an empty prompt
+    never generates a password, Python runs from the repo root.
+  - B1 (must): BWAPP-0047 (sqli_17 User-Agent xss-reflected) was a source-disproven
+    negative: a User-Agent that breaks the INSERT prints the MySQL error raw (:102). Now a
+    positive; the same echo on sqli_1/sqli_6 `title` added (BWAPP-0057/0058). All three
+    verified live (`x' AND <b>zz</b>`).
+  - B2 (must): the live security-level checks were wrong by construction (the crawler
+    harmlessly GETs the "Set Security Level" link; POST bodies are not in the access log;
+    the session never adopts response cookies). Replaced: no probe of `security_level` /
+    `form_security_level` in either pass, plus the structural reason in a comment. The
+    second live run failed exactly there and passed everything before it.
+  - B3: checked candidates are `oracle_status == CHECKED` (the one vocabulary). B8: a
+    flagged negative fails in any pass. B7: a static test keeps each floor inside its
+    pass's reach tags (it caught BWAPP-0029, retagged `crawl,gt`). B10: every gt row
+    cites its gate's page:line. B12: in-process passes run under a deadline. B14: the
+    JUICE-0005 pin ties its OOB tokens to the `imageUrl` sends.
+  - B11: the crawler's Juice Shop `/redirect?to=` gap is recorded as a stated residual in
+    FR-LAB-303 and reported to the operator (crawler code is locked here).
+  - Bug protocol (review round 2, reviewer B N1): the round-1 code defects are recorded
+    as **BUG-0310** (A1-A5, the fail-open exposure checks; PA-0310) and **BUG-0311**
+    (B1-B3, a wrong negative and live checks on unestablished premises; PA-0311), each
+    with an ERROR_LOG line. The other round-1 findings were hardening or test gaps that
+    caused no wrong result (A6-A18, B7-B14). Follow-ups from the two PA-0002 sweeps:
+    `lab/labctl.sh`'s existing `_force_clean`/`down` path still trusts `podman ps` output
+    on an engine error (PA-0310(2)); the generated labs' negatives were not re-swept for
+    error-path echoes (PA-0311(1)); a repo-wide guard for hand-written oracle-status
+    strings (PA-0311(3)) would also cover locked files.
+- Code review round 2 (reviewer A AGREE with nits; reviewer B REVISE on N1-N4):
+  - B N1: the bug protocol above. B N2: lane B's BUG-0301 overstated what its tables
+    proved; corrected in that report (appended "Correction") and in CC-CORE-0301's
+    Risk field.
+  - B N3/N4: an "Effectiveness, final" section is to quote each count from its own run
+    (written at the end, from the clean-tree runs), and FR-LAB-304 now states the live
+    assertions as they are.
+  - Live run 3 (from e74fba8) failed only on round 1's B2 replacement. The crawl pass
+    probed the login form's `security_level` field through the isolated anonymous
+    client. Root cause and revision are in BUG-0311 ("Corrective action, revised"). The
+    fixture now writes a per-request log of the level cookie (new
+    `lab/external/bwapp/apache-level-log.conf`, `GlobalLog`, `apache2ctl -t` at build,
+    spiked first). The live test asserts that no request of either pass carried level
+    1 or 2, that the log saw at least 1000 requests, and that a level-1 control request
+    appears in it.
+- Code review round 3 (A REVISE, B REVISE):
+  - Both: the revised level check was still wrong (BUG-0311 "Corrective action, second
+    revision"). Its control could never pass (B M1), and its predicate was a denylist
+    resting on a false claim about PHP's loose comparison (A M1, B S1). The predicate is
+    now `external.bwapp_level_problems`: an allowlist (`0` or no cookie), every level line
+    parsed (A6, B S2), two level-1 controls before and after the passes, polled (A7,
+    B S3). It is unit-tested offline on a synthetic log and mutation-checked, and it
+    reads stdout only with `errors="replace"`. The check runs before the crawl floor.
+  - B M2 / A9: BUG-0311, the ERROR_LOG and the deliverables say "live verification
+    pending" until a live run at the final commit passes. PA-0311(2) now also asks for
+    an offline-tested predicate.
+  - A2 / B S4: a CHANGELOG bullet for rounds 2 and 3. B S5: each bug report names its
+    ERROR_LOG entry.
+  - A3: `project_ids` fails on an engine error, the bWAPP build must be visible by its
+    project label after `up`, and podman pods count as leftovers. A4: the shell lint
+    also recognises `"${ENGINE:-docker}"`, `"${eng[@]}"`, `docker compose run` and
+    `docker-compose run`; `$(which docker)` is a stated limit. A5: the `origin` limit's
+    wording. A8 / B nit: FR-LAB-302 says the identity's host is the binding's host.
+  - B nits: BWAPP-0048..0050's notes also cite their `die($link->error)` error paths
+    (regenerated; only those three notes changed). FR-LAB-304 adds Juice Shop's
+    `safetyMode`, the PA-0007 reachability GETs and the JUICE-0005 assertions. The three
+    sweep follow-ups are now `[ ] todo` deliverables.
+- Code review round 4 (A AGREE, B AGREE; nits only, folded in as comments): the shell
+  lint states its remaining compose-form limits; `bwapp_level_problems` states the
+  cookie-name case limit (Apache matches it without regard to case, PHP does not); the
+  podman pod leftover query is stated as unproven (podman paths are `[design]`).
+  Not taken: reading the level log after the gt pass as well (B nit 1). The level check
+  already runs before the crawl floor, and a gt-floor failure is reported on its own.
+  - A L1: lane B's PA-0300 pointer check accepted any URL with a path. It now requires
+    a directory (`http://h/<dir>/`), with an origin-level offender
+    (`test_an_origin_level_page_url_is_not_a_subpath_literal`); every current pointer
+    still passes. L2: `origin` parameters are a stated limit in that module's
+    docstring. L3: the 4-letter-stem limit is stated in the test and in PA-0301(1).
+    L4: the generated-labs test's docstring says what a failure means.
+  - A N1: `fetch_bwapp` holds an exclusive `flock` on the cache directory, so a
+    concurrent fetch neither sweeps the other's part file nor races its rename. N2:
+    `published_port` fails closed on every engine error `check_exposure` handles and
+    returns the binding's own host (`::1` stays `::1`); the bootstrap targets it. N3:
+    the shell lint matches clustered short flags (`-dp`, `-dP`) and any engine
+    variable. N4: the live teardown counts built images as leftovers; an overrun
+    in-process pass is a stated limit (its thread cannot be stopped; its later sends
+    hit the stopped loopback lab). N5: the extctl header says how a relative
+    `FUZZLAB_PYTHON` resolves.
+- Impact: LAB, plus a read-only use of CORE (`core.net`, `core.http` headers,
+  `core.credentials`, the new `procutil.host_listen_sockets`, CC-CORE-0300). Existing
+  `labctl.sh` subcommands unchanged (tested). Consumers: `harness.multitarget`,
+  `scripts/on_host_full_run.sh` (`JUICE_GROUND_TRUTH`), the web UI later (follow-up: it
+  must not be edited here). Two existing glob tests now also load the new dirs
+  (`tests/test_oracle.py`, `tests/test_forms_phase2.py`) and pass.
+- Risk: medium.
+  - Safety: new loopback publishes, guarded by the lint, the pre-flight and a fail-closed
+    post-check; container code execution (bWAPP's command/code injection; Juice Shop's
+    unsafe-mode challenges) contained by the container, dropped capabilities and
+    `no-new-privileges`; container egress not blocked (NFR-LAB-safety `Not yet enforced`).
+  - Unverified: the podman / podman-compose / SELinux / netavark / pasta paths (only
+    docker here; runbook `[design]` for podman).
+  - Licence: bWAPP never committed (guard test, ignores); the download depends on
+    SourceForge; a changed or missing upstream fails loudly.
+  - Labels depend on Juice Shop's `safetyMode` and bWAPP's level cookie (pinned and checked).
+  - Known locked-file defects deferred to their lock owner: BUG-0300 (CC-FUZZ-0300) and
+    BUG-0301 (CC-CORE-0301), pinned by strict xfails.
+  - JUICE-0005 (SSRF) is not live-confirmable under the bridge network (pinned in the live
+    test as a documented miss); host networking was refused by this session's safety
+    classifier and is an operator decision.
+- Deliverables:
+  - [x] fixtures (compose, Dockerfile, ini, Apache conf) — done
+  - [x] labctl dispatch + extctl.sh — done
+  - [x] fuzzlab/lab_fixtures/external.py — done
+  - [x] ground truth (two dirs, .gitignore negations) — done
+  - [x] static + hermetic tests, mutation checks — done
+  - [x] live passes executed (exploratory, docker); gated live test file written — done
+  - [x] the gated live file passes under the flag — done. Live run 5 at 859bcfd passed
+    4/4 (1476 s). Live run 3 failed on the first level check and live run 4 on the
+    broken control. The final commit differs from 859bcfd only in comments and docs
+    (round-4 nits).
+  - [x] CHANGELOG, FR-LAB-300..304, NFR lines, ARCHITECTURE, lab/README, runbook — done
+  - [x] PA-0114 Juice table and BUG-0300/0301 protocol — done (lane B: CC-FUZZ-0300,
+    CC-CORE-0301, CC-CRAWL-0300; merged on this branch)
+  - [ ] tell the lock-owning session about lane B's six strict-xfail markers before this
+    branch merges (MULTI_AGENT §6) — todo (relayed through the session report to the
+    integrator; this session has no channel to the lock owner)
+  - [ ] follow-up: `lab/labctl.sh`'s `_force_clean`/`down` trusts `podman ps` output on
+    an engine error (PA-0310(2), BUG-0310 sweep) — todo (outside this change's files)
+  - [ ] follow-up: re-sweep the generated labs' negatives for error-path echoes
+    (PA-0311(1), BUG-0311 sweep) — todo
+  - [ ] follow-up: a repo-wide guard for hand-written oracle-status strings
+    (PA-0311(3)); it would also cover locked files — todo
+- Effectiveness (assessed 2026-10-15): partially (interim, 2026-10-15).
+  - Live, docker, this session: both fixtures come up through `./labctl.sh up <lab>
+    --authorized` (pre-flight, build, exposure check, bootstrap), `status` exits 0, and the
+    bootstrap is idempotent (re-run: "already exists", keyring identity reused).
+  - Juice Shop gt pass (`auto --points ground-truth --identity juice-user --browser
+    --oob`): tp=4 fp=0 (JUICE-0002/0003/0004/0006), every negative a true negative; crawl
+    pass (login-route crawl, `--points crawl`): JUICE-0003, no flagged negative;
+    `run_targets` (anonymous, no browser): tp=2 fp=0, the same keys as the CLI.
+  - bWAPP gt pass (origin base): 18 matched, 2 extra detections that were real, unlisted
+    reflections (now BWAPP-0051/0052), no flagged negative.
+  - Tests: `tests/test_external_labs_static.py` 109 passed, `tests/test_external_labs_extctl.py`
+    45 passed, `tests/test_external_labs_live.py` 4 skipped without the flag (each run as
+    its own invocation, PA-0038(b)); the glob tests that now also load the new dirs
+    (`tests/test_oracle.py`, `tests/test_forms_phase2.py`) pass.
+  - Mutation check over the new mechanisms: 29/29 killed (it found two test gaps first:
+    a regex that could not match `BWAPP_SHA256`, and an untested level-0 check; both fixed).
+  - Pending at this entry's first writing: the bWAPP crawl-pass floor, the live test file
+    under the flag, the code review and the clean-tree suite run; see "Effectiveness,
+    final" in this entry.
+- Effectiveness, final (assessed 2026-10-15): **effective**, with the stated residuals.
+  Code was last changed in 64d69a2; this entry's own commit changes only docs. Each
+  count below is from its own pytest run (PA-0038(b)), on a clean detached worktree at
+  64d69a2 unless noted, under docker in this session's container:
+  - `tests/test_external_labs_static.py` 171 passed; `tests/test_external_labs_extctl.py`
+    50 passed; `tests/test_base_url_subpath_registry.py` 13 passed, 2 xfailed (strict,
+    BUG-0300); `tests/test_destructive_routes_external_labs.py` 83 passed, 4 xfailed
+    (strict, BUG-0301); `tests/test_procutil_guard.py` 30 passed;
+    `tests/test_lab_labctl_profile_parsing.py` 5 passed; `tests/test_external_labs_live.py`
+    4 skipped without the flag.
+  - Live, with `FUZZLAB_LIVE_EXTERNAL_LABS=1 FUZZLAB_REQUIRE_BROWSER=1` (live run 5, a
+    clean detached worktree at 859bcfd, which differs from 64d69a2 only in comments):
+    4 passed in 1476 s. That covers Juice Shop scoring, bWAPP restart plus a killed DB,
+    the wrong-zip-hash build failure, and bWAPP scoring: both floors, no flagged
+    negative, every tagged row checked, and the level log allowlist with both controls.
+    Live runs 1-4 failed and were root-caused (CC entries above; BUG-0311).
+  - Every test file importing a changed module (`fuzzlab/procutil.py`,
+    `fuzzlab/lab_fixtures/`; 22 files from `git diff --name-only cdde39f..64d69a2 --
+    fuzzlab` and grep, slow tests included): 524 passed, 4 skipped (the live file,
+    unflagged).
+  - Full suite `-m "not slow"` with `FUZZLAB_REQUIRE_LINT=1 FUZZLAB_REQUIRE_BROWSER=1`:
+    5691 passed, 15 skipped, 255 deselected, 13 xfailed. A first run failed 14 labgen
+    `--check` tests because the container had no `gitleaks` (identical at the base
+    commit cdde39f; ERROR_LOG, Environment). They passed once gitleaks was installed,
+    and the run above is the rerun. `tests/test_lint.py` with `FUZZLAB_REQUIRE_LINT=1`:
+    1 passed. The glob ground-truth tests (`tests/test_oracle.py`,
+    `tests/test_forms_phase2.py`) are inside the full run.
+  - Mutation check over every new mechanism: 55 killed, 0 survived, and 1 not run as a
+    kill. That one is the static check that each live floor stays inside its pass's
+    reach tags. It runs only on the real floors, which all satisfy it, so removing the
+    subset assertion passes on today's data (no synthetic offender). When first written
+    it caught BWAPP-0029.
+  - Code review: reviewers A and B, four rounds. Both AGREE at round 4 (nits folded in
+    as comments).
+  - Residuals (stated, not fixed here): the podman / podman-compose paths are
+    `[design]` only. JUICE-0005 (SSRF) cannot be confirmed under the bridge network.
+    Container egress is not blocked (NFR-LAB-safety `Not yet enforced`). Lane B's six
+    strict xfails await the lock owner. The `todo` follow-ups are in Deliverables.
+
 ### CC-LAB-0255 — Every lab server the harnesses and tests launch binds loopback, checked on its real sockets (BUG-0130) (2026-10-14)
 - Change:
   - **Harnesses:** `live_boot_spring_boot.py` adds `--server.address=127.0.0.1` (Spring

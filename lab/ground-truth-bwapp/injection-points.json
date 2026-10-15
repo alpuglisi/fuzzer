@@ -1,0 +1,328 @@
+{
+  "version": 1,
+  "target": "bwapp_v2_2",
+  "points": [
+    {
+      "url": "/bWAPP/sqli_1.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_2.php",
+      "method": "GET",
+      "param": "movie",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_6.php",
+      "method": "POST",
+      "param": "title",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_13.php",
+      "method": "POST",
+      "param": "movie",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_10-2.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/bWAPP/sqli_3.php",
+      "method": "POST",
+      "param": "login",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_16.php",
+      "method": "POST",
+      "param": "login",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_login.php",
+      "method": "POST",
+      "param": "login",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_11.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_14.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_4.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_15.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_7.php",
+      "method": "POST",
+      "param": "entry",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_12.php",
+      "method": "POST",
+      "param": "entry",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_17.php",
+      "method": "GET",
+      "param": "User-Agent",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_get.php",
+      "method": "GET",
+      "param": "firstname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_get.php",
+      "method": "GET",
+      "param": "lastname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/htmli_get.php",
+      "method": "GET",
+      "param": "firstname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/htmli_get.php",
+      "method": "GET",
+      "param": "lastname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_post.php",
+      "method": "POST",
+      "param": "firstname",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_post.php",
+      "method": "POST",
+      "param": "lastname",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/htmli_post.php",
+      "method": "POST",
+      "param": "firstname",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/htmli_post.php",
+      "method": "POST",
+      "param": "lastname",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_php_self.php",
+      "method": "GET",
+      "param": "firstname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_php_self.php",
+      "method": "GET",
+      "param": "lastname",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_json.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_ajax_2-2.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_eval.php",
+      "method": "GET",
+      "param": "date",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_href-2.php",
+      "method": "GET",
+      "param": "name",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/hpp-2.php",
+      "method": "GET",
+      "param": "name",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_back_button.php",
+      "method": "GET",
+      "param": "Referer",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_referer.php",
+      "method": "GET",
+      "param": "Referer",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_user_agent.php",
+      "method": "GET",
+      "param": "User-Agent",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_custom_header.php",
+      "method": "GET",
+      "param": "bWAPP",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_stored_1.php",
+      "method": "POST",
+      "param": "entry",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/htmli_stored.php",
+      "method": "POST",
+      "param": "entry",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/xss_stored_4.php",
+      "method": "GET",
+      "param": "User-Agent",
+      "location": "header",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/unvalidated_redir_fwd_1.php",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/unvalidated_redir_fwd_2.php",
+      "method": "GET",
+      "param": "ReturnUrl",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/http_response_splitting.php",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/directory_traversal_1.php",
+      "method": "GET",
+      "param": "page",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/directory_traversal_2.php",
+      "method": "GET",
+      "param": "directory",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamUrl",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamWidth",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamHeight",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_5.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
+    }
+  ]
+}

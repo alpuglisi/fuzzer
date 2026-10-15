@@ -314,6 +314,53 @@ changed, and the reason. Reference the commit hash where useful.
   anonymous, counted (`session_out_of_origin`) and stamped on verdicts. CC-SESS-0023,
   CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023; BUG-0134, PA-0134.
 
+## 2026-10-15 (bWAPP and OWASP Juice Shop become permanent loopback lab fixtures; CC-LAB-0300)
+- **Numbering:** this session uses the reserved ranges CC-<CODE>-0300..0349,
+  BUG/PA-0300..0349 and FR-<CODE>-300+ (pre-assigned for concurrent sessions, PA-0031), so
+  its numbers jump past the current heads.
+- **Why:** the two external apps the project had been testing against by hand needed to be
+  reproducible, loopback-only fixtures with ground truth and tests.
+- **What:** `lab/external/{bwapp,juice-shop}` compose projects, pinned by digest and (for
+  bWAPP, CC BY-NC-ND, never committed) a sha256-verified build-time download; `labctl.sh
+  {up|down|status|reset|bootstrap} <lab>` through `lab/external/extctl.sh` with a config
+  pre-flight and a fail-closed exposure check; an idempotent, `--authorized` bootstrap that
+  puts the lab identity in the keyring after a verified login; ground truth
+  `lab/ground-truth-bwapp` (58 cases) and `lab/ground-truth-juice-shop` (13) with per-case
+  reach tags; static, hermetic and gated live tests (CC-LAB-0300, CC-LAB-0301,
+  CC-CORE-0300, CC-ML-0300; FR-LAB-300..304, FR-CORE-300). Juice Shop runs with its own
+  `NODE_ENV=unsafe`; its SSRF row is a documented miss under the bridge network.
+- **Code review (reviewers A and B, round 1):** the network-mode checks became an
+  allowlist (podman `ns:`/slirp/pasta modes and external host networks were let through)
+  with a host-namespace comparison; engine errors no longer read as "nothing left"; the
+  exposure check combines both inspect port sources and fails closed on every engine
+  error; the bootstrap targets the port the running project publishes; a source-disproven
+  negative (bWAPP's error echo) became a positive; the live test's level checks and status
+  filter were wrong and are replaced. Bug protocol: BUG-0310/PA-0310 (safety checks over
+  an engine's state are allowlists, and "no answer" is a failure) and BUG-0311/PA-0311
+  (negatives proven on every output path; live checks shown able to fail).
+- **Code review (rounds 2 and 3):**
+  - The bWAPP fixture logs each request's `security_level` cookie. The live test checks
+    that log with an allowlist predicate (`bwapp_level_problems`, unit-tested offline)
+    and level-1 controls before and after the passes. Both earlier level checks were
+    wrong, live run 3 failed on the first, and the record is BUG-0311's two revisions.
+  - `fetch_bwapp` holds a lock on its cache. `published_port` fails closed and keeps the
+    binding's host. The shell lint covers more forms.
+  - Lane B's PA-0300 pointer check requires a directory-form sub-path URL (CC-FUZZ-0301),
+    and PA-0301's short-stem limit is stated (CC-CORE-0302).
+
+## 2026-10-15 (Lane B: BUG-0300 and BUG-0301 recorded and pinned; PA-0300 base-URL registry, PA-0301 destructive-spelling sweep)
+- **Why:** adopting bWAPP (served under `/bWAPP/`) and Juice Shop as permanent fixtures
+  surfaced two defects in files locked by another session: ground-truth points double an
+  operator sub-path (BUG-0300, `harness/auto.py`), and the destructive rule misses Juice
+  Shop's GET password change and `/dataerasure` (BUG-0301, `core/urls.py`).
+- **What:** both bugs are documented in full and pinned by strict xfails; their
+  corrective actions are deferred to the lock owner (CC-FUZZ-0300, CC-CORE-0301).
+  PA-0300's registry test finds every function that takes an operator base URL and
+  requires its sub-path test or a named bug. PA-0301's tables judge every Juice Shop and
+  bWAPP destructive route by its real gate, and a compound-spelling scan runs over every
+  lab's routes. Spec lines are added for NFR-CRAWL-safe (CC-CRAWL-0300), NFR-FUZZ-safe and
+  FR-FUZZ-41.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),
