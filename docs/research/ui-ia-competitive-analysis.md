@@ -33,8 +33,12 @@ The ten findings that should shape the redesign:
    - ZAP asks once whether to persist a session, then saves every change automatically
      [src](https://www.zaproxy.org/docs/desktop/ui/dialogs/persistsession/)
      [src](https://www.zaproxy.org/docs/desktop/ui/tlmenu/file).
-   - fuzzlab's SQLite store already holds everything a project file needs (§10.1). What is
-     missing is the lifecycle: new, open, recent, temporary, snapshot.
+   - fuzzlab's SQLite store already holds most of what a project file needs, including a
+     key/value `meta` table (§10.1). What is missing is project metadata and the lifecycle:
+     new, open, recent, temporary, snapshot.
+   - Decision D21 already settled the layout: per-project SQLite files plus a small global
+     config database (`docs/DECISIONS_AND_ROADMAP.md`). No global config DB exists in code
+     yet.
 2. **The site tree is host → path → leaf, and a leaf is identified by method plus parameter
    *names*.**
    - ZAP names leaves `METHOD:segment(urlParams)(postParams)`
@@ -42,16 +46,17 @@ The ten findings that should shape the redesign:
    - Burp separates GET and PUT to the same path, greys out discovered-but-unrequested
      items, and puts a dot on each branch showing the worst issue beneath it
      [src](https://portswigger.net/burp/documentation/desktop/tools/target/site-map).
-   - Neither Nessus nor Greenbone has a URL tree at all
-     [src](https://forum.greenbone.net/t/can-greenbone-scan-a-specific-url/14494). A good
-     URL tree is therefore a real differentiator for fuzzlab.
+   - Greenbone has no URL tree at all
+     [src](https://forum.greenbone.net/t/can-greenbone-scan-a-specific-url/14494), and no
+     Nessus documentation we found describes one **(inference)**. A good URL tree is
+     therefore a likely differentiator for fuzzlab **(inference)**.
 3. **Hash routes are first-class in at least one tool.**
    - ZAP's ordinary Sites tree cannot show `#fragments`, so ZAP added a separate
      **Client Map** to show them
      [src](https://zaproxy.org/docs/desktop/addons/client-side-integration).
    - Burp accepts `#` start URLs only with its browser-based crawler
      [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/setting-pro-scope).
-   - fuzzlab already stores SPA routes as `/#/search` (`fuzzlab/core/urls.py:23`), so it can
+   - fuzzlab already stores SPA routes as `/#/search` (`fuzzlab/core/urls.py:24`), so it can
      show them inline in one tree.
 4. **Configuration lives apart from operation, and is reused by name.**
    - Nessus splits *Policies* (tuned and reusable) from *Scans* (policy plus targets plus
@@ -62,19 +67,21 @@ The ten findings that should shape the redesign:
      [src](https://portswigger.net/burp/documentation/desktop/scanning/built-in-configurations).
    - Greenbone has a separate *Configuration* menu
      [src](https://docs.greenbone.net/GSM-Manual/gos-22.04/en/scanning.html).
-   - NinjaOne edits policies only under Administration, with
-     **Inherited / Overridden / Revert** badges
+   - NinjaOne creates and manages policies under Administration (device overrides are made
+     on the device), with **Inherited / Overridden / Revert** badges
      [src](https://www.ninjaone.com/docs/policies-and-conditions/policies/policy-inheritance/).
    - fuzzlab instead renders every argparse flag as a form field (§10.2, P2 and P3).
-5. **"URL → results" takes one to three actions in every scanner.**
+5. **"URL → results" takes a handful of actions in every scanner, and one field in the
+   best.**
    - Greenbone's Task Wizard: one field and Start
      [src](https://docs.greenbone.net/GSM-Manual/gos-22.04/en/scanning.html#using-the-task-wizard).
    - ZAP's Quick Start: URL and Attack
      [src](https://www.zaproxy.org/docs/desktop/addons/quick-start/).
-   - Burp: New scan, then URL, then preset, then Scan
+   - Burp: New scan, Crawl and audit, URL, preset, Scan
      [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/launching-scans/full-crawl-and-audit).
-   - fuzzlab: pick one of five tools and fill a 33-field form, or press a button that scans
-     the target from the config file, which the UI cannot change (P1).
+   - fuzzlab: run `crawl`, then fill the 33-field `auto` form. `auto` imports that crawl and,
+     without ground truth, needs `--categories`. The panel's "Run full pipeline" button is
+     an unwired stub in the shipped `fuzzlab web` (P1).
 6. **Test or benchmark runs are kept out of the real results.**
    - Burp's **"Run isolated scan"** keeps a scan out of the site map and All issues, so you
      can test configurations without polluting live results
@@ -111,8 +118,8 @@ The ten findings that should shape the redesign:
      the incidents you must act on
      [src](https://support.huntress.io/hc/en-us/articles/24001293720083-Huntress-Command-Center-Your-New-Homepage)
      (snippet).
-   - fuzzlab's pipeline already has every stage of that funnel in its store
-     (endpoint → parameter → candidate → attempt → finding).
+   - fuzzlab's store has most stages of that funnel: endpoint → parameter → candidate
+     (with `oracle_status`) → finding. `auto` runs write no `attempt` rows (P10).
 10. **What users complain about across products:**
     - project files grow huge or open slowly (Burp, ZAP)
       [src](https://forum.portswigger.net/thread/huge-project-files-when-scanning-9d968752)
@@ -145,10 +152,13 @@ The ten findings that should shape the redesign:
 - **Opening a project.** You can choose "Pause Automated Tasks" and "Trust this project
   file". An untrusted file has potentially harmful settings stripped
   [src](https://portswigger.net/burp/documentation/desktop/projects).
-- **No conversion.** A temporary project cannot later become a disk project
-  [src](https://portswigger.net/blog/introducing-burp-projects).
-- **Edition split.** Community gets temporary projects only; saving is a Professional
-  feature [src](https://portswigger.net/burp/communitydownload).
+- **Conversion.** The 2016 launch post said a temporary project could not become a disk
+  project [src](https://portswigger.net/blog/introducing-burp-projects). Current docs say
+  Project → **Save copy** converts it
+  [src](https://portswigger.net/burp/documentation/desktop/troubleshooting/performance).
+- **Edition split.** "Project files (save your work)" is listed as a Professional feature,
+  so Community works in temporary projects
+  [src](https://portswigger.net/burp/communitydownload).
 - **Scans live inside the project.** Each scan is a Dashboard *task*, and tasks are paused
   by default when the project is reopened
   [src](https://portswigger.net/burp/documentation/desktop/dashboard).
@@ -195,19 +205,18 @@ The ten findings that should shape the redesign:
   - the site-map Issues pane, for the selected branch.
 
   Source: [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/results/issues).
-- **Issue table.** Columns are time, task, type, host, path, insertion point, severity,
+- **Issue table.** Columns are time, source, type, host, path, insertion point, severity,
   confidence and comment. You can filter by severity, confidence and check type (same src).
 - **Evidence tabs:**
   - Advisory: description and remediation;
   - Request, with the payload highlighted;
   - Response, with the reflection highlighted;
-  - **Path to issue**: the scanner actions that led to the request;
-  - Collaborator interactions.
+  - **Path to issue**: the scanner actions that led to the request.
 
   Same src.
 - **Triage in Pro has no status field.** You set severity (including "False positive") and
-  confidence, add comments and highlights, and can restore the original value. Deleting an
-  issue is discouraged because a rescan reports it again (same src).
+  confidence, add comments and highlights, and can restore the original value. Issues can
+  also be deleted from the table (same src).
 - **De-duplication.** An issue is recorded only the first time it is found (same src). How
   Pro matches issues across separate scans is not documented.
 - **DAST/Enterprise has a full lifecycle.**
@@ -232,7 +241,7 @@ The ten findings that should shape the redesign:
   - crawl: by time limit or by strategy;
   - audit: passive, light active, "critical issues only", "minimize false positives".
 
-  Source: [src](https://portswigger.net/burp/documentation/scanning/built-in-configurations).
+  Source: [src](https://portswigger.net/burp/documentation/desktop/scanning/built-in-configurations).
 - **Resource pools.** A pool throttles concurrent requests and rate per task, and several
   tasks can share one
   [src](https://portswigger.net/blog/burp-2-0-how-do-i-throttle-requests).
@@ -319,8 +328,8 @@ The ten findings that should shape the redesign:
     sessions open very slowly or never finish
     [src](https://github.com/zaproxy/zaproxy/issues/1364).
   - Scan progress is not saved [src](https://github.com/zaproxy/zaproxy/issues/4270).
-  - Only one session can be open at a time
-    [src](https://github.com/zaproxy/zaproxy/issues/3772).
+  - Only one session can be open at a time. This is implied by a still-open feature
+    request for multiple sessions [src](https://github.com/zaproxy/zaproxy/issues/3772).
 
 ### 3.2 Target and site organization
 - **Node naming.** Top-level nodes are protocol + host + port. Middle nodes are path
@@ -364,8 +373,9 @@ The ten findings that should shape the redesign:
   - Context alert filters travel with a context export
     [src](https://www.zaproxy.org/docs/desktop/addons/alert-filters/contextalertfilter/).
 - **De-duplication (2.17).**
-  - Alerts are de-duplicated by Sites-tree node, site-wide issues are tagged `SYSTEMIC`,
-    and a `nodeName` field is recommended for comparing alerts across scans.
+  - 2.17 de-duplicates alerts by Sites-tree node and flags site-wide issues as Systemic.
+  - The accompanying blog recommends a `nodeName` field for comparing alerts across
+    scans.
   - A new **Insights** tab holds information that is not a vulnerability.
   - Sources: [src](https://www.zaproxy.org/blog/2025-09-30-alert-de-duplication/)
     [src](https://www.zaproxy.org/docs/desktop/releases/2.17.0/).
@@ -493,6 +503,8 @@ The ten findings that should shape the redesign:
   [src](https://docs.tenable.com/nessus/10_12/Content/manage-vulnerabilities.htm).
 - **Severity.** Info to Critical, from CVSS bands, with the CVSS version settable per scan
   [src](https://docs.tenable.com/nessus/Content/ConfigureIndividualScanSeverity.htm).
+  Sorting by VPR needs grouping turned off
+  [src](https://docs.tenable.com/nessus/Content/ScanResults.htm).
 - **Filters.** About 60 attributes, combined with All/Any, and saveable
   [src](https://docs.tenable.com/nessus/Content/SearchAndFilterResults.htm).
 - **Triage at three levels:**
@@ -699,8 +711,9 @@ analogy.
   - **Signals** start investigations.
   - An AI layer **bundles related signals** on the same entity into one investigation
     [src](https://www.huntress.com/blog/ai-signal-triage).
-  - **Only confirmed malicious activity becomes an Incident Report.** Benign
-    investigations are still visible, with a timeline
+  - **Confirmed malicious activity becomes an Incident Report.** That *only* confirmed
+    activity does is our reading **(inference)**. Benign investigations are still visible,
+    with a timeline
     [src](https://www.huntress.com/blog/security-incident-investigations-partner-view).
 - **Plain-language severity definitions.** Low, High and Critical are each defined by the
   action they require
@@ -716,6 +729,8 @@ analogy.
 - **Remediation workflow.**
   - Steps are typed Active, Assisted (needs approval) or Manual, and each is tracked as
     Success, In Progress or Failure (Incident Report Overview, snippet).
+  - Report statuses are Active and Resolved
+    [src](https://www.huntress.com/blog/assisted-remediation-in-action).
   - **Resolve is blocked** while unreviewed Assisted or Manual steps remain
     [src](https://support.huntress.io/hc/en-us/articles/21925225772563-Bulk-Resolve-Incident-Reports)
     (snippet).
@@ -802,6 +817,13 @@ analogy.
 - **Vulnerabilities at three levels.** A Vulnerabilities tab exists at system, organization
   and device level, with one row per CVE and links from CVE detail to patch status
   [src](https://www.ninjaone.com/docs/integrations/vulnerability-management/find-cve-data/).
+- **CVE detail.** Shows risk information, the CVSS score, the impacted devices and patch
+  status (same src).
+- **Activity and tickets.** A device's Activities feed records script runs and actions
+  [src](https://www.ninjaone.com/docs/endpoint-management/manage-devices-and-run-actions/).
+  Tickets have six system statuses (New, Open, Waiting, Paused, Resolved, Closed)
+  [src](https://www.ninjaone.com/docs/ticketing/ninjaone-ticketing-getting-started/configure-custom-statuses-and-relationships/)
+  (snippet).
 - **Re-imports.** Re-importing scan data treats a CVE missing from the new scan as
   remediated
   [src](https://www.ninjaone.com/docs/integrations/vulnerability-management/importing-vulnerability-scan-data/).
@@ -814,8 +836,10 @@ analogy.
   [src](https://www.ninjaone.com/docs/new-to-ninjaone/dashboards-navigation/patch-management-dashboard/).
 
 ### 7.5 Operation vs configuration (NinjaOne's strongest pattern)
-- **Policies are edited only under Administration → Policies**
+- **Policies are created and managed under Administration → Policies**
   [src](https://www.ninjaone.com/docs/policies-and-conditions/ninjaone-policies/).
+  Per-device overrides are made from the device's own policy settings and counted back on
+  the policy list (below).
 - **Inheritance with visible state.**
   - A child policy inherits from a parent.
   - Inherited settings carry an **Inherited** tag, and edited ones an **Overridden** tag.
@@ -888,6 +912,9 @@ analogy.
   - Statuses: New (under 7 days), To Do, Task Open, PR Open.
   - Spot-checked §17. Source:
     [src](https://help.aikido.dev/getting-started/core-functionalities/main-feed.md).
+- **Auto-solved.** An issue moves to Solved when a later scan no longer detects it
+  [src](https://help.aikido.dev/docs/docs-ja/hajimeni/core-functionalities/why-was-an-issue-marked-as-solved.md)
+  (snippet).
 - **Severity score, 0–100.** Adjusted for exploitability and context; clicking the score
   shows its **breakdown**
   [src](https://help.aikido.dev/getting-started/core-functionalities/how-is-severity-score-calculated.md).
@@ -959,16 +986,16 @@ analogy.
 
 | Dimension | Burp | ZAP | Nessus | Greenbone | Huntress | NinjaOne | Aikido |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Project/session file | Yes. Auto-saving; temporary or disk; recent list; Community has temporary only | Yes. Persist prompt, then auto-save; snapshots; recent list | No. A saved scan plus run history; .nessus / .db export | No. Task → reports; container tasks for imports | No. Organization is the container | No. Organization plus Favorites/Recents | No. Workspace plus continuous monitoring |
+| Project/session file | Yes. Auto-saving; temporary or disk (Save copy converts); recent list; saving is Pro-only | Yes. Persist prompt, then auto-save; snapshots; recent list | No. A saved scan plus run history; .nessus / .db export | No. Task → reports; container tasks for imports | No. Organization is the container | No. Organization plus Favorites/Recents | No. Connected resources plus continuous monitoring |
 | URL/site tree | Host → dir → file → request; grey = unvisited; worst-severity dot per branch | Host → path → `METHOD:leaf(params)`; structural / data-driven nodes; separate Client Map for `#` | None for web apps (sitemap CSV) | None (host → port → application) | n/a | Org → location → device (drill-down) | Flat per-domain lists (subdomains, routes) |
 | Hash/SPA routes | `#` start URLs with browser crawler | Client Map only | n/a | n/a | n/a | n/a | OpenAPI spec, no crawl |
 | Severity × confidence | High–Info × Certain/Firm/Tentative | High–Info × FP/Low/Med/High/Confirmed | Critical–Info (CVSS); VPR | CVSS bands × **QoD 0–100, default ≥70** | Low/High/Critical with plain definitions | CVSS | 0–100 score with breakdown |
 | Cross-run de-dup / diff | First-find only (Pro); DAST: New/Present/Regressed/Fixed | 2.17 de-dup by node name | Diff (new only, vs a baseline) | **Delta: New/Gone/Same/Changed** | Signals bundled into investigations | Re-import marks missing CVEs remediated | Issue groups; auto-Solved when gone |
-| Triage status | Pro: set severity/FP; DAST: FP, Accepted, Verified, Fixed (persistent) | Confidence = FP/Confirmed; alert filters | Modify / Snooze / Plugin rules | Overrides (scoped), notes, tickets | Active/Resolved; resolve blocked by pending steps | Ticket statuses | Ignore-scope picker, snooze, severity with reason |
+| Triage status | Pro: set severity/FP; DAST: FP, Accepted, Verified, Fixed (persistent) | Confidence = FP/Confirmed; alert filters | Modify / Snooze / Plugin rules | Overrides (scoped), notes, tickets (appliance) | Active/Resolved; resolve blocked by pending steps | Ticket statuses | Ignore-scope picker, snooze, severity with reason |
 | Evidence | Advisory; request/response highlighted; path to issue | Request/response with evidence highlighted | Plugin output | Detection result + method + check ID | Narrative + timeline | Activities feed | Request/response; retest |
 | URL → results | New scan → URL → preset → Scan | Quick Start: URL → Attack | Gallery → template → name + target → Launch | **Wizard: 1 field → Start** | Deploy agent | Play → Run Automation | Add Domain → type → URL |
 | Advanced hidden by | Presets; optional panels | "Show Advanced Options" | Template subset | Wizard vs full dialog | n/a (SOC tunes) | Policy inheritance | "Advanced" expander |
-| Operation vs config | Configuration library; user vs project settings | Context / policy / options; modes; automation plans | **Policies (locked) vs scans** | **Scans menu vs Configuration menu** | Settings; SOC tuning | **Administration only; inheritance + overrides** | Settings → Triage / SLA; ignore rules |
+| Operation vs config | Configuration library; user vs project settings | Context / policy / options; modes; automation plans | **Policies (locked) vs scans** | **Scans menu vs Configuration menu** | Settings; SOC tuning | **Policies in Administration; inheritance; device overrides counted** | Settings → Triage / SLA; ignore rules |
 | Test / benchmark lane | **Isolated scan** | — | Live Results (marked) | — | **Incident Simulation (stamped)** | — | — |
 | Reporting | HTML/XML; by type/severity/URL | Template × theme × risk/confidence filter; SARIF | PDF/HTML/CSV from current filter | Many formats; export uses active filter | Scheduled; executive one-pager | PDF/CSV; scheduled | CSV/PDF; audit report |
 | Top user complaint | File bloat; freezes; learning curve | Clutter; slow sessions | Dated UI; reporting | Outdated UI; confusing overrides | Thin reporting | Thin reporting; no folders | Auto-triage hides real issues |
@@ -988,7 +1015,7 @@ are to that tree.
 | Group | Section | Route | What it shows today |
 | --- | --- | --- | --- |
 | Workbench | Overview | `/` | KPI tiles: findings by derived severity, runs, last run, **detection quality F1/MCC**, **requests per finding**. Recent runs. Findings-by-severity chart (`templates/sections/overview.html`) |
-| Workbench | Launcher | `/launcher` | Master/detail list of 11 activities. Each detail is a form **generated from the tool's argparse parser** (`web/commandspec.py`), with Dry-run, Run, Stop and live output |
+| Workbench | Launcher | `/launcher` | Master/detail list of 12 activities. Each detail is a form **generated from the tool's argparse parser** (`web/commandspec.py`), with Dry-run, Run, Stop and live output |
 | Workbench | Lab | `/lab` | On/off switches for the lab's containers |
 | Workbench | Proxy | `/proxy` | History, Intercept, Repeater, Scope and Match-Replace |
 | Workbench | Findings | `/findings` | Facets (severity, vuln class, method, mechanism, endpoint), quick filter, chips, saved views, table. Detail page at `/findings/{id}` |
@@ -997,7 +1024,8 @@ are to that tree.
 | Analysis | Diagnostics | `/diagnostics` | Cross-run trends, series, bandit arms, model registry, raw store explorer |
 
 The top bar shows the target and scope **from the config file**, plus the authorized state
-and the proxy state (`templates/base.html`).
+and the proxy state (`templates/base.html`). The Runs table's "target" column actually
+shows `run.config_hash` (`web/results.py:101`).
 
 **CLI** (`fuzzlab/cli.py`): 15 commands in one flat list: `web`, `session`, `crawl`,
 `audit`, `fuzz`, `auto`, `greybox-run`, `proxy`, `mutate-run`, `report`, `reveal-holdout`,
@@ -1012,13 +1040,14 @@ Launcher form sizes, counted with `commandspec.all_specs()` at this commit:
 | `mutate-run` | 15 |
 | `crawl`, `fuzz`, `proxy` | 13 each |
 | `audit` | 11 |
-| `flow-anomaly` | 5 |
+| `flow-anomaly`, `lab-generate` | 5 each |
 | `report` | 3 |
 | `session` | 2 subcommands (CLI only) |
 | `build-db` | 0 |
 
 **The store** is one SQLite file per run set (`store_path`, default `fuzzlab.db`;
-`fuzzlab/core/config.py:36`). It already holds what a project file needs:
+`fuzzlab/core/config.py:36`). It already holds most of what a project file needs:
+- a key/value `meta` table (`Store.set_meta` / `get_meta`, `fuzzlab/core/store.py:160`);
 - runs and discovery: `run`, `target`, `endpoint`, `page` (with `template_cluster_id` and
   `discovered_from`), `parameter`, `form`;
 - traffic: `flow` (with `host`, `in_scope`, raw request/response hashes and a full-text
@@ -1027,7 +1056,7 @@ Launcher form sizes, counted with `commandspec.all_specs()` at this commit:
 - UI and session state: `repeater_tab`, `saved_views`, `session_state`;
 - ML and evaluation: `model`, `metric_series`, the holdout tables.
 
-There is no `project` table, no run kind, and no triage table.
+There is no project metadata, no run kind and no triage table.
 
 ### 10.2 Pain points
 
@@ -1036,23 +1065,25 @@ Each pain point is something observed in the code. The severity rating is our ju
 
 | # | Pain point | Evidence | Severity |
 | --- | --- | --- | --- |
-| P1 | **No URL → results path.** "Point it at a URL" means choosing among `crawl`, `audit`, `fuzz`, `auto` and `greybox-run` and filling a 33-field `auto` form. The one-click "Run full pipeline" button scans the **config file's** target, which the UI cannot change. | `templates/sections/launcher.html` (`/api/run/automatic`); `app.py:247` | High |
+| P1 | **No URL → results path.** A working scan is two tools in sequence: `crawl --start URL`, then `auto --base-url URL --spider-db …`. `auto` imports that crawl but does not crawl itself, and with no ground truth it needs `--categories` or fails loudly (D15). The panel's one-click "Run full pipeline" button is an unwired stub: `fuzzlab web` passes no pipeline, so the button answers "pipeline not wired (use the CLI: fuzzlab auto)". | `harness/auto_cli.py:1-11`; `web/app.py:743-755`; `web_main` → `serve(cfg, proxy=…)` | High |
 | P2 | **Forms are argparse dumps.** Every flag of every tool is a form field. There are no presets and no basic/advanced split. | `web/commandspec.py:1-14`; table above | High |
-| P3 | **Working and training/benchmark options share one command and one form.** `auto` mixes target options (`--base-url`, `--identity`, `--browser`) with benchmark and ML options (`--ground-truth`, `--points ground-truth`, `--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`, `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method`, `--anomaly-*`). | `fuzzlab auto --help` | High |
+| P3 | **Working and training/benchmark options share one command and one form.** `auto` mixes target options (`--base-url`, `--identity`, `--browser`) with ground-truth benchmark options (`--ground-truth`, `--points ground-truth`) and model options (`--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`, `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method`, `--anomaly-*`). The model options do **not** need ground truth: they learn from oracle labels on earlier runs against the same target. They are legitimate but advanced working-run features. | `fuzzlab auto --help` | High |
 | P4 | **One concept, four names.** The target is `--start` (crawl), `--base-url` (audit, auto, greybox-run), `--url` (fuzz, mutate-run) or `--base` (mutate-run). The crawl result is `--db` on crawl and `--spider-db` elsewhere, alongside a separate `--store`. | each tool's `--help` | High |
-| P5 | **No project concept.** The UI reads the one store named in config. It cannot create, open, switch, snapshot or list recent stores, and `fuzzlab web` has no `--store`. | `app.py` (every `_read_*` uses `cfg.get("store_path")`); `web_main` | High |
+| P5 | **No project concept.** The UI reads the one store named in config. It cannot create, open, switch, snapshot or list recent stores, and `fuzzlab web` has no `--store`. The only workaround is an environment override such as `FUZZLAB_STORE_PATH` (`core/config.py` `_from_env`). | `app.py` (every `_read_*` uses `cfg.get("store_path")`); `web_main` | High |
 | P6 | **No site tree.** Endpoints, pages, parameters and flows are stored per run, but nothing groups them host → path → parameter. Findings filter only by an "endpoint" facet. | store schema; `templates/sections/findings.html` | High |
-| P7 | **Training metrics on the operator's landing page.** The Overview shows detection-quality F1/MCC, which is meaningless on a target with no ground truth. ML and Diagnostics sit beside operational sections in one sidebar. | `templates/sections/overview.html` | Medium |
-| P8 | **No triage state.** A finding cannot be marked confirmed, false positive or accepted. `finding.label` is written only by the oracle (D9/D10) and must stay that way. | `oracle/oracle.py` `_write_finding` | Medium |
+| P7 | **Training metrics on the operator's landing page.** The Overview gives a tile to detection-quality F1/MCC, a benchmark metric that shows only "— unscored" on a store with no ground truth. ML and Diagnostics sit beside operational sections in one sidebar. | `templates/sections/overview.html` | Medium |
+| P8 | **No triage state.** A finding cannot be marked confirmed, false positive or accepted. `finding` is written only by the oracle (`docs/ARCHITECTURE.md`, "The store as the contract") and must stay that way. | `oracle/oracle.py` `_write_finding` | Medium |
 | P9 | **Severity is derived, not stored**, from a substring match on `vuln_class`. Confidence is the confirming *mechanism* (e.g. `error-signature`), not a level. | `web/findingsview.py:1-45` | Medium |
-| P10 | **Weak evidence view.** A finding's evidence is a mechanism-specific key/value dict with no link to the flows that confirmed it, so there is no side-by-side request and response with the payload highlighted. | `oracle/oracle.py` `_write_finding`; `templates/finding.html` | Medium |
-| P11 | **No de-duplication across runs.** The same issue found in three runs appears three times. | `web/findingsview.list_findings` (`ORDER BY id`, no grouping) | Medium |
+| P10 | **Weak evidence view, and no links to build a better one.** A finding's evidence is a mechanism-specific key/value dict with no link to the flows that confirmed it, so there is no side-by-side request and response with the payload highlighted. `_write_finding` sets no `attempt_id` and no `location`. The `auto` pipeline writes no `attempt` rows; only the fuzz-CSV import and `greybox-run` do. `auto` candidates have a NULL `parameter_id`: their URL, parameter and location sit only in the evidence JSON. | `oracle/oracle.py:320-330`; `tools/store_adapter.py:742`; `greybox/run.py:223`; `audit/engine.py:107-111`; `templates/finding.html` | Medium |
+| P11 | **No de-duplication across runs.** The same issue found in three runs appears three times. | `web/findingsview.list_findings` (`ORDER BY id DESC`, no grouping) | Medium |
 | P12 | **"Results" means runs**, and it overlaps with Overview's recent-runs table. | `NAV`; `templates/sections/results.html` | Low |
-| P13 | **Lab and generator tooling sits at the top level** beside operations: `lab-generate`, `build-db`, `reveal-holdout` and `flow-anomaly` sit beside `crawl` in the CLI, and Lab sits beside Findings in the sidebar. | `cli.py` usage; `NAV` | Low |
+| P13 | **Lab, benchmark and maintenance commands sit at the top level** beside operations. `lab-generate` (lab), `reveal-holdout` (benchmark), `flow-anomaly` (analysis) and `build-db` (rebuilds the auditor's indicator DB) sit beside `crawl` in the CLI, and Lab sits beside Findings in the sidebar. | `cli.py` usage; `NAV`; `tools/build_sql_db.py:1-12` | Low |
+| P14 | **Columns a site tree would want are never written.** `page.template_cluster_id` and `page.discovered_from` exist only in the DDL. The one `page` writer sets `run_id, url, method, status, source`, and `TemplateClusterer` runs in memory only. Result URLs are stored path-only, so an endpoint's origin comes only from `target` rows (written by the pipeline) or `flow.host` (set by proxy history only). Crawl-only runs record no origin. | `core/migrations.py:58-59`; `tools/store_adapter.py:119`; `harness/pipeline.py:55-65, 147-157`; `proxy/history.py:134` | Medium |
 
 **Keep these, which already work:**
 - the Findings facets, chips and saved views, which are a powerfilter-like layer;
 - the shared message editor, Repeater, and "send to Repeater" from a finding;
+- full-text search over proxy history (`flow_fts`, `web/proxyview.py`);
 - the safety chips in the top bar;
 - dark mode and density settings;
 - a dry-run preview of every launch;
@@ -1069,21 +1100,21 @@ address the project, site-tree or working/benchmark questions this document cove
 | --- | --- | --- | --- |
 | Project file with new/open/recent/temporary, auto-save, snapshot (Burp §2.1, ZAP §3.1) | The store is already a file that saves as it goes; one fixed path from config | Lifecycle, chooser, recent list, snapshot, metadata | R1 |
 | Tasks paused on reopen; "trust this file" (Burp §2.1) | No-auto-run (D11) already holds; nothing reads project-stored settings | Make it explicit: opening a project never sends traffic; project settings that send traffic need `--authorized` again | R1 |
-| One-field quick scan (Greenbone §5.4, ZAP §3.4) | 33-field form, or a button bound to the config target | URL field + profile + Scan | R2 |
+| One-field quick scan (Greenbone §5.4, ZAP §3.4) | `crawl`, then a 33-field `auto` form; the panel's quick button is an unwired stub | URL field + profile + Scan that runs crawl → auto | R2 |
 | Outcome-named presets / policy library (Burp §2.5, Nessus §4.5, ZAP §3.4) | None | Scan profiles | R3 |
 | Inherited / Overridden / Revert (NinjaOne §7.5) | None | Profile editor shows its difference from the base profile | R3 |
 | Host → path → `METHOD leaf(params)` tree (ZAP §3.2, Burp §2.2) | Data exists per run; no view | Site tree | R4 |
-| Visited / unvisited / worst-severity roll-up (Burp §2.2) | `page.discovered_from`, `flow`, `finding` exist | Node states + roll-ups | R4 |
+| Visited / unvisited / worst-severity roll-up (Burp §2.2) | `flow` and `finding` exist; `page.discovered_from` is in the schema but never written (P14) | Node states + roll-ups; a writer for discovered-not-requested; a per-run origin | R4 |
 | Fragment routes (ZAP §3.2, Burp §2.2) | `to_route_path` stores `/#/route` | Show inline, with a route badge | R4 |
-| Data-driven node collapse (ZAP §3.2) | `page.template_cluster_id` (DOM MinHash) exists | Collapse suggestions | R4 |
+| Data-driven node collapse (ZAP §3.2) | `TemplateClusterer` (DOM MinHash) runs in memory; `page.template_cluster_id` is never written (P14) | Persist clusters, then suggest collapses | R4 |
 | Isolated / simulated runs (Burp §2.4, Huntress §6.4) | Benchmark and working share runs, findings and Overview | Run kind + separate lane | R5 |
 | Severity × confidence, confidence floor (Burp, ZAP, Greenbone QoD) | Severity derived; confidence = mechanism name | Mechanism → confidence tier, default floor | R6 |
 | Cross-run issue identity + New/Gone/Same/Changed (Greenbone §5.3, ZAP 2.17, Burp DAST) | Per-run rows only | Issue key, occurrences, delta | R6, R8 |
 | Persistent user triage, separate from scanner state (Burp DAST §2.3, Nessus §4.3, Aikido §8.5) | None; the oracle owns `label` | `finding_triage` side table | R6 |
-| Evidence: request/response highlighted, path to issue (Burp, ZAP, Greenbone) | Key/value dump | Link finding → flows; reuse msgeditor | R7 |
-| Funnel / Focus vs All with reasons (Huntress §6.6, Aikido §8.3) | Stages stored; not shown together | Funnel strip; "not confirmed" reasons | R9 |
+| Evidence: request/response highlighted, path to issue (Burp, ZAP, Greenbone) | Key/value dump; finding not linked to candidate, attempt or flow (P10) | Record links when the finding is written; reuse msgeditor | R7 |
+| Funnel / Focus vs All with reasons (Huntress §6.6, Aikido §8.3) | Endpoints, parameters, candidates (with `oracle_status`) and findings are stored; `auto` writes no attempts | Funnel strip; "not confirmed" reasons | R9 |
 | Report = current filtered view (Nessus §4.7, Greenbone §5.7) | `fuzzlab report` exists for one run | Report from the Findings view | R10 |
-| Global search with `/` (NinjaOne §7.6) | Quick filter on Findings only | Project-wide search over the flow index | R11 |
+| Global search with `/` (NinjaOne §7.6) | Full-text search over proxy history (`flow_fts`) and a quick filter on Findings; nothing project-wide | Project-wide search | R11 |
 
 ---
 
@@ -1113,7 +1144,7 @@ Left nav
   ▶ Runs               history, run detail, diff two runs
   ── Tools ─────────────
   ⇄ Proxy              History · Intercept · Repeater · Scope · Match-Replace
-  ⚙ Manual tools       today's per-tool forms (crawl / audit / fuzz / …), "advanced"
+  ⚙ Manual tools       today's per-tool forms (crawl / audit / fuzz / build-db …), "advanced"
   ── Configure ─────────
   ☰ Scan profiles      Quick / Standard / Deep + custom; inheritance badges
   ◎ Scope & identities scope rules, identities (keyring-backed names only)
@@ -1122,7 +1153,7 @@ Left nav
   ◈ Models & ML        today's ML page
   ◍ Diagnostics        trends, store explorer
   ── Environment (outside the project) ──
-  ⏻ Lab                containers, lab-generate, build-db
+  ⏻ Lab                containers, lab-generate
 ```
 
 Rules:
@@ -1140,16 +1171,22 @@ Rules:
 
 ### 12.2 Project-file model (R1) [PROJ]
 
-**What a project is.** One SQLite file, the existing store, plus a `project` metadata
-table. The store is already the contract (`docs/ARCHITECTURE.md`), and it already saves as
-it goes, like Burp and ZAP. Recommended extension: `.fuzzlab` (keep accepting `.db`).
+**What a project is.** One SQLite file, the existing store, plus project metadata.
+- **Where the metadata goes.** It can live in the existing key/value `meta` table
+  (`Store.set_meta` / `get_meta`, `fuzzlab/core/store.py:160`) rather than a new table.
+- **Layout is already decided.** D21 settled it: per-project SQLite files plus a small
+  global config database (`docs/DECISIONS_AND_ROADMAP.md`). No global config DB exists in
+  code yet; R1 is where it gets built.
+- **Why the store fits.** It is already the contract (`docs/ARCHITECTURE.md`), and it
+  already saves as it goes, like Burp and ZAP.
+- **Extension.** Recommended: `.fuzzlab`, while still accepting `.db`.
 
 | Inside the project file | Not inside the project file |
 | --- | --- |
-| Project metadata: name, kind (`working` or `benchmark`, fixed at creation), created/modified time, fuzzlab and schema version, notes | Credentials: they stay in the OS keyring (D12). The file stores identity **names** only |
-| Targets and scope rules (include/exclude), per project | Global user settings (theme, density, hotkeys, recent list) in the user config dir |
+| Project metadata: name, project UUID, kind (`working` or `benchmark`, fixed at creation), created/modified time, fuzzlab and schema version, notes | Stored credentials: they stay in the OS keyring (D12), and the file stores identity **names**. But `repeater_tab.raw_request` is kept verbatim and can hold a cookie or `Authorization` header the user typed (`fuzzlab/proxy/repeater.py`) |
+| Targets and scope rules (include/exclude), per project | Global user settings (theme, density, hotkeys, recent list), in the D21 global config DB |
 | Scan profiles used, copied in as they were at run time (reproducibility) | The lab, its containers and generator output |
-| All runs (with a `kind` column, R5) and their discovery, flows, candidates, attempts and findings | Ground-truth files (read out-of-band, D9); a benchmark project stores a **path and hash** to them |
+| All runs (with a `kind` column, R5) and their discovery, flows, candidates, attempts, findings and models | Ground-truth files (read out-of-band, D9); a benchmark project stores a **path and hash** to them |
 | Triage state (R6), saved views, repeater tabs, site-tree structure overrides (R4) | Sealed holdout plaintext (existing sealing rules apply) |
 
 **Lifecycle.** The start screen follows Burp's wizard and ZAP's persist prompt:
@@ -1172,12 +1209,13 @@ it goes, like Burp and ZAP. Recommended extension: `.fuzzlab` (keep accepting `.
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **New / Open / Recent.** The recent list lives in the user config dir, not in the
+- **New / Open / Recent.** The recent list lives in the D21 global config DB, not in the
   project. A missing file shows as "not found", with a Remove action.
-- **Temporary.** A temporary project lives in a scratch file. Unlike Burp, fuzzlab should
-  offer **"Save as project…"** at any time: SQLite's online backup API makes conversion
-  trivial **(inference)**. This removes a known Burp limitation
-  [src](https://portswigger.net/blog/introducing-burp-projects).
+- **Temporary.** A temporary project lives in a scratch file. Offer **"Save as
+  project…"** at any time, and then continue working in the saved file. SQLite's online
+  backup API makes this straightforward **(inference)**. Burp offers Project → Save copy
+  for the same purpose
+  [src](https://portswigger.net/burp/documentation/desktop/troubleshooting/performance).
 - **Auto-save.** There is no Save button; every write is already committed. Make that
   visible with a "saved · 2 s ago" indicator.
 - **Snapshot as…** writes a timestamped copy via the backup API, as ZAP does
@@ -1200,16 +1238,21 @@ it goes, like Burp and ZAP. Recommended extension: `.fuzzlab` (keep accepting `.
   shell; `fuzzlab web --project PATH` opens one directly (fixes P5).
 - **Export.**
   - The `.fuzzlab` file itself is the lossless format.
-  - Add a **redacted interchange** export (JSON/HAR with cookies, authorization headers
-    and token parameters stripped by `fuzzlab.core.redaction`). This mirrors Nessus's
-    credential-stripped `.nessus` vs complete `.db`
+  - The export dialog warns that the lossless file can contain secrets typed into Repeater
+    tabs.
+  - Add a **redacted interchange** export (JSON/HAR). Headers are stripped with
+    `fuzzlab/proxy/redact.py::redact`; parameter names and bodies with
+    `fuzzlab.core.redaction`. This mirrors Nessus's credential-stripped `.nessus` vs
+    complete `.db`
     [src](https://docs.tenable.com/nessus/Content/ScanReportFormats.htm).
 - **Avoid known failures.**
   - Burp and ZAP files bloat
     [src](https://forum.portswigger.net/thread/huge-project-files-when-scanning-9d968752).
     Show the project size, as Burp does in its dock
-    [src](https://portswigger.net/burp/documentation/desktop/dashboard), and offer
-    "Compact" (VACUUM) and "Drop response bodies older than…".
+    [src](https://portswigger.net/burp/documentation/desktop/dashboard).
+  - Offer "Compact" (VACUUM) and "Drop response bodies older than…" as gated maintenance
+    operations. Dropping bodies deletes tool output, so it needs an explicit
+    NFR-UI-read-only amendment or must stay a CLI operation (§16).
   - ZAP sessions open slowly
     [src](https://github.com/zaproxy/zaproxy/issues/1364). Build the site tree from indexed
     tables, never by replaying flows (R4).
@@ -1217,17 +1260,28 @@ it goes, like Burp and ZAP. Recommended extension: `.fuzzlab` (keep accepting `.
     stable **project UUID** in metadata, so recents and snapshots can be matched to their
     origin **(inference)**.
 
+**Migration, CLI and concurrency** [PROJ]:
+- **Migration.** Today's `fuzzlab.db`, or any existing store, opens as a project as-is. The
+  first open writes project metadata into `meta`. The config file's `target_base_url` and
+  `scope_hosts` become the project's first target and scope.
+- **CLI.** Every tool gains `--project PATH` as the one name for `--store`. The crawl's
+  separate `--db` / `--spider-db` file folds into the project (P4). The old flags stay as
+  aliases.
+- **Concurrency.** A CLI run may write to a project that the UI has open. SQLite allows one
+  writer at a time; the UI only reads and refreshes. Use WAL mode, and show a "run in
+  progress" badge for an unfinished `run` row **(inference)**.
+
 ### 12.3 Site-tree design (R4) [TREE]
 
 **Node levels.** These follow ZAP's leaf identity and Burp's state and roll-up conventions.
 
 | Level | Key | Source in the store | Notes |
 | --- | --- | --- | --- |
-| 0 Origin | `canonical_origin(url)` (`fuzzlab/core/urls.py:53`) | `target.base_url`, `flow.host`, `endpoint.url` | Loopback aliases are already one site |
+| 0 Origin | `canonical_origin(url)` (`fuzzlab/core/urls.py:53`) | **Needs a per-run origin.** Result URLs (`endpoint.url`, `page.url`, `finding.url`) are stored path-only. `target.base_url` is written only by the pipeline and `flow.host` only by proxy history, so crawl-only runs record no origin. The [TREE] session must add one, e.g. a `target` row for every run (P14) | Loopback aliases are already one site |
 | 1…n Path segment | `to_path(url)` split on `/` | `endpoint.url`, `page.url` | Directories are synthetic grouping nodes |
-| `#` SPA route | `to_route_path(url)` → `/#/search` (`urls.py:23`) | endpoints stored with the route | A **`#` pseudo-segment** under the path serving the app shell; route badge |
+| `#` SPA route | `to_route_path(url)` → `/#/search` (`urls.py:24`) | endpoints stored with the route | A **`#` pseudo-segment** under the path part of the URL the route was seen on. `to_route_path` keeps that path, so `/app/#/x` sits under `/app/`. If several paths serve the same app, its routes appear under each. Route badge |
 | Leaf | `METHOD name(query params)(body params)` | `endpoint.method` + `parameter` rows (`name`, `location`) | Identity uses parameter **names**, not values (ZAP); GET and POST are separate leaves (Burp) |
-| Parameter (expandable) | `name @ location` | `parameter` | Location covers query, body, JSON, header, cookie, fragment-query. **Fragment-query params never reach the server**: show a "client-side" badge, as `spa_route` documents |
+| Parameter (expandable) | `name @ location` | `parameter`; `auto` candidates carry it only in `candidate.evidence` | Location is one of `audit/rules.LOCATIONS`: query, body, header, cookie, json, fragment, path. **`fragment` params (a hash route's query) never reach the server**: show a "client-side" badge, as `spa_route` documents |
 
 **SPA routes appear inline, not in a second tree.** ZAP needed a separate Client Map
 because its Sites tree cannot hold fragments
@@ -1255,13 +1309,16 @@ stores `/#/route` as an endpoint path, so a single tree is simpler. For example:
 should show four:
 1. **Discovered**, grey: known from a link or a crawl, but no `flow` has been recorded.
 2. **Requested**, normal text: a flow exists.
-3. **Tested**, a small tick: candidates or attempts exist for its parameters.
-4. **Out of scope / excluded**, struck through: `flow.in_scope = 0` or excluded by a scope
-   rule.
+3. **Tested**, a small tick: candidates exist for its parameters. This is a join on
+   URL, parameter and location from `candidate.evidence`, because `auto` candidates have no
+   `parameter_id`.
+4. **Out of scope / excluded**, struck through: excluded by the project's scope rules.
+   `flow.in_scope` is set only by proxy history, so it cannot be the only source.
 
-Turning on "show discovered" is a filter, not a different tree. *(The mapping from states to
-tables is our inference; the [TREE] session should confirm it against the crawler's
-writes.)*
+Turning on "show discovered" is a filter, not a different tree. *Today nothing records
+"discovered but not requested": `page.discovered_from` is never written. The [TREE]
+session needs a writer for it in the crawler or store adapter (§16). The rest of this
+state mapping is our inference.*
 
 **Roll-ups on every non-leaf node:**
 - **worst open severity**, shown as a coloured dot, as in Burp;
@@ -1288,9 +1345,11 @@ writes.)*
 
 **Structure overrides.** These are stored in the project.
 - **Collapse data-like segments** (ZAP's data-driven nodes,
-  [src](https://www.zaproxy.org/docs/desktop/start/features/sitestree/)). fuzzlab can
-  **suggest** collapses from `page.template_cluster_id`, the DOM MinHash clusters
-  (`fuzzlab/core/dedup.py`). The user confirms each one; nothing collapses automatically.
+  [src](https://www.zaproxy.org/docs/desktop/start/features/sitestree/)).
+  - fuzzlab could **suggest** collapses from its DOM MinHash clusters
+    (`fuzzlab/core/dedup.py`) once they are persisted. `page.template_cluster_id` exists
+    but is never written today (§16).
+  - The user confirms each collapse; nothing collapses automatically.
 - **Mark a parameter structural** (split by value).
 
 **Node actions.**
@@ -1308,9 +1367,15 @@ bottom right.
 
 **R6, issue identity and status.**
 - **Issue key** = `(vuln_class, canonical origin, route path, method, parameter name,
-  location)`. Each `finding` row becomes an **occurrence** of an issue. This is the same
-  identity as the tree leaf, as ZAP 2.17 recommends comparing alerts by node name
-  [src](https://www.zaproxy.org/blog/2025-09-30-alert-de-duplication/). It fixes P11.
+  location)`. Each `finding` row becomes an **occurrence** of an issue. This fixes P11.
+  - **The key is anchored at the tree's parameter node, not the leaf.** A leaf is named by
+    the full set of its parameter names, so a page that gains a parameter gets a new leaf,
+    but its existing issues keep their keys. This is deliberate.
+  - ZAP's de-duplication blog makes a similar move: it recommends a node-name field for
+    comparing alerts across scans
+    [src](https://www.zaproxy.org/blog/2025-09-30-alert-de-duplication/).
+  - **Dependency:** `finding` has no `location` column today, so the oracle must record it
+    (§16).
 - **Scanner state**, computed and never stored, over the project's working runs:
   - **New**: only in the latest run that tested this leaf.
   - **Present**: in the latest run and an earlier one.
@@ -1323,8 +1388,8 @@ bottom right.
   - **Open** (default), **Confirmed**, **False positive**, **Accepted risk**,
     **Fixed (unverified)**.
   - Stored with a reason and timestamp in a **new side table** (e.g. `finding_triage`). It
-    never writes `finding.label`, because the oracle remains the only label writer
-    (D9/D10).
+    never writes to `finding`, which only the oracle writes (`docs/ARCHITECTURE.md`, "The
+    store as the contract").
   - Benchmark scoring must **not** read triage state unless a benchmark explicitly opts
     in.
   - Changing severity **requires a reason**, as in Aikido
@@ -1351,13 +1416,15 @@ bottom right.
   response side by side, payload and marker highlighted**, as Burp and ZAP do
   [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/results/issues)
   [src](https://www.zaproxy.org/pdf/ZAPGettingStartedGuide-2.15.pdf).
-- It adds a **"Path to issue"** list: page → parameter → candidate rule → attempts → the
-  confirming mechanism, built from `candidate` and `attempt`. Burp has an equivalent
+- It adds a **"Path to issue"** list: page → parameter → candidate rule → confirming
+  probes → the confirming mechanism. Today this cannot be assembled: `_write_finding`
+  records no candidate or attempt id, and `auto` runs write no `attempt` rows. Burp has an equivalent
   [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/results/issues).
 - It adds a **Detection method** block (mechanism, strategy, version), as Greenbone does
   [src](https://raw.githubusercontent.com/greenbone/gsa/main/src/web/pages/results/ResultDetails.tsx).
-- **Dependency.** This needs the confirming flow ids recorded in `finding.evidence`. That
-  is a change to `fuzzlab/oracle/oracle.py`, which is currently locked (§16).
+- **Dependency.** This needs the confirming flow ids, the candidate id and the location
+  recorded when the finding is written. That is a change to `fuzzlab/oracle/oracle.py`,
+  which is currently locked (§16).
 
 **R8, run diff.**
 - Pick two runs in Runs (or use the tree's run lens) and see **New / Gone / Same /
@@ -1365,7 +1432,8 @@ bottom right.
 - Diff **both ways in one view**, fixing Nessus's new-only diff
   [src](https://docs.tenable.com/nessus/Content/CompareScanReportResults.htm).
 
-**R9, Focus / All and the funnel.**
+**R9, Focus / All and the funnel.** Focus/All needs R6's triage table. The funnel and the
+not-confirmed reasons do not.
 - **Focus** (default): Open and Confirmed issues.
 - **All**: also false positives, accepted risk and *candidates the oracle did not confirm*,
   each with its reason. The reason comes from `candidate.oracle_status`
@@ -1373,8 +1441,8 @@ bottom right.
   `skipped_budget`, `no_confirmer` or `pending`. This
   follows Aikido's auto-ignored list with reasons
   [src](https://help.aikido.dev/workflows-and-guides/resolve-dependency-vulnerabilities-with-autotriage-and-ai-autofix.md).
-- The Dashboard shows the **funnel**: endpoints → parameters → candidates → attempts →
-  confirmed → open, as in Huntress's SOC Actions funnel
+- The Dashboard shows the **funnel**: endpoints → parameters → candidates → confirmed →
+  open, with attempts only where a tool records them, as in Huntress's SOC Actions funnel
   [src](https://support.huntress.io/hc/en-us/articles/24001293720083-Huntress-Command-Center-Your-New-Homepage)
   (snippet).
 - The funnel is the operator's equivalent of the benchmark's precision/recall, with no
@@ -1409,18 +1477,26 @@ ZAP's Quick Start.
   - The dry-run preview is the collapsed "Show command" section.
   - The click is the explicit user action D11 requires.
 - **One name for the target.** It is always `URL` in the UI. Add a CLI verb with the same
-  shape, `fuzzlab scan URL [--profile P] [--identity I] --authorized`, as a thin wrapper
-  over `auto` (fixes P1 and P4 for the common case). The existing tool flags stay for
-  manual use.
+  shape, `fuzzlab scan URL [--profile P] [--identity I] --authorized`.
+  - **What the wrapper runs.** It runs **`crawl` then `auto`** into the project, because
+    `auto` does not crawl by itself (`harness/auto_cli.py:1-11`).
+  - **Categories.** With no ground truth, automatic mode needs explicit categories or fails
+    loudly (D14/D15). Every working profile therefore names its categories, defaulting to
+    all known ones.
+  - **Authorization.** `crawl` and `audit` have no `--authorized` flag today, so the
+    wrapper applies the authorized gate itself before the crawl step.
+  - **Launching.** UI launches go through the gated subprocess runner (D18).
+  - This fixes P1 and P4 for the common case. The existing tool flags stay for manual
+    use.
 - **Results appear live.** The site tree fills as the crawl runs, and findings stream into
-  the Dashboard funnel, as in Burp's live crawl view
-  [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/results).
+  the Dashboard funnel, much as Burp's site map fills during a crawl **(inference)**.
 
 **R3. Scan profiles instead of flag forms.**
 - **Built-in profiles** are named for their outcome, as Burp's presets are
   [src](https://portswigger.net/burp/documentation/desktop/scanning/built-in-configurations):
   - **Quick**: crawl and audit only, no confirmation traffic beyond the audit's.
-  - **Standard**: crawl → audit → oracle-confirm (today's `auto` working defaults).
+  - **Standard**: crawl → audit → oracle-confirm, all known categories. No single command
+    does this today; R2's wrapper does.
   - **Deep**: adds browser execution, header points and JSON-write fuzzing.
   - **Passive**: crawl only.
 - **A profile is a partial overlay** on the defaults, as in Burp's configuration library
@@ -1433,10 +1509,17 @@ ZAP's Quick Start.
 - **Locked at run time.** A profile used by a run is copied into that run, so editing it
   never changes history. Nessus locks policy tuning in the same way
   [src](https://docs.tenable.com/nessus/Content/TemplateSettings.htm).
-- **Working profiles cannot carry training options.** The ML and benchmark flags
-  (`--ground-truth`, `--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`,
-  `--holdout`, `--hybrid`, `--confirm-budget` with a model, `--anomaly*`) belong to
-  **benchmark profiles** only (fixes P3).
+- **Ground-truth options belong to benchmark profiles only:** `--ground-truth` and
+  `--points ground-truth`.
+- **Model options stay available to working profiles, collapsed.**
+  - The model options are `--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`,
+    `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method` and `--anomaly*`.
+  - They work without ground truth, because they learn from oracle labels on earlier runs
+    against the same target.
+  - They are real operator features (budgeted confirmation, ranking), so a working profile
+    may use them. They sit in a collapsed **Model-assisted** group, never in the basic
+    form. This fixes P3.
+  - Whether `--holdout` is benchmark-only is §18 Q6.
 - **Folders and tags.** NinjaOne users complain that policies have no folders
   [src](https://capterra.com/p/184229/NinjaOne/reviews?page=1) (snippet), so profiles
   should support them.
@@ -1444,7 +1527,8 @@ ZAP's Quick Start.
 ### 12.6 Working vs benchmark separation (R5) [SPLIT]
 
 This recommendation is for the session separating the two kinds of run. Combine Burp's
-isolated scan with Huntress's stamped simulation:
+isolated scan with a stamped-output rule (Huntress's Incident Simulation is a similar,
+less well-sourced idea):
 
 - **Project kind** is fixed at creation and shown in the title bar.
   - A **Working** project targets a URL. It has no ground truth, and its Dashboard is
@@ -1455,36 +1539,47 @@ isolated scan with Huntress's stamped simulation:
 - **Run kind** is a new column with three values:
   - `working`;
   - `benchmark`;
-  - `isolated`: a working run used to *test a profile*. Its results stay out of the site
-    tree's default lens, Findings and the Dashboard, and are reachable only from Runs, as
-    with Burp
+  - `trial`: a run used to *test a profile*. Its results stay out of the site tree's
+    default lens, Findings and the Dashboard, and are reachable only from Runs. ("Isolated"
+    is avoided because it already names FR-SESS-17's `#isolated:<n>` identities and
+    FR-FUZZ-44's isolated paths.) This is modelled on Burp's isolated scan
     [src](https://portswigger.net/burp/documentation/desktop/automated-scanning/setting-pro-scope).
+- **Allowed combinations.** A working project holds `working` and `trial` runs. A
+  benchmark project holds `benchmark` and `trial` runs.
 - **Benchmark output is stamped.** Benchmark findings and reports carry a visible
-  **BENCHMARK** stamp, as Huntress stamps "Simulated"
+  **BENCHMARK** stamp, so a benchmark export can never pass for a real assessment. This is
+  our design choice. Huntress's Incident Simulation is a similar idea, but its "Simulated"
+  stamp was read only from a search snippet
   [src](https://support.huntress.io/hc/en-us/articles/30950483531539-EDR-ITDR-Incident-Simulation)
-  (snippet). This way a benchmark export can never pass for a real assessment.
-- **Training reads benchmark projects.** "Train on" in a benchmark profile picks from
-  benchmark projects and runs. A working project can *apply* a saved model (ranking or
-  budget) in the read-only direction; it never trains on, or alters, its own unlabelled
-  findings.
+  (§17).
+- **Where models live.** Models are rows in a project's `model` table, so they stay
+  inside one project file. **(inference; the [SPLIT] session decides)**
+  - **Training on earlier runs** against the same target (`--train-on earlier`) stays
+    inside one project and needs no ground truth.
+  - **Using a model trained elsewhere** means *exporting* it from one project and
+    *importing* it into another. Its provenance (source project UUID, run ids, feature
+    version) is copied along.
+  - **No live cross-project read.** R1's one-project-per-process rule rules it out.
+  - **Ground-truth scoring** happens only in benchmark projects.
 - **The CLI mirrors the split.**
   - `fuzzlab scan` for working runs.
   - `fuzzlab bench …` gathers `auto --ground-truth`, `report`, `reveal-holdout` and the ML
     flags.
-  - `fuzzlab lab …` gathers `lab-generate` and `build-db`.
+  - `fuzzlab lab …` gathers `lab-generate`. `build-db` rebuilds the auditor's indicator
+    DB, so it stays a tool.
   - Existing commands stay as aliases (fixes P13).
 
 ### 12.7 What to hide by default
 
 | Hide (reachable via Advanced / research toggle / benchmark project) | Keep visible |
 | --- | --- |
-| All ML and benchmark flags; `greybox-run`, `mutate-run`, `flow-anomaly`, `reveal-holdout`, `lab-generate`, `build-db` | Scan a URL; Site map; Findings; Runs |
+| Ground-truth flags (benchmark projects only); model-assisted flags (collapsed); `greybox-run`, `mutate-run`, `flow-anomaly`, `reveal-holdout`, `lab-generate`, `build-db` | Scan a URL; Site map; Findings; Runs |
 | The per-tool launcher forms (move to Tools → Manual tools) | Proxy (History, Intercept, Repeater) |
 | Detection-quality and efficiency KPIs (move to Benchmark) | Safety chips: target, authorized, proxy, budget |
 | Diagnostics and the raw store explorer | Project switcher and saved indicator |
 | Bandit posteriors, plugins list, anomaly settings | Dry-run "Show command" (collapsed, one click away) |
 | Advanced scan options (scope prefix, budget, categories, browser, OOB, header points) | Profile picker and identity picker |
-| Low-confidence ("Tentative") findings, in a "Certain/Firm only" saved view (not default) | Focus/All toggle with counts |
+| (Whether to hide Tentative findings by default is open: §18 Q3) | Focus/All toggle with counts |
 
 ---
 
@@ -1519,7 +1614,7 @@ The names, counts and scores in these wireframes are illustrative, not measured.
 ```
 ┌ Dashboard · juice-shop (WORKING) ────────────────────────────────────────────────────────┐
 │ [▶ Scan a URL]                                                                             │
-│ Funnel   endpoints 84 → params 211 → candidates 57 → attempts 1,940 → confirmed 9 → open 7│
+│ Funnel   endpoints 84 → params 211 → candidates 57 → confirmed 9 → open 7                 │
 │ Open issues  ● 3 critical  ● 2 high  ● 2 medium        Coverage  ▓▓▓▓▓▓▓░░ 78% params tested│
 │ Recent runs                                                                                │
 │  #12 Standard  2026-10-14 14:02  done      +2 new  −1 gone  [diff vs #11]                  │
@@ -1551,7 +1646,7 @@ The names, counts and scores in these wireframes are illustrative, not measured.
 │ ── Evidence ─────────────────────────────────────────────────────────────────────────────── │
 │ Request  ⟦payload⟧ highlighted          │ Response  ⟦marker⟧ highlighted                    │
 │ ── Path to issue ───────────────────────────────────────────────────────────────────────── │
-│ page /#/search → param q (query) → audit rule → 14 attempts → error-signature ✓            │
+│ page /#/search → param q (query) → audit rule → 14 probes → error-signature ✓              │
 │ ── Detection method ─────────────────────────────────────────────────────────────────────── │
 │ mechanism error-signature · strategy SqliErrorStrategy · fuzzlab 0.x                       │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -1563,7 +1658,7 @@ The names, counts and scores in these wireframes are illustrative, not measured.
 ┌ Runs ────────────────────────────────────────────────────────────────────────────────────┐
 │ ☐ #12 working  Standard  done         9 confirmed                                         │
 │ ☐ #11 working  Standard  done         8 confirmed                                         │
-│ ☐ #9  isolated Deep*     done         (kept out of Site map / Findings)                   │
+│ ☐ #9  trial    Deep*     done         (kept out of Site map / Findings)                   │
 │ [Diff selected]  →  New 2 · Gone 1 · Same 6 · Changed 0   (both directions)               │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1577,7 +1672,7 @@ The names, counts and scores in these wireframes are illustrative, not measured.
 │ Confirm   browser (M6)     on         Overridden  [Revert]                                 │
 │           OOB (M8)         off        Inherited                                            │
 │ Budget    requests         5000       Inherited                                            │
-│ (Training/benchmark options are not available in working profiles.)                        │
+│ (Ground-truth options: benchmark profiles only. Model-assisted options: collapsed.)        │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1609,8 +1704,8 @@ The names, counts and scores in these wireframes are illustrative, not measured.
   - Include a plain-language summary per finding, as Huntress does
     [src](https://support.huntress.io/hc/en-us/articles/54383533080979-In-Depth-Understanding-of-Huntress-EDR-and-ITDR-Incident-Reports)
     (snippet). Thin reporting is the most common complaint about Huntress and NinjaOne.
-- **R11, global search with `/`.** Search across project URLs (the `flow_fts` index already
-  exists), findings, runs and profiles. Support a `kind:` prefix and keep the query in the
+- **R11, global search with `/`.** Extend proxy history's existing full-text search
+  (`flow_fts`) project-wide, across URLs, findings, runs and profiles. Support a `kind:` prefix and keep the query in the
   URL, as NinjaOne does
   [src](https://www.ninjaone.com/docs/new-to-ninjaone/search-tools/global-search-platform/).
 - **Performance guardrails.** Burp and ZAP users complain about frozen tables and slow
@@ -1631,25 +1726,34 @@ Impact is how much each one reduces "unnecessarily complicated and hard to use".
 
 | Rank | Rec. | What | Impact | Effort | Owner | Depends on |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | R2 | "Scan a URL" dialog + `fuzzlab scan` verb | **High** | S–M | [SPLIT] | R3 (can ship with hard-coded profiles first) |
+| 1 | R2 | "Scan a URL" dialog + `fuzzlab scan` verb (crawl → auto, explicit categories, authorized gate) | **High** | S–M | [SPLIT] | R3 (can ship with hard-coded profiles first) |
 | 2 | R1 | Project lifecycle: start screen, `--project`, recent list, temporary → save as, snapshot, saved indicator | **High** | M | [PROJ] | — |
 | 3 | R5 | Project kind + run kind; Dashboard split; hide research tools in working projects | **High** | M | [SPLIT] | R1 |
-| 4 | R4 | Site tree (origin → path → `#` route → leaf → params), states, roll-ups, filters | **High** | M–L | [TREE] | R1 |
+| 4 | R4 | Site tree (origin → path → `#` route → leaf → params), states, roll-ups, filters | **High** | M–L | [TREE] | R1; per-run origin and discovered/cluster writers (§16) |
 | 5 | R3 | Scan profiles (built-ins, overlay, editor with inherited/overridden, copy-on-run) | High | M | [SPLIT] | — |
-| 6 | R6 | Issue key, cross-run states, `finding_triage` side table, confidence tiers, Focus/All | High | M | [TREE] | R4 (shared identity) |
+| 6 | R6 | Issue key, cross-run states, `finding_triage` side table, confidence tiers | High | M | [TREE] | R4 (shared identity); finding location (§16) |
 | 7 | R7 | Evidence: linked flows, highlighted request/response, path to issue | Medium–High | M | [TREE] | oracle change (locked file, §16) |
 | 8 | R8 | Two-way run diff | Medium | S | [TREE] | R6 |
-| 9 | R9 | Funnel on Dashboard; not-confirmed reasons in All | Medium | S | [SPLIT] | — |
+| 9 | R9 | Funnel on Dashboard; not-confirmed reasons; Focus/All views | Medium | S | [SPLIT] | R6 for Focus/All only |
 | 10 | R11 | `/` global search | Medium | S–M | any | — |
 | 11 | R10 | Report = current view | Medium | M | any | R6 |
 | 12 | — | Rename Results → Runs; move Lab and generators out of the project nav | Low | S | any | — |
 
-**Quick wins that need no new data:** R2 (with fixed profiles), R9, the Results → Runs
-rename, and moving the F1/MCC tiles off a working project's Dashboard.
+**Quick wins that need no new data:**
+- R2 with fixed profiles, since it wraps existing commands;
+- the funnel part of R9 (endpoints, parameters, candidates, findings);
+- the Results → Runs rename;
+- moving the F1/MCC tiles off a working project's Dashboard.
 
-**Changes that need schema additions:** R1 (a `project` metadata table), R5 (`run.kind`)
-and R6 (`finding_triage`). Each schema addition needs a migration and a
-`docs/ARCHITECTURE.md` "store as contract" update in the session that builds it.
+**Changes that need schema additions or new writes:**
+- **R1:** project metadata in `meta`, plus the D21 global config DB.
+- **R4:** a per-run origin, and persisting discovered-not-requested and template clusters.
+- **R5:** `run.kind`.
+- **R6:** `finding_triage`.
+- **R6/R7:** finding location, plus links to the candidate and the confirming flows.
+
+Each needs a migration and a `docs/ARCHITECTURE.md` "store as contract" update in the
+session that builds it.
 
 ---
 
@@ -1659,33 +1763,61 @@ and R6 (`finding_triage`). Each schema addition needs a migration and a
 - **D11, no auto-run.** Opening a project, a profile or a tree node never sends traffic.
 - **Loopback only, and `--authorized` for anything that sends traffic.** These are checked
   against the current environment, never against the project file.
-- **D12, credentials in the OS keyring.** A project stores identity names only, never
-  secrets or session tokens. The redacted export strips cookies, authorization headers and
-  token parameters through `fuzzlab.core.redaction`.
-- **D9/D10, the oracle is the only writer of `finding.label`.** Triage is a separate,
-  user-owned layer, and ML writes scores, never labels.
+- **D12, credentials in the OS keyring.** A project stores identity names, never stored
+  credentials. It can still contain secrets the user typed, because
+  `repeater_tab.raw_request` is kept verbatim. The redacted export strips headers with
+  `fuzzlab/proxy/redact.py::redact`, and parameter names and bodies with
+  `fuzzlab.core.redaction`.
+- **The oracle is the only writer of `finding`** (`docs/ARCHITECTURE.md`, "The store as
+  the contract"), and ML writes scores, never labels. Triage is a separate, user-owned
+  layer. D9/D10 add that the oracle never reads ground truth.
+- **D14/D15, category selection.** A working scan without ground truth must name its
+  categories, and R2's profiles do so explicitly.
+- **D18, gated subprocess runner.** Every UI launch goes through it.
+- **D21, storage layout.** Per-project SQLite files plus a small global config DB.
 - **NFR-UI-read-only** (`docs/components/12-diagnostics-and-ui/requirements.md`). The UI
-  never writes result tables (`finding`, `attempt`, `candidate`), and `saved_views` is
-  the one documented exception. A `finding_triage` table, stored profiles, scope edits
+  never writes result tables (`finding`, `attempt`, `candidate`). The documented
+  exceptions are `saved_views` and the Repeater's `repeater_tab` / `run` / `flow` writes. A `finding_triage` table, stored profiles, scope edits
   and project metadata would be **new UI-written state**. The building session must amend
   that requirement explicitly, not work around it. Those writes go through the existing
-  `SecurityGateMiddleware` POST rules and never touch the result tables.
-- **PA-0003, one definition.** The tree must reuse `canonical_origin`, `to_path`,
-  `to_route_path` and `spa_route` from `fuzzlab/core/urls.py`, not reimplement them.
+  `SecurityGateMiddleware` POST rules and never touch the result tables. R1's Compact and
+  Drop-bodies operations rewrite or delete tool output, so they need the same explicit
+  amendment or must stay CLI-only.
+- **PA-0003 / PA-0021, one definition.** The tree must reuse `canonical_origin`,
+  `to_path`, `to_route_path`, `spa_route` and `url_key` from `fuzzlab/core/urls.py`, not
+  reimplement them.
 
-**Follow-up notes for locked files.** These are not changed here. The lock lifts when
-`origin/ccr-27885270-9ahcdd` carries BUG-0138.
-- **`fuzzlab/oracle/oracle.py`** (`_write_finding`). Record the confirming flow ids, and
-  the strategy name and version, in `finding.evidence`. R7 depends on this.
+**Follow-up notes for locked files.**
+- **Where the lock comes from.** This session's dispatching prompt locked these files,
+  because another session has unpushed work in them.
+- **When it lifts.** When `origin/ccr-27885270-9ahcdd` carries a BUG-0138 commit.
+- **No in-repo record.** BUG-0138 does not exist in this repository yet, so nothing
+  in-repo records the lock.
+- These files are not changed here.
+- **`fuzzlab/oracle/oracle.py`** (`_write_finding`). Record:
+  - the confirming flow ids;
+  - the strategy name and version;
+  - the candidate id (`finding.attempt_id` is never set today);
+  - the parameter `location` (no `finding` column carries it).
+
+  R6 and R7 depend on this.
 - **`fuzzlab/harness/auto_cli.py`**:
-  - accept `--profile` (or let a new `fuzzlab scan` wrapper in `fuzzlab/cli.py` translate a
-    profile into today's flags) for R2 and R3;
-  - split the benchmark/ML flags into the benchmark entry point for R5.
-- **`fuzzlab/tools/spider.py`, `fuzzlab/tools/store_adapter.py`**. Confirm which writes
-  mark a URL as discovered-not-requested (`page.discovered_from` without a `flow`) for R4's
-  node states.
-- **`fuzzlab/session/cli.py`, `fuzzlab/session/manager.py`**. Expose the list of stored
-  identity *names* (never secrets) for the identity picker in R2.
+  - accept `--profile`, or let a new `fuzzlab scan` wrapper in `fuzzlab/cli.py` translate a
+    profile into today's flags (R2, R3). Either way the wrapper runs `crawl` first, since
+    `auto` does not crawl;
+  - move the ground-truth flags (`--ground-truth`, `--points ground-truth`) to the
+    benchmark entry point (R5), and group the model flags as advanced.
+- **`fuzzlab/tools/spider.py`, `fuzzlab/tools/store_adapter.py`, `fuzzlab/harness/pipeline.py`.**
+  - **Unwritten columns.** Nothing writes `page.discovered_from` or
+    `page.template_cluster_id` today. The only `page` writer is `store_adapter.py:119`,
+    and `TemplateClusterer` runs in memory in the pipeline.
+  - **Needed for R4.** The discovered state and collapse suggestions need those columns
+    written, plus a per-run origin (`target` rows are written only by the pipeline).
+- **`fuzzlab/session/cli.py`, `fuzzlab/session/manager.py`.**
+  - Identities already used are recorded in `session_state` (host, identity). These can
+    feed R2's identity picker without touching the locked files.
+  - Listing identities that are stored but never used needs a names-only listing from the
+    keyring layer.
 - **`fuzzlab/core/urls.py`**. Nothing needs to change; R4 only reads its helpers.
 
 ---
@@ -1755,6 +1887,23 @@ The fuzzlab facts in §10 were read directly from the code. The form sizes were 
   - whether AutoFix applies to DAST findings;
   - the vendor's noise-reduction percentages.
 
+**Independent review.** Two read-only reviewer sub-agents reviewed the first version
+(commit `14372a4`).
+- **Reviewer A** checked every fuzzlab claim against the code. It reported 7 blocking
+  findings, including:
+  - the "Run full pipeline" button is a stub;
+  - `auto` does not crawl;
+  - several schema columns are never written;
+  - `auto` writes no attempt rows;
+  - stored URLs are path-only;
+  - the ML flags work without ground truth;
+  - D21 already exists.
+- **Reviewer B** re-fetched 34 product claims and checked internal consistency. It
+  reported 2 blocking findings: Burp's temporary projects *can* be converted, and NinjaOne
+  policies are not edited "only" under Administration.
+- **Resolution.** The orchestrating session verified each blocking finding against the code
+  or the source, then applied every finding, minor items included, in the next commit.
+
 **What this document is not.** It is not a specification. Requirement IDs, schema DDL and
 UI acceptance criteria belong to the sessions that build R1 to R11, with their own
 change-control and `requirements.md` updates.
@@ -1770,3 +1919,5 @@ change-control and `requirements.md` updates.
    opt-in, or never?
 5. **Temporary project as default.** Should `fuzzlab web` with no arguments open a
    temporary project, as Burp Community does, or show the start screen?
+6. **Holdout.** Should `--holdout` (a sealed evaluation split) be available in working
+   projects, or only in benchmark projects?
