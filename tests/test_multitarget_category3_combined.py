@@ -43,9 +43,7 @@ boots + real HTTP in one test).
 from __future__ import annotations
 
 import shutil
-import socket
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -82,25 +80,6 @@ BUILD_TIMEOUT_S = 240.0
 BOOT_TIMEOUT_S = 30.0
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _wait_until_listening(port: int, timeout_s: float = BOOT_TIMEOUT_S) -> None:
-    deadline = time.monotonic() + timeout_s
-    last_exc: Exception | None = None
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return
-        except OSError as exc:
-            last_exc = exc
-            time.sleep(0.25)
-    raise AssertionError(f"java -jar never started listening on 127.0.0.1:{port}: {last_exc}")
-
-
 @pytest.fixture(scope="module")
 def trackernest_app_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("trackernest_combined")
@@ -127,15 +106,14 @@ def trackernest_base_url(trackernest_app_dir: Path):
     assert package_result.returncode == 0, (
         f"mvn package failed:\nstdout={package_result.stdout}\nstderr={package_result.stderr}"
     )
-    port = _free_port()
     jar_path = trackernest_app_dir / "target" / "trackernest.jar"
-    server = procutil.start_server(
-        ["java", "-jar", str(jar_path), f"--server.port={port}", "--server.address=127.0.0.1"],
-        cwd=trackernest_app_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    server, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+        lambda port: ["java", "-jar", str(jar_path), f"--server.port={port}",
+                      "--server.address=127.0.0.1"],
+        boot_timeout=BOOT_TIMEOUT_S, cwd=trackernest_app_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     proc = server.proc
     try:
-        _wait_until_listening(port)
         procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield f"http://127.0.0.1:{port}"
     finally:

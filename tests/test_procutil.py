@@ -849,16 +849,41 @@ def test_proc_net_tcp_decoding_covers_ipv4_and_ipv6() -> None:
     assert procutil.Listener(pid=1, address="127.0.0.2", port=1).is_loopback()
 
 
+def _caller_owned_group(argv: list[str]) -> subprocess.Popen:
+    """A child the caller owns itself, in its own session and group -- the documented
+    use of ``kill_process_group`` (the corpus sandbox's ``runsc``). Never supervised:
+    a supervisor stops the rest of the group when the leader dies, which races any count
+    of who was signalled (BUG-0144)."""
+    return subprocess.Popen(argv, start_new_session=True)  # noqa: S603
+
+
 def test_kill_process_group_kills_exactly_the_recorded_group() -> None:
     """The mechanism the corpus sandbox's timeout uses (BUG-0125 D14): every member of the
-    recorded group, identity-checked, and nothing else."""
-    h = procutil.start_server(["sh", "-c", "sleep 300 & sleep 300 & wait"])
-    members = _wait_members(h, 4)
-    group = [(p, st) for p, st in members if p != h.pid]
-    assert procutil.kill_process_group(h.child_pid, h.child_start_time, signal.SIGKILL) == 3
-    assert _wait_gone(group) == []
-    assert h.proc.wait(timeout=BOUND_S) == 128 + signal.SIGKILL  # the server's own status
-    assert procutil.finish(h) == "child"
+    recorded group, identity-checked, and nothing else.
+
+    BUG-0144: this used to run the group under ``procutil.start_server``. Its supervisor
+    kills the remaining members once the leader dies, so under CPU load the count was 1
+    or 2 (11 of 30 runs). The group is now owned the way the function is specified for."""
+    bystander = _bystander(["sleep", "300"])
+    leader = _caller_owned_group(["sh", "-c", "sleep 300 & sleep 300 & wait"])
+    try:
+        start = procutil.read_stat(leader.pid).start
+        deadline = time.monotonic() + BOUND_S
+        while True:
+            group = [(st.pid, st.start) for st in procutil._iter_stats() if st.pgid == leader.pid]
+            if len(group) >= 3 or time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+        assert len(group) == 3, group
+        assert procutil.kill_process_group(leader.pid, start, signal.SIGKILL) == 3
+        assert leader.wait(timeout=BOUND_S) == -signal.SIGKILL
+        assert _wait_gone(group) == []
+        assert bystander.poll() is None, "a process outside the group was signalled"
+    finally:
+        for proc in (leader, bystander):
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
 
 
 # --- threads (BUG-0125 D12) and allow_thread (D17) -----------------------------------------------
@@ -1098,19 +1123,9 @@ def test_a_clean_session_passes_the_safety_net(tmp_path: Path) -> None:
 # --- a real listener: the port refuses after stop -----------------------------------
 
 def test_a_stopped_server_releases_its_port() -> None:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    h = procutil.start_server([sys.executable, "-m", "http.server", "--bind", "127.0.0.1", str(port)],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + BOUND_S
-    while True:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
-            break
-        except OSError:
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
+    h, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+        lambda port: [sys.executable, "-m", "http.server", "--bind", "127.0.0.1", str(port)],
+        boot_timeout=BOUND_S, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tree = _tree(h)
     procutil.stop_server(h)
     with pytest.raises(ConnectionRefusedError):

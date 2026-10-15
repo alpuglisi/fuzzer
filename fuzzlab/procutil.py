@@ -155,6 +155,16 @@ class ListenerCheckFailed(ProcUtilError):
     stop still ran in full; this is raised afterwards, never instead of stopping."""
 
 
+class ServerDidNotListen(ProcUtilError):
+    """A started server exited, or did not listen on its port in time (BUG-0143)."""
+
+
+class PortTaken(ProcUtilError):
+    """The port picked for a server is answered by a process outside that server's
+    tree (BUG-0143). A boot check that only connects would take the other process for
+    the server. The caller stops this server and starts it again on a fresh port."""
+
+
 # --- /proc ------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -378,6 +388,30 @@ def _socket_inodes(pid: int) -> set[int]:
         if target.startswith("socket:["):
             out.add(int(target[8:-1]))
     return out
+
+
+def port_owner(h: "ServerHandle", port: int) -> str:
+    """Who answers on ``127.0.0.1:port`` for this server (BUG-0143):
+
+    * ``"ours"`` -- a process of the server's own tree listens on it;
+    * ``"taken"`` -- something accepts connections there, but not the server's tree.
+      Between a free-port pick and the server's bind, another process (a concurrent
+      test's server) took the port;
+    * ``"none"`` -- nothing listens yet.
+
+    A boot is complete only at ``"ours"``. A connect alone cannot tell a server from
+    whichever process holds its port: a harness once reported a successful boot
+    while its URL answered a different test's server."""
+    if any(lst.port == port for lst in listeners(h)):
+        return "ours"
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+            pass
+    except OSError:
+        return "none"
+    # It answered, but the tree held no listener a moment ago: re-check once, since
+    # the server may have bound between the two reads.
+    return "ours" if any(lst.port == port for lst in listeners(h)) else "taken"
 
 
 def listeners(h: "ServerHandle") -> list[Listener]:
@@ -939,6 +973,72 @@ def _reap_supervisor(h: ServerHandle) -> bool:
                     f"{KILL_BOUND_S}s (stuck in D state?); left registered for the safety net")
         return False
     return True
+
+
+def free_port() -> int:
+    """A loopback port free at this moment. Another process can take it before the
+    server binds it, so callers boot through :func:`start_server_on_free_port`, which
+    retries that case (BUG-0143)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def wait_until_listening(h: "ServerHandle", port: int, *, timeout: float) -> None:
+    """Return once the server's **own** process tree listens on ``127.0.0.1:port``
+    (:func:`port_owner`). Raise :class:`PortTaken` when another process answers there,
+    and :class:`ServerDidNotListen` when the server exits first or ``timeout`` passes.
+    A bare connect is not a boot check: it also succeeds against another process
+    holding the port (BUG-0143)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        owner = port_owner(h, port)
+        if owner == "ours":
+            return
+        if owner == "taken":
+            raise PortTaken(f"127.0.0.1:{port} is answered by another process, not {list(h.argv)!r}")
+        if h.proc.poll() is not None:
+            out = ""
+            stream = getattr(h.proc, "stdout", None)
+            if stream is not None:
+                try:
+                    out = stream.read() or ""
+                except (OSError, ValueError):
+                    out = ""
+            raise ServerDidNotListen(
+                f"{list(h.argv)!r} exited (code {h.proc.returncode}) before listening on "
+                f"127.0.0.1:{port}: {out[-2000:]!r}")
+        if time.monotonic() > deadline:
+            raise ServerDidNotListen(f"{list(h.argv)!r} did not listen on 127.0.0.1:{port} "
+                                     f"within {timeout}s")
+        time.sleep(0.1)
+
+
+def start_server_on_free_port(argv_for: Any, *, boot_timeout: float, env_for: Any = None,
+                              attempts: int = 3, **kwargs: Any) -> tuple["ServerHandle", int]:
+    """Pick a free loopback port, :func:`start_server` ``argv_for(port)`` (with
+    ``env=env_for(port)`` when given), and wait until the server itself listens there.
+    A port another process took before the bind is retried on a fresh port, up to
+    ``attempts`` times; any other failure stops the server and raises. Returns
+    ``(handle, port)`` (BUG-0143)."""
+    last: PortTaken | None = None
+    for _ in range(attempts):
+        port = free_port()
+        kw = dict(kwargs)
+        if env_for is not None:
+            kw["env"] = env_for(port)
+        h = start_server(list(argv_for(port)), **kw)
+        try:
+            wait_until_listening(h, port, timeout=boot_timeout)
+            return h, port
+        except PortTaken as exc:
+            stop_server(h)
+            last = exc
+        except BaseException:
+            stop_server(h)
+            raise
+    assert last is not None
+    raise last
 
 
 def start_server(argv: Sequence[str], *, cwd: Any = None, env: dict[str, str] | None = None,

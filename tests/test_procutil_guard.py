@@ -43,9 +43,11 @@ ALLOWLIST: dict[str, tuple[int, str]] = {
            "started in its own session and its timeout kills the whole group through "
            "procutil.kill_process_group"),
     "tests/test_procutil.py": (
-        3, "the owner processes the owner-death tests SIGKILL and reap themselves, the "
-           "bystander `sleep` of the reused-pid identity test (it must NOT be ours), and a "
-           "direct run of the supervisor entry point with a wrong owner (it must refuse)"),
+        4, "the owner processes the owner-death tests SIGKILL and reap themselves, the "
+           "bystander `sleep` of the reused-pid identity test (it must NOT be ours), a "
+           "direct run of the supervisor entry point with a wrong owner (it must refuse), "
+           "and the caller-owned group `kill_process_group` is specified for (BUG-0144: a "
+           "supervised group races the count)"),
 }
 
 

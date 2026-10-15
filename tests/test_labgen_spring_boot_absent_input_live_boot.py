@@ -33,10 +33,8 @@ from __future__ import annotations
 
 import glob
 import shutil
-import socket
 import subprocess
 import tempfile
-import time
 import urllib.request
 from pathlib import Path
 
@@ -136,21 +134,11 @@ def booted_group(request, tmp_path_factory):
         built = procutil.run_bounded(["mvn", "-q", "-B", "package", "-DskipTests"], cwd=app,
                                timeout=BUILD_TIMEOUT_S)
         assert built.returncode == 0, built.stdout[-4000:] + built.stderr[-4000:]
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
-        server = procutil.start_server(["java", "-jar", "target/trackernest.jar", f"--server.port={port}",
-                                        "--server.address=127.0.0.1"],
-                                       cwd=app, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        server, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+            lambda port: ["java", "-jar", "target/trackernest.jar", f"--server.port={port}",
+                          "--server.address=127.0.0.1"],
+            boot_timeout=BOOT_TIMEOUT_S, cwd=app, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         proc = server.proc
-        deadline = time.monotonic() + BOOT_TIMEOUT_S
-        while True:
-            try:
-                socket.create_connection(("127.0.0.1", port), timeout=1).close()
-                break
-            except OSError:
-                assert time.monotonic() < deadline, "app did not boot"
-                time.sleep(0.25)
         procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield label, cells, f"http://127.0.0.1:{port}"
     finally:

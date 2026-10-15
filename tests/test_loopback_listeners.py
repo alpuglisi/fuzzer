@@ -80,7 +80,8 @@ def _callee(node: ast.Call) -> str:
     return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
 
 
-_PROCUTIL_LAUNCHERS = {"start_server", "astart_server", "run_bounded"}
+_PROCUTIL_LAUNCHERS = {"start_server", "astart_server", "run_bounded",
+                       "start_server_on_free_port"}  # BUG-0143: a launch too
 
 
 def _defines(tree: ast.AST) -> set[str]:
@@ -255,9 +256,11 @@ _WILDCARD_ANYWHERE = re.compile(r"://(\*|0\.0\.0\.0|\[::\])|^\*:\d|(^|[=\s])(0\.
 
 #: Launch sites that do not start a lab server (file -> (count, reason)). Exact counts.
 NON_SERVER_LAUNCHES = {
-    "fuzzlab/procutil.py": (2, "run_bounded / arun_bounded launch a forking tool (npm, go, mvn, "
+    "fuzzlab/procutil.py": (3, "run_bounded / arun_bounded launch a forking tool (npm, go, mvn, "
                                "composer, bundle, the corpus sync's VCS client, labctl.sh ps), "
-                               "not a server"),
+                               "not a server; start_server_on_free_port (BUG-0143) delegates "
+                               "to start_server, and each of its callers is checked at its "
+                               "own call"),
     "fuzzlab/web/runner.py": (1, "launcher jobs are fuzzlab CLI commands; their own listeners go "
                                  "through core.net.require_loopback (the listener guard above)"),
     "tests/test_procutil.py": (None, "process-tree tests (sleep, sh, python -c ...); its listener "
@@ -340,7 +343,7 @@ def _launch_findings(call: ast.Call, func: ast.AST | None, module: ast.Module) -
     and the enclosing function's assignments to a name it uses: ``env["HOST"] = ...``)."""
     helpers = {n.name: n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     argv = call.args[0] if call.args else None
-    env = next((k.value for k in call.keywords if k.arg == "env"), None)
+    env = next((k.value for k in call.keywords if k.arg in ("env", "env_for")), None)
     token_lists: list[list[str | None]] = []
     env_pairs: list[tuple[str, str | None]] = []
     names: set[str] = set()
@@ -391,7 +394,7 @@ def server_launch_problems(source: str, filename: str = "<mem>") -> list[str]:
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or launch_name(node, local_defs, aliases) not in (
-                "start_server", "astart_server"):
+                "start_server", "astart_server", "start_server_on_free_port"):
             continue
         func = node
         while func in parents and not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -531,7 +534,7 @@ def boot_check_problems(source: str, filename: str = "<mem>") -> list[str]:
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or launch_name(node, local_defs, aliases) not in (
-                "start_server", "astart_server"):
+                "start_server", "astart_server", "start_server_on_free_port"):
             continue
         func = node
         while func in parents and not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -558,6 +561,25 @@ def test_every_server_site_checks_loopback_right_after_boot():
             problems += boot_check_problems(path.read_text(encoding="utf-8"), rel)
     assert problems == [], ("a lab server site must call procutil.assert_loopback_only right "
                             "after boot (BUG-0130, PA-0130):\n" + "\n".join(problems))
+
+
+def test_a_free_port_launch_is_checked_like_any_other():
+    """BUG-0143 moved test sites to ``start_server_on_free_port``. Both BUG-0130 rules
+    must still see them: an unpinned argv lambda, a wildcard env, and a missing boot
+    check are each flagged, and a pinned, checked launch passes."""
+    unpinned = ("from fuzzlab import procutil\n"
+                "def boot():\n"
+                "    h, port = procutil.start_server_on_free_port(lambda port: ['node', 'app.js'],\n"
+                "        boot_timeout=5, env_for=lambda port: {'PORT': str(port)})\n"
+                "    procutil.assert_loopback_only(h)\n")
+    wildcard = unpinned.replace("{'PORT': str(port)}", "{'PORT': str(port), 'HOST': '0.0.0.0'}")
+    pinned = unpinned.replace("{'PORT': str(port)}", "{'PORT': str(port), 'HOST': '127.0.0.1'}")
+    unchecked = pinned.replace("    procutil.assert_loopback_only(h)\n", "")
+    assert server_launch_problems(unpinned) == ["<mem>:3 start_server_on_free_port"]
+    assert server_launch_problems(wildcard) == ["<mem>:3 start_server_on_free_port"]
+    assert server_launch_problems(pinned) == []
+    assert boot_check_problems(pinned) == []
+    assert boot_check_problems(unchecked) == ["<mem>:3 start_server_on_free_port"]
 
 
 @pytest.mark.parametrize("src", [

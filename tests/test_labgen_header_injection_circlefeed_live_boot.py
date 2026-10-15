@@ -271,25 +271,15 @@ def test_the_generated_controllers_own_header_call_cannot_be_spliced_through_a_r
         'header("Location: " . $next);\n'
         'echo "body\\n";\n'
     )
-    port = _find_free_port()
-    server = procutil.start_server(
-        [shutil.which("php"), "-S", f"127.0.0.1:{port}", str(script)],
+    server, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+        lambda port: [shutil.which("php"), "-S", f"127.0.0.1:{port}", str(script)],
+        boot_timeout=10.0,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     proc = server.proc
     try:
-        deadline = time.monotonic() + 10.0
-        connected = False
-        while time.monotonic() < deadline:
-            try:
-                with socket_module.create_connection(("127.0.0.1", port), timeout=0.5):
-                    connected = True
-                    break
-            except OSError:
-                time.sleep(0.1)
-        assert connected, "php -S never started listening"
         procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
 
         with socket_module.create_connection(("127.0.0.1", port), timeout=10) as sock:

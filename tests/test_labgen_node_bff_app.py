@@ -52,7 +52,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import subprocess
 import time
 import urllib.error
@@ -105,25 +104,6 @@ def _npm_registry_reachable(probe_dir: Path) -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return False
     return result.returncode == 0
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _wait_until_listening(port: int, timeout_s: float = 15.0) -> None:
-    deadline = time.monotonic() + timeout_s
-    last_exc: Exception | None = None
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return
-        except OSError as exc:
-            last_exc = exc
-            time.sleep(0.1)
-    raise AssertionError(f"node app.js never started listening on 127.0.0.1:{port}: {last_exc}")
 
 
 def _http_raw(method: str, port: int, path: str, body: dict | None = None) -> tuple[int, bytes, float]:
@@ -206,16 +186,14 @@ def npm_installed(app_dir: Path, tmp_path_factory: pytest.TempPathFactory) -> Pa
 def live_app(npm_installed: Path):
     """Boot the whole assembled app for real (`node app.js`), yield its
     base port, and terminate it on teardown."""
-    port = _free_port()
-    server = procutil.start_server(
-        ["node", "app.js"],
+    server, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+        lambda port: ["node", "app.js"], boot_timeout=15.0,
         cwd=npm_installed,
-        env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
+        env_for=lambda port: {**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     proc = server.proc
     try:
-        _wait_until_listening(port)
         procutil.assert_loopback_only(server)  # BUG-0130: checked after boot
         yield port
     finally:

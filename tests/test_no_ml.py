@@ -18,14 +18,13 @@ import json
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
 from fuzzlab import procutil
 from fuzzlab.core.store import Store
-from tests._browser import free_port, launch_browser_or_skip, require_modules
+from tests._browser import launch_browser_or_skip, require_modules
 from tests.test_auto_budget import _main
 
 REPO = Path(__file__).resolve().parent.parent
@@ -163,20 +162,13 @@ def test_ml_tab_and_run_page_render_without_ml_in_a_real_browser(seeded):
 
     from tests.test_web_pages_browser import _Page
     db, run_id, _ = seeded
-    port = free_port()
-    server_handle = procutil.start_server([sys.executable, str(CHILD), "serve", str(db), str(port), "127.0.0.1"],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                              env=_env(), cwd=str(REPO))
+    server_handle, port = procutil.start_server_on_free_port(  # BUG-0143: our own listener
+        lambda port: [sys.executable, str(CHILD), "serve", str(db), str(port), "127.0.0.1"],
+        boot_timeout=10.0, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=_env(), cwd=str(REPO))
     server = server_handle.proc
     try:
         assert server.stdout.readline().strip() == "ML_BLOCKED"
-        import urllib.request
-        for _ in range(100):
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1)
-                break
-            except OSError:
-                time.sleep(0.1)
         procutil.assert_loopback_only(server_handle)  # BUG-0130: checked after boot
         with sync_playwright() as pw:
             browser = launch_browser_or_skip(pw)

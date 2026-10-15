@@ -366,6 +366,11 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
         ) from exc
 
 
+#: BUG-0143: how many fresh ports a boot tries when another process takes its port
+#: between the pick and the server's bind.
+PORT_ATTEMPTS = 3
+
+
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -559,16 +564,24 @@ class DjangoLiveBootHarness:
 
         self._seed_db()
 
-        self._port = _find_free_port()
-        self._server = procutil.start_server(
-            [str(self._venv_python()), "manage.py", "runserver", f"127.0.0.1:{self._port}", "--noreload"],
-            cwd=self._app_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        self._proc = self._server.proc
-        self._wait_for_boot()
+        for attempt in range(PORT_ATTEMPTS):  # BUG-0143: a port taken before bind is retried
+            self._port = _find_free_port()
+            self._server = procutil.start_server(
+                [str(self._venv_python()), "manage.py", "runserver", f"127.0.0.1:{self._port}", "--noreload"],
+                cwd=self._app_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            self._proc = self._server.proc
+            try:
+                self._wait_for_boot()
+                break
+            except procutil.PortTaken:
+                server, self._server, self._proc = self._server, None, None
+                procutil.stop_server(server)
+                if attempt == PORT_ATTEMPTS - 1:
+                    raise
         procutil.assert_loopback_only(self._server)  # BUG-0130: never exposed
 
     def _wait_for_boot(self) -> None:
@@ -577,14 +590,20 @@ class DjangoLiveBootHarness:
         last_err: Exception | None = None
         while time.monotonic() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
+                if procutil.port_owner(self._server, self._port) == "taken":   # BUG-0143
+                    raise procutil.PortTaken(f"127.0.0.1:{self._port} was taken before the server bound it")
                 out = self._proc.stdout.read() if self._proc.stdout else ""
                 raise LiveBootError(f"manage.py runserver exited early (code {self._proc.returncode}):\n{out}")
-            try:
-                with socket.create_connection(("127.0.0.1", self._port), timeout=1.0):
-                    return
-            except OSError as exc:
-                last_err = exc
-                time.sleep(0.25)
+            # BUG-0143: the boot is complete only when this server's own process tree
+            # listens on the port; a bare connect also succeeds against whichever
+            # process holds it (another test's server under parallel runs).
+            owner = procutil.port_owner(self._server, self._port)
+            if owner == "ours":
+                return
+            if owner == "taken":
+                raise procutil.PortTaken(f"127.0.0.1:{self._port} is answered by another process")
+            last_err = OSError(f"nothing listens on 127.0.0.1:{self._port} yet")
+            time.sleep(0.25)
         raise LiveBootError(f"manage.py runserver did not accept connections within {BOOT_TIMEOUT_S}s: {last_err}")
 
     # -- HTTP ------------------------------------------------------------------
