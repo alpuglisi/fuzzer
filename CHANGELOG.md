@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (claude_juicelab_failures: a running record of the agent's failures)
+- **What:** `docs/claude_juicelab_failures.md` (new, append-only): every failure, wrong action and oversight by the AI agent during the Juice Shop work and before it (F-001..F-047), each with evidence, impact and status. CLAUDE.md now requires appending to it whenever a new one is found.
+- **Why:** the owner's request, to support a full investigation once the Juice Shop lab is complete. Writing it surfaced a regression the agent had misdiagnosed: Juice Shop's login SQLi, confirmed on 2026-10-14, is refused by the agent's own BUG-0118 gate in the 2026-10-15 baseline (F-017, F-018).
+
 ## 2026-10-15 (Juice Shop answer key reviewed against every challenge)
 - **What:** the Juice Shop ground truth was reviewed against all 116 challenges: 24 are injection-class, 18 were already covered, and 5 new positive cases are added (JUICE-0014..0018; 18 cases, 15 positive). The 92 exclusions and their reasons are in CC-LAB-0261.
 - **Why:** measure detection against what Juice Shop actually contains, not only what earlier runs happened to reach. The 5 new cases are unreachable today, and the score now shows that.

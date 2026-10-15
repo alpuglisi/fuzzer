@@ -166,6 +166,16 @@ substitute if the specified one is unavailable.
 - Status answers lead with the `report`. After a context compaction, compare progress
   with the goal before dispatching; a summary's task list is not authorisation.
 
+## The agent failure record (MANDATORY for AI agents)
+
+`docs/claude_juicelab_failures.md` records every failure, wrong action and oversight by
+the AI agent working in this repository. It is append-only. When you find something the
+agent got wrong, did badly or overlooked (a regression it caused, a wrong diagnosis, a
+broken rule, a lab-fitted design, a status that overstated progress), append an `F-NNN`
+entry **in the same turn**, with what / evidence / impact / status. Do not wait to be
+asked and do not soften earlier entries; correct one with a new entry. It supports the
+owner's investigation after the Juice Shop work.
+
 ## Canonical policy docs (the detail behind this summary)
 
 - `docs/components/README.md` — change-control policy + the CHANGELOG relationship + entry
