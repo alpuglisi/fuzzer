@@ -176,3 +176,15 @@ spelling, and for keyword heuristics:
   logout, delete or reset route. The scan's only other hit is `/channels/subscribers`
   (a plural noun on a read-only GET).
 - **No further bug** was found (BUG-0302..0305 unused).
+
+## Correction (2026-10-15, code review round 2, reviewer B)
+Two sentences above (in "What it caused to fail" and in the compensating controls) say
+that Lane A's live crawl pass asserts neither path reaches the store (design §5.6).
+**That assertion was not built** (CC-LAB-0300 records it under "Not built from the
+design"): the live test's Juice Shop crawl covers the login route only, where such an
+assertion would be vacuous. The real evidence is weaker: one exploratory full reveal
+crawl (~22 minutes, 2026-10-15) stored neither `/dataerasure` nor the change-password
+URL. So the residual is larger than stated: **an operator's full crawl that reaches
+`/dataerasure` would import its server-rendered form, and a fuzz run would send it**,
+until the rule is fixed (CC-CORE-0301). The other compensating controls listed above
+stand.

@@ -27,8 +27,10 @@ Newest first.
   pinned gap and the tables. The requirement lines are under CC-CRAWL-0300 and
   CC-FUZZ-0300.
 - Risk: medium until fixed: an imported change-password URL, or a crawled erasure form,
-  would be fuzzed. Mitigated meanwhile by the compensating controls stated in BUG-0301,
-  and by Lane A's live assertion that neither path reaches the store (design §5.6). The
+  would be fuzzed. Mitigated meanwhile by the compensating controls stated in BUG-0301
+  (not by a live assertion: the design §5.6 one was not built, see BUG-0301's
+  correction; one exploratory full crawl stored neither path). Uncovered residual: a full
+  crawl that reaches `/dataerasure` would import and fuzz its server-rendered form. The
   tests carry no risk. The strict xfails turn into hard failures (XPASS(strict)) when
   the rule is fixed. That is intended: per MULTI_AGENT §6 the fixing lane deletes them in
   its own merge, and the stale-disposition check then asks it to drop the two
@@ -67,7 +69,8 @@ Newest first.
     LISTEN socket of this process's network namespace, through the existing
     `_listen_table` parser (PA-0087: no second parser); `netns_of(pid)` / `host_netns()`
     expose the existing namespace readers (added in code review A1: the exposure check
-    compares each container's namespace with the host's). ~20 lines. FR-CORE-300.
+    compares each container's namespace with the host's; BUG-0310, PA-0310(1)). ~20
+    lines. FR-CORE-300.
   - `tests/test_procutil_guard.py`: `FORKING_TOOLS` gains `bash`, `sh`, `docker`,
     `podman`, `docker-compose`, `podman-compose`, with six synthetic offenders
     (PA-0034(2)). The sweep (the guard's own AST scan with the new list) found one site,

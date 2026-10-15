@@ -25,7 +25,10 @@ changed, and the reason. Reference the commit hash where useful.
   exposure check combines both inspect port sources and fails closed on every engine
   error; the bootstrap targets the port the running project publishes; a source-disproven
   negative (bWAPP's error echo) became a positive; the live test's level checks and status
-  filter were wrong and are replaced.
+  filter were wrong and are replaced. Bug protocol: BUG-0310/PA-0310 (safety checks over
+  an engine's state are allowlists, and "no answer" is a failure) and BUG-0311/PA-0311
+  (negatives proven on every output path; live checks shown able to fail).
+
 ## 2026-10-15 (Lane B: BUG-0300 and BUG-0301 recorded and pinned; PA-0300 base-URL registry, PA-0301 destructive-spelling sweep)
 - **Why:** adopting bWAPP (served under `/bWAPP/`) and Juice Shop as permanent fixtures
   surfaced two defects in files locked by another session: ground-truth points double an

@@ -1743,3 +1743,38 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      the request/method gate, the body gate, the form gate or the SPA form gate,
      whichever must stop it. A residual's verdict is pinned to None, so the row is
      revisited when a rule starts refusing it. (from BUG-0301)
+
+- **PA-0310** — Strengthens `PA-0025`, `PA-0059(1)` and `PA-0130` for container
+  engines, after BUG-0310. The external labs' loopback checks refused only docker's
+  `host` network mode, so podman's `ns:`/`slirp4netns`/`pasta` modes and an external
+  network named `host` passed. They also read an engine error as "nothing running /
+  nothing exposed".
+  1. **A safety check over an external system's state is an allowlist** of the states
+     known to be safe, not a list of known-bad ones. It is backed where possible by an
+     engine-agnostic fact (for containers: compare the container's network namespace
+     with the host's), whatever name the engine gives the mode.
+  2. **Every inability to determine the state is a failure**, in the shell and in the
+     API. That covers an engine error, a timeout, a missing engine, empty output from a
+     failed query and an unexpected result shape. `$(cmd 2>/dev/null)` alone is never
+     the answer: its exit status is checked.
+  3. **The tests use offenders the check's own list was not written from**: another
+     engine's vocabulary, a failing or raising engine, a zero-container answer. Each
+     fail-closed branch is mutation-checked.
+  4. **The PA-0002 sweep covers every safety check over that system's state**, shell and
+     Python, and records any it could not fix in this change. (from BUG-0310)
+
+- **PA-0311** — Strengthens `PA-0013` and carries `PA-0117(1)` to ground-truth labels,
+  after BUG-0311. A bWAPP negative was "proven" from the escaped display path while the
+  DB error path echoed the value raw. Two live checks could not detect the violation
+  they tested for (a session cookie that is never updated; POST bodies in an access
+  log), and a status filter listed the values it excluded.
+  1. **A ground-truth negative is proven on every path the input reaches output by**,
+     error handlers included (DB errors, exceptions, warnings). It is backed by a live
+     probe that drives those paths, and its note cites each path checked.
+  2. **A live or integration assertion of a premise names the observation that would
+     differ if the premise were false, and confirms the observed channel can carry
+     it.** An assertion on a channel that cannot carry the violation is replaced by one
+     on a channel that can, or by a stated structural argument plus a check of that
+     argument's own premise.
+  3. **A status or enum filter names the value it means**, imported from its defining
+     module (`PA-0001`), never a list of values to exclude. (from BUG-0311)

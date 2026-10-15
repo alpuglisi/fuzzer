@@ -143,6 +143,15 @@ Component code: **LAB**. Entry format and required fields: see
     JUICE-0005 pin ties its OOB tokens to the `imageUrl` sends.
   - B11: the crawler's Juice Shop `/redirect?to=` gap is recorded as a stated residual in
     FR-LAB-303 and reported to the operator (crawler code is locked here).
+  - Bug protocol (review round 2, reviewer B N1): the round-1 code defects are recorded
+    as **BUG-0310** (A1-A5, the fail-open exposure checks; PA-0310) and **BUG-0311**
+    (B1-B3, a wrong negative and live checks on unestablished premises; PA-0311), each
+    with an ERROR_LOG line. The other round-1 findings were hardening or test gaps that
+    caused no wrong result (A6-A18, B7-B14). Follow-ups from the two PA-0002 sweeps:
+    `lab/labctl.sh`'s existing `_force_clean`/`down` path still trusts `podman ps` output
+    on an engine error (PA-0310(2)); the generated labs' negatives were not re-swept for
+    error-path echoes (PA-0311(1)); a repo-wide guard for hand-written oracle-status
+    strings (PA-0311(3)) would also cover locked files.
 - Impact: LAB, plus a read-only use of CORE (`core.net`, `core.http` headers,
   `core.credentials`, the new `procutil.host_listen_sockets`, CC-CORE-0300). Existing
   `labctl.sh` subcommands unchanged (tested). Consumers: `harness.multitarget`,

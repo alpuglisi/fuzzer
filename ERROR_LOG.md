@@ -18,6 +18,35 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — External lab fixtures: an external-lab negative and three live checks rested on premises nobody had observed (fixed, BUG-0311 / PA-0311, CC-LAB-0300)
+- **Symptom:** code review found that BWAPP-0047 (sqli_17 `User-Agent`, reflected XSS)
+  was labelled a negative although a quote-breaking value comes back raw in the MySQL
+  error. Of the live test's two security-level checks, one could not fail and one failed
+  on a harmless GET. The "checked candidate" filter also counted undecided statuses.
+- **Root cause:** a negative proven only on the display path, never the error path, and
+  live assertions on channels that cannot carry the violation they test for. The session
+  adopts no response cookies, and access logs hold no POST bodies. The status filter was
+  hand-written instead of using `oracle_status.CHECKED`.
+- **Remediation:** BWAPP-0047 is now a positive, plus BWAPP-0057/0058 (the same echo),
+  all verified live. The level checks became "no probe of the level parameters" plus a
+  stated structural reason. The filter uses `CHECKED` (commit e74fba8). Full RCA in
+  `docs/bugs/BUG-0311-*`, rule PA-0311.
+- **Status:** Fixed
+
+## 2026-10-15 — External lab fixtures: the loopback exposure checks failed open (fixed, BUG-0310 / PA-0310, CC-LAB-0300, CC-CORE-0300)
+- **Symptom:** code review found that the pre-flight and post-boot checks passed podman's
+  `ns:/proc/1/ns/net`, `slirp4netns:allow_host_loopback=true` and `pasta`, and an
+  external network named `host`. Engine errors read as "nothing left" (`down` exit 0)
+  or "not running", and a non-loopback binding seen only in `NetworkSettings.Ports` was
+  never judged.
+- **Root cause:** the checks were a denylist of docker's bad modes, and "the engine
+  could not answer" defaulted to "safe".
+- **Remediation:** allowlists in the pre-flight and the post-check, a comparison of each
+  container's network namespace with the host's, both inspect port sources combined,
+  and every engine error treated as a failure (commit e74fba8). Full RCA in
+  `docs/bugs/BUG-0310-*`, rule PA-0310.
+- **Status:** Fixed
+
 ## 2026-10-15 — External lab fixtures: build-time failures met while making bWAPP / Juice Shop permanent (fixed, CC-LAB-0300; environment)
 - **Symptom:** (1) no Docker daemon in the cloud build container (`docker info`: no
   `/var/run/docker.sock`); (2) the first bWAPP image prototype served every page as binary
