@@ -44,6 +44,17 @@ Format per entry:
 - **Status:** Fixed (2)-(5) in CC-LAB-0300; (1) Environment. None was a defect in
   committed code (no BUG report); the locked-file defects found alongside are BUG-0300
   and BUG-0301.
+## 2026-10-15 — core/urls: the destructive rule misses Juice Shop's GET password change and `/dataerasure` (open, deferred, BUG-0301/PA-0301)
+- **Symptom:** the PA-0114 enumeration of Juice Shop's routes (before adopting it as a permanent fixture) found `destructive_reason` and `transaction_reason` both None for `GET /rest/user/change-password?current=a&new=b&repeat=b` (changes the bearer's password; `current` is optional) and `/dataerasure` (GET and POST; files an erasure request and clears the token cookie). The send gate lets both through, and the real `dataErasureForm.hbs` form passes `form_skip_reason`, so the POST would be imported and fuzzed. Latent: neither is captured by a crawl today.
+- **Root cause:** the rule matches whole tokens and listed pairs only, and is validated only against the spellings it was written for: `dataerasure` is one token (`erasure` is not `erase`), and `(change, password)` is not a listed pair. A recurrence of BUG-0114's class.
+- **Remediation:** none to the rule yet: `fuzzlab/core/urls.py` is locked by another session, so the corrective action is deferred to its owner (CC-CORE-0301). Pinned by strict xfails, a computed Juice Shop / bWAPP PA-0114 table, and the PA-0301 compound-spelling scan over every lab's routes (`tests/test_destructive_routes_external_labs.py`). `docs/bugs/BUG-0301-destructive-rule-missed-juice-password-change-and-data-erasure.md`.
+- **Status:** Open (deferred to the `core/urls.py` lock owner; compensating controls stated in BUG-0301)
+
+## 2026-10-15 — Harness: ground-truth points double an operator base URL's sub-path (open, deferred, BUG-0300/PA-0300)
+- **Symptom:** `points_from_ground_truth(gt, "http://127.0.0.1:8092/bWAPP/")` with a ground-truth url `/bWAPP/sqli_1.php` builds `http://127.0.0.1:8092/bWAPP/bWAPP/sqli_1.php` (every branch: server, DOM and stored-XSS points); greybox's `points_with_classes` inherits it and keys its class lookup the same way. A ground-truth run against a sub-path base would probe 404s and score every case as missed.
+- **Root cause:** the join is `base_url.rstrip("/") + path`, treating a ground-truth url as app-relative, while findings (and so the scored keys) are full request paths (`to_path`). The convention was never written down, every generated lab serves at `/`, and BUG-0113's sweep cleared this function "by contract" without a sub-path test: PA-0113(3) had no enforcement.
+- **Remediation:** none to the code yet: `fuzzlab/harness/auto.py` and `fuzzlab/greybox/run.py` are locked by another session, so the corrective action is deferred to their owner (CC-FUZZ-0300). Operators pass the origin as `--base-url` for ground-truth runs meanwhile. Pinned by strict xfails, and PA-0300's registry (`tests/test_base_url_subpath_registry.py`) now lists every function that takes an operator base URL with its sub-path test or its bug. `docs/bugs/BUG-0300-ground-truth-points-doubled-an-operator-sub-path.md`.
+- **Status:** Open (deferred to the `harness/auto.py` lock owner)
 
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
