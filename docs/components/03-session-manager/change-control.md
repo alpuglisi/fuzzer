@@ -3,6 +3,69 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0025 — Find the login page by what every stack shares (BUG-0148, FR-SESS-21) (2026-10-15)
+- Change: built to design v2 (`b148/design-v2.md`, which answers reviews A and B of
+  `design.md`; the pre-change gate), sections 0-11.
+  - `session/detect.py`: `login_path_match(target, *, mode)`, the one SP-16 owner:
+    ``logout`` (`looks_like_login_url`'s rule, now its thin wrapper) and ``candidate``
+    (rank 1 whole segment or ``session(s)/new``; rank 2 final token or final login
+    pair; no prefix/suffix rule). Public vocabulary `LOGIN_WORDS`, `LOGIN_PAIRS`,
+    `LOGIN_ENDPOINT_TOKENS`, `AFFORDANCE_FILLER`, `USERNAME_HINT`;
+    `login_affordance(text, aria)`; `login_links(html, page_url)` for the requests side.
+  - `session/browserlogin.py`: `LOGIN_PATH_TOKENS` / `LOGIN_PATH_PAIRS` are detect's
+    sets; `_login_routes` replaced by `_Discovery` (affordances read with
+    `AFFORDANCES_JS` + `spa.LABELS_JS`, form submitters excluded; links visited with
+    `navguard.navigate`; other controls clicked with `spa.click_vetted` under
+    `guard_page(window=LoginGate.window_refusal, ws_hold=LoginGate.ws_hold)` over
+    `spa.window_request_refusal`; captured navigations visited next; restore before
+    later clicks; one level of an account menu; per-candidate errors caught; at most
+    `MAX_ROUTES` distinct candidates in the order affordances, rank 1, rank 2;
+    `diagnosis()`); `_pick_form` refuses a form whose password control is not visible
+    (`is_visible` first, errors caught) and notes an identifier-first form;
+    `login_form_refusal` drops `LOGIN_ROUTE_OVERRIDES` (`new`, `users`, `account`,
+    `admin`) from a route or action that names a login (`login_named`; each location
+    on its own) and a checkbox's hidden companion from the controls the gates see;
+    `LoginGate.request_refusal` aborts every non-GET/HEAD request before the window,
+    counted and named (`prewindow_writes`); `LoginObservation.aborted_writes`.
+  - `session/manager.py`: `_discover_login_form` visits the base page's
+    `detect.login_links` (at most `MAX_LINKED_LOGINS`, each passing
+    `_navigation_ok`) before the fixed paths; `_browser_login_state` logs aborted
+    pre-window writes.
+- Impact (other components / project): SESS only in code. SP-16's callers swept
+  (`grep` of `looks_like_login_url`, `redirect_is_logout`, `_LOGIN_` over `fuzzlab/` and
+  `tests/`): `redirect_is_logout` and `probesender.py:120` keep the identical logout
+  rule (tested over a corpus); `browserlogin` was the only importer of `_LOGIN_SEGMENTS`
+  and `_USERNAME_HINT`. Uses, without editing, `spa.LABELS_JS`, `click_vetted`,
+  `window_request_refusal`, `label_refusal`, `submitter_glyph`, `FORMS_JS` and
+  `navguard.guard_page(window=, ws_hold=)` / `navigate` (CRAWL's files, owned by a
+  concurrent lane). No store, schema or CLI change. PA-0152 consumers of the changed
+  contracts: `LOGIN_PATH_TOKENS` (`account_endpoint_reason`; same set, now derived),
+  `login_form_refusal` (`_pick_form` only), `LoginGate.request_refusal` (its route
+  hook only).
+- Risk (level; mitigation or accepted-risk justification): medium. (1) Clicking an
+  affordance could run an app action: mitigated by the click's reveal window (every
+  navigation captured, every write and word-refused GET aborted, WebSocket messages
+  held) and the pre-window rule (every write aborted from launch to the first fill),
+  both tested on a page and a click that POST. (2) A rank-2 decoy page could get the
+  credentials: rank 2 is tried only after every affordance and rank-1 candidate
+  (tested with a decoy linked first). (3) The gate overrides could accept a non-login
+  form: only for a location that names a login, and only the four words; labels,
+  control names, password count/shape and credential-change detection keep every rule
+  (tested). (4) The requests side visits more pages: each passes `_navigation_ok`
+  first and the hop rules as before.
+- Deliverables:
+  - [x] section 0 measurements in real Chromium, recorded in BUG-0148 — done
+  - [x] code (detect, browserlogin, manager) — done
+  - [x] tests: `tests/test_login_discovery.py`, `tests/_framework_login_fixture.py`
+    (framework documentation defaults only); two assertions of
+    `tests/test_session_browser_login.py` updated to the pre-window rule — done
+  - [x] FR-SESS-21 added and FR-SESS-19 edited in place; SP-16 row; ARCHITECTURE;
+    BUG-0148; PA-0154 (PA-0122(4) marked superseded); ERROR_LOG; CHANGELOG — done
+- Effectiveness (assessed 2026-10-15): the framework matrix run against the base tree
+  and the fix: browser login 7 of 12 shapes failed before, 0 after; requests side 4 of
+  7 not found before, 0 after (BUG-0148, "Before and after"). Verification counts are
+  in the lane report. The held-out lab is not re-run by this lane (blind).
+
 ### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
 - Change: `session/browserlogin.py` `_drive` loads the base page and each login route
   through `navguard.navigate` (commit, then a bounded load cut short after a refused

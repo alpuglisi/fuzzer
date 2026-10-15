@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0148: find the login page by what every stack shares)
+- **What:** the browser login finds a login page by the page's own "Log in" / "Sign in" link or button first (links visited, other controls clicked in the reveal window, one level of an account menu), then by path candidates ranked by one SP-16 owner (`detect.login_path_match`); hidden login forms are refused; the gates accept Rails, Devise, ASP.NET Identity and Django admin default login pages; every write before the login window is aborted and named; the requests-side discovery follows the base page's login links; failures list every candidate. PA-0154; CC-SESS-0025; FR-SESS-21; SP-16 updated.
+- **Why:** on the blind held-out lab the login was never found, so the authenticated crawl never started. The discovery rule was a word list fitted to the development labs (F-013, F-049).
+
 ## 2026-10-15 (D68: the owner drops the BUG-0118 SQLi send gate)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D68: the SQLi send gate (branch `bug-0118-v3`) is not merged. `docs/claude_juicelab_failures.md` gains F-051 (a ledger re-registration that tripped the progress guard's bug-chain trigger).
 - **Why:** the owner's decision. The gate refused Juice Shop's login SQLi (F-017).

@@ -157,10 +157,14 @@ def test_only_a_login_shaped_form_with_no_account_word_is_used(form, route, expe
 
 
 def test_the_request_side_gate_needs_the_window():
-    """Since A-S1 the gate is on every write in the window, password or not."""
+    """Since A-S1 the gate is on every write in the window, password or not. Since
+    BUG-0148 (design section 5) every write **before** the window is aborted too, and
+    named by host and path; a GET is not."""
     gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))
     body = json.dumps({"email": "a", "password": "s3cret"}).encode()
-    assert gate.request_refusal("POST", "http://h/api/Users", {}, body) is None  # closed
+    assert gate.request_refusal("POST", "http://h/api/Users?x=1", {}, body)  # pre-window
+    assert gate.request_refusal("GET", "http://h/api/Users", {}, None) is None
+    assert gate.prewindow_writes == ["POST h/api/Users"]                     # no query
     gate.window_open = True
     assert gate.request_refusal("POST", "http://h/api/Users", {}, b"{}")
     assert gate.request_refusal("POST", "http://h/rest/user/login", {}, body) is None
@@ -708,11 +712,12 @@ class _FakeApi:
 
 def test_every_write_to_an_account_endpoint_is_refused_in_the_window():
     """A-S1: whatever the body (a hashed password, nothing recognisable), a write to an
-    account endpoint in the window is refused; a read, or a write before the window,
-    is not this gate's business."""
+    account endpoint in the window is refused; a read is not this gate's business. A
+    write before the window is refused whatever its endpoint (BUG-0148, section 5)."""
     gate = LoginGate(_Dest("http://h"), "http://h/", forms=secret_forms("s3cret"))
     digest = json.dumps({"password": hashlib.sha256(b"s3cret").hexdigest()}).encode()
-    assert gate.request_refusal("POST", "http://h/api/Users", {}, digest) is None
+    assert gate.request_refusal("POST", "http://h/api/Users", {}, digest) == \
+        "a write before the login window"
     gate.window_open = True
     for method in ("POST", "PUT", "PATCH", "DELETE"):
         assert gate.request_refusal(method, "http://h/api/Users", {}, digest), method

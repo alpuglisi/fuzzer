@@ -875,6 +875,11 @@ class SessionManager:
             raise SessionAuthError(                    # the route refused it already
                 f"refusing {identity}@{host}'s browser login: its request went to "
                 f"{canonical_origin(obs.login_url)}")
+        if obs.aborted_writes:
+            (self._log or _LOG).info(
+                f"browser login for {identity}@{host}: aborted "
+                f"{len(obs.aborted_writes)} write(s) before the login window "
+                f"({', '.join(obs.aborted_writes[:8])}; BUG-0148)")
         if not 200 <= obs.status < 300:
             raise SessionAuthError(
                 f"login for {identity}@{host} was rejected: the app's login request "
@@ -988,7 +993,10 @@ class SessionManager:
 
     def _discover_login_form(self, fetcher: Fetcher, base_url: str, *,
                              seen: set[str] | None = None):
-        """Look for a login form from the base URL and a few common login paths.
+        """Look for a login form from the base URL, then from what the base page links
+        to as its login (BUG-0148: its "Log in" / "Sign in" links, then links whose path
+        is a whole login segment, `detect.login_links`, at most `MAX_LINKED_LOGINS`, each
+        first passing `_navigation_ok`), then a few common login paths (the fallback).
         Returns ``(form, login_page_url, challenge, floor_https)``; ``challenge`` is
         ``"basic"`` when the base URL answered 401 with a Basic ``WWW-Authenticate`` (no
         form needed); ``floor_https`` is True once the base URL or any hop visited was
@@ -997,17 +1005,24 @@ class SessionManager:
         Redirects are followed **by hand** (`_navigate`, BUG-0097): every hop is
         authorised against the operator's input before it is fetched, so neither a
         request nor the page's trust can leave the approved origins."""
-        candidates = [base_url] + [urljoin(base_url, p) for p in
-                                   ("login", "login.php", "signin", "users/login")]
+        fixed = [urljoin(base_url, p) for p in
+                 ("login", "login.php", "signin", "users/login")]
         challenge = None
         floor = urlparse(base_url).scheme.lower() == "https"
-        for url in candidates:
+        queue, tried = [base_url], set()
+        while queue:
+            url = queue.pop(0)
+            if url in tried:
+                continue
+            tried.add(url)
             try:
                 resp, page, page_floor = self._navigate(fetcher, url, base_url, floor,
                                                         seen=seen)
             except SessionAuthError:
                 raise                                   # an unapproved hop: loud
             except Exception:  # noqa: BLE001 - a bad candidate URL is not fatal
+                if url == base_url:
+                    queue += fixed
                 continue
             if url == base_url and resp.status == 401:
                 www = {k.lower(): v for k, v in resp.headers.items()}.get(
@@ -1017,6 +1032,10 @@ class SessionManager:
             form = detect.find_login_form(resp.text, page)
             if form is not None:
                 return form, page, challenge, page_floor
+            if url == base_url:
+                linked = [u for u in detect.login_links(resp.text, page)
+                          if self._navigation_ok(u, base_url, page_floor)]
+                queue += linked[:MAX_LINKED_LOGINS] + fixed
         return None, base_url, challenge, floor
 
     def _navigate(self, fetcher: Fetcher, url: str, base_url: str, floor_https: bool,
@@ -1233,6 +1252,9 @@ def distinctness_problem(new: SessionState, other: SessionState) -> str | None:
 
 #: The most redirects login discovery follows from one candidate URL (BUG-0097).
 MAX_LOGIN_HOPS = 5
+#: At most this many login pages the base page links to are visited by the requests-side
+#: discovery before its fixed fallback paths (BUG-0148).
+MAX_LINKED_LOGINS = 5
 
 
 #: A cookie value at least this long is matched by containment in `_carries` (T2).

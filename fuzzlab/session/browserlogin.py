@@ -31,9 +31,15 @@ How (Revision 2 of the reviewed design; every bound is explicit):
   control and one user field (`store_adapter.login_shaped`), no account word on the
   route, button labels, action or control names (`ACCOUNT_WORDS`), not a
   credential-change form (`store_adapter.credential_change_reason`), and the crawler's
-  SPA form gate (`spa.form_refusal`). Forms are read with `spa.FORMS_JS` on the base
-  page, then on SPA routes (from the page's own scripts and links) whose last segment
-  is a login word (`detect._LOGIN_SEGMENTS`);
+  SPA form gate (`spa.form_refusal`); a standard login page's route or action word
+  (`LOGIN_ROUTE_OVERRIDES`) does not refuse it when that route or action names a login
+  (BUG-0148). Forms are read with `spa.FORMS_JS` on the base page (a form whose password
+  control is not visible is refused), then (BUG-0148, `_Discovery`) on what the page's
+  own login affordances lead to -- "Log in" / "Sign in" links visited, other such
+  controls clicked in the reveal window, one level of an account menu opened -- then on
+  path candidates by rank (`detect.login_path_match`), at most `MAX_ROUTES`;
+* **before the window** every write (any method but GET and HEAD) is aborted, counted
+  and named in the diagnosis (`LoginGate.request_refusal`, BUG-0148);
 * **one click** through `spa.click_vetted` (covered -> Escape -> dispatch; labels read
   again), never retried within an attempt;
 * **Playwright's API log is off**: the driver is started without ``DEBUG`` /
@@ -59,6 +65,7 @@ from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from fuzzlab.core.redaction import name_tokens
 from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, url_key
+from fuzzlab.session.detect import LOGIN_ENDPOINT_TOKENS, LOGIN_PAIRS
 
 #: The whole browser login (launch to close), joined with this deadline.
 LOGIN_DEADLINE_S = 120.0
@@ -69,9 +76,19 @@ CLEANUP_S = 30.0
 WAIT_LOGIN_MS = 10000
 #: How long the app may keep requesting after the login answer (bounded settle).
 SETTLE_MS = 5000
-#: At most this many login routes are visited, and probe candidates kept.
+#: At most this many distinct login candidates are tried after the base page
+#: (affordance links and clicks, then path candidates by rank; BUG-0148), and probe
+#: candidates kept.
 MAX_ROUTES = 5
 MAX_PROBES = 8
+#: At most this many disclosure controls (an account menu) are opened, one level deep.
+MAX_DISCLOSURES = 2
+#: At most this many elements are read as possible affordances on one page.
+MAX_AFFORDANCES = 400
+#: An affordance click's actionability probe is bounded by this (a hidden one raises).
+CLICK_MS = 3000
+#: At most this many aborted pre-window writes are named in a diagnosis.
+MAX_NAMED_WRITES = 8
 #: The login response body is read up to this many bytes.
 MAX_BODY = 1 << 20
 
@@ -91,9 +108,16 @@ ACCOUNT_PATH_TOKENS = frozenset({"register", "registration", "signup", "password
                                  "passwd", "reset", "change"})
 #: ... and collections of accounts, refused unless a login token is in the path too.
 ACCOUNT_COLLECTIONS = frozenset({"user", "users", "account", "accounts"})
-LOGIN_PATH_TOKENS = frozenset({"login", "signin", "logon", "session", "sessions", "auth",
-                               "authenticate", "authentication", "token", "tokens"})
-LOGIN_PATH_PAIRS = frozenset({("sign", "in"), ("log", "in"), ("log", "on")})
+#: The login vocabulary is SP-16's (`session.detect`), never a copy (BUG-0148, PA-0154(c)).
+LOGIN_PATH_TOKENS = LOGIN_ENDPOINT_TOKENS
+LOGIN_PATH_PAIRS = LOGIN_PAIRS
+#: Words a standard framework login page has on its route or form action that the form
+#: gates otherwise refuse (BUG-0148): Rails ``session/new`` (``new``), Devise
+#: ``users/sign_in`` (``users``), ASP.NET Identity ``Identity/Account/Login``
+#: (``account``), Django ``admin/login`` (``admin``). Dropped from the route and the
+#: action, for the gates only, when either has a login token or pair
+#: (`login_named`). Button labels, control names and hidden field names keep every rule.
+LOGIN_ROUTE_OVERRIDES = frozenset({"new", "users", "account", "admin"})
 
 
 class BrowserLoginError(RuntimeError):
@@ -115,6 +139,8 @@ class LoginObservation:
     probes: list[str] = field(repr=False)
     page_url: str = ""
     floor_https: bool = False
+    #: writes aborted before the login window, ``METHOD host/path`` (BUG-0148)
+    aborted_writes: list[str] = field(default_factory=list)
 
 
 # --- the password detector (identification only) -------------------------------------
@@ -178,10 +204,58 @@ def account_word_reason(form: dict, route: str) -> str | None:
     return None
 
 
+def login_named(text: str) -> bool:
+    """A path (a route, or a URL's path) has a login token or pair (`LOGIN_PATH_TOKENS`,
+    `LOGIN_PATH_PAIRS`), by whole token: the test `account_endpoint_reason` uses."""
+    tokens = [t.lower() for t in name_tokens(unquote(text or ""))]
+    return bool(set(tokens) & LOGIN_PATH_TOKENS
+                or set(zip(tokens, tokens[1:])) & LOGIN_PATH_PAIRS)
+
+
+def _drop_overrides(path: str) -> str:
+    """``path`` as its tokens, `LOGIN_ROUTE_OVERRIDES` removed (for the gates only)."""
+    return "/".join(t for t in name_tokens(unquote(path or ""))
+                    if t.lower() not in LOGIN_ROUTE_OVERRIDES)
+
+
+def _gated_route_and_action(form: dict, route: str) -> tuple[dict, str]:
+    """BUG-0148 (design section 2): the gates see the route without
+    `LOGIN_ROUTE_OVERRIDES` when the route names a login (`login_named`), and the form
+    action without them when the action's path names a login; the action keeps its
+    origin and query (its destructive and transaction rules still see them). Each
+    location is judged on its own: a login route whose form posts to ``/users/new`` is
+    still refused for the action's ``new``."""
+    from urllib.parse import urlunsplit
+    action = form.get("action") or ""
+    apath = urlsplit(action).path
+    gated = form
+    if action and login_named(apath):
+        gated = dict(form)
+        gated["action"] = urlunsplit(urlsplit(action)._replace(
+            path="/" + _drop_overrides(apath)))
+    return gated, (_drop_overrides(route) if login_named(route) else route)
+
+
+def _without_checkbox_companions(form: dict) -> dict:
+    """``form`` for the gates without each hidden control that has the name of a
+    checkbox in the same form: the checkbox's unchecked value, which Rails' ``check_box``
+    (Devise's ``user[remember_me]``) and ASP.NET's tag helper (``Input.RememberMe``)
+    emit, not an object selector (BUG-0148, found by the framework matrix)."""
+    controls = list(form.get("controls") or [])
+    boxes = {n for n, k in controls if k == "checkbox" and n}
+    kept = [(n, k) for n, k in controls if not (k == "hidden" and n in boxes)]
+    if len(kept) == len(controls):
+        return form
+    return {**form, "controls": kept}
+
+
 def login_form_refusal(form: dict, route: str) -> str | None:
-    """Why this rendered form is not the login form to use, or None (FR-SESS-19)."""
+    """Why this rendered form is not the login form to use, or None (FR-SESS-19). A
+    standard login page's route or action word (`LOGIN_ROUTE_OVERRIDES`) does not
+    refuse it when the route or action names a login (BUG-0148)."""
     from fuzzlab.tools.spa import form_refusal, normalise_route
     from fuzzlab.tools.store_adapter import credential_change_reason, login_shaped
+    form, route = _gated_route_and_action(_without_checkbox_companions(form), route)
     controls = [(n, k) for n, k in form.get("controls") or []]
     passwords = [n for n, k in controls if k == "password"]
     if len(passwords) != 1:
@@ -248,6 +322,16 @@ class LoginGate:
         self.scripts = 0
         self.login: dict | None = None
         self.probes: list[str] = []
+        #: BUG-0148 (design section 5): every write aborted before the window, as
+        #: ``METHOD host/path`` (no query), each once, in order
+        self.prewindow_writes: list[str] = []
+        self.prewindow_write_count = 0
+        #: an affordance click is in progress (its reveal window, design section 3)
+        self.clicking = False
+        #: navigations a click triggered (captured, never followed; visited later)
+        self.captured: list[str] = []
+        #: hosts an affordance click tried to reach outside the login scope
+        self.click_out_of_scope: list[str] = []
 
     def in_scope(self, url: str) -> bool:
         if self.cancelled.is_set():
@@ -271,15 +355,58 @@ class LoginGate:
                              + (" (in the login window)" if self.window_open else ""))
         if self.window_open:
             self.window_refusals += 1
+        if self.clicking and _host(url) not in self.click_out_of_scope:
+            self.click_out_of_scope.append(_host(url))
+
+    def note_prewindow_write(self, method: str, url: str) -> None:
+        """An aborted write before the window: counted, and named by host and path."""
+        self.prewindow_write_count += 1
+        parts = urlsplit(url or "")
+        name = f"{(method or '?').upper()} {parts.hostname or '?'}{parts.path or '/'}"
+        if name not in self.prewindow_writes:
+            self.prewindow_writes.append(name)
+
+    def window_refusal(self, method: str, url: str, navigation: bool) -> str | None:
+        """The route's ``window`` hook (design section 3): while an affordance click is
+        in progress (`clicking`), the crawler's reveal-window rule
+        (`spa.window_request_refusal`) aborts every navigation -- a GET one's target is
+        captured, to be visited through `navguard.navigate` and the gates -- every write
+        and every word-refused GET. Outside a click it lets everything through (the
+        pre-window rule of `request_refusal` still applies)."""
+        from fuzzlab.tools.spa import window_request_refusal
+        if not self.clicking:
+            return None
+        why = window_request_refusal(method, url, navigation)
+        if why is None:
+            return None
+        method = (method or "").upper()
+        if method not in ("GET", "HEAD"):
+            self.note_prewindow_write(method, url)
+        elif navigation and url not in self.captured:
+            self.captured.append(url)
+        return why
+
+    def ws_hold(self) -> bool:
+        """WebSocket messages from the page are held while an affordance click is in
+        progress (the reveal window's W3 rule)."""
+        return self.clicking
 
     def request_refusal(self, method, url, headers, body) -> str | None:
         """Before a request (or a body-keeping redirect hop) is sent: everything once
-        the login was abandoned; in the window, every write (POST, PUT, PATCH, DELETE)
+        the login was abandoned; **before the window** (from launch to the first fill
+        of a vetted form; BUG-0148), every write -- any method but GET and HEAD, on page
+        load, on a route visit or on an affordance click -- counted and named
+        (`note_prewindow_write`); in the window, every write (POST, PUT, PATCH, DELETE)
         to an account endpoint, whatever its body (a hashed password included,
         reviewer A-S1)."""
         if self.cancelled.is_set():
             return "browser login abandoned"
-        if not self.window_open or (method or "").upper() not in WRITE_METHODS:
+        if not self.window_open:
+            if (method or "").upper() in ("GET", "HEAD"):
+                return None
+            self.note_prewindow_write(method, url)
+            return "a write before the login window"
+        if (method or "").upper() not in WRITE_METHODS:
             return None
         why = account_endpoint_reason(url)
         if why is None:
@@ -418,61 +545,430 @@ def _sel(fid: str) -> str:
 _CLEAR_IF_PRESENT = "(sel) => { const e = document.querySelector(sel); if (e) e.value = ''; }"
 
 
-def _login_routes(page, gate: LoginGate, base_url: str) -> list[str]:
-    """URLs of the app's login routes: SPA routes from its scripts and links, and
-    same-origin links, whose last segment is a login word (whole segment)."""
+# --- finding the login form (BUG-0148: by affordance first, then by path rank) --------
+#: What a diagnosis says about a page that asks for a user field alone.
+IDENTIFIER_FIRST = ("a user-field form with no password control (identifier-first "
+                    "login: not supported)")
+NO_AFFORDANCE = "no login affordance found (English labels only)"
+#: Labels of a disclosure control (an account menu) that is opened to look for a login
+#: affordance inside it (design section 3): these words only, or no label but an icon.
+DISCLOSURE_WORDS = frozenset({"to", "your", "my", "account", "here", "now", "please",
+                              "user", "profile", "me", "menu", "person", "avatar",
+                              "circle"})
+
+#: Marks the elements a login affordance can be (``data-fuzzlab-aff``), in document
+#: order: ``a[href]``, ``button``, ``[role=button]``, ``[role=link]``,
+#: ``[role=menuitem]`` -- never a form's submitter (``input[type=submit|image]``, or a
+#: ``<button>`` of type submit that belongs to a form): clicking one would submit its
+#: form. Links are read visible or not (measured, BUG-0148 section 0). Labels are read
+#: afterwards with the one label reader, `spa.LABELS_JS`.
+AFFORDANCES_JS = r"""
+(maxScan) => {
+  const SEL = 'a[href], button, [role=button], [role=link], [role=menuitem]';
+  const shown = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+    && getComputedStyle(el).visibility !== 'hidden';
+  const submitter = el => {
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'input') return true;
+    if (tag !== 'button') return false;
+    const type = (el.getAttribute('type') || 'submit').toLowerCase();
+    return type === 'submit' && !!(el.form || el.closest('form'));
+  };
+  window.__fuzzlabA = (window.__fuzzlabA || 0) + 1;
+  const run = window.__fuzzlabA, items = [];
+  for (const el of document.querySelectorAll(SEL)) {
+    if (items.length >= maxScan) break;
+    if (submitter(el)) continue;
+    const id = `a${run}n${items.length}`;
+    el.setAttribute('data-fuzzlab-aff', id);
+    const popup = (el.getAttribute('aria-haspopup') || 'false').toLowerCase() !== 'false'
+      || el.getAttribute('aria-expanded') === 'false';
+    items.push({id, link: el.matches('a[href]') ? el.href : null, popup,
+      icon: !!el.querySelector('svg, img, i, [class*="icon"]'), visible: shown(el),
+      disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true'});
+  }
+  return {run, items};
+}
+"""
+
+
+def _labels_js() -> str:
+    """``els => [[id, [text, aria, icons]], ...]``: `spa.LABELS_JS`, the one label
+    reader (PA-0003), applied to each marked element."""
+    from fuzzlab.tools.spa import LABELS_JS
+    return ("els => els.map(e => [e.getAttribute('data-fuzzlab-aff'), (" + LABELS_JS
+            + ")(e)])")
+
+
+def affordance_refusal(labels) -> str | None:
+    """Why a control is not a login affordance to follow or click, or None: its label
+    is not a login label (`detect.login_affordance`), or it fails the label gates every
+    click passes (`spa.submitter_glyph`, `spa.label_refusal` on its text and
+    aria-label)."""
+    from fuzzlab.session.detect import login_affordance
+    from fuzzlab.tools.spa import label_refusal, submitter_glyph
+    text, aria, icons = (list(labels or []) + ["", "", ""])[:3]
+    if not login_affordance(text, aria):
+        return "not a login label"
+    glyph = submitter_glyph(icons, text, aria)
+    if glyph:
+        return f"destructive icon ({glyph!r})"
+    for where, value in (("text", text), ("aria-label", aria)):
+        why = label_refusal(value)
+        if why:
+            return f"{where} {why}"
+    return None
+
+
+def disclosure_refusal(item: dict) -> str | None:
+    """Why a control is not a disclosure to open (one level) for a login affordance, or
+    None: it announces a popup (``aria-haspopup``, ``aria-expanded=false``), is not a
+    link, is visible and enabled, and its label is account-like (`DISCLOSURE_WORDS`) or
+    empty with an icon; no destructive glyph, no refused label."""
+    from fuzzlab.tools.spa import DESTRUCTIVE_GLYPHS, label_refusal
+    if not item.get("popup") or item.get("link") or not item.get("visible") \
+            or item.get("disabled"):
+        return "not a visible, enabled popup control"
+    text, aria, icons = (list(item.get("labels") or []) + ["", "", ""])[:3]
+    if any(g in DESTRUCTIVE_GLYPHS for g in (icons or "").lower().split()):
+        return "destructive icon"
+    tokens = name_tokens(f"{text} {aria}")
+    if not tokens:
+        return None if item.get("icon") else "no label and no icon"
+    if not set(tokens) <= DISCLOSURE_WORDS:
+        return "not an account menu"
+    for value in (text, aria):
+        if label_refusal(value):
+            return "refused label"
+    return None
+
+
+def _read_affordances(page) -> list[dict]:
+    """The page's affordance elements (`AFFORDANCES_JS`), each with its labels
+    (`spa.LABELS_JS`) and its ordinal among the elements with the same labels."""
+    marked = page.evaluate(AFFORDANCES_JS, MAX_AFFORDANCES)
+    run = marked.get("run")
+    labels = dict(page.eval_on_selector_all(f'[data-fuzzlab-aff^="a{run}n"]',
+                                            _labels_js()))
+    counts: dict[tuple, int] = {}
+    items = []
+    for item in marked.get("items") or []:
+        item["labels"] = list(labels.get(item["id"]) or ["", "", ""])
+        key = tuple(item["labels"])
+        item["ordinal"] = counts.get(key, 0)
+        counts[key] = item["ordinal"] + 1
+        items.append(item)
+    return items
+
+
+@dataclass
+class _Candidate:
+    """A place to look for the login form: a ``link`` (an affordance's in-scope href,
+    or a navigation a click triggered), a ``click`` (``steps``: the labels and ordinal
+    of each control to click from the base page, a disclosure first when there is
+    one) or a ``path`` (a script or link route by rank, `detect.login_path_match`)."""
+    kind: str
+    key: str
+    url: str = ""
+    steps: tuple = ()
+    rank: int = 0
+
+    def describe(self) -> str:
+        if self.kind == "click":
+            names = [s[0][0] or s[0][1] or "(icon)" for s in self.steps]
+            return "click " + " > ".join(repr(n) for n in names)
+        return ("link " if self.kind == "link" else f"path (rank {self.rank}) ") + \
+            _short(self.url)
+
+
+def _short(url: str) -> str:
+    """A URL as a diagnosis names it: its path and SPA fragment, never its query."""
+    parts = urlsplit(url or "")
+    frag = parts.fragment.split("?", 1)[0]
+    return (parts.path or "/") + (f"#{frag}" if frag else "")
+
+
+class _Refused(Exception):
+    """A candidate that was not tried to the end (hidden, gone, its labels changed)."""
+
+
+class _Discovery:
+    """Finds the login form after the base page showed none (BUG-0148, design sections
+    3 and 6): the page's own login affordances first -- in-scope links visited with
+    `navguard.navigate`, other controls clicked with `spa.click_vetted` in the reveal
+    window (`LoginGate.window_refusal`, `LoginGate.ws_hold`), one level of an account
+    menu opened -- then path candidates by rank (`detect.login_path_match`: rank 1, then
+    rank 2). At most `MAX_ROUTES` distinct candidates; each one's failure (hidden,
+    detached, refused) is recorded and the next is tried. Nothing here fills or submits:
+    the first form `_pick_form` accepts ends the search."""
+
+    def __init__(self, page, gate: LoginGate, base_url: str, inflight, timeout_ms: int,
+                 cancelled: threading.Event, refusals: list[str], notes: set):
+        self.page, self.gate, self.base = page, gate, base_url
+        self.inflight, self.timeout_ms, self.cancelled = inflight, timeout_ms, cancelled
+        self.refusals, self.notes = refusals, notes
+        self.tried: list[str] = []
+        self.keys: set[str] = set()
+        self.affordances = 0
+        self.dirty = False            # the page has left the base page's first state
+
+    # -- reading -----------------------------------------------------------------------
+    def _link(self, url: str, out: list) -> None:
+        from fuzzlab.tools import spa
+        url = url.split("#", 1)[0] if spa.spa_fragment(url) is None else url
+        if not self.gate.in_login_scope(url):
+            host = _host(url)
+            if host not in self.gate.click_out_of_scope:
+                self.gate.click_out_of_scope.append(host)
+            return
+        if spa.route_destructive_reason(url):
+            self.refusals.append(f"link {_short(url)}: destructive")
+            return
+        out.append(_Candidate("link", spa.visit_key(url), url=url))
+
+    def affordance_candidates(self) -> list[_Candidate]:
+        """The base page's login links and clicks, then those inside one level of each
+        account menu (opened in the reveal window), in document order."""
+        from fuzzlab.tools import spa
+        items = _read_affordances(self.page)
+        out: list[_Candidate] = []
+        here = spa.visit_key(self.page.url)
+        for item in items:
+            if affordance_refusal(item["labels"]) is not None:
+                continue
+            self.affordances += 1
+            link = item.get("link")
+            if link and urlsplit(link).scheme.lower() in ("http", "https") and \
+                    spa.visit_key(link) != here:
+                self._link(link, out)
+            else:
+                step = (tuple(item["labels"]), item["ordinal"])
+                out.append(_Candidate("click", json.dumps([step]), steps=(step,)))
+        opened = 0
+        for item in items:
+            if opened >= MAX_DISCLOSURES:
+                break
+            if disclosure_refusal(item) is not None:
+                continue
+            opened += 1
+            outer = (tuple(item["labels"]), item["ordinal"])
+            try:
+                self._restore()
+                self._click([outer])
+                inner = _read_affordances(self.page)
+            except (_Refused, *_playwright_errors()) as exc:
+                self.refusals.append(f"menu {outer[0][0] or outer[0][1] or '(icon)'!r}: "
+                                     f"{_first_line(exc)}")
+                continue
+            before = {(tuple(i["labels"]), i["ordinal"]) for i in items}
+            for sub in inner:
+                step = (tuple(sub["labels"]), sub["ordinal"])
+                if step in before or affordance_refusal(sub["labels"]) is not None:
+                    continue
+                self.affordances += 1
+                link = sub.get("link")
+                if link and urlsplit(link).scheme.lower() in ("http", "https"):
+                    self._link(link, out)
+                else:
+                    out.append(_Candidate("click", json.dumps([outer, step]),
+                                          steps=(outer, step)))
+        return out
+
+    def path_candidates(self) -> list[_Candidate]:
+        """Script routes (`LoginGate.routes`) and link routes that are login candidates
+        (`detect.login_path_match`, mode ``candidate``): rank 1 before rank 2, each in
+        the order found; never the root, a parameterised, destructive or out-of-scope
+        route."""
+        from playwright.sync_api import Error as PlaywrightError
+
+        from fuzzlab.session.detect import MODE_CANDIDATE, login_path_match
+        from fuzzlab.tools import spa
+        page = self.page
+        try:
+            hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
+        except PlaywrightError:                      # no links readable: scripts only
+            hrefs = []
+        frag = spa.spa_fragment(page.url) or ""
+        link_frags = [spa.spa_fragment(h) for h in hrefs]
+        hash_mode = bool(frag) or any(f is not None for f in link_frags)
+        hashbang = frag.startswith("!/") or any(f and f.startswith("!/") for f in link_frags)
+        found: list[tuple[int, str]] = []
+        for name in list(self.gate.routes) + [f.split("?", 1)[0] for f in link_frags if f]:
+            kind, _reason = spa.classify_route(name)
+            rank = login_path_match(spa.normalise_route(name), mode=MODE_CANDIDATE) \
+                if kind == spa.ROUTE_OK else None
+            if rank:
+                found.append((rank, spa.route_url(page.url, name, hash_mode=hash_mode,
+                                                  hashbang=hashbang, base=self.base)))
+        for h in hrefs:
+            if spa.spa_fragment(h) is None:
+                rank = login_path_match(h, mode=MODE_CANDIDATE)
+                if rank:
+                    found.append((rank, h.split("#", 1)[0]))
+        out = []
+        here = spa.visit_key(page.url)
+        for rank, url in sorted(found, key=lambda pair: pair[0]):      # stable
+            if spa.visit_key(url) == here or not self.gate.in_login_scope(url) \
+                    or spa.route_destructive_reason(url):
+                continue
+            out.append(_Candidate("path", spa.visit_key(url), url=url, rank=rank))
+        return out
+
+    # -- acting --------------------------------------------------------------------------
+    def _restore(self) -> None:
+        """Back to the base page (design section 3, A5), unless it is still as loaded:
+        each click starts from the page its controls were read on."""
+        from fuzzlab.tools.navguard import navigate
+        if self.dirty:
+            _alive(self.cancelled)
+            navigate(self.page, self.base, timeout_ms=self.timeout_ms)
+            _settle(self.page, self.inflight, SETTLE_MS, self.cancelled)
+            self.dirty = False
+
+    def _click(self, steps) -> None:
+        """Click each step's control, found again by its labels and ordinal, through
+        `spa.click_vetted` in the reveal window (`LoginGate.clicking`), and settle."""
+        from fuzzlab.tools import spa
+        for labels, ordinal in steps:
+            same = [i for i in _read_affordances(self.page)
+                    if tuple(i["labels"]) == tuple(labels)]
+            if len(same) <= ordinal:
+                raise _Refused("the control was not found again")
+            item = same[ordinal]
+            if not item.get("visible"):
+                raise _Refused("not visible")
+            if item.get("disabled"):
+                raise _Refused("disabled")
+            _alive(self.cancelled)
+            self.dirty = True
+            self.gate.clicking = True
+            try:
+                how = spa.click_vetted(self.page, f'[data-fuzzlab-aff="{item["id"]}"]',
+                                       list(labels),
+                                       timeout_ms=min(self.timeout_ms, CLICK_MS))
+                if how is None:
+                    raise _Refused("its labels changed before the click")
+                _settle(self.page, self.inflight, SETTLE_MS, self.cancelled)
+            finally:
+                self.gate.clicking = False
+
+    def run(self, candidates: list[_Candidate]):
+        """Try ``candidates`` in order (a click's captured navigations right after it),
+        at most `MAX_ROUTES` distinct ones; the first acceptable form, or None."""
+        from fuzzlab.tools.navguard import navigate
+        queue = list(candidates)
+        while queue:
+            cand = queue.pop(0)
+            if cand.key in self.keys:
+                continue
+            if len(self.keys) >= MAX_ROUTES:
+                self.refusals.append(f"{len(queue) + 1} more candidate(s) not tried "
+                                     f"(at most {MAX_ROUTES})")
+                break
+            self.keys.add(cand.key)
+            self.tried.append(cand.describe())
+            self.gate.captured.clear()
+            before = len(self.refusals)
+            try:
+                if cand.kind == "click":
+                    self._restore()
+                    self._click(cand.steps)
+                else:
+                    _alive(self.cancelled)
+                    self.dirty = True
+                    navigate(self.page, cand.url, timeout_ms=self.timeout_ms)
+                    _settle(self.page, self.inflight, SETTLE_MS, self.cancelled)
+                picked = _pick_form(self.page, self.base, self.refusals, self.timeout_ms,
+                                    self.notes)
+            except _Refused as exc:
+                self.refusals.append(f"{cand.describe()}: {exc}")
+                continue
+            except _playwright_errors() as exc:
+                self.refusals.append(f"{cand.describe()}: {_first_line(exc)}")
+                continue
+            if picked is not None:
+                return picked
+            if len(self.refusals) == before:
+                self.refusals.append(f"{cand.describe()}: no form with a password "
+                                     f"control")
+            if cand.kind == "click":
+                found: list[_Candidate] = []
+                for url in list(self.gate.captured):
+                    self._link(url, found)
+                queue[:0] = [c for c in found if c.key not in self.keys]
+        return None
+
+    def diagnosis(self) -> str:
+        """Why no login form was found: every candidate and why it failed, the writes
+        aborted before the window, an affordance leading off the login scope, an
+        identifier-first page, no affordance at all."""
+        parts = []
+        if self.tried:
+            parts.append("tried: " + ", ".join(self.tried))
+        if self.refusals:
+            parts.append("refused: " + "; ".join(self.refusals))
+        if not self.tried and not self.refusals:
+            parts.append("no rendered form with a password control on the base page, "
+                         "and no login candidate")
+        writes = self.gate.prewindow_writes
+        if writes:
+            named = ", ".join(writes[:MAX_NAMED_WRITES])
+            more = len(writes) - MAX_NAMED_WRITES
+            parts.append(f"{self.gate.prewindow_write_count} write(s) aborted before "
+                         f"the login window: {named}"
+                         + (f" and {more} more" if more > 0 else ""))
+        for host in self.gate.click_out_of_scope:
+            parts.append(f"a login affordance leads to {host}, outside the login scope "
+                         f"(needs --auth-origin <its origin> if it belongs to this app)")
+        if IDENTIFIER_FIRST in self.notes:
+            parts.append(IDENTIFIER_FIRST)
+        if not self.affordances:
+            parts.append(NO_AFFORDANCE)
+        return "; ".join(parts)
+
+
+def _playwright_errors() -> tuple:
+    from playwright.sync_api import Error as PlaywrightError
+    return (PlaywrightError,)
+
+
+def _identifier_only(form: dict) -> bool:
+    """A form that asks for a user field and nothing else a user types, with no
+    password control: the first step of an identifier-first login."""
+    from fuzzlab.session.detect import USERNAME_HINT
+    typed = [(n, k) for n, k in form.get("controls") or []
+             if k in ("text", "email", "tel", "password", "textarea", "search", "number")]
+    return len(typed) == 1 and typed[0][1] in ("text", "email") and \
+        (typed[0][1] == "email" or bool(USERNAME_HINT.search(typed[0][0] or "")))
+
+
+def _pick_form(page, base_url: str, refusals: list[str], timeout_ms: int,
+               notes: set | None = None):
+    """The first acceptable login form on the current page, or None. A form whose
+    password control is not visible (a pre-rendered hidden modal) is refused, so the
+    search goes on to the control that opens it (BUG-0148, design section 4; measured:
+    ``is_enabled`` is true for a hidden control, and waits out its timeout for a mark
+    `spa.FORMS_JS` re-assigned to an enclosing container)."""
     from playwright.sync_api import Error as PlaywrightError
 
-    from fuzzlab.session.detect import _LOGIN_SEGMENTS
-    from fuzzlab.tools import spa
-    try:
-        hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
-    except PlaywrightError:                          # no links readable: scripts only
-        hrefs = []
-    frag = spa.spa_fragment(page.url) or ""
-    link_frags = [spa.spa_fragment(h) for h in hrefs]
-    hash_mode = bool(frag) or any(f is not None for f in link_frags)
-    hashbang = frag.startswith("!/") or any(f and f.startswith("!/") for f in link_frags)
-    names = list(gate.routes) + [f.split("?", 1)[0] for f in link_frags if f]
-    out: list[str] = []
-
-    def login_name(path: str) -> bool:
-        segs = [s for s in spa.normalise_route(path).split("/") if s]
-        return bool(segs) and segs[-1].lower() in _LOGIN_SEGMENTS
-
-    for name in names:
-        kind, _reason = spa.classify_route(name)
-        if kind != spa.ROUTE_OK or not login_name(name):
-            continue
-        out.append(spa.route_url(page.url, name, hash_mode=hash_mode, hashbang=hashbang,
-                                 base=base_url))
-    for h in hrefs:
-        if spa.spa_fragment(h) is None and login_name(urlsplit(h).path):
-            out.append(h.split("#", 1)[0])
-    seen, unique = set(), []
-    for url in out:
-        key = spa.visit_key(url)
-        if key in seen or spa.visit_key(page.url) == key or not gate.in_scope(url) \
-                or spa.route_destructive_reason(url):
-            continue
-        seen.add(key)
-        unique.append(url)
-    return unique[:MAX_ROUTES]
-
-
-def _pick_form(page, base_url: str, refusals: list[str], timeout_ms: int):
-    """The first acceptable login form on the current page, or None."""
     from fuzzlab.tools import spa
     route = spa.route_of(page.url, base_url)
     for form in page.evaluate(spa.FORMS_JS, 20):
         if not spa.has_password(form):
+            if notes is not None and _identifier_only(form):
+                notes.add(IDENTIFIER_FIRST)
             continue
         why = login_form_refusal(form, route)
         if why is None:
             pw = next(cid for (n, k), cid in zip(form["controls"], form["ids"])
                       if k == "password")
-            if not page.is_enabled(_sel(pw), timeout=timeout_ms):
-                why = "its password control is disabled"
+            try:
+                if not page.is_visible(_sel(pw)):
+                    why = "its password control is not visible"
+                elif not page.is_enabled(_sel(pw), timeout=timeout_ms):
+                    why = "its password control is disabled"
+            except PlaywrightError as exc:
+                why = f"its password control could not be read ({_first_line(exc)})"
         if why is None:
             return form, route
         refusals.append(f"{'/' + route if route else 'the base page'}: {why}")
@@ -480,14 +976,14 @@ def _pick_form(page, base_url: str, refusals: list[str], timeout_ms: int):
 
 
 def _username_control(form: dict) -> str | None:
-    """The user field: `detect._USERNAME_HINT` over its name (`FORMS_JS`: name, id,
+    """The user field: `detect.USERNAME_HINT` over its name (`FORMS_JS`: name, id,
     formcontrolname, aria-label or placeholder) or ``type=email``, else the only one
     (`login_shaped` guarantees exactly one)."""
-    from fuzzlab.session.detect import _USERNAME_HINT
+    from fuzzlab.session.detect import USERNAME_HINT
     users = [(n, k, cid) for (n, k), cid in zip(form["controls"], form["ids"])
              if k in ("text", "email", "tel")]
     for name, kind, cid in users:
-        if kind == "email" or _USERNAME_HINT.search(name or ""):
+        if kind == "email" or USERNAME_HINT.search(name or ""):
             return cid
     return users[0][2] if len(users) == 1 else None
 
@@ -533,7 +1029,8 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             context = browser.new_context(service_workers="block")
             guard_page(context, allow=frozenset({url_key(base_url)}),
                        in_scope=gate.in_scope, on_out_of_scope=gate.note_out_of_scope,
-                       request_refusal=gate.request_refusal, observe=gate.observe)
+                       request_refusal=gate.request_refusal, observe=gate.observe,
+                       window=gate.window_refusal, ws_hold=gate.ws_hold)
             page = context.new_page()
             inflight = _Inflight(page)
             page.on("dialog", lambda d: d.dismiss())    # an app's alert is never ours
@@ -544,21 +1041,20 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             navigate(page, base_url, timeout_ms=timeout_ms)
             _settle(page, inflight, SETTLE_MS, cancelled)
             refusals: list[str] = []
-            picked = _pick_form(page, base_url, refusals, timeout_ms)
+            notes: set = set()
+            picked = _pick_form(page, base_url, refusals, timeout_ms, notes)
             if picked is None:
-                for url in _login_routes(page, gate, base_url):
-                    _alive(cancelled)
-                    navigate(page, url, timeout_ms=timeout_ms)
-                    _settle(page, inflight, SETTLE_MS, cancelled)
-                    picked = _pick_form(page, base_url, refusals, timeout_ms)
-                    if picked is not None:
-                        break
-            if picked is None:
-                raise BrowserLoginError(
-                    "no login form was found in the browser"
-                    + (f" (refused: {'; '.join(refusals)})" if refusals else
-                       " (no rendered form with a password control on the base page "
-                       "or a login route)"))
+                # BUG-0148 (design section 6): the base page's own login affordances,
+                # then path candidates by rank; at most MAX_ROUTES distinct ones
+                finder = _Discovery(page, gate, base_url, inflight, timeout_ms,
+                                    cancelled, refusals, notes)
+                candidates = finder.affordance_candidates()
+                finder._restore()
+                candidates += finder.path_candidates()
+                picked = finder.run(candidates)
+                if picked is None:
+                    raise BrowserLoginError("no login form was found in the browser ("
+                                            + finder.diagnosis() + ")")
             form, route = picked
             user = _username_control(form)
             pw_id = next(cid for (n, k), cid in zip(form["controls"], form["ids"])
@@ -635,7 +1131,8 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
         body=login["body"],
         cookies={n: jar[n] for n in login["set_cookies"] if n in jar},
         storage_state=filter_storage_state(storage, gate.in_login_scope, [base_url]),
-        probes=list(gate.probes), page_url=page_url, floor_https=gate.floor_https)
+        probes=list(gate.probes), page_url=page_url, floor_https=gate.floor_https,
+        aborted_writes=list(gate.prewindow_writes))
 
 
 def _first_line(exc) -> str:

@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Session: the browser login found a login page only by an exact path word (fixed, BUG-0148, PA-0154)
+- **Symptom:** on the blind held-out lab, `fuzzlab crawl --identity ...` failed with "no login form was found in the browser (no rendered form with a password control on the base page or a login route)"; the authenticated crawl never started (0 endpoints).
+- **Root cause:** login discovery was built on a word list fitted to the development labs (a route's last segment exactly `login`, `signin`, ...; a narrower private copy of SP-16's vocabulary), never on the page's own "Log in" / "Sign in" control; and the form gates were never tested against other frameworks' defaults, so they refused the standard login pages of Rails, Devise, ASP.NET Identity and Django admin. A pre-rendered hidden login modal raised a `TimeoutError` out of the login (measured).
+- **Remediation:** one SP-16 owner (`detect.login_path_match`, ranked candidates; public vocabulary); discovery by the page's login affordances first (links visited, controls clicked in the reveal window, one menu level), then path candidates by rank; hidden forms refused; gate overrides for a location that names a login; every write before the login window aborted and named; the requests side follows the base page's login links; a diagnosis of every candidate. Verified on a framework matrix taken from framework documentation (before: 7 of 12 browser shapes and 4 of 7 requests-side shapes failed; after: none). CC-SESS-0025.
+- **Status:** Fixed.
+
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
 - **Root cause:**

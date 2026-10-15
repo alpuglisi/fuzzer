@@ -1621,7 +1621,8 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      disposition per site (PA-0067(1)).
   4. **Each such rule is checked against the lab's own vocabulary** (the target app's
      page and field names, PA-0022's check made concrete), and that check is a test.
-     (from BUG-0122)
+     (from BUG-0122) *(Item 4 superseded by PA-0154(2), BUG-0148: a rule is checked
+     against framework defaults through its downstream gates, never against one lab.)*
   - Enforced by: tests/test_logout_redirect.py::test_no_substring_test_decides_session_or_auth_state, tests/test_logout_redirect.py::test_the_guard_catches_a_synthetic_offender, tests/test_logout_redirect.py::test_the_lab_vocabulary_has_one_login_url
 
 - **PA-0123** — Strengthens `PA-0112` and `PA-0002` (related: BUG-0050, BUG-0111),
@@ -2389,3 +2390,26 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A hand-written HTTP response that closes its connection says
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
+
+- **PA-0154** — **A rule that finds something rests on a signal every technology
+  shares, and every keyword rule is tested across frameworks, not against a lab.**
+  Supersedes `PA-0122(4)` and strengthens `PA-0301(1)`, `PA-0003` and SP-16, after
+  BUG-0148: the browser login found a login page only by an exact path word, never by
+  the page's own "Log in" control, kept a narrower copy of SP-16's vocabulary through a
+  private import, and its form gates refused the default login pages of Rails, Devise,
+  ASP.NET Identity and Django admin.
+  1. **A rule that finds something** (a login page, a parameter, a route) **has a primary
+     signal every technology shares**, such as a UI affordance or an observed request. A
+     word list may only rank candidates or add to them.
+  2. **Every keyword rule (allow, deny or discovery) is tested end to end, through every
+     downstream gate, against a table of framework defaults** taken from framework
+     documentation (here `tests/_framework_login_fixture.py`), never from a lab.
+  3. **No module imports another module's private vocabulary** (a `_UPPER_CASE` constant
+     of another module); a known instance in a file the change may not edit is listed
+     with its reason, and a stale entry fails. Enforced by an AST guard proven on
+     synthetic offenders (`PA-0034(2)`).
+  4. **No fixture copies the shape of the lab that failed.** A fix proven on the failing
+     lab's shape proves fit, not transfer.
+
+  (from BUG-0148)
+  - Enforced by: tests/test_login_discovery.py::test_no_module_imports_another_modules_private_vocabulary, tests/test_login_discovery.py::test_the_private_vocabulary_guard_catches_synthetic_offenders, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_and_accepted, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_without_a_browser, tests/test_login_discovery.py::test_framework_default_login_forms_pass_the_gates

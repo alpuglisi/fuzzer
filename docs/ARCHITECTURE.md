@@ -1339,7 +1339,13 @@ tracked in the requirements files, not here.
   recorded), the credential is detected from the app's own login response, and success
   is confirmed by a differential on a request the app made after the click (kept as
   the session's protected probe for `verify_live`). The context's `storage_state` is
-  kept in memory only (`SessionState.browser_state`).
+  kept in memory only (`SessionState.browser_state`). *(FR-SESS-21, CC-SESS-0025,
+  BUG-0148:)* the login page is found by what every stack shares, the page's own "Log
+  in" / "Sign in" link or button (links visited, other controls clicked in the reveal
+  window, one level of an account menu opened), then by path candidates ranked by the
+  one SP-16 owner (`detect.login_path_match`); writes before the login window are
+  aborted; the requests-side discovery follows the base page's login links before its
+  fixed paths.
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
   identity)`, `ensure(identity)`, resolved by the request's host and **sent by
   origin**: a session carries `SessionState.origins` (base, login page, credential

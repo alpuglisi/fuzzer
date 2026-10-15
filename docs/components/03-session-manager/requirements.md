@@ -128,6 +128,62 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-21 (finding the login page by what every stack shares, CC-SESS-0025,
+  BUG-0148; design v2 after reviews A and B)**
+  - **One login vocabulary and rule (SP-16).** `detect.login_path_match(target, *,
+    mode)` owns every login-URL decision. ``mode="logout"`` is `looks_like_login_url`'s
+    rule, unchanged (FR-SESS-18; `redirect_is_logout`, the probe sender).
+    ``mode="candidate"`` ranks where the browser login may look: rank 1 for a whole
+    login segment or ``session(s)/new``; rank 2 for a final `name_tokens` token or a
+    final login pair (``wp-login``, ``UserLogin``, ``user-sign-in``). No prefix or
+    suffix of a run-together word (``userlogin`` is found by its affordance, never by
+    its path). Every logout positive is a candidate. The vocabulary is public in
+    `session/detect.py` (`LOGIN_WORDS`, `LOGIN_PAIRS`, `LOGIN_ENDPOINT_TOKENS`,
+    `AFFORDANCE_FILLER`, `USERNAME_HINT`); `browserlogin.LOGIN_PATH_TOKENS` /
+    `LOGIN_PATH_PAIRS` are those sets, not copies; no module imports a `_LOGIN_*` name.
+  - **The affordance first (browser, `browserlogin._Discovery`).** When the base page
+    shows no acceptable form, its own login affordances are read with the one label
+    reader (`spa.LABELS_JS`) over `a[href]`, `button`, `[role=button]`, `[role=link]`
+    and `[role=menuitem]`, never a form's submitter (`input[type=submit|image]`, a
+    submit `<button>` of a form). A label is an affordance when its tokens, filler
+    (to, your, my, account, here, now, please) dropped, are exactly login, signin,
+    logon, log in, sign in or log on (`detect.login_affordance`), and it passes
+    `spa.submitter_glyph` and `spa.label_refusal`. Affordances are deduplicated by
+    target (link key, or labels plus ordinal). An in-scope, non-destructive link is
+    visited with `navguard.navigate` (read visible or not); any other affordance is
+    clicked with `spa.click_vetted` in the reveal window (`LoginGate.window_refusal`
+    over `spa.window_request_refusal`, `LoginGate.ws_hold`): a navigation it triggers
+    is captured, not followed, and visited next through `navigate` and the gates;
+    before each click after the first the base page is reloaded and the control found
+    again by its labels and ordinal. One level of an account menu (`aria-haspopup` or
+    `aria-expanded=false`, an account-like label or an icon with no label) is opened
+    to look inside it. A candidate that is hidden, gone or refused is recorded and the
+    next one is tried.
+  - **Order.** The base page; affordance links and clicks; rank-1 path candidates
+    (script and link routes); rank-2. At most 5 distinct candidates after the base page.
+  - **Hidden forms.** A form whose password control is not visible (a pre-rendered
+    modal) is refused, so the search reaches the control that opens it.
+  - **The gates accept the frameworks' own login pages.** When a route (or a form
+    action's path) names a login (`browserlogin.login_named`), the gates see it without
+    `new`, `users`, `account` and `admin` (Rails ``session/new``, Devise
+    ``users/sign_in``, ASP.NET Identity ``Identity/Account/Login``, Django
+    ``admin/login``); each location is judged on its own. A hidden control named as a
+    checkbox of the same form (its unchecked value: Devise's ``user[remember_me]``) is
+    not an object selector. Button labels, control names, password count and shape,
+    and credential-change detection keep every rule.
+  - **Before the window** (from launch to the first fill) every write (any method but
+    GET and HEAD: on page load, on a route visit, on a click) is aborted, counted and
+    named by host and path (`LoginGate.request_refusal`); a successful login logs them.
+  - **The requests side** (`SessionManager._discover_login_form`): the base page, then
+    its affordance links and rank-1 links (`detect.login_links`, at most 5, each first
+    passing `_navigation_ok`), then the fixed fallback paths.
+  - **Diagnosis.** A failure lists every candidate tried and why it failed, the aborted
+    pre-window writes, an affordance leading outside the login scope ("needs
+    --auth-origin"), an identifier-first page, and "no login affordance found (English
+    labels only)". It never holds the password.
+  - **Stated residuals** (strict xfails in `tests/test_login_discovery.py`): a form in a
+    shadow root, a clickable `div` with no role, non-English labels, identifier-first
+    (two-step) login. Named follow-ons: BUG-0148's section "Named follow-ons".
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins
@@ -265,16 +321,18 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `navguard.navigate` (the commit, then a bounded load). A page whose script
     navigates to a refused URL while it is parsed is never waited out: with no form on
     it, the login fails loudly, and fast.
-  - **The form.** On the base page, then on SPA routes (from the app's own scripts and
-    links, hash or history mode) and same-origin links whose last segment is a login
-    word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
-    (`spa.FORMS_JS`) with exactly one enabled password control that is login-shaped
+  - **The form.** On the base page, then on the candidates of FR-SESS-21 (the page's
+    own login affordances, then path candidates by rank; *superseded:* ~~SPA routes and
+    same-origin links whose last segment is a login word, `detect._LOGIN_SEGMENTS`,
+    whole segment~~, BUG-0148), at most 5: the first rendered form
+    (`spa.FORMS_JS`) with exactly one visible, enabled password control that is
+    login-shaped
     (`store_adapter.login_shaped`), has no account word (register, sign up, create,
     join, enroll, new, forgot, recover, reset, change, repeat, confirm, retype, security
     question/answer, OTP) on its route, button text or aria-label, action or control
     names, is not a credential-change form (`store_adapter.credential_change_reason`)
     and passes `spa.form_refusal`. The username goes into the one user field
-    (`_USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
+    (`detect.USERNAME_HINT` or `type=email`, else the only one: BUG-0121 owns the hint); the
     password only into the password control, from the credential store, never logged.
     One click (`spa.click_vetted`: covered -> Escape -> dispatch, labels re-read),
     never retried within an attempt. After a 2xx login answer the page is settled until
