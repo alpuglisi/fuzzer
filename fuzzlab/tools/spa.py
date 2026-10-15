@@ -168,7 +168,7 @@ def normalise_route(path: str) -> str:
     return (path or "").lstrip("#!").strip("/")
 
 
-def classify_route(path: str) -> tuple[str, str | None]:
+def classify_route(path: str, *, strict: bool = False) -> tuple[str, str | None]:
     """``(kind, reason)``: `ROUTE_OK`, or why the route is not visited --
     parameterised or wildcard (``:id``, ``*``, ``**``), destructive
     (`core.urls.destructive_reason` on the route path), the root, a socket.io /
@@ -187,7 +187,9 @@ def classify_route(path: str) -> tuple[str, str | None]:
         return ROUTE_TRANSPORT, None
     if "*" in route or any(seg.startswith(":") for seg in route.split("/")):
         return ROUTE_PARAM, route
-    reason = sendpolicy.destructive(destructive_reason("/" + route))
+    reason = destructive_reason("/" + route)
+    if not strict:                     # D71; the login flow's route choice passes strict
+        reason = sendpolicy.destructive(reason)
     if reason:
         return ROUTE_DESTRUCTIVE, reason
     return ROUTE_OK, None
@@ -617,7 +619,7 @@ def label_refusal(text: str | None) -> str | None:
     word = sendpolicy.transaction(transaction_reason(text))
     if word:
         return f"transaction ({word!r})"
-    word = _account_hit(text)
+    word = sendpolicy.credential_change(_account_hit(text))     # D71: the credential rule
     if word:
         return f"account word ({word!r})"
     return None
@@ -629,8 +631,8 @@ def reveal_refusal(labels) -> str | None:
     reveal), no label at all, or a text / aria-label that fails `label_refusal`.
     ``labels`` is ``[text, aria, icons]`` (`LABELS_JS`)."""
     text, aria, icons = (list(labels or []) + ["", "", ""])[:3]
-    glyph = next((g for g in (icons or "").lower().split() if g in DESTRUCTIVE_GLYPHS),
-                 None)
+    glyph = sendpolicy.destructive(
+        next((g for g in (icons or "").lower().split() if g in DESTRUCTIVE_GLYPHS), None))
     if glyph:
         return f"destructive icon ({glyph!r})"
     if not ((text or "").strip() or (aria or "").strip()):

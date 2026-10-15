@@ -403,7 +403,7 @@ def form_skip_reason(form: dict) -> str | None:
     if reason:
         return reason
     if credentials and password_fields(form) and not login_shaped(form):
-        return "password form that is not a login form (settings, CAPTCHA or other)"
+        return "password form that is not a login form (settings, registration or other)"
     reason = sendpolicy.destructive(destructive_reason(form["action_url"]))
     if reason:
         return f"destructive action ({reason!r})"

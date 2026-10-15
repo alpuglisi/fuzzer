@@ -441,7 +441,7 @@ def _login_routes(page, gate: LoginGate, base_url: str) -> list[str]:
         return bool(segs) and segs[-1].lower() in _LOGIN_SEGMENTS
 
     for name in names:
-        kind, _reason = spa.classify_route(name)
+        kind, _reason = spa.classify_route(name, strict=True)   # D71: login stays strict
         if kind != spa.ROUTE_OK or not login_name(name):
             continue
         out.append(spa.route_url(page.url, name, hash_mode=hash_mode, hashbang=hashbang,

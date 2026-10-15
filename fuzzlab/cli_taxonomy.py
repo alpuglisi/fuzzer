@@ -178,6 +178,9 @@ def _all(cls: str, dests: Iterable[str]) -> dict[str, str]:
     return {d: cls for d in dests}
 
 
+#: The D71 send-rule off-switches (`core.sendpolicy.FLAGS`), on every traffic command.
+_SEND_POLICY = ["allow_destructive_routes", "allow_transactions", "allow_credential_changes"]
+
 FLAG_CLASSES: dict[str, dict[str, str]] = {
     "auto": {
         "base_url": "B", "spider_db": "B", "store": "B",
@@ -192,15 +195,15 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
         "anomaly": "B", "anomaly_contamination": "B", "anomaly_method": "B",
         "plugins": "B", "header_points": "B", "fuzz_json_writes": "B",
         "authorized": "B", "dry_run": "B", "auth_origin": "B",
-        **_all("B", ["allow_destructive_routes", "allow_transactions", "allow_credential_changes"]),
+        **_all("B", _SEND_POLICY),
     },
     "crawl": _all("B", ["start", "max_depth", "db", "engine", "timeout", "resume", "store",
                         "identity", "follow_selector_forms", "no_spa_routes",
                         "submit_spa_forms", "no_reveal", "dry_run", "auth_origin",
-                        "no_spa_query", "allow_destructive_routes", "allow_transactions", "allow_credential_changes"]),
+                        "no_spa_query", *_SEND_POLICY]),
     "audit": _all("B", ["spider_db", "indicator_db", "out", "engine", "timeout", "append",
                         "quiet", "store", "identity", "base_url", "dry_run",
-                        "allow_destructive_routes", "allow_transactions", "allow_credential_changes"]),
+                        *_SEND_POLICY]),
     "fuzz": _all("B", ["url", "param", "output", "baseline_iterations", "repeats", "sigma",
                        "min_delay", "pause", "timeout", "authorized", "store", "identity",
                        "dry_run"]),
@@ -219,7 +222,7 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     "greybox-run": {
         **_all("B", ["base_url", "store", "spider_db", "identity", "mutation_variants",
                      "max_mutation_variants", "allow_destructive", "authorized",
-                     "dry_run", "auth_origin", "allow_destructive_routes", "allow_transactions", "allow_credential_changes"]),
+                     "dry_run", "auth_origin", *_SEND_POLICY]),
         "ground_truth": "T", "points": "T",
         **_all("L", ["cov_dir", "app_root", "labctl", "reset", "settle"]),
     },

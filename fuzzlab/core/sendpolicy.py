@@ -4,10 +4,13 @@ Three rules keep the tool away from parts of a lab:
 - **destructive** — a URL, route, button, option or entry with a destructive or
   session-ending word (``core.urls.destructive_reason`` / ``text_destructive_reason``) is
   never visited, submitted or fuzzed;
-- **transactions** — a route, label or request that names a transaction
-  (``core.urls.transaction_reason``) is never submitted or fuzzed;
+- **transactions** — a route, button, label, captured request or redirect target that
+  names a transaction (``core.urls.transaction_reason``) is refused where that rule is
+  applied: SPA forms and reveals, the reveal window, captured requests, PRG targets.
+  (Crawled server-rendered forms and crawl points have no transaction check);
 - **credential changes** — a form or body that changes a credential or manages an
-  account (``store_adapter.credential_change_rule``) is never submitted or fuzzed.
+  account (``store_adapter.credential_change_rule``), a non-login password form, and
+  the reveal window's and label gate's account words.
 
 All three are enforced by default. The owner's decision D71 keeps them and adds a
 lab-only flag per rule to turn it off for one run (``--allow-destructive-routes``,
@@ -22,19 +25,17 @@ its reason through `destructive`, `transaction` or `credential_change`. The logi
 it uses the rules to tell a login form from a password-change form and to keep itself
 logged in, and it calls them directly, so the flags never change how a login is found.
 
-The state lives in one environment variable, ``FUZZLAB_SEND_POLICY_OFF`` (a comma list
-of rule names), so a browser worker or any subprocess sees the same policy. A command
-sets it only from its own flags (`apply`); a stray value in the shell is cleared, never
-inherited.
+The state is this process's own (a module variable), set only by a command's flags
+(`apply`). Nothing reads it from the environment, so no shell value, inherited variable
+or library caller can turn a rule off (review of CC-CORE-0062). No subprocess of the
+tool needs it: the browser is driven from this process, and the web UI launches each
+command with its flags on the command line.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-import os
-
-ENV = "FUZZLAB_SEND_POLICY_OFF"
 
 DESTRUCTIVE = "destructive"
 TRANSACTIONS = "transactions"
@@ -42,6 +43,8 @@ CREDENTIAL_CHANGES = "credential-changes"
 RULES = (DESTRUCTIVE, TRANSACTIONS, CREDENTIAL_CHANGES)
 
 #: (flag, rule, help) for each rule a command may turn off.
+_disabled: frozenset[str] = frozenset()
+
 FLAGS = (
     ("--allow-destructive-routes", DESTRUCTIVE,
      "lab-only: visit, submit and fuzz URLs, routes, buttons and entries with "
@@ -51,8 +54,9 @@ FLAGS = (
      "lab-only: submit and fuzz forms and requests that name a transaction "
      "(checkout, payment, order, transfer, ...)"),
     ("--allow-credential-changes", CREDENTIAL_CHANGES,
-     "lab-only: submit and fuzz forms and bodies that change a credential or manage an "
-     "account; the run may change the lab user's password"),
+     "lab-only: submit and import forms and bodies that change a credential or manage "
+     "an account (password change, registration, account settings); a password "
+     "control is still never fuzzed, and a revealed password form stays refused"),
 )
 
 
@@ -72,7 +76,7 @@ def disabled_by(args: argparse.Namespace) -> tuple[str, ...]:
 
 def apply(args: argparse.Namespace) -> tuple[str, ...]:
     """Set this process's policy from a command's flags, and return the rules turned off.
-    Any inherited value is replaced: only the command's own flags count."""
+    Only the command's own flags count."""
     off = disabled_by(args)
     set_disabled(off)
     if off:
@@ -82,19 +86,16 @@ def apply(args: argparse.Namespace) -> tuple[str, ...]:
 
 
 def set_disabled(rules) -> None:
+    global _disabled
     rules = tuple(rules)
     unknown = [r for r in rules if r not in RULES]
     if unknown:
         raise ValueError(f"unknown send rule(s): {', '.join(unknown)}")
-    if rules:
-        os.environ[ENV] = ",".join(rules)
-    else:
-        os.environ.pop(ENV, None)
+    _disabled = frozenset(rules)
 
 
 def disabled() -> frozenset[str]:
-    raw = os.environ.get(ENV, "")
-    return frozenset(r.strip() for r in raw.split(",") if r.strip() in RULES)
+    return _disabled
 
 
 def enforced(rule: str) -> bool:

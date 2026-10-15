@@ -13,13 +13,16 @@ Newest first.
   never inherited.
 - Change:
   - **New `fuzzlab/core/sendpolicy.py`:** `add_arguments`, `apply`, `enforced`, and the
-    `destructive` / `transaction` / `credential_change` filters. The state is held in
-    `FUZZLAB_SEND_POLICY_OFF`.
+    `destructive` / `transaction` / `credential_change` filters. The state is a module
+    variable set only by `apply`; nothing reads the environment (review fix: an
+    environment variable let a stray shell value relax `mutate-run`, `fuzz`, `proxy`
+    and every library caller, and leaked between test files).
   - **Refusal sites swept**, each passing its reason through the switch:
     - `core.urls.check_send_url`;
     - `harness.auto` (crawl and header points, the header estimate);
-    - `tools.spa` (`classify_route`, `form_refusal` with a new `strict`, `label_refusal`,
-      `window_request_refusal`, `query_url_refusal`);
+    - `tools.spa` (`classify_route` and `form_refusal`, each with a new `strict`;
+      `label_refusal`, its account words under the credential rule; `reveal_refusal`'s
+      glyph; `window_request_refusal`; `query_url_refusal`);
     - `tools.spider._destructive`;
     - `tools.navguard.make_route_handler` / `guard_page` (new `strict`);
     - `tools.fetcher` (spider-DB skip, redirect hops);
@@ -27,13 +30,14 @@ Newest first.
     - `tools.probesender` (PRG target);
     - `tools.store_adapter` (`entries_refusal`, `form_skip_reason`, `request_refusal`,
       `body_refusal`).
-  - **Login kept strict:** `browserlogin.login_form_refusal` and the login window call
-    with `strict=True`. Login candidates, the identity probe and
-    `SessionManager._navigation_ok` are unchanged.
+  - **Login kept strict:** `browserlogin.login_form_refusal`, the login window's guard
+    and the login-route choice (`classify_route`) call with `strict=True`. The
+    login-page candidates, the identity probe and `SessionManager._navigation_ok` call
+    the rules directly.
   - **CAPTCHA:** `spa.captcha_reason` and `CAPTCHA_TOKENS` are removed, along with the
     spider's two calls.
-  - **Flags** on `crawl`, `audit`, `auto` (and so `scan` and `train run`) and
-    `greybox-run`, classified in `cli_taxonomy`. `fuzzlab.cli.main` clears the variable.
+  - **Flags** on `crawl`, `audit`, `auto` (and so `train run`) and `greybox-run`,
+    classified in `cli_taxonomy`. `fuzzlab.cli.main` resets the policy to the defaults.
 - Impact (other components / consumers / project):
   - CRAWL (CC-CRAWL-0033), AUD (CC-AUD-0045), FUZZ (CC-FUZZ-0092), SESS (CC-SESS-0026)
     and UI (CC-UI-0057). The rules' classifiers are unchanged (SP-09, SP-10, SP-11,
@@ -46,9 +50,16 @@ Newest first.
   - Defaults are unchanged. The scope, origin, transport and loopback rules are
     untouched. `DELETE` stays refused. The login flow stays strict. A stray
     environment value is cleared at the top-level entry.
-  - Residual: a module run directly (`python -m fuzzlab.tools.spider`) also sets the
-    policy from its own flags (`parse_args`), but a library caller inherits the
-    process environment.
+  - Residual:
+    - `mutate-run` and `fuzz` have no flags; their rules always apply (an explicit
+      `--url` is already exempt in `fuzz`);
+    - a run does not yet record in the store which rules it turned off, so results of
+      relaxed runs cannot be told apart. That is needed for the reconciliation process;
+    - the web UI shows the three flags as ordinary options;
+    - greybox-run has both `--allow-destructive` (payloads) and
+      `--allow-destructive-routes` (URLs);
+    - no sweep guard catches a future refusal site that is not routed through the
+      switch. Such a site fails safe (it keeps refusing).
 - Hypothesis: none; this is an owner decision, not uncertain capability work. Its
   detection effect (cases reached once a rule is off) is to be measured.
 - Verification / review: `scripts/verify_change.py --base 0063d5c`, and one combined
@@ -58,8 +69,12 @@ Newest first.
   - [x] CAPTCHA rule removed; its tests turned around — done
   - [x] flags and taxonomy — done
   - [x] tests (`tests/test_send_policy.py`) — done
+  - [x] review fixes (process state, not the environment; reveal glyph and label
+    account words gated; strict login routes; tests cover every site, each
+    mutation-checked) — done
   - [ ] the reconciliation of cases these rules refuse (owner: "there will need to be
-    some reconciliation process") — todo, later
+    some reconciliation process"): record the disabled rules on the run, and report
+    each refused case by rule — todo, later
 - Rollback / recovery: revert the commit. Without a flag, the behaviour equals the
   previous defaults minus the CAPTCHA rule.
 - Effectiveness (pending; control_status: implemented): judged by the next measured

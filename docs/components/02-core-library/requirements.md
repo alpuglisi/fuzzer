@@ -394,15 +394,18 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `core/sendpolicy.py` is the one switch for three rules: **destructive**
     (`destructive_reason` / `text_destructive_reason`, FR-CORE-28), **transactions**
     (`transaction_reason`) and **credential changes**
-    (`store_adapter.credential_change_rule`, plus the reveal window's account and
-    credential GET tokens and the importer's non-login password forms). All three are
-    enforced by default.
+    (`store_adapter.credential_change_rule`, plus the account words of the label gate
+    and the reveal window, the reveal window's credential GET tokens, the PRG
+    account-target check and the importer's non-login password forms). All three are
+    enforced by default. (The transaction rule applies where it applied before: SPA
+    forms and reveals, the reveal window, captured requests and PRG targets; crawled
+    server-rendered forms and crawl points have no transaction check.)
   - `--allow-destructive-routes`, `--allow-transactions` and `--allow-credential-changes`
-    (on `crawl`, `audit`, `auto` / `scan` / `train run` and `greybox-run`) each turn one
-    off for that run, lab-only. The state is the `FUZZLAB_SEND_POLICY_OFF` environment
-    variable, set by the command from its own flags (`sendpolicy.apply`) and cleared by
-    `fuzzlab.cli.main`, so a browser worker or subprocess sees the same policy and a
-    stray value is never inherited.
+    (on `crawl`, `audit`, `auto` / `train run` and `greybox-run`) each turn one off for
+    that run, lab-only. The state is this process's own (a module variable), set only by
+    the command from its own flags (`sendpolicy.apply`); nothing reads it from the
+    environment, so no shell value or library caller can turn a rule off. No subprocess
+    needs it (the web UI passes the flags on each command line).
   - The rule functions stay pure classifiers. Every **refusal** passes its reason
     through `sendpolicy.destructive` / `transaction` / `credential_change`.
   - The **login flow keeps all three**: `browserlogin.login_form_refusal`

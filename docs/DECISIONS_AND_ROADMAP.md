@@ -497,14 +497,19 @@ some reconciliation process".
 - **The destructive, transaction and credential-change rules stay on by default.**
   Each has a lab-only flag that turns it off for one run: `--allow-destructive-routes`,
   `--allow-transactions` and `--allow-credential-changes`, on `crawl`, `audit`, `auto`
-  (`scan`, `train run`) and `greybox-run` (`core/sendpolicy.py`, FR-CORE-45,
+  (and `train run`) and `greybox-run` (`core/sendpolicy.py`, FR-CORE-45,
   CC-CORE-0062).
   - Implementation choices, stated for the owner:
     - three flags, one per rule;
     - the login flow keeps all three rules whatever the flags, so a login is found
       the same way;
     - a `DELETE` send stays refused;
-    - destructive *payloads* keep their own `--allow-destructive`.
+    - destructive *payloads* keep their own `--allow-destructive`;
+    - account words ("register", "change password", ...) belong to the credential
+      rule, so "Reset" in a menu is refused as an account word unless
+      `--allow-credential-changes` is given too;
+    - a non-login password form, a CAPTCHA login form included, is still refused by
+      the credential rule, not by a CAPTCHA rule.
 - **Open, for later:**
   - The three rules cost findings. They are to be handled better later.
   - A **reconciliation process** is needed for the cases they refuse. Its form is not
