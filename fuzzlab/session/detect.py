@@ -98,8 +98,44 @@ def shows_login_form(html: str, page_url: str, login_url: str | None,
 
 
 def find_login_form(html: str, page_url: str) -> LoginForm | None:
-    """Find the login form on a page: the form containing a password input."""
+    """Find the login form on a page: the first form containing a password input (no
+    gate; `login_forms` gives every one, with what the gates judge)."""
+    found = login_forms(html, page_url)
+    return found[0][0] if found else None
+
+
+def gate_description(form, page_url: str) -> dict:
+    """A server-rendered form as the login form gates judge it, the shape
+    `spa.FORMS_JS` gives for a rendered one (BUG-0148, review A2): ``controls`` as
+    ``(name, kind)`` (name, else id), the submitter's text (a button's text, an
+    input's value) and aria-label / title, the absolute ``action`` (None without
+    one)."""
+    from fuzzlab.core.forms import submitter
+    controls = []
+    for el in owned_controls(form):
+        if el.name == "button":                       # FORMS_JS reads no <button> control
+            continue
+        kind = el.name if el.name in ("textarea", "select") else \
+            (el.get("type") or "text").lower()
+        controls.append((el.get("name") or el.get("id") or "", kind))
+    submit = submitter(form)
+    label = aria = ""
+    if submit is not None:
+        label = (submit.get("value") or "") if submit.name == "input" else \
+            " ".join(submit.get_text(" ").split())
+        aria = submit.get("aria-label") or submit.get("title") or ""
+    action = form.get("action")
+    return {"controls": controls, "button": label[:100], "button_aria": aria[:100],
+            "button_icons": "", "action": urljoin(page_url, action) if action else None,
+            "ids": [""] * len(controls), "button_id": None,
+            "autocomplete": [""] * len(controls)}
+
+
+def login_forms(html: str, page_url: str) -> list[tuple[LoginForm, dict]]:
+    """Every form with a password input on a page, in order: the `LoginForm` to fill and
+    its `gate_description`. The caller picks the first one its gates accept."""
     soup = BeautifulSoup(html or "", "html.parser")
+    out: list[tuple[LoginForm, dict]] = []
     for form in soup.find_all("form"):
         password_field = None
         username_field = None
@@ -128,9 +164,10 @@ def find_login_form(html: str, page_url: str) -> LoginForm | None:
         action = form.get("action")
         action_url = urljoin(page_url, action) if action else page_url
         method = (form.get("method") or "GET").upper()
-        return LoginForm(action_url, method, fields, username_field, password_field,
-                         submitter_overrides(form))
-    return None
+        out.append((LoginForm(action_url, method, fields, username_field, password_field,
+                              submitter_overrides(form)),
+                    gate_description(form, page_url)))
+    return out
 
 
 # --- session credential from a login response --------------------------------
@@ -230,12 +267,13 @@ LOGIN_PAIRS = frozenset({("sign", "in"), ("log", "in"), ("log", "on")})
 #: gate's override (`browserlogin.LOGIN_PATH_TOKENS` is this set).
 LOGIN_ENDPOINT_TOKENS = LOGIN_WORDS | frozenset({
     "session", "sessions", "auth", "authenticate", "authentication", "token", "tokens"})
-#: Words a login link or button may carry besides its login word or pair ("Sign in to
-#: your account", "Log in here"): dropped before the label is compared (BUG-0148).
-AFFORDANCE_FILLER = frozenset({"to", "your", "my", "account", "here", "now", "please"})
-#: A label is a login affordance when its tokens, filler dropped, are exactly one of
-#: these. "Sign up", "Log out", "Login with Google" and "Forgot password" are not.
-_AFFORDANCE_LABELS = frozenset({(w,) for w in LOGIN_WORDS} | set(LOGIN_PAIRS))
+#: Words a label may carry around its subject ("Sign in to your account", "My
+#: account"): the one filler set (BUG-0148). The browser login's account-menu rule
+#: (`browserlogin.DISCLOSURE_WORDS`) is built on it.
+LABEL_FILLER = frozenset({"to", "your", "my", "account", "here", "now", "please"})
+#: A label with one of these tokens leaves a session, never starts one ("Log out",
+#: "Sign out", "Exit"): never a login affordance (review B, B2(a)).
+LOGOUT_WORDS = frozenset({"out", "logout", "signout", "exit"})
 
 #: `login_path_match` modes.
 MODE_LOGOUT = "logout"
@@ -278,9 +316,9 @@ def _segments_match(segments: list[str], query: str, final_token: bool) -> bool:
 
 
 def _final_login_tokens(segment: str) -> bool:
-    """The segment's own-case `name_tokens` (``UserLogin`` -> user, login) end in a login
-    word or a login pair. Tokens only: never a prefix or suffix of a run-together word
-    (``userlogin``, ``loginhistory``: PA-0122(1))."""
+    """The segment's own-case `name_tokens` (``MemberLogin`` -> member, login) end in a
+    login word or a login pair. Tokens only: never a prefix or suffix of a run-together
+    word (``memberlogin``, ``loginhistory``: PA-0122(1))."""
     from fuzzlab.core.redaction import name_tokens
     tokens = name_tokens(_stem(segment))
     return bool(tokens) and (tokens[-1] in LOGIN_WORDS
@@ -312,12 +350,13 @@ def login_path_match(target: str, *, mode: str, final_token: bool = True):
       deliberately narrow.
     * ``mode="candidate"`` (`MODE_CANDIDATE`): where the browser login may *look* for a
       login form (a visit, then the form gates). `RANK_SEGMENT` (1) for a whole login
-      segment or the REST "new session" pair (the logout rule without its final-token
-      half); `RANK_TOKEN` (2) for a final `name_tokens` token or a final login pair
-      (``wp-login``, ``UserLogin``, ``user-sign-in``); None otherwise. No prefix or
-      suffix of a run-together word: ``userlogin`` is found by its page's "Log in"
-      affordance (`login_affordance`), the signal every technology shares, not by its
-      path. Every logout positive is a candidate at some rank (tested)."""
+      segment, the REST "new session" pair (the logout rule without its final-token
+      half) or a login directory's front controller (``login/index.php``, Moodle;
+      review B, B2(d)); `RANK_TOKEN` (2) for a final `name_tokens` token or a final
+      login pair (``wp-login``, ``MemberLogin``, ``member-sign-in``); None otherwise. No
+      prefix or suffix of a run-together word: ``memberlogin`` is found by its page's
+      login affordance (`login_affordance`), the signal every technology shares, not by
+      its path. Every logout positive is a candidate at some rank (tested)."""
     where = _path_and_query(target, route=mode == MODE_CANDIDATE)
     if where is None:
         return False if mode == MODE_LOGOUT else None
@@ -327,7 +366,9 @@ def login_path_match(target: str, *, mode: str, final_token: bool = True):
         return _segments_match(segments, query, final_token)
     if mode != MODE_CANDIDATE:
         raise ValueError(f"unknown login_path_match mode {mode!r}")
-    if _segments_match(segments, query, False):
+    if _segments_match(segments, query, False) or \
+            (len(segments) >= 2 and _stem(segments[-1].lower()) in _ROUTER_SEGMENTS
+             and _login_segment(segments[-2], False)):
         return RANK_SEGMENT
     if _segments_match(segments, query, True) or \
             (segments and _final_login_tokens(segments[-1])):
@@ -342,17 +383,40 @@ def looks_like_login_url(url: str, *, final_token: bool = True) -> bool:
 
 
 def login_affordance(text: str, aria: str = "") -> bool:
-    """Is a link or button labelled as **the** way to log in (BUG-0148)? Its
-    aria-label / title (the accessible name) or its text, as `name_tokens` with
-    `AFFORDANCE_FILLER` dropped, is exactly ``login``, ``signin``, ``logon``,
-    ``log in``, ``sign in`` or ``log on``. English labels only (a stated residual). The
-    caller still applies the label gates to both (`browserlogin.affordance_refusal`)."""
-    from fuzzlab.core.redaction import name_tokens
+    """Is a link or button labelled as a way to log in (BUG-0148; review B, B2(a))? Its
+    aria-label / title (the accessible name) or its text **contains** a login word
+    (`LOGIN_WORDS`) or a login pair (`LOGIN_PAIRS`) as `name_tokens`, and neither label
+    has a `LOGOUT_WORDS` token. "User Login", "Login / Register", "Sign in to continue"
+    are affordances; "Log out", "Sign out" and "Sign up" are not. A combined label is
+    accepted because the form gates still protect the fill. English labels only (a
+    stated residual). The caller applies the label gates (`browserlogin.affordance_refusal`)."""
+    return affordance_rank(text, aria) is not None
 
-    def match(label: str) -> bool:
-        tokens = tuple(t for t in name_tokens(label or "") if t not in AFFORDANCE_FILLER)
-        return tokens in _AFFORDANCE_LABELS
-    return match(aria) or match(text)
+
+#: `affordance_rank`: the label is exactly a login word or pair (filler aside) ...
+AFFORDANCE_EXACT = 1
+#: ... or it only contains one ("User Login", "Login / Register", "Exercise: login").
+AFFORDANCE_CONTAINS = 2
+
+
+def affordance_rank(text: str, aria: str = "") -> int | None:
+    """How strongly a label names the way to log in (`login_affordance`), for ordering
+    candidates (a word list only ranks, PA-0154(1)): `AFFORDANCE_EXACT` when a label's
+    tokens, `LABEL_FILLER` aside, are exactly a login word or pair ("Log in", "Sign in
+    to your account"); `AFFORDANCE_CONTAINS` when one only contains it; None for no
+    login word, or any `LOGOUT_WORDS` token. A contained label ranks after a rank-1
+    path, so an app page titled "... login ..." is never filled before ``/login``."""
+    from fuzzlab.core.redaction import name_tokens
+    labels = [[t.lower() for t in name_tokens(label or "")] for label in (aria, text)]
+    if any(set(tokens) & LOGOUT_WORDS for tokens in labels):
+        return None
+    exact = {(w,) for w in LOGIN_WORDS} | set(LOGIN_PAIRS)
+    if any(tuple(t for t in tokens if t not in LABEL_FILLER) in exact for tokens in labels):
+        return AFFORDANCE_EXACT
+    if any(set(tokens) & LOGIN_WORDS or set(zip(tokens, tokens[1:])) & LOGIN_PAIRS
+           for tokens in labels):
+        return AFFORDANCE_CONTAINS
+    return None
 
 
 #: At most this many links are read from one page by `login_links`.
@@ -361,13 +425,14 @@ MAX_PAGE_LINKS = 2000
 
 def login_links(html: str, page_url: str) -> list[str]:
     """The login candidates a server-rendered page links to, for the requests-side
-    discovery (`SessionManager._discover_login_form`, BUG-0148): first the ``<a href>``
-    whose text (or aria-label / title) is a login affordance (`login_affordance`), then
-    those whose path is a `RANK_SEGMENT` login candidate, each in document order,
-    absolute, without fragment, deduplicated. Nothing here decides whether one may be
-    fetched (the caller's navigation rule does)."""
+    discovery (`SessionManager._discover_login_form`, BUG-0148), in the browser
+    login's order: links whose label is exactly a login label (`AFFORDANCE_EXACT`),
+    then links whose path is a `RANK_SEGMENT` login candidate, then links whose label
+    only contains one (`AFFORDANCE_CONTAINS`); each in document order, absolute, without
+    fragment, deduplicated. Nothing here decides whether one may be fetched (the
+    caller's navigation rule does)."""
     soup = BeautifulSoup(html or "", "html.parser")
-    afford, ranked = [], []
+    exact, ranked, contained = [], [], []
     for a in soup.find_all("a", href=True)[:MAX_PAGE_LINKS]:
         href = (a.get("href") or "").strip()
         if not href or href.startswith("#"):
@@ -377,12 +442,15 @@ def login_links(html: str, page_url: str) -> list[str]:
             continue
         text = " ".join(a.get_text(" ").split())
         aria = a.get("aria-label") or a.get("title") or ""
-        if login_affordance(text, aria):
-            afford.append(url)
+        rank = affordance_rank(text, aria)
+        if rank == AFFORDANCE_EXACT:
+            exact.append(url)
         elif login_path_match(url, mode=MODE_CANDIDATE) == RANK_SEGMENT:
             ranked.append(url)
+        elif rank == AFFORDANCE_CONTAINS:
+            contained.append(url)
     out: list[str] = []
-    for url in afford + ranked:
+    for url in exact + ranked + contained:
         if url not in out:
             out.append(url)
     return out

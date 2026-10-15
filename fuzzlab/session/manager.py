@@ -1029,7 +1029,7 @@ class SessionManager:
                     "www-authenticate", "")
                 if www.lower().startswith("basic"):
                     challenge = "basic"
-            form = detect.find_login_form(resp.text, page)
+            form = _gated_login_form(resp.text, page, base_url)
             if form is not None:
                 return form, page, challenge, page_floor
             if url == base_url:
@@ -1251,6 +1251,24 @@ def distinctness_problem(new: SessionState, other: SessionState) -> str | None:
 
 
 #: The most redirects login discovery follows from one candidate URL (BUG-0097).
+def _gated_login_form(html: str, page_url: str, base_url: str):
+    """The first form on a page that the shared login-form gates accept
+    (`browserlogin.login_form_core_refusal`, the browser login's own: one
+    implementation; review A, A2), or None. A registration or credential-change form
+    before the login form, on a linked page or a fixed path alike, never gets the
+    credentials."""
+    from fuzzlab.session.browserlogin import login_form_core_refusal
+    from fuzzlab.tools.spa import route_of
+    route = route_of(page_url, base_url)
+    for form, described in detect.login_forms(html, page_url):
+        why = login_form_core_refusal(described, route)
+        if why is None:
+            return form
+        _LOG.info(f"login discovery: a password form on {urlparse(page_url).path or '/'} "
+                  f"is not used ({why})")
+    return None
+
+
 MAX_LOGIN_HOPS = 5
 #: At most this many login pages the base page links to are visited by the requests-side
 #: discovery before its fixed fallback paths (BUG-0148).

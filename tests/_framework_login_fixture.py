@@ -29,7 +29,8 @@ USER = "operator@example.invalid"
 @dataclass
 class Shape:
     """One app: ``pages`` maps a path to its HTML (``{csrf}`` is the token, ``{other}``
-    another server's origin) or to ``"REDIRECT:<location>"``; ``login`` is the action
+    another server's origin, ``{origin}`` this one's) or to ``"REDIRECT:<location>"``
+    (a POST to ``/graphql`` answers a JSON body); ``login`` is the action
     path that accepts ``user`` / ``password`` (and ``csrf`` when set). ``spa``: any
     other GET path serves ``pages["/"]`` (history-mode fallback)."""
     name: str
@@ -192,7 +193,130 @@ LARAVEL = Shape(
             "class='ms-3'>Log in</button></div></form></body></html>"},
     "/login", "email", "password", csrf="_token")
 
-SERVER_RENDERED = [DJANGO, DJANGO_ADMIN, RAILS, DEVISE, ASPNET, SPRING, LARAVEL]
+DRUPAL = Shape(
+    "drupal-user-login", "/", {
+        "/": "<!doctype html><html><body><nav role='navigation' aria-labelledby="
+             "'block-account-menu'><ul class='menu'><li class='menu-item'><a "
+             "href='/user/login' data-drupal-link-system-path='user/login'>Log in</a>"
+             "</li></ul></nav></body></html>",
+        # core/modules/user: the user login form (form id user_login_form)
+        "/user/login":
+            "<!doctype html><html><body><form class='user-login-form' "
+            "data-drupal-selector='user-login-form' action='/user/login' method='post' "
+            "id='user-login-form' accept-charset='UTF-8'><div class='js-form-item "
+            "form-item'><label for='edit-name' class='js-form-required form-required'>"
+            "Username</label><input autocorrect='none' autocapitalize='none' "
+            "spellcheck='false' autofocus='autofocus' autocomplete='username' "
+            "data-drupal-selector='edit-name' type='text' id='edit-name' name='name' "
+            "value='' size='60' maxlength='60' class='form-text required' "
+            "required='required' aria-required='true'></div><div class='js-form-item "
+            "form-item'><label for='edit-pass' class='js-form-required form-required'>"
+            "Password</label><input autocomplete='current-password' "
+            "data-drupal-selector='edit-pass' type='password' id='edit-pass' "
+            "name='pass' size='60' maxlength='128' class='form-text required' "
+            "required='required' aria-required='true'></div><input autocomplete='off' "
+            "data-drupal-selector='form-{csrf}' type='hidden' name='form_build_id' "
+            "value='form-{csrf}'><input data-drupal-selector='edit-user-login-form' "
+            "type='hidden' name='form_id' value='user_login_form'><div "
+            "data-drupal-selector='edit-actions' class='form-actions js-form-wrapper "
+            "form-wrapper' id='edit-actions'><input data-drupal-selector='edit-submit' "
+            "type='submit' id='edit-submit' name='op' value='Log in' class='button "
+            "js-form-submit form-submit'></div></form></body></html>"},
+    "/user/login", "name", "pass")
+
+KEYCLOAK = Shape(
+    "keycloak-login", "/realms/demo/account/", {
+        "/realms/demo/account/":
+            "REDIRECT:/realms/demo/protocol/openid-connect/auth?client_id=account-console"
+            "&response_type=code&scope=openid",
+        # themes/keycloak/login: login.ftl (form kc-form-login, url.loginAction)
+        "/realms/demo/protocol/openid-connect/auth":
+            "<!doctype html><html><body><div id='kc-form'><form id='kc-form-login' "
+            "onsubmit='login.disabled = true; return true;' action='/realms/demo/"
+            "login-actions/authenticate?session_code={csrf}&amp;execution=e1&amp;"
+            "client_id=account-console&amp;tab_id=t1' method='post'><div "
+            "class='form-group'><label for='username' class='pf-c-form__label'>"
+            "Username or email</label><input tabindex='1' id='username' "
+            "class='pf-c-form-control' name='username' value='' type='text' autofocus "
+            "autocomplete='off'></div><div class='form-group'><label for='password' "
+            "class='pf-c-form__label'>Password</label><input tabindex='2' "
+            "id='password' class='pf-c-form-control' name='password' type='password' "
+            "autocomplete='off'></div><div class='form-group login-pf-settings'><div "
+            "id='kc-form-options'><div class='checkbox'><label><input tabindex='3' "
+            "id='rememberMe' name='rememberMe' type='checkbox'> Remember me</label>"
+            "</div></div></div><div id='kc-form-buttons' class='form-group'><input "
+            "type='hidden' id='id-hidden-input' name='credentialId'><input tabindex='4' "
+            "class='pf-c-button pf-m-primary pf-m-block btn-lg' name='login' "
+            "id='kc-login' type='submit' value='Sign In'></div></form></div>"
+            "</body></html>"},
+    "/realms/demo/login-actions/authenticate", "username", "password")
+
+WORDPRESS = Shape(
+    "wordpress-wp-login", "/wp-admin/", {
+        "/wp-admin/": "REDIRECT:/wp-login.php?redirect_to=%2Fwp-admin%2F&reauth=1",
+        # wp-login.php (loginform), absolute action as WordPress emits it
+        "/wp-login.php":
+            "<!doctype html><html><body><div id='login'><form name='loginform' "
+            "id='loginform' action='{origin}/wp-login.php' method='post'><p><label "
+            "for='user_login'>Username or Email Address</label><input type='text' "
+            "name='log' id='user_login' class='input' value='' size='20' "
+            "autocapitalize='off' autocomplete='username' required='required'></p>"
+            "<div class='user-pass-wrap'><label for='user_pass'>Password</label><div "
+            "class='wp-pwd'><input type='password' name='pwd' id='user_pass' "
+            "class='input password-input' value='' size='20' "
+            "autocomplete='current-password' spellcheck='false' required='required'>"
+            "</div></div><p class='forgetmenot'><input name='rememberme' "
+            "type='checkbox' id='rememberme' value='forever'> <label for='rememberme'>"
+            "Remember Me</label></p><p class='submit'><input type='submit' "
+            "name='wp-submit' id='wp-submit' class='button button-primary "
+            "button-large' value='Log In'><input type='hidden' name='redirect_to' "
+            "value='/wp-admin/'><input type='hidden' name='testcookie' value='1'></p>"
+            "</form><p id='nav'><a href='/wp-login.php?action=lostpassword'>Lost your "
+            "password?</a></p></div></body></html>"},
+    "/wp-login.php", "log", "pwd")
+
+#: Rails 8's ``require_authentication`` and Devise's ``authenticate_user!``: a
+#: protected root redirects to the login page; no nav link at all (review B, B2(d)).
+RAILS_REDIRECT = Shape("rails-require-authentication", "/",
+                       {"/": "REDIRECT:/session/new", "/session/new": RAILS.pages[
+                           "/session/new"]},
+                       "/session", "email_address", "password", csrf="authenticity_token")
+DEVISE_REDIRECT = Shape("devise-authenticate-user", "/",
+                        {"/": "REDIRECT:/users/sign_in", "/users/sign_in": DEVISE.pages[
+                            "/users/sign_in"]},
+                        "/users/sign_in", "user[email]", "user[password]",
+                        csrf="authenticity_token")
+#: Laravel's ``route('login')`` renders the form action as an absolute URL.
+LARAVEL_ABSOLUTE = Shape("laravel-absolute-action", "/", {
+    "/": LARAVEL.pages["/"],
+    "/login": LARAVEL.pages["/login"].replace("action='/login'", "action='{origin}/login'")},
+    "/login", "email", "password", csrf="_token")
+#: Moodle's login page is ``/login/index.php``: found by its path (a login directory's
+#: front controller), here linked with no login label.
+MOODLE = Shape(
+    "moodle-login-index", "/", {
+        "/": "<!doctype html><html><body><a href='/'>Home</a> <a "
+             "href='/login/index.php'>Moodle sandbox</a></body></html>",
+        # login/index.php (core_auth login form)
+        "/login/index.php":
+            "<!doctype html><html><body><form class='login-form' "
+            "action='/login/index.php' method='post' id='login'><input id='anchor' "
+            "type='hidden' name='anchor' value=''><input type='hidden' "
+            "name='logintoken' value='{csrf}'><div class='login-form-username'><label "
+            "for='username' class='sr-only'>Username</label><input type='text' "
+            "name='username' id='username' class='form-control' value='' "
+            "placeholder='Username' autocomplete='username'></div><div "
+            "class='login-form-password'><label for='password' class='sr-only'>"
+            "Password</label><input type='password' name='password' id='password' "
+            "value='' class='form-control' placeholder='Password' "
+            "autocomplete='current-password'></div><div class='login-form-submit'>"
+            "<button class='btn btn-primary btn-lg' type='submit' id='loginbtn'>Log in"
+            "</button></div></form></body></html>"},
+    "/login/index.php", "username", "password", csrf="logintoken")
+
+SERVER_RENDERED = [DJANGO, DJANGO_ADMIN, RAILS, DEVISE, ASPNET, SPRING, LARAVEL, DRUPAL,
+                   KEYCLOAK, WORDPRESS, RAILS_REDIRECT, DEVISE_REDIRECT, LARAVEL_ABSOLUTE,
+                   MOODLE]
 
 # --- single-page-app shapes ------------------------------------------------------------
 _SPA_LOGIN = """
@@ -268,7 +392,44 @@ BOOTSTRAP_MODAL = Shape(
              "m.removeAttribute('aria-hidden'); };</script></body></html>"},
     "/login", "email", "password", csrf="_token")
 
-SPA_SHAPES = [VUE_HASH, ROUTERLINK_BUTTON, ACCOUNT_MENU, BOOTSTRAP_MODAL]
+#: The account menu's item is a Bootstrap-style ``<a href="#">`` that opens the form in
+#: place: clicked, never visited as a link to the base page (review A, A3).
+ACCOUNT_MENU_HASH = Shape(
+    "account-menu-hash-link", "/", {"/": ACCOUNT_MENU.pages["/"].replace(
+        "<button role='menuitem' id='si'>Sign in</button>",
+        "<a href='#' role='menuitem' data-bs-toggle='modal' id='si'>Sign in</a>")},
+    "/api/login", "email", "password", spa=True, json_login=True)
+#: A combined label (review B, B2(a)): "Login / Register" opens the modal.
+COMBINED_LABEL = Shape(
+    "combined-login-register-label", "/", {"/": BOOTSTRAP_MODAL.pages["/"].replace(
+        ">Log in</button></nav>", ">Login / Register</button></nav>")},
+    "/login", "email", "password", csrf="_token")
+#: An ``<input type=button>`` opener (review A, A8).
+INPUT_BUTTON = Shape(
+    "input-button-opener", "/", {"/": BOOTSTRAP_MODAL.pages["/"].replace(
+        "<button type='button' class='btn btn-primary' data-bs-toggle='modal' "
+        "data-bs-target='#loginModal'>Log in</button>",
+        "<input type='button' class='btn btn-primary' data-bs-toggle='modal' "
+        "data-bs-target='#loginModal' value='Sign in'>")},
+    "/login", "email", "password", csrf="_token")
+
+SPA_SHAPES = [VUE_HASH, ROUTERLINK_BUTTON, ACCOUNT_MENU, BOOTSTRAP_MODAL, ACCOUNT_MENU_HASH,
+              COMBINED_LABEL, INPUT_BUTTON]
+
+#: A "Sign in" link to a page whose first password form is a registration form (review
+#: A, A2): the requests side must take the login form after it, never the first.
+REGISTER_FIRST = Shape(
+    "registration-before-login", "/", {
+        "/": "<!doctype html><html><body><a href='/account'>Sign in</a></body></html>",
+        "/account":
+            "<!doctype html><html><body><form method='post' action='/account/register'>"
+            "<input type='email' name='email'><input type='password' name='password'>"
+            "<input type='password' name='password_confirmation'><button "
+            "type='submit'>Create account</button></form><form method='post' "
+            "action='/session'><input type='email' name='email'><input "
+            "type='password' name='password'><button type='submit'>Sign in</button>"
+            "</form></body></html>"},
+    "/session", "email", "password", decoys=("/account/register",))
 
 # --- negatives ---------------------------------------------------------------------------
 SUBMITTER_ONLY = Shape(
@@ -302,15 +463,63 @@ MISLABELLED = Shape(
 #: real login: the path rank must try ``/login`` first, and never fill the decoy.
 DECOY = Shape(
     "decoy-before-login", "/", {
-        "/": "<!doctype html><html><body><a href='/xss_login'>Exercise: login form</a> "
+        "/": "<!doctype html><html><body><a href='/exercise_login'>Exercise: login form</a> "
              "<a href='/login'>Members</a></body></html>",
-        "/xss_login": "<!doctype html><html><body><form method='post' "
-                      "action='/xss_login'><input name='login'><input type='password' "
+        "/exercise_login": "<!doctype html><html><body><form method='post' "
+                      "action='/exercise_login'><input name='login'><input type='password' "
                       "name='password'><button>Go</button></form></body></html>",
         "/login": SPRING.pages["/login"]},
-    "/login", "username", "password", csrf="_csrf", decoys=("/xss_login",))
+    "/login", "username", "password", csrf="_csrf", decoys=("/exercise_login",))
+
+#: Only a rank-2 path leads to a password form, and it is an app page (review A, A9):
+#: with nothing better found it is filled (a stated residual, pinned).
+DECOY_ONLY = Shape(
+    "rank-2-decoy-only", "/", {
+        "/": "<!doctype html><html><body><a href='/exercise_login'>Exercise: login form</a>"
+             "</body></html>",
+        "/exercise_login": DECOY.pages["/exercise_login"]},
+    "/login", "username", "password", decoys=("/exercise_login",))
 
 # --- stated residuals (strict xfails) ---------------------------------------------------
+#: A GraphQL query (a read sent as a POST) on page load, and the login rendered after it:
+#: the pre-window rule aborts the query (review B, B3).
+GRAPHQL_FIRST = Shape(
+    "graphql-query-before-login", "/", {
+        "/": _spa_page("", "fetch('/graphql', {method: 'POST', headers: {'Content-Type':"
+                           " 'application/json'}, body: JSON.stringify({query: "
+                           "'{ viewer { id } }'})}).then(r => r.json()).then(() => {"
+                           " document.getElementById('app').innerHTML = loginView();"
+                           " wire(); }).catch(() => {});")},
+    "/api/login", "email", "password", spa=True, json_login=True)
+#: A tab (``[role=tab]``) shows the login panel (review B, B9).
+ROLE_TAB = Shape(
+    "role-tab-panel", "/", {
+        "/": "<!doctype html><html><body><div role='tablist'><span role='tab' id='t1' "
+             "aria-controls='p1' tabindex='0'>Sign in</span><span role='tab' "
+             "tabindex='-1'>Register</span></div><div id='p1' role='tabpanel' hidden>"
+             "<form method='post' action='/login'><input type='email' name='email'>"
+             "<input type='password' name='password'><button>Continue</button></form>"
+             "</div><script>document.getElementById('t1').onclick = () => "
+             "document.getElementById('p1').hidden = false;</script></body></html>"},
+    "/login", "email", "password")
+#: A ``<details>`` whose ``<summary>`` reads "Sign in" (review B, B9).
+DETAILS_SUMMARY = Shape(
+    "details-summary", "/", {
+        "/": "<!doctype html><html><body><details><summary>Sign in</summary><form "
+             "method='post' action='/login'><input type='email' name='email'><input "
+             "type='password' name='password'><button>Continue</button></form></details>"
+             "</body></html>"},
+    "/login", "email", "password")
+#: The login form in a same-origin iframe (review B, B9).
+SAME_ORIGIN_IFRAME = Shape(
+    "same-origin-iframe", "/", {
+        "/": "<!doctype html><html><body><iframe src='/embedded' title='account'>"
+             "</iframe></body></html>",
+        "/embedded": "<!doctype html><html><body><form method='post' action='/login'>"
+                     "<input type='email' name='email'><input type='password' "
+                     "name='password'><button>Continue</button></form></body></html>"},
+    "/login", "email", "password")
+
 SHADOW_DOM = Shape(
     "shadow-dom-form", "/", {
         "/": "<!doctype html><html><body><login-box></login-box><script>"
@@ -389,6 +598,8 @@ class FrameworkApp:
         if h.command == "POST" and path in shape.decoys:
             self.decoy_posts.append(path)
             return _send(h, 200, "text/html", b"<p>decoy</p>")
+        if h.command == "POST" and path == "/graphql":
+            return _send(h, 200, "application/json", b'{"data":{"viewer":null}}')
         if h.command == "POST":
             return _send(h, 404, "text/plain", b"no")
         page = shape.pages.get(path)
@@ -399,7 +610,8 @@ class FrameworkApp:
         if page.startswith("REDIRECT:"):
             return _send(h, 302, "text/plain", b"", location=page[len("REDIRECT:"):])
         token = cookie or secrets.token_hex(16)
-        html = page.replace("{csrf}", token).replace("{other}", self.other)
+        html = page.replace("{csrf}", token).replace("{other}", self.other) \
+            .replace("{origin}", self.origin)
         _send(h, 200, "text/html", html.encode(),
               cookie=None if cookie else f"csrf={token}; Path=/")
 
