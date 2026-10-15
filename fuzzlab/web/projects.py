@@ -72,6 +72,8 @@ DEFAULT_PROJECTS_DIR = "~/.local/share/fuzzlab/projects"
 TEMP_DIRNAME = ".temporary"
 RECENT_FILE = "recent.json"
 RECENT_MAX = 10
+#: Files the Open list shows (each gets a bounded summary).
+LIST_MAX = 200
 
 #: A project name typed in the browser: ASCII letters/digits first and last, then
 #: letters, digits, ``. _ -`` and spaces; at most 64 characters; no ``..``. Never a path.
@@ -257,6 +259,30 @@ class Pending:
     schema_version: int = 0
 
 
+def _refusal(what: str):
+    """Decorate a project operation's worker: an OS or SQLite error from its file work
+    (a file removed after the page rendered, no space, a corrupt database) becomes a
+    `ProjectError` naming the operation — shown to the operator, never a bare 500
+    (code review A, round 2). Only these two families are converted (PA-0106); any other
+    exception is a defect and propagates."""
+    import functools
+
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*a, **k):
+            try:
+                return fn(*a, **k)
+            except (OSError, sqlite3.DatabaseError) as exc:
+                if isinstance(exc, FileNotFoundError):
+                    detail = f"{Path(exc.filename).name if exc.filename else 'a file'} " \
+                             "no longer exists (reload the page)"
+                else:
+                    detail = str(exc) or type(exc).__name__
+                raise ProjectError(f"{what} failed: {detail}") from exc
+        return inner
+    return wrap
+
+
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -268,16 +294,25 @@ class ProjectManager:
         self.runner = runner
         configured = cfg.get("projects_dir") or os.environ.get(PROJECTS_DIR_ENV) or \
             DEFAULT_PROJECTS_DIR
-        self.projects_dir = Path(os.path.expanduser(str(configured)))
+        self.projects_dir = Path(os.path.abspath(os.path.expanduser(str(configured))))
         start = cfg.get("store_path")
         self.startup_path: Path | None = (Path(os.path.abspath(start)) if start else None)
+        # FR-UI-458: the built-in default store (`config.DEFAULTS`) counts as configured
+        # only when that file already exists; otherwise the UI starts on the start
+        # screen, which offers it ("Use ./fuzzlab.db"). Any other value is the
+        # operator's choice and is bound as before. `startup_path` keeps the default
+        # either way (the recent list and migration rules rely on it).
+        from fuzzlab.core.config import DEFAULTS
+        self.default_offer: Path | None = None
+        if start and start == DEFAULTS["store_path"] and not os.path.lexists(start):
+            self.default_offer = self.startup_path
         self.current: OpenProject | None = None
         self.pending: Pending | None = None
         self.extra_busy: dict[str, str] = {}     # e.g. {"proxy": "the in-process proxy"}
         self.flash: list[tuple[str, str]] = []   # (level, text) for the next projects page
         self._launches: dict[str, int] = {}      # runner token -> launch id
         self._lock: asyncio.Lock | None = None
-        if self.startup_path is not None:
+        if self.startup_path is not None and self.default_offer is None:
             self._bind_startup(self.startup_path)
 
     # -- basics ----------------------------------------------------------------------
@@ -346,10 +381,12 @@ class ProjectManager:
         """Refuse a new project's path when anything a project owns is already there —
         its file, a SQLite side file, or its own directory (a stale ``<file>.d`` would be
         adopted, and its crawl read as this project's: PA-0450)."""
-        for suffix in ("", "-wal", "-shm", "-journal"):
+        if os.path.lexists(path):
+            raise ProjectError(f"a project named {name!r} already exists; open it instead")
+        for suffix in ("-wal", "-shm", "-journal"):
             if os.path.lexists(str(path) + suffix):
-                raise ProjectError(f"a project named {name!r} already exists; open it "
-                                   "instead")
+                raise ProjectError(f"{path.name}{suffix} is left over in the projects "
+                                   "directory; remove it or choose another name")
         if os.path.lexists(sidecar_dir(path)):
             raise ProjectError(f"{sidecar_dir(path).name} already exists in the projects "
                                "directory (left by an earlier project of that name); "
@@ -378,7 +415,7 @@ class ProjectManager:
                     os.mkdir(m, 0o700)
                 except FileExistsError:
                     pass
-        except (PermissionError, FileNotFoundError, NotADirectoryError) as exc:
+        except OSError as exc:                    # incl. ELOOP, EROFS, EACCES
             raise ProjectError(f"cannot create {d}: {exc.strerror or exc}") from exc
         if not _private_dir_ok(d):
             raise ProjectError(f"{d} must be a directory owned by this user with mode 0700")
@@ -434,8 +471,11 @@ class ProjectManager:
         for entry in sorted(os.scandir(d), key=lambda e: e.name.lower()):
             if not FILE_RE.fullmatch(entry.name) or not entry.is_file(follow_symlinks=False):
                 continue
+            if len(out) >= LIST_MAX:
+                break
             st = entry.stat(follow_symlinks=False)
             out.append({"file": entry.name, "size": st.st_size,
+                        "summary": core_project.summary(entry.path),
                         "modified": datetime.fromtimestamp(st.st_mtime, timezone.utc)
                         .strftime("%Y-%m-%d %H:%M:%S"),
                         "current": self.current is not None
@@ -465,6 +505,13 @@ class ProjectManager:
         for i, e in enumerate(entries):
             e["id"] = i
             e["exists"] = os.path.isfile(e["path"]) and not os.path.islink(e["path"])
+            e["where"], e["summary"] = None, None
+            if e["exists"]:
+                try:
+                    self._validate_file(Path(e["path"]))
+                    e["summary"] = core_project.summary(e["path"])
+                except (ProjectError, OSError):
+                    e["where"] = "outside the projects directory"
         return entries
 
     def _add_recent(self, path: Path) -> None:
@@ -498,6 +545,7 @@ class ProjectManager:
         """Create a new project file: called only with the lock held (FR-UI-451)."""
         core_project.create(path, path.stem)
 
+    @_refusal("creating the project file")
     def _ensure_created(self) -> str:
         """The open project's path, created (0600, metadata) if it does not exist yet."""
         if self.current is None:
@@ -528,12 +576,43 @@ class ProjectManager:
         async with self.lock:
             return await asyncio.to_thread(self._ensure_created)
 
+    # -- the default store (FR-UI-458) ----------------------------------------------------
+    async def use_default(self, *, discard: bool = False) -> bool:
+        """Open the built-in default store the start screen offers (its path comes from
+        the server, never the form). Returns whether it is now the open project."""
+        async with self.lock:
+            self._check_leave(discard)
+            return await asyncio.to_thread(self._use_default, discard)
+
+    @_refusal("opening the default project")
+    def _use_default(self, discard: bool) -> bool:
+        path = self.default_offer or self.startup_path
+        if path is None:
+            raise ProjectError("no default project is configured")
+        if not os.path.lexists(path):
+            self._switch(OpenProject(path, exists=False), discard)
+            self.pending = None
+            return True
+        op = self._prepare(path, core_project.inspect(path), kind="file")
+        if op is None:
+            return False
+        self._switch(op, discard)
+        return True
+
+    def adopt_default(self) -> None:
+        """For ``--with-proxy``: with nothing open or pending, bind the offered default
+        store (created by the proxy's first flow write, as before)."""
+        if self.current is None and self.pending is None and self.default_offer is not None:
+            self.current = OpenProject(self.default_offer, exists=False)
+
     # -- transitions (every one under the lock, after the busy check) ------------------
-    async def new(self, name: str, *, discard: bool = False) -> None:
+    async def new(self, name: str, *, discard: bool = False) -> bool:
         async with self.lock:
             self._check_leave(discard)
             await asyncio.to_thread(self._new, name, discard)
+            return True
 
+    @_refusal("creating the project")
     def _new(self, name: str, discard: bool) -> None:
         path = self._named_path(name)
         self._ensure_dir(self.projects_dir)
@@ -546,35 +625,54 @@ class ProjectManager:
         self.pending = None
         self._add_recent(path)
 
-    async def temporary(self, *, discard: bool = False) -> None:
+    async def temporary(self, *, discard: bool = False) -> bool:
         async with self.lock:
             self._check_leave(discard)
             await asyncio.to_thread(self._temporary, discard)
+            return True
 
+    @_refusal("starting a temporary project")
     def _temporary(self, discard: bool) -> None:
         tdir = self._ensure_dir(self._ensure_dir(self.projects_dir) / TEMP_DIRNAME)
         path = tdir / f"tmp-{_utc_stamp()}-{secrets.token_hex(4)}{PROJECT_EXT}"
         self._create_locked(path)
+        st = os.stat(path)
         fd = None
         try:
+            if os.path.lexists(sidecar_dir(path)):  # not ours (random name): refuse
+                raise ProjectError(f"{sidecar_dir(path).name} already exists")
             fd = _acquire_owner(self._ensure_dir(sidecar_dir(path)))
-            st = os.stat(path)
             op = OpenProject(path, kind="temporary", inode=(st.st_dev, st.st_ino),
                              owner_fd=fd)
         except BaseException:
             _release_owner(fd)
-            _remove_project_files(tdir, path.name)
+            left = _remove_project_files(tdir, path.name, expect=(st.st_dev, st.st_ino))
+            if left:
+                self.flash.append(("warn", "A failed start left: " + "; ".join(left)))
             raise
         self._switch(op, discard)
         self.pending = None
 
     async def open(self, *, file: str | None = None, recent_id: int | None = None,
-                   temporary: str | None = None, discard: bool = False) -> None:
+                   recent_path: str | None = None, temporary: str | None = None,
+                   discard: bool = False) -> bool:
+        """Open a listed file, a recent entry (its index **and** path must still match)
+        or a leftover temporary. Returns whether it is now the open project (False: an
+        offer or refusal is pending, or it was already open)."""
         async with self.lock:
+            cur = self.current
+            if cur is not None and (
+                    (temporary is not None and cur.kind == "temporary"
+                     and cur.path.name == temporary)
+                    or (file is not None and cur.path.name == file
+                        and cur.path.parent == self.projects_dir)):
+                return False                         # already open: never a discard
             self._check_leave(discard)
-            await asyncio.to_thread(self._open, file, recent_id, temporary, discard)
+            return await asyncio.to_thread(self._open, file, recent_id, recent_path,
+                                           temporary, discard)
 
-    def _open(self, file, recent_id, temporary, discard) -> None:
+    @_refusal("opening the project")
+    def _open(self, file, recent_id, recent_path, temporary, discard) -> bool:
         kind, owner_fd, inode = "file", None, None
         if temporary is not None:
             if not isinstance(temporary, str) or not TEMP_RE.fullmatch(temporary):
@@ -584,7 +682,7 @@ class ProjectManager:
                 raise ProjectError("no private .temporary directory")
             path = tdir / temporary
             if self.current is not None and path == self.current.path:
-                return                              # already open
+                return False                        # already open
             st = os.lstat(path)
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
                 raise ProjectError(f"{temporary} is not a regular file of this user")
@@ -594,12 +692,14 @@ class ProjectManager:
             entries = self.recent()
             if not isinstance(recent_id, int) or not 0 <= recent_id < len(entries):
                 raise ProjectError("no such recent project")
+            if recent_path is not None and entries[recent_id]["path"] != recent_path:
+                raise ProjectError("the recent list changed; reload the page")
             path = self._validate_file(Path(entries[recent_id]["path"]))
         else:
             path = self._validate_file(self._listed_path(file))
         if self.current is not None and path == self.current.path:
             _release_owner(owner_fd)
-            return                                  # already open
+            return False                            # already open
         try:
             op = self._prepare(path, core_project.inspect(path), kind=kind, inode=inode,
                                owner_fd=owner_fd)
@@ -614,10 +714,11 @@ class ProjectManager:
                 f"v{_head()}. It was not opened: review the migration offer below.")
                 if self.pending.kind == "older" else
                 f"{path.name} was not opened: {self.pending.detail}"))
-            return
+            return False
         self._switch(op, discard)
         if kind == "file":
             self._add_recent(path)
+        return True
 
     async def save_as(self, name: str) -> None:
         async with self.lock:
@@ -626,6 +727,7 @@ class ProjectManager:
                 raise ProjectBusy(busy)
             await asyncio.to_thread(self._save_as, name)
 
+    @_refusal("save as")
     def _save_as(self, name: str) -> None:
         if self.current is None or not self.current.exists:
             raise NoProject("no project with data is open")
@@ -637,11 +739,15 @@ class ProjectManager:
             core_project.copy_to(src, dest)
         except OSError as exc:                    # incl. no space, no hard links, EEXIST
             raise ProjectError(f"save as failed: {exc}") from exc
+        temporary_source = self.current.kind == "temporary"
         try:
             self._copy_sidecars(src, dest)
             with Store(dest, create=False) as store:
                 core_project.ensure_metadata(store, dest.stem)
-                core_project.rename(store, dest.stem)
+                # A saved temporary project is the same project (keeps its uuid); a
+                # saved copy of a file is a new one that records its origin.
+                core_project.mark_copy(store, kind="save-as", name=dest.stem,
+                                       keep_identity=temporary_source)
         except BaseException:
             left = _remove_project_files(dest.parent, dest.name)
             if left:
@@ -651,33 +757,118 @@ class ProjectManager:
         self._add_recent(dest)
 
     @staticmethod
-    def _copy_sidecars(src: Path, dest: Path) -> None:
+    def _copy_sidecars(src: Path, dest: Path, *, while_busy: bool = False) -> list[str]:
+        """Copy the project directory's known files (plain, singly linked files of ours)
+        into the copy's own directory. ``while_busy`` (a snapshot during a job): each
+        database waits at most briefly for a lock, and the fuzz CSV — possibly half
+        written — is skipped; returns what was skipped."""
+        skipped: list[str] = []
         sd = sidecar_dir(src)
-        if not os.path.isdir(sd) or os.path.islink(sd):
-            return
+        if not _private_dir_ok(sd):
+            return skipped
         names = sorted({d for c, d in OPTION_CLASS.values() if c == PIN_SIDECAR})
-        present = [n for n in names if _regular_of_ours(sd / n)]
+        present = [n for n in names if _regular_of_ours(sd / n, single=True)]
         if not present:
-            return
+            return skipped
         dd = sidecar_dir(dest)
         os.mkdir(dd, 0o700)
         for n in present:
             if n.endswith(".db"):
-                core_project.copy_to(sd / n, dd / n)
+                try:
+                    core_project.copy_to(sd / n, dd / n,
+                                         timeout=0.5 if while_busy else 10.0)
+                except sqlite3.OperationalError:
+                    if not while_busy:
+                        raise
+                    skipped.append(f"{n} (in use)")
+            elif while_busy:
+                skipped.append(f"{n} (may be half-written while a job runs)")
             else:
                 from fuzzlab.core.secretfile import create_secret
                 create_secret(dd / n, (sd / n).read_bytes())
+        return skipped
+
+    # -- snapshot (FR-UI-451; research §12.2) --------------------------------------------
+    async def snapshot(self) -> str:
+        """A timestamped, verified copy of the open project in the projects directory;
+        the project stays open. Allowed while a job runs (see `_copy_sidecars`)."""
+        async with self.lock:
+            return await asyncio.to_thread(self._snapshot)
+
+    @_refusal("snapshot")
+    def _snapshot(self) -> str:
+        if self.current is None or not self.current.exists:
+            raise NoProject("no project with data is open")
+        cur = self.current
+        busy = bool(self.busy_reasons())
+        self._ensure_dir(self.projects_dir)
+        stem = "temporary" if cur.kind == "temporary" else _grammar_stem(cur.path.stem)
+        stamp = _utc_stamp()
+        for n in range(1, 100):
+            suffix = "" if n == 1 else f"-{n}"
+            room = 64 - len(f"-snapshot-{stamp}{suffix}")
+            name = f"{_trim_stem(stem, room)}-snapshot-{stamp}{suffix}"
+            dest = self._named_path(name)
+            try:
+                self._fresh_target(dest, name)
+                core_project.copy_to(cur.path, dest)
+            except (ProjectError, FileExistsError):
+                continue                            # taken (also by another UI): next
+            break
+        else:
+            raise ProjectError("could not find a free snapshot name")
+        try:
+            skipped = self._copy_sidecars(cur.path, dest, while_busy=busy)
+            with Store(dest, create=False) as store:
+                core_project.ensure_metadata(store, dest.stem)
+                core_project.mark_copy(store, kind="snapshot", name=dest.stem,
+                                       keep_identity=False)
+        except BaseException:
+            left = _remove_project_files(dest.parent, dest.name)
+            if left:
+                self.flash.append(("warn", "A failed snapshot left: " + "; ".join(left)))
+            raise
+        if skipped:
+            self.flash.append(("warn", f"Snapshot {dest.name}: a job is running, so it "
+                               "is the project file at this moment; not copied: "
+                               + ", ".join(skipped)))
+        return dest.name
+
+    # -- the recent list: remove an entry (FR-UI-452) --------------------------------------
+    async def forget(self, recent_id: int, recent_path: str) -> None:
+        """Remove one recent entry — matched by index **and** path, under the list's lock;
+        never touches the file, never creates the projects directory."""
+        async with self.lock:
+            await asyncio.to_thread(self._forget, recent_id, recent_path)
+
+    @_refusal("removing the entry")
+    def _forget(self, recent_id: int, recent_path: str) -> None:
+        from fuzzlab.core.secretfile import locked, replace_secret
+        if self._checked_dir() is None:
+            raise ProjectError("no recent list")
+        rp = self._recent_path()
+        with locked(rp):
+            entries, _bad = _parse_recent(rp)
+            if not 0 <= recent_id < len(entries) or entries[recent_id]["path"] != recent_path:
+                raise ProjectError("the recent list changed; reload the page")
+            del entries[recent_id]
+            replace_secret(rp, json.dumps({"version": 1, "entries": entries},
+                                          indent=1).encode("utf-8"))
 
     async def close(self, *, discard: bool = False) -> None:
         """Close the open project (a discard's leftovers are reported by `_switch`)."""
         async with self.lock:
             self._check_leave(discard)
-            await asyncio.to_thread(self._switch, None, discard)
+            await asyncio.to_thread(_refusal("closing the project")(self._switch),
+                                    None, discard)
 
-    async def discard_leftover(self, name: str) -> list[str]:
+    async def discard_leftover(self, name: str, *, confirm: bool = False) -> list[str]:
+        if not confirm:
+            raise ProjectError(f"Tick 'delete it and its runs' to discard {name}.")
         async with self.lock:
             return await asyncio.to_thread(self._discard_leftover, name)
 
+    @_refusal("discarding the temporary project")
     def _discard_leftover(self, name: str) -> list[str]:
         if not isinstance(name, str) or not TEMP_RE.fullmatch(name):
             raise ProjectError("not a temporary project name")
@@ -718,6 +909,7 @@ class ProjectManager:
             self._check_leave(discard)
             return await asyncio.to_thread(self._migrate_pending, discard)
 
+    @_refusal("migrating the project")
     def _migrate_pending(self, discard: bool) -> str:
         assert self.pending is not None
         path = self.pending.path
@@ -737,6 +929,7 @@ class ProjectManager:
         async with self.lock:
             await asyncio.to_thread(self._set_meta, notes, targets)
 
+    @_refusal("saving")
     def _set_meta(self, notes, targets) -> None:
         store = open_reader(self.store_path())
         if store is None:
@@ -751,7 +944,8 @@ class ProjectManager:
         async with self.lock:
             if self.current is None or not self.current.exists:
                 raise NoProject("no project file is open")
-            await asyncio.to_thread(core_project.make_private, self.current.path)
+            await asyncio.to_thread(_refusal("making the file private")(
+                core_project.make_private), self.current.path)
 
     # -- launching into the project (FR-UI-456) ---------------------------------------
     async def launch(self, spec: "CommandSpec", values: dict[str, Any],
@@ -790,9 +984,7 @@ class ProjectManager:
         intermediate file it will write (with its SQLite side files) is absent or a
         regular, singly linked file of ours — never a symlink a tool's ``open()`` would
         follow out of the project (code review B)."""
-        project = pinned.get("store")
-        if project:
-            self._ensure_dir(sidecar_dir(project))
+        self._ensure_dir(sidecar_dir(self.store_path() or pinned["store"]))
         for opt in spec.options:
             cls, _detail = OPTION_CLASS.get((spec.name, opt.dest), (NOT_PATH, ""))
             if cls != PIN_SIDECAR:
@@ -830,8 +1022,11 @@ class ProjectManager:
 
     @staticmethod
     def _record_launch(path: str, spec, pinned: dict[str, Any]) -> tuple[int, str]:
+        target = target_of(pinned)
+        if target is not None and len(target) > core_project.MAX_TARGET_CHARS:
+            raise ProjectError(f"the target is longer than {core_project.MAX_TARGET_CHARS} "
+                               "characters")             # checked before anything is written
         with Store(path, create=False) as store:
-            target = target_of(pinned)
             launch_id, token = core_project.insert_launch(
                 store, spec.name, record_argv(spec, pinned), target)
             if target:
@@ -852,11 +1047,19 @@ class ProjectManager:
                 "schema_version": self.pending.schema_version,
                 "head_version": _head()},
         }
+        out["default_offer"] = (str(self.default_offer)
+                                if cur is None and self.pending is None
+                                and self.default_offer is not None else None)
+        out["size"] = out["written_at"] = None
         if cur is not None:
             out.update(name=cur.path.stem if cur.kind == "file" else "Temporary project",
                        path=str(cur.path), kind=cur.kind, exists=cur.exists)
             if cur.exists and os.path.exists(cur.path):
                 out["private"] = core_project.is_private(cur.path)
+                try:
+                    out.update(core_project.file_facts(cur.path))
+                except OSError:
+                    pass
         return out
 
 
@@ -895,7 +1098,7 @@ def _parse_recent(path: Path) -> tuple[list[dict[str, Any]], int]:
         return [], 1
     try:
         data = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):   # RecursionError: too deep
         return [], 1
     if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
         return [], 1
@@ -925,6 +1128,22 @@ def _acquire_owner(sd: Path) -> int | None:
         os.close(fd)
         raise ProjectError("that temporary project is in use by another fuzzlab web")
     return fd
+
+
+def _grammar_stem(stem: str) -> str:
+    """A stem rewritten into `NAME_RE`'s alphabet: other characters and ``..`` runs
+    become ``-``; it starts with a letter or digit; ``project`` if nothing is left."""
+    out = re.sub(r"[^A-Za-z0-9._ -]+", "-", stem)
+    out = re.sub(r"\.{2,}", "-", out)
+    out = re.sub(r"^[^A-Za-z0-9]+", "", out)
+    return out or "project"
+
+
+def _trim_stem(stem: str, room: int) -> str:
+    """``stem`` cut to ``room`` characters, ending with a letter, digit, ``_`` or ``-``."""
+    out = stem[:max(room, 1)]
+    out = re.sub(r"[^A-Za-z0-9_-]+$", "", out)
+    return out or "p"
 
 
 def _private_dir_ok(d: Path) -> bool:

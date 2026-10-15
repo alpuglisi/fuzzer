@@ -38,11 +38,20 @@
       {{ 'authorized' if authorized else 'not authorized' }}</span>
     <span class="chip" id="proxy-chip"><span class="led off"></span>proxy</span>
     {% if project %}
+    {# FR-UI-454: the open project on every page (research §13: name ▾ · state · size). #}
     <a class="chip project-chip" id="project-chip" href="/projects"
-       title="Projects: open, new, save as, close">
+       title="Projects: open, new, save as, snapshot, close">
       <span class="led {{ 'on' if project.status == 'open' else 'warn' }}"></span>
-      project <b>{{ project.name if project.status == 'open' else ('migration needed' if project.status == 'pending' and project.pending.kind == 'older' else ('refused' if project.status == 'pending' else 'none')) }}</b>
-      {% if project.kind == 'temporary' %}<span class="pill">temporary</span>{% endif %}
+      {% if project.status == 'open' %}
+      project <b>{{ project.name }}</b> &#9662;
+      {% if project.kind == 'temporary' %}<span class="pill">temporary</span>
+        <span class="chip-note warn">not saved</span>
+      {% elif not project.exists %}<span class="chip-note">not created yet</span>
+      {% elif project.written_at %}<span class="chip-note">written
+        <time datetime="{{ project.written_at }}">{{ project.written_at[11:16] }} UTC</time></span>{% endif %}
+      {% else %}
+      project <b>{{ 'migration needed' if project.status == 'pending' and project.pending.kind == 'older' else ('refused' if project.status == 'pending' else 'none') }}</b> &#9662;
+      {% endif %}
     </a>
     {% endif %}
   </div>

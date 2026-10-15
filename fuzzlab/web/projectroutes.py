@@ -17,6 +17,7 @@ CC-UI-0450): one local operator, one message queue, consumed by the next project
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Any
 from urllib.parse import parse_qsl
@@ -54,9 +55,8 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
                 "projects_dir": str(manager.projects_dir)}
 
     def _take_flash() -> list[dict[str, str]]:
-        out = [{"level": lvl, "text": text} for lvl, text in manager.flash]
-        manager.flash.clear()
-        return out
+        taken, manager.flash = manager.flash, []      # one swap: no append is lost
+        return [{"level": lvl, "text": text} for lvl, text in taken]
 
     @app.get("/projects", response_class=HTMLResponse)
     def projects_page(request: Request):
@@ -79,47 +79,85 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
         return {"project": manager.state(), "meta": manager.metadata(),
                 "history": manager.history() or []}
 
-    async def _act(request: Request, action, *, ok: str, back: str = "/projects"):
-        """Run one project action; a refusal becomes a held message, never a 500."""
+    async def _act(request: Request, action, *, ok: str, back: str = "/projects",
+                   home_on_switch: bool = False):
+        """Run one project action; a refusal becomes a held message, never a 500.
+
+        ``home_on_switch`` (New, Temporary, Open, Use default — the research's "URL →
+        results" path): go to ``/`` only when the action made the requested project the
+        open one (it returned True) **and** nothing but its ok message is queued; an
+        offer, a refusal or a warning (e.g. what a discard left) stays on ``/projects``,
+        where messages are shown (layout reviews C/D)."""
         form = await _form(request)
         try:
             result = await action(form)
         except _ACTION_ERRORS as exc:
-            if isinstance(exc, NeedsDiscard):
-                manager.flash.append(("warn", "This is a temporary project: leaving it "
-                                      "deletes it. Save it as a named project first, or "
-                                      "confirm the discard."))
-            else:
-                manager.flash.append(("error", str(exc)))
+            manager.flash.append(("error", _refusal_text(exc)))
             return RedirectResponse(url=back, status_code=303)
         if isinstance(result, list) and result:          # a discard left something
             manager.flash.append(("warn", "Discarded, but: " + "; ".join(result)))
         elif ok:
             manager.flash.append(("ok", ok if not isinstance(result, str) else
                                   ok.format(result=result)))
+        if home_on_switch and result is True and \
+                all(level == "ok" for level, _ in manager.flash):
+            manager.flash = []                           # the open project says it all
+            return RedirectResponse(url="/", status_code=303)
         return RedirectResponse(url=back, status_code=303)
+
+    def _refusal_text(exc: Exception) -> str:
+        if isinstance(exc, NeedsDiscard):
+            return ("The open project is temporary: leaving it deletes it. Save it as a "
+                    "named project first, or tick the box to discard it.")
+        return str(exc)
+
+    def _recent_fields(f: dict[str, str]) -> tuple[int | None, str | None]:
+        recent = f.get("recent")
+        if recent in (None, ""):
+            return None, None
+        if not re.fullmatch(r"[0-9]{1,4}", recent):
+            raise ProjectError("no such recent project")
+        return int(recent), f.get("path") or None
 
     @app.post("/projects/new")
     async def project_new(request: Request):
         return await _act(request, lambda f: manager.new(
-            f.get("name", "").strip(), discard=_flag(f, "discard")), ok="Project created.")
+            f.get("name", "").strip(), discard=_flag(f, "discard")), ok="Project created.",
+            home_on_switch=True)
 
     @app.post("/projects/temporary")
     async def project_temporary(request: Request):
         return await _act(request, lambda f: manager.temporary(discard=_flag(f, "discard")),
-                          ok="Temporary project started.")
+                          ok="Temporary project started.", home_on_switch=True)
+
+    @app.post("/projects/use-default")
+    async def project_use_default(request: Request):
+        return await _act(request, lambda f: manager.use_default(discard=_flag(f, "discard")),
+                          ok="", home_on_switch=True)
 
     @app.post("/projects/open")
     async def project_open(request: Request):
         async def go(f):
-            recent = f.get("recent")
-            if recent not in (None, "") and not recent.isdigit():
-                raise ProjectError("no such recent project")
-            await manager.open(
-                file=f.get("file") or None,
-                recent_id=int(recent) if recent not in (None, "") else None,
+            recent_id, recent_path = _recent_fields(f)
+            return await manager.open(
+                file=f.get("file") or None, recent_id=recent_id, recent_path=recent_path,
                 temporary=f.get("temporary") or None, discard=_flag(f, "discard"))
-        return await _act(request, go, ok="")
+        return await _act(request, go, ok="", home_on_switch=True)
+
+    @app.post("/projects/snapshot")
+    async def project_snapshot(request: Request):
+        return await _act(request, lambda f: manager.snapshot(),
+                          ok="Snapshot saved as {result}; this project stays open.")
+
+    @app.post("/projects/forget")
+    async def project_forget(request: Request):
+        async def go(f):
+            recent_id, recent_path = _recent_fields(f)
+            if recent_id is None or recent_path is None:
+                raise ProjectError("no such recent project")
+            await manager.forget(recent_id, recent_path)
+        return await _act(request, go, ok="Removed from the recent list (the file is "
+                                          "untouched).")
 
     @app.post("/projects/save-as")
     async def project_save_as(request: Request):
@@ -145,7 +183,8 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
     @app.post("/projects/discard-temporary")
     async def project_discard_leftover(request: Request):
         return await _act(request, lambda f: manager.discard_leftover(
-            f.get("temporary", "")), ok="Temporary project discarded.")
+            f.get("temporary", ""), confirm=_flag(f, "discard")),
+            ok="Temporary project discarded.")
 
     @app.post("/projects/make-private")
     async def project_make_private(request: Request):

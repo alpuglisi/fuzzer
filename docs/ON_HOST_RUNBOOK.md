@@ -721,12 +721,17 @@ while it is open is saved in it.
 FUZZLAB_PROJECTS_DIR=~/fuzzlab-projects FUZZLAB_STORE_PATH= fuzzlab web
 ```
 
-Open `http://127.0.0.1:8787/projects`: **New** (a name), **Temporary project**, **Open**
-(files in the projects directory, or **Recent**), **Save as**, **Close**. The topbar chip
+Open `http://127.0.0.1:8787/`: with no project open it is the **start screen** —
+**Temporary project**, **New** (a name), **Open** (files in the projects directory, with
+their run and finding counts), **Recent** (with **Remove from list**), and, when
+`./fuzzlab.db` does not exist yet, **Use ./fuzzlab.db**. With a project open, `/projects`
+offers **Save as**, **Snapshot** (a timestamped copy; you stay in the project) and
+**Close**. The topbar chip
 on every page names the open project; `/project` shows its notes, targets and run
 history. Without `FUZZLAB_STORE_PATH=` the configured store (default `./fuzzlab.db`)
 opens as the project, as before; an older store is offered for migration (a verified
-backup goes to `<file>.d/backups/` first) and is not touched until you accept.
+backup goes to `<file>.d/backups/` first) and is not touched until you accept. Every
+store written by this branch before migration 23 (schema v22) gets that offer once.
 
 Verified (2026-10-15, this build, offline — no target needed): with the command above on
 port 8799, `GET /api/projects` answered `"status": "none"`; `POST /projects/new

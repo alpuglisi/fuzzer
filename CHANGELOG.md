@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (project files: review round 2 and the layout pass; CC-UI-0450, CC-CORE-0450, BUG-0451, BUG-0452)
+- **Why:** both code reviewers' second round, and the page layout from the UI research
+  (owner: start screen when nothing is configured; Save As and Snapshot; recent.json kept).
+- **What:** the untrusted-file check is an allowlist of the objects fuzzlab creates (a
+  `TRIGGER` row had passed the denylist twice, BUG-0451); the built-in default store is
+  only offered unless it exists, and tests no longer create `./fuzzlab.db` (BUG-0452, a
+  session guard); migration 23 adds a display-only project id and copy lineage; a start
+  screen, Snapshot, Remove from list, a truthful "last written" chip, interrupted labels;
+  stale pages and corrupt files are messages, not 500s; real-browser lifecycle tests.
+
 ## 2026-10-15 (UI project files, Burp/ZAP-style; CC-UI-0450, CC-CORE-0450, CC-FUZZ-0450, BUG-0450)
 - **Why:** the owner wants the UI to work on saved project files: every run of a session
   saved in that session's file, opened later to continue or review.

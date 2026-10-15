@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import re
 import os
 import stat
 import sys
@@ -66,7 +67,8 @@ def _tree_modes(root: Path):
 _CREATE_ALLOWED = {("projects.py", "_create_locked")}
 _OPENERS = {"Store", "open_store", "connect"}
 #: `core.project` helpers that create files: only these web functions may call them.
-_CREATORS = {"create": {"_create_locked"}, "copy_to": {"_save_as", "_copy_sidecars"}}
+_CREATORS = {"create": {"_create_locked"},
+             "copy_to": {"_save_as", "_copy_sidecars", "_snapshot"}}
 
 
 def _refname(node):
@@ -75,30 +77,49 @@ def _refname(node):
 
 
 def _creating_opens(source: str, filename: str) -> list[str]:
-    """Calls in ``source`` that may open a store and create its file: ``Store(``,
-    ``open_store(``, ``connect(`` — under any import alias or assigned name — without
-    ``create=False``; any ``sqlite3.connect(``; an opener reached by ``getattr`` or
-    passed as an argument (``partial(Store, p)``); and a ``core_project.create`` /
-    ``copy_to`` outside its allowed function."""
+    """Code in ``source`` that may open a store and create its file, or create a project
+    file outside its allowed function:
+
+    - a call of ``Store`` / ``open_store`` / ``connect`` (under any import alias) without
+      ``create=False``, and any ``sqlite3.connect`` (under any module alias);
+    - any other use of an opener name — assigned, passed, stored, defaulted, subclassed,
+      reached by ``getattr`` — except as the direct callee or in an annotation;
+    - ``create`` / ``copy_to`` of ``fuzzlab.core.project`` (by any module alias, or
+      imported by name) called outside the functions allowed to.
+    Code review B, rounds 1-2 (PA-0034(2)): every shape is a synthetic offender below."""
     tree = ast.parse(source)
     aliases, sqlite_mods = set(_OPENERS), {"sqlite3"}
+    project_mods, creator_names = {"core_project"}, {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for a in node.names:
                 if a.name in _OPENERS:
                     aliases.add(a.asname or a.name)
+                if node.module == "fuzzlab.core" and a.name == "project":
+                    project_mods.add(a.asname or a.name)
+                if node.module == "fuzzlab.core.project" and a.name in _CREATORS:
+                    creator_names[a.asname or a.name] = a.name
         elif isinstance(node, ast.Import):
             for a in node.names:
                 if a.name == "sqlite3":
                     sqlite_mods.add(a.asname or a.name)
-        elif isinstance(node, ast.Assign) and _refname(node.value) in aliases:
-            aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
+                if a.name == "fuzzlab.core.project" and a.asname:
+                    project_mods.add(a.asname)
+    annotations = set()
+    for node in ast.walk(tree):
+        for ann in ([node.returns] if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    else []) + ([node.annotation] if isinstance(node, (ast.arg, ast.AnnAssign))
+                                else []):
+            if ann is not None:
+                annotations.update(id(n) for n in ast.walk(ann))
+    callee_ids = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     offenders = []
 
     def visit(node, func):
         for child in ast.iter_child_nodes(node):
             f = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                 else func
+            allowed = (filename, f) in _CREATE_ALLOWED
             if isinstance(child, ast.Call):
                 name = _refname(child.func)
                 is_sqlite = (isinstance(child.func, ast.Attribute) and
@@ -106,19 +127,27 @@ def _creating_opens(source: str, filename: str) -> list[str]:
                              child.func.value.id in sqlite_mods)
                 no_create = any(k.arg == "create" and isinstance(k.value, ast.Constant)
                                 and k.value.value is False for k in child.keywords)
-                allowed = (filename, f) in _CREATE_ALLOWED
                 if (name in aliases or is_sqlite) and (is_sqlite or not no_create) \
                         and not allowed:
                     offenders.append(f"{filename}:{child.lineno} {name}(")
                 if name == "getattr" and any(isinstance(a, ast.Constant) and
-                                             a.value in _OPENERS for a in child.args):
+                                             a.value in _OPENERS | set(_CREATORS)
+                                             for a in child.args):
                     offenders.append(f"{filename}:{child.lineno} getattr(…opener)")
-                if any(_refname(a) in aliases for a in child.args) and not allowed:
-                    offenders.append(f"{filename}:{child.lineno} opener passed to {name}(")
-                if (isinstance(child.func, ast.Attribute) and name in _CREATORS and
-                        _refname(child.func.value) == "core_project" and
-                        f not in _CREATORS[name]):
-                    offenders.append(f"{filename}:{child.lineno} core_project.{name}(")
+                creator = None
+                if isinstance(child.func, ast.Attribute) and name in _CREATORS and \
+                        _refname(child.func.value) in project_mods:
+                    creator = name
+                elif isinstance(child.func, ast.Name) and child.func.id in creator_names:
+                    creator = creator_names[child.func.id]
+                if creator and f not in _CREATORS[creator]:
+                    offenders.append(f"{filename}:{child.lineno} core project {creator}(")
+            elif (isinstance(child, (ast.Name, ast.Attribute)) and
+                  _refname(child) in aliases and id(child) not in callee_ids and
+                  id(child) not in annotations and
+                  isinstance(getattr(child, "ctx", None), ast.Load)):
+                offenders.append(f"{filename}:{getattr(child, 'lineno', 0)} "
+                                 f"{_refname(child)} used, not called")
             visit(child, f)
     visit(tree, "")
     return offenders
@@ -146,6 +175,17 @@ def test_no_web_module_opens_a_store_that_can_create():
     "def f(p):\n    S = Store\n    return S(p)\n",
     "def f(p):\n    return core_project.create(p)\n",
     "def _new(p):\n    return core_project.copy_to(p, p)\n",
+    # code review B, round 2
+    "from fuzzlab.core.project import create\ndef f(p):\n    create(p)\n",
+    "from fuzzlab.core import project as cp\ndef f(p):\n    cp.create(p)\n",
+    "from fuzzlab.core import project as cp\ndef f(a, b):\n    cp.copy_to(a, b)\n",
+    "def f(p):\n    S: type = Store\n    return S(p)\n",
+    "def f(p):\n    return (S := Store)(p)\n",
+    "def f(p):\n    S, = (Store,)\n    return S(p)\n",
+    "def f(p, S=Store):\n    return S(p)\n",
+    "OPEN = {'s': Store}\n",
+    "class X(Store):\n    pass\n",
+    "def f(p):\n    return (lambda: Store)()(p)\n",
 ])
 def test_the_creating_open_guard_catches_synthetic_offenders(bad):
     assert _creating_opens(bad, "x.py"), bad
@@ -158,12 +198,37 @@ def test_the_creating_open_guard_passes_a_no_create_open():
 
 
 _RECORD_WRITE = __import__("re").compile(
-    r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?"
-    r"|DELETE\s+FROM)\s+(?:[\"`\[]?main[\"`\]]?\.)?[\"`\[]?(?:launch|project)\b", __import__("re").I)
+    r"\b(?:INSERT(?:\s+OR\s+\w+)?\s*INTO|REPLACE\s*INTO|UPDATE(?:\s+OR\s+\w+)?"
+    r"|DELETE\s*FROM)\s*(?:[\"`\[]?main[\"`\]]?\.)?[\"`\[]?(?:launch|project)\b",
+    __import__("re").I)
+
+
+def _sql_text(source: str) -> str:
+    """``source`` with every string constant joined the way Python joins it (implicit
+    concatenation, ``+``, f-string parts) and SQL comments removed, so a split or
+    commented statement still reads as one (code review B, round 2)."""
+    import re as _re
+    parts = []
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            parts.append(node.value)
+        elif isinstance(node, ast.JoinedStr):
+            parts.append("".join(v.value if isinstance(v, ast.Constant) else " " for v in
+                                 node.values))
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            parts.append("".join(n.value for n in ast.walk(node)
+                                 if isinstance(n, ast.Constant) and isinstance(n.value, str)))
+    text = "\n".join(parts)
+    text = _re.sub(r"/\*.*?\*/", " ", text, flags=_re.S)
+    return _re.sub(r"--[^\n]*", " ", text)
 
 
 def _record_writers(source: str) -> bool:
-    return bool(_RECORD_WRITE.search(source))
+    return bool(_RECORD_WRITE.search(_sql_text(source)))
 
 
 def test_only_core_project_writes_the_project_record_tables():
@@ -172,15 +237,20 @@ def test_only_core_project_writes_the_project_record_tables():
     root = WEB.parent
     writers = sorted(str(p.relative_to(root)) for p in root.rglob("*.py")
                      if _record_writers(p.read_text()))
-    assert writers == ["core/project.py"], writers
+    # migrations.py: migration 23's post-step backfills `project.uuid` (PA-0105(2)).
+    assert writers == ["core/migrations.py", "core/project.py"], writers
     for offender in ("UPDATE launch SET argv=?", "INSERT OR REPLACE INTO launch (a) VALUES (1)",
                      "REPLACE INTO project (id) VALUES (1)", 'UPDATE "launch" SET x=1',
                      "DELETE FROM launch", "update main.project set notes=''",
-                     "INSERT INTO `project` (id) VALUES (1)"):
-        assert _record_writers(offender), offender
+                     "INSERT INTO `project` (id) VALUES (1)", "INSERT/**/INTO launch (a)",
+                     'INSERT INTO"launch"(a)'):
+        assert _record_writers(repr(offender)), offender
+    assert _record_writers('x = "INSERT INTO " "launch (a) VALUES (1)"')
+    assert _record_writers('x = "INSERT INTO " + "launch (a)"')
+    assert _record_writers('x = f"UPDATE {t} SET a=1; UPDATE project SET b=2"')
     for benign in ("SELECT id FROM launch WHERE token=?", "INSERT INTO run (launch_id)",
                    "CREATE TABLE IF NOT EXISTS launch ("):
-        assert not _record_writers(benign), benign
+        assert not _record_writers(repr(benign)), benign
 
 
 def _str_options():
@@ -599,11 +669,13 @@ def test_a_leftover_temporary_is_listed_and_one_held_by_another_ui_is_not_discar
     name = Path(a.store_path()).name
     b = ProjectManager(_cfg(tmp_path, store=None))
     assert b.leftover_temporaries() == [name]
+    with pytest.raises(ProjectError, match="Tick"):
+        asyncio.run(b.discard_leftover(name))                  # needs the confirmation
     with pytest.raises(ProjectError, match="in use"):
-        asyncio.run(b.discard_leftover(name))
+        asyncio.run(b.discard_leftover(name, confirm=True))
     projects._release_owner(a.current.owner_fd)          # the other UI exits
     a.current.owner_fd = None
-    assert asyncio.run(b.discard_leftover(name)) == []
+    assert asyncio.run(b.discard_leftover(name, confirm=True)) == []
     assert b.leftover_temporaries() == []
     with pytest.raises(ProjectError):
         asyncio.run(b.discard_leftover("../../x"))
@@ -1004,7 +1076,11 @@ def test_missing_parents_of_the_projects_directory_are_created_private(tmp_path)
         os.umask(old)
     for p in (tmp_path / "a", tmp_path / "a" / "b", deep):
         assert stat.S_IMODE(os.stat(p).st_mode) == 0o700, p
-    assert stat.S_IMODE(os.stat(tmp_path).st_mode) != 0o700 or True
+    os.chmod(tmp_path, 0o755)                     # an existing parent is left as it is
+    mgr2 = ProjectManager(load_config(overrides={
+        "store_path": "", "projects_dir": str(tmp_path / "c" / "projects")}, environ={}))
+    asyncio.run(mgr2.new("y"))
+    assert stat.S_IMODE(os.stat(tmp_path).st_mode) == 0o755
 
 
 def test_a_linked_temporary_directory_is_refused(tmp_path):
@@ -1019,7 +1095,8 @@ def test_a_linked_temporary_directory_is_refused(tmp_path):
     with pytest.raises(ProjectError):
         asyncio.run(mgr.open(temporary="tmp-20260101T000000Z-0123abcd.fuzzlab"))
     with pytest.raises(ProjectError):
-        asyncio.run(mgr.discard_leftover("tmp-20260101T000000Z-0123abcd.fuzzlab"))
+        asyncio.run(mgr.discard_leftover("tmp-20260101T000000Z-0123abcd.fuzzlab",
+                                         confirm=True))
     assert (elsewhere / "tmp-20260101T000000Z-0123abcd.fuzzlab").exists()
 
 
@@ -1082,7 +1159,7 @@ def test_a_failure_in_the_pump_tail_still_ends_busy_and_the_stream(tmp_path, mon
         calls.append(1)
         if len(calls) == 1:
             await real(h, **kw)
-            raise RuntimeError("injected tail failure")
+            raise procutil.ProcUtilError("injected tail failure")
         return await real(h, **kw)
     monkeypatch.setattr(procutil, "astop_server", raising)
     runner = Runner()
@@ -1094,6 +1171,8 @@ def test_a_failure_in_the_pump_tail_still_ends_busy_and_the_stream(tmp_path, mon
         assert any("event: done" in ev for ev in events)
         assert mgr.busy_reasons() == []
     asyncio.run(go())
+    with Store(tmp_path / "start.db", create=False) as store:   # and the end is recorded
+        assert store.conn.execute("SELECT status FROM launch").fetchone()[0] == "succeeded"
 
 
 def test_a_project_replaced_at_the_same_path_gets_its_own_repeater_run(tmp_path):
@@ -1115,3 +1194,300 @@ def test_a_project_replaced_at_the_same_path_gets_its_own_repeater_run(tmp_path)
         rows = store.conn.execute("SELECT t.name, r.tool FROM repeater_tab t "
                                   "JOIN run r ON r.id = t.run_id").fetchall()
         assert [tuple(r) for r in rows] == [("new", "repeater")]
+
+
+
+# --- code review round 2 (CC-UI-0450) ----------------------------------------------------
+
+def test_stale_pages_and_bad_input_are_messages_not_500s(tmp_path):
+    """A-r2-1: a file removed after the page rendered, a non-ASCII digit, a corrupt
+    project database — each becomes a refusal message, never a 500."""
+    from fastapi.testclient import TestClient
+    app = create_app(_cfg(tmp_path, store=None))
+    c = TestClient(app, base_url="http://127.0.0.1:8787", headers=SAME_ORIGIN_HEADERS,
+                   follow_redirects=False, raise_server_exceptions=False)
+    c.post("/projects/new", data={"name": "a"})
+    c.post("/projects/new", data={"name": "b"})
+    os.unlink(tmp_path / "projects" / "a.fuzzlab")
+    assert c.post("/projects/open", data={"file": "a.fuzzlab"}).status_code == 303
+    assert "no longer exists" in c.get("/projects").text
+    assert c.post("/projects/open", data={"recent": "\u00b2"}).status_code == 303
+    assert "no such recent project" in c.get("/projects").text
+    side = tmp_path / "projects" / "b.fuzzlab.d"
+    side.mkdir(mode=0o700)
+    (side / "spider.db").write_bytes(b"SQLite format 3\x00" + b"\x00" * 200)
+    os.chmod(side / "spider.db", 0o600)
+    assert c.post("/projects/save-as", data={"name": "c"}).status_code == 303
+    assert "save as failed" in c.get("/projects").text
+    assert not (tmp_path / "projects" / "c.fuzzlab").exists()
+
+
+def test_a_long_target_is_refused_before_any_launch_row(tmp_path, monkeypatch):
+    """A-r2-6: no `running` row is left by a refusal before the spawn."""
+    async def fake_launch(self, argv, **kw):
+        raise AssertionError("must not start")
+    monkeypatch.setattr(Runner, "launch", fake_launch)
+    app, c = _client(tmp_path)
+    r = c.post("/api/launch", json={"command": "auto", "values": {
+        "base_url": "http://127.0.0.1/" + "a" * 3000}})
+    assert r.status_code == 409 and "longer than" in r.json()["error"]
+    with Store(tmp_path / "start.db", create=False) as store:
+        assert store.conn.execute("SELECT COUNT(*) FROM launch").fetchone()[0] == 0
+
+
+def test_a_stale_side_file_alone_is_named(tmp_path):
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("x"))
+    (tmp_path / "projects" / "w.fuzzlab-wal").write_bytes(b"x")
+    with pytest.raises(ProjectError, match=r"w\.fuzzlab-wal is left over"):
+        asyncio.run(mgr.new("w"))
+
+
+def test_current_is_set_even_when_leaving_raises(tmp_path, monkeypatch):
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.temporary())
+
+    def boom(*a, **k):
+        raise OSError("injected")
+    monkeypatch.setattr(projects, "_remove_project_files", boom)
+    with pytest.raises(ProjectError):
+        asyncio.run(mgr.new("next", discard=True))
+    assert mgr.store_path() == str(tmp_path / "projects" / "next.fuzzlab")
+
+
+def test_a_project_the_cli_created_meanwhile_is_adopted_not_clobbered(tmp_path, monkeypatch):
+    """_ensure_created: the O_EXCL create losing a race to another writer."""
+    mgr = ProjectManager(_cfg(tmp_path))
+    path = tmp_path / "start.db"
+    real = core_project.create
+
+    def racing(p, name=None):
+        with Store(p) as store:                     # another process got there first
+            store.start_run("cli", "h")
+        return real(p, name)
+    monkeypatch.setattr(core_project, "create", racing)
+    assert mgr._ensure_created() == str(path)
+    with Store(path, create=False) as store:
+        assert store.conn.execute("SELECT tool FROM run").fetchone()[0] == "cli"
+        assert core_project.read_metadata(store)["name"] == "start"
+
+
+def test_reopening_the_open_temporary_is_a_no_op(tmp_path):
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.temporary())
+    name = Path(mgr.store_path()).name
+    asyncio.run(mgr.open(temporary=name))                  # no "in use" refusal
+    assert Path(mgr.store_path()).name == name
+
+
+def test_a_reused_inode_never_hands_out_another_tools_run(tmp_path):
+    """A-r2-4: the cached Repeater run id is re-checked against the store."""
+    from fuzzlab.web.proxycontrol import RepeaterController
+    from types import SimpleNamespace
+    path = tmp_path / "x.fuzzlab"
+    core_project.create(path)
+    cfg = SimpleNamespace(get=lambda k, d=None: str(path) if k == "store_path" else d)
+    ctl = RepeaterController(cfg, sender=lambda *a: b"HTTP/1.1 200 OK\r\n\r\n")
+    ctl.create_tab("t", "127.0.0.1", 80, "GET / HTTP/1.1\r\n\r\n")
+    ctl._local.store.close()
+    ctl._local.store = ctl._local.rep = ctl._local.path = None
+    key = ctl._key()
+    with Store(path, create=False) as store:              # same file, run id now not ours
+        store.conn.execute("UPDATE run SET tool='crawl' WHERE id=?", (ctl._run_ids[key],))
+        store.conn.commit()
+    ctl.create_tab("t2", "127.0.0.1", 80, "GET / HTTP/1.1\r\n\r\n")
+    with Store(path, create=False) as store:
+        tools = [r[0] for r in store.conn.execute(
+            "SELECT r.tool FROM repeater_tab t JOIN run r ON r.id=t.run_id WHERE t.name='t2'")]
+        assert tools == ["repeater"]
+
+
+# --- start screen and the default store (FR-UI-458, layout pass) ----------------------------
+
+def _default_client(tmp_path, monkeypatch, **over):
+    """The built-in default config, run from an empty working directory (layout C2)."""
+    monkeypatch.chdir(tmp_path)
+    cfg = load_config(overrides={"projects_dir": str(tmp_path / "projects"), **over},
+                      environ={})
+    app = create_app(cfg)
+    return app, web_client(app, follow_redirects=False)
+
+
+def test_a_default_first_launch_lands_on_the_start_screen(tmp_path, monkeypatch):
+    app, c = _default_client(tmp_path, monkeypatch)
+    r = c.get("/")
+    assert r.status_code == 303 and r.headers["location"] == "/projects"
+    page = c.get("/projects").text
+    assert 'id="start-temporary"' in page and 'id="start-default"' in page
+    assert str(tmp_path / "fuzzlab.db") in page            # the absolute path is shown
+    assert c.post("/api/launch", json={"command": "report", "values": {}}).status_code == 409
+    r = c.post("/projects/use-default")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    st = _state(c)
+    assert st["status"] == "open" and st["path"] == str(tmp_path / "fuzzlab.db")
+    assert not (tmp_path / "fuzzlab.db").exists()         # created by its first run only
+
+
+def test_an_existing_default_store_is_opened_as_before(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    core_project.create(tmp_path / "fuzzlab.db")
+    app, c = _default_client(tmp_path, monkeypatch)
+    assert c.get("/").status_code == 200
+    assert _state(c)["path"] == str(tmp_path / "fuzzlab.db")
+
+
+def test_the_in_process_proxy_adopts_the_default_store_in_a_fresh_directory(tmp_path,
+                                                                            monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.chdir(tmp_path)
+    cfg = load_config(overrides={"projects_dir": str(tmp_path / "projects")}, environ={})
+    proxy = _FakeProxy(str(tmp_path / "fuzzlab.db"))
+    app = create_app(cfg, proxy=proxy)
+    with TestClient(app, base_url="http://127.0.0.1:8787", headers=SAME_ORIGIN_HEADERS):
+        assert proxy.started and (tmp_path / "fuzzlab.db").exists()
+
+
+def test_opening_an_offer_stays_on_projects_and_success_goes_home(tmp_path):
+    """Layout D1/C1: `/` only when the requested project opened and nothing but its ok
+    message is queued."""
+    app, c = _client(tmp_path, store=None)
+    r = c.post("/projects/new", data={"name": "cur"})
+    assert r.headers["location"] == "/"
+    _older(tmp_path / "projects" / "old.fuzzlab")
+    r = c.post("/projects/open", data={"file": "old.fuzzlab"})
+    assert r.headers["location"] == "/projects"
+    assert 'id="project-migrate-offer"' in c.get("/projects").text
+    c.post("/projects/temporary")
+    side = core_project.sidecar_dir(Path(_state(c)["path"]))
+    (side / "unknown.bin").write_text("x")
+    r = c.post("/projects/new", data={"name": "next", "discard": "1"})
+    assert r.headers["location"] == "/projects"           # a warning is waiting there
+    assert "1 unknown file(s)" in c.get("/projects").text
+
+
+def test_snapshot_keeps_the_project_open_names_safely_and_records_lineage(tmp_path):
+    long_name = "n" * 64
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": long_name})
+    path = tmp_path / "projects" / f"{long_name}.fuzzlab"
+    with Store(path, create=False) as store:
+        store.start_run("x", "h")
+        src_uuid = core_project.read_metadata(store)["uuid"]
+    names = []
+    for _ in range(3):                                     # same second: -2, -3
+        assert c.post("/projects/snapshot").status_code == 303
+        names.append(re.search(r"Snapshot saved as (\S+);", c.get("/projects").text).group(1))
+    assert len(set(names)) == 3 and _state(c)["path"] == str(path)
+    listed = [f["file"] for f in c.get("/api/projects").json()["files"]]
+    for n in names:
+        assert n in listed and len(n) <= 64 + len(".fuzzlab")
+        with Store(tmp_path / "projects" / n, create=False) as store:
+            meta = core_project.read_metadata(store)
+            assert meta["copy_kind"] == "snapshot" and meta["origin_uuid"] == src_uuid
+            assert meta["uuid"] != src_uuid
+            assert store.conn.execute("SELECT COUNT(*) FROM run").fetchone()[0] == 1
+        assert stat.S_IMODE(os.stat(tmp_path / "projects" / n).st_mode) == 0o600
+    assert names[0] not in [r["name"] for r in c.get("/api/projects").json()["recent"]]
+
+
+def test_snapshot_stems_fit_the_name_grammar():
+    assert projects._grammar_stem("my..db") == "my-db"
+    assert projects._grammar_stem("..x") == "x"
+    assert projects._grammar_stem("é") == "project"
+    for room in (1, 10, 36):
+        t = projects._trim_stem("ab. -" * 20, room)
+        assert len(t) <= room and projects.NAME_RE.fullmatch(t + "-snapshot")
+
+
+def test_save_as_of_a_temporary_keeps_its_identity_and_of_a_file_records_origin(tmp_path):
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/temporary")
+    with Store(Path(_state(c)["path"]), create=False) as store:
+        tmp_uuid = core_project.read_metadata(store)["uuid"]
+    c.post("/projects/save-as", data={"name": "kept"})
+    with Store(tmp_path / "projects" / "kept.fuzzlab", create=False) as store:
+        meta = core_project.read_metadata(store)
+        assert meta["uuid"] == tmp_uuid and meta["copy_kind"] is None
+    c.post("/projects/save-as", data={"name": "copy"})
+    with Store(tmp_path / "projects" / "copy.fuzzlab", create=False) as store:
+        meta = core_project.read_metadata(store)
+        assert meta["origin_uuid"] == tmp_uuid and meta["copy_kind"] == "save-as"
+
+
+def test_remove_from_list_matches_index_and_path_and_leaves_the_file(tmp_path):
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "a"})
+    c.post("/projects/new", data={"name": "b"})
+    recent = c.get("/api/projects").json()["recent"]
+    a = [r for r in recent if r["name"] == "a"][0]
+    c.post("/projects/forget", data={"recent": str(a["id"]), "path": "/elsewhere"})
+    assert "the recent list changed" in _flash(c)
+    c.post("/projects/forget", data={"recent": str(a["id"]), "path": a["path"]})
+    assert [r["name"] for r in c.get("/api/projects").json()["recent"]] == ["b"]
+    assert (tmp_path / "projects" / "a.fuzzlab").exists()
+
+
+def test_a_leftover_discard_needs_its_confirmation(tmp_path):
+    a = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(a.temporary())
+    name = Path(a.store_path()).name
+    projects._release_owner(a.current.owner_fd)
+    a.current.owner_fd = None
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/discard-temporary", data={"temporary": name})
+    assert "Tick" in _flash(c) and (tmp_path / "projects" / ".temporary" / name).exists()
+    c.post("/projects/discard-temporary", data={"temporary": name, "discard": "1"})
+    assert not (tmp_path / "projects" / ".temporary" / name).exists()
+
+
+def test_the_last_written_time_ignores_readers(tmp_path):
+    """Layout D2: readers create an empty -wal and a -shm; neither moves the time."""
+    path = tmp_path / "p.fuzzlab"
+    core_project.create(path)
+    with Store(path, create=False) as store:
+        store.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    old = 1_700_000_000
+    os.utime(path, (old, old))
+    before = core_project.file_facts(path)
+    with Store(path, create=False):                       # a reader
+        core_project.summary(path)
+        core_project.inspect(path)
+        assert core_project.file_facts(path)["written_at"] == before["written_at"]
+
+
+def test_summary_refuses_a_view_named_run_and_is_bounded(tmp_path, monkeypatch):
+    import sqlite3
+    path = tmp_path / "v.fuzzlab"
+    Store(path).close()
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE run")
+    conn.execute("CREATE VIEW run AS WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL "
+                 "SELECT x+1 FROM c) SELECT x AS id FROM c")
+    conn.commit()
+    conn.close()
+    assert core_project.summary(path) == {"readable": False}
+    cheap = tmp_path / "c.fuzzlab"                         # refused by the allowlist,
+    Store(cheap).close()                                   # not only by the budget
+    conn = sqlite3.connect(cheap)
+    conn.execute("DROP TABLE run")
+    conn.execute("CREATE VIEW run AS SELECT 1 AS id")
+    conn.commit()
+    conn.close()
+    assert core_project.summary(cheap) == {"readable": False}
+    good = tmp_path / "g.fuzzlab"
+    core_project.create(good)
+    monkeypatch.setattr(core_project, "SUMMARY_STEP_BUDGET", 0)
+    core_project._SUMMARY_CACHE.clear()
+    assert core_project.summary(good) == {"readable": False}     # the budget aborts
+    monkeypatch.undo()
+    core_project._SUMMARY_CACHE.clear()
+    assert core_project.summary(good)["readable"] is True
+
+
+def test_history_labels_an_interrupted_job(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        core_project.ensure_metadata(store, "s")
+        core_project.insert_launch(store, "auto", [("", "fuzzlab")], None)
+        core_project.ensure_metadata(store, "s")           # the UI ended first
+        rows = core_project.run_history(store)
+        assert rows[0]["label"] == "interrupted" and rows[0]["status"] == "unknown"

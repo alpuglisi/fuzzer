@@ -28,6 +28,7 @@ save as / close, the recent list, path rules) lives in ``fuzzlab.web.projects``.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import secrets
@@ -58,15 +59,8 @@ MAX_NAME_CHARS = 200
 #: exit status could not be read.
 LAUNCH_STATUSES = ("running", "succeeded", "failed", "stopped", "unknown")
 
-#: The virtual tables migrations create, as ``(name, module)``; any other is refused.
-_OWN_VIRTUAL_TABLES = frozenset({("flow_fts", "fts5")})
-
-
-def _virtual_module(sql: str | None) -> str:
-    """The module of a ``CREATE VIRTUAL TABLE … USING <module>(…)`` statement."""
-    import re
-    m = re.search(r"\bUSING\s+([A-Za-z0-9_]+)", sql or "", re.I)
-    return m.group(1).lower() if m else ""
+def _norm_sql(sql: str | None) -> str:
+    return " ".join((sql or "").rstrip().rstrip(";").split())
 
 
 #: The only errors `inspect` turns into a refusal; anything else propagates (PA-0106).
@@ -140,27 +134,84 @@ def inspect(path: str | Path) -> ProjectInfo:
         raise ProjectError(f"{p} cannot be opened as a project: {exc}") from exc
 
 
+#: SQLite's own bookkeeping tables a legitimate store may gain (``ANALYZE``), allowed by
+#: name with type ``table``. ``sqlite_sequence`` and ``sqlite_autoindex_*`` are already in
+#: the reference schema.
+_SQLITE_STAT_TABLES = frozenset({"sqlite_stat1", "sqlite_stat2", "sqlite_stat3",
+                                 "sqlite_stat4"})
+
+
+@functools.lru_cache(maxsize=None)
+def reference_schema(version: int) -> dict[tuple[str, str, str], str]:
+    """Every schema object fuzzlab's migrations create up to ``version``, as
+    ``{(type, name, tbl_name): normalised sql}`` — built by running those migrations in
+    memory, so the allowlist is derived from the one source of truth (PA-0001)."""
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_version ("
+                     "  version INTEGER PRIMARY KEY,"
+                     "  applied_at TEXT NOT NULL DEFAULT (datetime('now'))"
+                     ")")
+        for v, sql in sorted(migrations.MIGRATIONS):
+            if v > version:
+                break
+            for stmt in migrations.split_statements(sql):
+                conn.execute(stmt)
+        return {(t, n, tb): _norm_sql(q) for t, n, tb, q in conn.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master")}
+    finally:
+        conn.close()
+
+
+def _foreign_objects(conn: sqlite3.Connection, version: int) -> list[str]:
+    """Schema objects in the file that fuzzlab's migrations (at ``version``) never
+    create: an **allowlist** check (BUG-0451). A row counts only if its exact
+    ``(type, name, tbl_name)`` — type compared case-sensitively, as written — is in the
+    reference schema; an index's or virtual table's definition must also match exactly
+    (normalised whitespace). Tables are matched by identity (an ``ALTER``/``DROP COLUMN``
+    history may reword their stored text; ``trusted_schema=OFF`` keeps any function in a
+    table definition from running). Missing objects are fine."""
+    ref = reference_schema(version)
+    out = []
+    for t, n, tb, q, rootpage in conn.execute(
+            "SELECT type, name, tbl_name, sql, rootpage FROM sqlite_master"):
+        if t == "table" and n in _SQLITE_STAT_TABLES:
+            continue
+        key = (t, n, tb)
+        if key not in ref:
+            out.append(f"{t} {n}")
+        elif (t == "index" or (t == "table" and rootpage == 0)) and \
+                _norm_sql(q) != ref[key]:
+            out.append(f"{t} {n} (definition changed)")
+    return sorted(out)
+
+
 def _inspect_open(conn: sqlite3.Connection, p: Path, size: int, head: int) -> ProjectInfo:
-    # Triggers and views have their own namespace (a trigger may share a table's name),
-    # so each kind is queried on its own, never folded into one name -> type map.
-    active = [f"{t} {n}" for t, n in conn.execute(
-        "SELECT type, name FROM sqlite_master WHERE type IN ('trigger','view') "
-        "ORDER BY type, name")]
-    virtual = [n for n, sql in conn.execute(
-        "SELECT name, sql FROM sqlite_master WHERE type='table' AND sql LIKE 'CREATE VIRTUAL%'")
-        if (n, _virtual_module(sql)) not in _OWN_VIRTUAL_TABLES]
-    if active or virtual:
-        raise ProjectError(f"{p} contains schema objects fuzzlab never creates "
-                           f"({', '.join(active + ['virtual table ' + v for v in virtual])}); "
-                           "refused as untrusted")
-    kinds = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "schema_version" not in kinds:
+    has_version_table = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'"
+    ).fetchone()[0]
+    if not has_version_table:
         raise ProjectError(f"{p} is an SQLite database but not a fuzzlab store "
                            "(no schema_version table)")
-    found = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] or 0
-    if found == 0 and kinds - {"schema_version"}:
-        raise ProjectError(f"{p} has tables but no recorded fuzzlab schema version; "
+    bad = conn.execute("SELECT COUNT(*) FROM schema_version WHERE typeof(version) != "
+                       "'integer' OR version < 1").fetchone()[0]
+    if bad:
+        raise ProjectError(f"{p} records a schema version fuzzlab never writes; "
                            "not a fuzzlab store")
+    found = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] or 0
+    kinds = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if found <= head:                       # a newer file is refused by its version anyway
+        foreign = _foreign_objects(conn, found)
+        if foreign:
+            raise ProjectError(
+                f"{p} contains schema objects fuzzlab never creates at schema v{found} "
+                f"({', '.join(foreign[:5])}{' …' if len(foreign) > 5 else ''}); "
+                "refused as untrusted")
+    app_id = int(conn.execute("PRAGMA application_id").fetchone()[0])
+    if found and ("run" not in kinds or app_id not in (0, migrations.APPLICATION_ID)
+                  or (found >= 22 and app_id != migrations.APPLICATION_ID)):
+        raise ProjectError(f"{p} is another application's database (its schema or "
+                           "SQLite application id is not fuzzlab's)")
     info = ProjectInfo(p, size, int(found), head,
                        application_id=int(conn.execute("PRAGMA application_id").fetchone()[0]))
     if size <= QUICK_CHECK_MAX_BYTES:
@@ -221,10 +272,10 @@ def ensure_metadata(store: Store, name: str) -> dict[str, Any]:
                 "SELECT MIN(applied_at) FROM schema_version").fetchone()[0] or now
             conn.execute(
                 "INSERT INTO project (id, name, created_at, opened_at, notes, targets, "
-                "created_by_version, opened_by_version, created_schema_version) "
-                "VALUES (1,?,?,?,'','[]',?,?,?)",
+                "created_by_version, opened_by_version, created_schema_version, uuid) "
+                "VALUES (1,?,?,?,'','[]',?,?,?,?)",
                 (str(name)[:MAX_NAME_CHARS], created, now, __version__, __version__,
-                 migrations.current_version(conn)))
+                 migrations.current_version(conn), secrets.token_hex(16)))
         else:
             conn.execute("UPDATE project SET opened_at=?, opened_by_version=? WHERE id=1",
                          (now, __version__))
@@ -252,7 +303,47 @@ def _parse_metadata(row: dict[str, Any]) -> dict[str, Any]:
         out["targets_malformed"] = True
         targets = []
     out["targets"] = targets
+    # Identity and lineage (migration 23): display only. A malformed value reads as
+    # malformed (None plus a flag), never fabricated.
+    out["identity_malformed"] = False
+    for key in ("uuid", "origin_uuid"):
+        v = row.get(key)
+        if v is not None and not (isinstance(v, str) and _HEX32.fullmatch(v)):
+            out["identity_malformed"] = True
+            v = None
+        out[key] = v
+    kind = row.get("copy_kind")
+    out["copy_kind"] = kind if kind in COPY_KINDS else None
+    out["copied_at"] = row.get("copied_at") if out["copy_kind"] else None
     return out
+
+
+COPY_KINDS = ("snapshot", "save-as")
+_HEX32 = __import__("re").compile(r"[0-9a-f]{32}")
+
+
+def mark_copy(store: Store, *, kind: str, name: str, keep_identity: bool) -> None:
+    """Record on a freshly published copy what it is (FR-CORE-453), in one transaction:
+    its name, and — unless ``keep_identity`` (a temporary project saved: the same
+    project) — a new ``uuid`` with ``origin_uuid`` (the source's), ``copied_at`` and
+    ``copy_kind``."""
+    if kind not in COPY_KINDS:
+        raise ValueError(f"unknown copy kind {kind!r}")
+    conn = store.conn
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if keep_identity:
+            conn.execute("UPDATE project SET name=? WHERE id=1", (str(name)[:MAX_NAME_CHARS],))
+        else:
+            conn.execute(
+                "UPDATE project SET name=?, origin_uuid=uuid, uuid=?, copied_at=?, "
+                "copy_kind=? WHERE id=1",
+                (str(name)[:MAX_NAME_CHARS], secrets.token_hex(16), _now(), kind))
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def read_metadata(store: Store) -> dict[str, Any] | None:
@@ -364,6 +455,16 @@ def finish_launch(path: str | Path, launch_id: int, status: str,
                 (status, exit_code, _now(), launch_id))
 
 
+def _status_label(status: str, finished_at: str | None) -> str:
+    """The run history's wording for a launch status (one definition). ``unknown`` with
+    no end recorded is a job whose UI ended before it did ("interrupted"); with an end
+    recorded, its exit status could not be read. Residual: a second UI opening the same
+    file reads a job the first UI still runs as interrupted."""
+    if status == "unknown":
+        return "interrupted" if finished_at is None else "unknown exit"
+    return status
+
+
 def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[str, Any]]:
     """The project's run history, newest first (FR-UI-455): one row per run, plus each
     launch that recorded no run. ``running`` is shown only for a launch that is live in
@@ -380,6 +481,7 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
         row["argv"] = argv if isinstance(argv, list) else []
         if row["status"] == "running" and row["id"] not in live:
             row["status"] = "unknown"
+        row["label"] = _status_label(row["status"], row["finished_at"])
     out: list[dict[str, Any]] = []
     linked: set[int] = set()
     for r in store.conn.execute(
@@ -394,6 +496,8 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
             linked.add(launch["id"])
         status = ("aborted" if is_aborted(r["notes"]) else
                   launch["status"] if launch is not None else "recorded")
+        label = launch["label"] if launch is not None and status == launch["status"] \
+            else status
         out.append({
             "run_id": r["id"], "launch_id": None if launch is None else launch["id"],
             "command": launch["command"] if launch else r["tool"],
@@ -401,7 +505,8 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
             "source": "ui" if launch else "cli",
             "target": (launch["target"] if launch and launch["target"] else
                        r["base_url"]) or "",
-            "started_at": r["started_at"], "status": status,
+            "started_at": r["started_at"], "status": status, "label": label,
+            "finished_at": launch["finished_at"] if launch else None,
             "findings": r["findings"], "candidates": r["candidates"],
         })
     for lid, launch in sorted(launches.items(), reverse=True):
@@ -410,14 +515,97 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
         out.append({"run_id": None, "launch_id": lid, "command": launch["command"],
                     "argv": launch["argv"], "source": "ui", "target": launch["target"] or "",
                     "started_at": launch["started_at"], "status": launch["status"],
+                    "label": launch["label"], "finished_at": launch["finished_at"],
                     "findings": 0, "candidates": 0})
     out.sort(key=lambda h: (h["started_at"] or "", h["run_id"] or 0), reverse=True)
     return out
 
 
+# --- cheap facts for listings (FR-UI-452/454) ---------------------------------------
+
+def file_facts(path: str | Path) -> dict[str, Any]:
+    """Size and last write of a project file, from ``stat`` only: size is the main file
+    plus a non-empty ``-wal``; ``written_at`` is the later of the main file's mtime and a
+    non-empty ``-wal``'s (never ``-shm``, which readers touch). It is the last write to
+    the file — an open records its open time, and a checkpoint can show a later time,
+    never an earlier one."""
+    st = os.stat(path)
+    size, mtime = st.st_size, st.st_mtime
+    try:
+        wst = os.stat(str(path) + "-wal")
+        if wst.st_size > 0:
+            size += wst.st_size
+            mtime = max(mtime, wst.st_mtime)
+    except FileNotFoundError:
+        pass
+    return {"size": size,
+            "written_at": datetime.fromtimestamp(mtime, timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+#: Work a listing's summary may do per file (SQLite VM steps) before it gives up.
+SUMMARY_STEP_BUDGET = 2_000_000
+_SUMMARY_CACHE: dict[tuple, dict[str, Any]] = {}
+_SUMMARY_ERRORS = (sqlite3.DatabaseError, OSError)
+
+
+def _stat_key(path: Path) -> tuple:
+    keys = []
+    for suffix in ("", "-wal"):
+        try:
+            st = os.stat(str(path) + suffix)
+            keys.append((st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns))
+        except FileNotFoundError:
+            keys.append(None)
+    return (str(path), *keys)
+
+
+def summary(path: str | Path) -> dict[str, Any]:
+    """Run and finding counts for a listing row, read-only and bounded: the same
+    untrusted-file allowlist as `inspect` (no ``quick_check``), a near-zero lock wait,
+    and a VM-step budget; anything that fails reads ``{"readable": False}``. Cached by
+    the file's and its ``-wal``'s identity, size and mtime."""
+    p = Path(path)
+    try:
+        key = _stat_key(p)
+    except OSError:
+        return {"readable": False}
+    if key in _SUMMARY_CACHE:
+        return _SUMMARY_CACHE[key]
+    out: dict[str, Any] = {"readable": False}
+    try:
+        with open(p, "rb") as fh:
+            if fh.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
+                raise sqlite3.DatabaseError("not an SQLite database")
+        conn = sqlite3.connect(_ro_uri(p), uri=True, timeout=0.05)
+        try:
+            conn.execute("PRAGMA trusted_schema=OFF")
+            steps = [0]
+
+            def budget():
+                steps[0] += 100
+                return steps[0] > SUMMARY_STEP_BUDGET      # non-zero aborts
+            conn.set_progress_handler(budget, 100)
+            version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+            if not isinstance(version, int) or version > migrations.head_version() or \
+                    _foreign_objects(conn, version):
+                raise sqlite3.DatabaseError("not a fuzzlab store this build can read")
+            out = {"readable": True, "schema_version": version,
+                   "runs": conn.execute("SELECT COUNT(*) FROM run").fetchone()[0],
+                   "findings": conn.execute("SELECT COUNT(*) FROM finding").fetchone()[0]}
+        finally:
+            conn.close()
+    except _SUMMARY_ERRORS:
+        out = {"readable": False}
+    if len(_SUMMARY_CACHE) > 1000:
+        _SUMMARY_CACHE.clear()
+    _SUMMARY_CACHE[key] = out
+    return out
+
+
 # --- copying and migrating ----------------------------------------------------
 
-def copy_to(src: str | Path, dst: str | Path) -> None:
+def copy_to(src: str | Path, dst: str | Path, *, timeout: float = 10.0) -> None:
     """Copy the project at ``src`` to the new file ``dst`` with SQLite's backup API.
 
     The copy goes into a hidden 0600 temporary file in ``dst``'s directory, opened in
@@ -438,7 +626,7 @@ def copy_to(src: str | Path, dst: str | Path) -> None:
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     os.close(fd)
     try:
-        source = sqlite3.connect(_ro_uri(src), uri=True, timeout=10.0)
+        source = sqlite3.connect(_ro_uri(src), uri=True, timeout=timeout)
         try:
             dest = sqlite3.connect(str(tmp))
             try:

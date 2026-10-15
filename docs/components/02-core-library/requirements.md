@@ -466,6 +466,18 @@ plugin registry. It is the layer that makes the store the integration bus.
   `migrate_with_backup` writes a verified backup before migrating.
   `Store(path, create=False)` / `open_store(..., create=False)` open an existing file
   only (a `mode=rw` URI); every connection sets `trusted_schema=OFF`.
+  *(Code review round 2, BUG-0451:)* the untrusted-file check is an **allowlist**:
+  `reference_schema(version)` (fuzzlab's migrations run in memory) and `_foreign_objects`
+  refuse any `sqlite_master` row whose exact `(type, name, tbl_name)` is not fuzzlab's at
+  the file's version, or whose index / virtual-table definition differs; a non-integer or
+  < 1 schema version, a foreign `application_id`, or a missing `run` table is refused too.
+- **FR-CORE-453** *(project identity; `CC-CORE-0450`, migration 23).* `project` gains
+  `uuid` (the file's own id, 32 hex — **display only**: nothing matches, dedupes or trusts
+  on it, since a file can claim any value), `origin_uuid`, `copied_at`, `copy_kind`
+  (`snapshot` | `save-as`); the post-step backfills `uuid` for an existing row.
+  `core.project.mark_copy` (one transaction) records a published copy: a new `uuid` plus
+  its origin, or — a saved temporary project — the same `uuid`. `file_facts` (size, last
+  write) and `summary` (bounded read-only counts for listings) serve the UI's lists.
 - **FR-CORE-451** *(launch provenance; `CC-CORE-0450`).* A job the web UI starts is a
   `launch` row with a random 32-hex `token`; the UI gives the child
   `FUZZLAB_LAUNCH_TOKEN`, and `Store.start_run` links each run it creates

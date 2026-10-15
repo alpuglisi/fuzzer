@@ -242,7 +242,12 @@ from tests._webclient import web_client  # noqa: E402
 
 
 def _client(authorized=False):
+    # An explicit, private store: a pinned launch (CC-UI-0450) writes it, and with the
+    # built-in default it used to create `./fuzzlab.db` in the working dir (BUG-0452).
+    import os
+    import tempfile
     cfg = load_config(overrides={"authorized": authorized,
+                                 "store_path": os.path.join(tempfile.mkdtemp(), "s.db"),
                                  "target_base_url": "http://localhost"}, environ={})
     return web_client(create_app(cfg))
 

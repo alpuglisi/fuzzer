@@ -541,6 +541,27 @@ CREATE TABLE IF NOT EXISTS launch (
 ALTER TABLE run ADD COLUMN launch_id INTEGER REFERENCES launch(id);
 """
 
+#: Migration 23 (UI project files, layout pass; CC-CORE-0450, FR-CORE-453): a project's
+#: display identity and copy lineage. ``uuid`` is the file's own id (32 hex; display only,
+#: never trusted or matched: a file can claim any value); a snapshot or a Save As of a
+#: saved project records where it was copied from (``origin_uuid``), when and how
+#: (``copied_at``, ``copy_kind`` ``snapshot`` | ``save-as``). Additive; an existing
+#: project row gets its ``uuid`` from the post-step, in the same transaction (PA-0105(2)).
+_M0023 = """
+ALTER TABLE project ADD COLUMN uuid TEXT;
+ALTER TABLE project ADD COLUMN origin_uuid TEXT;
+ALTER TABLE project ADD COLUMN copied_at TEXT;
+ALTER TABLE project ADD COLUMN copy_kind TEXT;
+"""
+
+
+def _backfill_project_uuid(conn: sqlite3.Connection) -> None:
+    """Migration 23's post-step: give an existing project row its ``uuid``."""
+    import secrets as _secrets
+    conn.execute("UPDATE project SET uuid=? WHERE id=1 AND uuid IS NULL",
+                 (_secrets.token_hex(16),))
+
+
 #: SQLite header ``application_id`` (offset 68) that marks a fuzzlab store: "FzLb".
 APPLICATION_ID = 0x467A4C62
 
@@ -594,7 +615,8 @@ def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
 
 
 #: Python steps run inside a migration's own transaction, after its SQL.
-POST_STEPS = {19: _backfill_holdout_seal, 22: _mark_application_id}
+POST_STEPS = {19: _backfill_holdout_seal, 22: _mark_application_id,
+              23: _backfill_project_uuid}
 
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
@@ -620,6 +642,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (20, _M0020),
     (21, _M0021),
     (22, _M0022),
+    (23, _M0023),
 ]
 
 

@@ -58,7 +58,7 @@ Newest first.
   - [x] skeleton pages + topbar chip/banner — done (layout: pending the UI research branch)
   - [x] tests: `tests/test_web_projects.py` (new); `test_web_launcher_browser.py` (pinned preview), `test_web_repeater.py` (controller never creates) updated — done
   - [x] FR-UI-450..457, NFR-UI-project-{private,paths-confined,provenance-redacted,switch-safe}, NFR-UI-read-only amended, §5; traceability classification; runbook section — done
-  - [ ] page layout from the UI research — todo (blocked on the research branch)
+  - [x] page layout from the UI research — done (layout pass, below)
 - Review: design gate 3/3 (reviewers A and B, three rounds). Code review round 1 (on
   9f1536e): A — 1 blocking, 10 non-blocking; B — 4 blocking, 9 non-blocking. Fixed in the
   follow-up commit:
@@ -90,6 +90,26 @@ Newest first.
   - Recorded deviation from design F18: refusals are a server-held, autoescaped message
     queue (`manager.flash`), not `?notice=<code>`; the text may quote the name the
     operator typed. One local operator; the next projects page consumes it.
+- Code review round 2 (on 1e81639; reviewers A and B, fresh agents after a container
+  restart): A — 1 blocking (narrowing the exception lists made stale pages and corrupt
+  files 500s → each project operation's worker converts OS/SQLite errors into a named
+  refusal via `projects._refusal`; recent ids must be ASCII digits), plus Repeater run ids
+  re-checked on a cache hit (inodes are reused), a long target refused before any launch
+  row, the pump tail always recording (`ProcUtilError` reported, `_RECORD_ERRORS` =
+  `DatabaseError`, `SchemaTooNew`), and test fixes; B — 1 blocking (BUG-0451, CORE), plus a
+  linear userinfo pattern and a 4096-character value cap, deep `recent.json` handled,
+  AST guards that resolve aliases, flag any non-call use of an opener and join split SQL,
+  `_copy_sidecars` single-link, `_temporary` cleanup by inode, `projects_dir` absolute, and
+  two stated residuals (pinned-file TOCTOU, odd-character passwords).
+- **Layout pass** (owner decisions: the research branch `claude/new-session-jqk4ku`;
+  startup = the configured store, else the start screen; Save As **and** Snapshot;
+  `recent.json` kept, the D21 global config DB a follow-up). Design gate: reviewers C and
+  D, two rounds, 3/3 (with D's redirect rule and C's "no queued warning" condition).
+  Built: the start screen (FR-UI-458) and `/` redirect; "Use ./fuzzlab.db" (BUG-0452's
+  fix); the chip (FR-UI-454); Snapshot; Remove from list; leftover Discard confirmation;
+  Open/Remove matched by index and path; listing summaries; interrupted labels; lineage on
+  `/project`; real-browser lifecycle tests (`tests/test_web_projects_browser.py`).
+  BUG-0452 (tests created `./fuzzlab.db`) recorded with PA-0452 and a session guard.
 - Effectiveness (assessed pending): pending.
 
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)

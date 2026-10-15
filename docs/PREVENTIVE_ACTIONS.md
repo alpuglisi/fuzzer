@@ -1713,3 +1713,23 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **Each such handoff has a test that runs the producer empty over a pre-existing
      file.** The PA-0002 sweep is by mechanism: every import of a file into the store,
      with a disposition per site (recorded in BUG-0450). (from BUG-0450)
+
+- **PA-0451** — Strengthens `PA-0028` and `PA-0083(3)`, after BUG-0451: the untrusted
+  project-file check was a denylist (`type IN ('trigger','view')`), and a trigger got past
+  it twice — by sharing a table's name, then by being typed `TRIGGER`.
+  1. **A safety gate over untrusted structured input admits only an allowlist derived from
+     what this code itself creates or accepts** — exact identity, and an exact definition
+     wherever the object can execute (here `core.project.reference_schema`, built by
+     running the migrations). Never a denylist keyed on one field.
+  2. **Its tests include the platform's own equivalent spellings** (case, comments, shared
+     namespaces, direct schema writes) **and a non-vacuity fixture of every legitimate
+     shape** (here fresh, legacy, `ANALYZE`d stores). (from BUG-0451)
+
+- **PA-0452** — Strengthens `PA-0450`, after BUG-0452: tests created the UI's default
+  store `./fuzzlab.db` in the repository.
+  1. **A built-in default path is never written implicitly.** It counts as the operator's
+     choice only if it already exists; otherwise it is offered (the start screen's "Use
+     ./fuzzlab.db"), never used.
+  2. **A session-wide guard fails any test run that leaves a default output in the working
+     directory** (`tests/conftest.py::_no_default_store_in_the_working_directory`); a new
+     default output path gets the same guard. (from BUG-0452)

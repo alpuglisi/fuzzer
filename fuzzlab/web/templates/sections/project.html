@@ -26,6 +26,10 @@
       <dt>last opened</dt><dd>{{ meta.opened_at }}</dd>
       <dt>schema</dt><dd>v{{ meta.schema_version }} (created at v{{ meta.created_schema_version }})</dd>
       <dt>fuzzlab</dt><dd>{{ meta.opened_by_version }} (created by {{ meta.created_by_version }})</dd>
+      {% if meta.uuid %}<dt>project id</dt><dd><code>{{ meta.uuid[:8] }}</code>
+        <span class="muted">(display only)</span></dd>{% endif %}
+      {% if meta.copy_kind %}<dt>copied</dt><dd>{{ 'snapshot' if meta.copy_kind == 'snapshot' else 'saved as' }}
+        of project <code>{{ (meta.origin_uuid or '')[:8] }}</code>, {{ meta.copied_at }}</dd>{% endif %}
     </dl>
     <form method="post" action="/project/meta" class="project-meta-form">
       <label>Targets (one per line; credentials in URLs are removed)
@@ -53,7 +57,8 @@
             {% if h.argv %}<br><code class="argv">{{ h.argv | join(' ') }}</code>{% endif %}</td>
           <td><code>{{ h.target }}</code></td>
           <td>{{ h.started_at or '' }}</td>
-          <td><span class="status-{{ h.status }}">{{ h.status }}</span></td>
+          <td><span class="status-{{ h.status }}{% if h.label == 'interrupted' %} status-interrupted{% endif %}"
+                {% if h.label == 'interrupted' %}title="The UI ended before the job did"{% endif %}>{{ h.label }}</span></td>
           <td>{% if h.run_id and h.findings %}<a href="/runs/{{ h.run_id }}#findings">{{ h.findings }}</a>{% else %}{{ h.findings }}{% endif %}</td>
           <td>{{ h.candidates }}</td>
         </tr>

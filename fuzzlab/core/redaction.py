@@ -572,7 +572,7 @@ def redact_captured_body(body: bytes, content_type: str):
 #: ``scheme://user[:password]@`` or ``//user[:password]@`` — URL userinfo, anywhere in a
 #: value, up to the **last** ``@`` of the authority (a password may contain ``@``; URL
 #: parsers split at the last one; code review B).
-_URL_USERINFO = re.compile(r"(?i)((?:\b[a-z][a-z0-9+.\-]*:)?//)[^/?#\s]*@")
+_URL_USERINFO = re.compile(r"(?i)((?:(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]*:)?//)[^/?#\s]*@")
 #: A scheme-less ``user:password@host`` at the start of a value or of a whitespace-
 #: separated piece, also up to the authority's last ``@``.
 _BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:?#]+:[^\s/?#]*@(?=[^\s@/])")
@@ -580,6 +580,8 @@ _BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:?#]+:[^\s/?#]*@(?=[^\s@/])")
 _MATRIX_PARAM = re.compile(r";([^;=/?#\s]+)=([^;/?#\s]*)")
 #: What a stripped userinfo becomes.
 USERINFO_PLACEHOLDER = "***@"
+#: The longest value `redact_for_record` keeps (longer values are cut first).
+MAX_RECORD_CHARS = 4096
 
 
 def redact_for_record(dest: str, value):
@@ -598,6 +600,8 @@ def redact_for_record(dest: str, value):
         return value
     if dest and is_sensitive_name(dest):
         return PLACEHOLDER
+    if len(value) > MAX_RECORD_CHARS:         # bounded work and storage (PA-0095/0096)
+        value = value[:MAX_RECORD_CHARS] + " …(truncated)"
     out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
     out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
     pieces = re.split(r"(\s+)", out)

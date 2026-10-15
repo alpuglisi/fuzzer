@@ -10,3 +10,15 @@ code.argv { font-size: .85rem; word-break: break-all; }
 .status-failed, .status-aborted { color: var(--crit); }
 .status-succeeded { color: var(--ok); }
 .status-running, .status-unknown, .status-stopped { color: var(--warn); }
+
+/* Start screen (research §12.2): the three ways in, side by side; Temporary first. */
+.start-title { font-size: 1.3rem; margin: 0 0 .8rem; }
+.start-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem; margin-bottom: 1rem; }
+.start-card form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.start-foot { margin-top: 1rem; }
+.project-headline { font-size: 1.1rem; margin: 0 0 .4rem; }
+button.primary { font-weight: 600; }
+button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+label.discard { color: var(--warn); }
+.status-interrupted { color: var(--warn); font-style: italic; }

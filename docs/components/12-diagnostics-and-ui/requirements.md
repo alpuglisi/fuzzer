@@ -455,25 +455,39 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   **open** (a file listed in the projects directory, a recent entry, or a leftover
   temporary project), **temporary** (a throwaway file in `<projects_dir>/.temporary/`),
   **save as** (a backup-API copy, FR-CORE-450, plus the project's own directory; the
-  copy becomes the open project), **close**. The projects directory is
+  copy becomes the open project), **snapshot** *(layout pass)* (a timestamped, verified
+  copy `<stem>-snapshot-<UTC>[-n].fuzzlab` in the projects directory — its name derived by
+  the server into `NAME_RE`; the project stays open; allowed while a job runs, when it
+  copies the project file and its databases as they are at that moment and skips the fuzz
+  CSV, saying so), **close**. The projects directory is
   `cfg["projects_dir"]`, else `$FUZZLAB_PROJECTS_DIR`, else
   `~/.local/share/fuzzlab/projects`; it is created only by an action that needs it.
 - **FR-UI-452** The **recent list** (`<projects_dir>/recent.json`, 10 entries, newest
   first) is updated under an interprocess lock (`core.secretfile.locked`), replaced
   atomically, and read through one validating parser (malformed entries skipped and
-  counted). An entry whose file is gone is shown as missing, not dropped.
+  counted). An entry whose file is gone is shown as "not found", not dropped; **Remove
+  from list** drops one (matched by index and path; the file is untouched). Listings show
+  each file's run and finding counts from a bounded read-only summary (the untrusted-file
+  allowlist, a near-zero lock wait, a step budget; "unreadable" on any failure; may leave
+  empty `-wal`/`-shm` beside a WAL file). Open and Remove re-check index and path.
 - **FR-UI-453** Leaving a **temporary project** (close, open, new, another temporary)
   deletes it and needs an explicit confirmation (`discard`); without it the action is
   refused with a message offering Save as. Deletion removes exactly the files the
   project owns: its file, its SQLite side files and the known files of its directory,
   each checked to be a regular file of this user, the main file matched to the inode
   recorded at creation; anything else is left and reported. Shutdown deletes nothing;
-  leftover temporaries are listed for Open or Discard, and one another `fuzzlab web`
+  leftover temporaries are listed for Open or Discard — Discard needs its own ticked box
+  ("delete it and its runs"), checked by the server too — and one another `fuzzlab web`
   holds open (its owner lock) is refused.
-- **FR-UI-454** The open project is shown on **every page** (the topbar chip: name and
-  `temporary`, linking to `/projects`, where its path is shown); when none is open, a
-  migration is waiting, or the file was refused, a banner says so. *(The page layout
-  beyond this skeleton follows the UI research; see CC-UI-0450.)*
+- **FR-UI-454** The open project is shown on **every page** (the topbar chip: name ▾, and
+  `temporary · not saved`, `not created yet`, or the last write time; linking to
+  `/projects`, where its path, size and last write are shown); when none is open, a
+  migration is waiting, or the file was refused, a banner says so. The last write is the
+  later of the file's mtime and a non-empty `-wal`'s (never `-shm`), rendered as of page
+  load: an open records its open time, and a checkpoint can show a later time, never an
+  earlier one (`core.project.file_facts`). Layout per the UI research
+  (`docs/research/ui-ia-competitive-analysis.md` §12.2/§13; the owner chose Save As **and**
+  Snapshot over the research's "no Save As").
 - **FR-UI-455** `/project` shows the open project's **metadata** (name, file, created,
   last opened, schema and fuzzlab versions; editable notes and targets) and its **run
   history** (`core.project.run_history`): each run's command (the UI launch's command
@@ -481,7 +495,11 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   time, status (`aborted` from the run's own notes first; else the launch's
   `succeeded` / `failed` / `stopped` / `unknown`, `running` only for a job live in this
   UI; else `recorded`), finding and candidate counts, linked to `/runs/{id}` and its
-  findings. A launch that recorded no run is listed as "no run recorded".
+  findings. A launch that recorded no run is listed as "no run recorded". A launch whose UI
+  ended before it did reads **interrupted**; one whose exit status could not be read,
+  "unknown exit" (`core.project.run_history`'s `label`; residual: a second UI opening the
+  same file shows a job the first still runs as interrupted). The research's "Resume" is
+  left to the scan-profile work.
 - **FR-UI-456** **Jobs pin to the project.** Every launched command that has a
   `--store` option runs with `--store <open project>`, and with its intermediate files
   (crawl `--db`, `--spider-db`, audit `--out`, fuzz `--output`) in the project's own
@@ -504,6 +522,16 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   version, or one failing `quick_check` is refused with the reason. With `--with-proxy`,
   a start-up project that is waiting or refused stops the start with the remedy (start
   once without `--with-proxy`).
+
+- **FR-UI-458** *(layout pass, CC-UI-0450)* **Start screen.** With no project open (and
+  nothing pending), `/` redirects to `/projects`, the start screen: Temporary project
+  (first), New project, Open (one form over the file list), Recent, leftover temporaries,
+  and — when the built-in default store does not exist yet — "Use ./fuzzlab.db" (its
+  absolute path shown; the path is the server's, never the form's). The built-in default
+  `store_path` counts as configured only if that file exists; any other configured path is
+  opened at start-up as before. After New, Temporary, Open or Use-default the UI goes to
+  `/` only if the requested project opened and no warning is waiting; otherwise it stays on
+  `/projects`, where the messages are. "Opening a project never sends traffic."
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
@@ -575,14 +603,14 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   entry is re-validated on every reopen. No web module opens a store that can create
   one, except the one creation site under the project lock.
   - Enforced by: `web.projects` — `tests/test_web_projects.py::test_bad_project_names_are_refused`, `tests/test_web_projects.py::test_open_refuses_traversal_symlinks_and_foreign_files`, `tests/test_web_projects.py::test_a_recent_entry_outside_the_projects_directory_is_refused`, `tests/test_web_projects.py::test_no_web_module_opens_a_store_that_can_create`, `tests/test_web_projects.py::test_the_creating_open_guard_catches_synthetic_offenders`, `tests/test_web_projects.py::test_every_project_action_is_refused_cross_site`
-  - Not yet enforced: the window between validating a path and SQLite opening it (another process of the same user could swap the file) is a stated residual; other tools' own path flags (input paths such as `--ground-truth`) are typed by the operator, as before; a hard crash can leave a hidden, private `.copy-*.tmp` in the projects directory (never listed or opened).
+  - Not yet enforced: the window between validating a path and SQLite opening it (another process of the same user could swap the file) is a stated residual, and so is the window between `_check_sidecars` and a tool's own later `open()` of a pinned intermediate (the project directory is 0700 and this user's, so only this user's own processes could use it); other tools' own path flags (input paths such as `--ground-truth`) are typed by the operator, as before; a hard crash can leave a hidden, private `.copy-*.tmp` in the projects directory (never listed or opened). A snapshot's name is derived by the server (`_grammar_stem` / `_trim_stem` through `_named_path`), never from the form.
 - **NFR-UI-project-provenance-redacted** *(added CC-UI-0450)* What the UI records about
   a job or a project (`launch.argv`, `launch.target`, `project.targets`) goes through
   `core.redaction.redact_for_record` (URL userinfo, sensitive query values, a sensitive
   option's value), written only by `core.project`; a project file never holds a
   credential the UI handled.
   - Enforced by: `core.project.insert_launch` / `set_meta` / `add_target` — `tests/test_web_projects.py::test_a_project_file_never_contains_a_credential_value`, `tests/test_web_projects.py::test_only_core_project_writes_the_project_record_tables`, `tests/test_core_project.py::test_redact_for_record_removes_every_planted_secret_shape`, `tests/test_core_project.py::test_redact_for_record_keeps_benign_values`
-  - Not yet enforced: `repeater_tab.raw_request` stores operator-typed requests as typed (an existing behaviour, see NFR-UI-redacted); notes are plain text the operator writes (labelled so on the page).
+  - Not yet enforced: `repeater_tab.raw_request` stores operator-typed requests as typed (an existing behaviour, see NFR-UI-redacted); notes are plain text the operator writes (labelled so on the page); a password containing a raw `/`, `?`, `#` or space inside a URL's authority (which no HTTP client would parse as credentials) keeps the part after it; values are cut to 4096 characters before redaction.
 - **NFR-UI-project-switch-safe** *(added CC-UI-0450)* A project is never switched, saved
   as, closed or deleted while it is being written: one lock covers every transition and
   every launch from the busy check to the act; a job counts as writing until its end is

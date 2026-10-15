@@ -62,6 +62,13 @@ Newest first.
   `tests/test_core_project.py::test_inspect_refuses_what_is_not_a_fuzzlab_store`
   (same-name trigger, virtual table, empty schema version) and the extended
   `test_redact_for_record_*` matrices.
+- Code review round 2 / layout pass: BUG-0451 — the schema check is now an allowlist
+  (`reference_schema`, `_foreign_objects`), with foreign `application_id`, non-integer
+  versions and a missing `run` table refused; migration 23 (`uuid`, `origin_uuid`,
+  `copied_at`, `copy_kind`, post-step backfill) instead of amending the already-pushed
+  migration 22 (a v22 store existed: BUG-0452's stray file); `mark_copy`, `file_facts`,
+  `summary` (bounded), `run_history` labels; `copy_to(timeout=)`; `redact_for_record`'s
+  userinfo pattern made linear (no `\b` scan) and values capped at 4096 characters.
 - Effectiveness (assessed pending): pending.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)

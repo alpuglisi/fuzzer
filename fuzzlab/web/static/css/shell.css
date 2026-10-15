@@ -217,3 +217,5 @@ th {
 .project-chip { text-decoration: none; color: inherit; }
 .project-chip:hover { border-color: var(--accent); }
 .project-banner { margin-bottom: 1rem; }
+.chip-note { color: var(--muted); font-size: .85em; }
+.chip-note.warn { color: var(--warn); }

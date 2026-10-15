@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — project files (unmerged): a trigger passed the untrusted-file check again; tests created ./fuzzlab.db (fixed, BUG-0451/PA-0451, BUG-0452/PA-0452)
+- **Symptom:** code review round 2 (reviewer B): a `sqlite_master` row typed `TRIGGER` passed `core.project.inspect` and fired during the UI's open; layout review (reviewer C): `/home/user/fuzzer/fuzzlab.db` (+ `fuzzlab.db.d/`) had been created in the repo by this branch's web tests.
+- **Root cause:** the schema check was a case-sensitive denylist (its round-1 fix patched one spelling); the UI bound the built-in default store and a pinned launch from a default-config test created it.
+- **Remediation:** an allowlist of exactly the objects fuzzlab's migrations create (`reference_schema`); the default store counts only if it exists, else the start screen offers it; default-config tests use private stores; a session guard fails a run that creates `./fuzzlab.db`; the stray files were removed.
+- **Status:** Fixed (re-review pending)
+
 ## 2026-10-15 — project files (unmerged, branch claude/new-session-dwzrhb): code review round 1 found defects in 9f1536e (fixed in the follow-up commit; CC-UI-0450, CC-CORE-0450)
 - **Symptom:** two independent reviewers of the pushed, unmerged project-files commit found: a trigger named like a table passed the untrusted-file refusal (it deleted findings once opened); `redact_for_record` kept part of a password containing `@`; New / Save as adopted or deleted a stale `<name>.fuzzlab.d`; a planted symlink at a pinned intermediate let a tool write outside the project; opening an older/newer file while a project was open was silent; plus non-blocking gaps (dropped discard reports, broad exception lists, an uncapped `recent.json` read, an unrecorded `stopped` at shutdown, …). While testing the fix, a test that planted a FIFO as `recent.json` hung the run: opening a FIFO read-only blocks — the page itself would have hung the same way.
 - **Root cause:** in-change defects of a not-yet-merged feature, caught by the review gate the process requires; the FIFO hang was an `os.open` without `O_NONBLOCK` on an attacker-placeable path.

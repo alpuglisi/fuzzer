@@ -506,6 +506,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     async def _lifespan(_app):
         if proxy is not None:
             if proxy.config.store_path:
+                manager.adopt_default()      # a fresh directory: the default store (FR-UI-458)
                 # The in-process proxy records flows into the startup project: make it
                 # exist (0600, metadata) and keep it busy while the proxy runs.
                 if os.path.abspath(proxy.config.store_path) != manager.store_path():
@@ -560,6 +561,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     @app.get("/", response_class=HTMLResponse)
     def overview_page(request: Request):
+        # FR-UI-458: with no project open (and nothing pending), the start screen.
+        if manager.current is None and manager.pending is None:
+            return RedirectResponse(url="/projects", status_code=303)
         # U1/CC-UI-0028: Overview is the landing route; read-only over the store
         # (renders with an empty store and with seeded runs, R-10).
         return templates.TemplateResponse(

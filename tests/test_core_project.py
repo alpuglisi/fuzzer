@@ -291,7 +291,11 @@ def test_inspect_is_read_only_on_the_main_file(tmp_path):
 
 @pytest.mark.parametrize("kind", ["garbage", "symlink", "fifo", "directory", "trigger",
                                   "view", "foreign-sqlite", "missing", "same-name-trigger",
-                                  "virtual-table", "empty-schema-version"])
+                                  "virtual-table", "empty-schema-version",
+                                  "commented-virtual-table", "foreign-version-3",
+                                  "negative-version", "text-version", "foreign-app-id",
+                                  "TRIGGER-row", "Trigger-row", "extra-table",
+                                  "changed-index"])
 def test_inspect_refuses_what_is_not_a_fuzzlab_store(tmp_path, kind):
     path = tmp_path / "x.fuzzlab"
     if kind == "garbage":
@@ -322,6 +326,53 @@ def test_inspect_refuses_what_is_not_a_fuzzlab_store(tmp_path, kind):
         Store(path).close()
         conn = sqlite3.connect(path)
         conn.execute("CREATE VIRTUAL TABLE x USING fts5(a)")
+        conn.commit()
+        conn.close()
+    elif kind == "commented-virtual-table":           # code review A, round 2
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE VIRTUAL TABLE evil USING fts4(x)")
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute("UPDATE sqlite_master SET sql='CREATE /*x*/ VIRTUAL TABLE evil USING "
+                     "fts4(x)' WHERE name='evil'")
+        conn.commit()
+        conn.close()
+    elif kind in ("foreign-version-3", "negative-version", "text-version"):
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE schema_version (version)")
+        conn.execute("INSERT INTO schema_version VALUES (?)",
+                     ({"foreign-version-3": 3, "negative-version": -5,
+                       "text-version": "x"}[kind],))
+        conn.execute("CREATE TABLE accounts (x)")
+        conn.commit()
+        conn.close()
+    elif kind in ("TRIGGER-row", "Trigger-row"):     # BUG-0451: type is not lowercase
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute("INSERT INTO sqlite_master VALUES (?,?,?,?,?)",
+                     (kind.split("-")[0], "evil", "project", 0,
+                      "CREATE TRIGGER evil AFTER UPDATE ON project BEGIN "
+                      "DELETE FROM finding; END"))
+        conn.commit()
+        conn.close()
+    elif kind == "extra-table":
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE notes_of_someone_else (x)")
+        conn.commit()
+        conn.close()
+    elif kind == "changed-index":
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("DROP INDEX ix_form_endpoint")
+        conn.execute("CREATE INDEX ix_form_endpoint ON form(run_id)")
+        conn.commit()
+        conn.close()
+    elif kind == "foreign-app-id":
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA application_id = 1234")
         conn.commit()
         conn.close()
     elif kind == "empty-schema-version":              # another app's db, version table empty
@@ -570,3 +621,58 @@ def test_fuzz_never_imports_a_stale_csv_when_its_run_collected_nothing(tmp_path,
 class _NoProbe:
     def allow_explicit(self, urls):
         pass
+
+
+
+def test_a_case_variant_trigger_never_fires_on_open(tmp_path):
+    """BUG-0451: the trigger row a denylist missed fired during the UI's own open."""
+    path = tmp_path / "evil.fuzzlab"
+    project.create(path)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE marker (x)")
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute("INSERT INTO sqlite_master VALUES ('TRIGGER','evil','project',0,"
+                 "'CREATE TRIGGER evil AFTER UPDATE ON project BEGIN "
+                 "INSERT INTO marker VALUES (1); END')")
+    conn.commit()
+    conn.close()
+    with pytest.raises(ProjectError, match="refused as untrusted"):
+        project.inspect(path)
+
+
+def test_the_allowlist_accepts_every_real_store_shape(tmp_path):
+    """Non-vacuity: a fresh store, a legacy (v21) store, a store with ANALYZE stats and
+    a store with recorded flows (FTS shadow rows) all pass."""
+    fresh = tmp_path / "fresh.fuzzlab"
+    project.create(fresh)
+    legacy = tmp_path / "legacy.fuzzlab"
+    _v21(legacy)
+    stats = tmp_path / "stats.fuzzlab"
+    project.create(stats)
+    with Store(stats, create=False) as store:
+        store.conn.execute("ANALYZE")
+        store.conn.commit()
+    for p in (fresh, legacy, stats):
+        assert project.inspect(p).state in ("ok", "older"), p
+    assert project.reference_schema(migrations.head_version())
+
+
+def test_record_redaction_is_linear_and_bounded():
+    """Code review B, round 2 (PA-0095/0096): the userinfo pattern was quadratic, and it
+    ran under the project lock; values are also capped before any work."""
+    import time
+    from fuzzlab.core import redaction
+    for pat in (redaction._URL_USERINFO, redaction._BARE_USERINFO, redaction._MATRIX_PARAM):
+        for v in ("a+" * 64000, "a." * 64000, "a:" * 64000, ";a=" * 40000):
+            t = time.perf_counter()
+            pat.sub("", v)
+            assert time.perf_counter() - t < 0.5, (pat.pattern, v[:4])
+    out = redact_for_record("start", "x" * 100_000)
+    assert len(out) <= redaction.MAX_RECORD_CHARS + 20
+
+
+def test_deep_json_in_the_recent_list_is_malformed_not_a_crash(tmp_path):
+    from fuzzlab.web import projects as web_projects
+    p = tmp_path / "recent.json"
+    p.write_text("[" * 100000 + "]" * 100000)
+    assert web_projects._parse_recent(p) == ([], 1)

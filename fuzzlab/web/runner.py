@@ -42,6 +42,7 @@ import sys
 from typing import TYPE_CHECKING, Any, Callable
 
 from fuzzlab import procutil
+from fuzzlab.core.migrations import SchemaTooNew
 from fuzzlab.web.sse import format_event
 
 if TYPE_CHECKING:
@@ -95,7 +96,8 @@ def display_command(spec: "CommandSpec", values: dict[str, Any]) -> str:
 # --- live execution --------------------------------------------------------
 
 #: What a job's completion hook may raise that is reported on its stream (PA-0106).
-_RECORD_ERRORS = (sqlite3.OperationalError,)        # the project file gone, or locked
+#: The project file gone, locked, replaced by a non-database, or by a newer schema.
+_RECORD_ERRORS = (sqlite3.DatabaseError, SchemaTooNew)
 
 
 class _Run:
@@ -186,8 +188,8 @@ class Runner:
                                                "reading it"))
             try:
                 await procutil.astop_server(run.handle)  # collects the exited supervisor
-            except procutil.ServerLost as exc:  # stopped without a request: say so (loud)
-                await run.queue.put(("output", f"[fuzzlab] {exc}"))
+            except procutil.ProcUtilError as exc:  # lost / exposed / check failed: loud,
+                await run.queue.put(("output", f"[fuzzlab] {exc}"))  # and still recorded
             if run.on_done is not None:
                 try:
                     await asyncio.to_thread(run.on_done, run.returncode, run.stopping)

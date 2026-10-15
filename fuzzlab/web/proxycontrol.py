@@ -313,6 +313,11 @@ class RepeaterController:
             store = Store(path, create=False)
             key = self._key()
             with self._run_lock:
+                cached = self._run_ids.get(key)
+                if cached is not None and (store.conn.execute(   # inodes are reused: the
+                        "SELECT tool FROM run WHERE id=?", (cached,)).fetchone() or  # id
+                        [None])[0] != "repeater":                  # must still be ours
+                    del self._run_ids[key]
                 if key not in self._run_ids:
                     self._run_ids[key] = store.start_run(
                         "repeater", self.cfg.get("target_base_url", ""))

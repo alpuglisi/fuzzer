@@ -12,6 +12,9 @@ from __future__ import annotations
 def undo_after(conn, version: int) -> None:
     """Undo every migration above ``version`` that this module knows, newest first.
     The caller still undoes the older ones it deletes ``schema_version`` rows for."""
+    if version == 22:                                # migration 23: project identity
+        for col in ("copy_kind", "copied_at", "origin_uuid", "uuid"):
+            conn.execute(f"ALTER TABLE project DROP COLUMN {col}")
     if version < 22:                                 # migration 22: project files
         conn.execute("ALTER TABLE run DROP COLUMN launch_id")
         conn.execute("DROP TABLE IF EXISTS launch")

@@ -38,7 +38,12 @@ SECTIONS = [
 
 
 def _client(authorized=False):
+    # An explicit, private store (CC-UI-0450): the built-in default `./fuzzlab.db` would
+    # start on the start screen — and a test must never create it in the working dir.
+    import os
+    import tempfile
     cfg = load_config(overrides={"target_base_url": "http://localhost",
+                                 "store_path": os.path.join(tempfile.mkdtemp(), "s.db"),
                                  "authorized": authorized}, environ={})
     return web_client(create_app(cfg))
 

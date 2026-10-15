@@ -1885,6 +1885,8 @@ one store at a time as its project (`<name>.fuzzlab`, SQLite `application_id` "F
 `<project>.d/`). A store whose schema is newer than the build is refused by
 `migrations.migrate` (`SchemaTooNew`); the UI opens an older one only after a verified
 backup and an accepted migration. Copies use the SQLite backup API (`core.project.copy_to`).
+A project file from elsewhere is untrusted input: `core.project.inspect` admits only the
+schema objects fuzzlab's own migrations create (an allowlist, BUG-0451).
 
 Core tables and their principal readers/writers (see the roadmap for schema
 detail):
@@ -1892,7 +1894,7 @@ detail):
 | Table | Written by | Read by |
 | --- | --- | --- |
 | `run` (`notes` carries `aborted: …` for a run that failed after it started — `Store.mark_aborted`, read by `store.is_aborted`, CC-CORE-0033; `launch_id` links a run to the UI job that created it, migration 22), `schema_version` | core (`launch_id`: `Store.start_run`, from the job's `FUZZLAB_LAUNCH_TOKEN`) | everything |
-| `project` (one metadata row: name, created / opened times, notes, targets, the fuzzlab versions that created / last opened it, the schema version it was created at; migration 22) | `core.project` only (`ensure_metadata` on the first UI open, `set_meta`, `add_target`, `rename`; values via `redaction.redact_for_record`) | web UI (`/project`, the topbar) |
+| `project` (one metadata row: name, created / opened times, notes, targets, the fuzzlab versions that created / last opened it, the schema version it was created at; migration 22; display-only `uuid` and copy lineage `origin_uuid` / `copied_at` / `copy_kind`, migration 23) | `core.project` only (`ensure_metadata` on the first UI open, `set_meta`, `add_target`, `rename`; values via `redaction.redact_for_record`) | web UI (`/project`, the topbar) |
 | `launch` (a job the UI started: random `token`, command, redacted argv, target, start / finish, status `running`/`succeeded`/`failed`/`stopped`/`unknown`, exit code; migration 22) | `core.project.insert_launch` / `finish_launch` (called by `web.projects`); `ensure_metadata` marks orphaned `running` rows `unknown` | web UI run history (`core.project.run_history`) |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
 | `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor | auditor, ranker, fuzzer |
