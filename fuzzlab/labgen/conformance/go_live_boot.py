@@ -100,9 +100,6 @@ class GoLiveBootError(RuntimeError):
     error)."""
 
 
-# BUG-0142: one real round trip per process, not one per importing test module
-# (24 Maven probes alone cost 66 s of every collection).
-@functools.lru_cache(maxsize=None)
 def _go_module_proxy_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`go_boot_available` must
     predict the outcome of -- a real Go module proxy round trip (``go list
@@ -153,6 +150,10 @@ def _go_env() -> dict[str, str]:
     return dict(os.environ)
 
 
+# BUG-0142: one real probe per process, not one per importing test module (24
+# Maven probes alone cost 66 s of every collection). The probe itself stays
+# uncached so its own tests can drive it.
+@functools.lru_cache(maxsize=1)
 def go_boot_available() -> bool:
     """The authoritative capability probe this module's own tests (and any
     other caller) must gate on before constructing a

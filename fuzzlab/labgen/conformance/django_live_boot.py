@@ -44,10 +44,12 @@ not restated here.
 
 from __future__ import annotations
 
+import fcntl
 import functools
 
 import hashlib
 import json
+import os
 import shutil
 import socket
 import sqlite3
@@ -112,9 +114,6 @@ REQUEST_TIMEOUT_S = 15.0
 NETWORK_PROBE_TIMEOUT_S = 30.0
 
 
-# BUG-0142: one real round trip per process, not one per importing test module
-# (24 Maven probes alone cost 66 s of every collection).
-@functools.lru_cache(maxsize=None)
 def _pip_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`django_boot_available`
     must predict the outcome of -- a real, bounded ``pip download
@@ -261,6 +260,10 @@ class InternalServiceFixture:
         self.stop()
 
 
+# BUG-0142: one real probe per process, not one per importing test module (24
+# Maven probes alone cost 66 s of every collection). The probe itself stays
+# uncached so its own tests can drive it.
+@functools.lru_cache(maxsize=1)
 def django_boot_available() -> bool:
     """The authoritative capability probe this module's own tests (and any
     other caller) must gate on before constructing a
@@ -277,6 +280,74 @@ def django_boot_available() -> bool:
     except ImportError:
         return False
     return SKELETON_DIR.is_dir() and _pip_network_probe()
+
+
+#: BUG-0142: where the pinned Django environment is built once per host.
+VENV_CACHE_ENV = "FUZZLAB_DJANGO_VENV_CACHE"
+
+
+def _venv_cache_root() -> Path:
+    env = os.environ.get(VENV_CACHE_ENV)
+    if env:
+        return Path(env)
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "fuzzlab" / "django-venv"
+
+
+def venv_cache_key() -> str:
+    """The pinned requirements and the interpreter: the same key always holds the same
+    installed packages."""
+    digest = hashlib.sha256()
+    for part in (DJANGO_PIN, REQUESTS_PIN, sys.executable, sys.version):
+        digest.update(part.encode() + b"\0")
+    return digest.hexdigest()[:32]
+
+
+def cached_venv(install_timeout: float) -> Path:
+    """A ``venv`` with ``DJANGO_PIN`` and ``REQUESTS_PIN`` installed, built by a real
+    ``python -m venv`` + ``pip install`` the first time on this host and shared
+    afterwards. BUG-0142: every boot used to build its own (venv about 3 s, pip about
+    5 s, of a 10 s boot). Apps only import from it; their own files, database and
+    server stay per boot.
+
+    A venv is not relocatable, so it is built at its final path under an exclusive
+    file lock, and used only once ``complete`` exists. A directory without it is a
+    failed or interrupted build and is rebuilt."""
+    root = _venv_cache_root()
+    key = venv_cache_key()
+    entry = root / key
+    if (entry / "complete").is_file():
+        return entry / "venv"
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / f"{key}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if (entry / "complete").is_file():
+            return entry / "venv"
+        if entry.exists():
+            shutil.rmtree(entry)
+        entry.mkdir()
+        venv_dir = entry / "venv"
+        try:
+            venv_result = _run([sys.executable, "-m", "venv", str(venv_dir)], cwd=entry, timeout=60.0)
+            if venv_result.returncode != 0:
+                raise LiveBootError(
+                    f"python -m venv failed (exit {venv_result.returncode}):\n"
+                    f"{venv_result.stdout}\n{venv_result.stderr}"
+                )
+            pip_result = _run(
+                [str(venv_dir / "bin" / "pip"), "install", "-q", DJANGO_PIN, REQUESTS_PIN],
+                cwd=entry, timeout=install_timeout,
+            )
+            if pip_result.returncode != 0:
+                raise LiveBootError(
+                    f"pip install {DJANGO_PIN} {REQUESTS_PIN} failed (exit {pip_result.returncode}):\n"
+                    f"{pip_result.stdout[-4000:]}\n{pip_result.stderr[-4000:]}"
+                )
+        except BaseException:
+            shutil.rmtree(entry, ignore_errors=True)
+            raise
+        (entry / "complete").write_text(key + "\n", encoding="utf-8")
+    return entry / "venv"
 
 
 def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
@@ -471,30 +542,9 @@ class DjangoLiveBootHarness:
         ``LiveBootHarness.build()``'s fail-loud convention."""
         self._tmp = tempfile.TemporaryDirectory(prefix="fuzzlab-django-live-boot-")
         self._app_dir = Path(self._tmp.name) / "app"
-        self._venv_dir = Path(self._tmp.name) / "venv"
         self._assemble()
-
-        venv_result = _run(
-            [sys.executable, "-m", "venv", str(self._venv_dir)],
-            cwd=Path(self._tmp.name),
-            timeout=60.0,
-        )
-        if venv_result.returncode != 0:
-            raise LiveBootError(
-                f"python -m venv failed (exit {venv_result.returncode}):\n"
-                f"{venv_result.stdout}\n{venv_result.stderr}"
-            )
-
-        pip_result = _run(
-            [str(self._venv_dir / "bin" / "pip"), "install", "-q", DJANGO_PIN, REQUESTS_PIN],
-            cwd=self._app_dir,
-            timeout=self._install_timeout,
-        )
-        if pip_result.returncode != 0:
-            raise LiveBootError(
-                f"pip install {DJANGO_PIN} {REQUESTS_PIN} failed (exit {pip_result.returncode}):\n"
-                f"{pip_result.stdout[-4000:]}\n{pip_result.stderr[-4000:]}"
-            )
+        # BUG-0142: the pinned environment is built once per host and shared.
+        self._venv_dir = cached_venv(self._install_timeout)
 
         migrate_result = _run(
             [str(self._venv_python()), "manage.py", "migrate", "--no-input"],

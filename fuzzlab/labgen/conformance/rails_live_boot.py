@@ -92,9 +92,6 @@ class RailsLiveBootError(RuntimeError):
     a skip, never an error)."""
 
 
-# BUG-0142: one real round trip per process, not one per importing test module
-# (24 Maven probes alone cost 66 s of every collection).
-@functools.lru_cache(maxsize=None)
 def _bundle_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     """Actually attempt the real operation :func:`rails_boot_available` must
     predict the outcome of -- a real RubyGems dependency-resolution round
@@ -144,6 +141,10 @@ def _bundle_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     return result.returncode == 0
 
 
+# BUG-0142: one real probe per process, not one per importing test module (24
+# Maven probes alone cost 66 s of every collection). The probe itself stays
+# uncached so its own tests can drive it.
+@functools.lru_cache(maxsize=1)
 def rails_boot_available() -> bool:
     """The authoritative capability probe this module's own tests (and any
     other caller) must gate on before constructing a
