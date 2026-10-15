@@ -979,9 +979,10 @@ def test_record_error_list_reports_a_vanished_project_and_propagates_others(tmp_
 def test_recent_json_is_never_followed_or_read_past_its_cap(tmp_path):
     d = tmp_path / "projects"
     d.mkdir(mode=0o700)
-    big = tmp_path / "big"
-    big.write_bytes(b"[" * (projects.RECENT_MAX_BYTES + 10))
-    (d / "recent.json").symlink_to(big)
+    planted = tmp_path / "planted.json"                 # small and valid: only the
+    planted.write_text(json.dumps({"version": 1, "entries": [  # no-follow refuses it
+        {"path": "/x.fuzzlab", "name": "x", "opened_at": "t"}]}))
+    (d / "recent.json").symlink_to(planted)
     assert projects._parse_recent(d / "recent.json") == ([], 1)
     os.unlink(d / "recent.json")
     (d / "recent.json").write_bytes(b" " * (projects.RECENT_MAX_BYTES + 10))
