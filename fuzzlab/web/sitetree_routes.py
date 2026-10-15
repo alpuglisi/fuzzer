@@ -40,7 +40,7 @@ def _error(exc: Exception) -> JSONResponse:
 
 def register(app: FastAPI, *, templates, shell_context: Callable[[], dict],
              with_store: Callable[[Callable[[Any], Any], Any], Any],
-             store_path: Callable[[], str], poll_ms: int = 5000) -> None:
+             store_path: Callable[[], str | None], poll_ms: int = 5000) -> None:
     """Add the site tree's routes to ``app``. ``with_store(fn, default)`` is the app's
     store accessor; ``store_path()`` names the same store, for the version fingerprint."""
 

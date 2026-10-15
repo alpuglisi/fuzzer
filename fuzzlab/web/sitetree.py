@@ -839,6 +839,8 @@ def store_version(path) -> str | None:
     and its inode and mtime are not used: reads never change the fingerprint (code
     review). Stated residual: in rollback-journal mode (only if WAL could not be set)
     an UPDATE inside one mtime tick that keeps the file size is not seen."""
+    if path is None:            # no project open (FR-UI-458): no store, no fingerprint
+        return None
     base = os.fspath(path)
     try:
         st = os.stat(base)

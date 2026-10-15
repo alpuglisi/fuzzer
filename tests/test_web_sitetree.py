@@ -714,8 +714,11 @@ def _table_state(path) -> str:
 def test_site_tree_routes_are_read_only(mixed):
     """NFR-UI-read-only: walking the whole tree through the API writes no row."""
     seed, _a, _b = mixed
-    before = _table_state(seed.path)
     client = _client(seed.path)
+    # Taken after the app starts: opening the store as the startup project records its
+    # project row (FR-UI-455, project files). The claim here is that the routes write
+    # nothing.
+    before = _table_state(seed.path)
     stack = [""]
     while stack:
         key = stack.pop()

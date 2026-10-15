@@ -3,6 +3,30 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0055 — Integration: the site tree reads only the open project; arrived CLI options classified (BUG-0146) (2026-10-15)
+- Change:
+  - `web/app.py` wires the site tree's `store_path` to `cfg.get("store_path")`, so there
+    is no implicit `fuzzlab.db` (FR-UI-458, PA-0452).
+  - `web/sitetree.store_version(None)` returns `None`, and
+    `sitetree_routes.register` types `store_path` as `str | None`.
+  - `web/projects.OPTION_CLASS` classifies `auth_origin` (crawl, auto, greybox-run,
+    session print) as not a path: an origin, FR-SESS-20.
+  - `tests/test_web_sitetree.py`'s read-only test snapshots after the app opens its
+    startup project.
+- Impact (other components / project):
+  - **UI:** the site-tree page in the start-screen state, which used to return 500.
+  - **Consumers of `cfg["store_path"]` in `fuzzlab/web/`,** searched (PA-0152): the
+    other readers already went through `with_store` and `open_reader`, which handle
+    `None`.
+  - **CLI (taxonomy):** CC-FUZZ-0087.
+- Risk: low; it removes a crash and an implicit default.
+- Deliverables:
+  - [x] code, tests — done
+  - [x] BUG-0146, PA-0152, ERROR_LOG — done
+- Effectiveness (assessed 2026-10-15): `tests/test_web_projects.py` and
+  `tests/test_web_sitetree.py`: 223 passed, 2 xfailed. The merged full suite is recorded
+  in the CHANGELOG.
+
 ### CC-UI-0402 — `report` shows an unknown `trained_on` as `unknown`; the UI hand-off no longer asks for a reveal in the launcher (2026-10-15)
 - Change:
   - **`report/report.py` `_training`:** a malformed `trained_on` reads `unknown`. Before,

@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Integration of the five session lanes: cross-lane defects found by the merged full suite (fixed, BUG-0145/0146, PA-0151/0152)
+- **Symptom:** merging the five lane branches onto the dev branch gave 14 failures in the full suite.
+- **Root cause:** each lane was built against the 10-14 base and was green there. Merged:
+  - options added by the dev branch were unclassified in the CLI taxonomy and the UI option table;
+  - the labs lane's base-URL registry did not list 7 origin-scope and run-target functions;
+  - two of its tests predated origin-scoped sessions (a session without origins; a 3-value unpack of a now 4-value return);
+  - the project-files lane read the `target` table outside the site-tree lane's one reader;
+  - the site tree assumed a store with no project open, and fell back to the implicit default (BUG-0146);
+  - one intermittent exit 141: `pipefail` SIGPIPE (BUG-0145, reproduced deterministically).
+- **Remediation:**
+  - classifications moved out of `PENDING`;
+  - registry entries, each with a direct sub-path test;
+  - the stale test doubles brought up to the current contract;
+  - `core/project.py` reads through `core.runtarget`;
+  - the site tree is wired to the open project only;
+  - the four early-exit pipes removed.
+  - See BUG-0145 and BUG-0146.
+- **Status:** Fixed (merged full suite re-run before push).
+
 ## 2026-10-15 — Test harness: a live boot accepted another process on its port as its own server (fixed, BUG-0143/PA-0149)
 - **Symptom:** run in parallel, `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed with `ConnectionResetError` probing the Twitch clone. It had failed the same way twice on 10-14 and was parked as a WATCH item.
 - **Root cause:** all 5 live-boot harnesses and 11 test-side server starts picked a free port, released it, then accepted any successful connect as "booted". Reproduced deterministically: with a stand-in server on the port, the Go harness booted "successfully" and its URL answered the stand-in.

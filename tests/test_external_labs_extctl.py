@@ -196,6 +196,18 @@ def _dc(project="fuzzlab-bwapp", lab="bwapp"):
     return f"docker compose -p {project} -f {lab}/compose.yaml"
 
 
+def test_the_preflight_never_dies_of_sigpipe_when_its_checker_stops_reading(stubs):
+    """The resolved config used to be piped into the checker (`printf | _py check-config`)
+    under ``set -o pipefail``. A checker that exits without reading all of it (here the
+    stub, which reads nothing; in production any early exit, e.g. an argument error)
+    kills the writer with SIGPIPE: ``up`` exits 141 with no message. That happened once,
+    under parallel load, on the 2026-10-15 integration run. A config larger than a pipe
+    buffer makes it deterministic."""
+    (stubs / "config.json").write_text('{"services": {}, "pad": "' + "x" * 300_000 + '"}')
+    res = _ext(stubs, "up", "bwapp")
+    assert res.returncode != 141, "SIGPIPE: the preflight still pipes into its checker"
+    assert res.returncode == 0, res.stderr
+
 @pytest.mark.parametrize("authorized", [False, True])
 def test_up_preflights_starts_checks_exposure_and_bootstraps_only_when_authorized(stubs,
                                                                                     authorized):

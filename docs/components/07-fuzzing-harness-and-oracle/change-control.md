@@ -3,6 +3,18 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0087 — Integration: the CLI taxonomy's pending options arrived (2026-10-15)
+- Change: `fuzzlab/cli_taxonomy.py` moves `auth_origin` (auto, crawl, greybox-run) and
+  `no_spa_query` (crawl) from `PENDING` into `FLAG_CLASSES` as `B`, as the CLI lane's own
+  comment directed, and classifies `print:auth_origin` (session). `PENDING` is now empty.
+  The guard's self-test uses a synthetic pending flag, since `--auth-origin` now exists.
+- Impact (other components / project): none beyond the taxonomy guard and the UI option
+  table (CC-UI-0055).
+- Risk: low.
+- Deliverables:
+  - [x] — done
+- Effectiveness (assessed 2026-10-15): `tests/test_cli_taxonomy.py` passes.
+
 ### CC-FUZZ-0450 — `fuzz` imports only the CSV its own run wrote (BUG-0450) (2026-10-15)
 - Change: `tools/blind_sqli_fuzzer.py`: `save_dataset` returns whether it wrote the file;
   `main` imports `--output` into the store only when it did (`{"attempt": 0}` otherwise),

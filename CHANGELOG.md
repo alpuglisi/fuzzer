@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (integration: the five session lanes merged onto the dev branch for main)
+- **Why:** bring `main` up to date with the dev branch and the five concurrent sessions:
+  - external labs as permanent fixtures (CC-LAB-0300..);
+  - CLI working vs training runs (CC-*-0400..);
+  - UI project files (CC-UI-0450..);
+  - UI site tree (CC-UI-0500..);
+  - UI/IA research (docs).
+- **What:**
+  - **Merges** in the planned order. Append-only logs keep both sides (every heading
+    checked present). Code conflicts resolved by contract, each recorded in its merge
+    commit: the launcher's pinned project, both store guards kept, both report imports,
+    and the Repeater base URL from `core.runtarget`.
+  - **The merged full suite found 14 cross-lane failures**, fixed by contract, not by
+    test edits alone:
+    - arrived options classified (CC-FUZZ-0087, CC-UI-0055);
+    - the base-URL registry covers 7 merged reducers, each with a direct sub-path test
+      (CC-LAB-0258);
+    - stale test doubles brought to the origin-scoped session contract;
+    - `core/project.py` reads through `core.runtarget` (CC-CORE-0058);
+    - the site tree reads only the open project (BUG-0146);
+    - early-exit pipes under `pipefail` removed (BUG-0145, reproduced deterministically).
+  - The lanes' 16 PAs name their enforcing tests. PA-0151 and PA-0152 added.
+- **Not merged:** the paused BUG-0118 safety lane (WIP, not verified).
+
 ## 2026-10-15 (test suite: measured, then cut from about 68 min; BUG-0142, BUG-0143, BUG-0144)
 - **Why:** the full suite took about 68 min (parallel 7 min + serial 61 min) and gated
   every push. It was measured instead of assumed. One Laravel live boot took 52 s, of

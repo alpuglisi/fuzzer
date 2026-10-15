@@ -42,6 +42,7 @@ from typing import Any, Iterable, Sequence
 from fuzzlab import __version__
 from fuzzlab.core import migrations
 from fuzzlab.core.redaction import redact_for_record
+from fuzzlab.core.runtarget import run_target_rows
 from fuzzlab.core.store import Store, is_aborted
 
 PROJECT_EXT = ".fuzzlab"
@@ -564,10 +565,11 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
             "label": _status_label(status, finished_at)}
     out: list[dict[str, Any]] = []
     linked: set[int] = set()
+    # A run's target is read through the one reader (core.runtarget, CC-UI-0501), once
+    # per listing.
+    targets = run_target_rows(store.conn)
     for r in store.conn.execute(
             "SELECT r.id, r.tool, r.started_at, r.notes, r.launch_id, "
-            "(SELECT base_url FROM target t WHERE t.run_id = r.id ORDER BY t.id LIMIT 1) "
-            "AS base_url, "
             "(SELECT COUNT(*) FROM finding f WHERE f.run_id = r.id) AS findings, "
             "(SELECT COUNT(*) FROM candidate c WHERE c.run_id = r.id) AS candidates "
             "FROM run r ORDER BY r.id DESC"):
@@ -588,7 +590,7 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
             "argv": launch["argv"] if launch else [],
             "source": "ui" if launch else "cli",
             "target": (launch["target"] if launch and launch["target"] else
-                       _text(r["base_url"])) or "",
+                       _text((targets.get(run_id) or {}).get("base_url"))) or "",
             "started_at": _text(r["started_at"]), "status": status, "label": label,
             "finished_at": launch["finished_at"] if launch else None,
             "findings": r["findings"], "candidates": r["candidates"],

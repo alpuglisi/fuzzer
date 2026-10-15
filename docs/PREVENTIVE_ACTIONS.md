@@ -2348,3 +2348,24 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      strict xfail (`PA-0054(3)`). (from BUG-0500)
   - Enforced by: tests/test_core_runtarget.py::test_origin_of_is_total, tests/test_web_sitetree.py::test_a_malformed_stored_base_url_is_an_unreadable_origin_not_a_crash
 
+- **PA-0151** — **No pipe into a reader that can stop early, under `pipefail`.**
+  1. **Avoid the pipe.** In a `set -o pipefail` script, never pipe into a reader that may
+     exit before EOF (`grep -q`, `grep -m`, `head`, `sed …q`, a checker that may refuse).
+     Capture the output, or use a here-string, a single self-quitting tool, or a file.
+  2. **Test with a large input.** A test of such a script uses an input larger than a
+     pipe buffer.
+
+  Strengthens PA-0059(1), whose `pipefail` made a reader's normal early exit look like
+  an error. (from BUG-0145)
+  - Enforced by: tests/test_external_labs_extctl.py::test_the_preflight_never_dies_of_sigpipe_when_its_checker_stops_reading
+
+- **PA-0152** — **A shared-contract change names its consumers from the code, and
+  integration checks every lane's consumers against it.**
+  - A change to a shared contract (a config key's possible values, a return shape, a
+    table's reader) lists its consumers in its change-control Impact. Find them by
+    searching the key or function across `fuzzlab/`, never from memory or by file.
+  - Concurrent lanes are told of the change at dispatch.
+  - The merged full suite runs before any push of an integration.
+
+  Strengthens PA-0146, which covers shared files, not shared contracts. (from BUG-0146)
+  - Enforced by: tests/test_web_projects.py::test_with_no_project_open_nothing_creates_a_file, tests/test_web_sitetree.py::test_site_tree_routes_are_read_only

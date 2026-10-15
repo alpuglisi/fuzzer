@@ -305,6 +305,23 @@ REGISTRY = {
         Covered(f"{_SUB}::test_the_crawler_logs_in_from_its_start_url_not_the_bare_origin"),
     "fuzzlab.web.results:build_finding_raw_request":
         Covered(f"{_ME}::test_a_finding_raw_request_keeps_its_stored_path_under_a_subpath_base"),
+    # Merged 2026-10-15 (origin-scoped sessions FR-SESS-20, the run-target reader
+    # FR-CORE-500): each reduces a sub-path base to its origin or host; the path never
+    # reaches an origin.
+    "fuzzlab.core.runtarget:origin_of":
+        Covered(f"{_ME}::test_a_subpath_base_reduces_to_its_origin_never_its_path"),
+    "fuzzlab.harness.auto_cli:_auth_origins":
+        Covered(f"{_ME}::test_auth_origins_are_scoped_by_a_subpath_bases_host"),
+    "fuzzlab.session.manager:SessionManager._check_base":
+        Covered(f"{_ME}::test_a_subpath_base_is_checked_by_its_origin"),
+    "fuzzlab.session.manager:SessionManager._login_anchors":
+        Covered(f"{_ME}::test_login_anchors_of_a_subpath_base_are_origins_only"),
+    "fuzzlab.session.manager:SessionManager._origins_of":
+        Covered(f"{_ME}::test_a_new_sessions_origins_from_a_subpath_base"),
+    "fuzzlab.tools.authhttp:scope_hosts_for":
+        Covered(f"{_ME}::test_auth_origins_are_scoped_by_a_subpath_bases_host"),
+    "fuzzlab.tools.probesender:SeamProbeSender._run_origins":
+        Covered(f"{_ME}::test_a_senders_run_origins_from_a_subpath_base"),
 }
 
 
@@ -543,6 +560,7 @@ def test_greybox_cli_logs_in_from_the_operators_subpath_base(monkeypatch):
     """`greybox_cli._cookie_for` hands the operator's whole base URL to the session
     manager (never its origin, BUG-0113)."""
     from fuzzlab.core.credentials import CredentialStore
+    from fuzzlab.core.urls import canonical_origin
     from fuzzlab.greybox import greybox_cli
     from fuzzlab.session import manager as manager_mod
     from fuzzlab.session.state import SessionState
@@ -553,12 +571,14 @@ def test_greybox_cli_logs_in_from_the_operators_subpath_base(monkeypatch):
 
     def ensure(self, host, identity, base_url, *, operator=False):
         seen.append((base_url, operator))
+        # FR-SESS-20: a session established from this base carries its origin.
         return SessionState(host, identity, kind="cookie", cookies={"PHPSESSID": "s"},
-                            valid=True)
+                            valid=True, origins=frozenset({canonical_origin(base_url)}))
     monkeypatch.setattr(manager_mod.SessionManager, "ensure", ensure)
-    cookie, secure_only, _is_auth = greybox_cli._cookie_for(
+    cookie, secure_only, _is_auth, origins = greybox_cli._cookie_for(
         "127.0.0.1", "user", SUBPATH_BASE + "portal.php")
     assert cookie == "PHPSESSID=s" and secure_only is False
+    assert origins == frozenset({"http://127.0.0.1:8092"})     # FR-SESS-20: the origin only
     assert seen and all(s == (SUBPATH_BASE + "portal.php", True) for s in seen)
 
 
@@ -599,3 +619,58 @@ def test_a_browser_session_for_a_subpath_base_scopes_its_whole_origin():
     scope = browserauth.header_scope_for(SessionState("127.0.0.1", "u", valid=True), base,
                                          lambda u: True)
     assert scope(SUBPATH_BASE + "x.php") and not scope("http://evil.example/bWAPP/")
+
+
+# --- origin and host reducers (merged 2026-10-15): a sub-path base keeps its origin -----
+
+def test_a_subpath_base_reduces_to_its_origin_never_its_path():
+    from fuzzlab.core.runtarget import origin_of
+    assert origin_of(SUBPATH_BASE) == "http://127.0.0.1:8092"
+    assert origin_of(SUBPATH_BASE + "portal.php?x=1") == "http://127.0.0.1:8092"
+
+
+def test_auth_origins_are_scoped_by_a_subpath_bases_host():
+    import argparse
+
+    from fuzzlab.harness import auto_cli
+    from fuzzlab.tools.authhttp import scope_hosts_for
+    assert "127.0.0.1" in scope_hosts_for(SUBPATH_BASE)
+    parser = argparse.ArgumentParser()
+    assert auto_cli._auth_origins(parser, ["http://127.0.0.1:9000"], SUBPATH_BASE) == [
+        "http://127.0.0.1:9000"]
+
+
+def _subpath_manager():
+    from tests.test_subpath_apps import SubpathApp, _mgr
+    return _mgr(SubpathApp())
+
+
+def test_a_subpath_base_is_checked_by_its_origin():
+    from fuzzlab.session.manager import SessionAuthError
+    from fuzzlab.session.state import SessionState
+    mgr = _subpath_manager()
+    mgr._state[("h", "user")] = SessionState("h", "user", origins=frozenset({"http://h:8090"}))
+    mgr._check_base("h", "user", "http://h:8090/app/portal.php", operator=True)   # same origin
+    with pytest.raises(SessionAuthError):
+        mgr._check_base("h", "user", "http://h:9999/app/portal.php", operator=True)
+
+
+def test_login_anchors_of_a_subpath_base_are_origins_only():
+    anchors = _subpath_manager()._login_anchors("http://h:8090/app/portal.php")
+    assert "http://h:8090" in anchors and "https://h:8090" in anchors
+    assert not any("/app" in a for a in anchors)
+
+
+def test_a_new_sessions_origins_from_a_subpath_base():
+    origins = _subpath_manager()._origins_of("http://h:8090/app/portal.php",
+                                             "http://h:8090/app/login.php")
+    assert origins == frozenset({"http://h:8090"})
+
+
+def test_a_senders_run_origins_from_a_subpath_base():
+    import types
+
+    from fuzzlab.tools.probesender import SeamProbeSender
+    sender = types.SimpleNamespace(_manager=None, _identity="user")
+    assert SeamProbeSender._run_origins(sender, SUBPATH_BASE) == frozenset(
+        {"http://127.0.0.1:8092"})

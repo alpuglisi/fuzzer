@@ -3,6 +3,36 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0258 — Integration: no pipe into an early-exiting reader under pipefail; the base-URL registry covers the merged reducers (BUG-0145) (2026-10-15)
+- Change:
+  - **Scripts:**
+    - `lab/external/extctl.sh` passes the rendered config to `check-config` as a
+      here-string, and reads `name:` with a self-quitting `sed`;
+    - `lab/labctl.sh` does the same for `name:`, and captures `podman ps` before
+      `grep -q`;
+    - `scripts/greybox_e2e.sh` captures `php -m` before `grep -qi`.
+  - **New regression test:**
+    `tests/test_external_labs_extctl.py::test_the_preflight_never_dies_of_sigpipe_when_its_checker_stops_reading`
+    (a 300 KB config makes the old race deterministic).
+  - **`tests/test_base_url_subpath_registry.py`:**
+    - 7 merged functions (`runtarget.origin_of`, `auto_cli._auth_origins`,
+      `authhttp.scope_hosts_for`, `SessionManager._check_base` / `_login_anchors` /
+      `_origins_of`, `SeamProbeSender._run_origins`) are registered, each with a direct
+      test that a sub-path base reduces to its origin or host;
+    - the greybox test's session double carries its origin (FR-SESS-20) and unpacks the
+      4-value `_cookie_for`.
+- Impact (other components / project):
+  - **Lab scripts only.** `labctl.sh down`'s leftover check no longer reads a match as
+    none.
+  - **All eight pipefail scripts were swept**; 4 sites changed.
+- Risk: low. Here-strings and captures are bash built-ins; `bash -n` is clean; every
+  test exercising the three scripts passes (468 passed).
+- Deliverables:
+  - [x] — done
+  - [x] BUG-0145, PA-0151 — done
+- Effectiveness (assessed 2026-10-15): the regression test fails (141) on the old script
+  and passes on the new.
+
 ### CC-LAB-0257 — Live-boot harnesses accept only their own listener and retry a taken port (BUG-0143) (2026-10-15)
 - Change: the five harnesses (`live_boot.py`, `go_live_boot.py`, `django_live_boot.py`,
   `rails_live_boot.py`, `live_boot_spring_boot.py`) behave the same way:

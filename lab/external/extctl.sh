@@ -53,7 +53,7 @@ if [[ ! "$SUFFIX" =~ ^[a-z0-9-]*$ ]]; then
   exit 2
 fi
 # The project name comes from the compose file's own `name:` (PA-0059(2)).
-NAME="$(sed -n 's/^name:[[:space:]]*//p' "$lab/compose.yaml" | head -n 1)"
+NAME="$(sed -n '/^name:/{s/^name:[[:space:]]*//p;q;}' "$lab/compose.yaml")"  # no pipe (BUG-0145)
 if [ -z "$NAME" ]; then
   echo "$lab/compose.yaml has no top-level name:" >&2
   exit 2
@@ -115,7 +115,9 @@ _preflight() {
   if ! rendered="$("${DC[@]}" config --format json 2>/dev/null)"; then
     rendered="$("${DC[@]}" config)"
   fi
-  printf '%s' "$rendered" | _py check-config "$lab"
+  # A here-string, not a pipe: under pipefail a checker that stops reading (an early
+  # error) killed the writer with SIGPIPE and `up` exited 141 with no message (BUG-0145).
+  _py check-config "$lab" <<<"$rendered"
 }
 
 _exposure() { _py check-exposure "$lab" --engine "$ENGINE" --project "$PROJECT"; }

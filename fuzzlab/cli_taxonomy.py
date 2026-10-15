@@ -191,11 +191,12 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
         "confirm_budget": "B", "budget_method": "W*", "budget_seed": "T",
         "anomaly": "B", "anomaly_contamination": "B", "anomaly_method": "B",
         "plugins": "B", "header_points": "B", "fuzz_json_writes": "B",
-        "authorized": "B", "dry_run": "B",
+        "authorized": "B", "dry_run": "B", "auth_origin": "B",
     },
     "crawl": _all("B", ["start", "max_depth", "db", "engine", "timeout", "resume", "store",
                         "identity", "follow_selector_forms", "no_spa_routes",
-                        "submit_spa_forms", "no_reveal", "dry_run"]),
+                        "submit_spa_forms", "no_reveal", "dry_run", "auth_origin",
+                        "no_spa_query"]),
     "audit": _all("B", ["spider_db", "indicator_db", "out", "engine", "timeout", "append",
                         "quiet", "store", "identity", "base_url", "dry_run"]),
     "fuzz": _all("B", ["url", "param", "output", "baseline_iterations", "repeats", "sigma",
@@ -203,7 +204,7 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
                        "dry_run"]),
     "session": _all("B", ["set-credential:host", "set-credential:identity",
                           "set-credential:username", "print:host", "print:identity",
-                          "print:base_url"]),
+                          "print:base_url", "print:auth_origin"]),
     "proxy": _all("B", ["host", "port", "scope", "ca_dir", "store", "record", "identity",
                         "max_response_bytes", "response_deadline", "no_verify_tls",
                         "export_ca", "no_tls", "authorized", "dry_run"]),
@@ -216,7 +217,7 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     "greybox-run": {
         **_all("B", ["base_url", "store", "spider_db", "identity", "mutation_variants",
                      "max_mutation_variants", "allow_destructive", "authorized",
-                     "dry_run"]),
+                     "dry_run", "auth_origin"]),
         "ground_truth": "T", "points": "T",
         **_all("L", ["cov_dir", "app_root", "labctl", "reset", "settle"]),
     },
@@ -224,14 +225,11 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     "train models": _all("T", ["store"]),
 }
 
-#: Dests another lane is adding (BUG-0138, `ccr-27885270-9ahcdd`): their class is decided
-#: here so the merge stays classified. The guard fails once one exists in its parser
-#: while still listed here — move it into FLAG_CLASSES then.
-PENDING: dict[str, dict[str, str]] = {
-    "auto": {"auth_origin": "B"},
-    "crawl": {"auth_origin": "B", "no_spa_query": "B"},
-    "greybox-run": {"auth_origin": "B"},
-}
+#: Dests another lane is adding: their class is decided here so the merge stays
+#: classified. The guard fails once one exists in its parser while still listed here —
+#: move it into FLAG_CLASSES then. (Empty since the 2026-10-15 integration: the
+#: BUG-0138 branch's `auth_origin` and `no_spa_query` arrived and were moved.)
+PENDING: dict[str, dict[str, str]] = {}
 
 #: W* flags: the values a working command allows.
 WORKING_RESTRICT: dict[str, dict[str, tuple[str, ...]]] = {

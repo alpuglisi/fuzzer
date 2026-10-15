@@ -703,7 +703,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         app, templates=templates,
         shell_context=lambda: _shell_context(cfg, active="sitetree"),
         with_store=lambda fn, default: _with_store(cfg, fn, default),
-        store_path=lambda: cfg.get("store_path", "fuzzlab.db"),
+        # The open project's store, or None with none open: never an implicit default
+        # (FR-UI-458, PA-0452).
+        store_path=lambda: cfg.get("store_path"),
         poll_ms=int(cfg.get("sitetree_poll_ms", 5000)))
     # --- end site tree -------------------------------------------------------------
 

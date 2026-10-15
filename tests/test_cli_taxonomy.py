@@ -39,7 +39,7 @@ def test_every_command_with_flags_has_a_parser_and_every_other_says_why():
     assert set(tx.PARSERS) == set(tx.FLAG_CLASSES)
 
 
-def test_the_guard_catches_an_unclassified_a_stale_and_an_arrived_pending_dest():
+def test_the_guard_catches_an_unclassified_a_stale_and_an_arrived_pending_dest(monkeypatch):
     """PA-0034(2): the guard itself is proven on synthetic offenders."""
     p = argparse.ArgumentParser()
     p.add_argument("--store")
@@ -47,9 +47,10 @@ def test_the_guard_catches_an_unclassified_a_stale_and_an_arrived_pending_dest()
     p.add_argument("--new-flag")                       # unclassified; `json` is stale
     problems = tx.classification_problems("report", p)
     assert "unclassified: new_flag" in problems and "stale: json" in problems
+    monkeypatch.setitem(tx.PENDING, "crawl", {"future_flag": "B"})
     crawl = tx.PARSERS["crawl"]()
-    crawl.add_argument("--auth-origin")                # BUG-0138's dest arrives
-    assert "pending but present: auth_origin" in tx.classification_problems("crawl", crawl)
+    crawl.add_argument("--future-flag")                # a pending dest arrives
+    assert "pending but present: future_flag" in tx.classification_problems("crawl", crawl)
 
 
 def test_session_subcommands_are_walked():

@@ -104,7 +104,9 @@ _force_clean() {
 # --- per-service control, CC-LAB-0250 (backs the web panel's Lab page) --------------
 # Compose project name, read from compose.yaml's own `name:` key (PA-0059(2): no
 # hand-kept duplicate).
-PROJECT="$(sed -n 's/^name:[[:space:]]*//p' compose.yaml | head -n 1)"
+# One sed that quits at the first match: no pipe into an early-exiting reader under
+# pipefail (BUG-0145).
+PROJECT="$(sed -n '/^name:/{s/^name:[[:space:]]*//p;q;}' compose.yaml)"
 PROJECT="${PROJECT:-pff-lab}"
 
 # The container engine CLI (podman or docker), as opposed to the compose provider
@@ -194,7 +196,11 @@ case "${1:-}" in
     # Checking real post-state (any `pff-lab_*` container still present)
     # instead of trusting the exit code is what actually detects this.
     "${COMPOSE[@]}" down || true
-    if podman ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^pff-lab_'; then
+    # Captured first: under pipefail, `podman ps | grep -q` reads as false when grep
+    # matches and exits while podman still writes (SIGPIPE), skipping exactly the
+    # force-clean it guards (BUG-0145).
+    _names="$(podman ps -a --format '{{.Names}}' 2>/dev/null || true)"
+    if grep -q '^pff-lab_' <<<"$_names"; then
       echo "down left containers behind; force-clearing wedged stack (DB volume kept)..." >&2
       _force_clean keep-volume
     fi

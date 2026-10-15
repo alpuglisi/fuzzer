@@ -3,6 +3,18 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
+- Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
+  subquery. It reads `runtarget.run_target_rows()` once per listing, the one reader the
+  site-tree lane made of the `target` table (FR-CORE-500, its guard).
+- Impact (other components / project): UI project pages: the same values (first target
+  row by id). One query per listing instead of one per run.
+- Risk: low.
+- Deliverables:
+  - [x] — done
+- Effectiveness (assessed 2026-10-15): `tests/test_core_runtarget.py`,
+  `tests/test_core_project.py` and `tests/test_web_projects.py` pass.
+
 ### CC-CORE-0057 — `procutil`: a started server is up only when its own process listens on its port (BUG-0143) (2026-10-15)
 - Change: `fuzzlab/procutil.py` gains:
   - `port_owner(h, port)`: `ours`, `taken` or `none`, read from the server tree's own

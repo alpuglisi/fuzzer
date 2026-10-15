@@ -1733,7 +1733,7 @@ tracked in the requirements files, not here.
   flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
   and structured audit/debug logs are built.
 - **Project files** `[built — back end, start screen and pages laid out from the UI
-  research; three code-review rounds; unmerged]` (CC-UI-0450): `web/projects.py`
+  research; three code-review rounds; merged 2026-10-15]` (CC-UI-0450): `web/projects.py`
   (`ProjectManager`: one open project, new / open / temporary / save as / snapshot /
   close, use-default, the recent list, path confinement to the projects directory, busy
   refusal under one lock, temporary-project discard; `ProjectBoundConfig` so every reader

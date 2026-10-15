@@ -133,6 +133,9 @@ OPTION_CLASS: dict[tuple[str, str], tuple[str, str]] = {
         ("mutate-run", "param"), ("mutate-run", "method"), ("mutate-run", "base"),
         ("mutate-run", "identity"), ("report", "run"),
         ("session:set-credential", "host"), ("session:set-credential", "identity"),
+        # an origin (URL) the session may also be sent to (FR-SESS-20): not a path
+        ("crawl", "auth_origin"), ("auto", "auth_origin"), ("greybox-run", "auth_origin"),
+        ("session:print", "auth_origin"),
         ("session:set-credential", "username"), ("session:print", "host"),
         ("session:print", "identity"), ("session:print", "base_url"))},
 }

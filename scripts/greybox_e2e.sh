@@ -79,7 +79,8 @@ echo "lab is up."
 say "3/6  Self-testing the coverage / db_fault side channel with curl"
 # First, a definitive check that pcov is actually loaded in the running container —
 # an empty coverage file otherwise looks like a wiring bug but is really a missing ext.
-if ( cd lab && ./labctl.sh exec web php -m 2>/dev/null ) | grep -qi '^pcov$'; then
+_mods="$( ( cd lab && ./labctl.sh exec web php -m 2>/dev/null ) || true)"   # no pipe (BUG-0145)
+if grep -qi '^pcov$' <<<"$_mods"; then
   echo "  pcov: loaded in the web container."
 else
   die "pcov is NOT loaded in the web container. Force a clean rebuild:
