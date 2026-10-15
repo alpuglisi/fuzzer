@@ -285,6 +285,10 @@ def log_finding(cursor, url, category, trans_type, target, context="", reference
     ''', (url, category, trans_type, target, context, reference))
 
 
+#: Is the live document's body missing or empty (no text, no element)?
+_BODY_EMPTY_JS = ("() => !document.body || (!document.body.innerText.trim() && "
+                  "!document.body.children.length)")
+
 class ContentFetcher:
     """Fetches page HTML, optionally rendering JavaScript with a headless browser.
 
@@ -446,6 +450,10 @@ class ContentFetcher:
                     html = None
                     if nav.superseded or not own:
                         html = nav.html                # taken at the commit
+                    elif self._page.evaluate(_BODY_EMPTY_JS):
+                        # merely slow, but nothing of the body parsed yet: the
+                        # received HTML, as the spider does (review B-N2)
+                        html = nav.html
                     if html is None and own:
                         html = self._page.content()
                     if html is None:

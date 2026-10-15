@@ -11,7 +11,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
-from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, url_key
+from fuzzlab.core.urls import (canonical_origin, document_key, in_origin_scope, origin_scope,
+                               url_key)
 from fuzzlab.tools import navguard, spa
 
 # Configure logging for production-ready output
@@ -294,12 +295,10 @@ def _storage_rotated(value) -> bool:
 
 def _nav_key(url):
     """A navigation's exact target for the reveal window's own-reload exemption (review
-    A-S2): canonical origin (scheme, host, port), path and query -- never only the path
-    (`url_key`), so a redirect or a navigation to ``?action=x`` on the same path is not
-    the window's own reload. The fragment is dropped: a reload never sends one."""
-    parts = urlparse(url or "")
-    origin = canonical_origin(url) or ""
-    return origin + (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    A-S2): `core.urls.document_key` -- canonical origin, path and query, never only the
+    path, so a redirect or a navigation to ``?action=x`` on the same path is not the
+    window's own reload. The fragment is dropped: a reload never sends one."""
+    return document_key(url)
 
 
 #: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).

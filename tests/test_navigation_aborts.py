@@ -149,7 +149,8 @@ def test_the_document_abort_code_is_err_aborted():
 
 # --- real Chromium ------------------------------------------------------------------
 class _Site:
-    """A loopback server: ``pages`` maps a path to HTML, ``redirects`` a path to a 302
+    """A loopback server: ``pages`` maps a path (or a path with its query) to HTML,
+    ``redirects`` a path to a 302
     ``Location``, ``delays`` a path to seconds its answer is held back. Every GET path
     is recorded in ``requests``, every POST path in ``posts``, and both in order in
     ``log`` as ``(method, path)``."""
@@ -171,7 +172,10 @@ class _Site:
                     self.send_header("Content-Length", "0")
                     self.end_headers()
                     return
-                body = site.pages.get(path, "<html><body>other</body></html>").encode()
+                # a page keyed by its path and query wins over its path's
+                body = site.pages.get(self.path) or site.pages.get(
+                    path, "<html><body>other</body></html>")
+                body = body.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
                 self.send_header("Content-Length", str(len(body)))

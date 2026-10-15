@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0138 review of 8350ab1: a document is its path and query)
+- **Why:** the guard's "is this still my document" check keyed URLs without their
+  query, so `/p?a=2` passed for `/p?a=1`. The failure watch armed on `goto`'s return,
+  not on the commit itself. The fetcher kept an empty live body when the received HTML
+  was available.
+- **What:** `core.urls.document_key` (origin, path, query) is the one key. The watch
+  arms on the main frame's commit. The fetcher falls back to the received HTML for an
+  empty body. CC-CRAWL-0030 and CC-AUD-0043 amendments.
+
 ## 2026-10-15 (BUG-0138 review: which failures cut a wait, and which content a page that did not load keeps)
 - **Why:** reviewers found that the previous page's cancelled navigation could cut a
   normal load short. They also found that a page that merely loaded slowly lost its

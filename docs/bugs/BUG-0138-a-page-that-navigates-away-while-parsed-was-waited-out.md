@@ -214,3 +214,17 @@ parsed** was not measured. The download's navigation may or may not be reported 
 failed main-frame navigation. Either way the wait is bounded by the caller's timeout,
 and the page is read from what it has: superseded, its received HTML; otherwise, its
 live DOM.
+
+### Review of 8350ab1 (added in review)
+Both reviewers agreed. Three small fixes (CC-CRAWL-0030 and CC-AUD-0043 amendments):
+- **The document key (reviewer A).** `url_key` drops the query, so a head script that
+  navigated `/p?a=1` to `/p?a=2` looked like the same document, and `/p?a=2`'s title,
+  links and final URL filled `/p?a=1`'s row. `core.urls.document_key` (origin, path,
+  query) is now the one key for the spider's own-reload check and the guard's document
+  checks.
+- **Arming (reviewer B).** The failure watch arms on the main frame's own commit
+  (`framenavigated`), with `goto`'s return as a fallback. So it no longer relies on a
+  refusal being reported after `goto` returns: in 20 of 20 real-Chromium runs the
+  commit armed it first.
+- **The fetcher's empty body (reviewer B).** When a merely slow page has no body yet,
+  the fetcher returns the received HTML, as the spider does.

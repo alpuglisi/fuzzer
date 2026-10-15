@@ -31,6 +31,11 @@ Newest first.
   - When it was merely slow, the live DOM is returned (JS-rendered content included).
   - It never returns another document's HTML.
   - The tests and run are in CC-CRAWL-0030's amendment.
+- Amendment, review of 8350ab1 (2026-10-15; B-N2, A-S1): in the merely-slow case,
+  when the live body is missing or empty (`_BODY_EMPTY_JS`: no text, no element), the
+  fetcher returns the received HTML (`Navigation.html`), as the spider does; otherwise
+  the live DOM. Its document checks use `core.urls.document_key` through navguard
+  (CC-CRAWL-0030 amendment).
 
 ### CC-AUD-0042 — A failed load in the auditor's browser ends the previous page (BUG-0136 review, X1's twin) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch`. When the rendered fetch of a URL

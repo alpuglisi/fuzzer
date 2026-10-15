@@ -427,3 +427,55 @@ def test_another_document_never_fills_this_urls_row(monkeypatch, tmp_path):
     assert "B-TEXT" not in (content or "")
     assert "/alink" in a.requests and "/blink" not in a.requests
     assert a.base + "b" not in rows                        # never filed as A's landing
+
+
+# --- review of 8350ab1 --------------------------------------------------------------
+def test_a_same_path_document_with_another_query_never_fills_this_urls_row(monkeypatch,
+                                                                         tmp_path):
+    """Review A-S1: ``/p?a=1``'s head script navigates (allowed) to the slow
+    ``/p?a=2``. A document is its path **and** query (`core.urls.document_key`): the
+    page no longer shows ``/p?a=1``, so its row holds its own response's title, text and
+    link, its final URL stays ``/p?a=1``, and nothing of ``/p?a=2`` is filed."""
+    import sqlite3
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.spider import LocalSpider
+    _chromium_or_skip(monkeypatch)
+    a = _Site()
+    a.pages["/p?a=1"] = ("<html><head><title>P-A1</title><script>location.href = "
+                         "'/p?a=2'</script></head><body><p>A1-TEXT</p>"
+                         "<a href='/a1link'>1</a></body></html>")
+    a.pages["/p?a=2"] = ("<html><head><title>P-A2</title></head><body><p>A2-TEXT</p>"
+                         "<a href='/a2link'>2</a><script src='/pslow.js'></script>"
+                         "</body></html>")
+    a.pages["/pslow.js"] = "window.p = 1;"
+    a.delays["/pslow.js"] = 5.0
+    finals = {}
+    try:
+        start = a.base + "p?a=1"
+        sp = LocalSpider(start, max_depth=1, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=3000)
+        if sp.engine != "playwright":
+            skip_or_fail("playwright engine unavailable")
+        real = sp._goto_and_parse
+
+        def goto_and_parse(url):
+            try:
+                return real(url)
+            finally:
+                finals[url] = sp._last_final_url
+        sp._goto_and_parse = goto_and_parse
+        try:
+            sp.crawl()
+        except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+            skip_or_fail(f"chromium could not launch: {exc}")
+    finally:
+        a.close()
+    rows = {u: (t, c) for u, t, c in sqlite3.connect(str(tmp_path / "s.db")).execute(
+        "SELECT url, title, content FROM discovered_pages").fetchall()}
+    title, content = rows[start]
+    assert title == "P-A1" and "A1-TEXT" in (content or "")
+    assert "A2-TEXT" not in (content or "")
+    assert finals[start] == start                         # never /p?a=2
+    assert "/a1link" in a.requests and "/a2link" not in a.requests
+    assert a.base + "p?a=2" not in rows

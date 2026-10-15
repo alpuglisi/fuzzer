@@ -243,6 +243,17 @@ def url_key(url: str) -> str:
     return f"{canonical_origin(url) or ''}{urlsplit(url or '').path or '/'}"
 
 
+def document_key(url: str) -> str:
+    """Which document a URL loads: ``canonical_origin``, path and query -- never only the
+    path (`url_key`: ``/p?a=1`` and ``/p?a=2`` are two documents). The fragment is
+    dropped: it is never sent. The one definition for the reveal window's own reload
+    and for the browser guard's "is this still the document I loaded" (BUG-0138
+    review, PA-0003)."""
+    parts = urlsplit(url or "")
+    return (canonical_origin(url) or "") + (parts.path or "/") + \
+        (f"?{parts.query}" if parts.query else "")
+
+
 #: A URL fragment starting with one of these names a single-page app's route (``#/x``,
 #: hashbang ``#!/x``): the one definition (forms phase 3 merge, PA-0003).
 SPA_ROUTE_PREFIXES = ("/", "!/")

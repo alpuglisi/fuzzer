@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
-from fuzzlab.core.urls import canonical_origin, destructive_reason, url_key
+from fuzzlab.core.urls import canonical_origin, destructive_reason, document_key, url_key
 
 #: Not network requests: never scope-checked.
 _LOCAL_SCHEMES = ("data:", "blob:", "about:")
@@ -358,7 +358,7 @@ def _abort_code(document: bool) -> str | None:
     return DOCUMENT_ABORT if document else None
 
 
-#: page -> (url_key, HTML) of the last main-frame document its guard fulfilled (BUG-0138
+#: page -> (document_key, HTML) of the last main-frame document its guard fulfilled (BUG-0138
 #: review Q2): the bytes the browser received, still there when a script navigation
 #: has replaced that document and the browser has dropped its body.
 _RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
@@ -373,7 +373,7 @@ def _note_received(req, url: str, answer) -> None:
         if page is None or "text/html" not in (answer.headers or {}).get(
                 "content-type", ""):
             return
-        _RECEIVED[page] = (url_key(url), answer.text())
+        _RECEIVED[page] = (document_key(url), answer.text())
     # no frame (a service worker's request; a request double without one), or a page
     # that cannot be weakly referenced: nothing is kept
     except (AttributeError, Error, TypeError):
@@ -383,17 +383,24 @@ def _note_received(req, url: str, answer) -> None:
 def _received_html(page, url: str, response) -> str | None:
     """The HTML the guard fulfilled for this navigation of ``url`` (or its final URL),
     else the response's own body, else None."""
-    from playwright.sync_api import Error
     got = _RECEIVED.get(page) if _is_weakref_able(page) else None
-    keys = {url_key(url)}
-    if response is not None:
-        try:
-            keys.add(url_key(response.url))
-        except (AttributeError, Error):    # a response double without a URL
-            pass
-    if got is not None and got[0] in keys:
+    if got is not None and got[0] in _navigation_keys(url, response):
         return got[1]
     return response_html(response) if response is not None else None
+
+
+def _navigation_keys(url: str, response) -> set:
+    """The documents a navigation of ``url`` may show (`core.urls.document_key`): the
+    URL's own, and its response's final one. The one key for `_note_received`,
+    `_received_html` and `shows_own_document` (BUG-0138 review A-S1)."""
+    from playwright.sync_api import Error
+    keys = {document_key(url)}
+    if response is not None:
+        try:
+            keys.add(document_key(response.url))
+        except (AttributeError, Error):    # a response double without a URL
+            pass
+    return keys
 
 
 def _is_weakref_able(obj) -> bool:
@@ -477,15 +484,24 @@ class _NavigationFailures:
     """Notes each failed main-frame navigation request of ``page`` reported once it is
     ``armed``: at or after this navigation's commit (BUG-0138 review Q1). A failure
     reported earlier -- the previous page's pending navigation, cancelled by this one
-    -- says nothing about this document's load. (A refusal of this document's own
-    script navigation is reported after ``goto(wait_until="commit")`` returns: 40 of 40
-    real-Chromium runs.)"""
+    -- says nothing about this document's load. It arms on the main frame's own commit
+    (``framenavigated``, review B-N1), so a refusal reported after the commit counts
+    whether or not ``goto`` has returned yet; `navigate` also arms when ``goto``
+    returns, for a page that reports no ``framenavigated``."""
 
     def __init__(self, page, *, armed: bool = False):
         from playwright.sync_api import Error
         self._page, self._error, self.failed = page, Error, []
         self.armed = armed
         page.on("requestfailed", self._on_failed)
+        page.on("framenavigated", self._on_committed)
+
+    def _on_committed(self, frame) -> None:
+        try:
+            if frame == self._page.main_frame:
+                self.armed = True
+        except self._error:        # the page has gone
+            return
 
     def _on_failed(self, request) -> None:
         try:
@@ -501,6 +517,7 @@ class _NavigationFailures:
         if remove is not None:
             try:
                 remove("requestfailed", self._on_failed)
+                remove("framenavigated", self._on_committed)
             except self._error:    # the page has gone: its listeners with it
                 pass
 
@@ -598,14 +615,8 @@ def shows_own_document(page, url: str, response) -> bool:
     (BUG-0138 review Q2)? Not when a script navigation it allowed has committed another
     document since: then nothing live (title, links, final URL) is this URL's."""
     from playwright.sync_api import Error
-    keys = {url_key(url)}
-    if response is not None:
-        try:
-            keys.add(url_key(response.url))
-        except Error:
-            pass
     try:
-        return url_key(page.url) in keys
+        return document_key(page.url) in _navigation_keys(url, response)
     except Error:
         return False
 

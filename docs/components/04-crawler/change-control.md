@@ -120,6 +120,26 @@ Newest first.
       (status 0 for `/channels/redirect`). That test crawls with the `requests` engine,
       which does not use `navguard.navigate`. It passed on 1a1da68 and in 7 of 7 reruns
       on 0d2371b: a live-boot flake, not this change.
+- Amendment, review of 8350ab1 (2026-10-15; reviewers A and B AGREE; A-S1, B-N1, B-N2):
+  - **A-S1:** `url_key` drops the query, so `/p?a=1` and `/p?a=2` looked like one
+    document to `shows_own_document`, `_received_html` and the `_RECEIVED` entry. A new
+    `core.urls.document_key` (canonical origin, path and query, no fragment) is the one
+    key (PA-0003). The spider's `_nav_key` now returns it, and navguard's three uses go
+    through one `_navigation_keys`.
+    - Test (real Chromium): `/p?a=1`'s head script navigates, allowed, to a slow
+      `/p?a=2`. The row for `/p?a=1` holds `P-A1`, its text and link only;
+      `_last_final_url` stays `/p?a=1`; `/a2link` is never crawled.
+    - Mutation: with `url_key` back at those sites, the test fails (the row takes
+      `P-A2`).
+  - **B-N1:** `_NavigationFailures` arms on the main frame's own commit
+    (`framenavigated`) as well as when `goto` returns (kept as a fallback for a page
+    that reports no `framenavigated`). In 20 of 20 real-Chromium head-script loads it
+    was armed by `framenavigated` before the refusal was reported, and the refusal
+    counted. The arming therefore no longer depends on when `goto` returns.
+  - **B-N2:** in the fetcher, see CC-AUD-0043.
+  - Tests: `tests/test_guarded_navigation.py` 21 passed. `tests/test_navigation_aborts.py`'s
+    `_Site` looks a page up by path and query first.
+  - Effectiveness: the related run on the committed tree is recorded below.
 
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
