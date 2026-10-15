@@ -470,8 +470,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   recorded at creation; anything else is left and reported. Shutdown deletes nothing;
   leftover temporaries are listed for Open or Discard, and one another `fuzzlab web`
   holds open (its owner lock) is refused.
-- **FR-UI-454** The open project is shown on **every page** (the topbar chip: name,
-  `temporary`, its path as the tooltip, linking to `/projects`); when none is open, a
+- **FR-UI-454** The open project is shown on **every page** (the topbar chip: name and
+  `temporary`, linking to `/projects`, where its path is shown); when none is open, a
   migration is waiting, or the file was refused, a banner says so. *(The page layout
   beyond this skeleton follows the UI research; see CC-UI-0450.)*
 - **FR-UI-455** `/project` shows the open project's **metadata** (name, file, created,

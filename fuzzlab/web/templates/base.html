@@ -39,7 +39,7 @@
     <span class="chip" id="proxy-chip"><span class="led off"></span>proxy</span>
     {% if project %}
     <a class="chip project-chip" id="project-chip" href="/projects"
-       title="{{ project.path or 'no project open' }}">
+       title="Projects: open, new, save as, close">
       <span class="led {{ 'on' if project.status == 'open' else 'warn' }}"></span>
       project <b>{{ project.name if project.status == 'open' else ('migration needed' if project.status == 'pending' and project.pending.kind == 'older' else ('refused' if project.status == 'pending' else 'none')) }}</b>
       {% if project.kind == 'temporary' %}<span class="pill">temporary</span>{% endif %}
