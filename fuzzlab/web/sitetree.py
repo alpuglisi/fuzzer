@@ -51,8 +51,7 @@ from fuzzlab.core.evidence import display_evidence, method_key, parse_evidence
 from fuzzlab.core.oracle_status import (CHECKED, INCONCLUSIVE, NO_CONFIRMER, PENDING,
                                          SKIPPED_BUDGET)
 from fuzzlab.core.runmode import to_category
-from fuzzlab.core.runtarget import run_target_rows
-from fuzzlab.core.urls import canonical_origin
+from fuzzlab.core.runtarget import origin_of, run_target_rows
 from fuzzlab.web.findingsview import SEVERITIES, derive_severity
 
 # --- bounds (PA-0096(1): sizes are bounded before anything is allocated) ------------
@@ -69,12 +68,14 @@ Q_MAX = 512
 GROUP_CAP = 10_000
 #: The child-list cache (G1/G10): entries, children per entry, children in total.
 CACHE_ENTRIES = 8
-CACHE_ENTRY_MAX = 100_000
-CACHE_TOTAL_MAX = 200_000
+CACHE_ENTRY_MAX = 60_000
+CACHE_TOTAL_MAX = 100_000
 #: Candidate projections kept (content-addressed, no raw evidence held).
 PROJECTION_CACHE_MAX = 65_536
 #: Run ids bound per ``IN`` list when JSON1 is unavailable.
 RUN_CHUNK = 500
+#: The id range a cursor may name (SQLite's INTEGER).
+ID_MAX = 2 ** 63 - 1
 
 #: The status vocabulary (FR-UI-501): ``confirmed`` is a finding row; the rest are
 #: `candidate.oracle_status` values (`core.oracle_status`), NULL or unknown reading
@@ -191,7 +192,28 @@ ROOT = NodeKey()
 def _bounded_str(value, what: str, limit: int = STR_MAX) -> str:
     if not isinstance(value, str) or len(value) > limit:
         raise SiteTreeError(f"bad {what}")
+    try:
+        value.encode("utf-8")            # a lone surrogate cannot be stored or bound
+    except UnicodeEncodeError as exc:
+        raise SiteTreeError(f"bad {what}") from exc
     return value
+
+
+def check_id(value, what: str = "cursor") -> int:
+    """A cursor id in SQLite's INTEGER range, or a `SiteTreeError` (never an
+    OverflowError at the bind)."""
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= ID_MAX:
+        raise SiteTreeError(f"bad {what}")
+    return value
+
+
+def fold(text: str) -> str:
+    """ASCII-only lower-casing -- exactly what SQLite's ``lower()`` does, so every path
+    search, in SQL or in Python, folds the same way (FR-UI-501)."""
+    return text.translate(_ASCII_LOWER)
+
+
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
 def parse_key(text: str | None) -> NodeKey:
@@ -212,7 +234,7 @@ def parse_key(text: str | None) -> NodeKey:
     origin = run = None
     if "o" in d:
         origin = _bounded_str(d["o"], "origin")
-        if canonical_origin(origin) != origin:
+        if origin_of(origin) != origin:
             raise SiteTreeError("origin is not canonical")
     else:
         run = d["r"]
@@ -292,8 +314,6 @@ def parse_filters(*, run=(), category=(), severity=(), status=(), q: str = "") -
 
 # --- candidate projection (G3/G4) ---------------------------------------------------
 
-_SEP = "\x1f"
-_NONE = "\x00"
 _proj_lock = threading.Lock()
 _proj_cache: "OrderedDict[tuple[bytes, int], tuple]" = OrderedDict()
 
@@ -372,12 +392,20 @@ def project_candidate(evidence, parameter_id, pa_name, pa_loc, ep_url,
 
 
 def _pack(fields) -> str:
-    return _SEP.join(_NONE if f is None else str(f) for f in fields)
+    """One projection as JSON: target-supplied strings may hold any character, so no
+    separator is safe (code review)."""
+    return json.dumps(list(fields), ensure_ascii=False)
+
+
+_unpacked = threading.local()
 
 
 def _unpack(packed: str, i: int):
-    v = packed.split(_SEP)[i]
-    return None if v == _NONE else v
+    """Field ``i`` of a packed projection; the last one parsed is kept per thread,
+    since SQL reads several fields of each row in turn."""
+    if getattr(_unpacked, "key", None) != packed:
+        _unpacked.key, _unpacked.value = packed, json.loads(packed)
+    return _unpacked.value[i]
 
 
 # --- registered SQL functions (G2: total by construction, named swallow list) -------
@@ -396,25 +424,17 @@ def _sql_pf(packed, i):
     return _unpack(packed, i)
 
 
+# Total by construction (type-checked inputs, string operations only): no swallow list.
 def _sql_sev(vuln_class):
-    try:
-        return derive_severity(vuln_class if isinstance(vuln_class, str) else None)
-    except SWALLOWED:
-        return None
+    return derive_severity(vuln_class if isinstance(vuln_class, str) else None)
 
 
 def _sql_fcat(vuln_class):
-    try:
-        return to_category(vuln_class) if isinstance(vuln_class, str) else "unknown"
-    except SWALLOWED:
-        return None
+    return to_category(vuln_class) if isinstance(vuln_class, str) else "unknown"
 
 
 def _sql_path(stored):
-    try:
-        return path_key(stored)
-    except SWALLOWED:
-        return None
+    return path_key(stored)
 
 
 def _sql_method(method, finding):
@@ -432,20 +452,17 @@ def _child_function(segs: tuple[str, ...]):
     depth = len(segs)
     want = list(segs)
 
-    def child(path, method):
-        try:
-            if path is None:
-                return "x:unplaced" if depth == 0 else None
-            if not isinstance(path, str):
-                return ERROR_KEY
-            sg = segments(path)
-            if len(sg) < depth or sg[:depth] != want:
-                return None
-            if len(sg) == depth:
-                return "e:" + (method if isinstance(method, str) else "")
-            return "s:" + sg[depth]
-        except SWALLOWED:
+    def child(path, method):           # total by construction: str operations only
+        if path is None:
+            return "x:unplaced" if depth == 0 else None
+        if not isinstance(path, str):
             return ERROR_KEY
+        sg = segments(path)
+        if len(sg) < depth or sg[:depth] != want:
+            return None
+        if len(sg) == depth:
+            return "e:" + (method if isinstance(method, str) else "")
+        return "s:" + sg[depth]
     return child
 
 
@@ -543,8 +560,7 @@ def _load_runs(conn, filters: Filters) -> _Runs:
         if filters.runs is None or rid in filters.runs:
             meta[rid] = {"tool": r[1], "started_at": r[2]}
     targets = run_target_rows(conn, meta.keys())
-    origin_of = {rid: canonical_origin(row["base_url"]) for rid, row in targets.items()}
-    return _Runs(meta, origin_of)
+    return _Runs(meta, {rid: origin_of(row["base_url"]) for rid, row in targets.items()})
 
 
 def _host_runs(runs: _Runs, key: NodeKey) -> list[int]:
@@ -613,6 +629,20 @@ def _needle(key: NodeKey) -> str | None:
     return text
 
 
+#: Evidence whose URL holds an escaped tab, CR or LF (which `urlsplit` strips from the
+#: path) passes the pre-filter whatever the needle (code review).
+_LOOSE_ESCAPES = ("instr(c.evidence, char(92) || 't') > 0 OR instr(c.evidence, char(92) "
+                  "|| 'r') > 0 OR instr(c.evidence, char(92) || 'n') > 0")
+
+
+def _loose(needle: str | None) -> str:
+    """The pre-filter for candidates without an endpoint row: a superset of those under
+    the node (exactness is `fl_child`'s)."""
+    if not needle:
+        return "ep.url IS NULL"
+    return f"ep.url IS NULL AND (instr(c.evidence, ?) > 0 OR {_LOOSE_ESCAPES})"
+
+
 def _status_sql(col: str) -> str:
     known = ", ".join(f"'{s}'" for s in CANDIDATE_STATUSES)
     return f"CASE WHEN {col} IN ({known}) THEN {col} ELSE '{UNRECORDED}' END"
@@ -649,7 +679,7 @@ def _leaf_query(conn, key: NodeKey, runs: list[int], filters: Filters,
     conds, cargs = _range_sql("ep.url", rng)
     rc, ra = runs_for("c.run_id")
     needle = _needle(key)
-    loose = "ep.url IS NULL" + (" AND instr(c.evidence, ?) > 0" if needle else "")
+    loose = _loose(needle)
     cand_where = f"{rc} AND (({' OR '.join(conds)}) OR ({loose}))"
     cand_args = ra + [a for carg in cargs for a in carg] + ([needle] if needle else [])
     cand_cte = (
@@ -784,27 +814,28 @@ child_cache = _ChildCache()
 # --- the store's version fingerprint (F2, G6) ---------------------------------------
 
 def store_version(path) -> str | None:
-    """A fingerprint of the store file and its WAL -- ``os.stat`` (device, inode, size,
-    mtime) plus the WAL header (checkpoint sequence and salts) -- with no SQLite at all;
-    ``None`` when the store does not exist. Any commit, an UPDATE-only one included,
-    and a store switch or copy change it."""
-    parts = []
-    for suffix in ("", "-wal"):
-        p = f"{os.fspath(path)}{suffix}"
-        try:
-            st = os.stat(p)
-        except FileNotFoundError:
-            if suffix == "":
-                return None
-            parts.append("-")
-            continue
-        parts.append(f"{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}")
-        if suffix == "-wal":
-            try:
-                with open(p, "rb") as fh:
-                    parts.append(fh.read(32).hex())
-            except FileNotFoundError:
-                parts.append("-")
+    """A fingerprint of the store with no SQLite at all: the store file's ``os.stat``
+    (device, inode, size, mtime) and its WAL's size and 32-byte header (checkpoint
+    sequence and salts); ``None`` when the store does not exist. A commit appends WAL
+    frames (UPDATE-only ones too), a checkpoint rewrites the store file, a WAL restart
+    changes the salts, and a store switch or copy changes the file. A reader opening
+    the store creates an empty WAL, so a WAL shorter than its header counts as absent,
+    and its inode and mtime are not used: reads never change the fingerprint (code
+    review). Stated residual: in rollback-journal mode (only if WAL could not be set)
+    an UPDATE inside one mtime tick that keeps the file size is not seen."""
+    base = os.fspath(path)
+    try:
+        st = os.stat(base)
+    except FileNotFoundError:
+        return None
+    parts = [f"{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"]
+    try:
+        with open(base + "-wal", "rb") as fh:
+            header = fh.read(32)
+            size = os.fstat(fh.fileno()).st_size
+        parts.append(f"{size}:{header.hex()}" if len(header) == 32 else "-")
+    except FileNotFoundError:
+        parts.append("-")
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
 
 
@@ -830,13 +861,17 @@ def _check_limit(limit, default: int, maximum: int) -> int:
 
 
 def _page(items: list, after: str | None, limit: int, sort_key: str = "sort") -> dict:
+    """One page of a whole child list. ``truncated``: an endpoint's groups reached
+    `GROUP_CAP`, so the list is partial -- said, never silent (code review)."""
+    truncated = any(c.get("truncated") for c in items)
     if after:
         items = [c for c in items if c[sort_key] > after]
     page = items[:limit]
     nxt = page[-1][sort_key] if len(items) > limit else None
     for c in page:
         c.pop(sort_key, None)
-    return {"children": page, "next": nxt}
+        c.pop("truncated", None)
+    return {"children": page, "next": nxt, "truncated": truncated}
 
 
 def children(conn, key: NodeKey, filters: Filters, *, after: str | None = None,
@@ -878,7 +913,7 @@ def _item_cursor(text: str | None) -> tuple[int, str] | None:
     if kind not in ("candidate", "finding"):
         raise SiteTreeError("bad cursor")
     try:
-        return int(sid), kind
+        return check_id(int(sid)), kind
     except ValueError as exc:
         raise SiteTreeError("bad cursor") from exc
 
@@ -991,7 +1026,7 @@ def _endpoint_rows(conn, key: NodeKey, runs: list[int], any_method: bool) -> dic
 
     rc, ra = _runs_clause(conn, "c.run_id", runs)
     needle = _needle(key)
-    loose = "ep.url IS NULL" + (" AND instr(c.evidence, ?) > 0" if needle else "")
+    loose = _loose(needle)
     cands = capped(conn.execute(
         f"WITH cand AS {_mat(conn)}(SELECT c.id, c.run_id, c.oracle_status, "
         f"fl_cproj(c.evidence, c.parameter_id, pa.name, pa.location, ep.url, ep.method) "
@@ -1011,41 +1046,86 @@ def _endpoint_rows(conn, key: NodeKey, runs: list[int], any_method: bool) -> dic
         f"WHERE {rc} AND label = 1 AND (url = ? OR (url >= ? AND url < ?)) "
         f"GROUP BY run_id, m, prm, vuln_class",
         ra + [path, path + "?", path + "@"]))
-    if not any_method:
-        params = [r for r in params if r[1] == method]
-        cands_m = [r for r in cands if r[1] == method]
-    else:
-        cands_m = cands
+
+    # the endpoint's own endpoint / page rows (count, last run) for its summary
+    structure = (0, None)
+    if method:
+        parts, sargs = [], []
+        for table in ("endpoint", "page"):
+            rc, ra = _runs_clause(conn, "run_id", runs)
+            parts.append(f"SELECT run_id, method FROM {table} WHERE {rc} AND "
+                         f"(url = ? OR (url >= ? AND url < ?))")
+            sargs += ra + [path, path + "?", path + "@"]
+        row = next(iter(_fetch(conn.execute(
+            f"SELECT COUNT(*), MAX(run_id) FROM ({' UNION ALL '.join(parts)}) "
+            f"WHERE fl_method(method, 0) = ? AND fl_path(?) IS NOT NULL",
+            sargs + [method, path]))))
+        structure = (int(row[0]), row[1])
+
+    # every method's rows feed location resolution; only this endpoint's method makes
+    # groups -- and the "(method not recorded)" endpoint has findings only (G8)
+    params_m = [r for r in params if r[1] == method] if method else []
+    cands_m = [r for r in cands if r[1] == method] if method else []
     finds = [r for r in finds if r[1] == method]
-    return {"params": params, "cands": cands, "cands_m": cands_m, "finds": finds,
-            "truncated": truncated}
+    return {"params": params, "params_m": params_m, "cands": cands, "cands_m": cands_m,
+            "finds": finds, "structure": structure, "truncated": truncated,
+            "locations": _Locations(cands, params)}
+
+
+class _Locations:
+    """Finding -> parameter location for one endpoint path (F8, G8), indexed once per
+    request by ``(run, param)`` and memoised per finding key, so resolving every
+    finding is linear in the rows read (PA-0095; it was a scan per finding)."""
+
+    def __init__(self, cands, params):
+        self.cands: dict[tuple, list] = {}
+        self.params: dict[tuple, list] = {}
+        for c in cands:              # (run, method, param, loc, status, cat, n, last)
+            self.cands.setdefault((c[0], c[2] or ""), []).append((c[1], c[3], c[5]))
+        for p in params:             # (run, method, name, location)
+            loc = p[3] if isinstance(p[3], str) else None
+            self.params.setdefault((p[0], p[2] or ""), []).append((p[1], loc))
+        self._memo: dict[tuple, str | None] = {}
+        self.steps = 0               # the scale test's operation count
+
+    def resolve(self, run_id: int, param: str, vuln_class, method: str) -> str | None:
+        """The unique location among the run's candidates at this path with the
+        finding's method (any method when it has none), param and category
+        (`to_category(vuln_class)`); if none match, the unique location among those
+        candidates and the parameter rows without the category (parameter rows carry no
+        category, and `to_category` is a lossy spelling map); else ``None``."""
+        key = (run_id, param or "", vuln_class, method)
+        if key in self._memo:
+            return self._memo[key]
+        cat = to_category(vuln_class) if isinstance(vuln_class, str) else None
+        cands = self.cands.get((run_id, param or ""), [])
+        params = self.params.get((run_id, param or ""), [])
+        self.steps += 1 + len(cands) + len(params)
+        first = {loc for m, loc, c in cands if (method == "" or m == method) and c == cat}
+        if first:
+            out = next(iter(first)) if len(first) == 1 else None
+        else:
+            second = {loc for m, loc, _c in cands if method == "" or m == method}
+            second |= {loc for m, loc in params if method == "" or m == method}
+            out = next(iter(second)) if len(second) == 1 else None
+        self._memo[key] = out
+        return out
 
 
 def resolve_location(run_id: int, param: str, vuln_class, method: str,
                      cands, params) -> str | None:
-    """A finding's parameter location (F8, G8): the unique location among the run's
-    candidates at its path with its method (any method when it has none), param and
-    category (`to_category(vuln_class)`); if none match, the unique location among
-    those candidates and the parameter rows without the category (parameter rows carry
-    no category, and `to_category` is a lossy spelling map); else ``None``."""
-    cat = to_category(vuln_class) if isinstance(vuln_class, str) else None
-
-    def m_ok(m):
-        return method == "" or m == method
-    first = {c[3] for c in cands if c[0] == run_id and c[2] == param and m_ok(c[1])
-             and c[5] == cat}
-    if len(first) == 1:
-        return next(iter(first))
-    if first:
-        return None
-    second = {c[3] for c in cands if c[0] == run_id and c[2] == param and m_ok(c[1])}
-    second |= {p[3] for p in params if p[0] == run_id and p[2] == param and m_ok(p[1])}
-    return next(iter(second)) if len(second) == 1 else None
+    """`_Locations.resolve` for one finding (a convenience for callers and tests)."""
+    return _Locations(cands, params).resolve(run_id, param, vuln_class, method)
 
 
 def _endpoint_children(conn, key: NodeKey, runs: list[int], filters: Filters) -> list:
     data = _endpoint_rows(conn, key, runs, any_method=(key.method == ""))
-    if filters.q and filters.q.lower() not in _doc_path(key.segs or ()).lower():
+    return _endpoint_groups(key, data, filters)
+
+
+def _endpoint_groups(key: NodeKey, data: dict, filters: Filters) -> list:
+    """An endpoint's parameter nodes from its rows (pure)."""
+    if filters.q and fold(filters.q) not in fold(_doc_path(key.segs or ())):
         return []
     groups: dict[tuple, dict] = {}
 
@@ -1060,11 +1140,11 @@ def _endpoint_children(conn, key: NodeKey, runs: list[int], filters: Filters) ->
                 "key": dumped, "kind": "param", "label": label, "param": param,
                 "location": loc, "expandable": dumped is not None,
                 "rollup": _empty_rollup(),
-                "sort": json.dumps([param, loc or ""], ensure_ascii=False)}
+                "sort": json.dumps([param, loc is None, loc or ""], ensure_ascii=False)}
         return g
 
     if not filters.items_only:
-        for rid, _m, name, loc in data["params"]:
+        for rid, _m, name, loc in data["params_m"]:
             g = group(name, loc if isinstance(loc, str) else None)
             _add(g["rollup"], "e", None, None, None, 0, rid)
     for rid, _m, prm, loc, st, cat, n, last in data["cands_m"]:
@@ -1074,7 +1154,7 @@ def _endpoint_children(conn, key: NodeKey, runs: list[int], filters: Filters) ->
     for rid, m, prm, vc, sev, cat, n, last in data["finds"]:
         if not _item_ok(filters, "f", CONFIRMED, sev, cat):
             continue
-        loc = resolve_location(rid, prm, vc, m, data["cands"], data["params"])
+        loc = data["locations"].resolve(rid, prm, vc, m)
         _add(group(prm, loc)["rollup"], "f", CONFIRMED, sev, cat, n, last)
     out = sorted(groups.values(), key=lambda g: g["sort"])
     for g in out:
@@ -1106,8 +1186,8 @@ def items(conn, key: NodeKey, filters: Filters, *, before: str | None = None,
     def build():
         register(conn, key.segs or ())
         runs = _host_runs(_load_runs(conn, filters), key)
-        if filters.q and filters.q.lower() not in _doc_path(key.segs or ()).lower():
-            return {"children": [], "next": None}
+        if filters.q and fold(filters.q) not in fold(_doc_path(key.segs or ())):
+            return {"children": [], "next": None, "truncated": False}
         data = _endpoint_rows(conn, key, runs, any_method=(key.method == ""))
         path = _doc_path(key.segs or ())
         out = []
@@ -1122,7 +1202,7 @@ def items(conn, key: NodeKey, filters: Filters, *, before: str | None = None,
         out.sort(key=lambda it: (-it["id"], it["kind"]))
         page = out[:limit]
         nxt = f"{page[-1]['id']}:{page[-1]['kind']}" if len(out) > limit else None
-        return {"children": page, "next": nxt}
+        return {"children": page, "next": nxt, "truncated": data["truncated"]}
     return _read(conn, build)
 
 
@@ -1139,7 +1219,7 @@ def _matching_findings(conn, key, runs, filters, path, data, before, cap):
     for fid, rid, vc, mech, created, m, sev, cat in _fetch(conn.execute(sql, args)):
         if m != key.method or not _item_ok(filters, "f", CONFIRMED, sev, cat):
             continue
-        loc = resolve_location(rid, key.param or "", vc, m, data["cands"], data["params"])
+        loc = data["locations"].resolve(rid, key.param or "", vc, m)
         if loc != key.loc:
             continue
         found.append({"kind": "finding", "id": int(fid), "run_id": int(rid),
@@ -1154,7 +1234,7 @@ def _matching_findings(conn, key, runs, filters, path, data, before, cap):
 def _matching_candidates(conn, key, runs, filters, path, before, cap):
     rc, ra = _runs_clause(conn, "c.run_id", runs)
     needle = _needle(key)
-    loose = "ep.url IS NULL" + (" AND instr(c.evidence, ?) > 0" if needle else "")
+    loose = _loose(needle)
     sql = (f"WITH cand AS {_mat(conn)}(SELECT c.id, c.run_id, c.oracle_status, "
            f"fl_cproj(c.evidence, c.parameter_id, pa.name, pa.location, ep.url, "
            f"ep.method) AS p FROM candidate c LEFT JOIN parameter pa ON pa.id = "
@@ -1184,8 +1264,11 @@ def _matching_candidates(conn, key, runs, filters, path, before, cap):
 def summary(conn, key: NodeKey, filters: Filters, *, before: int | None = None,
             limit: int | None = None) -> dict:
     """The node's own roll-up and a page of the findings in its subtree, newest first
-    (FR-UI-503). Findings carry their link to the finding page; no evidence."""
+    (FR-UI-503), in one read transaction (F12). Findings carry their link to the finding
+    page; no evidence."""
     limit = _check_limit(limit, FINDINGS_DEFAULT, FINDINGS_MAX)
+    if before is not None:
+        check_id(before, "before")
     if key.level == "root":
         raise SiteTreeError("select a host or a deeper node")
 
@@ -1194,6 +1277,7 @@ def summary(conn, key: NodeKey, filters: Filters, *, before: int | None = None,
         runs_all = _load_runs(conn, filters)
         runs = _host_runs(runs_all, key)
         roll = _empty_rollup()
+        truncated = False
         if key.level in ("host", "dir", "route"):
             sql, args = _leaf_query(conn, key, runs, filters)
             for kind, k, status, sev, cat, n, last in _fetch(conn.execute(
@@ -1207,39 +1291,28 @@ def summary(conn, key: NodeKey, filters: Filters, *, before: int | None = None,
                     _add(roll, kind, status, sev, cat, n, last)
             finds = _subtree_findings(conn, key, runs, filters, before, limit + 1)
         else:
-            entries = _endpoint_children(conn, key.child(param=None, has_param=False,
-                                                         loc=None), runs, filters)
+            endpoint = key.child(param=None, has_param=False, loc=None)
+            data = _endpoint_rows(conn, endpoint, runs, any_method=(key.method == ""))
+            truncated = data["truncated"]
+            entries = _endpoint_groups(endpoint, data, filters)
             for e in entries:
                 if key.level == "endpoint" or (e["param"] == (key.param or "")
                                                and e["location"] == key.loc):
                     _merge(roll, e["rollup"])
-            finds = _subtree_findings(conn, key, runs, filters, before, limit + 1)
+            q_ok = not filters.q or fold(filters.q) in fold(_doc_path(key.segs))
+            if key.level == "endpoint":
+                n, last = data["structure"]
+                if n and q_ok and not filters.items_only:
+                    _add(roll, "e", None, None, None, n, last)
+                finds = _subtree_findings(conn, key, runs, filters, before, limit + 1)
+            elif not q_ok or (filters.statuses and CONFIRMED not in filters.statuses):
+                finds = []
+            else:
+                finds = _matching_findings(conn, key, runs, filters, _doc_path(key.segs),
+                                           data, before, limit + 1)
         nxt = str(finds[limit - 1]["id"]) if len(finds) > limit else None
         return {"node": _describe(key, runs_all), "rollup": roll,
-                "findings": finds[:limit], "next": nxt}
-    if key.level == "param":
-        # `items` opens its own read transaction; run it outside ours
-        register(conn, key.segs or ())
-        runs_all = _read(conn, lambda: _load_runs(conn, filters))
-        runs = _host_runs(runs_all, key)
-        roll = _empty_rollup()
-        endpoint = key.child(param=None, has_param=False, loc=None)
-        entries = _read(conn, lambda: _endpoint_children(conn, endpoint, runs, filters))
-        for e in entries:
-            if e["param"] == (key.param or "") and e["location"] == key.loc:
-                _merge(roll, e["rollup"])
-        def param_findings():
-            data = _endpoint_rows(conn, endpoint, runs, any_method=(key.method == ""))
-            if filters.q and filters.q.lower() not in _doc_path(key.segs).lower():
-                return []
-            if filters.statuses and CONFIRMED not in filters.statuses:
-                return []
-            return _matching_findings(conn, key, runs, filters, _doc_path(key.segs),
-                                      data, before, limit + 1)
-        finds = _read(conn, param_findings)
-        nxt = str(finds[limit - 1]["id"]) if len(finds) > limit else None
-        return {"node": _describe(key, runs_all), "rollup": roll,
-                "findings": finds[:limit], "next": nxt}
+                "findings": finds[:limit], "next": nxt, "truncated": truncated}
     return _read(conn, build)
 
 
@@ -1266,7 +1339,7 @@ def _subtree_findings(conn, key: NodeKey, runs, filters, before, cap) -> list[di
         if not _item_ok(filters, "f", CONFIRMED, sev, cat):
             continue
         path = path_key(url)
-        if filters.q and filters.q.lower() not in (path or "").lower():
+        if filters.q and fold(filters.q) not in fold(path or ""):
             continue
         out.append({"kind": "finding", "id": int(fid), "run_id": int(rid),
                     "vuln_class": vc, "severity": sev, "category": cat,

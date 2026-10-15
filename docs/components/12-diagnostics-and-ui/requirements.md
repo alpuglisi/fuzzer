@@ -468,9 +468,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - Candidates are placed by shape: FK (`parameter` -> `endpoint`), pipeline
     (`core.evidence.parse_evidence`, path by `oracle.finding_url`); a parameter whose
     endpoint is gone is *unplaced*, an auditor row without a url *no path*, anything
-    else *unreadable*. A row without a usable path is *unplaced*; a registered SQL
-    function that hits one of a named list of errors returns *error*. All four are
-    counted in the host's roll-up, never dropped silently.
+    else *unreadable*. A row without a usable path is *unplaced*; the candidate
+    projection, the one registered SQL function that can fail, turns a named list of
+    errors into *error* (the others are total by construction; no handler in the site
+    tree catches broadly). All four are counted in the host's roll-up, never dropped
+    silently. Values are carried between SQL functions as JSON, so no character in a
+    target-supplied name can shift a field.
   - Scope limits: SPA routes without a route query are not stored, so not shown; a run's
     rows sit under its one recorded origin; proxy `flow` rows are not in the tree; a
     legacy endpoint not starting with `/` is unplaced.
@@ -488,16 +491,22 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
 - **FR-UI-502** *(added CC-UI-0500)* **Site tree: lazy, bounded, paged.**
   - A node's children load on expand (`GET /api/sitetree/children?node=&after=&limit=`),
     paged by a keyset cursor (default 200, max 1000; parameter items 50/200 by
-    `(id, kind)`). Node keys, filters and cursors are validated (sizes bounded, unknown
-    fields refused: 400); a node that no longer resolves is 404 `gone`.
+    `(id, kind)`). Node keys, filters and cursors are validated -- sizes bounded,
+    unknown fields, lone surrogates, malformed origins and ids outside 1..2^63-1 refused
+    with 400; a node that no longer resolves is 404 `gone`. An endpoint whose groups
+    reach `GROUP_CAP` (10 000) says `truncated`, and the page shows it.
   - Each request is a constant number of statements in one read transaction. Dir nodes
     narrow endpoint/page/finding rows by index-usable ranges on the stored path; a page
     after the first narrows by its cursor. Findings and candidates are scanned per
     selected run (no path index), and an endpoint's parameters by a scan of `parameter`
     (no `endpoint_id` index) -- the stated linear terms.
   - A node's whole child list is built once and cached against the store's version
-    fingerprint (taken before the snapshot), at most 8 lists, 100 000 children each and
-    200 000 in total, so walking a wide node is linear.
+    fingerprint (taken before the snapshot), at most 8 lists, 60 000 children each and
+    100 000 in total, so walking a node of up to 60 000 children is linear; a wider node
+    is rebuilt for each page (the cursor narrows its range). Narrow nodes are cached too.
+  - Finding locations are resolved through a per-request index, so an endpoint or
+    parameter costs operations linear in its rows (`tests/test_web_sitetree_scale.py::
+    test_e_finding_location_resolution_is_linear`).
   - Enforced by `tests/test_web_sitetree_scale.py` (>= 50 000 endpoints; statement,
     fetched-row, function-call and VM-step counts, never wall-clock).
 - **FR-UI-503** *(added CC-UI-0500; layout CC-UI-0502)* **Site tree: the page.** The
@@ -525,9 +534,13 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   finding evidence), a query string, a target's raw `base_url`, run notes or config;
   nothing is "un-redacted" or rebuilt from parts.
 - **FR-UI-505** *(added CC-UI-0500)* **Site tree: live.** The page polls
-  `GET /api/sitetree/version` (an `os.stat` + WAL-header fingerprint of the store; no
-  SQLite) while visible and, when it changes, re-fetches its expanded nodes and
-  selection, at most once per poll interval; a node that is gone is removed. SSE is not
+  `GET /api/sitetree/version` (the store file's `os.stat` and its WAL's size and
+  header; no SQLite; reads never change it) while visible and, when it changes,
+  refreshes in place -- the root, every expanded group (as many items as it shows) and
+  the selection -- keeping focus, expansion, selection and loaded pages, at most once
+  per poll interval; a node that is gone is removed. Stated residual: in rollback-journal
+  mode (only if WAL could not be set) an UPDATE within one mtime tick that keeps the file
+  size is not seen. SSE is not
   used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
   lifespan shutdown that stops launched jobs (BUG-0125).
 

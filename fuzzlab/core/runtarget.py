@@ -51,9 +51,21 @@ def run_target(conn: sqlite3.Connection, run_id: int | None) -> dict | None:
     return dict(zip(TARGET_COLUMNS, tuple(row))) if row else None
 
 
+def origin_of(base_url) -> str | None:
+    """A stored ``base_url``'s canonical origin, or ``None`` -- total (BUG-0500):
+    `canonical_origin` documents ``None`` for an unusable URL but raises ``ValueError``
+    on a malformed authority (``http://[::1``, an NFKC-invalid host), so one bad stored
+    row used to take every origin reader down. Its own fix is in `core/urls.py`."""
+    if not isinstance(base_url, str):
+        return None
+    try:
+        return canonical_origin(base_url)
+    except ValueError:                   # urlsplit's malformed-authority errors only
+        return None
+
+
 def run_origins(conn: sqlite3.Connection) -> dict[int, str | None]:
     """``{run_id: canonical origin of its first target row}`` -- ``None`` when that
-    row's ``base_url`` has no usable host or port. Runs without a target row are
-    absent."""
-    return {rid: canonical_origin(row["base_url"])
-            for rid, row in run_target_rows(conn).items()}
+    row's ``base_url`` has no usable host or port, or is malformed (`origin_of`). Runs
+    without a target row are absent."""
+    return {rid: origin_of(row["base_url"]) for rid, row in run_target_rows(conn).items()}

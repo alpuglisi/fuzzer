@@ -51,6 +51,8 @@ def _seed(path) -> dict:
                   "VALUES (?,?,?, 'query')", (a, ep, f"p{XSS}"))
         c.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, '/crawl/only', "
                   "'GET')", (b,))
+        c.executemany("INSERT INTO endpoint (run_id, url, method) VALUES (?,?, 'GET')",
+                      [(a, f"/wide/w{i:03d}") for i in range(250)])     # > one page
 
         def ev(path, param, cat, loc="query"):
             return json.dumps({"rule_id": "R", "category": cat, "url": ORIGIN + path,
@@ -258,20 +260,99 @@ def test_markup_in_stored_values_renders_as_text_everywhere(tab, site):
     assert host.count() == 1 and tab.problems() == []
 
 
+_BANNED = re.compile(r"\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|document\.write"
+                     r"|\beval\s*\(|new\s+Function\s*\(|\.html\s*\(|createContextualFragment"
+                     r"|\bDOMParser\b|\bsrcdoc\b|setHTMLUnsafe|parseHTMLUnsafe")
+
+
+def _page_scripts(template: str, read) -> set[str]:
+    """Every script the page loads: base.html's, the page's own, and everything they
+    import, transitively."""
+    todo = {"shell.js", "prefs.js", *re.findall(r'src="/static/js/([\w.-]+)"', template)}
+    seen: set[str] = set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        todo |= set(re.findall(r'from\s+"/static/js/([\w.-]+)"', read(name))) - seen
+    return seen
+
+
+def _offenders(names, read) -> list[str]:
+    return [f"{n}: {m.group(0)}" for n in sorted(names) for m in _BANNED.finditer(read(n))]
+
+
 def test_page_scripts_never_parse_html_strings():
-    """The textContent-only claim, enforced in source for every script the page loads
-    (`base.html`'s and the page's own)."""
-    loaded = {"sitetree.js", "shell.js", "prefs.js"}
+    """The textContent-only claim, enforced in source for every script the page loads,
+    imports followed transitively; proven on a synthetic offender (PA-0034(2))."""
     template = (Path(__file__).resolve().parents[1] / "fuzzlab" / "web" / "templates"
                 / "sections" / "sitetree.html").read_text()
-    for src in re.findall(r'src="/static/js/([\w.-]+)"', template):
-        loaded.add(src)
-    banned = re.compile(r"\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|document\.write"
-                        r"|\beval\s*\(|new\s+Function\s*\(|\.html\s*\(")
-    for name in sorted(loaded):
-        text = (STATIC / name).read_text()
-        imports = re.findall(r'from\s+"/static/js/([\w.-]+)"', text)
-        loaded.update(imports)
-    offenders = [f"{n}: {m.group(0)}" for n in sorted(loaded)
-                 for m in banned.finditer((STATIC / n).read_text())]
-    assert offenders == []
+    names = _page_scripts(template, lambda n: (STATIC / n).read_text())
+    assert {"sitetree.js", "shell.js", "prefs.js"} <= names
+    assert _offenders(names, lambda n: (STATIC / n).read_text()) == []
+    fake = {"page.js": 'import { x } from "/static/js/mid.js";',
+            "mid.js": 'import { y } from "/static/js/deep.js";',
+            "deep.js": "el.innerHTML = s; new DOMParser();",
+            "shell.js": "", "prefs.js": ""}
+    found = _page_scripts('<script src="/static/js/page.js">', fake.__getitem__)
+    assert found == set(fake)
+    assert _offenders(found, fake.__getitem__) == ["deep.js: innerHTML", "deep.js: DOMParser"]
+
+
+def _wide(tab):
+    tab.open(ORIGIN, "wide")
+    group = tab.item("wide").first.locator(":scope > ul[role=group]")
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(200)
+    return group
+
+
+def test_show_more_loads_one_page_per_click_and_works_from_the_keyboard(tab):
+    page = tab.page
+    group = _wide(tab)
+    btn = group.locator(":scope > li.st-more-item button")
+    btn.focus()
+    page.keyboard.press("Enter")                     # the button's own key, not the tree's
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
+    assert tab.item("wide").first.get_attribute("aria-expanded") == "true"
+    ids = group.locator(":scope > li[role=treeitem]").evaluate_all(
+        "els => els.map(e => e.dataset.id)")
+    assert len(ids) == len(set(ids)) == 250
+    assert group.locator(":scope > li.st-more-item").count() == 0
+    assert tab.problems() == []
+
+
+def test_a_double_click_on_show_more_loads_the_page_once(tab):
+    group = _wide(tab)
+    group.locator(":scope > li.st-more-item button").dblclick()
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
+    tab.page.wait_for_timeout(500)
+    assert group.locator(":scope > li[role=treeitem]").count() == 250
+    assert tab.problems() == []
+
+
+def test_a_refresh_keeps_focus_selection_and_loaded_pages(tab, site):
+    """Code review A2 (FR-UI-505): the store changing refreshes in place."""
+    page = tab.page
+    group = _wide(tab)
+    group.locator(":scope > li.st-more-item button").click()
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
+    late = tab.item("w240").first
+    late.locator(":scope > .st-row .st-label").click()      # select + focus on page 2
+    expect(late).to_be_focused()
+    page.wait_for_timeout(900)                               # the poll has its baseline
+    with Store(site["path"]) as s:
+        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
+                       "'/wide/w999', 'GET')", (site["a"],))
+        s.conn.commit()
+    try:
+        expect(tab.item("w999").first).to_be_attached(timeout=10000)
+        expect(group.locator(":scope > li[role=treeitem]")).to_have_count(251)
+        expect(late).to_be_focused()
+        assert late.get_attribute("aria-selected") == "true"
+        assert tab.item("wide").first.get_attribute("aria-expanded") == "true"
+    finally:
+        with Store(site["path"]) as s:
+            s.conn.execute("DELETE FROM endpoint WHERE url='/wide/w999'")
+            s.conn.commit()
+    assert tab.problems() == []

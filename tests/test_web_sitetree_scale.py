@@ -234,3 +234,51 @@ def test_c2_range_narrowing_holds_within_the_nodes_own_runs(tmp_path, probe):
     p2, (s2, f2, c2, t2) = _measure(probe, grown, key)
     assert p1["children"] == p2["children"] and (s1, f1, c1) == (s2, f2, c2)
     assert t2 <= t1 * 1.05 + 2, (t1, t2)
+
+
+def test_e_finding_location_resolution_is_linear(tmp_path, monkeypatch):
+    """Code review B1 (design F6(e), PA-0095): resolving every finding's location at an
+    endpoint, and listing a parameter's items, costs operations linear in the rows read
+    -- it was a scan of every candidate and parameter row per finding."""
+    made = []
+    real = st._Locations
+
+    class Counting(real):
+        def __init__(self, *a):
+            super().__init__(*a)
+            made.append(self)
+    monkeypatch.setattr(st, "_Locations", Counting)
+
+    def cost(n):
+        path = tmp_path / f"loc{n}.db"
+        s = Store(path)
+        rid = s.start_run("auto", "h")
+        s.conn.execute("INSERT INTO target (run_id, base_url) VALUES (?,?)", (rid, A))
+        ep = s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, '/p', "
+                            "'GET')", (rid,)).lastrowid
+        s.conn.executemany("INSERT INTO parameter (run_id, endpoint_id, name, location) "
+                           "VALUES (?,?,?, 'query')", [(rid, ep, f"x{i}") for i in range(n)])
+        s.conn.executemany(
+            "INSERT INTO candidate (run_id, evidence, oracle_status) VALUES (?,?, 'checked')",
+            [(rid, json.dumps({"rule_id": "R", "category": "sql-injection",
+                               "url": A + "/p", "param": f"x{i}", "method": "GET",
+                               "location": "query"})) for i in range(n)])
+        s.conn.executemany(
+            "INSERT INTO finding (run_id, vuln_class, label, confidence, evidence, url, "
+            "method, param) VALUES (?, 'sqli', 1, 'm', '{}', '/p', 'GET', ?)",
+            [(rid, f"x{i}") for i in range(n) for _ in range(3)])
+        s.conn.commit()
+        made.clear()
+        st.child_cache.clear()
+        key = _key({"o": A, "s": ["p"], "m": "GET"})
+        kids = st.children(s.conn, key, st.Filters(), limit=st.PAGE_MAX)["children"]
+        assert len(kids) == n
+        steps = sum(m.steps for m in made)
+        made.clear()
+        st.children(s.conn, st.parse_key(kids[0]["key"]), st.Filters(), limit=50)
+        steps += sum(m.steps for m in made)
+        s.close()
+        return steps
+    small, large = cost(300), cost(900)                  # one page each (<= PAGE_MAX)
+    assert large <= 3 * small * 1.1, (small, large)      # linear: 3x rows -> ~3x steps
+    assert large <= 3 * 900 * 3                          # a small constant per row

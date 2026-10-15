@@ -455,7 +455,10 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a
     run's target is its **first** `target` row by id (`run_target_rows`, `run_target`),
     and its origin is that row's `base_url` through `core.urls.canonical_origin`
-    (`run_origins`; `None` when the URL has no usable host or port). A run without a
+    (`run_origins`; `None` when the URL has no usable host or port). Every stored
+    `base_url` is canonicalised through `runtarget.origin_of`, which is total: a
+    malformed authority that makes `canonical_origin` raise reads `None` (BUG-0500,
+    CC-CORE-0501). A run without a
     target row has no recorded target; nothing is inferred from `run.config_hash` or a
     hostname (PA-0075). Every production writer writes at most one row per run, so the
     "first row" rule changes no current output.

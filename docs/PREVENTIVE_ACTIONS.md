@@ -1700,3 +1700,17 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+- **PA-0500** — Strengthens `PA-0096` and generalises `PA-0131(2)` and `PA-0108(1)`, after
+  BUG-0500: `canonical_origin` promised ``None`` for an unusable URL but raised on a
+  malformed authority, and one stored target row took every origin reader down.
+  1. **A function whose contract promises a sentinel for unusable input is total**, and
+     its tests feed the malformed inputs of every grammar it parses (for a URL: a bad
+     IPv6 bracket, an NFKC-invalid netloc, a bad port, a lone surrogate, control
+     characters) and assert the sentinel.
+  2. **A reader of stored data normalises each stored value through one total boundary**
+     (here `core.runtarget.origin_of`): a malformed row reads "unreadable", never takes
+     the reader down.
+  3. **The PA-0002 sweep lists every caller of the non-total function with a
+     disposition**; a known instance not fixed (here in a locked file) is pinned by a
+     strict xfail (`PA-0054(3)`). (from BUG-0500)
+

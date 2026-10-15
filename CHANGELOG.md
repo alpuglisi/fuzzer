@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (site tree: code-review fixes; BUG-0500)
+- **Why:** the independent code review (reviewers A and B) found a quadratic finding
+  -location step, 500s on hostile input, a fingerprint that changed on reads, a refresh
+  that rebuilt the tree, and a pre-existing defect: `canonical_origin` raises on a
+  malformed authority, so one stored target row broke every origin reader (BUG-0500).
+  **What:** all fixed in this lane, each pinned by a test and mutation-checked;
+  `core.runtarget.origin_of` is the total boundary (PA-0500); out-of-lane defects pinned
+  by strict xfails (CC-UI-0503, CC-CORE-0501).
+
 ## 2026-10-15 (site map page: the UI-research three-pane layout)
 - **Why:** the site tree needed its page; the UI-research session's design (§12.3/§13.1,
   branch `claude/new-session-jqk4ku`, confirmed by the operator) sets the layout.

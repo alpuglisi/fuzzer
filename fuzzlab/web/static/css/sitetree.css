@@ -63,3 +63,8 @@
   .st-panes { grid-template-columns: 1fr; }
   .st-tree-pane { max-height: none; }
 }
+
+.st-trunc-item { list-style: none; margin: .25rem 0 .25rem 1.5rem; font-size: .8rem; color: var(--warn); }
+.st-about { flex-basis: 100%; font-size: .85rem; }
+.st-about > summary { cursor: pointer; color: var(--muted); }
+.st-about ul { margin: .25rem 0 0 1rem; padding: 0; }

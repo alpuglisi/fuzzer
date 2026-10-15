@@ -41,6 +41,19 @@
     </label>
     <p class="muted st-note">Counts follow the filters. Severity applies to confirmed
       findings only.</p>
+    <details class="st-about">
+      <summary>What this map shows</summary>
+      <ul class="muted">
+        <li>Hosts are each run's recorded target origin; a run that recorded none (a plain
+          crawl or audit) is its own host, and all of a run's rows sit under its one origin.</li>
+        <li>Single-page-app routes appear only when the crawl saw them with a query.</li>
+        <li>Proxy history is not part of this map.</li>
+        <li>Stored query strings and recorded values (examples, evidence) are never shown;
+          open a finding for its details.</li>
+        <li>Rows the map cannot place (no usable path, unreadable evidence) are counted on
+          their host.</li>
+      </ul>
+    </details>
   </form>
 
   <div class="st-panes">

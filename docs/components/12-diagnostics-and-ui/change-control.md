@@ -3,6 +3,61 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0503 — Site tree: independent code review, fixes and divergences (2026-10-15)
+- Change: the code review of CC-UI-0500/0501/0502 (reviewers A, correctness, and B,
+  safety/robustness/tests/process; read-only, both AGREE-WITH-FIXES). Fixed in this
+  lane, before merge:
+  - **Python work was quadratic** (B1, blocker): finding locations were resolved by a
+    scan of every candidate and parameter row per finding; now a per-request index
+    (`sitetree._Locations`), with an operation-count test at two sizes (design F6(e),
+    which had been missed).
+  - **400, not 500** (A5, B2): malformed origins, lone surrogates, ids outside
+    1..2^63-1 (`check_id`).
+  - **A malformed stored base URL** (A6, B3): BUG-0500, CC-CORE-0501.
+  - **The fingerprint changed on reads** (A1): a reader's empty WAL is ignored and the
+    WAL's inode/mtime are not used.
+  - **The refresh rebuilt the tree** (A2): it now updates in place, keeping focus,
+    selection, expansion and "Show more" pages; keyboard activation of "Show more" no
+    longer toggles its parent (A3); one page per click (A4, B13); a failed load
+    retries; stale Issues pages and network errors are handled; one reload per search.
+  - **"(method not recorded)"** listed other methods' candidates (A7): its groups now
+    come from findings only (G8).
+  - **Packed fields** (A10, B4): JSON instead of a `\x1f` separator.
+  - **Swallow lists** (B5): only the candidate projection keeps a named list; the other
+    SQL functions are total by construction; an AST guard fails on any broad handler in
+    `sitetree.py` / `sitetree_routes.py`, proven on synthetic offenders.
+  - **Truncation is shown** (B6); every cache and cap bound has a test.
+  - **Queries planted on `finding.url` / `page.url`** (B7).
+  - **ASCII-only path search everywhere** (A8, B11); the endpoint summary counts its own
+    rows (A13); escaped tab/CR/LF evidence passes the pre-filter (A9); location `None`
+    and `""` sort apart (A12); the parameter summary is one read transaction (A11, F12);
+    the static HTML-parsing guard follows imports transitively, bans more APIs and is
+    proven on a synthetic offender (B12); smaller cache bounds (B10).
+  - **Known defects outside this lane pinned** (B9, PA-0054(3)): `xfail(strict=True)`
+    tests for the ML DOM-XSS labelling gap (`ml/dataset.endpoint_key`) and for the two
+    disagreeing severity bands (`findingsview.derive_severity` vs
+    `results.severity_of`).
+  - **The page states its scope limits** (F16).
+- Divergences from the agreed design (B8), recorded: G1 -- every node's whole child list
+  is read and cached, narrow ones included (the bound is the node's width; simpler, no
+  early-stop path); G11 -- the "inject a write" test became a call-order test of the
+  fingerprint before the snapshot (`_read`), which a moved fingerprint fails (mutation
+  checked); G2 -- the `x:error` sentinel comes only from the candidate projection, the
+  one function that can fail; G3 -- order refined (CC-UI-0500); the scope-limit text is
+  on the page.
+- Impact: UI and its tests only (plus CC-CORE-0501). No API change other than the added
+  `truncated` field and 400s for inputs that used to be 500s.
+- Risk: low.
+- Deliverables:
+  - [x] fixes above — done
+  - [x] tests: `tests/test_web_sitetree.py` 102 + 2 strict xfails,
+    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 11 — done
+  - [x] mutation checks: 27 back-end mutants and 7 UI mutants, all killed — done
+  - [x] closes CC-UI-0500's open deliverables (page CC-UI-0502, layout, review, docs) and
+    records the no-ML build re-run CC-UI-0501 left open — done
+- Effectiveness (assessed 2026-10-15): see the verification run quoted in the CHANGELOG
+  line of this date and below.
+
 ### CC-UI-0502 — Site map page: the UI-research three-pane layout (2026-10-15)
 - Change: the site tree's page (CC-UI-0500's open deliverables): `templates/sections/
   sitetree.html`, `static/js/sitetree.js` (WAI-ARIA treeview, lazy paging, contents

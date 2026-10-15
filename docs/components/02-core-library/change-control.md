@@ -3,6 +3,28 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0501 — `runtarget.origin_of`: a malformed stored base URL reads "no origin" (BUG-0500) (2026-10-15)
+- Change: `core.runtarget.origin_of(base_url)` -- `canonical_origin` with its documented
+  failure (`ValueError` from `urlsplit` on a malformed authority) turned into ``None``;
+  `run_origins` uses it, so ML's holdout origins and the site tree do too. FR-CORE-500
+  updated in place.
+- Why: BUG-0500 (found in the site tree's code review, reviewers A and B): one stored
+  target row such as `http://[::1` took every origin reader down. The source fix belongs
+  in `core/urls.py`, locked by another session: pinned by
+  `tests/test_core_runtarget.py::test_canonical_origin_is_total_for_malformed_authorities`
+  (`xfail(strict=True)`), so its fix turns that pin into a failure to remove.
+- Impact: a run with such a row reads "origin unreadable" (site tree) / unsealed (ML)
+  instead of crashing. No change for well-formed rows.
+- Risk: low.
+- Deliverables:
+  - [x] `origin_of` (~12 LOC) — done
+  - [x] tests: `::test_origin_of_is_total` (9 malformed inputs), the strict pin (3),
+    `tests/test_web_sitetree.py::test_a_malformed_stored_base_url_is_an_unreadable_origin_not_a_crash`
+    — done
+  - [x] BUG-0500, PA-0500, ERROR_LOG, sweep with dispositions — done
+- Effectiveness (assessed 2026-10-15): `tests/test_core_runtarget.py` 14 passed, 3 xfailed;
+  a mutant without the `ValueError` catch fails the malformed-base-url test.
+
 ### CC-CORE-0500 — One reader for a run's recorded target; one method key (2026-10-15)
 - Change: new `fuzzlab/core/runtarget.py` (`run_target_rows`, `run_target`,
   `run_origins`: a run's target is its first `target` row by id, its origin

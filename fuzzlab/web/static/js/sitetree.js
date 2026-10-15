@@ -68,7 +68,12 @@ function initSiteTree() {
   }
 
   async function getJSON(path, params) {
-    const r = await fetch(`${path}?${params.toString()}`, { headers: { Accept: "application/json" } });
+    let r;
+    try {
+      r = await fetch(`${path}?${params.toString()}`, { headers: { Accept: "application/json" } });
+    } catch (_) {
+      return { status: 0, body: null };            // network error: reported, not thrown
+    }
     let body = null;
     try { body = await r.json(); } catch (_) { body = null; }
     return { status: r.status, body };
@@ -82,6 +87,10 @@ function initSiteTree() {
   }
 
   // --- tree items -----------------------------------------------------------------
+  function identity(child) {
+    return child.key || `${child.kind}:${child.id}`;
+  }
+
   function itemFor(child, level) {
     const expandable = Boolean(child.expandable && child.key);
     const li = el("li", {
@@ -89,9 +98,20 @@ function initSiteTree() {
       class: `st-item st-${child.kind}`,
       "aria-expanded": expandable ? "false" : null,
     });
+    li.dataset.id = identity(child);
     if (child.key) li.dataset.key = child.key;
+    li.append(rowFor(child, li));
+    li._child = child;
+    return li;
+  }
+
+  // the visible row of an item; rebuilt on refresh inside the same <li>, so focus,
+  // selection, expansion and loaded children stay where they are
+  function rowFor(child, li) {
+    const expandable = li.getAttribute("aria-expanded") !== null;
+    const open = li.getAttribute("aria-expanded") === "true";
     const row = el("div", { class: "st-row" });
-    row.append(el("span", { class: "st-twisty", "aria-hidden": "true", text: expandable ? "▸" : "" }));
+    row.append(el("span", { class: "st-twisty", "aria-hidden": "true", text: expandable ? (open ? "▾" : "▸") : "" }));
     const sev = worstSeverity(child.rollup);
     row.append(el("span", {
       class: `st-dot ${sev ? "sev-" + sev : "st-dot-none"}`, "aria-hidden": "true",
@@ -131,13 +151,11 @@ function initSiteTree() {
     if (child.kind === "finding" && child.href && child.href.startsWith("/findings/")) {
       row.append(el("a", { href: child.href, class: "st-open", tabindex: "-1", text: "open" }));
     }
-    li.append(row);
-    li._child = child;
     row.addEventListener("click", () => {
       select(li);
       if (expandable) toggle(li);
     });
-    return li;
+    return row;
   }
 
   function groupOf(li) {
@@ -149,32 +167,91 @@ function initSiteTree() {
     return g;
   }
 
-  async function loadChildren(container, key, level, gen, after = null) {
-    const params = nodeParams(key, { after, limit: "200" });
-    const { status: code, body } = await getJSON("/api/sitetree/children", params);
-    if (gen !== state.generation) return false;
-    if (code === 404 && key) {
-      const gone = tree.querySelector(`[data-key="${CSS.escape(key)}"]`);
-      if (gone) {
-        state.expanded.delete(key);
-        gone.remove();
+  // fetch pages of a node's children until `want` are loaded (or there are no more)
+  async function fetchPages(key, gen, after, want) {
+    const out = [];
+    let next = after;
+    let truncated = false;
+    do {
+      const { status: code, body } = await getJSON("/api/sitetree/children",
+        nodeParams(key, { after: next, limit: "200" }));
+      if (gen !== state.generation) return { stale: true };
+      if (code === 404 && key) return { gone: true };
+      if (code !== 200 || !body) {
+        return { error: (body && body.detail) ? `Could not load: ${body.detail}` : "Could not load this node." };
       }
-      return false;
+      out.push(...body.children);
+      next = body.next;
+      truncated = truncated || Boolean(body.truncated);
+    } while (next && out.length < want);
+    return { children: out, next, truncated };
+  }
+
+  function dropNode(key) {
+    const gone = tree.querySelector(`li[data-key="${CSS.escape(key)}"]`);
+    if (!gone) return;
+    state.expanded.delete(key);
+    if (gone.contains(document.activeElement)) focusItem(gone.parentElement.closest("li[role=treeitem]") || visibleItems()[0]);
+    gone.remove();
+  }
+
+  function setTail(container, key, level, next, truncated) {
+    for (const old of container.querySelectorAll(":scope > li.st-more-item, :scope > li.st-trunc-item")) old.remove();
+    if (truncated) {
+      container.append(el("li", { role: "none", class: "st-trunc-item muted",
+        text: "List truncated: this endpoint has more recorded groups than the site map reads at once." }));
     }
-    if (code !== 200 || !body) {
-      status.textContent = (body && body.detail) ? `Could not load: ${body.detail}` : "Could not load this node.";
-      return false;
-    }
-    const more = container.querySelector(":scope > li.st-more-item");
-    if (more) more.remove();
-    for (const child of body.children) container.append(itemFor(child, level));
-    if (body.next) {
+    if (next) {
       const btn = el("button", { type: "button", class: "st-more-btn",
         text: `Show more (${container.querySelectorAll(":scope > li[role=treeitem]").length} loaded)` });
       const li = el("li", { role: "none", class: "st-more-item" }, btn);
-      btn.addEventListener("click", () => loadChildren(container, key, level, state.generation, body.next));
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;                       // one page per click, never twice
+        const ok = await loadChildren(container, key, level, state.generation, next);
+        if (!ok) btn.disabled = false;
+      });
       container.append(li);
     }
+  }
+
+  async function loadChildren(container, key, level, gen, after = null) {
+    const got = await fetchPages(key, gen, after, 1);
+    if (got.stale) return false;
+    if (got.gone) { dropNode(key); return false; }
+    if (got.error) { status.textContent = got.error; return false; }
+    for (const child of got.children) container.append(itemFor(child, level));
+    setTail(container, key, level, got.next, got.truncated);
+    return true;
+  }
+
+  // re-fetch a loaded group (as many items as it shows) and update it in place
+  async function refreshGroup(container, key, level, gen) {
+    const had = container.querySelectorAll(":scope > li[role=treeitem]").length;
+    const got = await fetchPages(key, gen, null, Math.max(1, had));
+    if (got.stale) return false;
+    if (got.gone) { dropNode(key); return false; }
+    if (got.error) { status.textContent = got.error; return false; }
+    const existing = new Map();
+    for (const li of container.querySelectorAll(":scope > li[role=treeitem]")) existing.set(li.dataset.id, li);
+    const wanted = got.children.map((child) => {
+      const li = existing.get(identity(child));
+      if (!li) return itemFor(child, level);
+      existing.delete(identity(child));
+      li._child = child;
+      li.replaceChild(rowFor(child, li), li.querySelector(":scope > .st-row"));
+      return li;
+    });
+    for (const li of existing.values()) {
+      if (li.dataset.key) state.expanded.delete(li.dataset.key);
+      if (li.contains(document.activeElement)) focusItem(container.closest("li[role=treeitem]") || null);
+      li.remove();
+    }
+    let ref = container.firstElementChild;
+    for (const li of wanted) {                    // move only what is out of place
+      if (li === ref) ref = ref.nextElementSibling;
+      else container.insertBefore(li, ref);
+    }
+    setTail(container, key, level, got.next, got.truncated);
     return true;
   }
 
@@ -185,12 +262,15 @@ function initSiteTree() {
     li.querySelector(":scope > .st-row .st-twisty").textContent = "▾";
     state.expanded.add(key);
     const g = groupOf(li);
+    const level = parseInt(li.getAttribute("aria-level"), 10) + 1;
+    g.hidden = false;
     if (!g.dataset.loaded) {
       g.dataset.loaded = "1";
-      const level = parseInt(li.getAttribute("aria-level"), 10) + 1;
-      await loadChildren(g, key, level, state.generation);
+      if (!await loadChildren(g, key, level, state.generation)) delete g.dataset.loaded;  // retry next time
+    } else if (g.dataset.version !== String(state.version)) {
+      await refreshGroup(g, key, level, state.generation);  // changed while collapsed
     }
-    g.hidden = false;
+    g.dataset.version = String(state.version);
   }
 
   function collapse(li) {
@@ -224,7 +304,7 @@ function initSiteTree() {
 
   tree.addEventListener("keydown", (ev) => {
     const li = ev.target.closest("li[role=treeitem]");
-    if (!li) return;
+    if (!li || ev.target !== li) return;          // a "Show more" button or a link: its own keys
     const items = visibleItems();
     const i = items.indexOf(li);
     let handled = true;
@@ -359,55 +439,69 @@ function initSiteTree() {
   document.getElementById("st-issues-more").addEventListener("click", async () => {
     if (!state.selected || !state.issuesNext) return;
     const key = state.selected;
+    const gen = state.generation;
     const { status: code, body } = await getJSON("/api/sitetree/node", nodeParams(key, { before: state.issuesNext }));
-    if (code !== 200 || !body || key !== state.selected) return;
+    if (code !== 200 || !body || key !== state.selected || gen !== state.generation) return;
     state.issuesNext = body.next;
     renderIssues(body.findings, true);
   });
 
   // --- (re)loading -------------------------------------------------------------------
-  async function reload({ keepExpanded }) {
+  // a filter change rebuilds the tree (other nodes, other counts)
+  async function reload() {
     state.generation += 1;
     const gen = state.generation;
-    const want = keepExpanded ? new Set(state.expanded) : new Set();
     state.expanded = new Set();
     tree.replaceChildren();
     status.textContent = "";
     const ok = await loadChildren(tree, null, 1, gen);
     if (gen !== state.generation) return;
     empty.hidden = !ok || tree.querySelector("li[role=treeitem]") !== null;
-    // re-open what was open, outermost first (a key that no longer resolves is dropped)
-    let opened = true;
-    while (opened && gen === state.generation) {
-      opened = false;
-      for (const li of tree.querySelectorAll("li[role=treeitem][aria-expanded=false]")) {
-        if (want.has(li.dataset.key)) {
-          want.delete(li.dataset.key);
-          await expand(li);
-          opened = true;
-        }
-      }
-    }
     const first = tree.querySelector("li[role=treeitem]");
-    if (first && !tree.querySelector("li[tabindex='0']")) first.tabIndex = 0;
+    if (first) first.tabIndex = 0;
     if (state.selected) {
-      const sel = tree.querySelector(`[data-key="${CSS.escape(state.selected)}"]`);
-      if (sel) {
-        sel.setAttribute("aria-selected", "true");
-        showNode(state.selected);
-      } else {
-        state.selected = null;
-        showNode(null);
-      }
+      if (tree.querySelector(`li[data-key="${CSS.escape(state.selected)}"]`)) showNode(state.selected);
+      else { state.selected = null; showNode(null); }
+    }
+  }
+
+  // a store change refreshes what is shown, in place: root, then every expanded group
+  // (outermost first), then the selection -- focus, expansion, selection and loaded
+  // pages are kept (FR-UI-505)
+  async function refresh() {
+    state.generation += 1;
+    const gen = state.generation;
+    status.textContent = "";
+    if (!await refreshGroup(tree, null, 1, gen)) return;
+    for (const li of [...tree.querySelectorAll("li[role=treeitem][aria-expanded=true]")]) {
+      if (gen !== state.generation) return;
+      if (!li.isConnected) continue;
+      const g = li.querySelector(":scope > ul[role=group]");
+      if (!g || !g.dataset.loaded) continue;
+      await refreshGroup(g, li.dataset.key, parseInt(li.getAttribute("aria-level"), 10) + 1, gen);
+      g.dataset.version = String(state.version);
+    }
+    if (gen !== state.generation) return;
+    empty.hidden = tree.querySelector("li[role=treeitem]") !== null;
+    if (!tree.querySelector("li[role=treeitem][tabindex='0']")) {
+      const first = tree.querySelector("li[role=treeitem]");
+      if (first) first.tabIndex = 0;
+    }
+    if (state.selected) {
+      if (tree.querySelector(`li[data-key="${CSS.escape(state.selected)}"]`)) showNode(state.selected);
+      else { state.selected = null; showNode(null); }
     }
   }
 
   let typing = null;
-  form.addEventListener("change", () => reload({ keepExpanded: false }));
+  form.addEventListener("change", (ev) => {
+    if (ev.target === qInput) return;             // the search box reloads on input
+    reload();
+  });
   form.addEventListener("submit", (ev) => ev.preventDefault());
   qInput.addEventListener("input", () => {
     clearTimeout(typing);
-    typing = setTimeout(() => reload({ keepExpanded: false }), 300);
+    typing = setTimeout(reload, 300);
   });
 
   async function loadFacets() {
@@ -440,12 +534,12 @@ function initSiteTree() {
     if (v !== state.version && Date.now() - state.lastRefresh >= pollMs) {
       state.version = v;
       state.lastRefresh = Date.now();
-      await reload({ keepExpanded: true });
+      await refresh();
     }
   }
 
   loadFacets();
-  reload({ keepExpanded: false }).then(() => { root.dataset.ready = "1"; });
+  reload().then(() => { root.dataset.ready = "1"; });
   poll();
   setInterval(poll, pollMs);
 }

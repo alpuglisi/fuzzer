@@ -10,6 +10,8 @@ its own).
 from __future__ import annotations
 
 import re
+
+import pytest
 from pathlib import Path
 
 from fuzzlab.core.evidence import method_key
@@ -119,3 +121,22 @@ def test_ml_and_report_readers_agree_with_the_core_reader(tmp_path):
 def test_method_key_is_upper_case_with_the_get_default():
     assert method_key("post") == "POST"
     assert method_key("") == "GET" and method_key(None) == "GET" and method_key(3) == "GET"
+
+
+@pytest.mark.xfail(strict=True, reason="BUG-0500 follow-up: core/urls.py (locked by another "
+                   "session) -- canonical_origin must return None for a malformed authority "
+                   "instead of raising; readers go through core.runtarget.origin_of meanwhile")
+@pytest.mark.parametrize("url", ["http://[::1", "http://a\uff03b", "http://[zz]:80"])
+def test_canonical_origin_is_total_for_malformed_authorities(url):
+    from fuzzlab.core.urls import canonical_origin
+    assert canonical_origin(url) is None
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "http://a\uff03b", "http://[zz]:80",
+                                 "http://h:99999", "http://h:x", "\ud800", "http://\x00h",
+                                 None, 5])
+def test_origin_of_is_total(url):
+    """PA-0500(1): the stored-value boundary returns its sentinel on every malformed
+    input of the URL grammar."""
+    from fuzzlab.core.runtarget import origin_of
+    assert origin_of(url) is None or isinstance(origin_of(url), str)

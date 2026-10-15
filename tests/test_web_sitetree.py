@@ -809,3 +809,247 @@ def test_no_planted_secret_reaches_any_sitetree_response(seed):
     leaked = [mk for mk in markers if mk in text]
     assert leaked == []
     assert "/c/token" in text and "title · body" in text       # the tree did render
+
+
+# --- code-review fixes (CC-UI-0503) ------------------------------------------------------
+
+def test_reads_never_change_the_version_fingerprint(seed):
+    """Code review A1: a reader opening the store creates an empty WAL, and closing the
+    last connection removes it; neither is a data change."""
+    rid = seed.run()
+    seed.endpoint(rid, "/a")
+    seed.close()
+    v0 = st.store_version(seed.path)
+    reader = Store(seed.path)
+    reader.conn.execute("SELECT COUNT(*) FROM endpoint").fetchone()
+    assert st.store_version(seed.path) == v0
+    reader.close()
+    assert st.store_version(seed.path) == v0
+    seed.store = Store(seed.path)
+    seed.conn = seed.store.conn
+
+
+@pytest.mark.parametrize("params", [
+    {"node": json.dumps({"o": "http://[::1"})},
+    {"node": json.dumps({"o": "http://a＃b"})},
+    {"node": '{"r":1,"s":["\\ud800"]}'},
+    {"node": '{"r":1,"s":["a"],"m":"GET","p":"\\udfff"}'},
+    {"node": json.dumps({"r": 1, "s": ["p"], "m": "GET", "p": "id", "l": None}),
+     "after": f"{10 ** 30}:finding"},
+])
+def test_hostile_requests_are_400_not_500(mixed, params):
+    seed, _a, _b = mixed
+    client = _client(seed.path)
+    assert client.get("/api/sitetree/children", params=params).status_code == 400
+    if "after" not in params:
+        assert client.get("/api/sitetree/node", params=params).status_code == 400
+
+
+def test_an_out_of_range_before_is_400(mixed):
+    seed, _a, _b = mixed
+    client = _client(seed.path)
+    r = client.get("/api/sitetree/node", params={"node": json.dumps({"o": ORIGIN}),
+                                                  "before": 10 ** 30})
+    assert r.status_code == 400
+
+
+def test_a_malformed_stored_base_url_is_an_unreadable_origin_not_a_crash(seed):
+    """BUG-0500: `canonical_origin` raises on a malformed authority; one such stored
+    target row used to take every origin reader down (the tree, facets, ML holdout)."""
+    from fuzzlab.core.runtarget import origin_of, run_origins
+    bad = seed.run(base_url="http://[::1")
+    good = seed.run()
+    seed.endpoint(bad, "/b")
+    seed.endpoint(good, "/g")
+    assert origin_of("http://[::1") is None and origin_of(None) is None
+    assert run_origins(seed.conn) == {bad: None, good: ORIGIN}
+    labels_ = [h["label"] for h in kids(seed.conn)]
+    assert labels_ == [ORIGIN, f"run #{bad} · auto — origin unreadable"]
+    assert st.facets(seed.conn)["runs"][1]["host"].endswith("origin unreadable")
+    holdout = pytest.importorskip("fuzzlab.ml.holdout")
+    assert holdout._run_origins(seed.store) == {bad: None, good: ORIGIN}
+
+
+def test_separator_characters_in_stored_strings_do_not_shift_fields(seed):
+    """Code review A10/B4: target-supplied names may hold any character."""
+    rid = seed.run()
+    seed.cand(rid, "/p", "a\x1fb", location="body")
+    seed.cand(rid, "/p", "\x00", location="query")
+    ep = seed.endpoint(rid, "/q")
+    pid = seed.param(rid, ep, "x\x1fy", "json")
+    seed.raw_cand(rid, json.dumps({"category": "c"}), parameter_id=pid)
+    got = labels(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}))
+    assert got == ["\x00 · query", "a\x1fb · body"]
+    assert labels(seed.conn, node({"o": ORIGIN, "s": ["q"], "m": "GET"})) == [
+        "x\x1fy · json"]
+
+
+def test_no_handler_in_sitetree_swallows_broadly():
+    """PA-0106: every `except` in the site tree names its exceptions; none catches
+    `Exception`/`BaseException` or is bare. Proven on a synthetic offender."""
+    import ast
+    from pathlib import Path
+
+    def broad(source: str) -> list[int]:
+        out = []
+        for n in ast.walk(ast.parse(source)):
+            if isinstance(n, ast.ExceptHandler):
+                elts = [] if n.type is None else (
+                    n.type.elts if isinstance(n.type, ast.Tuple) else [n.type])
+                names = [e.id if isinstance(e, ast.Name) else
+                         e.attr if isinstance(e, ast.Attribute) else "?" for e in elts]
+                if not names or {"Exception", "BaseException"} & set(names):
+                    out.append(n.lineno)
+        return out
+    assert broad("try:\n    f()\nexcept Exception:\n    pass\n"
+                 "try:\n    f()\nexcept:\n    pass\n"
+                 "try:\n    f()\nexcept (ValueError, builtins.BaseException):\n    pass\n"
+                 "try:\n    f()\nexcept (ValueError, m.Gone):\n    pass\n") == [3, 7, 11]
+    for mod in ("sitetree.py", "sitetree_routes.py"):
+        src = (Path(st.__file__).parent / mod).read_text()
+        assert broad(src) == [], mod
+
+
+def test_endpoint_truncation_is_reported(seed, monkeypatch):
+    rid = seed.run()
+    for i in range(5):
+        seed.finding(rid, "/p", f"x{i}")
+    monkeypatch.setattr(st, "GROUP_CAP", 3)
+    page = st.children(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}), st.Filters())
+    assert page["truncated"] is True and len(page["children"]) == 3
+    s = st.summary(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}), st.Filters())
+    assert s["truncated"] is True
+
+
+def test_the_child_list_cache_is_bounded(seed, monkeypatch):
+    monkeypatch.setattr(st, "CACHE_ENTRIES", 2)
+    monkeypatch.setattr(st, "CACHE_ENTRY_MAX", 3)
+    monkeypatch.setattr(st, "CACHE_TOTAL_MAX", 4)
+    cache = st._ChildCache()
+    cache.put(("a", (), "v"), [{}] * 4)                 # over the entry bound: not kept
+    assert cache.get(("a", (), "v")) is None
+    cache.put(("b", (), "v"), [{}] * 2)
+    cache.put(("c", (), "v"), [{}] * 2)
+    cache.put(("d", (), "v"), [{}] * 1)                 # evicts b (count and total)
+    assert cache.get(("b", (), "v")) is None
+    assert cache.get(("c", (), "v")) is not None and cache.get(("d", (), "v")) is not None
+    assert cache._total <= 4 and len(cache._data) <= 2
+    assert cache.get(("c", (), None)) is None           # never without a fingerprint
+
+
+def test_the_projection_cache_is_bounded(seed, monkeypatch):
+    monkeypatch.setattr(st, "PROJECTION_CACHE_MAX", 5)
+    st._proj_cache.clear()
+    rid = seed.run()
+    for i in range(20):
+        seed.cand(rid, f"/p{i}", "id")
+    kids(seed.conn, node({"o": ORIGIN}))
+    assert len(st._proj_cache) <= 5
+
+
+def test_chunked_run_lists_match_json_each(mixed, monkeypatch):
+    seed, _a, _b = mixed
+    want = walk(seed.conn)
+    st.child_cache.clear()
+    monkeypatch.setitem(st._features, "json1", False)
+    monkeypatch.setattr(st, "RUN_CHUNK", 1)
+    assert walk(seed.conn) == want
+
+
+def test_a_method_less_endpoint_groups_only_its_findings(seed):
+    """Code review A7 (G8): other methods' rows resolve its findings' locations but are
+    not listed under "(method not recorded)"."""
+    rid = seed.run()
+    seed.cand(rid, "/a.php", "id")
+    seed.cand(rid, "/a.php", "id")
+    f = seed.finding(rid, "/a.php", "id", method=None)
+    eps = {e["label"]: e for e in kids(seed.conn, node({"o": ORIGIN, "s": ["a.php"]}))}
+    nr = eps["(method not recorded) /a.php"]
+    assert nr["rollup"]["candidates"] == 0 and nr["rollup"]["findings"] == 1
+    (param,) = kids(seed.conn, node(nr["key"]))
+    assert param["label"] == "id · query" and param["rollup"]["candidates"] == 0
+    assert [i["id"] for i in kids(seed.conn, node(param["key"]))] == [f]
+    s = st.summary(seed.conn, node(nr["key"]), st.Filters())
+    assert s["rollup"]["candidates"] == 0 and s["rollup"]["findings"] == 1
+
+
+def test_path_search_folds_ascii_only_everywhere(seed):
+    """Code review A8: the roll-up (SQL) and the Issues list (Python) agree."""
+    rid = seed.run()
+    seed.finding(rid, "/Été", "id")
+    seed.finding(rid, "/ABC", "id")
+    host = node({"o": ORIGIN})
+    for q, n in (("été", 0), ("Été", 1), ("abc", 1)):
+        s = st.summary(seed.conn, host, st.parse_filters(q=q))
+        assert s["rollup"]["findings"] == len(s["findings"]) == n, q
+
+
+def test_an_endpoint_summary_counts_its_own_rows(seed):
+    """Code review A13: the Contents pane of a selected endpoint shows its recorded
+    endpoint and page rows and their last run."""
+    rid = seed.run()
+    seed.endpoint(rid, "/e.php")
+    seed.page(rid, "/e.php")
+    s = st.summary(seed.conn, node({"o": ORIGIN, "s": ["e.php"], "m": "GET"}), st.Filters())
+    assert s["rollup"]["endpoints"] == 2 and s["rollup"]["last_run"] == rid
+
+
+def test_evidence_urls_with_escaped_control_characters_pass_the_prefilter(seed):
+    """Code review A9: `urlsplit` strips a tab from the path; the JSON keeps it."""
+    rid = seed.run()
+    seed.cand(rid, "/a\tb/c.php", "id")
+    (child,) = kids(seed.conn, node({"o": ORIGIN}))
+    assert child["label"] == "ab"
+    assert labels(seed.conn, node(child["key"])) == ["c.php"]
+
+
+def test_location_none_and_empty_are_separate_groups_on_every_page(seed):
+    rid = seed.run()
+    ep = seed.endpoint(rid, "/p")
+    seed.param(rid, ep, "id", "")
+    seed.finding(rid, "/p", "id", vuln_class="ssrf")        # no candidate: location null
+    seed.cand(rid, "/p", "id", location="query")
+    seed.cand(rid, "/p", "id", location="body")
+    key = node({"o": ORIGIN, "s": ["p"], "m": "GET"})
+    paged = [(c["param"], c["location"]) for c in kids(seed.conn, key, limit=1)]
+    whole = [(c["param"], c["location"]) for c in st.children(
+        seed.conn, key, st.Filters(), limit=50)["children"]]
+    assert paged == whole and len(set(paged)) == len(paged) == 4
+
+
+def test_planted_queries_on_finding_and_page_urls_never_show(seed):
+    """Code review B7: `path_key` on every source, findings and pages included."""
+    rid = seed.run()
+    seed.page(rid, "/pg.php?tok=PQSECRET1")
+    seed.finding(rid, "/f.php?tok=PQSECRET2", "id")
+    text = json.dumps([c for _d, _l, c in walk(seed.conn)])
+    text += json.dumps(st.summary(seed.conn, node({"o": ORIGIN}), st.Filters()))
+    text += json.dumps(st.summary(seed.conn, node({"o": ORIGIN, "s": ["f.php"],
+                                                   "m": "GET"}), st.Filters()))
+    assert "PQSECRET" not in text and "/f.php" in text and "pg.php" in text
+
+
+# --- known defects outside this lane, pinned (PA-0054(3)) ------------------------------
+
+@pytest.mark.xfail(strict=True, reason="ML lane follow-up: ml/dataset.endpoint_key uses "
+                   "to_path, dropping a fragment point's SPA route, while the oracle records "
+                   "the finding at finding_url (/#/route); see CC-ML-0500")
+def test_a_confirmed_dom_xss_finding_labels_its_fragment_candidate(seed):
+    dataset = pytest.importorskip("fuzzlab.ml.dataset")
+    rid = seed.run()
+    seed.cand(rid, "/#/search", "q", category="xss", location="fragment")
+    seed.finding(rid, "/#/search", "q", vuln_class="xss-dom")
+    ds = dataset.build_dataset(seed.store, rid)
+    assert list(ds.y) == [1]
+
+
+@pytest.mark.xfail(strict=True, reason="UI follow-up: findingsview.derive_severity and "
+                   "results.severity_of disagree (e.g. ssti: info vs critical); the site tree "
+                   "uses the finding page's band (CC-UI-0500)")
+def test_the_two_severity_bands_agree_for_every_oracle_class():
+    from fuzzlab.oracle import strategies
+    from fuzzlab.web.results import severity_of
+    classes = {c.vuln_class for _n, c in inspect.getmembers(strategies, inspect.isclass)
+               if isinstance(getattr(c, "vuln_class", None), str) and c.vuln_class}
+    assert {vc: derive_severity(vc) for vc in classes} == {
+        vc: severity_of(vc) for vc in classes}
