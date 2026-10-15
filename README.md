@@ -80,6 +80,16 @@ nothing to the target until you do:
 fuzzlab web                                           # http://127.0.0.1:8787/
 ```
 
+The panel reads the shared store only. Besides the launcher it has an Overview,
+Findings, Runs, Proxy, ML and Diagnostics views and a **Site map**
+(`/sitetree`): what the tools recorded, browsable by origin (loopback aliases are
+one host) → URL path → single-page-app `#/route` → endpoint → parameter →
+findings and candidates. Every node shows its findings by severity and its
+candidates by oracle status, filters by run, category, severity, status and path,
+loads lazily, and refreshes when the store changes. It never shows a stored query
+string or any recorded value (parameter examples, evidence); each finding links
+to its own page.
+
 Or run the tools directly (manual mode), consolidating into the shared store:
 
 ```bash

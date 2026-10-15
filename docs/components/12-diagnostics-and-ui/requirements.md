@@ -500,10 +500,24 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     200 000 in total, so walking a wide node is linear.
   - Enforced by `tests/test_web_sitetree_scale.py` (>= 50 000 endpoints; statement,
     fetched-row, function-call and VM-step counts, never wall-clock).
-- **FR-UI-503** *(added CC-UI-0500)* **Site tree: the page.** A tree pane (WAI-ARIA
-  treeview) and a detail pane: the selected node's roll-up and a page of its subtree's
-  findings (`GET /api/sitetree/node`), each linking to the finding page. Everything is
-  rendered as text. Filter choices from `GET /api/sitetree/facets`.
+- **FR-UI-503** *(added CC-UI-0500; layout CC-UI-0502)* **Site tree: the page.** The
+  page and its nav link are labelled **"Site map"** (UI research §12.1; the component
+  and these FRs keep "site tree"). Three panes (UI research §12.3/§13.1):
+  - **Tree** (left): a WAI-ARIA treeview (roving tabindex; arrows, Home/End,
+    Enter/Space), lazy per node with "Show more" paging. Each node shows a worst-severity
+    dot with a text equivalent, its findings count (a button that selects the node and
+    focuses Issues), an inconclusive count, a `route` badge on SPA routes and a
+    `client-side` badge on `fragment` parameters.
+  - **Contents** (top right): the selected node's host / path / method / parameter /
+    location / last run, its roll-up (findings by severity and category, candidates by
+    status, recorded endpoints, problem counts) and a table of its children.
+  - **Issues** (bottom right): the subtree's findings, newest first, paged, each linking
+    to `/findings/{id}` (`GET /api/sitetree/node`).
+  - A filter bar (status toggles, severity, category, one-run lens, path search; choices
+    from `GET /api/sitetree/facets`) that only hides nodes.
+  - Everything is rendered as text: no page script parses an HTML string
+    (`tests/test_web_sitetree_browser.py`).
+  - Research items not built, each with its reason, are listed in CC-UI-0502.
 - **FR-UI-504** *(added CC-UI-0500)* **Site tree: what is never shown.** Only computed
   paths, parameter names and locations, methods, categories, statuses, vuln classes,
   mechanisms, ids, runs (id, tool, start) and canonical origins. Never a value column

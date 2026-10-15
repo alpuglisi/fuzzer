@@ -3,6 +3,52 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0502 — Site map page: the UI-research three-pane layout (2026-10-15)
+- Change: the site tree's page (CC-UI-0500's open deliverables): `templates/sections/
+  sitetree.html`, `static/js/sitetree.js` (WAI-ARIA treeview, lazy paging, contents
+  and Issues panes, filter bar, polling refresh; `textContent` only),
+  `static/css/sitetree.css`; NAV label "Site map"; `sitetree_poll_ms` config (default
+  5000 ms, used by tests). FR-UI-503 edited in place. The layout applies
+  `docs/research/ui-ia-competitive-analysis.md` §12.1/§12.3/§13.1 from
+  `origin/claude/new-session-jqk4ku` (branch confirmed by the operator).
+- Review: the layout delta went to reviewers A and B (F17, a reviewed divergence); both
+  AGREE-WITH-FIXES, all applied: no payload change; FR-UI-503 in place; "Site map"
+  naming; every research item not adopted listed with its reason; a severity text
+  equivalent; browser tests for every new behaviour and render site.
+- Research items not built, with reasons:
+  - Node states (discovered / requested / tested / out of scope): need a `flow` join,
+    a `page.discovered_from` writer (locked crawler/adapter) and project scope rules.
+  - Tested coverage %: needs distinct-parameter counting per subtree -- follow-up.
+  - Structure collapse and "mark a parameter structural": need persisted
+    `template_cluster_id` / project-stored overrides.
+  - Node actions: scan this branch and scope include/exclude belong to the IA /
+    project-files lanes; Send to Repeater stays on the finding page; **Copy URL is
+    prohibited** by FR-UI-504 (no URL rebuilt from parts).
+  - Filters "Has parameters", "Method", "Show SPA routes", "Untested": not FR-UI-501
+    filters (they would extend the gate-agreed back-end contract) -- follow-up. "Status
+    class": needs response status per node (`flow`, out of scope, F16). Regex search:
+    **declined** (a user regex run on the server is a ReDoS risk).
+  - Divergences: no `#` pseudo-node (routes sit under their document path with a
+    `route` badge, FR-UI-500); the leaf is (path, method) with parameter children, not
+    ZAP's `METHOD name(query)(body)` identity (gate F1); counts focus the in-page Issues
+    pane (the Findings view has no node filter); the contents table lists child nodes,
+    not flows (F16); no request/response pane (flows out of scope; findings keep no raw
+    bytes); diff-run lens and open-only severity (no triage state); a per-run origin for
+    crawl-only runs (research P14: locked `spider.py` / `fetcher.py` writers).
+- Impact: UI only; no API or payload change.
+- Risk: low-medium (attacker-influenced strings in a new client). Mitigated by the
+  text-only rendering, its static guard over every script the page loads, and a
+  browser test seeding markup into every render site.
+- Deliverables:
+  - [x] template / JS / CSS (~650 LOC) — done
+  - [x] `tests/test_web_sitetree_browser.py` (8): tree + badges, keyboard pattern,
+    contents + Issues paging, count -> Issues focus, status toggle + run lens, polling
+    refresh keeping expansion, markup rendered as text everywhere, scripts never parse
+    HTML strings; `tests/test_web_pages_browser.py` waits for the tree on `/sitetree` — done
+  - [x] UI mutation checks: `innerHTML` rendering, the severity text, the poll timer,
+    the Issues focus -- 4 of 4 killed — done
+- Effectiveness: pending -- assessed after the independent code review (CC-UI-0503).
+
 ### CC-UI-0500 — Site tree: browse findings by origin and URL path (2026-10-15)
 - Change:
   - **Data layer** `fuzzlab/web/sitetree.py` (pure; no FastAPI): node keys (host ->

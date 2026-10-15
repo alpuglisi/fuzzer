@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (site map page: the UI-research three-pane layout)
+- **Why:** the site tree needed its page; the UI-research session's design (§12.3/§13.1,
+  branch `claude/new-session-jqk4ku`, confirmed by the operator) sets the layout.
+  **What:** `/sitetree` ("Site map"): a lazy WAI-ARIA tree with severity dots, counts and
+  route / client-side badges, the selected node's contents and issues, a filter bar and
+  a polling refresh; text-only rendering, browser-verified (CC-UI-0502, FR-UI-503).
+  Research items not built are listed with their reasons in CC-UI-0502.
+
 ## 2026-10-15 (site tree: data layer and API)
 - **Why:** browse identified vulnerabilities by domain and URL path, like Burp's Site
   map. **What:** `web/sitetree.py` + `/api/sitetree/*`: host (canonical origin) -> path
