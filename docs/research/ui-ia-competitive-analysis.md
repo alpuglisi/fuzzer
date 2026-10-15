@@ -819,11 +819,11 @@ analogy.
   [src](https://www.ninjaone.com/docs/integrations/vulnerability-management/find-cve-data/).
 - **CVE detail.** Shows risk information, the CVSS score, the impacted devices and patch
   status (same src).
-- **Activity and tickets.** A device's Activities feed records script runs and actions
+- **Activity and tickets.** A device's Activities feed records events and actions taken on
+  the device (installs, scans, automated tasks, patch alerts)
   [src](https://www.ninjaone.com/docs/endpoint-management/manage-devices-and-run-actions/).
   Tickets have six system statuses (New, Open, Waiting, Paused, Resolved, Closed)
-  [src](https://www.ninjaone.com/docs/ticketing/ninjaone-ticketing-getting-started/configure-custom-statuses-and-relationships/)
-  (snippet).
+  [src](https://www.ninjaone.com/docs/ticketing/ninjaone-ticketing-getting-started/configure-custom-statuses-and-relationships/).
 - **Re-imports.** Re-importing scan data treats a CVE missing from the new scan as
   remediated
   [src](https://www.ninjaone.com/docs/integrations/vulnerability-management/importing-vulnerability-scan-data/).
@@ -913,8 +913,7 @@ analogy.
   - Spot-checked §17. Source:
     [src](https://help.aikido.dev/getting-started/core-functionalities/main-feed.md).
 - **Auto-solved.** An issue moves to Solved when a later scan no longer detects it
-  [src](https://help.aikido.dev/docs/docs-ja/hajimeni/core-functionalities/why-was-an-issue-marked-as-solved.md)
-  (snippet).
+  [src](https://help.aikido.dev/docs/docs-ja/hajimeni/core-functionalities/why-was-an-issue-marked-as-solved.md).
 - **Severity score, 0–100.** Adjusted for exploitability and context; clicking the score
   shows its **breakdown**
   [src](https://help.aikido.dev/getting-started/core-functionalities/how-is-severity-score-calculated.md).
@@ -993,7 +992,7 @@ analogy.
 | Cross-run de-dup / diff | First-find only (Pro); DAST: New/Present/Regressed/Fixed | 2.17 de-dup by node name | Diff (new only, vs a baseline) | **Delta: New/Gone/Same/Changed** | Signals bundled into investigations | Re-import marks missing CVEs remediated | Issue groups; auto-Solved when gone |
 | Triage status | Pro: set severity/FP; DAST: FP, Accepted, Verified, Fixed (persistent) | Confidence = FP/Confirmed; alert filters | Modify / Snooze / Plugin rules | Overrides (scoped), notes, tickets (appliance) | Active/Resolved; resolve blocked by pending steps | Ticket statuses | Ignore-scope picker, snooze, severity with reason |
 | Evidence | Advisory; request/response highlighted; path to issue | Request/response with evidence highlighted | Plugin output | Detection result + method + check ID | Narrative + timeline | Activities feed | Request/response; retest |
-| URL → results | New scan → URL → preset → Scan | Quick Start: URL → Attack | Gallery → template → name + target → Launch | **Wizard: 1 field → Start** | Deploy agent | Play → Run Automation | Add Domain → type → URL |
+| URL → results | New scan → Crawl and audit → URL → preset → Scan | Quick Start: URL → Attack | Gallery → template → name + target → Launch | **Wizard: 1 field → Start** | Deploy agent | Play → Run Automation | Add Domain → type → URL |
 | Advanced hidden by | Presets; optional panels | "Show Advanced Options" | Template subset | Wizard vs full dialog | n/a (SOC tunes) | Policy inheritance | "Advanced" expander |
 | Operation vs config | Configuration library; user vs project settings | Context / policy / options; modes; automation plans | **Policies (locked) vs scans** | **Scans menu vs Configuration menu** | Settings; SOC tuning | **Policies in Administration; inheritance; device overrides counted** | Settings → Triage / SLA; ignore rules |
 | Test / benchmark lane | **Isolated scan** | — | Live Results (marked) | — | **Incident Simulation (stamped)** | — | — |
@@ -1067,7 +1066,7 @@ Each pain point is something observed in the code. The severity rating is our ju
 | --- | --- | --- | --- |
 | P1 | **No URL → results path.** A working scan is two tools in sequence: `crawl --start URL`, then `auto --base-url URL --spider-db …`. `auto` imports that crawl but does not crawl itself, and with no ground truth it needs `--categories` or fails loudly (D15). The panel's one-click "Run full pipeline" button is an unwired stub: `fuzzlab web` passes no pipeline, so the button answers "pipeline not wired (use the CLI: fuzzlab auto)". | `harness/auto_cli.py:1-11`; `web/app.py:743-755`; `web_main` → `serve(cfg, proxy=…)` | High |
 | P2 | **Forms are argparse dumps.** Every flag of every tool is a form field. There are no presets and no basic/advanced split. | `web/commandspec.py:1-14`; table above | High |
-| P3 | **Working and training/benchmark options share one command and one form.** `auto` mixes target options (`--base-url`, `--identity`, `--browser`) with ground-truth benchmark options (`--ground-truth`, `--points ground-truth`) and model options (`--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`, `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method`, `--anomaly-*`). The model options do **not** need ground truth: they learn from oracle labels on earlier runs against the same target. They are legitimate but advanced working-run features. | `fuzzlab auto --help` | High |
+| P3 | **Working and training/benchmark options share one command and one form.** `auto` mixes target options (`--base-url`, `--identity`, `--browser`) with ground-truth benchmark options (`--ground-truth`, `--points ground-truth`) and model options (`--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`, `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method`, `--anomaly-*`). The model options do **not** need ground truth: they learn from oracle labels (this run's or earlier runs' against the same target), or, like `--anomaly`, from no labels at all. They are legitimate but advanced working-run features. | `fuzzlab auto --help` | High |
 | P4 | **One concept, four names.** The target is `--start` (crawl), `--base-url` (audit, auto, greybox-run), `--url` (fuzz, mutate-run) or `--base` (mutate-run). The crawl result is `--db` on crawl and `--spider-db` elsewhere, alongside a separate `--store`. | each tool's `--help` | High |
 | P5 | **No project concept.** The UI reads the one store named in config. It cannot create, open, switch, snapshot or list recent stores, and `fuzzlab web` has no `--store`. The only workaround is an environment override such as `FUZZLAB_STORE_PATH` (`core/config.py` `_from_env`). | `app.py` (every `_read_*` uses `cfg.get("store_path")`); `web_main` | High |
 | P6 | **No site tree.** Endpoints, pages, parameters and flows are stored per run, but nothing groups them host → path → parameter. Findings filter only by an "endpoint" facet. | store schema; `templates/sections/findings.html` | High |
@@ -1150,7 +1149,7 @@ Left nav
   ◎ Scope & identities scope rules, identities (keyring-backed names only)
   ── (benchmark projects only, or "Show research tools" toggle) ──
   ◈ Benchmark          ground truth, scoring, holdout reveal
-  ◈ Models & ML        today's ML page
+  ◈ Models & ML        today's ML page (also shown in a working project once it has models)
   ◍ Diagnostics        trends, store explorer
   ── Environment (outside the project) ──
   ⏻ Lab                containers, lab-generate
@@ -1268,8 +1267,10 @@ Rules:
   separate `--db` / `--spider-db` file folds into the project (P4). The old flags stay as
   aliases.
 - **Concurrency.** A CLI run may write to a project that the UI has open. SQLite allows one
-  writer at a time; the UI only reads and refreshes. Use WAL mode, and show a "run in
-  progress" badge for an unfinished `run` row **(inference)**.
+  writer at a time, and the store already runs in WAL mode (`fuzzlab/core/store.py:28-32`),
+  so readers never block a running tool. The UI mostly reads; its few writes (saved views,
+  Repeater) are brief. Show a "run in progress" badge for an unfinished `run` row
+  **(inference)**.
 
 ### 12.3 Site-tree design (R4) [TREE]
 
@@ -1450,7 +1451,7 @@ not-confirmed reasons do not.
 
 ### 12.5 The shortest "URL → results" flow (R2, R3) [SPLIT]
 
-**R2. One dialog, three fields, one button.** It is modelled on Greenbone's Task Wizard and
+**R2. One dialog, four fields, one button.** It is modelled on Greenbone's Task Wizard and
 ZAP's Quick Start.
 
 ```
@@ -1459,8 +1460,10 @@ ZAP's Quick Start.
 │            ✓ loopback · in scope of this project                     │
 │ Profile    [ Standard — crawl + audit + confirm, ~10 min      ▾ ]   │
 │ Identity   [ anonymous                                         ▾ ]   │
+│ Categories ☐ sql-injection ☐ xss ☐ server-side-template-injection …  │
+│            required: choose at least one (D15; nothing preselected)  │
 │                                                                      │
-│ ▸ Advanced (scope prefix, budget, categories, browser, OOB …)        │
+│ ▸ Advanced (scope prefix, budget, browser, OOB …)                    │
 │ ▸ Show command    fuzzlab scan http://127.0.0.1:3000/ --profile …    │
 │                                                                      │
 │  ⚠ Sends traffic to the target. Requires authorized: true.           │
@@ -1480,9 +1483,12 @@ ZAP's Quick Start.
   shape, `fuzzlab scan URL [--profile P] [--identity I] --authorized`.
   - **What the wrapper runs.** It runs **`crawl` then `auto`** into the project, because
     `auto` does not crawl by itself (`harness/auto_cli.py:1-11`).
-  - **Categories.** With no ground truth, automatic mode needs explicit categories or fails
-    loudly (D14/D15). Every working profile therefore names its categories, defaulting to
-    all known ones.
+  - **Categories.** With no ground truth, automatic mode needs an explicit category
+    selection and has **no "test everything" default** (D15). So the Scan dialog shows the
+    categories as a required field with nothing preselected, and Scan stays disabled until
+    at least one is ticked. A user-saved profile may carry a selection the user made
+    explicitly. A built-in profile never carries "all". Whether an explicit one-click
+    "select all" chip would satisfy D15 is a decision for the owner (§18 Q7).
   - **Authorization.** `crawl` and `audit` have no `--authorized` flag today, so the
     wrapper applies the authorized gate itself before the crawl step.
   - **Launching.** UI launches go through the gated subprocess runner (D18).
@@ -1495,8 +1501,8 @@ ZAP's Quick Start.
 - **Built-in profiles** are named for their outcome, as Burp's presets are
   [src](https://portswigger.net/burp/documentation/desktop/scanning/built-in-configurations):
   - **Quick**: crawl and audit only, no confirmation traffic beyond the audit's.
-  - **Standard**: crawl → audit → oracle-confirm, all known categories. No single command
-    does this today; R2's wrapper does.
+  - **Standard**: crawl → audit → oracle-confirm over the categories chosen at launch. No
+    single command does this today; R2's wrapper does.
   - **Deep**: adds browser execution, header points and JSON-write fuzzing.
   - **Passive**: crawl only.
 - **A profile is a partial overlay** on the defaults, as in Burp's configuration library
@@ -1514,8 +1520,9 @@ ZAP's Quick Start.
 - **Model options stay available to working profiles, collapsed.**
   - The model options are `--score`, `--rank`, `--train-on`, `--model-id`, `--calibrate`,
     `--holdout`, `--hybrid`, `--confirm-budget`, `--budget-method` and `--anomaly*`.
-  - They work without ground truth, because they learn from oracle labels on earlier runs
-    against the same target.
+  - They work without ground truth. They learn from oracle labels, either this run's
+    (`--train-on run`) or earlier runs' against the same target (`--train-on earlier`).
+    Some, like `--anomaly`, use no labels at all.
   - They are real operator features (budgeted confirmation, ranking), so a working profile
     may use them. They sit in a collapsed **Model-assisted** group, never in the basic
     form. This fixes P3.
@@ -1563,8 +1570,9 @@ less well-sourced idea):
   - **Ground-truth scoring** happens only in benchmark projects.
 - **The CLI mirrors the split.**
   - `fuzzlab scan` for working runs.
-  - `fuzzlab bench …` gathers `auto --ground-truth`, `report`, `reveal-holdout` and the ML
-    flags.
+  - `fuzzlab bench …` gathers `auto --ground-truth` / `--points ground-truth`, `report` and
+    `reveal-holdout`.
+  - The model flags stay on `fuzzlab scan` as advanced options.
   - `fuzzlab lab …` gathers `lab-generate`. `build-db` rebuilds the auditor's indicator
     DB, so it stays a tool.
   - Existing commands stay as aliases (fixes P13).
@@ -1578,7 +1586,7 @@ less well-sourced idea):
 | Detection-quality and efficiency KPIs (move to Benchmark) | Safety chips: target, authorized, proxy, budget |
 | Diagnostics and the raw store explorer | Project switcher and saved indicator |
 | Bandit posteriors, plugins list, anomaly settings | Dry-run "Show command" (collapsed, one click away) |
-| Advanced scan options (scope prefix, budget, categories, browser, OOB, header points) | Profile picker and identity picker |
+| Advanced scan options (scope prefix, budget, browser, OOB, header points) | Profile, identity and category pickers (categories required, D15) |
 | (Whether to hide Tentative findings by default is open: §18 Q3) | Focus/All toggle with counts |
 
 ---
@@ -1772,12 +1780,14 @@ session that builds it.
   the contract"), and ML writes scores, never labels. Triage is a separate, user-owned
   layer. D9/D10 add that the oracle never reads ground truth.
 - **D14/D15, category selection.** A working scan without ground truth must name its
-  categories, and R2's profiles do so explicitly.
+  categories, with no "test everything" default. R2 makes categories a required field with
+  nothing preselected, and built-in profiles never carry "all".
 - **D18, gated subprocess runner.** Every UI launch goes through it.
 - **D21, storage layout.** Per-project SQLite files plus a small global config DB.
 - **NFR-UI-read-only** (`docs/components/12-diagnostics-and-ui/requirements.md`). The UI
-  never writes result tables (`finding`, `attempt`, `candidate`). The documented
-  exceptions are `saved_views` and the Repeater's `repeater_tab` / `run` / `flow` writes. A `finding_triage` table, stored profiles, scope edits
+  never writes result tables (`finding`, `attempt`, `candidate`). The one documented
+  exception is `saved_views`. The Repeater's `repeater_tab` / `run` / `flow` writes are
+  recorded as a known gap ("Not yet enforced"), not an approved exception. A `finding_triage` table, stored profiles, scope edits
   and project metadata would be **new UI-written state**. The building session must amend
   that requirement explicitly, not work around it. Those writes go through the existing
   `SecurityGateMiddleware` POST rules and never touch the result tables. R1's Compact and
@@ -1903,6 +1913,10 @@ The fuzzlab facts in §10 were read directly from the code. The form sizes were 
   policies are not edited "only" under Administration.
 - **Resolution.** The orchestrating session verified each blocking finding against the code
   or the source, then applied every finding, minor items included, in the next commit.
+- **Re-review.** Reviewer B approved the fixed version. Reviewer A confirmed all 23 of its
+  original findings resolved, and raised one new blocking point: the first fix's
+  "all categories" default contradicted D15. That point and the remaining nits were fixed
+  in a third commit.
 
 **What this document is not.** It is not a specification. Requirement IDs, schema DDL and
 UI acceptance criteria belong to the sessions that build R1 to R11, with their own
@@ -1921,3 +1935,7 @@ change-control and `requirements.md` updates.
    temporary project, as Burp Community does, or show the start screen?
 6. **Holdout.** Should `--holdout` (a sealed evaluation split) be available in working
    projects, or only in benchmark projects?
+7. **"Select all" categories.** D15 forbids a "test everything" default for runs without
+   ground truth. Would an explicit one-click "select all categories" chip in the Scan
+   dialog satisfy D15, or should D15 be amended, or should users always tick categories
+   one by one?
