@@ -1288,8 +1288,9 @@ def test_current_is_set_even_when_leaving_raises(tmp_path, monkeypatch):
     # leave the temporary one is a warning — the action itself succeeded
     assert mgr.pending is None
     assert [r["name"] for r in mgr.recent()] == ["next"]
-    assert any(level == "warn" and "leaving it failed: injected" in text
-               for level, text in mgr.flash)
+    assert any(level == "warn" and text.startswith("Leaving the previous project failed: "
+                                                   "injected") for level, text in mgr.flash)
+    assert not any("was discarded" in text for _, text in mgr.flash)   # nothing was
 
     def defect(*a, **k):
         raise sqlite3.ProgrammingError("a defect of ours")
@@ -1568,6 +1569,25 @@ def test_an_older_leftover_temporary_stays_temporary_when_migrated(tmp_path):
         asyncio.run(c.discard_leftover(path.name, confirm=True))
     with pytest.raises(projects.NeedsDiscard):
         asyncio.run(b.close())
+    backups = core_project.sidecar_dir(path) / core_project.BACKUPS_DIRNAME
+    assert len(list(backups.iterdir())) == 1               # the verified pre-v22 backup
+    b.flash.clear()
+    asyncio.run(b.close(discard=True))                     # round 4: no copy left behind
+    assert not path.exists() and not core_project.sidecar_dir(path).exists()
+    assert b.flash == []
+
+
+def test_discard_removes_only_the_projects_own_backups(tmp_path):
+    d = tmp_path / "p.fuzzlab.d"
+    (d / "backups").mkdir(parents=True)
+    own = d / "backups" / "p.pre-v21-20261015T000000Z-0123abcd.fuzzlab"
+    other = d / "backups" / "q.pre-v21-20261015T000000Z-0123abcd.fuzzlab"
+    for f in (own, Path(str(own) + "-wal"), other):
+        f.write_bytes(b"x")
+    (tmp_path / "p.fuzzlab").write_bytes(b"")
+    problems = projects._remove_project_files(tmp_path, "p.fuzzlab")
+    assert not own.exists() and not Path(str(own) + "-wal").exists() and other.exists()
+    assert problems == ["p.fuzzlab.d still holds 1 unknown file(s); left in place"]
 
 
 def test_dismiss_takes_the_lock_and_a_vanished_offer_is_a_refusal(tmp_path):
@@ -1575,7 +1595,28 @@ def test_dismiss_takes_the_lock_and_a_vanished_offer_is_a_refusal(tmp_path):
     mgr = ProjectManager(_cfg(tmp_path, store=None))
     with pytest.raises(ProjectError, match="no migration is waiting"):
         mgr._migrate_pending(False)
-    assert asyncio.iscoroutinefunction(ProjectManager.dismiss_pending)
+    mgr.pending = projects.Pending(tmp_path / "x.fuzzlab", "older", "", 21)
+
+    async def scenario():
+        async with mgr.lock:                       # a migration holds the lock …
+            task = asyncio.create_task(mgr.dismiss_pending())
+            await asyncio.sleep(0.05)
+            assert mgr.pending is not None         # … so Not now waits for it
+        await task
+        assert mgr.pending is None
+    asyncio.run(scenario())
+
+
+def test_an_unreadable_recent_list_is_a_refusal_when_opening(tmp_path, monkeypatch):
+    """Round 4: the already-open check read the list outside `_refusal`."""
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("a"))
+
+    def denied(path):
+        raise PermissionError(13, "Permission denied", str(path))
+    monkeypatch.setattr(projects, "_parse_recent", denied)
+    with pytest.raises(ProjectError, match="opening the project failed"):
+        asyncio.run(mgr.open(recent_id=0, recent_path=str(tmp_path / "x.fuzzlab")))
 
 
 def test_reopening_the_open_project_from_recent_is_a_no_op_even_while_busy(tmp_path):

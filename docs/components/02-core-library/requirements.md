@@ -469,8 +469,8 @@ plugin registry. It is the layer that makes the store the integration bus.
   *(Code review round 2, BUG-0451:)* the untrusted-file check is an **allowlist**:
   `reference_schema(version)` (fuzzlab's migrations run in memory) and `_foreign_objects`
   refuse any `sqlite_master` row whose exact `(type, name, tbl_name)` is not fuzzlab's at
-  the file's version, or — *(code review round 3, BUG-0453)* — whose normalised
-  **definition** differs from the reference's, **for every object including tables**
+  the file's version, or — *(code review round 3, BUG-0453; round 4, BUG-0456)* — whose
+  **definition** differs from the reference's **byte for byte** (no normalisation), **for every object including tables**
   (`trusted_schema=OFF` stops application functions only, so an added generated column,
   `CHECK` or `DEFAULT` would run SQLite's own functions); `sqlite_stat1`/`sqlite_stat4`
   must carry SQLite's own definitions. `schema_version`'s definition is checked from

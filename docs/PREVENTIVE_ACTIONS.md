@@ -1768,3 +1768,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      linear-time redaction first and cut last.
   2. **Every bound a redactor introduces is tested with a secret straddling it.** (from
      BUG-0455)
+
+- **PA-0456** — Strengthens `PA-0131` and `PA-0453`, after BUG-0456: the definition check
+  compared whitespace-normalised text (`str.split()`), and a definition SQLite reads
+  differently (a U+00A0 inside an identifier, a moved `--` comment end) compared equal.
+  1. **An equality or allowlist check over untrusted input compares the raw form, byte for
+     byte,** unless a normalisation is the consumer's own (its tokenizer or parser) — never
+     a convenience transform from another grammar.
+  2. **Its tests include inputs that differ only in what the consumer treats as
+     significant** (non-ASCII spaces, comment boundaries, quoting), each with a
+     non-vacuity step proving the consumer reads them differently. (from BUG-0456)

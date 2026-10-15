@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from fuzzlab.core import project as core_project
 from fuzzlab.core.config import Config
-from fuzzlab.core.project import PROJECT_EXT, ProjectError, sidecar_dir
+from fuzzlab.core.project import BACKUPS_DIRNAME, PROJECT_EXT, ProjectError, sidecar_dir
 from fuzzlab.core.store import LAUNCH_TOKEN_ENV, Store
 
 try:                                                # POSIX only
@@ -381,14 +381,19 @@ class ProjectManager:
         file error while leaving is reported the same way, never as a failure of the
         action that opened ``new`` (code review round 3: that action succeeded). A defect
         still propagates."""
+        leave_error = None
         try:
             problems = self._leave(discard_temporary=discard)
         except _REFUSAL_ERRORS as exc:
             if isinstance(exc, _DEFECT_ERRORS):
                 raise
-            problems = [f"leaving it failed: {exc}"]
+            problems, leave_error = [], exc
         finally:
             self.current = new
+        if leave_error is not None:
+            self.flash.append(("warn", f"Leaving the previous project failed: {leave_error}; "
+                               "check its files on the projects page."))
+            return [f"leaving the previous project failed: {leave_error}"]
         if problems:
             self.flash.append(("warn", "The temporary project was discarded, but: "
                                + "; ".join(problems)))
@@ -530,7 +535,10 @@ class ProjectManager:
         ``None``. Reads the list only — never validates or opens anything."""
         if self._checked_dir() is None or not isinstance(recent_id, int):
             return None
-        entries, _bad = _parse_recent(self._recent_path())
+        try:
+            entries, _bad = _parse_recent(self._recent_path())
+        except OSError:                    # unreadable: the worker reports it properly
+            return None
         if 0 <= recent_id < len(entries) and entries[recent_id]["path"] == recent_path:
             return Path(recent_path)
         return None
@@ -585,7 +593,6 @@ class ProjectManager:
         core_project.create(path, path.stem)
 
     @_refusal("creating the project file")
-    @_refusal("preparing the project")
     def _ensure_created(self) -> str:
         """The open project's path, created (0600, metadata) if it does not exist yet."""
         if self.current is None:
@@ -1283,6 +1290,7 @@ def _remove_project_files(directory: Path, name: str,
                         for suffix in _SIDE:
                             problems += _unlink_owned(sfd, base + suffix)
                     problems += _unlink_owned(sfd, OWNER_LOCK)
+                    problems += _remove_own_backups(sfd, name)
                     leftover = os.listdir(sfd)
                 finally:
                     os.close(sfd)
@@ -1293,6 +1301,35 @@ def _remove_project_files(directory: Path, name: str,
                     os.rmdir(sd_name, dir_fd=dfd)
     finally:
         os.close(dfd)
+    return problems
+
+
+def _remove_own_backups(sfd: int, name: str) -> list[str]:
+    """The project's own pre-migration backups (`core.project.backup_path`: exactly
+    ``backups/<stem>.pre-v<N>-<UTC>-<hex8>.fuzzlab`` and its side files) — removed with
+    the project, by the same owned-regular-file rule, so a discarded temporary leaves no
+    copy of its data behind (code review round 4). Anything else in ``backups/`` is left,
+    and the directory is removed only when empty."""
+    try:
+        st = os.stat(BACKUPS_DIRNAME, dir_fd=sfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return []
+    if not stat.S_ISDIR(st.st_mode):
+        return [f"{BACKUPS_DIRNAME} is not a directory; left in place"]
+    stem = name[:-len(PROJECT_EXT)] if name.endswith(PROJECT_EXT) else name
+    own = re.compile(re.escape(stem) + r"\.pre-v\d+-\d{8}T\d{6}Z-[0-9a-f]{8}"
+                     + re.escape(PROJECT_EXT) + r"(-wal|-shm|-journal)?")
+    problems: list[str] = []
+    bfd = os.open(BACKUPS_DIRNAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=sfd)
+    try:
+        for entry in os.listdir(bfd):
+            if own.fullmatch(entry):
+                problems += _unlink_owned(bfd, entry)
+        empty = not os.listdir(bfd)
+    finally:
+        os.close(bfd)
+    if empty:
+        os.rmdir(BACKUPS_DIRNAME, dir_fd=sfd)
     return problems
 
 

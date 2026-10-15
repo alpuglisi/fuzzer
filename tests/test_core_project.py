@@ -879,3 +879,30 @@ def test_run_history_labels_an_unknown_exit(tmp_path):
     project.finish_launch(tmp_path / "s.db", lid, "unknown", None)
     with Store(tmp_path / "s.db", create=False) as store:
         assert project.run_history(store)[0]["label"] == "unknown exit"
+
+
+@pytest.mark.parametrize("table,column,rewrite", [
+    ("launch", "argv", lambda sql: sql.replace("    argv ", " argv ", 1)),
+    ("page", "template_cluster_id", lambda sql: sql.replace(
+        "-- 'link' | 'xhr' | ...\n    template_cluster_id TEXT,\n",
+        "-- 'link' | 'xhr' | ... template_cluster_id TEXT,\n\n", 1)),
+], ids=["non-ascii-space", "comment-shift"])
+def test_a_definition_that_only_normalises_equal_is_refused(tmp_path, table, column, rewrite):
+    """BUG-0456 (code review round 4): whitespace normalisation that is not SQLite's
+    grammar let a column vanish — U+00A0 is an identifier character to SQLite, and a
+    newline is where a `--` comment ends."""
+    path = tmp_path / "shifted.fuzzlab"
+    project.create(path)
+    conn = sqlite3.connect(path)
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
+    conn.close()
+    new = rewrite(sql)
+    assert new != sql and " ".join(new.split()) == " ".join(sql.split())   # equal once normalised
+    _rewrite_definition(path, table, lambda _old: new)
+    conn = sqlite3.connect(path)                          # non-vacuity: the column is gone
+    with pytest.raises(sqlite3.OperationalError, match="no such column"):
+        conn.execute(f"SELECT {column} FROM {table}")
+    conn.close()
+    with pytest.raises(ProjectError, match=rf"table {table} \(definition changed\)"):
+        project.inspect(path)
+    assert project.summary(path) == {"readable": False}

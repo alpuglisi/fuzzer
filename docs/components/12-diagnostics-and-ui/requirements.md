@@ -478,7 +478,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
 - **FR-UI-453** Leaving a **temporary project** (close, open, new, another temporary)
   deletes it and needs an explicit confirmation (`discard`); without it the action is
   refused with a message offering Save as. Deletion removes exactly the files the
-  project owns: its file, its SQLite side files and the known files of its directory,
+  project owns: its file, its SQLite side files, the known files of its directory and
+  its own pre-migration backups (`backups/<stem>.pre-v…`; code review round 4),
   each checked to be a regular file of this user, the main file matched to the inode
   recorded at creation; anything else is left and reported. Shutdown deletes nothing;
   leftover temporaries are listed for Open or Discard — Discard needs its own ticked box

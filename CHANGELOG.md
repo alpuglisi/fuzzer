@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (project files: code review round 4; CC-UI-0450, CC-CORE-0450, BUG-0456)
+- **Why:** the security reviewer's re-review found the new definition check compared
+  whitespace-normalised text, so a definition SQLite reads differently passed it.
+- **What:** definitions are compared byte for byte (BUG-0456); a discarded temporary's
+  pre-migration backups are removed with it; smaller fixes from the correctness re-review
+  (one refusal label on file creation, a clear message when leaving the previous project
+  fails, Not now proven to wait for the lock, an unreadable recent list is a refusal).
+
 ## 2026-10-15 (project files: code review round 3; CC-UI-0450, CC-CORE-0450, BUG-0453, BUG-0454, BUG-0455)
 - **Why:** the third independent review (a correctness and a security reviewer) found that
   a crafted project file could still run SQLite's own functions on open, crash the project

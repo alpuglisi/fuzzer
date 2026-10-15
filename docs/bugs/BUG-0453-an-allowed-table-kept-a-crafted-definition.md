@@ -105,3 +105,8 @@ other read. PA-0002 sweep: the gates over untrusted SQLite on this branch are `i
 `summary` (both fixed here) and the migrations' entry (`migrate_with_backup` calls
 `inspect` first); `Store`/`open_store` elsewhere open only stores the operator configured
 or that passed `inspect`, so no other site reads an unvalidated file.
+
+## Addendum — code review round 4 (2026-10-15)
+The corrective action's "compares the normalised definition" was itself a bypass: the
+normaliser was Python's whitespace, not SQLite's grammar — **BUG-0456** (PA-0456). The
+comparison is now byte for byte. This report is otherwise unchanged (append-only).

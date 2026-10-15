@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — project files (unmerged): code review round 4 — a definition that only normalised equal passed the schema check (fixed, BUG-0456/PA-0456)
+- **Symptom:** security reviewer: replacing the space before `argv` in `launch`'s stored definition with U+00A0 (or moving the newline that ends a `--` comment in `page`) passed `inspect` and `summary`; SQLite then had no `argv` column and `/project` was a 500.
+- **Root cause:** the definition check compared text after Python's `str.split()` whitespace normalisation, which is not SQLite's grammar.
+- **Remediation:** definitions compared byte for byte (`_exact_sql`), verified against fresh, analysed, downgraded and historical stores; regression test with non-vacuity steps; mutation-checked.
+- **Status:** Fixed (re-review pending)
+
 ## 2026-10-15 — project files (unmerged): code review round 3 — crafted table definitions ran SQL on open; crafted values crashed the project pages; a straddling credential was recorded (fixed, BUG-0453/PA-0453, BUG-0454/PA-0454, BUG-0455/PA-0455)
 - **Symptom:** security reviewer: a project file whose `project` table definition gained a generated column built from `printf`/`replace` held `inspect` for 38 s (and `summary` hung the start screen); a 200 000-deep `targets` JSON or a BLOB `started_at` made `/projects/open` and `/project` 500s; both reviewers: `http://admin:<4 KB>@host` was recorded with the password.
 - **Root cause:** the allowlist exempted tables from definition matching on a false belief about `trusted_schema=OFF`, and read `schema_version` before checking it; readers assumed fuzzlab-written types and shallow JSON; the record redactor cut values before stripping userinfo.

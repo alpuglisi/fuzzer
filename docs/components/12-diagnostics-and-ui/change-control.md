@@ -148,7 +148,17 @@ Newest first.
     value in a crafted file that passed the schema allowlist — a page error, not code
     execution or a write; for the results-pages owner.
   - Residual (stated): a migrated temporary's pre-migration backup (`<tmp>.d/backups/`)
-    is kept, and reported, when the temporary is discarded.
+    is kept, and reported, when the temporary is discarded. *(Superseded in round 4: it
+    is now removed with the temporary.)*
+- Code review round 4 (on bffa9c1; the same two reviewers): correctness — APPROVE with
+  non-blocking items, all fixed: one `_refusal` on `_ensure_created` ("creating the
+  project file"); a failure leaving the previous project gets its own warning, not "was
+  discarded, but"; the dismiss test proves Not now waits for the lock; an unreadable
+  recent list in the already-open check is a refusal, not a 500; a discarded temporary's
+  own pre-migration backups (`backups/<stem>.pre-v<N>-<UTC>-<hex>.fuzzlab` and side files,
+  regular files of this user) are removed with it, anything else in `backups/` left and
+  reported (`_remove_own_backups`; also the security reviewer's item 2). Security — 1
+  blocking (BUG-0456, CORE; see CC-CORE-0450).
 - Effectiveness (assessed pending): pending.
 
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)

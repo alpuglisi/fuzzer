@@ -97,6 +97,14 @@ Newest first.
     (`identity_malformed`), never silently dropped; tests for migration 23's backfill on a
     v22 row, a v22-migrated and an FTS store in the allowlist's non-vacuity fixture, the
     "unknown exit" label.
+- Code review round 4 (on bffa9c1; the same two reviewers): correctness — APPROVE;
+  security — 1 blocking: BUG-0456, the definition check compared `str.split()`-normalised
+  text (a U+00A0 or a moved comment end compared equal while SQLite read a different
+  schema) → byte-for-byte comparison (`_exact_sql`); checked against fresh, `ANALYZE`d,
+  v21/v22-downgraded stores and all 15 past migration sets (byte-identical). PA-0456.
+  PA-0002 sweep: the only other `" ".join(….split())` in `fuzzlab/` is `core/forms.py`'s
+  option-label text (HTML, collapsed as a browser does; not a safety comparison).
+  `BACKUPS_DIRNAME` is now the one name for the backups directory (PA-0001).
 - Effectiveness (assessed pending): pending.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)

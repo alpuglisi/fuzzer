@@ -48,6 +48,8 @@ PROJECT_EXT = ".fuzzlab"
 #: A project's own directory (`sidecar_dir`): intermediates the pinned tools write
 #: (crawl / audit databases, the fuzz CSV) and pre-migration backups. 0700.
 SIDECAR_SUFFIX = ".d"
+#: The directory inside a project's own directory that `migrate_with_backup` writes to.
+BACKUPS_DIRNAME = "backups"
 SQLITE_MAGIC = b"SQLite format 3\x00"
 #: ``quick_check`` reads the whole file; above this size it is skipped (and said so).
 QUICK_CHECK_MAX_BYTES = 512 * 1024 * 1024
@@ -59,8 +61,14 @@ MAX_NAME_CHARS = 200
 #: exit status could not be read.
 LAUNCH_STATUSES = ("running", "succeeded", "failed", "stopped", "unknown")
 
-def _norm_sql(sql: str | None) -> str:
-    return " ".join((sql or "").rstrip().rstrip(";").split())
+def _exact_sql(sql: str | None) -> str | None:
+    """A schema object's stored definition, compared **byte for byte** (BUG-0456): any
+    normalisation that is not SQLite's own grammar lets two definitions that differ to
+    SQLite compare equal (a U+00A0 Python reads as a space is an identifier character to
+    SQLite; a newline ends a ``--`` comment). SQLite stores the ``CREATE`` text as written
+    and ``ALTER … ADD COLUMN`` appends deterministically, so a legitimate store's text
+    equals the reference's exactly."""
+    return sql
 
 
 #: The only errors `inspect` turns into a refusal; anything else propagates (PA-0106).
@@ -153,7 +161,7 @@ SUMMARY_LENGTH_LIMIT = 1024 * 1024
 @functools.lru_cache(maxsize=None)
 def reference_schema(version: int) -> dict[tuple[str, str, str], str]:
     """Every schema object fuzzlab's migrations create up to ``version``, as
-    ``{(type, name, tbl_name): normalised sql}`` — built by running those migrations in
+    ``{(type, name, tbl_name): sql}`` (the exact stored text) — built by running those migrations in
     memory, so the allowlist is derived from the one source of truth (PA-0001)."""
     conn = sqlite3.connect(":memory:")
     try:
@@ -166,7 +174,7 @@ def reference_schema(version: int) -> dict[tuple[str, str, str], str]:
                 break
             for stmt in migrations.split_statements(sql):
                 conn.execute(stmt)
-        return {(t, n, tb): _norm_sql(q) for t, n, tb, q in conn.execute(
+        return {(t, n, tb): _exact_sql(q) for t, n, tb, q in conn.execute(
             "SELECT type, name, tbl_name, sql FROM sqlite_master")}
     finally:
         conn.close()
@@ -176,8 +184,8 @@ def _foreign_objects(conn: sqlite3.Connection, version: int) -> list[str]:
     """Schema objects in the file that fuzzlab's migrations (at ``version``) never
     create: an **allowlist** check (BUG-0451). A row counts only if its exact
     ``(type, name, tbl_name)`` — type compared case-sensitively, as written — is in the
-    reference schema **and** its definition matches the reference's exactly (normalised
-    whitespace), for every object including ordinary tables (BUG-0453):
+    reference schema **and** its definition matches the reference's byte for byte
+    (BUG-0456: no normalisation), for every object including ordinary tables (BUG-0453):
     ``trusted_schema=OFF`` stops application-defined functions only, so a generated
     column, ``CHECK`` or ``DEFAULT`` added to an allowed table would otherwise run
     SQLite's own functions — without bound — on every read. Matching every definition
@@ -188,13 +196,13 @@ def _foreign_objects(conn: sqlite3.Connection, version: int) -> list[str]:
     out = []
     for t, n, tb, q in conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master"):
         if t == "table" and n in _SQLITE_STAT_TABLES and tb == n:
-            if _norm_sql(q) != _SQLITE_STAT_TABLES[n]:
+            if _exact_sql(q) != _SQLITE_STAT_TABLES[n]:
                 out.append(f"{t} {n} (definition changed)")
             continue
         key = (t, n, tb)
         if key not in ref:
             out.append(f"{t} {n}")
-        elif _norm_sql(q) != ref[key]:
+        elif _exact_sql(q) != ref[key]:
             out.append(f"{t} {n} (definition changed)")
     return sorted(out)
 
@@ -208,7 +216,7 @@ def _version_table_trusted(conn: sqlite3.Connection) -> bool:
                         "WHERE name='schema_version'").fetchall()
     want = reference_schema(1)[("table", "schema_version", "schema_version")]
     return len(rows) == 1 and rows[0][0] == "table" and rows[0][1] == "schema_version" \
-        and _norm_sql(rows[0][2]) == want
+        and _exact_sql(rows[0][2]) == want
 
 
 def _inspect_open(conn: sqlite3.Connection, p: Path, size: int, head: int) -> ProjectInfo:
@@ -758,7 +766,7 @@ def backup_path(path: str | Path, schema_version: int) -> Path:
     named so it is never listed as a project."""
     p = Path(path)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return (sidecar_dir(p) / "backups" /
+    return (sidecar_dir(p) / BACKUPS_DIRNAME /
             f"{p.stem}.pre-v{schema_version}-{stamp}-{secrets.token_hex(4)}.fuzzlab")
 
 
