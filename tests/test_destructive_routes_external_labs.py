@@ -589,6 +589,8 @@ def spelling_hits(url: str) -> list[str]:
 SPELLING_DISPOSITIONS = {
     JUICE + "/rest/user/change-password": "BUG-0301 (strict xfail above)",
     JUICE + "/dataerasure": "BUG-0301 (strict xfail above)",
+    "/dataerasure": "BUG-0301 (strict xfail above): the answer key's JUICE-0017 names "
+                    "the route by its path; it has no injection point",
     _bw("password_change.php"): "a GET visit only renders the form; the change needs its "
                                 "three password controls, which credential_change_rule "
                                 "refuses (row above)",

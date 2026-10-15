@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (the dev branch's suite green again: /dataerasure disposition)
+- **What:** `tests/test_destructive_routes_external_labs.py` gives the answer key's path-only `/dataerasure` row (JUICE-0017, CC-LAB-0261) the same BUG-0301 disposition as its full URL.
+- **Why:** commit 8e45899 was pushed after only the static lab tests and turned the compound-word guard red (claude_juicelab_failures F-025). The BUG-0118 branch that also carries this line is held for the owner's decision on its gate (F-017), so the line is ported alone.
+
 ## 2026-10-15 (claude_juicelab_failures: a running record of the agent's failures)
 - **What:** `docs/claude_juicelab_failures.md` (new, append-only): every failure, wrong action and oversight by the AI agent during the Juice Shop work and before it (F-001..F-047), each with evidence, impact and status. CLAUDE.md now requires appending to it whenever a new one is found.
 - **Why:** the owner's request, to support a full investigation once the Juice Shop lab is complete. Writing it surfaced a regression the agent had misdiagnosed: Juice Shop's login SQLi, confirmed on 2026-10-14, is refused by the agent's own BUG-0118 gate in the 2026-10-15 baseline (F-017, F-018).
