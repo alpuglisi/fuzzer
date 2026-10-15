@@ -325,6 +325,7 @@ class LoginGate:
         #: BUG-0148 (design section 5): every write aborted before the window, as
         #: ``METHOD host/path`` (no query), each once, in order
         self.prewindow_writes: list[str] = []
+        self._named_writes: dict[str, None] = {}
         self.prewindow_write_count = 0
         #: an affordance click is in progress (its reveal window, design section 3)
         self.clicking = False
@@ -359,12 +360,13 @@ class LoginGate:
             self.click_out_of_scope.append(_host(url))
 
     def note_prewindow_write(self, method: str, url: str) -> None:
-        """An aborted write before the window: counted, and named by host and path."""
+        """An aborted write before the window: counted, and named by host and path
+        (each name once, in order: a diagnosis, never a send decision)."""
         self.prewindow_write_count += 1
         parts = urlsplit(url or "")
-        name = f"{(method or '?').upper()} {parts.hostname or '?'}{parts.path or '/'}"
-        if name not in self.prewindow_writes:
-            self.prewindow_writes.append(name)
+        self._named_writes.setdefault(
+            f"{(method or '?').upper()} {parts.hostname or '?'}{parts.path or '/'}")
+        self.prewindow_writes[:] = list(self._named_writes)
 
     def window_refusal(self, method: str, url: str, navigation: bool) -> str | None:
         """The route's ``window`` hook (design section 3): while an affordance click is
@@ -730,7 +732,11 @@ class _Discovery:
         """The base page's login links and clicks, then those inside one level of each
         account menu (opened in the reveal window), in document order."""
         from fuzzlab.tools import spa
-        items = _read_affordances(self.page)
+        try:
+            items = _read_affordances(self.page)
+        except _playwright_errors() as exc:              # the page went away meanwhile
+            self.refusals.append(f"the base page's controls: {_first_line(exc)}")
+            return []
         out: list[_Candidate] = []
         here = spa.visit_key(self.page.url)
         for item in items:

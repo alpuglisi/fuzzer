@@ -108,7 +108,8 @@ def test_the_logout_mode_is_looks_like_login_url_unchanged():
     ("Sign in with Google", "", False), ("Forgot password", "", False),
     ("Account", "", False), ("Login history", "", False), ("", "", False),
     ("Anmelden", "", False),                            # English labels only (residual)
-    ("Members", "Sign in", False),                       # the text decides when present
+    ("Members", "Sign in", True),                        # the accessible name
+    ("Sign in", "Members area", True),
 ])
 def test_the_affordance_rule(text, aria, hit):
     assert login_affordance(text, aria) is hit

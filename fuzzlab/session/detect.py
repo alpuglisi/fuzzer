@@ -342,15 +342,17 @@ def looks_like_login_url(url: str, *, final_token: bool = True) -> bool:
 
 
 def login_affordance(text: str, aria: str = "") -> bool:
-    """Is a link or button labelled as **the** way to log in (BUG-0148)? Its text (or,
-    with no text, its aria-label / title), as `name_tokens` with `AFFORDANCE_FILLER`
-    dropped, is exactly ``login``, ``signin``, ``logon``, ``log in``, ``sign in`` or
-    ``log on``. English labels only (a stated residual). The caller still applies the
-    label gates (`browserlogin.affordance_refusal`)."""
+    """Is a link or button labelled as **the** way to log in (BUG-0148)? Its
+    aria-label / title (the accessible name) or its text, as `name_tokens` with
+    `AFFORDANCE_FILLER` dropped, is exactly ``login``, ``signin``, ``logon``,
+    ``log in``, ``sign in`` or ``log on``. English labels only (a stated residual). The
+    caller still applies the label gates to both (`browserlogin.affordance_refusal`)."""
     from fuzzlab.core.redaction import name_tokens
-    label = text if (text or "").strip() else aria
-    tokens = tuple(t for t in name_tokens(label or "") if t not in AFFORDANCE_FILLER)
-    return tokens in _AFFORDANCE_LABELS
+
+    def match(label: str) -> bool:
+        tokens = tuple(t for t in name_tokens(label or "") if t not in AFFORDANCE_FILLER)
+        return tokens in _AFFORDANCE_LABELS
+    return match(aria) or match(text)
 
 
 #: At most this many links are read from one page by `login_links`.

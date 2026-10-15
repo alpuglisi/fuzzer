@@ -252,7 +252,9 @@ REGISTRY = {
     "fuzzlab.labgen.oracle_wrapper:assert_loopback":
         Covered(f"{_ME}::test_the_oracle_loopback_check_reads_only_the_host_of_a_subpath_url"),
     "fuzzlab.session.browserlogin:LoginGate.__init__": Covered(_SPA_SUBPATH),
-    "fuzzlab.session.browserlogin:_login_routes": Covered(_SPA_SUBPATH),
+    # BUG-0148: `_login_routes` became `_Discovery` (the sub-path SPA's form is behind
+    # a route, so that test drives it)
+    "fuzzlab.session.browserlogin:_Discovery.__init__": Covered(_SPA_SUBPATH),
     "fuzzlab.session.browserlogin:_pick_form": Covered(_SPA_SUBPATH),
     "fuzzlab.session.browserlogin:_drive": Covered(_SPA_SUBPATH),
     "fuzzlab.session.browserlogin:run": Covered(_SPA_SUBPATH),
