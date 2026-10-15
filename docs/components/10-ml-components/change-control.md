@@ -3,6 +3,29 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0500 — ML reads run targets and the method key through core (2026-10-15)
+- Change: `ml/dataset.method_key` is re-exported from `core.evidence.method_key` (same
+  function); `ml/dataset.target_of` reads through `core.runtarget.run_target`;
+  `ml/dataset.target_runs` and `ml/holdout._run_origins` through
+  `core.runtarget.run_origins` (CC-CORE-0500).
+- Impact: `target_runs` now matches a run on its **first** target row (it matched any
+  row); every current writer writes at most one row per run, so no store current tools
+  write changes. Holdout seals and same-target training read the same origins as
+  before.
+- Risk: low.
+- Deliverables:
+  - [x] delegation (~15 LOC) — done
+  - [x] ML tests re-run (every test file importing `fuzzlab.ml.dataset` /
+    `fuzzlab.ml.holdout`) — done
+- Effectiveness (assessed 2026-10-15): the re-run is quoted in CC-UI-0501's
+  effectiveness; `tests/test_core_runtarget.py::test_ml_and_report_readers_agree_with_the_core_reader`
+  pins `target_of`, `target_runs` (first row only) and the `method_key` re-export.
+- Reported, not fixed here (design review A): `ml/dataset.endpoint_key` takes
+  `to_path(ev["url"])`, which drops a `fragment` point's SPA route, while the oracle
+  records that finding at `finding_url` (`/#/route`); so a confirmed DOM-XSS finding
+  never labels its candidate, which then trains as a negative. Raised with the operator
+  as a follow-up for the ML lane.
+
 ### CC-ML-0030 — Note: the `loc_body` feature counts `json` points as body (forms phase 3; documentation) (2026-10-14)
 - Change: FR-ML-5 gains a dated note: the candidate feature `loc_body`
   (`core/features.extract_candidate_v1`) is 1 for location `json` (one leaf of a JSON

@@ -34,7 +34,6 @@ from __future__ import annotations
 import hashlib
 import json
 
-from fuzzlab.core.urls import canonical_origin
 
 HOLDOUT_VERSION = 1
 HOLDOUT_FRACTION = 0.2
@@ -96,11 +95,8 @@ def _sealing_of(recs) -> tuple | str | None:
 def _run_origins(store) -> dict[int, str | None]:
     """Run id -> canonical origin of its recorded target (the first target row, as
     `dataset.target_of`)."""
-    out: dict[int, str | None] = {}
-    for r in store.conn.execute("SELECT run_id, base_url FROM target WHERE run_id IS NOT "
-                                "NULL ORDER BY id").fetchall():
-        out.setdefault(int(r["run_id"]), canonical_origin(r["base_url"]))
-    return out
+    from fuzzlab.core.runtarget import run_origins       # the one reader (CC-ML-0500)
+    return run_origins(store.conn)
 
 
 class _AllUnknown(dict):

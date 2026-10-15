@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from fuzzlab.core.evidence import parse_evidence
+from fuzzlab.core.evidence import method_key, parse_evidence  # noqa: F401 - method_key re-exported (CC-ML-0500)
 from fuzzlab.core.features import (CANDIDATE_FEATURE_NAMES, CANDIDATE_FEATURE_VERSION,
                                    extract_candidate_v1)
 from fuzzlab.core.oracle_status import UNLABELLED
 from fuzzlab.core.runmode import to_category
+from fuzzlab.core.runtarget import run_origins, run_target
 from fuzzlab.core.urls import canonical_origin, to_path
 
 # The candidate feature vector is computed by `core/`'s versioned extractor (FR-ML-5,
@@ -57,13 +58,6 @@ class Dataset:
         return sum(y for y, lab in zip(self.y, self.labelled) if lab)
 
 
-def method_key(method) -> str:
-    """The HTTP method as every label / seen-key join compares it: upper-case, and
-    ``GET`` when missing (the evidence default). The one definition (PA-0003) for both
-    sides of a join (BUG-0075, PA-0076)."""
-    return method.upper() if isinstance(method, str) and method else "GET"
-
-
 def endpoint_key(ev: dict) -> str:
     """The endpoint a candidate belongs to — its URL path. The one definition for the
     group-k-fold groups and for blind-holdout membership (PA-0003, CC-ML-0020): folds
@@ -77,9 +71,8 @@ def target_runs(store, target: str) -> list[int]:
     want = canonical_origin(target)
     if want is None:                     # no usable host: matches nothing
         return []
-    return sorted({int(r["run_id"]) for r in store.conn.execute(
-        "SELECT run_id, base_url FROM target WHERE run_id IS NOT NULL").fetchall()
-        if canonical_origin(r["base_url"]) == want})
+    # a run's target is its first target row (`core.runtarget`, CC-ML-0500)
+    return sorted(rid for rid, origin in run_origins(store.conn).items() if origin == want)
 
 
 def _run_filter(store, run_id, before_run_id, target) -> tuple[str, tuple]:
@@ -204,8 +197,7 @@ def target_of(store, run_id: int) -> str | None:
     """The pipeline's recorded target (`target.base_url`) for a run, or ``None`` when the
     run has no target row (the pipeline writes one only when it had points). The one
     definition of "same target" for cross-run training (PA-0003)."""
-    row = store.conn.execute(
-        "SELECT base_url FROM target WHERE run_id=? ORDER BY id LIMIT 1", (run_id,)).fetchone()
+    row = run_target(store.conn, run_id)          # the one reader (CC-ML-0500)
     return row["base_url"] if row else None
 
 

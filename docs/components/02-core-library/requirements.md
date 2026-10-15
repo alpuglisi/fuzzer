@@ -450,6 +450,25 @@ plugin registry. It is the layer that makes the store the integration bus.
     namespace may be bridged with published ports. Nothing launches servers that way
     today.
 
+- **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
+  2026-10-15).*
+  - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a
+    run's target is its **first** `target` row by id (`run_target_rows`, `run_target`),
+    and its origin is that row's `base_url` through `core.urls.canonical_origin`
+    (`run_origins`; `None` when the URL has no usable host or port). A run without a
+    target row has no recorded target; nothing is inferred from `run.config_hash` or a
+    hostname (PA-0075). Every production writer writes at most one row per run, so the
+    "first row" rule changes no current output.
+  - Readers: `ml/dataset.target_of` / `target_runs`, `ml/holdout._run_origins`,
+    `report/report.build_report`, `web/results.run_detail` / `finding_detail`,
+    `web/proxycontrol.create_from_finding`, `web/sitetree`. Enforced by
+    `tests/test_core_runtarget.py::test_no_module_reads_target_rows_outside_runtarget`
+    (a lint over `fuzzlab/` for upper-case `FROM target` / `JOIN target`; the shipped
+    migration-19 post-step is allowlisted; proven on a synthetic offender).
+  - `core.evidence.method_key(method)`: upper-case, `GET` when missing -- the one
+    method normalisation for joins (PA-0076(2)), moved from `ml.dataset` (which
+    re-exports it) so the web UI shares it without the ML package.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

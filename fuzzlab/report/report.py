@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core.runtarget import run_target
+
 
 def _one(store, sql, args=()):
     row = store.conn.execute(sql, args).fetchone()
@@ -101,8 +103,10 @@ def build_report(store, run_id: int | None = None) -> dict:
 
     run = _one(store, "SELECT id, tool, started_at, config_hash, env_profile, notes "
                       "FROM run WHERE id=?", (run_id,))
-    target = _one(store, "SELECT base_url, dbms, framework, waf FROM target "
-                         "WHERE run_id=? ORDER BY id DESC LIMIT 1", (run_id,))
+    # the run's first target row, through the one reader (CC-UI-0501, PA-0063(1))
+    row = run_target(store.conn, run_id)
+    target = None if row is None else {k: row[k] for k in ("base_url", "dbms",
+                                                           "framework", "waf")}
 
     fired = {int(r["fired"]): int(r["c"]) for r in store.conn.execute(
         "SELECT fired, COUNT(*) c FROM evaluation WHERE run_id=? GROUP BY fired",

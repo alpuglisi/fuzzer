@@ -34,6 +34,14 @@ def parse_evidence(raw) -> dict | None:
     return ev
 
 
+def method_key(method) -> str:
+    """The HTTP method as every label / seen-key join compares it: upper-case, and
+    ``GET`` when missing (the evidence default). The one definition (PA-0003) for both
+    sides of a join (BUG-0075, PA-0076); moved here from ``ml.dataset`` so the web UI
+    can share it without the ML package (CC-CORE-0500)."""
+    return method.upper() if isinstance(method, str) and method else "GET"
+
+
 def display_evidence(raw) -> dict:
     """For display only (feeds no labels): the parsed object, or ``{}``."""
     try:

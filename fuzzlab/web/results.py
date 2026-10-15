@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fuzzlab.core.evidence import display_evidence
+from fuzzlab.core.runtarget import run_target
 from fuzzlab.core.urls import to_path
 
 # Score keys the harness records (report.as_dict); surfaced as a group in the UI.
@@ -201,12 +202,10 @@ def finding_detail(store, finding_id: int) -> dict | None:
         "f.method, f.param, f.evidence, f.created_at, "
         "a.candidate_id, a.payload_family, a.reward, a.score AS attempt_score, "
         "c.rule, c.sink_context, c.evidence AS cand_evidence, "
-        "r.tool AS run_tool, r.started_at AS run_started_at, "
-        "t.base_url AS target_base_url "
+        "r.tool AS run_tool, r.started_at AS run_started_at "
         "FROM finding f LEFT JOIN attempt a ON f.attempt_id = a.id "
         "LEFT JOIN candidate c ON a.candidate_id = c.id "
         "LEFT JOIN run r ON f.run_id = r.id "
-        "LEFT JOIN target t ON t.run_id = f.run_id "
         "WHERE f.id = ?", (finding_id,)
     ).fetchone()
     if row is None:
@@ -228,7 +227,8 @@ def finding_detail(store, finding_id: int) -> dict | None:
         "candidate": None if row["candidate_id"] is None else {
             "id": row["candidate_id"], "rule": row["rule"],
             "sink_context": row["sink_context"]},
-        "target_base_url": row["target_base_url"],
+        # the run's first target row, through the one reader (CC-UI-0501)
+        "target_base_url": (run_target(store.conn, row["run_id"]) or {}).get("base_url"),
     }
 
 
@@ -302,9 +302,7 @@ def run_detail(store, run_id: int) -> dict | None:
         (run_id,)).fetchall()}
     metrics = {r["key"]: r["value"] for r in store.conn.execute(
         "SELECT key, value FROM run_metrics WHERE run_id=?", (run_id,)).fetchall()}
-    target = store.conn.execute(
-        "SELECT base_url, dbms, framework, waf FROM target WHERE run_id=?", (run_id,)
-    ).fetchone()
+    target = run_target(store.conn, run_id)          # the one reader (CC-UI-0501)
 
     score = {k: metrics[k] for k in _SCORE_KEYS if k in metrics} or None
     model, scored = _scored_candidates(store, run_id)
@@ -321,7 +319,8 @@ def run_detail(store, run_id: int) -> dict | None:
             "negatives": fired.get(0, 0),
             "pages": _count(store, "page", run_id),
         },
-        "target_fingerprint": dict(target) if target else None,
+        "target_fingerprint": None if target is None else {
+            k: target[k] for k in ("base_url", "dbms", "framework", "waf")},
         "metrics": metrics,
         "score": score,
         "model": model,

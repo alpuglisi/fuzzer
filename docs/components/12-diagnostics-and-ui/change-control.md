@@ -3,6 +3,28 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0501 — The run page, finding detail, Repeater pivot and report read the run's target through core (2026-10-15)
+- Change: `web/results.run_detail` and `finding_detail`, `web/proxycontrol.
+  create_from_finding` and `report/report.build_report` take a run's target from
+  `core.runtarget.run_target` (its first `target` row; CC-CORE-0500) instead of their
+  own queries: an unordered `fetchone` (run page), a `LEFT JOIN target` on a non-unique
+  key (finding detail, Repeater pivot: one finding row per target row), and the **last**
+  row (`ORDER BY id DESC`, report).
+- Impact: run page, finding detail, "→ Repeater" from a finding, `fuzzlab report`. No
+  output change for stores current tools write (at most one target row per run).
+- Risk: low.
+- Deliverables:
+  - [x] four readers switched (~25 LOC) — done
+  - [x] `tests/test_core_runtarget.py::test_ml_and_report_readers_agree_with_the_core_reader`
+    (first row wins on a two-row store, for the report, run page and finding detail) — done
+- Effectiveness (assessed 2026-10-15): every test file importing a changed module
+  (`fuzzlab.ml.dataset` / `holdout`, `fuzzlab.report`, `fuzzlab.web.results` /
+  `proxycontrol`, `fuzzlab.core.evidence`; 48 files) re-run under
+  `FUZZLAB_REQUIRE_BROWSER=1`: 1363 passed, 1 error -- `tests/test_no_ml.py::
+  test_a_real_no_ml_build_passes_the_same_checks`, which builds from the tracked tree and
+  so could not see the then-uncommitted `core/runtarget.py`; re-run on the committed
+  tree (see the next CHANGELOG line / CC-UI-0500).
+
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
   candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could

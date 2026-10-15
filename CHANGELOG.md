@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (one reader for a run's target; site-tree groundwork)
+- **Why:** the site tree needs each run's origin without the ML package, and its design
+  gate found five private copies of "which `target` row is the run's" with three rules
+  (first, last, unordered). **What:** `core.runtarget` is the one reader (first row by
+  id, canonical origin) and `core.evidence.method_key` the one method key; ML, the
+  report, the run page, finding detail and the Repeater pivot read through them, and a
+  guard test fails on any other `target` read (CC-CORE-0500, CC-ML-0500, CC-UI-0501).
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),
