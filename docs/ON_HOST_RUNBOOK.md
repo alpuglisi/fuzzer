@@ -728,8 +728,10 @@ their run and finding counts), **Recent** (with **Remove from list**), and, when
 offers **Save as**, **Snapshot** (a timestamped copy; you stay in the project) and
 **Close**. The topbar chip
 on every page names the open project; `/project` shows its notes, targets and run
-history. Without `FUZZLAB_STORE_PATH=` the configured store (default `./fuzzlab.db`)
-opens as the project, as before; an older store is offered for migration (a verified
+history. Without `FUZZLAB_STORE_PATH=`, an explicitly configured store opens as the
+project, as before, and so does `./fuzzlab.db` if it already exists; if it does not, the
+start screen offers it instead of creating it (`--with-proxy` is the exception: it
+creates `./fuzzlab.db` at start-up, because the proxy needs a store). An older store is offered for migration (a verified
 backup goes to `<file>.d/backups/` first) and is not touched until you accept. Every
 store written by this branch before migration 23 (schema v22) gets that offer once.
 
@@ -747,6 +749,10 @@ private; the directory held `pff-oct.fuzzlab`, `recent.json` and `recent.json.lo
   with `--with-proxy`, whose history goes into the start-up project).
 - Leaving a temporary project deletes it only when you tick "discard"; use Save as to
   keep it. Unsaved temporaries from an earlier session are listed for Open or Discard.
+- A project file from someone else is checked before anything in it is read: any schema
+  object fuzzlab does not create, or a changed definition (a trigger, a view, an extra
+  column or constraint), refuses the file with the objects named. Such a refusal is the
+  expected result for a file edited by hand.
 - The UI never writes a credential into a project file (credentials stay in the keyring,
   and recorded commands and targets are redacted). Two exceptions are yours: Repeater
   tabs keep requests exactly as you typed them (a cookie or `Authorization` header you

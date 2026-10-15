@@ -580,7 +580,7 @@ _BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:?#]+:[^\s/?#]*@(?=[^\s@/])")
 _MATRIX_PARAM = re.compile(r";([^;=/?#\s]+)=([^;/?#\s]*)")
 #: What a stripped userinfo becomes.
 USERINFO_PLACEHOLDER = "***@"
-#: The longest value `redact_for_record` keeps (longer values are cut first).
+#: The longest value `redact_for_record` keeps (cut after userinfo is stripped).
 MAX_RECORD_CHARS = 4096
 
 
@@ -600,10 +600,13 @@ def redact_for_record(dest: str, value):
         return value
     if dest and is_sensitive_name(dest):
         return PLACEHOLDER
-    if len(value) > MAX_RECORD_CHARS:         # bounded work and storage (PA-0095/0096)
-        value = value[:MAX_RECORD_CHARS] + " …(truncated)"
+    # Userinfo is stripped from the **whole** value before it is cut (BUG-0455: a cut
+    # between a password and its ``@`` left the password unmatched); both patterns are
+    # linear. The cut then bounds the per-piece work and the stored size (PA-0095/0096).
     out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
     out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
+    if len(out) > MAX_RECORD_CHARS:
+        out = out[:MAX_RECORD_CHARS] + " …(truncated)"
     pieces = re.split(r"(\s+)", out)
     return "".join(_redact_piece(p) for p in pieces)
 

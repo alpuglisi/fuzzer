@@ -59,3 +59,22 @@ no check on what a test run leaves behind.
 counts as chosen only if it already exists, and otherwise it is offered, not used; and a
 session-wide guard fails a test run that leaves a default output in the working directory
 (`tests/conftest.py`). A new default output path gets the same guard.
+
+## Addendum — code review round 3 (2026-10-15)
+- **Recurrence review, completed:** **BUG-0125 / its session guard** (`tests/_leak_guard.py`:
+  a session-end safety net failing the run on a leaked lab server) is the precedent for the
+  guard this report adds — same mechanism, a different leaked resource. Not the same root
+  cause (BUG-0125 leaked processes, not default outputs).
+- **The guard was weaker than PA-0452(2) says** (both reviewers): it was disarmed whenever
+  `./fuzzlab.db` existed before the run, and ignored the side files and `fuzzlab.db.d/`.
+  It now records `(inode, size, mtime_ns)` of the store, `-wal`, `-shm`, `-journal` and
+  `.d` before the session and fails on any difference
+  (`tests/test_web_projects.py::test_the_default_store_guard_sees_changes_to_an_existing_store`).
+- **The `--with-proxy` exception** (the lifespan creates the default store at start-up for
+  the in-process proxy) is now written into PA-0452(3) and FR-UI-458.
+- **PA-0002 sweep (recorded):** default output paths a test run could leave in the working
+  directory — the UI's store (`./fuzzlab.db`, guarded here) and the tools' intermediates
+  (`spider.db`, `audit.db`, `fuzz.csv`), which the UI pins into the project directory
+  (`OPTION_CLASS`, PA-0450(2)); a full-suite run of the round-3 tree is checked for any of
+  them left in the working tree (CC-UI-0450, Effectiveness). No other default output.
+

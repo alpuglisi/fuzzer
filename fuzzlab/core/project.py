@@ -127,6 +127,7 @@ def inspect(path: str | Path) -> ProjectInfo:
         conn = sqlite3.connect(_ro_uri(p), uri=True, timeout=10.0)
         try:
             conn.execute("PRAGMA trusted_schema=OFF")
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, INSPECT_LENGTH_LIMIT)
             return _inspect_open(conn, p, st.st_size, head)
         finally:
             conn.close()
@@ -134,11 +135,19 @@ def inspect(path: str | Path) -> ProjectInfo:
         raise ProjectError(f"{p} cannot be opened as a project: {exc}") from exc
 
 
-#: SQLite's own bookkeeping tables a legitimate store may gain (``ANALYZE``), allowed by
-#: name with type ``table``. ``sqlite_sequence`` and ``sqlite_autoindex_*`` are already in
-#: the reference schema.
-_SQLITE_STAT_TABLES = frozenset({"sqlite_stat1", "sqlite_stat2", "sqlite_stat3",
-                                 "sqlite_stat4"})
+#: SQLite's own statistics tables a legitimate store may gain (``ANALYZE``), each with the
+#: one definition SQLite writes for it. ``sqlite_sequence`` and ``sqlite_autoindex_*``
+#: are already in the reference schema.
+_SQLITE_STAT_TABLES = {
+    "sqlite_stat1": "CREATE TABLE sqlite_stat1(tbl,idx,stat)",
+    "sqlite_stat4": "CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)",
+}
+
+#: Bound on any string or blob an inspecting or summarising connection may build
+#: (defence in depth behind the definition check, BUG-0453): the metadata row is
+#: capped far below this, and counting never materialises a value.
+INSPECT_LENGTH_LIMIT = 4 * 1024 * 1024
+SUMMARY_LENGTH_LIMIT = 1024 * 1024
 
 
 @functools.lru_cache(maxsize=None)
@@ -167,32 +176,50 @@ def _foreign_objects(conn: sqlite3.Connection, version: int) -> list[str]:
     """Schema objects in the file that fuzzlab's migrations (at ``version``) never
     create: an **allowlist** check (BUG-0451). A row counts only if its exact
     ``(type, name, tbl_name)`` — type compared case-sensitively, as written — is in the
-    reference schema; an index's or virtual table's definition must also match exactly
-    (normalised whitespace). Tables are matched by identity (an ``ALTER``/``DROP COLUMN``
-    history may reword their stored text; ``trusted_schema=OFF`` keeps any function in a
-    table definition from running). Missing objects are fine."""
+    reference schema **and** its definition matches the reference's exactly (normalised
+    whitespace), for every object including ordinary tables (BUG-0453):
+    ``trusted_schema=OFF`` stops application-defined functions only, so a generated
+    column, ``CHECK`` or ``DEFAULT`` added to an allowed table would otherwise run
+    SQLite's own functions — without bound — on every read. Matching every definition
+    is safe for legitimate stores because migrations only ``CREATE`` and
+    ``ALTER … ADD COLUMN``, whose stored text is deterministic (every past version of
+    the migrations was checked to build the same schema). Missing objects are fine."""
     ref = reference_schema(version)
     out = []
-    for t, n, tb, q, rootpage in conn.execute(
-            "SELECT type, name, tbl_name, sql, rootpage FROM sqlite_master"):
-        if t == "table" and n in _SQLITE_STAT_TABLES:
+    for t, n, tb, q in conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master"):
+        if t == "table" and n in _SQLITE_STAT_TABLES and tb == n:
+            if _norm_sql(q) != _SQLITE_STAT_TABLES[n]:
+                out.append(f"{t} {n} (definition changed)")
             continue
         key = (t, n, tb)
         if key not in ref:
             out.append(f"{t} {n}")
-        elif (t == "index" or (t == "table" and rootpage == 0)) and \
-                _norm_sql(q) != ref[key]:
+        elif _norm_sql(q) != ref[key]:
             out.append(f"{t} {n} (definition changed)")
     return sorted(out)
 
 
+def _version_table_trusted(conn: sqlite3.Connection) -> bool:
+    """``schema_version`` exists with exactly fuzzlab's definition — checked from
+    ``sqlite_master`` alone, **before** any row of it is read (BUG-0453: a generated
+    ``version`` column would otherwise run on that first read). Its definition has
+    never changed, so the reference at any version holds it."""
+    rows = conn.execute("SELECT type, tbl_name, sql FROM sqlite_master "
+                        "WHERE name='schema_version'").fetchall()
+    want = reference_schema(1)[("table", "schema_version", "schema_version")]
+    return len(rows) == 1 and rows[0][0] == "table" and rows[0][1] == "schema_version" \
+        and _norm_sql(rows[0][2]) == want
+
+
 def _inspect_open(conn: sqlite3.Connection, p: Path, size: int, head: int) -> ProjectInfo:
     has_version_table = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'"
-    ).fetchone()[0]
+        "SELECT COUNT(*) FROM sqlite_master WHERE name='schema_version'").fetchone()[0]
     if not has_version_table:
         raise ProjectError(f"{p} is an SQLite database but not a fuzzlab store "
                            "(no schema_version table)")
+    if not _version_table_trusted(conn):
+        raise ProjectError(f"{p} has a schema_version table fuzzlab never creates; "
+                           "refused as untrusted")
     bad = conn.execute("SELECT COUNT(*) FROM schema_version WHERE typeof(version) != "
                        "'integer' OR version < 1").fetchone()[0]
     if bad:
@@ -200,20 +227,22 @@ def _inspect_open(conn: sqlite3.Connection, p: Path, size: int, head: int) -> Pr
                            "not a fuzzlab store")
     found = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] or 0
     kinds = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if found <= head:                       # a newer file is refused by its version anyway
-        foreign = _foreign_objects(conn, found)
-        if foreign:
-            raise ProjectError(
-                f"{p} contains schema objects fuzzlab never creates at schema v{found} "
-                f"({', '.join(foreign[:5])}{' …' if len(foreign) > 5 else ''}); "
-                "refused as untrusted")
     app_id = int(conn.execute("PRAGMA application_id").fetchone()[0])
+    if found > head:
+        # A newer build's file: refused by its version, and nothing else of it is read
+        # (its definitions cannot be checked against this build's migrations, BUG-0453).
+        return ProjectInfo(p, size, int(found), head, application_id=app_id)
+    foreign = _foreign_objects(conn, found)
+    if foreign:
+        raise ProjectError(
+            f"{p} contains schema objects fuzzlab never creates at schema v{found} "
+            f"({', '.join(foreign[:5])}{' …' if len(foreign) > 5 else ''}); "
+            "refused as untrusted")
     if found and ("run" not in kinds or app_id not in (0, migrations.APPLICATION_ID)
                   or (found >= 22 and app_id != migrations.APPLICATION_ID)):
         raise ProjectError(f"{p} is another application's database (its schema or "
                            "SQLite application id is not fuzzlab's)")
-    info = ProjectInfo(p, size, int(found), head,
-                       application_id=int(conn.execute("PRAGMA application_id").fetchone()[0]))
+    info = ProjectInfo(p, size, int(found), head, application_id=app_id)
     if size <= QUICK_CHECK_MAX_BYTES:
         result = conn.execute("PRAGMA quick_check").fetchone()[0]
         if result != "ok":
@@ -269,7 +298,8 @@ def ensure_metadata(store: Store, name: str) -> dict[str, Any]:
         now = _now()
         if row is None:
             created = conn.execute(
-                "SELECT MIN(applied_at) FROM schema_version").fetchone()[0] or now
+                "SELECT MIN(applied_at) FROM schema_version").fetchone()[0]
+            created = _text(created, 32) or now          # an untrusted value (BUG-0454)
             conn.execute(
                 "INSERT INTO project (id, name, created_at, opened_at, notes, targets, "
                 "created_by_version, opened_by_version, created_schema_version, uuid) "
@@ -287,17 +317,41 @@ def ensure_metadata(store: Store, name: str) -> dict[str, Any]:
     return read_metadata(store) or {}
 
 
+#: The longest text any value read back from a project file is shown at: a file may
+#: hold anything, of any type and size (BUG-0454).
+MAX_SHOWN_CHARS = 10_000
+_JSON_ERRORS = (ValueError, TypeError, RecursionError)
+
+
+def _text(v: Any, cap: int = MAX_SHOWN_CHARS) -> str | None:
+    """A value read from an untrusted store as text for display: a ``str`` (capped) or
+    ``None`` — a BLOB, number or anything else is not fabricated into text (BUG-0454)."""
+    return v[:cap] if isinstance(v, str) else None
+
+
+def _int(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+_STAMP = __import__("re").compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
+
+
 def _parse_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    """The one parser of a ``project`` row (PA-0108): ``targets`` must be a JSON list of
-    strings; anything else reads as ``[]`` with ``targets_malformed`` set — never a
-    fabricated value."""
-    out = {k: row.get(k) for k in ("name", "created_at", "opened_at", "notes",
-                                    "created_by_version", "opened_by_version",
-                                    "created_schema_version")}
+    """The one parser of a ``project`` row (PA-0108). The file is untrusted, so every
+    value is typed here (BUG-0454): text fields are text or ``None``; ``targets`` must be
+    a JSON list of strings, else ``[]`` with ``targets_malformed``; identity and lineage
+    must have their exact shapes, else ``None`` with ``identity_malformed`` — never a
+    fabricated value, never an exception."""
+    out: dict[str, Any] = {k: _text(row.get(k)) for k in (
+        "name", "created_at", "opened_at", "notes", "created_by_version",
+        "opened_by_version")}
+    out["created_schema_version"] = _int(row.get("created_schema_version"))
     out["targets_malformed"] = False
+    raw = row.get("targets")
     try:
-        targets = json.loads(row.get("targets") or "[]")
-    except (ValueError, TypeError):
+        targets = json.loads(raw) if isinstance(raw, str) and raw else \
+            ([] if raw in (None, "") else None)
+    except _JSON_ERRORS:
         targets = None
     if not (isinstance(targets, list) and all(isinstance(t, str) for t in targets)):
         out["targets_malformed"] = True
@@ -312,9 +366,15 @@ def _parse_metadata(row: dict[str, Any]) -> dict[str, Any]:
             out["identity_malformed"] = True
             v = None
         out[key] = v
-    kind = row.get("copy_kind")
-    out["copy_kind"] = kind if kind in COPY_KINDS else None
-    out["copied_at"] = row.get("copied_at") if out["copy_kind"] else None
+    kind, copied = row.get("copy_kind"), row.get("copied_at")
+    if kind is not None and kind not in COPY_KINDS:
+        out["identity_malformed"] = True
+        kind = None
+    if copied is not None and not (isinstance(copied, str) and _STAMP.fullmatch(copied)):
+        out["identity_malformed"] = True
+        copied = None
+    out["copy_kind"] = kind
+    out["copied_at"] = copied if kind else None
     return out
 
 
@@ -470,18 +530,31 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
     launch that recorded no run. ``running`` is shown only for a launch that is live in
     this UI (``live_launch_ids``); any other ``running`` row reads ``unknown``."""
     live = set(live_launch_ids)
-    launches = {r["id"]: dict(r) for r in store.conn.execute(
-        "SELECT id, command, argv, target, started_at, finished_at, status, exit_code "
-        "FROM launch")}
-    for row in launches.values():
+    # The file is untrusted: every value is typed before use (BUG-0454) — a BLOB where
+    # text belongs, a deep or odd JSON argv, an unknown status — never a 500.
+    launches: dict[int, dict[str, Any]] = {}
+    for r in store.conn.execute(
+            "SELECT id, command, argv, target, started_at, finished_at, status, exit_code "
+            "FROM launch"):
+        lid = _int(r["id"])
+        if lid is None:
+            continue
         try:
-            argv = json.loads(row["argv"])
-        except (ValueError, TypeError):
+            argv = json.loads(r["argv"]) if isinstance(r["argv"], str) else None
+        except _JSON_ERRORS:
             argv = None
-        row["argv"] = argv if isinstance(argv, list) else []
-        if row["status"] == "running" and row["id"] not in live:
-            row["status"] = "unknown"
-        row["label"] = _status_label(row["status"], row["finished_at"])
+        if not (isinstance(argv, list) and all(isinstance(a, str) for a in argv)):
+            argv = []
+        status = r["status"] if r["status"] in LAUNCH_STATUSES else "unknown"
+        if status == "running" and lid not in live:
+            status = "unknown"
+        finished_at = _text(r["finished_at"])
+        launches[lid] = {
+            "id": lid, "command": _text(r["command"]) or "", "argv": argv,
+            "target": _text(r["target"]), "started_at": _text(r["started_at"]),
+            "finished_at": finished_at, "status": status,
+            "exit_code": _int(r["exit_code"]),
+            "label": _status_label(status, finished_at)}
     out: list[dict[str, Any]] = []
     linked: set[int] = set()
     for r in store.conn.execute(
@@ -491,21 +564,25 @@ def run_history(store: Store, live_launch_ids: Iterable[int] = ()) -> list[dict[
             "(SELECT COUNT(*) FROM finding f WHERE f.run_id = r.id) AS findings, "
             "(SELECT COUNT(*) FROM candidate c WHERE c.run_id = r.id) AS candidates "
             "FROM run r ORDER BY r.id DESC"):
-        launch = launches.get(r["launch_id"]) if r["launch_id"] is not None else None
+        run_id = _int(r["id"])
+        if run_id is None:
+            continue
+        launch = launches.get(_int(r["launch_id"]))
         if launch is not None:
             linked.add(launch["id"])
-        status = ("aborted" if is_aborted(r["notes"]) else
+        notes = _text(r["notes"])
+        status = ("aborted" if notes is not None and is_aborted(notes) else
                   launch["status"] if launch is not None else "recorded")
         label = launch["label"] if launch is not None and status == launch["status"] \
             else status
         out.append({
-            "run_id": r["id"], "launch_id": None if launch is None else launch["id"],
-            "command": launch["command"] if launch else r["tool"],
+            "run_id": run_id, "launch_id": None if launch is None else launch["id"],
+            "command": launch["command"] if launch else (_text(r["tool"]) or ""),
             "argv": launch["argv"] if launch else [],
             "source": "ui" if launch else "cli",
             "target": (launch["target"] if launch and launch["target"] else
-                       r["base_url"]) or "",
-            "started_at": r["started_at"], "status": status, "label": label,
+                       _text(r["base_url"])) or "",
+            "started_at": _text(r["started_at"]), "status": status, "label": label,
             "finished_at": launch["finished_at"] if launch else None,
             "findings": r["findings"], "candidates": r["candidates"],
         })
@@ -586,6 +663,9 @@ def summary(path: str | Path) -> dict[str, Any]:
                 steps[0] += 100
                 return steps[0] > SUMMARY_STEP_BUDGET      # non-zero aborts
             conn.set_progress_handler(budget, 100)
+            conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, SUMMARY_LENGTH_LIMIT)
+            if not _version_table_trusted(conn):          # before any row is read
+                raise sqlite3.DatabaseError("not a fuzzlab store this build can read")
             version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
             if not isinstance(version, int) or version > migrations.head_version() or \
                     _foreign_objects(conn, version):

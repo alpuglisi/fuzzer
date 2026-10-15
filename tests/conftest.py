@@ -12,16 +12,36 @@ from tests._leak_guard import pytest_sessionfinish, pytest_terminal_summary  # n
 
 # --- no test creates the default store in the working directory (BUG-0452) ----------------
 
+def _default_store_state(path: str) -> dict[str, tuple | None]:
+    """``(inode, size, mtime_ns)`` of the default store, each side file and its project
+    directory — ``None`` for one that does not exist."""
+    import os
+    out: dict[str, tuple | None] = {}
+    for name in (path, path + "-wal", path + "-shm", path + "-journal", path + ".d"):
+        try:
+            st = os.lstat(name)
+        except FileNotFoundError:
+            out[name] = None
+        else:
+            out[name] = (st.st_ino, st.st_size, st.st_mtime_ns)
+    return out
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_default_store_in_the_working_directory():
     """The UI pins launched jobs to its project, and the built-in default project is
     `./fuzzlab.db`: a default-config test that launched a job created it in the repo
-    (BUG-0452). Every test must use a private store; this fails the run if one did not."""
+    (BUG-0452). Every test must use a private store; this fails the run if one created,
+    changed or removed the default store, a side file of it, or its project directory —
+    also when one already existed before the run (code review round 3)."""
     import os
     from fuzzlab.core.config import DEFAULTS
     path = os.path.abspath(DEFAULTS["store_path"])
-    before = os.path.lexists(path)
+    before = _default_store_state(path)
     yield
-    if not before and os.path.lexists(path):
-        pytest.fail(f"a test created the default store {path} in the working directory "
-                    "(BUG-0452): give it an explicit, private store_path", pytrace=False)
+    after = _default_store_state(path)
+    changed = sorted(n for n in before if before[n] != after[n])
+    if changed:
+        pytest.fail("a test created or changed the default store in the working "
+                    f"directory ({', '.join(changed)}; BUG-0452): give it an explicit, "
+                    "private store_path", pytrace=False)

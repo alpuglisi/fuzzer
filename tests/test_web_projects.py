@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import sqlite3
 import re
 import os
 import stat
@@ -553,8 +554,10 @@ def test_a_recent_entry_outside_the_projects_directory_is_refused(tmp_path):
     data["entries"].insert(0, {"path": str(outside), "name": "planted",
                                "opened_at": "2026-01-01 00:00:00"})
     rp.write_text(json.dumps(data))
-    with pytest.raises(ProjectError):
-        asyncio.run(mgr.open(recent_id=0))
+    with pytest.raises(ProjectError, match="projects directory"):
+        asyncio.run(mgr.open(recent_id=0, recent_path=str(outside)))
+    with pytest.raises(ProjectError, match="the recent list changed"):
+        asyncio.run(mgr.open(recent_id=0))               # the path is required too
 
 
 def test_the_startup_store_may_be_reopened_from_recent(tmp_path):
@@ -564,7 +567,7 @@ def test_the_startup_store_may_be_reopened_from_recent(tmp_path):
     asyncio.run(mgr.new("b"))
     mgr._add_recent(start)
     entry = [r["id"] for r in mgr.recent() if r["path"] == str(start)][0]
-    asyncio.run(mgr.open(recent_id=entry))
+    asyncio.run(mgr.open(recent_id=entry, recent_path=str(start)))
     assert mgr.store_path() == str(start)
 
 
@@ -1111,7 +1114,7 @@ def test_a_recent_entry_must_name_a_project_file(tmp_path):
     data["entries"].insert(0, {"path": str(stray), "name": "s", "opened_at": "t"})
     rp.write_text(json.dumps(data))
     with pytest.raises(ProjectError, match="not a project file name"):
-        asyncio.run(mgr.open(recent_id=0))
+        asyncio.run(mgr.open(recent_id=0, recent_path=str(stray)))
 
 
 def test_owner_lock_and_saved_project_directory_are_private(tmp_path):
@@ -1197,6 +1200,35 @@ def test_a_project_replaced_at_the_same_path_gets_its_own_repeater_run(tmp_path)
 
 
 
+def test_a_replacement_holding_its_own_repeater_run_is_not_reused(tmp_path):
+    """The file identity is what tells the projects apart (mutation-checked, round 3): the
+    replacement also has a `repeater` run with the cached id, so the run-id re-check alone
+    would reuse it; the old file is kept (moved away) so its inode is not recycled."""
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "x"})
+    path = tmp_path / "projects" / "x.fuzzlab"
+    raw = "GET / HTTP/1.1\r\nHost: h\r\n\r\n"
+    c.post("/api/proxy/repeater/tabs", json={"name": "old", "raw": raw})
+    c.post("/projects/close")
+    other = tmp_path / "other.fuzzlab"
+    core_project.create(other)
+    with Store(other, create=False) as store:
+        foreign = store.start_run("repeater", "h")         # same id the cache holds
+    kept = tmp_path / "kept"
+    kept.mkdir()
+    for suffix in ("", "-wal", "-shm"):
+        if Path(str(path) + suffix).exists():
+            os.rename(str(path) + suffix, str(kept / ("x.fuzzlab" + suffix)))
+    os.rename(other, path)
+    c.post("/projects/open", data={"file": "x.fuzzlab"})
+    assert _state(c)["path"] == str(path)
+    assert c.post("/api/proxy/repeater/tabs", json={"name": "new", "raw": raw}).status_code == 200
+    with Store(path, create=False) as store:
+        run_id = store.conn.execute(
+            "SELECT run_id FROM repeater_tab WHERE name='new'").fetchone()[0]
+    assert run_id != foreign
+
+
 # --- code review round 2 (CC-UI-0450) ----------------------------------------------------
 
 def test_stale_pages_and_bad_input_are_messages_not_500s(tmp_path):
@@ -1250,9 +1282,21 @@ def test_current_is_set_even_when_leaving_raises(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise OSError("injected")
     monkeypatch.setattr(projects, "_remove_project_files", boom)
-    with pytest.raises(ProjectError):
-        asyncio.run(mgr.new("next", discard=True))
+    assert asyncio.run(mgr.new("next", discard=True)) is True
     assert mgr.store_path() == str(tmp_path / "projects" / "next.fuzzlab")
+    # round 3 (C7): the new project's own bookkeeping still ran, and the failure to
+    # leave the temporary one is a warning — the action itself succeeded
+    assert mgr.pending is None
+    assert [r["name"] for r in mgr.recent()] == ["next"]
+    assert any(level == "warn" and "leaving it failed: injected" in text
+               for level, text in mgr.flash)
+
+    def defect(*a, **k):
+        raise sqlite3.ProgrammingError("a defect of ours")
+    asyncio.run(mgr.temporary())
+    monkeypatch.setattr(projects, "_remove_project_files", defect)
+    with pytest.raises(sqlite3.ProgrammingError):             # a defect propagates
+        asyncio.run(mgr.new("third", discard=True))
 
 
 def test_a_project_the_cli_created_meanwhile_is_adopted_not_clobbered(tmp_path, monkeypatch):
@@ -1363,6 +1407,9 @@ def test_opening_an_offer_stays_on_projects_and_success_goes_home(tmp_path):
     r = c.post("/projects/new", data={"name": "next", "discard": "1"})
     assert r.headers["location"] == "/projects"           # a warning is waiting there
     assert "1 unknown file(s)" in c.get("/projects").text
+    # reopening the open project is not an open: no flash, but it stays on /projects
+    r = c.post("/projects/open", data={"file": "next.fuzzlab"})
+    assert r.headers["location"] == "/projects"
 
 
 def test_snapshot_keeps_the_project_open_names_safely_and_records_lineage(tmp_path):
@@ -1387,7 +1434,9 @@ def test_snapshot_keeps_the_project_open_names_safely_and_records_lineage(tmp_pa
             assert meta["uuid"] != src_uuid
             assert store.conn.execute("SELECT COUNT(*) FROM run").fetchone()[0] == 1
         assert stat.S_IMODE(os.stat(tmp_path / "projects" / n).st_mode) == 0o600
-    assert names[0] not in [r["name"] for r in c.get("/api/projects").json()["recent"]]
+    recent = c.get("/api/projects").json()["recent"]
+    assert recent and not any(Path(r["path"]).name in names for r in recent)
+    assert not any(r["name"] in {Path(n).stem for n in names} for r in recent)
 
 
 def test_snapshot_stems_fit_the_name_grammar():
@@ -1491,3 +1540,170 @@ def test_history_labels_an_interrupted_job(tmp_path):
         core_project.ensure_metadata(store, "s")           # the UI ended first
         rows = core_project.run_history(store)
         assert rows[0]["label"] == "interrupted" and rows[0]["status"] == "unknown"
+
+
+# --- code review round 3 --------------------------------------------------------------
+
+def test_an_older_leftover_temporary_stays_temporary_when_migrated(tmp_path):
+    """C2: the migration offer forgot it was a temporary — it opened as a plain file
+    with no owner lock and joined the recent list."""
+    a = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(a.temporary())
+    path = Path(a.store_path())
+    projects._release_owner(a.current.owner_fd)
+    a.current.owner_fd = None
+    with Store(path, create=False) as store:              # make it an older store
+        undo_after(store.conn, 21)
+        store.conn.execute("DELETE FROM schema_version WHERE version >= 22")
+        store.conn.commit()
+    b = ProjectManager(_cfg(tmp_path, store=None))
+    assert asyncio.run(b.open(temporary=path.name)) is False
+    assert b.pending.kind == "older" and b.pending.project_kind == "temporary"
+    asyncio.run(b.migrate_pending())
+    assert b.current.kind == "temporary" and b.current.owner_fd is not None
+    assert b.current.inode == (os.stat(path).st_dev, os.stat(path).st_ino)
+    assert b.recent() == []                                # never in the recent list
+    c = ProjectManager(_cfg(tmp_path, store=None))         # a second UI cannot discard it
+    with pytest.raises(ProjectError, match="in use"):
+        asyncio.run(c.discard_leftover(path.name, confirm=True))
+    with pytest.raises(projects.NeedsDiscard):
+        asyncio.run(b.close())
+
+
+def test_dismiss_takes_the_lock_and_a_vanished_offer_is_a_refusal(tmp_path):
+    """C12: Not now raced a migration (an AssertionError, a 500)."""
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    with pytest.raises(ProjectError, match="no migration is waiting"):
+        mgr._migrate_pending(False)
+    assert asyncio.iscoroutinefunction(ProjectManager.dismiss_pending)
+
+
+def test_reopening_the_open_project_from_recent_is_a_no_op_even_while_busy(tmp_path):
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("a"))
+    entry = mgr.recent()[0]
+    mgr.extra_busy["job"] = "a job"
+    assert asyncio.run(mgr.open(recent_id=entry["id"], recent_path=entry["path"])) is False
+    mgr.extra_busy.clear()
+
+
+def test_the_default_offer_says_whether_the_default_store_exists(tmp_path, monkeypatch):
+    app, c = _default_client(tmp_path, monkeypatch)
+    assert "created by its first run" in c.get("/projects").text
+    c.post("/projects/use-default")
+    with Store(tmp_path / "fuzzlab.db") as store:          # its first run
+        store.start_run("x", "h")
+    c.post("/projects/close")
+    page = c.get("/projects").text
+    assert 'id="start-default"' in page and "created by its first run" not in page
+
+
+def test_the_open_list_counts_the_wal(tmp_path):
+    """C9: the Open list's size and time came from the main file only."""
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("a"))
+    path = tmp_path / "projects" / "a.fuzzlab"
+    old = 1_700_000_000
+    os.utime(path, (old, old))
+    store = Store(path, create=False)
+    try:
+        store.conn.execute("PRAGMA wal_autocheckpoint=0")
+        store.start_run("x", "h")                          # lands in the -wal
+        assert os.stat(str(path) + "-wal").st_size > 0
+        row = [f for f in mgr.list_files() if f["file"] == "a.fuzzlab"][0]
+        facts = core_project.file_facts(path)
+        assert row["size"] == facts["size"] > os.stat(path).st_size
+        assert row["modified"] == facts["written_at"] and not row["modified"].startswith("2023")
+    finally:
+        store.close()
+
+
+def test_a_database_error_while_recording_a_job_is_a_409_not_a_500(tmp_path, monkeypatch):
+    """C6: the launch workers were not wrapped by `_refusal`."""
+    async def fake_launch(self, argv, **kw):
+        raise AssertionError("must not start")
+    monkeypatch.setattr(Runner, "launch", fake_launch)
+
+    def locked(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(core_project, "insert_launch", locked)
+    from fastapi.testclient import TestClient
+    app = create_app(_cfg(tmp_path))
+    c = TestClient(app, base_url="http://127.0.0.1:8787", headers=SAME_ORIGIN_HEADERS,
+                   raise_server_exceptions=False)
+    r = c.post("/api/launch", json={"command": "report", "values": {}})
+    assert r.status_code == 409 and "recording the job failed" in r.json()["error"]
+
+
+def test_refusal_converts_file_trouble_and_propagates_defects():
+    """PA-0106(2): one converted error, one propagated (C6)."""
+    @projects._refusal("x")
+    def raises(exc):
+        raise exc
+    for exc in (OSError("disk"), sqlite3.OperationalError("locked"),
+                sqlite3.DatabaseError("file is not a database"), sqlite3.DataError("big")):
+        with pytest.raises(ProjectError, match="x failed"):
+            raises(exc)
+    for exc in (sqlite3.ProgrammingError("misuse"), sqlite3.IntegrityError("ours"),
+                sqlite3.InterfaceError("api"), ValueError("other")):
+        with pytest.raises(type(exc)):
+            raises(exc)
+
+
+def test_a_malformed_project_identity_is_shown_as_unknown(tmp_path):
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "a"})
+    with Store(tmp_path / "projects" / "a.fuzzlab", create=False) as store:
+        store.conn.execute("UPDATE project SET uuid='not-hex', copy_kind='Snapshot', "
+                           "name=X'41', created_at=X'42'")
+        store.conn.commit()
+    page = c.get("/project").text
+    assert 'id="project-identity-malformed"' in page and "None" not in page
+
+
+def test_a_case_variant_trigger_never_fires_through_the_ui(tmp_path):
+    """C10 / PA-0451(2): the planted row really fires on a plain open, and opening the
+    file through the UI refuses it before anything is written."""
+    import shutil
+    pdir = tmp_path / "projects"
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("cur"))
+    evil = pdir / "evil.fuzzlab"
+    core_project.create(evil)
+    conn = sqlite3.connect(evil)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("CREATE TABLE marker (x)")
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute("INSERT INTO sqlite_master VALUES ('TRIGGER','evil','project',0,"
+                 "'CREATE TRIGGER evil AFTER UPDATE ON project BEGIN "
+                 "INSERT INTO marker VALUES (1); END')")
+    conn.commit()
+    conn.close()
+    os.chmod(evil, 0o600)
+    probe = tmp_path / "probe.db"                        # non-vacuity, on a copy
+    shutil.copy(evil, probe)
+    conn = sqlite3.connect(probe)
+    conn.execute("UPDATE project SET opened_at='t'")
+    conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM marker").fetchone()[0] == 1
+    conn.close()
+    with pytest.raises(ProjectError, match=r"TRIGGER evil.*refused as untrusted"):
+        asyncio.run(mgr.open(file="evil.fuzzlab"))
+    assert mgr.store_path() == str(pdir / "cur.fuzzlab")
+    conn = sqlite3.connect(evil)
+    assert conn.execute("SELECT COUNT(*) FROM marker").fetchone()[0] == 0
+    conn.close()
+
+
+def test_the_default_store_guard_sees_changes_to_an_existing_store(tmp_path):
+    """Code review round 3 (S5/C11): the guard was off when ./fuzzlab.db pre-existed."""
+    from tests.conftest import _default_store_state
+    path = str(tmp_path / "fuzzlab.db")
+    empty = _default_store_state(path)
+    assert set(empty.values()) == {None} and len(empty) == 5
+    Path(path).write_bytes(b"x")
+    before = _default_store_state(path)
+    os.utime(path, ns=(1, 1))
+    assert _default_store_state(path) != before
+    (tmp_path / "fuzzlab.db.d").mkdir()
+    assert _default_store_state(path)[path + ".d"] is not None

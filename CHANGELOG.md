@@ -4,12 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (project files: code review round 3; CC-UI-0450, CC-CORE-0450, BUG-0453, BUG-0454, BUG-0455)
+- **Why:** the third independent review (a correctness and a security reviewer) found that
+  a crafted project file could still run SQLite's own functions on open, crash the project
+  pages, or get part of a credential recorded; and that several living docs lagged.
+- **What:** the untrusted-file allowlist compares every object's definition, tables
+  included, and reads nothing before checking it (BUG-0453); every value read back from a
+  project file is typed (BUG-0454); the record redactor strips URL userinfo before cutting
+  a value (BUG-0455); a migrated leftover temporary stays temporary; SQLite's defect
+  classes propagate instead of becoming messages; the default-store test guard stays armed
+  when the file pre-exists; requirements, ARCHITECTURE and change-control brought current.
+
 ## 2026-10-15 (project files: review round 2 and the layout pass; CC-UI-0450, CC-CORE-0450, BUG-0451, BUG-0452)
 - **Why:** both code reviewers' second round, and the page layout from the UI research
   (owner: start screen when nothing is configured; Save As and Snapshot; recent.json kept).
 - **What:** the untrusted-file check is an allowlist of the objects fuzzlab creates (a
   `TRIGGER` row had passed the denylist twice, BUG-0451); the built-in default store is
-  only offered unless it exists, and tests no longer create `./fuzzlab.db` (BUG-0452, a
+  opened only if it already exists, otherwise offered on the start screen, and tests no
+  longer create `./fuzzlab.db` (BUG-0452, a
   session guard); migration 23 adds a display-only project id and copy lineage; a start
   screen, Snapshot, Remove from list, a truthful "last written" chip, interrupted labels;
   stale pages and corrupt files are messages, not 500s; real-browser lifecycle tests.

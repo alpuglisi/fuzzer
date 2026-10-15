@@ -1686,13 +1686,16 @@ tracked in the requirements files, not here.
   runs and results, surfacing oracle findings and the advisory model scores with their
   flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
   and structured audit/debug logs are built.
-- **Project files** `[built — back end and functional pages; layout pending the UI
-  research]` (CC-UI-0450): `web/projects.py` (`ProjectManager`: one open project, new /
-  open / temporary / save as / close, the recent list, path confinement to the projects
-  directory, busy refusal under one lock, temporary-project discard; `ProjectBoundConfig`
-  so every reader follows the open project; `OPTION_CLASS`/`pin_values` pin each launched
-  command to it), `web/projectroutes.py` (`/projects`, `/project`), the topbar project chip;
-  store side in `core/project.py` (FR-CORE-450..452).
+- **Project files** `[built — back end, start screen and pages laid out from the UI
+  research; three code-review rounds; unmerged]` (CC-UI-0450): `web/projects.py`
+  (`ProjectManager`: one open project, new / open / temporary / save as / snapshot /
+  close, use-default, the recent list, path confinement to the projects directory, busy
+  refusal under one lock, temporary-project discard; `ProjectBoundConfig` so every reader
+  follows the open project; `OPTION_CLASS`/`pin_values` pin each launched command to it),
+  `web/projectroutes.py` (`/projects` — the start screen when nothing is open, where `/`
+  redirects — and `/project`), the topbar project chip; the built-in default store is
+  opened only if it exists (FR-UI-458); store side in `core/project.py`
+  (FR-CORE-450..453; migrations 22 and 23).
 - **Revamp (in progress, `docs/UI_REVAMP_PLAN.md`):** growing the read-only panel into a
   full control plane over a **tabbed shell** (Launcher / Proxy / Results / ML /
   Diagnostics; jinja2 templates + a `/static` asset pipeline). Phase 0 foundations built:
@@ -1879,14 +1882,17 @@ tracked in the requirements files, not here.
 
 ## The store as the contract
 
-**A store is a project file** (CC-CORE-0450 / CC-UI-0450, migration 22): the web UI opens
+**A store is a project file** (CC-CORE-0450 / CC-UI-0450, migrations 22 and 23): the web UI opens
 one store at a time as its project (`<name>.fuzzlab`, SQLite `application_id` "FzLb",
 0600) and pins every command it launches to it (`--store <project>`, intermediates in
 `<project>.d/`). A store whose schema is newer than the build is refused by
 `migrations.migrate` (`SchemaTooNew`); the UI opens an older one only after a verified
 backup and an accepted migration. Copies use the SQLite backup API (`core.project.copy_to`).
 A project file from elsewhere is untrusted input: `core.project.inspect` admits only the
-schema objects fuzzlab's own migrations create (an allowlist, BUG-0451).
+schema objects fuzzlab's own migrations create, each with exactly the definition they
+give it — tables included (an allowlist, BUG-0451, BUG-0453) — checks `schema_version`'s
+definition before reading it, reads nothing of a newer file past its version, and types
+every value it reads back (BUG-0454).
 
 Core tables and their principal readers/writers (see the roadmap for schema
 detail):

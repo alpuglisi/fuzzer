@@ -3,7 +3,7 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
-### CC-CORE-0450 — Project files: migration 22 (project metadata, launch provenance), `core.project`, newer-schema refusal (2026-10-15)
+### CC-CORE-0450 — Project files: migrations 22 and 23 (project metadata, launch provenance, identity), `core.project`, untrusted-file allowlist, newer-schema refusal (2026-10-15)
 - Change:
   - `core/migrations.py`: migration 22 — `project` (one metadata row), `launch` (a UI
     job: random `token`, command, redacted argv, target, start/finish, status, exit code),
@@ -32,7 +32,12 @@ Newest first.
     (PA-0003; its own mkdir kept).
   - `procutil.astart_server(..., umask=)` — set on the supervisor, inherited by the tree.
 - Impact (other components / project): **every store** gains two empty tables, one NULL
-  column and the application id on its next open (additive). **Every tool**: `start_run`
+  column and the application id on its next open (migration 22), and four project
+  columns (`uuid`, `origin_uuid`, `copied_at`, `copy_kind`; migration 23, whose post-step
+  gives an existing `project` row a `uuid`) — both additive. **A new refusal surface**:
+  the UI now refuses a store whose schema differs in any object definition from what
+  fuzzlab's migrations create at its version (the allowlist, BUG-0451/BUG-0453); a
+  hand-altered legitimate store is refused there (the CLI still opens it). **Every tool**: `start_run`
   reads one environment variable (unset outside UI jobs → NULL, as before); a store from a
   newer build is now refused instead of written. UI (CC-UI-0450) is the consumer. Tests
   that fake older stores undo migration 22 through the new `tests/_downgrade.py`
@@ -44,14 +49,21 @@ Newest first.
   migrations create no trigger, view or schema function (FTS5 works with it off). Stated
   exception to NFR-CORE-central-connection: `copy_to`'s private destination (a WAL
   destination could leave data in a `-wal` the hard link does not carry). Residual: the
-  CLI still migrates an older store silently, as before.
+  CLI still migrates an older store silently, as before. The allowlist's risk of refusing
+  a legitimate store is mitigated by deriving it from the migrations themselves and by a
+  history check (all 15 past versions of `migrations.py` build today's schema at every
+  version) plus fixtures of every real shape (fresh, legacy v21, v22 migrated, `ANALYZE`d,
+  FTS rows); a store altered by hand (or by `ALTER … DROP/RENAME`) is refused with a
+  message naming the objects.
 - Deliverables:
   - [x] migration 22 + post-step, `head_version`, `SchemaTooNew` — done
+  - [x] migration 23 (identity and lineage) + backfill post-step; `mark_copy`, `file_facts`, bounded `summary` — done
+  - [x] untrusted-file allowlist (`reference_schema`, `_foreign_objects`, `_version_table_trusted`; every definition compared) — done
   - [x] `Store(create=False)`, `trusted_schema=OFF`, close on migrate failure, launch linkage, `is_aborted` — done
   - [x] `core/project.py` — done
   - [x] `redact_for_record`, `secretfile.locked` (+ credentials), `astart_server(umask=)` — done
   - [x] tests: `tests/test_core_project.py` (new), `tests/_downgrade.py`, contract-writers tables (+`project`, `launch`) — done
-  - [x] FR-CORE-450..452, NFR-CORE-central-connection (exception), §5; ARCHITECTURE store-as-contract — done
+  - [x] FR-CORE-450..453, NFR-CORE-central-connection (exception), §5; ARCHITECTURE store-as-contract — done
 - Code review round 1 (with CC-UI-0450), fixed: `inspect` queries triggers and views on
   their own (a trigger may share a table's name; reviewer B made one named
   `schema_version` that deleted findings, and it was opened) and also refuses virtual
@@ -69,6 +81,22 @@ Newest first.
   migration 22 (a v22 store existed: BUG-0452's stray file); `mark_copy`, `file_facts`,
   `summary` (bounded), `run_history` labels; `copy_to(timeout=)`; `redact_for_record`'s
   userinfo pattern made linear (no `\b` scan) and values capped at 4096 characters.
+- Code review round 3 (on 8569187; a correctness and a security reviewer, fresh agents):
+  - (blocking) BUG-0453 — the allowlist matched tables by name only, so a crafted
+    generated column / `CHECK` / `DEFAULT` ran SQLite's own functions without bound on
+    open, listing and migrate (`trusted_schema=OFF` stops application functions only) →
+    every definition is compared; `schema_version`'s definition is checked before its
+    rows are read; a newer file is refused before any other read; length limits on the
+    inspect/summary connections. PA-0453.
+  - BUG-0454 — deep JSON (`RecursionError`) and oddly typed values (a BLOB `started_at`)
+    from a crafted file crashed `inspect` / `run_history` → every value typed at one
+    parser (`_text`, `_int`, `_JSON_ERRORS`). PA-0454.
+  - BUG-0455 — `redact_for_record` cut values before stripping userinfo, keeping a
+    straddling password → userinfo stripped from the whole value, cut last. PA-0455.
+  - Non-blocking, fixed: a malformed `copy_kind` / `copied_at` is flagged
+    (`identity_malformed`), never silently dropped; tests for migration 23's backfill on a
+    v22 row, a v22-migrated and an FTS store in the allowlist's non-vacuity fixture, the
+    "unknown exit" label.
 - Effectiveness (assessed pending): pending.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)

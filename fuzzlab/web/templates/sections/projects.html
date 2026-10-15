@@ -56,8 +56,8 @@
       {% elif project.kind == 'temporary' %}
       <dt>state</dt><dd class="warn">not saved &mdash; use Save as&hellip; to keep it</dd>
       {% else %}
-      <dt>last written</dt><dd><time datetime="{{ project.written_at }}">{{ project.written_at }}</time>
-        <span class="muted">(as of this page load)</span></dd>
+      <dt>last written</dt><dd>{% if project.written_at %}<time datetime="{{ project.written_at }}">{{ project.written_at }}</time>
+        <span class="muted">(as of this page load)</span>{% else %}<span class="muted">unknown</span>{% endif %}</dd>
       {% endif %}
       <dt>size</dt><dd>{{ size(project.size) }}</dd>
     </dl>
@@ -114,7 +114,7 @@
     <div class="card start-card" id="start-default">
       <h2>Default project</h2>
       <p class="muted"><code>{{ project.default_offer }}</code> &mdash; the configured
-        store; created by its first run.</p>
+        store{% if project.default_exists %}.{% else %}; created by its first run.{% endif %}</p>
       <form method="post" action="/projects/use-default">
         <button type="submit">Use it</button>
       </form>

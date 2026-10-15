@@ -177,7 +177,7 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
     @app.post("/projects/dismiss")
     async def project_dismiss(request: Request):
         async def go(_f):
-            manager.dismiss_pending()
+            await manager.dismiss_pending()
         return await _act(request, go, ok="")
 
     @app.post("/projects/discard-temporary")

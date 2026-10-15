@@ -87,3 +87,10 @@ spellings (case, comments, namespaces, direct schema writes) plus a non-vacuity 
 every legitimate shape. PA-0002 sweep: the only other untrusted-structure gates on this
 branch are `summary` (now the same allowlist) and `_parse_recent` / `_parse_metadata`
 (already allowlists of keys and shapes, PA-0108).
+
+## Correction — code review round 3 (2026-10-15)
+The corrective action above says tables are matched by identity because "`trusted_schema=OFF`
+keeps a function in a table definition from running". That is false for SQLite's built-in
+functions, and the carve-out let an executable table definition through: **BUG-0453**
+(PA-0453) — every definition, tables included, is now compared. This report is otherwise
+unchanged (append-only).

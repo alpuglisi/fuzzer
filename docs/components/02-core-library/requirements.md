@@ -459,7 +459,7 @@ plugin registry. It is the layer that makes the store the integration bus.
   `BEGIN IMMEDIATE`, re-checked) and marks orphaned `running` launches `unknown`.
   `core.project` is the one writer and parser of both tables; `inspect` reads a file
   without writing its main file and refuses (typed `ProjectError`, from a named list of
-  errors) anything that is not a fuzzlab store, holds a trigger or view, or fails
+  errors) anything that is not a fuzzlab store, fails the allowlist below, or fails
   `quick_check`; `create` makes a file 0600 / `O_EXCL` / `O_NOFOLLOW`; `copy_to` copies
   with the SQLite backup API into a private temporary file (rollback journal), checks no
   side file holds data, `quick_check`s, fsyncs and hard-links it into place;
@@ -469,8 +469,17 @@ plugin registry. It is the layer that makes the store the integration bus.
   *(Code review round 2, BUG-0451:)* the untrusted-file check is an **allowlist**:
   `reference_schema(version)` (fuzzlab's migrations run in memory) and `_foreign_objects`
   refuse any `sqlite_master` row whose exact `(type, name, tbl_name)` is not fuzzlab's at
-  the file's version, or whose index / virtual-table definition differs; a non-integer or
-  < 1 schema version, a foreign `application_id`, or a missing `run` table is refused too.
+  the file's version, or — *(code review round 3, BUG-0453)* — whose normalised
+  **definition** differs from the reference's, **for every object including tables**
+  (`trusted_schema=OFF` stops application functions only, so an added generated column,
+  `CHECK` or `DEFAULT` would run SQLite's own functions); `sqlite_stat1`/`sqlite_stat4`
+  must carry SQLite's own definitions. `schema_version`'s definition is checked from
+  `sqlite_master` before any of its rows is read, and a file newer than this build is
+  returned as `newer` before anything else of it is read. A non-integer or < 1 schema
+  version, a foreign `application_id`, or a missing `run` table is refused too. The
+  inspecting and summarising connections cap string/blob length (4 MiB, 1 MiB). Every
+  value `core.project` reads back from such a file is typed before use (`_text`, `_int`,
+  `RecursionError` among the JSON errors; BUG-0454).
 - **FR-CORE-453** *(project identity; `CC-CORE-0450`, migration 23).* `project` gains
   `uuid` (the file's own id, 32 hex — **display only**: nothing matches, dedupes or trusts
   on it, since a file can claim any value), `origin_uuid`, `copied_at`, `copy_kind`

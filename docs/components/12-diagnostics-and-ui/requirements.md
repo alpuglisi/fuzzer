@@ -449,8 +449,11 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   `application_id`; FR-CORE-450). The UI has at most one open project; every page reads
   it and every UI write goes into it (`web.projects.ProjectBoundConfig`:
   `cfg.get("store_path")` is the open project, or `None` when none is open). At start-up
-  the configured `store_path` is the open project (an empty `store_path` starts with
-  none); its metadata row is created on its first open (FR-CORE-450).
+  an explicitly configured `store_path` is the open project (an empty `store_path` starts
+  with none); the built-in default is opened only if it already exists, else it is offered
+  on the start screen (FR-UI-458 — *superseding, in the layout pass, this requirement's
+  original "the configured `store_path` is the open project" for the built-in default*).
+  Its metadata row is created on its first open (FR-CORE-450).
 - **FR-UI-451** Lifecycle, on `/projects` (plain POST forms, PRG): **new** (a name),
   **open** (a file listed in the projects directory, a recent entry, or a leftover
   temporary project), **temporary** (a throwaway file in `<projects_dir>/.temporary/`),
@@ -469,7 +472,9 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   from list** drops one (matched by index and path; the file is untouched). Listings show
   each file's run and finding counts from a bounded read-only summary (the untrusted-file
   allowlist, a near-zero lock wait, a step budget; "unreadable" on any failure; may leave
-  empty `-wal`/`-shm` beside a WAL file). Open and Remove re-check index and path.
+  empty `-wal`/`-shm` beside a WAL file). Open and Remove re-check index **and** path —
+  both are required (code review round 3). The Open list's size and modified time are
+  `core.project.file_facts`' (the file plus a non-empty `-wal`), as the chip's.
 - **FR-UI-453** Leaving a **temporary project** (close, open, new, another temporary)
   deletes it and needs an explicit confirmation (`discard`); without it the action is
   refused with a message offering Save as. Deletion removes exactly the files the
@@ -517,9 +522,14 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   not opened, read or written until the operator accepts the migration offer (shown on
   `/projects` whether or not another project is open, which stays open meanwhile); accepting
   writes a verified backup (`<file>.d/backups/`) and then migrates (FR-CORE-452 covers a
-  partial failure). A newer file, a non-fuzzlab SQLite file, a file with triggers or
-  views, a virtual table fuzzlab does not create, a non-empty file with no recorded schema
-  version, or one failing `quick_check` is refused with the reason. With `--with-proxy`,
+  partial failure). A newer file (nothing of it is read past its version), a non-fuzzlab
+  SQLite file, a file holding any schema object fuzzlab's migrations do not create at its
+  version — or one whose **definition** differs, tables included (the allowlist,
+  FR-CORE-450; BUG-0451, BUG-0453) — a non-empty file with no recorded schema version, or
+  one failing `quick_check` is refused with the reason. Every value read back from an
+  accepted file is typed before use: an odd value reads as unknown or malformed, never a
+  crash (BUG-0454). A migrated leftover temporary stays temporary (its owner lock is taken
+  before the migration). With `--with-proxy`,
   a start-up project that is waiting or refused stops the start with the remedy (start
   once without `--with-proxy`).
 
@@ -529,7 +539,10 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   and — when the built-in default store does not exist yet — "Use ./fuzzlab.db" (its
   absolute path shown; the path is the server's, never the form's). The built-in default
   `store_path` counts as configured only if that file exists; any other configured path is
-  opened at start-up as before. After New, Temporary, Open or Use-default the UI goes to
+  opened at start-up as before. Stated exception: `--with-proxy` binds the built-in default
+  and creates it at start-up when nothing else is configured (the proxy needs a store
+  before any page is opened; PA-0452(3)). The default card says whether the file exists.
+  After New, Temporary, Open or Use-default the UI goes to
   `/` only if the requested project opened and no warning is waiting; otherwise it stays on
   `/projects`, where the messages are. "Opening a project never sends traffic."
 
@@ -610,7 +623,7 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   option's value), written only by `core.project`; a project file never holds a
   credential the UI handled.
   - Enforced by: `core.project.insert_launch` / `set_meta` / `add_target` — `tests/test_web_projects.py::test_a_project_file_never_contains_a_credential_value`, `tests/test_web_projects.py::test_only_core_project_writes_the_project_record_tables`, `tests/test_core_project.py::test_redact_for_record_removes_every_planted_secret_shape`, `tests/test_core_project.py::test_redact_for_record_keeps_benign_values`
-  - Not yet enforced: `repeater_tab.raw_request` stores operator-typed requests as typed (an existing behaviour, see NFR-UI-redacted); notes are plain text the operator writes (labelled so on the page); a password containing a raw `/`, `?`, `#` or space inside a URL's authority (which no HTTP client would parse as credentials) keeps the part after it; values are cut to 4096 characters before redaction.
+  - Not yet enforced: `repeater_tab.raw_request` stores operator-typed requests as typed (an existing behaviour, see NFR-UI-redacted); notes are plain text the operator writes (labelled so on the page); a password containing a raw `/`, `?`, `#` or space inside a URL's authority (which no HTTP client would parse as credentials) keeps the part after it. Values are cut to 4096 characters **after** userinfo is stripped from the whole value (BUG-0455; `tests/test_core_project.py::test_a_credential_straddling_the_record_cut_is_still_removed`).
 - **NFR-UI-project-switch-safe** *(added CC-UI-0450)* A project is never switched, saved
   as, closed or deleted while it is being written: one lock covers every transition and
   every launch from the busy check to the act; a job counts as writing until its end is

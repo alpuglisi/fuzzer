@@ -19,24 +19,26 @@
     <p class="muted">This project has no data yet: it is created by its first run.</p></div>
   {% else %}
   <div class="card" id="project-meta">
-    <h2>{{ meta.name }}{% if project.kind == 'temporary' %} <span class="pill">temporary</span>{% endif %}</h2>
+    <h2>{{ meta.name or project.name }}{% if project.kind == 'temporary' %} <span class="pill">temporary</span>{% endif %}</h2>
     <dl class="project-facts">
       <dt>file</dt><dd><code>{{ project.path }}</code></dd>
-      <dt>created</dt><dd>{{ meta.created_at }}</dd>
-      <dt>last opened</dt><dd>{{ meta.opened_at }}</dd>
-      <dt>schema</dt><dd>v{{ meta.schema_version }} (created at v{{ meta.created_schema_version }})</dd>
-      <dt>fuzzlab</dt><dd>{{ meta.opened_by_version }} (created by {{ meta.created_by_version }})</dd>
+      <dt>created</dt><dd>{{ meta.created_at or "unknown" }}</dd>
+      <dt>last opened</dt><dd>{{ meta.opened_at or "unknown" }}</dd>
+      <dt>schema</dt><dd>v{{ meta.schema_version }} (created at v{{ meta.created_schema_version or "?" }})</dd>
+      <dt>fuzzlab</dt><dd>{{ meta.opened_by_version or "unknown" }} (created by {{ meta.created_by_version or "unknown" }})</dd>
       {% if meta.uuid %}<dt>project id</dt><dd><code>{{ meta.uuid[:8] }}</code>
         <span class="muted">(display only)</span></dd>{% endif %}
       {% if meta.copy_kind %}<dt>copied</dt><dd>{{ 'snapshot' if meta.copy_kind == 'snapshot' else 'saved as' }}
-        of project <code>{{ (meta.origin_uuid or '')[:8] }}</code>, {{ meta.copied_at }}</dd>{% endif %}
+        of project <code>{{ (meta.origin_uuid or '')[:8] }}</code>, {{ meta.copied_at or 'time unknown' }}</dd>{% endif %}
+      {% if meta.identity_malformed %}<dt>identity</dt><dd class="warn" id="project-identity-malformed">The
+        stored project id or copy record is unreadable; it is shown as unknown.</dd>{% endif %}
     </dl>
     <form method="post" action="/project/meta" class="project-meta-form">
       <label>Targets (one per line; credentials in URLs are removed)
         <textarea name="targets" rows="3">{{ meta.targets | join('\n') }}</textarea></label>
       {% if meta.targets_malformed %}<p class="warn">The stored target list was unreadable and is shown empty.</p>{% endif %}
       <label>Notes (stored in the project file as plain text &mdash; never put secrets here)
-        <textarea name="notes" rows="4" maxlength="10000">{{ meta.notes }}</textarea></label>
+        <textarea name="notes" rows="4" maxlength="10000">{{ meta.notes or "" }}</textarea></label>
       <button type="submit">Save</button>
     </form>
   </div>

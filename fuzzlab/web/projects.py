@@ -1,5 +1,6 @@
-"""Project files in the web UI: new, open, temporary, save as, close, the recent list,
-and jobs pinned to the open project (component #12, CC-UI-0450, FR-UI-450..457).
+"""Project files in the web UI: new, open, temporary, save as, snapshot, close, the
+recent list, and jobs pinned to the open project (component #12, CC-UI-0450,
+FR-UI-450..458).
 
 A project is one fuzzlab store (``fuzzlab.core.project``). This module owns the UI's
 lifecycle around it:
@@ -7,8 +8,10 @@ lifecycle around it:
 - **One open project at a time** (`ProjectManager.current`). It is set only for a file
   whose schema matches this build's (FR-UI-457): an older file is offered for migration
   (behind a verified backup) and never touched until the operator accepts; a newer or
-  invalid file is refused. At startup the configured ``store_path`` is that project, so
-  existing setups keep working.
+  invalid file is refused. At startup an explicitly configured ``store_path`` (or an
+  existing ``./fuzzlab.db``) is that project, so existing setups keep working; with only
+  the built-in default and no such file, nothing is open and the start screen offers it
+  (FR-UI-458).
 - **Every existing reader follows it with no change at its call site**:
   `ProjectBoundConfig` answers ``cfg.get("store_path")`` with the open project's path, or
   ``None`` when none is open (never the caller's default, so a closed UI never writes
@@ -257,6 +260,16 @@ class Pending:
     kind: str                               # older | refused
     detail: str
     schema_version: int = 0
+    project_kind: str = "file"              # file | temporary: what it opens as
+
+
+#: What `_refusal` turns into a message: file trouble and a database that cannot be read
+#: (busy, locked, corrupt, not a database, a value too big) …
+_REFUSAL_ERRORS = (OSError, sqlite3.OperationalError, sqlite3.DataError,
+                   sqlite3.DatabaseError)
+#: … but never these subclasses, which are defects in fuzzlab's own use of SQLite.
+_DEFECT_ERRORS = (sqlite3.ProgrammingError, sqlite3.InterfaceError,
+                  sqlite3.InternalError, sqlite3.IntegrityError, sqlite3.NotSupportedError)
 
 
 def _refusal(what: str):
@@ -264,7 +277,10 @@ def _refusal(what: str):
     (a file removed after the page rendered, no space, a corrupt database) becomes a
     `ProjectError` naming the operation — shown to the operator, never a bare 500
     (code review A, round 2). Only these two families are converted (PA-0106); any other
-    exception is a defect and propagates."""
+    exception is a defect and propagates — including SQLite's own defect classes
+    (`ProgrammingError`, `InterfaceError`, `InternalError`, `IntegrityError`,
+    `NotSupportedError`: a misused API or a broken invariant of ours; code review round
+    3)."""
     import functools
 
     def wrap(fn):
@@ -272,7 +288,9 @@ def _refusal(what: str):
         def inner(*a, **k):
             try:
                 return fn(*a, **k)
-            except (OSError, sqlite3.DatabaseError) as exc:
+            except _REFUSAL_ERRORS as exc:
+                if isinstance(exc, _DEFECT_ERRORS):
+                    raise
                 if isinstance(exc, FileNotFoundError):
                     detail = f"{Path(exc.filename).name if exc.filename else 'a file'} " \
                              "no longer exists (reload the page)"
@@ -342,7 +360,8 @@ class ProjectManager:
         then created or touched); else ``None``, with the offer or refusal recorded in
         ``pending``. Never changes ``current``."""
         if info.state == "older":
-            self.pending = Pending(path, "older", "", info.schema_version)
+            self.pending = Pending(path, "older", "", info.schema_version,
+                                   project_kind=kind)
             return None
         if info.state == "newer":
             self.pending = Pending(path, "refused",
@@ -358,9 +377,16 @@ class ProjectManager:
     def _switch(self, new: OpenProject | None, discard: bool) -> list[str]:
         """Leave the open project (deleting a temporary one only when ``discard``; the
         caller checked busy and the discard rule), then make ``new`` current — even if
-        leaving raised. Anything a discard could not remove is reported (FR-UI-453)."""
+        leaving raised. Anything a discard could not remove is reported (FR-UI-453); a
+        file error while leaving is reported the same way, never as a failure of the
+        action that opened ``new`` (code review round 3: that action succeeded). A defect
+        still propagates."""
         try:
             problems = self._leave(discard_temporary=discard)
+        except _REFUSAL_ERRORS as exc:
+            if isinstance(exc, _DEFECT_ERRORS):
+                raise
+            problems = [f"leaving it failed: {exc}"]
         finally:
             self.current = new
         if problems:
@@ -473,11 +499,13 @@ class ProjectManager:
                 continue
             if len(out) >= LIST_MAX:
                 break
-            st = entry.stat(follow_symlinks=False)
-            out.append({"file": entry.name, "size": st.st_size,
+            try:                    # the file plus a non-empty -wal (as the chip)
+                facts = core_project.file_facts(entry.path)
+            except OSError:         # removed while listing
+                continue
+            out.append({"file": entry.name, "size": facts["size"],
                         "summary": core_project.summary(entry.path),
-                        "modified": datetime.fromtimestamp(st.st_mtime, timezone.utc)
-                        .strftime("%Y-%m-%d %H:%M:%S"),
+                        "modified": facts["written_at"],
                         "current": self.current is not None
                         and Path(entry.path) == self.current.path})
         return out
@@ -495,6 +523,17 @@ class ProjectManager:
     # -- the recent list -------------------------------------------------------------
     def _recent_path(self) -> Path:
         return self.projects_dir / RECENT_FILE
+
+    def _recent_entry_path(self, recent_id, recent_path) -> Path | None:
+        """The path of recent entry ``recent_id`` if it still names ``recent_path``
+        (only to recognise the already-open project before the busy check); else
+        ``None``. Reads the list only — never validates or opens anything."""
+        if self._checked_dir() is None or not isinstance(recent_id, int):
+            return None
+        entries, _bad = _parse_recent(self._recent_path())
+        if 0 <= recent_id < len(entries) and entries[recent_id]["path"] == recent_path:
+            return Path(recent_path)
+        return None
 
     def recent(self) -> list[dict[str, Any]]:
         """The recent list, newest first; an entry whose file is gone is kept, marked."""
@@ -546,6 +585,7 @@ class ProjectManager:
         core_project.create(path, path.stem)
 
     @_refusal("creating the project file")
+    @_refusal("preparing the project")
     def _ensure_created(self) -> str:
         """The open project's path, created (0600, metadata) if it does not exist yet."""
         if self.current is None:
@@ -601,7 +641,10 @@ class ProjectManager:
 
     def adopt_default(self) -> None:
         """For ``--with-proxy``: with nothing open or pending, bind the offered default
-        store (created by the proxy's first flow write, as before)."""
+        store. The lifespan then calls `require_writable`, which **creates it at
+        start-up** — the one place a built-in default is written without the start
+        screen, because the operator asked for the in-process proxy, which needs a store
+        before any page is opened (PA-0452(1)'s stated exception; FR-UI-458)."""
         if self.current is None and self.pending is None and self.default_offer is not None:
             self.current = OpenProject(self.default_offer, exists=False)
 
@@ -665,7 +708,9 @@ class ProjectManager:
                     (temporary is not None and cur.kind == "temporary"
                      and cur.path.name == temporary)
                     or (file is not None and cur.path.name == file
-                        and cur.path.parent == self.projects_dir)):
+                        and cur.path.parent == self.projects_dir)
+                    or (recent_id is not None
+                        and self._recent_entry_path(recent_id, recent_path) == cur.path)):
                 return False                         # already open: never a discard
             self._check_leave(discard)
             return await asyncio.to_thread(self._open, file, recent_id, recent_path,
@@ -692,7 +737,7 @@ class ProjectManager:
             entries = self.recent()
             if not isinstance(recent_id, int) or not 0 <= recent_id < len(entries):
                 raise ProjectError("no such recent project")
-            if recent_path is not None and entries[recent_id]["path"] != recent_path:
+            if not isinstance(recent_path, str) or entries[recent_id]["path"] != recent_path:
                 raise ProjectError("the recent list changed; reload the page")
             path = self._validate_file(Path(entries[recent_id]["path"]))
         else:
@@ -911,19 +956,40 @@ class ProjectManager:
 
     @_refusal("migrating the project")
     def _migrate_pending(self, discard: bool) -> str:
-        assert self.pending is not None
-        path = self.pending.path
-        backup, _version = core_project.migrate_with_backup(path)
-        op = self._prepare(path, core_project.inspect(path), kind="file")
-        if op is None:
-            raise ProjectError(f"{path} could not be opened after migrating")
+        pending = self.pending
+        if pending is None or pending.kind != "older":
+            raise ProjectError("no migration is waiting")
+        path = pending.path
+        # A leftover temporary stays temporary (code review round 3): its owner lock is
+        # taken **before** anything is written, so a second UI can neither discard it
+        # nor migrate it meanwhile, and it never joins the recent list.
+        kind, owner_fd, inode = pending.project_kind, None, None
+        if kind == "temporary":
+            tdir = self._temp_dir()
+            if tdir is None or path.parent != tdir or not TEMP_RE.fullmatch(path.name):
+                raise ProjectError("the temporary project is no longer in .temporary")
+            owner_fd = _acquire_owner(self._ensure_dir(sidecar_dir(path)))
+        try:
+            backup, _version = core_project.migrate_with_backup(path)
+            if kind == "temporary":
+                st = os.lstat(path)
+                inode = (st.st_dev, st.st_ino)
+            op = self._prepare(path, core_project.inspect(path), kind=kind, inode=inode,
+                               owner_fd=owner_fd)
+            if op is None:
+                raise ProjectError(f"{path} could not be opened after migrating")
+        except BaseException:
+            _release_owner(owner_fd)
+            raise
         self._switch(op, discard)
-        if path != self.startup_path:
+        if kind == "file" and path != self.startup_path:
             self._add_recent(path)
         return str(backup)
 
-    def dismiss_pending(self) -> None:
-        self.pending = None
+    async def dismiss_pending(self) -> None:
+        """Not now / Dismiss — under the lock, so it never races a migration."""
+        async with self.lock:
+            self.pending = None
 
     async def set_meta(self, notes: str | None, targets: list[str] | None) -> None:
         async with self.lock:
@@ -979,6 +1045,7 @@ class ProjectManager:
             self._launches[token] = launch_id
             return token, argv
 
+    @_refusal("starting the job")
     def _check_sidecars(self, spec, pinned: dict[str, Any]) -> None:
         """Before a pinned job starts: its project directory is private and ours, and each
         intermediate file it will write (with its SQLite side files) is absent or a
@@ -1021,6 +1088,7 @@ class ProjectManager:
             return meta
 
     @staticmethod
+    @_refusal("recording the job")
     def _record_launch(path: str, spec, pinned: dict[str, Any]) -> tuple[int, str]:
         target = target_of(pinned)
         if target is not None and len(target) > core_project.MAX_TARGET_CHARS:
@@ -1050,6 +1118,8 @@ class ProjectManager:
         out["default_offer"] = (str(self.default_offer)
                                 if cur is None and self.pending is None
                                 and self.default_offer is not None else None)
+        out["default_exists"] = bool(out["default_offer"]) and \
+            os.path.lexists(self.default_offer)
         out["size"] = out["written_at"] = None
         if cur is not None:
             out.update(name=cur.path.stem if cur.kind == "file" else "Temporary project",

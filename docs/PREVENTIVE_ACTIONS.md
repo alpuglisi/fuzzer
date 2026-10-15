@@ -1732,4 +1732,39 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      ./fuzzlab.db"), never used.
   2. **A session-wide guard fails any test run that leaves a default output in the working
      directory** (`tests/conftest.py::_no_default_store_in_the_working_directory`); a new
-     default output path gets the same guard. (from BUG-0452)
+     default output path gets the same guard. The guard compares the default path's state
+     (and its side files and project directory) before and after, so it stays armed when
+     the file already exists (code review round 3). (from BUG-0452)
+  3. **Stated exception:** an explicit operator flag that needs a store before any page
+     is opened (`fuzzlab web --with-proxy`) binds and creates the default at start-up
+     (`ProjectManager.adopt_default`, FR-UI-458). Any other exception is written here
+     first. (code review round 3)
+
+- **PA-0453** — Strengthens `PA-0451`, after BUG-0453: the allowlist that replaced
+  BUG-0451's denylist exempted tables from definition matching because `trusted_schema=OFF`
+  was believed to make them inert; a generated column, `CHECK` or `DEFAULT` ran SQLite's
+  own functions without bound on open, listing and migrate.
+  1. **An allowlist over untrusted structure compares the full definition of every
+     object.** No kind is exempted on the belief that a platform setting makes it inert;
+     a claim that a setting protects something is backed by an attack fixture showing the
+     protected case blocked and the unprotected case running.
+  2. **Nothing of an untrusted structure is read before the definition that computes it is
+     validated** (here `schema_version` before its rows), and a version this build cannot
+     validate is refused before any other read. (from BUG-0453)
+
+- **PA-0454** — Strengthens `PA-0108` and `PA-0101(2)`, after BUG-0454: a deeply nested or
+  oddly typed value in a project file from someone else crashed the project pages.
+  1. **Every value read from a store or file that can come from someone else is typed at
+     one parser before use**: its storage type checked (SQLite does not enforce a declared
+     column type), its size capped, JSON parsed with `RecursionError` handled; an odd value
+     reads as missing or malformed — never fabricated, never an exception.
+  2. **A fix for one parser-limit crash is swept across every parser of the same input
+     source in the same change** (PA-0002 applied at fix time, not later). (from BUG-0454)
+
+- **PA-0455** — Strengthens `PA-0101`, after BUG-0455: the record redactor truncated a
+  value before stripping its URL userinfo, so a credential straddling the cut was kept.
+  1. **A redactor never applies a lossy transformation (truncation, decoding, splitting)
+     before the redaction that depends on the whole value**; bound the work with
+     linear-time redaction first and cut last.
+  2. **Every bound a redactor introduces is tested with a secret straddling it.** (from
+     BUG-0455)

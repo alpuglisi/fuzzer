@@ -676,3 +676,206 @@ def test_deep_json_in_the_recent_list_is_malformed_not_a_crash(tmp_path):
     p = tmp_path / "recent.json"
     p.write_text("[" * 100000 + "]" * 100000)
     assert web_projects._parse_recent(p) == ([], 1)
+
+
+# --- code review round 3 --------------------------------------------------------------
+
+#: An expression that costs real time in SQLite's own built-ins (no application function
+#: is needed, so `trusted_schema=OFF` does not stop it): ~25 MB built and measured, many
+#: times over — seconds per evaluation, unbounded in depth.
+_HEAVY = "length(replace(printf('%.*c', 25000000, 'x'), 'x', 'yy'))"
+
+
+def _rewrite_definition(path, name, rewrite):
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=DELETE")
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()[0]
+    conn.execute("PRAGMA writable_schema=ON")
+    conn.execute("UPDATE sqlite_master SET sql=? WHERE name=?", (rewrite(sql), name))
+    conn.commit()
+    conn.close()
+
+
+def _add_before_close(extra):
+    return lambda sql: sql.rstrip().rstrip(")") + f", {extra})"
+
+
+@pytest.mark.parametrize("name,rewrite", [
+    ("project", _add_before_close(f"g INTEGER GENERATED ALWAYS AS ({_HEAVY}) VIRTUAL")),
+    ("project", _add_before_close(f"CHECK (length(name) + 0*{_HEAVY} >= 0)")),
+    ("launch", _add_before_close(f"extra INTEGER DEFAULT ({_HEAVY})")),
+    ("schema_version", lambda sql: sql.replace(
+        "version INTEGER PRIMARY KEY",
+        f"v0 INTEGER, version INTEGER GENERATED ALWAYS AS (v0 + 0*{_HEAVY})")),
+], ids=["generated-column", "check", "default", "generated-version"])
+def test_an_allowed_table_with_a_changed_definition_is_refused_before_any_row_is_read(
+        tmp_path, name, rewrite):
+    """BUG-0453: a table matched by name alone kept an added generated column, CHECK or
+    DEFAULT, which ran SQLite's built-ins without bound on open, listing and migrate."""
+    path = tmp_path / "evil.fuzzlab"
+    project.create(path)
+    with Store(path, create=False) as store:
+        store.start_run("x", "h")
+    _rewrite_definition(path, name, rewrite)
+    if name != "schema_version":                        # non-vacuity: it does run
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA trusted_schema=OFF")
+        t = time.perf_counter()
+        if name == "project":                           # a read, and the UI's write
+            conn.execute("SELECT * FROM project").fetchall()
+            conn.execute("UPDATE project SET name='t'")
+        else:
+            conn.execute("INSERT INTO launch (command, argv, started_at, status, token) "
+                         "VALUES ('c','[]','t','running','tok')")
+        assert time.perf_counter() - t > 0.05            # built-in work, not refused
+        conn.close()
+    t = time.perf_counter()
+    with pytest.raises(ProjectError, match="untrusted"):
+        project.inspect(path)
+    assert project.summary(path) == {"readable": False}
+    assert time.perf_counter() - t < 0.5                 # refused from sqlite_master alone
+
+
+def test_a_newer_file_is_refused_without_reading_its_tables(tmp_path):
+    """BUG-0453: a newer build's definitions cannot be checked, so nothing past its
+    version is read (its project row's generated column never runs)."""
+    path = tmp_path / "newer.fuzzlab"
+    project.create(path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (HEAD + 1,))
+    conn.commit()
+    conn.close()
+    _rewrite_definition(path, "project", _add_before_close(
+        f"g INTEGER GENERATED ALWAYS AS ({_HEAVY}) VIRTUAL"))
+    t = time.perf_counter()
+    info = project.inspect(path)
+    assert info.state == "newer" and info.metadata is None and info.runs == 0
+    assert time.perf_counter() - t < 0.5
+
+
+def test_sqlite_statistics_tables_must_have_sqlites_own_definition(tmp_path):
+    path = tmp_path / "stat.fuzzlab"
+    project.create(path)
+    with Store(path, create=False) as store:
+        store.conn.execute("ANALYZE")
+        store.conn.commit()
+    assert project.inspect(path).state == "ok"
+    _rewrite_definition(path, "sqlite_stat1", _add_before_close(
+        f"g INTEGER GENERATED ALWAYS AS ({_HEAVY}) VIRTUAL"))
+    with pytest.raises(ProjectError, match="sqlite_stat1"):
+        project.inspect(path)
+
+
+def test_the_allowlist_accepts_a_v22_store_migrated_to_head_and_one_with_flows(tmp_path):
+    """Code review round 3 (C10): the legacy shape PA-0451(2) names, and real FTS rows."""
+    v22 = tmp_path / "v22.fuzzlab"
+    with Store(v22) as store:
+        project.ensure_metadata(store, "v22")
+        store.conn.execute("UPDATE project SET uuid=NULL")
+        undo_after(store.conn, 22)
+        store.conn.execute("DELETE FROM schema_version WHERE version >= 23")
+        store.conn.commit()
+    assert project.inspect(v22).state == "older"
+    project.migrate_with_backup(v22)
+    info = project.inspect(v22)
+    assert info.state == "ok"
+    # migration 23's backfill gave the existing row an identity (FR-CORE-453)
+    assert project._HEX32.fullmatch(info.metadata["uuid"])
+    flows = tmp_path / "flows.fuzzlab"
+    project.create(flows)
+    with Store(flows, create=False) as store:
+        for i in range(50):
+            store.conn.execute("INSERT INTO flow_fts (url, method, host, req_head, "
+                               "resp_head, flow_id) VALUES (?,?,?,?,?,?)",
+                               (f"http://h/{i}", "GET", "h", "a", "b", i))
+        store.conn.commit()
+    assert project.inspect(flows).state == "ok"
+    assert project.summary(flows)["readable"] is True
+
+
+@pytest.mark.parametrize("column", ["targets", "argv"])
+def test_deep_json_in_a_project_file_reads_as_malformed(tmp_path, column):
+    """BUG-0454: a RecursionError from a deeply nested value escaped every handler."""
+    path = tmp_path / "deep.fuzzlab"
+    project.create(path)
+    deep = "[" * 200000 + "]" * 200000
+    with Store(path, create=False) as store:
+        if column == "targets":
+            store.conn.execute("UPDATE project SET targets=?", (deep,))
+        else:
+            project.insert_launch(store, "crawl", [("", "fuzzlab")], None)
+            store.conn.execute("UPDATE launch SET argv=?", (deep,))
+        store.conn.commit()
+    info = project.inspect(path)
+    with Store(path, create=False) as store:
+        if column == "targets":
+            assert info.metadata["targets"] == [] and info.metadata["targets_malformed"]
+        else:
+            assert project.run_history(store)[0]["argv"] == []
+
+
+def test_odd_types_in_a_project_file_are_never_a_crash(tmp_path):
+    """BUG-0454: every value of an untrusted store is typed before use — a BLOB where
+    text belongs, an unknown status, a non-string argv element."""
+    path = tmp_path / "odd.fuzzlab"
+    project.create(path)
+    with Store(path, create=False) as store:
+        a = store.start_run("crawl", "h")
+        b = store.start_run("crawl", "h")
+        lid, _tok = project.insert_launch(store, "crawl", [("", "fuzzlab")], None)
+        store.conn.execute("UPDATE run SET started_at=X'41', notes=X'42' WHERE id=?", (a,))
+        store.conn.execute("UPDATE run SET tool=X'47' WHERE id=?", (b,))
+        store.conn.execute("UPDATE launch SET status='<b>', command=X'43', "
+                           "argv='[1, [2]]', started_at=5, exit_code='x' WHERE id=?", (lid,))
+        store.conn.execute("UPDATE project SET name=X'44', notes=X'46', created_at=X'45', "
+                           "created_schema_version='v'")
+        store.conn.commit()
+    info = project.inspect(path)
+    meta = info.metadata
+    assert meta["name"] is None and meta["notes"] is None and meta["created_at"] is None
+    assert meta["created_schema_version"] is None
+    with Store(path, create=False) as store:
+        rows = project.run_history(store)
+    by_run = {r["run_id"]: r for r in rows}
+    assert by_run[a]["started_at"] is None and by_run[a]["status"] == "recorded"
+    assert by_run[b]["command"] == ""
+    launch = [r for r in rows if r["run_id"] is None][0]
+    assert launch["status"] == "unknown" and launch["argv"] == [] and launch["command"] == ""
+
+
+def test_malformed_lineage_is_flagged_never_fabricated(tmp_path):
+    """Code review round 3 (C5, PA-0108): a bad copy_kind or copied_at is flagged."""
+    path = tmp_path / "lin.fuzzlab"
+    project.create(path)
+    for kind, copied, flagged in [("snapshot", "2026-01-01 00:00:00", False),
+                                  ("Snapshot", "2026-01-01 00:00:00", True),
+                                  ("snapshot", "x" * 5000, True),
+                                  ("snapshot", 7, True), (None, None, False)]:
+        with Store(path, create=False) as store:
+            store.conn.execute("UPDATE project SET copy_kind=?, copied_at=?",
+                               (kind, copied))
+            store.conn.commit()
+            meta = project.read_metadata(store)
+        assert meta["identity_malformed"] is flagged, (kind, copied)
+        if flagged:
+            assert meta["copy_kind"] is None or meta["copied_at"] is None
+
+
+def test_a_credential_straddling_the_record_cut_is_still_removed():
+    """BUG-0455: the cut ran before userinfo redaction, leaving a password unmatched."""
+    from fuzzlab.core.redaction import MAX_RECORD_CHARS
+    long_pw = "http://admin:" + "S3cr3t!" * 600 + "@lab.local/"
+    straddle = "x" * (MAX_RECORD_CHARS - 16) + " http://user:secretpw@h"
+    bare = "x" * (MAX_RECORD_CHARS - 16) + " user:secretpw@host"
+    for value, secret in ((long_pw, "S3cr3t"), (straddle, "secr"), (bare, "secr")):
+        out = redact_for_record("target", value)
+        assert secret not in out and len(out) <= MAX_RECORD_CHARS + 20
+
+
+def test_run_history_labels_an_unknown_exit(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        project.ensure_metadata(store, "s")
+        lid, _tok = project.insert_launch(store, "auto", [("", "fuzzlab")], None)
+    project.finish_launch(tmp_path / "s.db", lid, "unknown", None)
+    with Store(tmp_path / "s.db", create=False) as store:
+        assert project.run_history(store)[0]["label"] == "unknown exit"

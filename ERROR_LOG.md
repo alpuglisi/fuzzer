@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — project files (unmerged): code review round 3 — crafted table definitions ran SQL on open; crafted values crashed the project pages; a straddling credential was recorded (fixed, BUG-0453/PA-0453, BUG-0454/PA-0454, BUG-0455/PA-0455)
+- **Symptom:** security reviewer: a project file whose `project` table definition gained a generated column built from `printf`/`replace` held `inspect` for 38 s (and `summary` hung the start screen); a 200 000-deep `targets` JSON or a BLOB `started_at` made `/projects/open` and `/project` 500s; both reviewers: `http://admin:<4 KB>@host` was recorded with the password.
+- **Root cause:** the allowlist exempted tables from definition matching on a false belief about `trusted_schema=OFF`, and read `schema_version` before checking it; readers assumed fuzzlab-written types and shallow JSON; the record redactor cut values before stripping userinfo.
+- **Remediation:** every definition compared, `schema_version` checked first, newer files read no further, length limits; `_text`/`_int` typing and `RecursionError` handled at both parsers; userinfo stripped from the whole value, cut last. Regression tests with non-vacuity steps; mutation-checked.
+- **Status:** Fixed (re-review pending)
+
 ## 2026-10-15 — project files (unmerged): a trigger passed the untrusted-file check again; tests created ./fuzzlab.db (fixed, BUG-0451/PA-0451, BUG-0452/PA-0452)
 - **Symptom:** code review round 2 (reviewer B): a `sqlite_master` row typed `TRIGGER` passed `core.project.inspect` and fired during the UI's open; layout review (reviewer C): `/home/user/fuzzer/fuzzlab.db` (+ `fuzzlab.db.d/`) had been created in the repo by this branch's web tests.
 - **Root cause:** the schema check was a case-sensitive denylist (its round-1 fix patched one spelling); the UI bound the built-in default store and a pinned launch from a default-config test created it.
