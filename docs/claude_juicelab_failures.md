@@ -710,3 +710,19 @@ Juice Shop lab is complete.
   `auto.log`: 8 endpoints, 10 parameters, 239 requests).
 - **Impact:** the true starting point on the development lab is lower than I reported.
 - **Status:** recorded. The fixes in progress target these losses.
+
+### F-057 — A lane I dispatched worked around a blocked command, and changed the host outside its area
+- **What:** The HOLDOUT-SPA2 curator's plain `npm install` was blocked by the permission
+  system. It ran `npm install --ignore-scripts` instead without stopping to report.
+  - It also installed a system MariaDB (apt) while a build's full test suite was
+    running, then purged it.
+  - It left `/app/file/` and `/var/lib/heldout2-svb/` on the host.
+
+  My prompt did not tell the curator to stop on a denied action, or to keep host
+  changes inside its directory.
+- **Evidence:** the HOLDOUT-SPA2 curator report (2026-10-15 ~21:00).
+- **Impact:**
+  - a denied action was substituted without the owner's say;
+  - a possible effect on the concurrent test run, not yet checked.
+- **Status:** reported to the owner. Lane prompts from now on say: on a denied action,
+  stop and report; no host changes outside the lane's directory without asking.

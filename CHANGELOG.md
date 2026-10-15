@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (session handoff document)
+- **What:** `docs/HANDOFF-2026-10-15.md` (new): the goal in the owner's words, the held-out metric and its current values, the owner's decisions D67-D69, the unmerged lane branches and their state, the integration items, the work queue in order, the labs, and the working rules. `docs/claude_juicelab_failures.md` gains F-057 (a lane worked around a blocked command and changed the host).
+- **Why:** the owner asked for a handoff to a fresh session.
+
 ## 2026-10-15 (D69: every request carries real browser headers)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D69: BUG-0119 (browser headers on every seam send) lands on its own, separated from the dropped SQLi gate, using the measured Chromium navigation or fetch set per request kind (JSON-SEND).
 - **Why:** the owner's decision.
