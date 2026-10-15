@@ -619,3 +619,28 @@ Juice Shop lab is complete.
 - **Status:** open. The trigger is reported to the owner and was not worked around.
   BUG-0148 proceeds under `BUG-0148-owner`, which the owner approved.
 
+### F-052 — The BUG-0148 design contained false statements and a fixture that mirrored the failing lab
+- **What:** Both design reviewers (2026-10-15 ~18:45) found errors in my BUG-0148
+  design:
+  - it said `looks_like_login_url` is used by the crawler's auth-endpoint exclusion;
+    its only callers are `redirect_is_logout` and `probesender.py:120`;
+  - it said a hash-mode `#/auth/sign-in` fixture "exists today"; it does not;
+  - it said candidates are "only visited and read, never submitted"; `_drive` fills
+    and submits the first candidate form that passes the gate, so a decoy page could
+    receive the real credentials;
+  - its Risk section said the gate refuses account writes before the login window,
+    while its own safety section said the opposite; the code refuses nothing there;
+  - it cited no measurement of the browser behaviour it relied on (CLAUDE.md item 8);
+  - its first test fixture copied the failing lab's shape (history mode, `/userlogin`,
+    "Log in"), which proves fit, not transfer;
+  - it missed that the existing login-form gates would still refuse the standard login
+    pages of Rails (`/session/new`: `new`), Devise (`/users/sign_in`: `users`),
+    ASP.NET Identity (`/Identity/Account/Login`: `account`) and Django admin
+    (`admin`).
+
+    The fix as designed would not have transferred.
+- **Evidence:** BUG-0148 reviews A and B; `b148/design.md` in the session scratchpad.
+- **Impact:** without the reviews, a fix that only moved the one failing lab, which is
+  the pattern of F-049.
+- **Status:** the design is being revised to the reviewers' required changes.
+
