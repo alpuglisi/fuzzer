@@ -62,8 +62,11 @@ Newest first.
       switch. Such a site fails safe (it keeps refusing).
 - Hypothesis: none; this is an owner decision, not uncertain capability work. Its
   detection effect (cases reached once a rule is off) is to be measured.
-- Verification / review: `scripts/verify_change.py --base 0063d5c`, and one combined
-  review (counts in CHANGELOG).
+- Verification / review:
+  - One combined review: three must-fix items, fixed in 745c76d; the follow-ups are
+    listed under Residual.
+  - `scripts/verify_change.py --base 0063d5c` on 745c76d: 110 files, 3315 passed,
+    0 failed, 8 skipped (4 need the live external labs), 16 xfailed.
 - Deliverables:
   - [x] sendpolicy owner and the sweep — done
   - [x] CAPTCHA rule removed; its tests turned around — done

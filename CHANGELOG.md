@@ -11,6 +11,10 @@ changed, and the reason. Reference the commit hash where useful.
   - New lab-only flags on `crawl`, `audit`, `auto`/`train run` and `greybox-run`: `--allow-destructive-routes`, `--allow-transactions`, `--allow-credential-changes`. A `DELETE` send stays refused.
   - D71 also records PyGoat (try again to get an answer key) and the reconciliation process still to design (CC-CORE-0062, CC-CRAWL-0033, CC-AUD-0045, CC-FUZZ-0092, CC-SESS-0026, CC-UI-0057).
 - **Why:** the owner's decision. These rules were the agent's choices and cost findings (F-016); the owner keeps three of them, with an off-switch, until they are handled better.
+- **Verified:** one combined review (three must-fix items, fixed in 745c76d), then `scripts/verify_change.py --base 0063d5c` on 745c76d.
+  - 110 files: 3315 passed, 0 failed, 8 skipped, 16 xfailed (evidence key 32dee9241108).
+  - Skipped: 4 live external-lab tests (they need `FUZZLAB_LIVE_EXTERNAL_LABS=1` and docker), and 4 reproduced on another route by design.
+  - The full suite (`--full`) has not run on this branch; it is required before a merge.
 
 ## 2026-10-15 (lean quality policy adopted as a bounded pilot, D70)
 - **What:** the owner adopted the lean quality-control review, Revision 3 (`docs/quality/LEAN_QC_PROPOSAL_REV3.md`). The changes:
