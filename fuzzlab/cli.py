@@ -19,34 +19,27 @@ _TOOL_MODULES = {
     "build-db": "fuzzlab.tools.build_sql_db",
 }
 
-_USAGE = """usage: fuzzlab <command> [args]
 
-commands:
-  web [--with-proxy]  open the local control panel / launcher (loopback only;
-                      --with-proxy runs the intercepting proxy in-process, needs --authorized)
-  session <sub>       manage per-host credentials / print a session header
-  crawl [args]        run the crawler        (python -m fuzzlab.tools.spider)
-  audit [args]        run the auditor        (python -m fuzzlab.tools.fetcher)
-  fuzz  [args]        run the blind SQLi fuzzer (requires --authorized)
-  auto  [args]        run an automatic pipeline pass over a crawl (requires --authorized)
-  greybox-run [args]  live grey-box pass: coverage/DB-fault reward (requires --authorized)
-  proxy [args]        run the intercepting proxy / export its CA (requires --authorized)
-  mutate-run [args]   learn + evade the live lab WAF, record variants (requires --authorized)
-  report [args]       print a reproducible evaluation report for a stored run (read-only)
-  reveal-holdout [args] print a run's sealed blind-holdout metrics (counts the reveal)
-  flow-anomaly [args] flag each host's most unusual recorded flows (writes the store; no traffic)
-  lab-generate [args] render a lab manifest to source files via an emitter (read-only; --check runs build gates)
-  build-db [args]     rebuild the indicator database
-  version             print the version
+def _usage() -> str:
+    """Grouped help — working runs, training/benchmark, lab — from the one table
+    (`cli_taxonomy.COMMANDS`, FR-UI-400)."""
+    from fuzzlab.cli_taxonomy import render_help
+    return render_help()
 
-Lab-only. Nothing runs against a target until you ask it to (no auto-run).
-"""
+
+def _old_name_note(command: str) -> None:
+    """One stderr line for an older name; stdout is the command's own (design D-6)."""
+    from fuzzlab.cli_taxonomy import OLD_NAMES
+    new = OLD_NAMES.get(command)
+    if new:
+        print(f"fuzzlab: '{command}' is now 'fuzzlab {new}' (the old name still works)",
+              file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help"):
-        print(_USAGE)
+        print(_usage())
         return 0
 
     command, rest = argv[0], argv[1:]
@@ -62,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     if command == "session":
         from fuzzlab.session import cli as session_cli
         return session_cli.main(rest)
+
+    if command == "train":
+        from fuzzlab import train_cli
+        return train_cli.main(rest)
+
+    _old_name_note(command)
 
     if command == "auto":
         from fuzzlab.harness import auto_cli
@@ -97,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
     module = _TOOL_MODULES.get(command)
     if module is None:
-        print(f"unknown command: {command}\n\n{_USAGE}", file=sys.stderr)
+        print(f"unknown command: {command}\n\n{_usage()}", file=sys.stderr)
         return 2
 
     # Delegate to the tool's module main, preserving its own argument parsing.

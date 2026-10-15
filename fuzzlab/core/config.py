@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from fuzzlab.core import storepath
+
 # Built-in defaults. Safety-relevant values are intentionally conservative.
 DEFAULTS: dict[str, Any] = {
     # Networking / scope. Lab-only: the target must resolve to loopback.
@@ -32,8 +34,9 @@ DEFAULTS: dict[str, Any] = {
     # Safety gates.
     "authorized": False,          # tools that send traffic require this to be true
     "allow_destructive": False,   # destructive payload classes are off by default
-    # Storage.
-    "store_path": "fuzzlab.db",
+    # Storage. The default and the environment (FUZZLAB_STORE, FUZZLAB_STORE_PATH) are
+    # resolved by `core.storepath`, the one resolution the CLI shares (FR-CORE-400).
+    "store_path": storepath.DEFAULT_STORE,
     # Ground-truth label contract (read out-of-band from disk; D9).
     "ground_truth_dir": "lab/ground-truth",
     # Web control panel (D11): loopback only.
@@ -70,9 +73,15 @@ def _deep_merge(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, A
     return out
 
 
+#: Keys whose environment form is read by their own resolver, not the generic layer.
+_ENV_RESOLVED = {"store_path"}
+
+
 def _from_env(defaults: Mapping[str, Any], environ: Mapping[str, str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, default in defaults.items():
+        if key in _ENV_RESOLVED:
+            continue
         env_key = _ENV_PREFIX + key.upper()
         if env_key in environ:
             out[key] = _coerce(default, environ[env_key])
@@ -145,6 +154,11 @@ def load_config(
             merged = _deep_merge(merged, json.loads(path.read_text(encoding="utf-8")))
 
     merged = _deep_merge(merged, _from_env(DEFAULTS, environ))
+    # FUZZLAB_STORE / FUZZLAB_STORE_PATH through the CLI's own function, so the web UI and
+    # a command it launches never disagree (empty = unset, `~` expanded; never raises)
+    store_env = storepath.from_environ(environ)
+    if store_env is not None:
+        merged["store_path"] = store_env[0]
 
     if overrides:
         merged = _deep_merge(merged, dict(overrides))

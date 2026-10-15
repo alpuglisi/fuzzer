@@ -90,6 +90,39 @@ fuzzlab fuzz  --url http://127.0.0.1:8080/product.php --param id --authorized --
 
 Each tool is also runnable as `python -m fuzzlab.tools.<name>`.
 
+`--store` is optional. A command uses the first of these that is set:
+1. `--store PATH`;
+2. `$FUZZLAB_STORE`;
+3. `$FUZZLAB_STORE_PATH`;
+4. `./fuzzlab.db` in the current directory.
+
+The web UI uses the same rule. Every summary names the store it used:
+
+```bash
+fuzzlab report                 # the latest run in ./fuzzlab.db  (stderr: store: …/fuzzlab.db (default))
+fuzzlab train models           # the saved models, label-free (the model registry)
+```
+
+`fuzzlab --help` groups the commands into three groups:
+- **working runs:** fuzzlab used as a tool against a lab target;
+- **training and benchmark** (`fuzzlab train …`): ground truth, scored runs, model
+  training, holdouts, calibration, the model registry;
+- **lab.**
+
+A training or benchmark run is `fuzzlab train run <url>`. It takes the same flags as
+`auto`, and needs `--authorized` plus at least one training or benchmark choice, for
+example:
+
+```bash
+# [design] -- the command's parsing and store handling are tested; not yet run here against the lab
+fuzzlab train run http://127.0.0.1:8080 --ground-truth lab/ground-truth --score --authorized
+```
+
+Give benchmark and training runs their own `--store` when reproducibility matters: bandit
+posteriors, holdout reveals and earlier-run training pools are store-wide. The older names
+`mutate-run`, `reveal-holdout` and `flow-anomaly` still work; they are now
+`fuzzlab train mutate`, `train reveal-holdout` and `train flow-anomaly`.
+
 ## The blind SQLi fuzzer
 
 Sends a small payload catalog to one parameter, measures latency against a

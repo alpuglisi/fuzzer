@@ -63,7 +63,7 @@ def _seed_flow(path):
         hw.flush()
 
 
-def test_launcher_dry_run_and_run_in_browser(tmp_path):
+def test_launcher_dry_run_and_run_in_browser(tmp_path, monkeypatch):
     port = _free_port()
     store = tmp_path / "s.db"
     _seed_flow(store)                       # a recorded flow for the Proxy History tab
@@ -96,8 +96,11 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
             preview.wait_for(state="visible")
             assert "fuzzlab report --store x.db" in preview.inner_text()
 
-            # Run: clear --store first so report exits fast (argparse error) and writes
-            # no file into the repo; its output must still stream to completion over SSE.
+            # Run: clear --store first so report exits fast and writes no file into the
+            # repo; its output must still stream to completion over SSE. --store is
+            # optional (FR-CORE-400): the child inherits FUZZLAB_STORE, pinned to an
+            # absent store, so it refuses ("no such store") whatever the host holds.
+            monkeypatch.setenv("FUZZLAB_STORE", str(tmp_path / "absent.db"))
             page.fill(f"{report} [data-dest='store']", "")
             page.click(f"{report} [data-action='run']")
             output = page.locator(f"{report} .launch-output")

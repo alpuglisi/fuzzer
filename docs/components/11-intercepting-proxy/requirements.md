@@ -98,6 +98,11 @@ that shares the store, never a mandatory pipeline (D5).
   - **Off the event loop:** the engine runs the (stateless) sender with
     `asyncio.to_thread`, with at most min(32, CPUs + 4) concurrent upstream calls.
     History is recorded on the loop thread.
+- **FR-PROXY-400** *(`--record`; `CC-PROXY-0400`, 2026-10-15).* Flow recording stays
+  opt-in.
+  - `--record` records into the resolved store (FR-CORE-400).
+  - `--store PATH` records there, as before; with both, `--store` wins.
+  - The `--authorized` and loopback gates run before any store work.
 
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).

@@ -517,6 +517,14 @@ the oracle owns truth (the oracle/advisory split).
     and `run_metrics.ml_quarantined_rows`, and the CLI prints a line.
   - Quarantined ids are scored by no model, and the prioritizer orders them after the
     scored candidates.
+- **FR-ML-400** *(model listing; `CC-ML-0400`, 2026-10-15).*
+  `model_registry.list_models(store)` returns every saved model oldest first, for
+  `fuzzlab train models`. It is a listing, never a selection.
+  - **Row fields:** id, name, version, feature version, created, params saved.
+  - **From the calibration JSON:** only `LISTING_KEYS` (`trained_on`, the `run_id`
+    scope, `source_model_id`, the count of `scored_run_ids`).
+  - **Never read:** a metric, `holdout.*`, `params`, or a sealed table (PA-0092).
+  - **Malformed:** an unparsable calibration is reported `unreadable` (PA-0108).
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

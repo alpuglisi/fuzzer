@@ -1957,6 +1957,26 @@ replays and edits, including a raw byte path for malformed-traffic study.
   reproducibility.
 - **Configuration:** layered (defaults → file → env → CLI), validated, hashed
   onto the `run` row; one config shared by all tools; secrets by reference only.
+- **The store's location (FR-CORE-400):** `--store` is never required.
+  - `core/storepath.resolve` is the one resolution. Its order is `--store`, then
+    `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then `./fuzzlab.db`.
+  - Every CLI and the web UI's config go through it, so a command launched from the UI
+    and the UI's own pages always open the same store.
+  - Writers create the store; non-creating commands refuse a missing one.
+  - Every summary names the store and its source.
+  - A per-user location is an open owner decision
+    (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §4.8).
+- **The command taxonomy (FR-FUZZ-401, FR-UI-400):** commands are grouped as working
+  runs (lab-only; fuzzlab as a tool), training and benchmark (`fuzzlab train …`: ground
+  truth, scored runs, model training and its modulators, holdouts, calibration, the
+  model registry, the research learners), and lab.
+  - `fuzzlab/cli_taxonomy.py` classifies every flag of every command's parser (B / T /
+    W\* / L).
+  - A working command refuses every training, benchmark and lab-only flag by name.
+  - Ground truth is never a working option.
+  - The grouped `fuzzlab --help` is printed from the same table.
+  - Older names (`mutate-run`, `reveal-holdout`, `flow-anomaly`; `auto` until `scan`
+    lands) still work.
 - **Testing:** protocol unit tests, `hypothesis` property tests for the parser,
   golden-file feature tests, deterministic ML-pipeline tests, an
   assert-N-known-vulns integration suite, and oracle precision tests. Every server a
@@ -1979,6 +1999,12 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
+- `[partial]` **CLI simplification (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).**
+  - **Phase 1 is built:** the default store (FR-CORE-400), the `fuzzlab train` group
+    (FR-FUZZ-400), the taxonomy and refusal machinery (FR-FUZZ-401), the grouped help,
+    `proxy --record`, and `train models`.
+  - **Phase 2 is gated on the BUG-0138 merge:** `fuzzlab scan <url>`, the default store
+    for `auto`/`greybox-run`, and the extraction of `auto_cli.validate()`.
 - `[built]` (offline-complete, unit-tested):
   - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
     migrations (head = 10), config, structured logging, request budget + per-host

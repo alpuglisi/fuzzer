@@ -1,6 +1,6 @@
 # CLI simplification: a default store, working runs vs training runs
 
-Status: **AGREED (design gate 3/3 after round 3, 2026-10-15)** — revision 3 with the round-3 fixes
+Status: **AGREED (design gate 3/3 after round 3, 2026-10-15); Phase 1 BUILT (CC-*-0400); Phase 2 gated on BUG-0138** — revision 3 with the round-3 fixes
 (Appendix D) folded in; both reviewers stated no further round is needed. Two reviewers (A, B) reviewed rounds 1 and 2; both said
 "agree with fixes". Appendix B maps round 1's findings to resolutions, Appendix C maps
 round 2's.
@@ -607,7 +607,8 @@ flow-anomaly`, `reveal-holdout`, `train reveal-holdout`, `train models` and `pro
 - Coverage checks both directions; `PENDING` behaves as specified.
 - Help counting.
 - Each T/L/W\* flag is refused through `copy_parser` on auto's parser, naming `train
-  run`, with no sender import.
+  run`, and opens no socket (importing `auto`'s parser imports its sender module
+  today; `auto_cli` is locked, so Phase 2 makes that import lazy).
 
 **Web compatibility.**
 - Every `commandspec` spec builds.

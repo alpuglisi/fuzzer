@@ -4,6 +4,40 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (CLI simplification, Phase 1: a default store; working runs vs training runs)
+- **Why:** the owner found the CLI too complicated. `--store` was required by six commands,
+  and training and benchmark options (ground truth, model training, holdouts, calibration)
+  were mixed into the working tool.
+- **What:**
+  - **`--store` is never required.** One resolution in `core/storepath.py` (`--store`,
+    then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then `./fuzzlab.db`) is shared by
+    every CLI and the web UI's config. Its default is unchanged.
+  - **Read-only commands no longer create stores.** `report`, `reveal-holdout`,
+    `flow-anomaly` and `train models` refuse a missing store instead of creating one.
+  - **New `fuzzlab train` group:** `train run <url>` (it needs a training or benchmark
+    choice) and `train models` (label-free). `train reveal-holdout`, `train
+    flow-anomaly` and `train mutate` are the new names; the old ones still work.
+  - **Every flag classified.** `fuzzlab/cli_taxonomy.py` classifies every flag of every
+    command, and a working command refuses training, benchmark and lab-only flags by
+    name.
+  - **Grouped `fuzzlab --help`.**
+  - **`proxy --record`.**
+  - The design went through a 3-round, two-reviewer gate
+    (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`). Phase 2 (`fuzzlab scan <url>`, and the
+    default store for `auto`/`greybox-run`) waits for the BUG-0138 merge.
+  - Change controls: CC-CORE-0400, CC-FUZZ-0400, CC-UI-0400, CC-MUT-0400, CC-PROXY-0400,
+    CC-ML-0400.
+
+## 2026-10-15 (BUG-0400: the launcher's argv builder mis-serialises four argparse shapes)
+- Found during the CLI design review. `web/runner.build_flags` mis-serialises four
+  argparse shapes; it builds both the web launcher's real child argv and every
+  `--dry-run` display:
+  - `nargs='*'` lists are written as their Python repr;
+  - a bare `const=""` flag is dropped;
+  - a dash-leading value is split off its flag.
+- Pinned by strict xfails from a discovery round-trip test over every action of every
+  registered parser. The fix is handed to the UI lane (BUG-0400, PA-0400).
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

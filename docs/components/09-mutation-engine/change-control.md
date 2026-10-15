@@ -3,6 +3,32 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0400 — `mutate-run` / `fuzzlab train mutate`: default store (FR-MUT-400) (2026-10-15)
+- Change:
+  - **`mutation/cli.py`:**
+    - `--store` is optional (`core.storepath`). The store is created on first use and
+      reused.
+    - An explicit empty `--store` or a missing directory is a typed usage error, checked
+      after `--authorized` and before any sender or store.
+    - The summary's `sqlite3` hint uses the resolved path, and a store line is added.
+    - The dry run prints the store line.
+    - `main(argv, *, prog=)`, so `fuzzlab train mutate` reports its own name.
+- Impact (other components / project):
+  - FUZZ: `train mutate` dispatches here.
+  - The web launcher's `mutate-run` form shows `--store` as optional.
+  - The destructive gate and the `--authorized` gate are unchanged.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `mutation/cli.py` — done
+  - [x] tests: `tests/test_cli_default_store.py` (created then reused through both names;
+    usage errors create nothing; dry run names the store, creates nothing),
+    `tests/test_train_cli.py::test_train_mutate_dry_run_sends_nothing`,
+    `::test_train_mutate_keeps_the_destructive_gate_off_by_default` — done
+  - [x] NFR-MUT-safe / NFR-MUT-dry-run traced through `train mutate` — done
+  - [x] FR-MUT-400 — done
+- Effectiveness (assessed 2026-10-15): the existing `tests/test_cli_dry_run.py` mutate
+  tests still pass unchanged. Effective.
+
 ### CC-MUT-0013 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-MUT-safe, NFR-MUT-offline, NFR-MUT-dry-run, naming the enforcing code and the test functions that fail without it

@@ -3,6 +3,55 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0400 — One store resolution for every CLI and the web UI; `--store` never required (FR-CORE-400) (2026-10-15)
+- Change:
+  - **New `core/storepath.py`:** `resolve(value)` → `ResolvedStore(path, source)`.
+    - Order: `--store`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then
+      `DEFAULT_STORE` (`fuzzlab.db` in the cwd).
+    - Pure. An explicit `--store ""` raises a typed `StorePathError`.
+    - `from_environ` (never raises: empty = unset, `~` expanded) is the one reader of
+      both variables.
+    - `check_readable` / `check_writable` are typed boundary checks (missing store,
+      missing directory, a directory or FIFO). They only stat.
+    - `describe` gives the printed `store: <path> (<source>)` line.
+  - **`core/config.py`:**
+    - `DEFAULTS["store_path"]` is `storepath.DEFAULT_STORE` (same value).
+    - `store_path`'s environment layer goes through `storepath.from_environ` instead of
+      the generic one.
+    - The web UI therefore resolves exactly as the CLI does, with no `web/` edit.
+- Impact (other components / project):
+  - Every command that takes `--store` (UI `report`; FUZZ `train run`, `reveal-holdout`,
+    `flow-anomaly`; MUT `mutate-run`; PROXY `--record`).
+  - The web UI now also honours `FUZZLAB_STORE`. It expands `~` and treats an empty
+    variable as unset. **Its default does not move** (`./fuzzlab.db`).
+  - The config hash is byte-identical when neither variable is set.
+  - `.gitignore` ignores `fuzzlab.db` at any depth. A writer run from a subdirectory
+    never leaves a committable store.
+  - `tests/conftest.py` gains the store isolation guard (`tests/_store_guard.py`).
+- Risk (level; mitigation or accepted-risk justification): low.
+  - `load_config` cannot fail because of the store (`from_environ` never raises).
+  - The default and the hash are unchanged (tested against the source of truth).
+  - Moving to a per-user location is an owner decision with listed preconditions
+    (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §4.8). It was deliberately not done here, because it would move the UI's
+    store under the parallel UI session.
+- Deliverables:
+  - [x] `core/storepath.py`, `core/config.py`, `.gitignore` — done
+  - [x] tests: `tests/test_storepath.py` (precedence, empty/explicit-empty, `~`, no
+    writes, typed checks incl. a FIFO, UI-config == CLI for six environments, override
+    wins, hash unchanged, never raises, isolation, guard) — done
+  - [x] `tests/_store_guard.py` + `tests/conftest.py`: environment cleared per test;
+    the session fails on any new or written `fuzzlab.db` (+ sidecars) in the tree — done
+  - [x] FR-CORE-400; §8 open question answered — done
+  - [x] design gate: `docs/CLI_WORKING_VS_TRAINING_DESIGN.md`, reviewers A and B, 3 rounds, 3/3 — done
+- Effectiveness (assessed 2026-10-15):
+  - Mutation checks: removing `config`'s `from_environ` use fails
+    `test_the_ui_config_and_the_cli_pick_the_same_store`. Removing the explicit-empty
+    refusal fails `test_an_explicit_empty_store_flag_is_a_usage_error_not_absent`.
+    Making the guard ignore writes fails
+    `test_the_store_guard_sees_a_new_store_and_a_write_to_an_existing_one`.
+  - Full-suite counts: see CC-FUZZ-0400.
+  - Effective.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

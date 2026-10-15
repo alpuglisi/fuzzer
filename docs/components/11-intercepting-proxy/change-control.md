@@ -3,6 +3,33 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0400 — `proxy --record`: record flow history into the default store (FR-PROXY-400) (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:**
+    - New `--record` records into the resolved store (`core.storepath`). `--store PATH`
+      alone still records there; with both, `--store` wins.
+    - Recording stays **opt-in**.
+    - The order is `--dry-run` / `--export-ca`, then `--authorized`, then
+      `require_loopback` (the existing order), then `check_writable`, then `Store`.
+    - The banner and the dry run name the store.
+- Impact (other components / project):
+  - The web launcher's proxy form gains a `--record` checkbox (commandspec
+    introspection).
+  - `web --with-proxy` is unchanged: it records to the UI's own `store_path`, which now
+    resolves the same way.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - Nothing is recorded unless asked.
+  - The loopback and `--authorized` gates come before any store work, which is tested.
+- Deliverables:
+  - [x] `proxy/cli.py` — done
+  - [x] tests: `tests/test_cli_default_store.py::test_proxy_records_nothing_unless_asked`,
+    `::test_proxy_record_checks_come_before_any_store_work`;
+    `tests/test_web_commandspec.py` and `tests/test_loopback_listeners.py` still green
+    — done
+  - [x] FR-PROXY-400 — done
+- Effectiveness (assessed 2026-10-15): the dry runs name the store only when recording;
+  usage errors leave nothing. Effective.
+
 ### CC-PROXY-0022 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-PROXY-safe, NFR-PROXY-dry-run, naming the enforcing code and the test functions that fail without it

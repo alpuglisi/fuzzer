@@ -5,6 +5,10 @@ store when `--store` is given, and — with a local CA — terminates CONNECT/TL
 targets can be intercepted. Lab-only: requires `--authorized` to run (it sends traffic
 to upstreams). `--export-ca` just writes/prints the CA cert to import into your browser
 and sends nothing, so it needs no `--authorized`.
+
+Recording stays opt-in: ``--store PATH`` records there (as before), and ``--record`` records
+into the resolved default store (`core.storepath`: ``$FUZZLAB_STORE``,
+``$FUZZLAB_STORE_PATH``, else ``./fuzzlab.db`` -- the store the web UI shows; FR-PROXY-400).
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import argparse
 import asyncio
 import os
 
+from fuzzlab.core import storepath
 from fuzzlab.proxy.ca import LocalCA
 from fuzzlab.proxy.scope import Scope
 from fuzzlab.proxy.server import AsyncProxyServer, ProxyEngine
@@ -36,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ca-dir", default=os.path.expanduser("~/.fuzzlab/ca"),
                    help="Local CA directory (holds fuzzlab-ca.crt / .key)")
     p.add_argument("--store", default=None, help="Store (SQLite) to record flow history")
+    p.add_argument("--record", action="store_true",
+                   help="Record flow history into the default store ($FUZZLAB_STORE, "
+                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db); --store PATH records there "
+                        "instead. Off by default: nothing is recorded unless asked.")
     p.add_argument("--identity", default=None, help="Tag recorded flows with this identity")
     p.add_argument("--max-response-bytes", type=int, default=None,
                    help="Cap on one upstream response body (default 64 MiB; FR-PROXY-12)")
@@ -59,9 +68,18 @@ def main(argv: list[str]) -> int:
     p = build_parser()
     args = p.parse_args(argv)
 
+    recording = None
+    if args.store is not None or args.record:
+        try:
+            recording = storepath.resolve(args.store)
+        except storepath.StorePathError as exc:
+            p.error(str(exc))
+
     if args.dry_run:
         from fuzzlab.cli_dryrun import report
         report("proxy", args)
+        if recording is not None:
+            print(f"  {storepath.describe(recording)}")
         return 0
 
     ca = LocalCA(args.ca_dir)
@@ -84,6 +102,12 @@ def main(argv: list[str]) -> int:
     except ValueError as exc:
         p.error(str(exc))
 
+    if recording is not None:
+        try:
+            storepath.check_writable(recording)
+        except storepath.StorePathError as exc:
+            p.error(str(exc))
+
     from fuzzlab.proxy.socketsender import MAX_BODY_BYTES
     sender = SocketSender(verify_tls=not args.no_verify_tls,
                           max_body=args.max_response_bytes or MAX_BODY_BYTES,
@@ -92,10 +116,10 @@ def main(argv: list[str]) -> int:
 
     store = None
     history = None
-    if args.store:
+    if recording is not None:
         from fuzzlab.core.store import Store
         from fuzzlab.proxy.history import HistoryWriter
-        store = Store(args.store)
+        store = Store(recording.path)
         run_id = store.start_run("proxy", args.host)
         # batch_size=1: persist each flow immediately (WAL), so a reader can see flows
         # while the proxy runs and shutdown timing never loses records.
@@ -114,8 +138,8 @@ def main(argv: list[str]) -> int:
         if not args.no_tls:
             print(f"  HTTPS interception on: import {ca.ca_cert_path} "
                   f"(run `fuzzlab proxy --export-ca` first if it doesn't exist)")
-        if args.store:
-            print(f"  recording flows to {args.store}")
+        if recording is not None:
+            print(f"  recording flows to {recording.path} ({recording.source})")
         print("  Ctrl-C to stop.")
         try:
             await asyncio.Event().wait()          # run until interrupted

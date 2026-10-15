@@ -22,6 +22,68 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0400 — `fuzzlab train` (training/benchmark group) and the CLI taxonomy; default store for `reveal-holdout` / `flow-anomaly` (FR-FUZZ-400, FR-FUZZ-401) (2026-10-15)
+- Change:
+  - **New `fuzzlab/cli_taxonomy.py`:**
+    - `COMMANDS` gives every command a group (working / training and benchmark / lab /
+      other) and drives the grouped help. `OLD_NAMES` lists the older names.
+    - `FLAG_CLASSES` classifies every flag of every command's parser as B / T / W\* / L,
+      with BUG-0138's incoming dests in `PENDING`.
+    - `copy_parser` builds a parser from a command's own parser. Actions are copied,
+      never re-typed, and the source is never mutated. It supports a URL positional,
+      `--store` optional, refusing options (T/L, named, the value consumed), restricted
+      values (W\*) and presence defaults.
+    - `working_parser` is the working view Phase 2's `scan` is built from.
+  - **New `fuzzlab/train_cli.py`:**
+    - `train run <url>` is `auto`'s engine with all its flags. The target comes first or
+      via `--base-url`; `--store` is optional.
+    - It must carry a training or benchmark choice, detected by presence (D-9). Applying
+      a saved model does not count.
+    - It refuses without `--authorized` before anything is created, then forwards the
+      user's argv **verbatim** (PA-0400(3)). It prints the store line, plus a
+      store-qualified reveal hint for holdout runs.
+    - `train models`, `train reveal-holdout`, `train flow-anomaly` and `train mutate` are
+      the other subcommands.
+  - **`harness/reveal_cli.py`, `harness/flow_anomaly_cli.py`:**
+    - `--store` is optional (`core.storepath`). A missing store is refused, never
+      created. `main(argv, *, prog=)`.
+    - The reveal names its store on stderr **before** it is counted, and its header
+      names the run (tool, target, start).
+    - `flow-anomaly` prints the store line.
+- Impact (other components / project):
+  - The CLI surface. Old names still work (a one-line stderr note), so the web UI's
+    commandspec is unchanged.
+  - ML: `list_models` (CC-ML-0400). UI: grouped help (CC-UI-0400). MUT: `train mutate`
+    (CC-MUT-0400).
+  - `auto_cli.py`, `greybox_cli.py` and `tools/spider.py` are untouched (locked; Phase 2
+    of `docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).
+- Risk (level; mitigation or accepted-risk justification): medium.
+  - `copy_parser` uses argparse internals. Mitigations: parity and identity tests; no
+    re-serialisation (verbatim forwarding); a two-directional classification guard; and
+    D-9, URL-first and PA-0079 path tests (every usage error leaves no store file and no
+    run row).
+  - Known Phase 1 warts, removed in Phase 2 by `auto_cli.main(prog=)`: errors raised
+    inside the engine say `fuzzlab auto:`; `--dry-run` displays the equivalent
+    `fuzzlab auto …`.
+- Deliverables:
+  - [x] `fuzzlab/cli_taxonomy.py`, `fuzzlab/train_cli.py`, `reveal_cli.py`,
+    `flow_anomaly_cli.py` — done
+  - [x] tests: `tests/test_cli_taxonomy.py`, `tests/test_train_cli.py`,
+    `tests/test_cli_default_store.py` — done
+  - [x] NFR-FUZZ-safe and NFR-FUZZ-dry-run traced through `train run` (PA-0112) — done
+  - [x] BUG-0400 found in review, pinned (`tests/test_cli_argv_roundtrip.py`), handed to
+    the UI lane — done
+  - [x] FR-FUZZ-400, FR-FUZZ-401 — done
+  - [ ] Phase 2 (`scan <url>`, `auto`/`greybox-run` default store, `validate()`
+    extraction): todo, gated on BUG-0138 landing
+- Effectiveness (assessed 2026-10-15):
+  - Mutation checks: refusal, W\* restriction, D-9, URL-first and reveal-store-first
+    each fail their named test when reverted. 10 of 10 mechanisms were killed.
+  - An executed offline run (`fuzzlab train run http://127.0.0.1:9 --score --categories
+    sql-injection --authorized`, no crawl DB, so 0 requests) created `./fuzzlab.db`, a
+    second run reused it (run #2), and `report` and `train models` read it.
+  - Full-suite counts: pending the clean-tree run.
+
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
   literal sat in the edit field (`<input value="#{728*889}">`) and its rule was

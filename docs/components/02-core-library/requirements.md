@@ -449,6 +449,30 @@ plugin registry. It is the layer that makes the store the integration bus.
     (a container's, joined with nsenter) would not count as exposed, even though that
     namespace may be bridged with published ports. Nothing launches servers that way
     today.
+- **FR-CORE-400** *(store resolution; `CC-CORE-0400`, 2026-10-15).* `--store` is never
+  required. `core/storepath.resolve` is the one resolution that every command taking
+  `--store`, and the web UI's `load_config()["store_path"]`, go through (PA-0003).
+  - **Order:** `--store PATH`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then
+    `DEFAULT_STORE` (`fuzzlab.db` in the current directory, the shared project store).
+  - **Environment values:** an empty variable is unset, and `~` is expanded.
+    `from_environ` (the only reader of the two variables) never raises.
+  - **Explicit empty flag:** an explicit empty `--store` is a usage error.
+  - **Side effects:** resolution writes nothing.
+    - Writers create the store file on first use (`Store`). Its mode comes from the
+      umask, as for any explicit path; a private mode is part of the §8 per-user
+      follow-up.
+    - Non-creating commands (`report`, `train models`, `reveal-holdout`,
+      `flow-anomaly`) refuse a missing store. They do migrate an existing older store
+      when they open it.
+  - **Typed refusals:** a missing directory, or a path that is a directory or another
+    non-regular file, is refused with the typed `StorePathError` (a `ValueError`), which
+    each CLI prints as a usage error.
+  - **The printed line:** every run summary and read-only command names the resolved
+    store and its source (`describe`).
+  - **Config hash:** with neither variable set, the config value and its hash are
+    unchanged.
+  - **Test isolation:** tests run with both variables cleared, and the session fails on
+    any new or written `fuzzlab.db` in the tree (`tests/_store_guard.py`).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
@@ -486,4 +510,7 @@ None (foundational layer; it manages the project store).
 ## 8. Open questions
 - Package name.
 - Per-project database files plus a small global config database, versus one
-  global database.
+  global database. *(Answered 2026-10-15, FR-CORE-400: per project directory
+  (`./fuzzlab.db`, shared by the CLI and the web UI); a per-user location
+  (`$XDG_DATA_HOME/fuzzlab/default.db`) is pending the owner's decision with its listed
+  preconditions -- `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §4.8.)*
