@@ -343,7 +343,8 @@ _INCONCLUSIVE_PREFIX = "pipeline_oracle_inconclusive_"
 def inconclusive_by(metrics: dict) -> list[tuple[str, int]]:
     """``[(mechanism, rows)]`` of a run's inconclusive candidates, by the mechanism that
     could not decide them (``unplaceable``: no mechanism could place the point,
-    FR-FUZZ-47; else the cost-capped one, e.g. ``boolean-differential``, FR-FUZZ-45),
+    FR-FUZZ-47; ``unobserved``: a probe got no response, FR-FUZZ-50; else the
+    cost-capped one, e.g. ``boolean-differential``, FR-FUZZ-45),
     as the pipeline recorded them. Empty for a run recorded before CC-FUZZ-0068."""
     out = []
     for key, value in metrics.items():
@@ -396,11 +397,12 @@ def _ml_context(store, run_id: int, metrics: dict) -> dict:
                           # safety breaker stopped those points
                           "pending": counts[PENDING],
                           # could not be decided: a cost cap stopped a started check
-                          # (FR-FUZZ-45), or no mechanism could place the point
-                          # (FR-FUZZ-47)
+                          # (FR-FUZZ-45), no mechanism could place the point
+                          # (FR-FUZZ-47), or a probe got no response (FR-FUZZ-50)
                           "inconclusive": counts[INCONCLUSIVE]},
         # which mechanism left them undecided, from the pipeline's per-mechanism counts
-        # (`pipeline_oracle_inconclusive_<mechanism>`): ``unplaceable`` or the capped one
+        # (`pipeline_oracle_inconclusive_<mechanism>`): ``unplaceable``, ``unobserved``
+        # or the capped one
         "oracle_inconclusive_by": inconclusive_by(metrics),
         "anomaly": {"top": top_flagged(store, run_id, limit=10),
                     "flagged": metrics.get("anomaly_flagged"),

@@ -34,7 +34,7 @@ from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
 from fuzzlab.oracle import Candidate, Oracle, category_to_oracle_class
 from fuzzlab.oracle.oracle import UNPLACEABLE
-from fuzzlab.oracle.probe import HeaderPointsStopped
+from fuzzlab.oracle.probe import HeaderPointsStopped, ProbeUnobserved
 
 
 @dataclass
@@ -139,8 +139,15 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     # goes where its point says, siblings included (BUG-0115: it used to send any
     # point's parameter as a GET query); never through a header point.
     fp_point = _fingerprint_point(points)
+    probe = None
     if fp_point is not None:
-        probe = _baseline(sender, fp_point)
+        try:
+            probe = _baseline(sender, fp_point)
+        except ProbeUnobserved:
+            # no response to the baseline (BUG-0147): an unprobed target row, as for
+            # header points only; the candidates still run
+            pass
+    if probe is not None:
         fp = fingerprint(probe.headers, probe.text)
         origin = urlparse(fp_point.url)
         store.conn.execute(
@@ -151,9 +158,10 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         )
         store.conn.commit()
     elif points:
-        # no point a baseline may go through (header points only): still one target row,
-        # unprobed -- ML's same-target training and holdout origins key on it (BUG-0104)
-        origin = urlparse(points[0].url)
+        # no point a baseline may go through (header points only), or no response to it:
+        # still one target row, unprobed -- ML's same-target training and holdout
+        # origins key on it (BUG-0104)
+        origin = urlparse((fp_point or points[0]).url)
         store.conn.execute("INSERT INTO target (run_id, base_url) VALUES (?,?)",
                            (run_id, f"{origin.scheme}://{origin.netloc}"))
         store.conn.commit()
@@ -252,6 +260,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                 item["reason"] = str(unsure.evidence.get("reason", ""))[:200]
             elif "not_observed" in unsure.evidence:      # BUG-0137: M6 saw no page
                 item["reason"] = str(unsure.evidence["not_observed"])[:200]
+            elif "unobserved" in unsure.evidence:        # BUG-0147: no response
+                item["reason"] = str(unsure.evidence["unobserved"])[:200]
             inconclusive_detail.append(item)
 
     def _checked(key) -> str:
@@ -319,7 +329,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                "oracle_no_confirmer": statuses.count(NO_CONFIRMER),
                "oracle_inconclusive": statuses.count(INCONCLUSIVE),
                # of those, rows no mechanism could place (FR-FUZZ-47); the rest were
-               # stopped by a cost cap (FR-FUZZ-45)
+               # stopped by a cost cap (FR-FUZZ-45) or got no response (FR-FUZZ-50)
                "oracle_unplaceable": undecided.get(UNPLACEABLE, 0),
                "oracle_checked_keys": checked_keys, "confirmable_keys": len(keyed),
                "findings": findings, "scored": plan.scored, **budget_info}

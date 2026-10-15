@@ -32,8 +32,8 @@ class Probe:
     probe's own fields always stay the raw response (a 3xx and its ``Location``), which
     open-redirect, header-injection and timing read. ``prg`` says what happened:
     ``None`` (not asked, or not a PRG redirect), `PRG_OBSERVED`, `PRG_UNOBSERVED` (a
-    follow-up was sent, but answered with another redirect or timed out), or
-    ``"skipped: <reason>"`` (a gate refused the follow-up; nothing was sent)."""
+    follow-up was sent, but answered with another redirect, timed out or got no
+    response), or ``"skipped: <reason>"`` (a gate refused the follow-up; nothing was sent)."""
     status: int
     text: str
     elapsed: float = 0.0                       # seconds
@@ -46,12 +46,21 @@ class Probe:
     #: its origin is not one of the session's. The oracle carries it into the verdict's
     #: ``evidence["session"]``; greybox into the attempt's features.
     session: str | None = None
+    #: Times the sender re-sent this probe (or its follow-up) after no response
+    #: (BUG-0147): requests of the run too.
+    resent: int = 0
+
+    @property
+    def prg_sends(self) -> int:
+        """The PRG follow-up the sender made for this probe (0 or 1; FR-FUZZ-49)."""
+        return 1 if self.prg in (PRG_OBSERVED, PRG_UNOBSERVED) else 0
 
     @property
     def follow_up_sends(self) -> int:
-        """Requests the sender made for this probe beyond the probe itself (0 or 1):
-        counted in the run's ``requests`` and a strategy's cost (FR-FUZZ-49, P8)."""
-        return 1 if self.prg in (PRG_OBSERVED, PRG_UNOBSERVED) else 0
+        """Requests the sender made for this probe beyond the probe itself -- its PRG
+        follow-up and any re-send after no response: counted in the run's
+        ``requests`` and a strategy's cost (FR-FUZZ-49 P8, BUG-0147)."""
+        return self.prg_sends + self.resent
 
 
 @dataclass
@@ -107,6 +116,19 @@ class HeaderPointsStopped(RuntimeError):
 class UnplaceableLocation(ValueError):
     """A sender or executor cannot put a payload where the point says it goes. It
     refuses instead of sending it somewhere else (BUG-0115, PA-0115)."""
+
+
+class ProbeUnobserved(RuntimeError):
+    """A probe was sent but no response could be read: the connection was reset,
+    refused or closed before a complete response (BUG-0147). The one transport class a
+    sender maps to "not observed" (PA-0137(1), PA-0106); the message names the error
+    class only, never the payload or URL. The oracle makes it no verdict from that
+    mechanism, never a negative and never the end of the run. ``resent``: the requests
+    the sender re-sent before giving up, which the run's counters still count."""
+
+    def __init__(self, message: str = "", resent: int = 0):
+        super().__init__(message)
+        self.resent = resent
 
 
 class Sender:

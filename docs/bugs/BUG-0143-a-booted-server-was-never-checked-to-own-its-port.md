@@ -32,7 +32,7 @@ isolated … if it fails in the serial full suite → investigate".
 **Correction (later on 2026-10-15).** This report first treated BUG-0143 as the cause of
 that test's resets. That was a hypothesis, never shown: the wrong-server hazard below
 was proven and is fixed, but the same test failed the same way, with the fix in place,
-in the integration branch's full suite. Its cause is open as BUG-0147. BUG-0143 stands
+in the integration branch's full suite. Its cause was root-caused and fixed as BUG-0147. BUG-0143 stands
 on its own deterministic reproduction.
 
 ## What it caused to fail

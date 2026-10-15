@@ -3,6 +3,20 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0024 — The proxy's hand-written 501 says `Connection: close` (BUG-0147 sweep) (2026-10-15)
+- Change: `fuzzlab/proxy/server.py`: the 501 sent for a CONNECT with no CA, after which
+  the connection is closed, carries `Connection: close` (the 502 already did).
+- Impact (other components / project): proxy clients only; no API, store or UI change.
+  Found by BUG-0147's PA-0002 sweep of hand-written responses.
+- Risk: low; one header.
+- Residual recorded in BUG-0147 (not changed here): forwarded upstream responses keep
+  their own `Connection` semantics although the proxy closes after each one. Rewriting
+  the forwarded head is a design decision for this component.
+- Deliverables:
+  - [x] code — done
+  - [x] guard (the same hand-written-response test, mutation-checked) — done
+- Effectiveness (assessed pending):
+
 ### CC-PROXY-0023 — A captured session records the origins it was seen on (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change: `proxy/session_capture.py` records the canonical origin of every URL passed to
   `observe_request` / `observe_response` on the capture's host (loopback aliases one

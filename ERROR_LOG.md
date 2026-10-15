@@ -18,13 +18,14 @@ Format per entry:
 
 ---
 
-## 2026-10-15 — Tests: `test_multitarget_category4` connection reset under the full parallel suite (OPEN, BUG-0147)
-- **Symptom:** `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
-- **Root cause:** unknown.
-  - It is not reproduced in isolation or under CPU load (10/10 pass).
-  - It is not the OOM killer (`oom_kill 0`), not a Go idle timeout (none set), and not BUG-0143 (it recurred with that fix in place).
-- **Remediation:** none yet. Investigation continues with the three hypotheses in `docs/bugs/BUG-0147-multitarget-category4-connection-reset-under-full-parallel-load.md`. Not moved to a serial pass.
-- **Status:** Open.
+## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
+- **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
+- **Root cause:**
+  - The Go response-splitting twin hand-wrote a 302 without `Connection: close`, then closed. `requests` reused the connection, and under load the follow-up arrived before the close, so the close sent a reset.
+  - The probe senders had no defined outcome for "no response": `RequestsProbeSender` caught timeouts only, so the reset ended the run for both targets. PA-0137 had made such failures "no verdict" for the browser only.
+  - Reproduced deterministically without load. On the real Go app, the missing `Connection: close` and the close after one response are confirmed; the reset ordering there is inferred.
+- **Remediation:** `ProbeUnobserved`, classified in one place (`probesender._unobserved`); an idempotent probe is re-sent once; the oracle makes it inconclusive, never a negative or the end of the run; OOB mechanisms still wait for their callback; a dead target still fails loudly. The Go twin and the proxy's 501 send `Connection: close`. Guards: every default mechanism against a dead sender and a stopped listener (named exemptions), every HTTP sender, every hand-written response (CC-FUZZ-0088, CC-LAB-0259, CC-PROXY-0024, CC-UI-0056).
+- **Status:** Fixed.
 
 ## 2026-10-15 — Integration of the five session lanes: cross-lane defects found by the merged full suite (fixed, BUG-0145/0146, PA-0151/0152)
 - **Symptom:** merging the five lane branches onto the dev branch gave 14 failures in the full suite.

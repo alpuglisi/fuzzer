@@ -18,7 +18,7 @@ from fuzzlab.core.urls import (DestructiveUrlRefused, canonical_origin, check_se
                                to_path, transaction_reason, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
                                   PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
-                                  Probe, UnplaceableLocation)
+                                  Probe, ProbeUnobserved, UnplaceableLocation)
 from fuzzlab.tools.authhttp import with_query, with_query_param
 
 
@@ -156,6 +156,61 @@ class _Copy:
         self.manager = manager
         self.client = client
         self.label = manager.label
+
+
+def _chain(exc: BaseException) -> list[BaseException]:
+    """``exc`` and what it wraps: ``__cause__``, ``__context__`` and exception
+    arguments (``requests`` puts the urllib3 error in ``args``, urllib3 its cause)."""
+    out: list[BaseException] = []
+    todo = [exc]
+    while todo and len(out) < 12:
+        e = todo.pop(0)
+        if any(e is seen for seen in out):
+            continue
+        out.append(e)
+        todo += [a for a in (e.__cause__, e.__context__, *getattr(e, "args", ()))
+                 if isinstance(a, BaseException)]
+    return out
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """A timeout, including one while reading the body (``requests`` reports that as
+    a ``ConnectionError`` wrapping urllib3's ``ReadTimeoutError``). urllib3's
+    ``NewConnectionError`` (refused, unreachable) subclasses its connect-timeout error
+    but is not a timeout."""
+    import requests
+    from urllib3.exceptions import NewConnectionError
+    from urllib3.exceptions import TimeoutError as Urllib3Timeout
+    chain = _chain(exc)
+    if any(isinstance(e, NewConnectionError) for e in chain):
+        return False
+    return any(isinstance(e, (requests.Timeout, Urllib3Timeout, TimeoutError)) for e in chain)
+
+
+def _unobserved(exc: BaseException) -> ProbeUnobserved | None:
+    """``ProbeUnobserved`` when a sent probe got no complete response (BUG-0147): the
+    connection was reset or aborted, or the body was cut off or undecodable. Else
+    None, and the caller re-raises the original:
+    - a timeout is not one (each sender has its own rule for it, `_is_timeout`);
+    - a target that cannot be reached at all (refused, DNS, TLS, proxy) is not one: it
+      fails loudly, so a dead target never turns every candidate inconclusive.
+    The message names the error classes only, never the payload or URL."""
+    import requests
+    from urllib3.exceptions import NewConnectionError, ProxyError, SSLError
+    if not isinstance(exc, (requests.ConnectionError, requests.exceptions.ChunkedEncodingError,
+                            requests.exceptions.ContentDecodingError)) or _is_timeout(exc):
+        return None
+    chain = _chain(exc)
+    if any(isinstance(e, (NewConnectionError, ProxyError, SSLError, requests.exceptions.SSLError,
+                          requests.exceptions.ProxyError, ConnectionRefusedError))
+           for e in chain):
+        return None
+    root = next((e for e in reversed(chain)
+                 if not type(e).__module__.startswith(("requests", "urllib3"))), exc)
+    cause = type(root).__name__ if type(root).__module__ == "builtins" or \
+        type(root).__module__ == "http.client" else \
+        f"{type(root).__module__}.{type(root).__name__}"
+    return ProbeUnobserved(f"no response: {type(exc).__name__} ({cause})")
 
 
 class SeamProbeSender(_ExplicitAllowance):
@@ -397,7 +452,23 @@ class SeamProbeSender(_ExplicitAllowance):
                 if not isinstance(exc, LoginCapReached):
                     self._count_failed_login_locked()
             return None
-        if not self._verify_main(url, first_only=True):
+        except Exception as exc:
+            if _unobserved(exc) is None:
+                raise
+            # its login got no response (BUG-0147): a failed login, never a half-made
+            # copy; the path's probes go anonymous, as after any failed copy login
+            self._manager.release_copy(manager)
+            with self._iso_lock:
+                self._fail_locked(key, "isolated login got no response")
+                self._count_failed_login_locked()
+            return None
+        try:
+            verified = self._verify_main(url, first_only=True)
+        except Exception as exc:
+            if _unobserved(exc) is not None:   # unverified: never kept (BUG-0147)
+                self._manager.release_copy(manager)
+            raise
+        if not verified:
             self._manager.release_copy(manager)
             return None
         return copy
@@ -425,6 +496,11 @@ class SeamProbeSender(_ExplicitAllowance):
             alive = self._manager.verify_live(self._target_host(url), self._identity, base)
         except SessionAuthError:             # an unapproved hop: cannot verify -> trip
             alive = False
+        except Exception as exc:
+            if _unobserved(exc) is not None and first_only:
+                with self._iso_lock:         # no response: checked again next time
+                    self._verified_first = False
+            raise
         if not alive:
             with self._iso_lock:
                 self._trip_single_session_locked(
@@ -493,6 +569,9 @@ class SeamProbeSender(_ExplicitAllowance):
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False) -> Probe:
+        """A probe. Every gate runs first; then the session's own network calls on its
+        way (a first login, an isolated copy's login, a liveness check) map a transport
+        failure the same way as the probe's send (BUG-0147)."""
         # every gate before any routing: a stopped or refused header probe never causes
         # an isolated copy login (reviewers A/B, forms phase 2 merge)
         if location == "header" and self.header_stop_reason is not None:
@@ -503,6 +582,18 @@ class SeamProbeSender(_ExplicitAllowance):
             _json_body(param, value, entries, content_type)
         if location == "header":
             check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
+        try:
+            return self._send(url, param, value, timing, method, location, content_type,
+                              entries, prg)
+        except Exception as exc:
+            unobserved = _unobserved(exc)
+            if unobserved is None:
+                raise
+            raise unobserved from exc
+
+    def _send(self, url, param, value, timing, method, location, content_type, entries,
+              prg) -> Probe:
+        """The probe's routing and network, after `send`'s gates."""
         identity = self._identity_for(url)
         with self._iso_lock:
             self._counts["send_ordinal"] += 1
@@ -534,6 +625,10 @@ class SeamProbeSender(_ExplicitAllowance):
         before = copy.manager.login_attempts()
         try:
             probe = send_on(copy.client, copy.label)
+        except ProbeUnobserved:
+            if copy.manager.login_attempts() > before:   # the copy re-logged in first
+                self._verify_main(url, first_only=False)
+            raise
         except IsolatedLoginFailed as exc:
             key = url_key(url)
             self._manager.release_copy(copy.manager)
@@ -579,13 +674,17 @@ class SeamProbeSender(_ExplicitAllowance):
         def dispatch(on_client, on_identity):
             req = Request("GET", target, identity=on_identity, component="oracle")
             return self._dispatch(on_client, on_identity, req, location, param, url)
-        if copy is None:
-            followed = dispatch(client, identity)
-        else:
-            followed = self._on_copy(copy, url, dispatch)
-            if followed is None:
-                probe.prg = _skipped("isolated session lost")
-                return
+        try:
+            if copy is None:
+                followed = dispatch(client, identity)
+            else:
+                followed = self._on_copy(copy, url, dispatch)
+                if followed is None:
+                    probe.prg = _skipped("isolated session lost")
+                    return
+        except ProbeUnobserved:                # the follow-up got no response (BUG-0147)
+            probe.prg = PRG_UNOBSERVED
+            return
         probe.followed, probe.prg = _observation(followed, target)
 
     def _send_on(self, client, identity, url, param, value, timing, method, location,
@@ -647,10 +746,15 @@ class SeamProbeSender(_ExplicitAllowance):
         self._current = (location, param, url) if main else None
         try:
             r = client.send(req)
+        except Exception as exc:
+            unobserved = _unobserved(exc)       # a timeout still raises, as before
+            if unobserved is None:
+                raise
+            raise unobserved from exc           # no response: no verdict, the run goes on
         finally:
             self._current = None
-        if main:
-            self._last_main_was_header = (param, url) if location == "header" else None
+            if main:     # sent, answered or not: a later logout is blamed on it
+                self._last_main_was_header = (param, url) if location == "header" else None
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers),
                      session=self._session_note(req))
@@ -758,15 +862,34 @@ class RequestsProbeSender(_ExplicitAllowance):
             self._follow(probe, url, method)
         return probe
 
+    #: Methods re-sent once after a connection failed with no response (RFC 9110
+    #: 9.2.2: idempotent): the pooled connection may have been closing (BUG-0147); the
+    #: retry opens a fresh one. A cut-off or undecodable body is never re-sent: the
+    #: server had already answered.
+    RETRY_ON_RESET = frozenset({"GET", "HEAD", "OPTIONS"})
+
     def _request(self, method: str, url: str, kwargs: dict) -> Probe:
         import requests
-        start = time.perf_counter()
-        try:
-            r = self._session.request(method, url, **kwargs)
-            return Probe(status=r.status_code, text=r.text,
-                         elapsed=time.perf_counter() - start, headers=dict(r.headers))
-        except requests.Timeout:
-            return Probe(status=0, text="", elapsed=float(self._timeout))
+        for attempt in (1, 2):
+            start = time.perf_counter()
+            try:
+                r = self._session.request(method, url, **kwargs)
+                return Probe(status=r.status_code, text=r.text,
+                             elapsed=time.perf_counter() - start, headers=dict(r.headers),
+                             resent=attempt - 1)
+            except Exception as exc:
+                if _is_timeout(exc):        # the body's read included (BUG-0147)
+                    return Probe(status=0, text="", elapsed=float(self._timeout),
+                                 resent=attempt - 1)
+                unobserved = _unobserved(exc)
+                if unobserved is None:
+                    raise
+                if attempt == 1 and method.upper() in self.RETRY_ON_RESET and \
+                        isinstance(exc, requests.ConnectionError):
+                    continue
+                unobserved.resent = attempt - 1
+                raise unobserved from exc   # no response: no verdict, the run goes on
+        raise AssertionError("unreachable")
 
     def _follow(self, probe: Probe, url: str, method: str) -> None:
         """One plain GET of the probe's PRG target (`prg_target`), anonymous like the
@@ -780,8 +903,13 @@ class RequestsProbeSender(_ExplicitAllowance):
         jar = getattr(self._session, "cookies", None)
         if jar is not None:
             jar.clear()
-        followed = self._request("GET", target, {"timeout": self._timeout,
-                                                 "allow_redirects": False})
+        try:
+            followed = self._request("GET", target, {"timeout": self._timeout,
+                                                     "allow_redirects": False})
+        except ProbeUnobserved as exc:         # the follow-up got no response (BUG-0147)
+            probe.prg, probe.resent = PRG_UNOBSERVED, probe.resent + exc.resent
+            return
+        probe.resent += followed.resent
         if followed.status == 0:               # timed out: no observation
             probe.prg = PRG_UNOBSERVED
             return

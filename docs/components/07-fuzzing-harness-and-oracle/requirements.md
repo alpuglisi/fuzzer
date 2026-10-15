@@ -1399,6 +1399,28 @@ rewards) derives from it.
     `tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument`,
     `tests/test_sender_conformance.py::test_every_wrapper_reports_its_inner_senders_prg_capability`,
     `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`
+- **FR-FUZZ-50** *(a probe with no response; `CC-FUZZ-0088`, 2026-10-15, BUG-0147).* A
+  probe whose connection is reset or aborted, or whose body is cut off or undecodable,
+  is "not observed" (`oracle.probe.ProbeUnobserved`), classified only by
+  `tools/probesender._unobserved`.
+  - A refused, DNS, TLS or proxy failure is not: it fails loudly.
+  - A timeout keeps its rule: a status-0 probe of the full timeout in
+    `RequestsProbeSender`, the body's read included; it raises in `SeamProbeSender`.
+  - `RequestsProbeSender` re-sends an idempotent (GET/HEAD/OPTIONS) probe once when
+    its connection failed with no response (never a cut-off or undecodable body), and
+    the re-send is counted in the run's requests and the mechanism's cost.
+  - An isolated copy whose login gets no response is a failed copy login.
+  - The oracle makes it no verdict from that mechanism: the others still run; the
+    candidate is inconclusive (`unobserved`, with its reason in the run's detail)
+    unless one confirms; and the run continues.
+  - A PRG follow-up with no response is `unobserved` on its probe, which keeps its own
+    response.
+  - Out-of-band mechanisms still wait for their callback.
+  - A stopped listener is no verdict.
+  - A baseline probe with no response leaves the target row unprobed.
+
+  Enforced by `tests/test_probe_unobserved.py`.
+
 - **FR-FUZZ-400** *(training and benchmark group; `CC-FUZZ-0400`, 2026-10-15).*
   `fuzzlab train <sub>` holds the training/benchmark runs (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).
   - **`train run <url>`** is the `auto` engine with every one of its flags.

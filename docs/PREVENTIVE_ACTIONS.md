@@ -2369,3 +2369,23 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
 
   Strengthens PA-0146, which covers shared files, not shared contracts. (from BUG-0146)
   - Enforced by: tests/test_web_projects.py::test_with_no_project_open_nothing_creates_a_file, tests/test_web_sitetree.py::test_site_tree_routes_are_read_only
+
+- **PA-0153** — Strengthens `PA-0137` (a mechanism's external failure is no verdict) and
+  `PA-0138(3)` (sweep a shared primitive across every caller), after BUG-0147: a probe
+  that met a connection reset raised out of the oracle and ended the run for every
+  target, because PA-0137 was applied to the browser only and never enforced beyond it.
+  1. **A probe that gets no complete response is `ProbeUnobserved`,** classified in one
+     place (`probesender._unobserved`, SP-34): a reset or abort, a cut-off or
+     undecodable body. A refused, DNS, TLS or proxy failure is not one: it fails
+     loudly. A timeout keeps its own rule. The oracle makes `ProbeUnobserved` no verdict
+     from that mechanism -- never a negative, never the end of the run -- and an
+     idempotent probe is re-sent once first. (The mechanism, not the probe, is the
+     unit for HTTP: a recorded deviation from PA-0137(4), see BUG-0147.)
+  2. **Every sender that issues HTTP itself is listed with its error contract;** an AST
+     guard fails on a new one until it is listed and tested.
+  3. **Every default mechanism is run against a sender that never answers and a stopped
+     out-of-band listener;** none may raise or return a negative. A mechanism added
+     later is covered by the same guard.
+  4. **A hand-written HTTP response that closes its connection says
+     `Connection: close`** in its own head (lab templates and the proxy).
+  - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so

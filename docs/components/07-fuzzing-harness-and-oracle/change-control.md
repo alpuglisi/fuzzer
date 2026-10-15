@@ -3,6 +3,83 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
+- Change:
+  - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no
+    complete response".
+  - `tools/probesender.py`:
+    - `_unobserved(exc)` (SP-34) maps a reset/abort, `ChunkedEncodingError` and
+      `ContentDecodingError`; it never maps a timeout (`_is_timeout`, which also
+      recognises a body-read timeout and excludes urllib3's `NewConnectionError`) or
+      a refused/DNS/TLS/proxy failure, which stay loud. Messages name error classes
+      only.
+    - `RequestsProbeSender._request` re-sends a GET/HEAD/OPTIONS probe once when its
+      connection failed with no response (`RETRY_ON_RESET`, RFC 9110 9.2.2; never a
+      cut-off or undecodable body), then raises `ProbeUnobserved`; a body-read timeout
+      is a status-0 probe of the full timeout. `_follow` maps `ProbeUnobserved` to
+      `PRG_UNOBSERVED`.
+    - Re-sends are counted: `Probe.resent` (in `follow_up_sends`; `prg_sends` is the
+      PRG part the oracle's PRG counters read) and `ProbeUnobserved.resent`, added by
+      `harness/auto._CountingSender` and `oracle._CostCounter` when a retry fails too.
+    - An isolated copy whose login gets no response is a failed copy login (released,
+      path failed with a fixed reason, counted toward the breaker); a liveness check
+      with no response is retried at the next copy.
+    - `SeamProbeSender.send` runs its gates first (unchanged, so
+      `test_destructive_urls`' send-gate guard still sees them in `send`), then wraps
+      the rest of the send (`_send`: probe, follow-up, first login, isolated copy
+      login, liveness check) in the same mapping; `_dispatch` updates
+      the header breaker's note in `finally`; `_on_copy` runs its re-login check
+      before re-raising; `_follow` maps `ProbeUnobserved`. Its timeouts still raise.
+  - `oracle/oracle.py`: `_confirm_outcome` catches `ProbeUnobserved` per strategy: no
+    verdict from that mechanism, the others still run, inconclusive
+    (`UNOBSERVED = "unobserved"`, evidence: error classes and the arm) unless one
+    confirms; scheduler reward 0 with the real cost; logged with host and error class.
+    The unit is the mechanism, a recorded deviation from PA-0137(4) (BUG-0147).
+  - `oracle/strategies.py`: `_canary` (a stopped listener is `UnplaceableLocation`)
+    for all five listener users; `_send_blind` in the three OOB mechanisms, which wait
+    for the callback after a probe with no response and raise `ProbeUnobserved` only
+    without one.
+  - `harness/pipeline.py`: a baseline probe with no response gives an unprobed target
+    row; an `unobserved` inconclusive carries its reason. `harness/auto_cli.py` prints
+    it.
+- Impact (other components / project):
+  - Consumers, found by searching `fuzzlab/` and `tests/` for the senders, `Oracle`,
+    `PRG_UNOBSERVED`, `inconclusive` and the listener (138 test files):
+    - `harness/pipeline` is the only caller of `Oracle.confirm_outcome`;
+      `harness/auto` and `harness/multitarget` reach it through it;
+    - `Oracle._restore` already contained a raising send;
+    - `mutation/livefilter.HttpFilter` (`mutate-run`) now sees `ProbeUnobserved`
+      instead of `requests.ConnectionError`, which still ends that command;
+    - greybox's own sender is unchanged.
+  - A run that used to stop on the first reset completes; the candidate is
+    inconclusive (unlabelled, never a training negative).
+  - UI and results wording: CC-UI-0056. Three tests that pin the inconclusive
+    wording are updated.
+  - No store schema change.
+- Risk: medium.
+  - A retried GET/HEAD/OPTIONS probe reaches the target twice. It is the same payload,
+    sent only when the connection failed with no response; both sends are counted.
+  - A strategy that met a reset loses its verdict for that candidate (the mechanism is
+    the unit).
+  - Every other exception still propagates (tested). A dead target still fails loudly.
+- Process note:
+  - implemented, then committed locally (bd36ff2, never pushed), before the pre-change
+    review gate ran: a deviation;
+  - the two independent reviews then ran on bd36ff2: A agreed with should-fix
+    findings, B disagreed with two blocking findings;
+  - this entry and the code are the revision that addresses them (BUG-0147, Review),
+    and are re-reviewed before push.
+- Deliverables:
+  - [x] code (`oracle/probe.py`, `oracle/oracle.py`, `oracle/strategies.py`,
+    `tools/probesender.py`, `harness/pipeline.py`, `harness/auto.py`,
+    `harness/auto_cli.py`) — done
+  - [x] tests (`tests/test_probe_unobserved.py`, 26; three wording pins) and 16
+    mutation checks — done
+  - [x] BUG-0147, PA-0153, SP-34, ERROR_LOG, CHANGELOG; FR-FUZZ-50 — done
+  - [x] re-review: round 2 on 422ebaf, A and B AGREE; their should-fix items are
+    addressed in this commit (BUG-0147, Review) — done
+- Effectiveness (assessed pending):
+
 ### CC-FUZZ-0087 — Integration: the CLI taxonomy's pending options arrived (2026-10-15)
 - Change: `fuzzlab/cli_taxonomy.py` moves `auth_origin` (auto, crawl, greybox-run) and
   `no_spa_query` (crawl) from `PENDING` into `FLAG_CLASSES` as `B`, as the CLI lane's own

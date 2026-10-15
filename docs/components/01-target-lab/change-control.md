@@ -3,6 +3,34 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0259 — The Go response-splitting twin says `Connection: close` (BUG-0147) (2026-10-15)
+- Change: `fuzzlab/labgen/emitters/go_net_http/templates/sinks/raw_socket_response_write.go.j2`
+  adds `Connection: close` as the last header of its hand-written `HTTP/1.1 302`,
+  which it already closed after writing. The original order (`Location`,
+  `Content-Length`) is kept, so an injected blank line still ends the head first and
+  the classic full split (a second, attacker-controlled response) stays as realistic
+  as before. The CRLF injection into `Location` is unchanged.
+- Impact (other components / project):
+  - Every generated Go app with a `raw_socket_response_write` cell (Twitch clone
+    `/channels/redirect`, `lab/manifests/http_header_injection_redirect_go_sample.yaml`).
+  - A client no longer reuses the connection the twin closes (the trigger of
+    BUG-0147).
+  - Detection: `HttpHeaderInjectionCrlfStrategy` (CC-FUZZ-0045) confirms this cell's
+    positive (TWCH-0013), and the cell also carries TWCH-0015 (open redirect). Both
+    read the injected header and the `Location` value, which are unchanged; the
+    live tests that pin them (`test_labgen_go_live_boot.py`,
+    `test_multitarget_category4.py`) are in the verification run. Ground truth
+    unchanged.
+  - Other stacks swept: the PHP twin uses PHP's own `header()` and is unaffected.
+- Risk: low; one header appended, with no change to the vulnerable behaviour (single
+  injected header or full split).
+- Process note: as CC-FUZZ-0088.
+- Deliverables:
+  - [x] template — done
+  - [x] guard `tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so` (mutation-checked) — done
+  - [x] FR-LAB-175 — done
+- Effectiveness (assessed pending):
+
 ### CC-LAB-0258 — Integration: no pipe into an early-exiting reader under pipefail; the base-URL registry covers the merged reducers (BUG-0145) (2026-10-15)
 - Change:
   - **Scripts:**

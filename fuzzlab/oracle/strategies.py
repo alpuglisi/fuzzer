@@ -33,7 +33,8 @@ from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
                                     xss_breakouts)
 from fuzzlab.oracle.oob import OobListener
-from fuzzlab.oracle.probe import Candidate, Probe, Sender, UnplaceableLocation, Verdict
+from fuzzlab.oracle.probe import (Candidate, Probe, ProbeUnobserved, Sender,
+                                  UnplaceableLocation, Verdict)
 
 # --- error signatures (M2) ---------------------------------------------------
 SQL_ERROR_SIGNATURES = [
@@ -1361,6 +1362,29 @@ class RegexDosStrategy(ConfirmationStrategy):
         return None
 
 
+
+def _canary(listener: OobListener, token: str) -> str:
+    """The listener's callback URL for ``token``. A listener that is not running is no
+    verdict (as a browser that cannot start, PA-0126(3)), never the end of the run
+    (BUG-0147, PA-0153)."""
+    if not getattr(listener, "running", True):
+        raise UnplaceableLocation("out-of-band listener not running")
+    return listener.callback_url(token)
+
+
+def _send_blind(send: Callable[[], object]) -> bool:
+    """Send an out-of-band probe whose HTTP response is never read. True when it got no
+    response: the payload may still have reached the target, so the caller still waits
+    for the callback, and raises `ProbeUnobserved` only if none came (BUG-0147)."""
+    try:
+        send()
+    except ProbeUnobserved:
+        return True
+    return False
+
+#: What an out-of-band mechanism raises when a probe got no response and no callback came.
+_OOB_UNOBSERVED = "no response: an out-of-band probe got no response and no callback"
+
 class CommandInjectionOobStrategy(ConfirmationStrategy):
     """M8: blind command injection confirmed by an out-of-band callback.
 
@@ -1383,16 +1407,19 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
     def confirm(self, candidate, sender):
         if self._listener is None:
             return None
+        unobserved = False
         for template in _CMDI_OOB_TEMPLATES:
             token = self._listener.register()
-            canary = self._listener.callback_url(token)
-            self._send(sender, candidate,
-                       (candidate.base_value or "") + template.format(url=canary))
+            canary = _canary(self._listener, token)
+            value = (candidate.base_value or "") + template.format(url=canary)
+            unobserved |= _send_blind(lambda v=value: self._send(sender, candidate, v))
             hit = self._listener.wait_for(token, timeout=self._timeout)
             if hit is not None:
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"canary": canary, "template": template,
                                 "hit_path": hit.path, "remote_addr": hit.remote_addr})
+        if unobserved:
+            raise ProbeUnobserved(_OOB_UNOBSERVED)
         return None
 
 
@@ -1421,7 +1448,7 @@ class SsrfInBandMarkerStrategy(ConfirmationStrategy):
         if self._listener is None:
             return None
         token = self._listener.register()
-        canary = self._listener.callback_url(token)
+        canary = _canary(self._listener, token)
         probe = self._send(sender, candidate, canary)
         # the fetched body's proof, never the token (which the URL itself carries, so a
         # page reflecting the URL would confirm; BUG-0089)
@@ -1459,13 +1486,15 @@ class SsrfOobStrategy(ConfirmationStrategy):
         if self._listener is None:
             return None
         token = self._listener.register()
-        canary = self._listener.callback_url(token)
-        self._send(sender, candidate, canary)
+        canary = _canary(self._listener, token)
+        unobserved = _send_blind(lambda: self._send(sender, candidate, canary))
         hit = self._listener.wait_for(token, timeout=self._timeout)
         if hit is not None:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"canary": canary, "hit_path": hit.path,
                             "remote_addr": hit.remote_addr})
+        if unobserved:
+            raise ProbeUnobserved(_OOB_UNOBSERVED)
         return None
 
 
@@ -1656,7 +1685,7 @@ class XxeInBandMarkerStrategy(ConfirmationStrategy):
         if self._listener is None:
             return None
         token = self._listener.register()
-        canary = self._listener.callback_url(token)
+        canary = _canary(self._listener, token)
         for wrapper in _XXE_ENTITY_WRAPPERS:
             probe = sender.send(candidate.url, candidate.param,
                                 _xxe_payload(canary, wrapper),
@@ -1688,15 +1717,17 @@ class XxeOobStrategy(ConfirmationStrategy):
         if self._listener is None:
             return None
         token = self._listener.register()
-        canary = self._listener.callback_url(token)
-        sender.send(candidate.url, candidate.param,
-                    _xxe_payload(canary, _XXE_ENTITY_WRAPPERS[0]),
-                    method=candidate.method, location=candidate.location,
-                    content_type="application/xml")
+        canary = _canary(self._listener, token)
+        unobserved = _send_blind(lambda: sender.send(
+            candidate.url, candidate.param, _xxe_payload(canary, _XXE_ENTITY_WRAPPERS[0]),
+            method=candidate.method, location=candidate.location,
+            content_type="application/xml"))
         hit = self._listener.wait_for(token, timeout=self._timeout)
         if hit is not None:
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"canary": canary, "hit_path": hit.path})
+        if unobserved:
+            raise ProbeUnobserved(_OOB_UNOBSERVED)
         return None
 
 

@@ -238,7 +238,8 @@ def test_run_page_shows_oracle_coverage_anomalies_and_plugins_as_text(site, tab)
     # reworded when "inconclusive" gained its second meaning (CC-FUZZ-0068, J2); a run
     # without per-mechanism counts shows the definition only
     assert ("inconclusive 2 (could not be decided: a cost cap stopped a started check, "
-            "or no mechanism could place the point)") in " ".join(coverage.split())
+            "no mechanism could place the point, or a probe got no response)") \
+        in " ".join(coverage.split())
     assert "unrecorded 1" in coverage
     anomaly = page.inner_text("#run-anomaly")
     assert HOSTILE in anomaly and "Flagged on this run: 5" in anomaly

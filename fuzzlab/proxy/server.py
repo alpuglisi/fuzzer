@@ -204,7 +204,7 @@ class AsyncProxyServer:
                 if self.ca is None:
                     # No local CA wired: TLS interception is off (offline default).
                     writer.write(b"HTTP/1.1 501 Not Implemented\r\n"
-                                 b"Content-Length: 0\r\n\r\n")
+                                 b"Content-Length: 0\r\nConnection: close\r\n\r\n")
                     await writer.drain()
                     return
                 written = True        # it answers 200 first: never a 502 into the tunnel

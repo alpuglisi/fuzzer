@@ -444,27 +444,31 @@ class _CountingSender:
     def send(self, url, param, value, timing: bool = False,
              method: str = "GET", location: str = "query",
              content_type: str | None = None, entries=None, prg: bool = False):
-        from fuzzlab.oracle.probe import Probe
+        from fuzzlab.oracle.probe import Probe, ProbeUnobserved
         self.count += 1
-        if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
-            probe = self._inner.send(url, param, value, timing=timing, method=method,
-                                     location=location, content_type=content_type,
-                                     entries=entries, prg=True)
-        elif entries is not None:
-            probe = self._inner.send(url, param, value, timing=timing, method=method,
-                                     location=location, entries=entries)
-        elif method == "GET" and location == "query":
-            probe = self._inner.send(url, param, value, timing=timing)
-        elif content_type:
-            probe = self._inner.send(url, param, value, timing=timing,
-                                     method=method, location=location,
-                                     content_type=content_type)
-        else:
-            probe = self._inner.send(url, param, value, timing=timing,
-                                     method=method, location=location)
+        try:
+            if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
+                probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                         location=location, content_type=content_type,
+                                         entries=entries, prg=True)
+            elif entries is not None:
+                probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                         location=location, entries=entries)
+            elif method == "GET" and location == "query":
+                probe = self._inner.send(url, param, value, timing=timing)
+            elif content_type:
+                probe = self._inner.send(url, param, value, timing=timing,
+                                         method=method, location=location,
+                                         content_type=content_type)
+            else:
+                probe = self._inner.send(url, param, value, timing=timing,
+                                         method=method, location=location)
+        except ProbeUnobserved as exc:
+            self.count += exc.resent        # re-sent before giving up (BUG-0147)
+            raise
         if isinstance(probe, Probe):
-            # a PRG follow-up the sender made for this probe is a request of the run
-            # too (FR-FUZZ-49, P8)
+            # a PRG follow-up or a re-send the sender made for this probe is a request
+            # of the run too (FR-FUZZ-49 P8, BUG-0147)
             self.count += probe.follow_up_sends
         return probe
 

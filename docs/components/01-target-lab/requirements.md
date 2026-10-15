@@ -6285,6 +6285,12 @@ lane) can submit a payload as
   `tests/test_server_port_ownership.py::test_the_go_harness_never_boots_against_another_process`
   and the ownership guard.
 
+- **FR-LAB-175** *(hand-written responses close honestly; `CC-LAB-0259`, 2026-10-15,
+  BUG-0147).* A generated app that writes its own HTTP response and then closes the
+  connection sends `Connection: close`, so a client never reuses a closing connection.
+  Enforced by
+  `tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so`.
+
 - **FR-LAB-300** *(external lab fixtures; `CC-LAB-0300`, 2026-10-15).* Two third-party
   vulnerable apps run as permanent, reproducible lab fixtures under `lab/external/<lab>/`,
   each its own compose project: **bWAPP v2.2** (`fuzzlab-bwapp`: `php:5.6-apache` +

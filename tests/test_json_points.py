@@ -982,8 +982,8 @@ def test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negativ
                             None, result)
     out = capsys.readouterr().out
     assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
-            "started check, or no mechanism could place the point; unlabelled, "
-            "FR-FUZZ-45/47):") in out
+            "started check, no mechanism could place the point, or a probe got no "
+            "response; unlabelled, FR-FUZZ-45/47/50):") in out
     assert ("- fragment /#/go [next]: unplaceable (no mechanism could place the point: "
             "a fragment point is placed by the browser only)") in out
     assert "not started" not in out                         # no empty cap detail
@@ -1011,7 +1011,7 @@ def test_the_run_page_names_the_undecided_mechanism(tmp_path):
     page = web_client(create_app(cfg)).get(f"/runs/{run}").text
     text = " ".join(page.split())
     assert ("inconclusive 1 (could not be decided: a cost cap stopped a started check, "
-            "or no mechanism could place the point:") in text
+            "no mechanism could place the point, or a probe got no response:") in text
     assert 'data-field="inconclusive-unplaceable">unplaceable 1</span>' in text
 
 

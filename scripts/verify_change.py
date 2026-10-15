@@ -90,9 +90,9 @@ EXPLICIT_GUARDS: tuple[str, ...] = (
 # two consecutive runs: 1716 passed, 0 failed, about 14 min 20 s each (38 min 45 s
 # serially). Two concurrency defects found on the way are fixed: a live boot could run
 # against another test's server (BUG-0143), and a test's exact count raced the
-# supervisor (BUG-0144). One intermittent failure under full parallel load is still
-# open and not yet reproduced on its own: test_multitarget_category4's connection
-# reset (BUG-0147). It is investigated, not moved to a serial pass.
+# supervisor (BUG-0144). The last intermittent failure under full parallel load,
+# test_multitarget_category4's connection reset, was reproduced deterministically and
+# fixed in the code, not by a serial pass (BUG-0147).
 #
 # A file goes back on this list only with its reason, and only after a reproduced
 # failure under parallel load that cannot be fixed in the test or the code

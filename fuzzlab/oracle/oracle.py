@@ -14,14 +14,17 @@ import json
 from fuzzlab.core import jsonbody
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.urls import to_path, to_route_path, url_key
-from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, Probe, Sender,
-                                  UnplaceableLocation, Verdict, accepts_prg)
+from fuzzlab.oracle.probe import (PRG_UNOBSERVED, Candidate, Probe, ProbeUnobserved,
+                                  Sender, UnplaceableLocation, Verdict, accepts_prg)
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
 
 #: The mechanism of the inconclusive verdict a candidate gets when every applicable
 #: mechanism refused its location (FR-FUZZ-47); a cost-capped one keeps its own name.
 UNPLACEABLE = "unplaceable"
+#: The mechanism of the inconclusive verdict a candidate gets when a probe got no
+#: response (`ProbeUnobserved`, BUG-0147) and nothing confirmed it.
+UNOBSERVED = "unobserved"
 
 
 def finding_url(candidate: Candidate) -> str:
@@ -52,24 +55,28 @@ class _CostCounter:
         # the full `Sender` signature, forwarded exactly like `harness.auto`'s
         # `_CountingSender` (BUG-0071: a JSON-body / upload / XXE probe crashed `--bandit`)
         self.count += 1
-        if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
-            probe = self._inner.send(url, param, value, timing=timing, method=method,
-                                     location=location, content_type=content_type,
-                                     entries=entries, prg=True)
-        elif entries is not None:
-            probe = self._inner.send(url, param, value, timing=timing, method=method,
-                                     location=location, entries=entries)
-        elif method == "GET" and location == "query":
-            probe = self._inner.send(url, param, value, timing=timing)
-        elif content_type:
-            probe = self._inner.send(url, param, value, timing=timing,
-                                     method=method, location=location,
-                                     content_type=content_type)
-        else:
-            probe = self._inner.send(url, param, value, timing=timing,
-                                     method=method, location=location)
+        try:
+            if prg:                          # FR-FUZZ-49: only ever asked of a capable inner
+                probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                         location=location, content_type=content_type,
+                                         entries=entries, prg=True)
+            elif entries is not None:
+                probe = self._inner.send(url, param, value, timing=timing, method=method,
+                                         location=location, entries=entries)
+            elif method == "GET" and location == "query":
+                probe = self._inner.send(url, param, value, timing=timing)
+            elif content_type:
+                probe = self._inner.send(url, param, value, timing=timing,
+                                         method=method, location=location,
+                                         content_type=content_type)
+            else:
+                probe = self._inner.send(url, param, value, timing=timing,
+                                         method=method, location=location)
+        except ProbeUnobserved as exc:
+            self.count += exc.resent                # re-sent before giving up (BUG-0147)
+            raise
         if isinstance(probe, Probe):
-            self.count += probe.follow_up_sends     # a PRG follow-up is its cost too
+            self.count += probe.follow_up_sends     # a PRG follow-up or re-send is its cost too
         return probe
 
 
@@ -164,9 +171,9 @@ class _PrgRun:
         probe = self._inner.send(url, param, value, timing=timing, method=method,
                                  location=location, content_type=content_type,
                                  entries=entries, prg=True)
-        if isinstance(probe, Probe) and probe.follow_up_sends:
+        if isinstance(probe, Probe) and probe.prg_sends:
             key = "prg_follow_ups_get" if method.upper() == "GET" else "prg_follow_ups"
-            self._counts[key] += probe.follow_up_sends
+            self._counts[key] += probe.prg_sends
             if probe.prg == PRG_UNOBSERVED:
                 self._counts["prg_unobserved"] += 1
         return probe
@@ -273,8 +280,10 @@ class Oracle:
         A strategy that started a check but could not decide within its cost cap
         returns ``Verdict(confirmed=False, inconclusive=True)`` (FR-FUZZ-45). It is
         reported only when nothing confirms; any other non-confirming verdict is
-        ignored, as before. Under a scheduler an inconclusive arm gets reward 0 and
-        its real cost."""
+        ignored, as before. A mechanism whose probe got no response
+        (`ProbeUnobserved`, BUG-0147) gives no verdict; with no confirmation the result is
+        inconclusive (``unobserved``). Under a scheduler an inconclusive arm gets reward 0
+        and its real cost."""
         if candidate.base_entries:                       # a form point: send its siblings
             sender = _FormBoundSender(sender, candidate)
         counts = dict.fromkeys(PRG_COUNTERS, 0)
@@ -346,6 +355,32 @@ class Oracle:
                 # this mechanism cannot place the point (PA-0115): no verdict from it,
                 # and no reward or cost for its arm; the others still run
                 unplaceable = unplaceable or str(exc)
+                continue
+            except ProbeUnobserved as exc:
+                # a probe got no response (BUG-0147, PA-0137(1), PA-0153): no verdict
+                # from this mechanism, never a negative, and the others still run.
+                # The unit is the mechanism, not the probe (a recorded deviation from
+                # PA-0137(4)): an HTTP strategy cannot tell a stand-in probe from a
+                # real one, so continuing could confirm on a response that never came.
+                # The sender has already retried an idempotent probe once. Reward 0 and
+                # the probes it sent, as for any inconclusive arm. Logged with the host
+                # and the error class only.
+                placed = True
+                if self.scheduler is not None:
+                    self.scheduler.update(ctx, strategy.arm, 0.0, cost=max(1, probe.count))
+                if inconclusive is None:
+                    inconclusive = Verdict(False, candidate.vuln_class or "", UNOBSERVED,
+                                           {"unobserved": str(exc)[:200],
+                                            "mechanism": getattr(strategy, "arm",
+                                                                 type(strategy).__name__)},
+                                           inconclusive=True)
+                from urllib.parse import urlsplit
+
+                from fuzzlab.core.obs import get_logger
+                get_logger("oracle").warning(
+                    "probe got no response",
+                    extra={"host": urlsplit(candidate.url).hostname or "",
+                           "error": type(exc.__cause__ or exc).__name__})
                 continue
             placed = True
             if verdict is not None and notes.notes:

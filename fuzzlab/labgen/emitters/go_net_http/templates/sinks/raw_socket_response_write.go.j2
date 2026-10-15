@@ -25,10 +25,17 @@ if err != nil {
 	http.Error(w, "hijack failed", http.StatusInternalServerError)
 	return
 }
+// The connection closes after this one response, so the response says so
+// (Connection: close): a client must not reuse a connection the server is
+// about to close, or its next request meets a reset (BUG-0147). It stays
+// after the injected Location line, in the original header order, so the
+// classic full split above is unchanged: an injected blank line still ends
+// the head first and leaves what follows as a second response.
 defer conn.Close()
 response := "HTTP/1.1 302 Found\r\n" +
 	"Location: " + {{ var_name }} + "\r\n" +
 	"Content-Length: 0\r\n" +
+	"Connection: close\r\n" +
 	"\r\n"
 bufrw.WriteString(response)
 bufrw.Flush()

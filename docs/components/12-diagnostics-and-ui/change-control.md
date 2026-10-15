@@ -3,6 +3,20 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0056 — "Inconclusive" names a probe that got no response (BUG-0147) (2026-10-15)
+- Change: `fuzzlab/web/templates/run.html` and `fuzzlab/web/results.py`
+  (`inconclusive_by`'s docstring and the coverage comment) define "inconclusive" as "a
+  cost cap stopped a started check, no mechanism could place the point, or a probe got
+  no response". The per-mechanism counts already list `unobserved` by name.
+- Impact (other components / project): wording only; `test_web_ml_context.py` and
+  `test_json_points.py` pins updated. No route, data or schema change.
+- Risk: low.
+- Process note: as CC-FUZZ-0088.
+- Deliverables:
+  - [x] template and docstring — done
+  - [x] pinned tests — done
+- Effectiveness (assessed pending):
+
 ### CC-UI-0055 — Integration: the site tree reads only the open project; arrived CLI options classified (BUG-0146) (2026-10-15)
 - Change:
   - `web/app.py` wires the site tree's `store_path` to `cfg.get("store_path")`, so there

@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0147: a probe with no response no longer ends the run)
+- **What:** a reset, cut-off or undecodable response to a probe is now "not observed" (`ProbeUnobserved`): an idempotent probe is re-sent once, then that mechanism gives no verdict, never a negative, and the run goes on (OOB mechanisms still wait for their callback; a dead target still fails loudly). The Go lab's response-splitting twin and the proxy's 501 now send `Connection: close`.
+- **Why:** the last intermittent failure of the full suite. Root-caused: the twin's keep-alive-looking 302 let the client reuse a closing connection, and one reset then ended confirmation for every target. PA-0137 had covered the browser only (CC-FUZZ-0088, CC-LAB-0259, CC-PROXY-0024, CC-UI-0056; PA-0153).
+
 ## 2026-10-15 (integration: the five session lanes merged onto the dev branch for main)
 - **Why:** bring `main` up to date with the dev branch and the five concurrent sessions:
   - external labs as permanent fixtures (CC-LAB-0300..);

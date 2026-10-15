@@ -905,8 +905,8 @@ def test_cap_exhaustion_is_inconclusive_never_a_negative(tmp_path, budgeted, cap
     out = capsys.readouterr().out
     # reworded when "inconclusive" gained its second meaning (CC-FUZZ-0068, J2)
     assert ("inconclusive (1 candidate key(s) could not be decided: a cost cap stopped a "
-            "started check, or no mechanism could place the point; unlabelled, "
-            "FR-FUZZ-45/47):") in out
+            "started check, no mechanism could place the point, or a probe got no "
+            "response; unlabelled, FR-FUZZ-45/47/50):") in out
     assert "unplaceable:" not in out                    # printed only when non-zero
     assert ("- query /bWAPP/page.php [title]: boolean-differential; not started: "
             "string-grammar, string-evaluation") in out
