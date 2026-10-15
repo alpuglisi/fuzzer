@@ -530,3 +530,22 @@ Juice Shop lab is complete.
 ---
 
 <!-- Append new entries below this line as F-048, F-049, ... -->
+
+### F-048 — What two days of development produced does not transfer
+- **What:** The first measurement on the blind held-out lab (a React single-page app
+  with a JSON API and JWT sessions; generic command line; unauthenticated, because of
+  F-013) gives:
+  - reached 3/20 answer-key positives;
+  - candidate 3/20, probed 2/20, confirmed 2/20.
+
+  For comparison, Juice Shop gave 8/15 reached and 6/15 confirmed, with Juice-specific
+  flags (F-011). The run reported 7 confirmed findings; only 2 match the key. The other
+  5 are not judged yet: judging them means reading the key.
+- **Evidence:** `heldout-anon/run.db` and `heldout-anon/auto.log` in the session
+  scratchpad (crawl imported 9 endpoints, 18 parameters; 605 requests);
+  `heldout/ground-truth/` (blind).
+- **Impact:** much of the Juice Shop improvement was fitted to Juice Shop, not to its
+  technology. This is the outcome the user warned against (2026-10-15 17:32).
+- **Status:** open. This is the baseline DISC-CAPTURE, BUG-0148 and JSON-SEND must move,
+  measured once by a separate agent.
+
