@@ -659,3 +659,54 @@ Juice Shop lab is complete.
 - **Status:** the lane implements the measured values. Replaying the app's own captured
   `Accept` per endpoint (DISC-CAPTURE) is a named follow-on.
 
+### F-054 — I leaked the held-out lab's details into documents the developers read
+- **What:** The held-out lab is only valid while it stays blind. I wrote its specifics
+  into designs, lane prompts and this document, all of which build lanes and reviewers
+  then read:
+  - its login route (`/userlogin`) and its "Log in" link;
+  - its stack (React with axios, NestJS);
+  - its session carriage (JWT in sessionStorage, a raw `authorization` header).
+
+  It appears in F-013, F-048, F-052, BUG-0148 design v1 and DISC-CAPTURE design v4. The
+  BUG-0148 lane then built a test fixture with exactly that route and label. Review B
+  flagged it as a PA-0154(d) breach.
+- **Evidence:** BUG-0148 combined review B (must-fix 1); the documents named above.
+- **Impact:** the first held-out lab is no longer fully blind for login discovery or
+  session handling. Any improvement it shows there is partly contaminated.
+- **Status:**
+  - The fixture is being replaced with neutral framework shapes.
+  - Measurements on that lab will be reported as partly contaminated.
+  - The second held-out lab (being curated) is the clean one.
+  - From now on, held-out labs are referred to only by profile and counts in anything a
+    lane can read.
+
+### F-055 — My funnel metric could not measure "probed", and I reported its artifacts as findings
+- **What:** `scripts/funnel_report.py` (my tool, 2026-10-15) counted a candidate as
+  probed only if it had `attempt` rows. `harness/auto` never writes attempt rows, so
+  for every `auto` run the "probed" stage was the confirmed findings and nothing more.
+  - From it I told the owner that "probing loses 2 cases": the login SQLi, explained
+    by an Accept-header story (F-018), and the profile username stored XSS.
+  - In F-041 I wrote that JUICE-0008 was "never probed".
+  - The investigation showed the XSS check was run and rejected, because of a real
+    oracle defect: only the first reflection context is tested.
+- **Evidence:**
+  - the INVEST-JUICE report (candidate 39 `oracle_status='checked'`; 0 attempt rows for
+    the whole run, including confirmed findings);
+  - `scripts/funnel_report.py:61-70`.
+- **Impact:** the metric used to steer the work gave a false stage for every case, and
+  I built explanations on it.
+- **Status:** being fixed in the DISC-CAPTURE lane (probed from `oracle_status`). The
+  real oracle defect is being fixed as XSS-MULTICTX (BUG-0154).
+
+### F-056 — Measured: the Juice-specific flags inflated the baseline I reported
+- **What:** Juice Shop re-measured on dev HEAD 13b1cff with the generic command line
+  (no `--submit-spa-forms` route names, no SQLi gate): reached 6/15, confirmed 5/15. The
+  baseline I reported and set the goal from was 8/15 reached and 6/15 confirmed
+  (F-011, F-019). The difference:
+  - **The login SQLi:** reached only because I passed `login` as a route to submit.
+  - **The search DOM XSS:** lost in this run to a broken document after a failed script
+    load. 32 routes rendered empty (INVEST-JUICE, cause B).
+- **Evidence:** `juice-generic/` in the session scratchpad (`run.db`, `crawl.log`,
+  `auto.log`: 8 endpoints, 10 parameters, 239 requests).
+- **Impact:** the true starting point on the development lab is lower than I reported.
+- **Status:** recorded. The fixes in progress target these losses.
