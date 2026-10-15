@@ -644,3 +644,18 @@ Juice Shop lab is complete.
   the pattern of F-049.
 - **Status:** the design is being revised to the reviewers' required changes.
 
+### F-053 — I wrote a "browser" header set from memory, and it was not the browser's
+- **What:** The JSON-SEND design said a browser's fetch/XHR sends
+  `Accept: application/json, text/plain, */*`. The lane measured real Chromium
+  141.0.7390.37 (fetch() and XHR, same-origin JSON POST): it sends `Accept: */*`. The
+  value I wrote is the default of the axios and Angular HttpClient libraries.
+  - I designed from memory instead of measuring first, against CLAUDE.md item 8.
+  - The design also presented that header as fixing apps that negotiate content. By the
+    frameworks' own documentation, the measured `*/*` reveals JSON evidence on Spring
+    Boot and DRF, but not on html-first Express or Rails apps.
+- **Evidence:** the JSON-SEND lane's measurement report, 2026-10-15 ~20:20;
+  `json-send/design.md` in the session scratchpad.
+- **Impact:** a design premise that was false, and an overstated expected effect.
+- **Status:** the lane implements the measured values. Replaying the app's own captured
+  `Accept` per endpoint (DISC-CAPTURE) is a named follow-on.
+
