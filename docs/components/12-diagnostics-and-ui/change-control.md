@@ -59,7 +59,37 @@ Newest first.
   - [x] tests: `tests/test_web_projects.py` (new); `test_web_launcher_browser.py` (pinned preview), `test_web_repeater.py` (controller never creates) updated — done
   - [x] FR-UI-450..457, NFR-UI-project-{private,paths-confined,provenance-redacted,switch-safe}, NFR-UI-read-only amended, §5; traceability classification; runbook section — done
   - [ ] page layout from the UI research — todo (blocked on the research branch)
-- Review: design gate 3/3 (reviewers A and B, three rounds); code review: pending.
+- Review: design gate 3/3 (reviewers A and B, three rounds). Code review round 1 (on
+  9f1536e): A — 1 blocking, 10 non-blocking; B — 4 blocking, 9 non-blocking. Fixed in the
+  follow-up commit:
+  - (A1, blocking) opening an older/newer file while a project is open was a silent
+    no-op → the offer/refusal card shows whenever one is pending, with a message; the
+    migrate form carries the discard confirmation.
+  - (B1, blocking — CORE) a trigger named like a table hid from the trigger/view refusal
+    (one name → type map) → see CC-CORE-0450's review note.
+  - (B2/A3, blocking) New / Save as adopted, or on failure deleted, a stale
+    `<name>.fuzzlab.d` → both refuse when any file the project would own exists.
+  - (B3, blocking) a planted symlink (or hard link) at a pinned intermediate let a tool's
+    `open()` write outside the project → each is checked (absent, or a plain singly
+    linked file of ours, side files included) before the job starts.
+  - (B4, blocking — CORE) `redact_for_record` kept part of a password containing `@`, and
+    fragment / matrix / scheme-relative secrets → see CC-CORE-0450.
+  - Non-blocking, all fixed: discard leftovers reported on every transition (`_switch`
+    flashes; `current` set even if leaving raises); owner lock held until deletion ends;
+    exception lists narrowed (`_ACTION_ERRORS`, `_RECORD_ERRORS` = `OperationalError`;
+    OS errors converted to `ProjectError` at their sites; `ProjectError` → 409 on the API);
+    `recent.json` opened `O_NOFOLLOW | O_NONBLOCK`, regular files only, read capped;
+    missing parents of the projects directory created 0700; `.temporary` checked like the
+    projects directory; recent entries must match `FILE_RE`; `_temporary` releases and
+    removes on failure; a failure before the spawn marks the launch failed; `shutdown`
+    waits (≤ `RECORD_WAIT_S`) so stopped jobs record `stopped`; the whole `_pump` tail is
+    in its `finally`; thread-read dicts are snapshotted; Repeater state keyed by the
+    file's identity (path + inode); `_ensure_created` tolerates a CLI creating the file
+    meanwhile; AST guards track import aliases, `getattr`, openers passed as arguments,
+    `core_project.create`/`copy_to` outside their functions, and every SQL write form.
+  - Recorded deviation from design F18: refusals are a server-held, autoescaped message
+    queue (`manager.flash`), not `?notice=<code>`; the text may quote the name the
+    operator typed. One local operator; the next projects page consumes it.
 - Effectiveness (assessed pending): pending.
 
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)

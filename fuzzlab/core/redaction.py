@@ -569,11 +569,15 @@ def redact_captured_body(body: bytes, content_type: str):
 
 # --- the project-record boundary (CC-CORE-0450, FR-UI-456, NFR-UI-project-provenance-redacted)
 
-#: ``scheme://user[:password]@`` — URL userinfo, anywhere in a value.
-_URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s@?#]*@")
+#: ``scheme://user[:password]@`` or ``//user[:password]@`` — URL userinfo, anywhere in a
+#: value, up to the **last** ``@`` of the authority (a password may contain ``@``; URL
+#: parsers split at the last one; code review B).
+_URL_USERINFO = re.compile(r"(?i)((?:\b[a-z][a-z0-9+.\-]*:)?//)[^/?#\s]*@")
 #: A scheme-less ``user:password@host`` at the start of a value or of a whitespace-
-#: separated piece (reviewer B, design round 2).
-_BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:]+:[^\s/@]*@(?=[^\s@])")
+#: separated piece, also up to the authority's last ``@``.
+_BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:?#]+:[^\s/?#]*@(?=[^\s@/])")
+#: A ``;name=value`` path (matrix) parameter, e.g. ``;jsessionid=…``.
+_MATRIX_PARAM = re.compile(r";([^;=/?#\s]+)=([^;/?#\s]*)")
 #: What a stripped userinfo becomes.
 USERINFO_PLACEHOLDER = "***@"
 
@@ -583,8 +587,11 @@ def redact_for_record(dest: str, value):
     (``launch.argv``, ``launch.target``, ``project.targets``; PA-0100: one boundary).
 
     - a value whose option name (``dest``) `is_sensitive_name` flags → `PLACEHOLDER`;
-    - URL userinfo (``http://user:pw@``) and a scheme-less ``user:pw@`` → ``***@``;
-    - each URL-shaped piece's sensitive query values → `redact_url`.
+    - URL userinfo (``http://user:pw@``, ``//user:pw@``) and a scheme-less ``user:pw@``
+      → ``***@`` (through the authority's last ``@``);
+    - in each whitespace-separated piece, sensitive values of the query, of a query-shaped
+      fragment (``#access_token=…``, ``#/route?token=…``) and of ``;name=value`` path
+      parameters → `PLACEHOLDER`.
 
     Non-strings are returned unchanged (counts, booleans). Never raises on a string."""
     if not isinstance(value, str):
@@ -598,9 +605,19 @@ def redact_for_record(dest: str, value):
 
 
 def _redact_piece(piece: str) -> str:
-    if "?" not in piece:
-        return piece
-    try:
-        return redact_url(piece)
-    except ValueError:                       # an unparseable authority (e.g. a bad IPv6)
-        return PLACEHOLDER if "=" in piece.split("?", 1)[1] else piece
+    piece = _MATRIX_PARAM.sub(
+        lambda m: f";{m.group(1)}={PLACEHOLDER}" if is_sensitive_name(m.group(1))
+        else m.group(0), piece)
+    base, hashmark, fragment = piece.partition("#")
+    if "?" in base:
+        try:
+            base = redact_url(base)
+        except ValueError:                   # an unparseable authority (e.g. a bad IPv6)
+            base = base.split("?", 1)[0] + "?" + redact_query(base.split("?", 1)[1])
+    if hashmark:
+        route, q, query = fragment.partition("?")
+        if q:
+            fragment = route + "?" + redact_query(query)
+        elif "=" in fragment:
+            fragment = redact_query(fragment)
+    return base + hashmark + fragment

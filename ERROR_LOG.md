@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — project files (unmerged, branch claude/new-session-dwzrhb): code review round 1 found defects in 9f1536e (fixed in the follow-up commit; CC-UI-0450, CC-CORE-0450)
+- **Symptom:** two independent reviewers of the pushed, unmerged project-files commit found: a trigger named like a table passed the untrusted-file refusal (it deleted findings once opened); `redact_for_record` kept part of a password containing `@`; New / Save as adopted or deleted a stale `<name>.fuzzlab.d`; a planted symlink at a pinned intermediate let a tool write outside the project; opening an older/newer file while a project was open was silent; plus non-blocking gaps (dropped discard reports, broad exception lists, an uncapped `recent.json` read, an unrecorded `stopped` at shutdown, …). While testing the fix, a test that planted a FIFO as `recent.json` hung the run: opening a FIFO read-only blocks — the page itself would have hung the same way.
+- **Root cause:** in-change defects of a not-yet-merged feature, caught by the review gate the process requires; the FIFO hang was an `os.open` without `O_NONBLOCK` on an attacker-placeable path.
+- **Remediation:** every finding fixed and given a regression test (listed in the CC-UI-0450 / CC-CORE-0450 review notes); `recent.json` opened `O_NOFOLLOW | O_NONBLOCK` and refused unless a regular file. Recorded under the change's own CC entries (as BUG-0125's review rounds were, CC-CORE-0050) rather than as separate BUG-NNNN, since no defect reached a merged branch.
+- **Status:** Fixed (re-review pending)
+
 ## 2026-10-15 — fuzzer: an empty run imported the previous run's CSV (fixed, BUG-0450/PA-0450)
 - **Symptom:** found in design review of project files (CC-UI-0450): `fuzzlab fuzz --store S` with a run that collected no rows still imported `--output` (default `blind_sqli_dataset.csv` in the working directory) — an earlier run's, possibly another target's or project's — as its own attempts; with no such file it crashed with `FileNotFoundError` before the oracle confirmation.
 - **Root cause:** provenance inferred from presence: `save_dataset` wrote nothing for an empty run and returned no fact, and `main` imported the path unconditionally (a recurrence of PA-0075's root cause at the file layer).

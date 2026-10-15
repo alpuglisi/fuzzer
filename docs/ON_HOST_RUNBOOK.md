@@ -742,8 +742,10 @@ private; the directory held `pff-oct.fuzzlab`, `recent.json` and `recent.json.lo
   with `--with-proxy`, whose history goes into the start-up project).
 - Leaving a temporary project deletes it only when you tick "discard"; use Save as to
   keep it. Unsaved temporaries from an earlier session are listed for Open or Discard.
-- A project file never holds a credential (they stay in the keyring); notes are plain
-  text — never put secrets there.
+- The UI never writes a credential into a project file (credentials stay in the keyring,
+  and recorded commands and targets are redacted). Two exceptions are yours: Repeater
+  tabs keep requests exactly as you typed them (a cookie or `Authorization` header you
+  paste stays in the file), and notes are plain text — never put secrets there.
 
 ## Running everything in one pass (Parts A, C–L)
 

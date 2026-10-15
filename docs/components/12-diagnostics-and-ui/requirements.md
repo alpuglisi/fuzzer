@@ -488,15 +488,20 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   directory (`<file>.d/`), overriding the form (`web.projects.pin_values`, from the
   exhaustive `OPTION_CLASS` table). Each such job is recorded in the project's `launch`
   table (command, redacted argv, redacted target; FR-CORE-451) and its target is added
-  to the project's targets; it runs with `umask 077`. The dry run shows the pinned
-  command and creates nothing. A pinned command with no project open is refused (409).
+  to the project's targets; it runs with `umask 077`. Before it starts, its intermediate
+  files must be absent or plain, singly linked files of this user (a planted link is
+  refused). The dry run shows the pinned command when a project is open (with none open
+  it shows the form's values and `project_pinned: true`; the launch is then refused) and
+  creates nothing. A pinned command with no project open is refused (409).
   Commands without a store (session, build-db, lab-generate) and lab switches are not
   pinned, record nothing and keep the normal umask.
 - **FR-UI-457** **Schema mismatch.** A file whose schema is older than this build's is
-  not opened, read or written until the operator accepts the migration offer; accepting
+  not opened, read or written until the operator accepts the migration offer (shown on
+  `/projects` whether or not another project is open, which stays open meanwhile); accepting
   writes a verified backup (`<file>.d/backups/`) and then migrates (FR-CORE-452 covers a
   partial failure). A newer file, a non-fuzzlab SQLite file, a file with triggers or
-  views, or one failing `quick_check` is refused with the reason. With `--with-proxy`,
+  views, a virtual table fuzzlab does not create, a non-empty file with no recorded schema
+  version, or one failing `quick_check` is refused with the reason. With `--with-proxy`,
   a start-up project that is waiting or refused stops the start with the remedy (start
   once without `--with-proxy`).
 
@@ -570,7 +575,7 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   entry is re-validated on every reopen. No web module opens a store that can create
   one, except the one creation site under the project lock.
   - Enforced by: `web.projects` — `tests/test_web_projects.py::test_bad_project_names_are_refused`, `tests/test_web_projects.py::test_open_refuses_traversal_symlinks_and_foreign_files`, `tests/test_web_projects.py::test_a_recent_entry_outside_the_projects_directory_is_refused`, `tests/test_web_projects.py::test_no_web_module_opens_a_store_that_can_create`, `tests/test_web_projects.py::test_the_creating_open_guard_catches_synthetic_offenders`, `tests/test_web_projects.py::test_every_project_action_is_refused_cross_site`
-  - Not yet enforced: the window between validating a path and SQLite opening it (another process of the same user could swap the file) is a stated residual; other tools' own path flags (input paths such as `--ground-truth`) are typed by the operator, as before.
+  - Not yet enforced: the window between validating a path and SQLite opening it (another process of the same user could swap the file) is a stated residual; other tools' own path flags (input paths such as `--ground-truth`) are typed by the operator, as before; a hard crash can leave a hidden, private `.copy-*.tmp` in the projects directory (never listed or opened).
 - **NFR-UI-project-provenance-redacted** *(added CC-UI-0450)* What the UI records about
   a job or a project (`launch.argv`, `launch.target`, `project.targets`) goes through
   `core.redaction.redact_for_record` (URL userinfo, sensitive query values, a sensitive

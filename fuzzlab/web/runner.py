@@ -95,7 +95,7 @@ def display_command(spec: "CommandSpec", values: dict[str, Any]) -> str:
 # --- live execution --------------------------------------------------------
 
 #: What a job's completion hook may raise that is reported on its stream (PA-0106).
-_RECORD_ERRORS = (sqlite3.Error, OSError, ValueError)
+_RECORD_ERRORS = (sqlite3.OperationalError,)        # the project file gone, or locked
 
 
 class _Run:
@@ -108,6 +108,7 @@ class _Run:
         self.project: str | None = None
         self.on_done: Callable[[int | None, bool], None] | None = None
         self.recorded = False
+        self.pump: asyncio.Task | None = None
         self.proc: asyncio.subprocess.Process | None = None
         self.handle: procutil.ServerHandle | None = None
         self.stopping = False
@@ -153,7 +154,7 @@ class Runner:
         )
         run.project = project            # only after a successful spawn (design round 2)
         run.proc = run.handle.proc
-        asyncio.create_task(self._pump(run))
+        run.pump = asyncio.create_task(self._pump(run))
         return token
 
     async def _pump(self, run: _Run) -> None:
@@ -168,24 +169,25 @@ class Runner:
         # Read until the supervisor has exited, then drain for at most DRAIN_S
         # (BUG-0125 review round 2).
         reader = asyncio.ensure_future(lines())
-        code = await run.proc.wait()
-        if code == procutil.CODE_UNKNOWN:  # never shown as if it were a real status
-            await run.queue.put(("output", "[fuzzlab] exit status unknown: the job's "
-                                           "supervisor was reaped outside fuzzlab"))
-            code = None
-        run.returncode = code
-        run.finished = True
         try:
-            await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
-        except asyncio.TimeoutError:
-            reader.cancel()
-            await run.queue.put(("output", "[fuzzlab] output still held open by a process that "
-                                           "outlived the job; stopped reading it"))
-        try:
-            await procutil.astop_server(run.handle)  # collects the exited supervisor
-        except procutil.ServerLost as exc:  # stopped without a request: say so (loud)
-            await run.queue.put(("output", f"[fuzzlab] {exc}"))
-        try:
+            code = await run.proc.wait()
+            if code == procutil.CODE_UNKNOWN:  # never shown as if it were a real status
+                await run.queue.put(("output", "[fuzzlab] exit status unknown: the job's "
+                                               "supervisor was reaped outside fuzzlab"))
+                code = None
+            run.returncode = code
+            run.finished = True
+            try:
+                await asyncio.wait_for(asyncio.shield(reader), self.DRAIN_S)
+            except asyncio.TimeoutError:
+                reader.cancel()
+                await run.queue.put(("output", "[fuzzlab] output still held open by a "
+                                               "process that outlived the job; stopped "
+                                               "reading it"))
+            try:
+                await procutil.astop_server(run.handle)  # collects the exited supervisor
+            except procutil.ServerLost as exc:  # stopped without a request: say so (loud)
+                await run.queue.put(("output", f"[fuzzlab] {exc}"))
             if run.on_done is not None:
                 try:
                     await asyncio.to_thread(run.on_done, run.returncode, run.stopping)
@@ -193,8 +195,11 @@ class Runner:
                     await run.queue.put(("output", "[fuzzlab] could not record the job's "
                                                    f"end in its project: {exc}"))
         finally:
+            # Whatever happened above (an error, a cancellation), the job no longer
+            # writes its project's record and its stream ends (code review A).
+            run.finished = True
             run.recorded = True
-            await run.queue.put(("done", run.returncode))
+            run.queue.put_nowait(("done", run.returncode))
 
     async def stream(self, token: str):
         """Yield SSE events for a run: ``output`` lines, then a ``done`` event."""
@@ -240,8 +245,13 @@ class Runner:
             except procutil.ProcUtilError as exc:  # lost / exposed: say so on its stream
                 await run.queue.put(("output", f"[fuzzlab] {exc}"))
 
+    #: Seconds `shutdown` waits for stopped jobs to record their end in their project.
+    RECORD_WAIT_S = 10.0
+
     async def shutdown(self) -> None:
-        """Stop every live job (the UI is shutting down; BUG-0125 D18)."""
+        """Stop every live job (the UI is shutting down; BUG-0125 D18), then wait up to
+        `RECORD_WAIT_S` for each to record its end (``stopped``) in its project; a job
+        that does not is left ``running`` and read as ``unknown`` on the next open."""
         for run in list(self._runs.values()):
             if run.handle is not None and not run.finished:
                 run.stopping = True          # its project records "stopped"
@@ -253,6 +263,10 @@ class Runner:
                     pass  # already stopped without a request; reported on its stream
                 except procutil.ProcUtilError as exc:  # e.g. ListenerCheckFailed: loud
                     await run.queue.put(("output", f"[fuzzlab] {exc}"))
+        pumps = [r.pump for r in list(self._runs.values())
+                 if r.pump is not None and not r.pump.done()]
+        if pumps:
+            await asyncio.wait(pumps, timeout=self.RECORD_WAIT_S)
 
     def known(self, token: str) -> bool:
         return token in self._runs
@@ -260,8 +274,8 @@ class Runner:
     def pinned_jobs(self, project: str) -> list[str]:
         """The commands of jobs still writing ``project``: spawned into it and their end
         not yet recorded there (CC-UI-0450)."""
-        return [r.command for r in self._runs.values()
-                if r.project == project and not r.recorded]
+        return [r.command for r in list(self._runs.values())     # snapshot: read from
+                if r.project == project and not r.recorded]      # worker threads too
 
     def unrecorded(self, token: str) -> bool:
         """Whether the job ``token`` is still running or its end is not yet recorded."""

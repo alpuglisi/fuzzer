@@ -41,6 +41,7 @@ at startup.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import re
@@ -321,9 +322,15 @@ class ProjectManager:
 
     def _switch(self, new: OpenProject | None, discard: bool) -> list[str]:
         """Leave the open project (deleting a temporary one only when ``discard``; the
-        caller checked busy and the discard rule), then make ``new`` current."""
-        problems = self._leave(discard_temporary=discard)
-        self.current = new
+        caller checked busy and the discard rule), then make ``new`` current — even if
+        leaving raised. Anything a discard could not remove is reported (FR-UI-453)."""
+        try:
+            problems = self._leave(discard_temporary=discard)
+        finally:
+            self.current = new
+        if problems:
+            self.flash.append(("warn", "The temporary project was discarded, but: "
+                               + "; ".join(problems)))
         return problems
 
     def busy_reasons(self) -> list[str]:
@@ -335,6 +342,19 @@ class ProjectManager:
             reasons += [f"job {cmd}" for cmd in self.runner.pinned_jobs(str(self.current.path))]
         return reasons
 
+    def _fresh_target(self, path: Path, name: str) -> None:
+        """Refuse a new project's path when anything a project owns is already there —
+        its file, a SQLite side file, or its own directory (a stale ``<file>.d`` would be
+        adopted, and its crawl read as this project's: PA-0450)."""
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            if os.path.lexists(str(path) + suffix):
+                raise ProjectError(f"a project named {name!r} already exists; open it "
+                                   "instead")
+        if os.path.lexists(sidecar_dir(path)):
+            raise ProjectError(f"{sidecar_dir(path).name} already exists in the projects "
+                               "directory (left by an earlier project of that name); "
+                               "remove it or choose another name")
+
     def _check_leave(self, discard: bool) -> None:
         busy = self.busy_reasons()
         if busy:
@@ -344,27 +364,35 @@ class ProjectManager:
 
     # -- the projects directory --------------------------------------------------------
     def _ensure_dir(self, d: Path) -> Path:
-        """Create ``d`` 0700 (and its parents, 0700) if missing; refuse one that is not a
-        private directory owned by this user (NFR-UI-project-private)."""
-        if not os.path.lexists(d):
-            os.makedirs(d, mode=0o700, exist_ok=True)
-        st = os.lstat(d)
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-            raise ProjectError(f"{d} is not a directory")
-        if st.st_uid != os.getuid() or st.st_mode & 0o077:
-            raise ProjectError(f"{d} must be owned by this user with mode 0700")
+        """Create ``d`` if missing — it and each missing parent with mode 0700 — and refuse
+        one that is not a private directory owned by this user (NFR-UI-project-private).
+        Existing parents are left as they are."""
+        missing = []
+        p = d
+        while not os.path.lexists(p) and p != p.parent:
+            missing.append(p)
+            p = p.parent
+        try:
+            for m in reversed(missing):
+                try:
+                    os.mkdir(m, 0o700)
+                except FileExistsError:
+                    pass
+        except (PermissionError, FileNotFoundError, NotADirectoryError) as exc:
+            raise ProjectError(f"cannot create {d}: {exc.strerror or exc}") from exc
+        if not _private_dir_ok(d):
+            raise ProjectError(f"{d} must be a directory owned by this user with mode 0700")
         return d
 
     def _checked_dir(self) -> Path | None:
         """The projects directory if it exists and is safe to read; never creates it."""
-        d = self.projects_dir
-        if not os.path.lexists(d):
-            return None
-        st = os.lstat(d)
-        if (stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode)
-                or st.st_uid != os.getuid() or st.st_mode & 0o077):
-            return None
-        return d
+        return self.projects_dir if _private_dir_ok(self.projects_dir) else None
+
+    def _temp_dir(self) -> Path | None:
+        """``.temporary`` if it exists and is a private directory of ours (never a link)."""
+        d = self._checked_dir()
+        return d / TEMP_DIRNAME if d is not None and _private_dir_ok(d / TEMP_DIRNAME) \
+            else None
 
     def _named_path(self, name: str) -> Path:
         if not isinstance(name, str) or not NAME_RE.fullmatch(name) or ".." in name:
@@ -379,10 +407,13 @@ class ProjectManager:
         return self.projects_dir / filename
 
     def _validate_file(self, path: Path) -> Path:
-        """A path the UI may open: a regular file of ours directly in the projects
-        directory (no symlink anywhere in it), or the operator's configured store."""
+        """A path the UI may open: the operator's configured store, or a regular file of
+        this user named by `FILE_RE` directly in the projects directory (neither the
+        directory nor the file may be a symlink)."""
         if self.startup_path is not None and os.path.abspath(path) == str(self.startup_path):
             return self.startup_path
+        if not FILE_RE.fullmatch(path.name):
+            raise ProjectError("not a project file name")
         d = self._checked_dir()
         if d is None or os.path.realpath(path.parent) != os.path.realpath(d) or \
                 path.parent != d:
@@ -412,12 +443,12 @@ class ProjectManager:
         return out
 
     def leftover_temporaries(self) -> list[str]:
-        d = self._checked_dir()
-        if d is None or not os.path.isdir(d / TEMP_DIRNAME):
+        tdir = self._temp_dir()
+        if tdir is None:
             return []
         cur = self.current.path.name if self.current and self.current.kind == "temporary" \
             else None
-        return sorted(e.name for e in os.scandir(d / TEMP_DIRNAME)
+        return sorted(e.name for e in os.scandir(tdir)
                       if TEMP_RE.fullmatch(e.name) and e.is_file(follow_symlinks=False)
                       and e.name != cur)
 
@@ -473,16 +504,22 @@ class ProjectManager:
             raise NoProject("no project is open")
         cur = self.current
         if not cur.exists:
-            if os.path.lexists(cur.path):       # created meanwhile (e.g. by the CLI)
+            created = False
+            if not os.path.lexists(cur.path):
+                try:
+                    self._create_locked(cur.path)
+                    created = True
+                except FileExistsError:         # created meanwhile, outside the UI
+                    pass
+            if created:
+                cur.exists = True
+            else:                               # created meanwhile (e.g. by the CLI)
                 info = core_project.inspect(cur.path)
                 op = self._prepare(cur.path, info, kind=cur.kind)
                 self.current = op
                 if op is None:
                     raise NoProject("the project file changed under the UI; see the "
                                     "projects page")
-            else:
-                self._create_locked(cur.path)
-                cur.exists = True
         return str(self.current.path)
 
     async def require_writable(self) -> str:
@@ -500,9 +537,11 @@ class ProjectManager:
     def _new(self, name: str, discard: bool) -> None:
         path = self._named_path(name)
         self._ensure_dir(self.projects_dir)
-        if os.path.lexists(path):
-            raise ProjectError(f"a project named {name!r} already exists; open it instead")
-        self._create_locked(path)
+        self._fresh_target(path, name)
+        try:
+            self._create_locked(path)
+        except FileExistsError as exc:             # created meanwhile, outside the UI
+            raise ProjectError(f"a project named {name!r} already exists") from exc
         self._switch(OpenProject(path), discard)
         self.pending = None
         self._add_recent(path)
@@ -516,11 +555,17 @@ class ProjectManager:
         tdir = self._ensure_dir(self._ensure_dir(self.projects_dir) / TEMP_DIRNAME)
         path = tdir / f"tmp-{_utc_stamp()}-{secrets.token_hex(4)}{PROJECT_EXT}"
         self._create_locked(path)
-        sd = self._ensure_dir(sidecar_dir(path))
-        fd = _acquire_owner(sd)
-        st = os.stat(path)
-        self._switch(OpenProject(path, kind="temporary", inode=(st.st_dev, st.st_ino),
-                                 owner_fd=fd), discard)
+        fd = None
+        try:
+            fd = _acquire_owner(self._ensure_dir(sidecar_dir(path)))
+            st = os.stat(path)
+            op = OpenProject(path, kind="temporary", inode=(st.st_dev, st.st_ino),
+                             owner_fd=fd)
+        except BaseException:
+            _release_owner(fd)
+            _remove_project_files(tdir, path.name)
+            raise
+        self._switch(op, discard)
         self.pending = None
 
     async def open(self, *, file: str | None = None, recent_id: int | None = None,
@@ -534,10 +579,12 @@ class ProjectManager:
         if temporary is not None:
             if not isinstance(temporary, str) or not TEMP_RE.fullmatch(temporary):
                 raise ProjectError("not a temporary project name")
-            d = self._checked_dir()
-            if d is None:
-                raise ProjectError("no projects directory")
-            path = d / TEMP_DIRNAME / temporary
+            tdir = self._temp_dir()
+            if tdir is None:
+                raise ProjectError("no private .temporary directory")
+            path = tdir / temporary
+            if self.current is not None and path == self.current.path:
+                return                              # already open
             st = os.lstat(path)
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
                 raise ProjectError(f"{temporary} is not a regular file of this user")
@@ -561,6 +608,12 @@ class ProjectManager:
             raise
         if op is None:                              # an offer or a refusal: stay put
             _release_owner(owner_fd)
+            assert self.pending is not None
+            self.flash.append(("warn", (
+                f"{path.name} uses schema v{self.pending.schema_version}; this fuzzlab is "
+                f"v{_head()}. It was not opened: review the migration offer below.")
+                if self.pending.kind == "older" else
+                f"{path.name} was not opened: {self.pending.detail}"))
             return
         self._switch(op, discard)
         if kind == "file":
@@ -578,17 +631,21 @@ class ProjectManager:
             raise NoProject("no project with data is open")
         dest = self._named_path(name)
         self._ensure_dir(self.projects_dir)
-        if os.path.lexists(dest):
-            raise ProjectError(f"a project named {name!r} already exists")
+        self._fresh_target(dest, name)            # so everything at dest is ours below
         src = self.current.path
-        core_project.copy_to(src, dest)
+        try:
+            core_project.copy_to(src, dest)
+        except OSError as exc:                    # incl. no space, no hard links, EEXIST
+            raise ProjectError(f"save as failed: {exc}") from exc
         try:
             self._copy_sidecars(src, dest)
             with Store(dest, create=False) as store:
                 core_project.ensure_metadata(store, dest.stem)
                 core_project.rename(store, dest.stem)
         except BaseException:
-            _remove_project_files(dest.parent, dest.name)
+            left = _remove_project_files(dest.parent, dest.name)
+            if left:
+                self.flash.append(("warn", "A failed save as left: " + "; ".join(left)))
             raise
         self._switch(OpenProject(dest), True)    # a temporary source is now saved
         self._add_recent(dest)
@@ -599,7 +656,7 @@ class ProjectManager:
         if not os.path.isdir(sd) or os.path.islink(sd):
             return
         names = sorted({d for c, d in OPTION_CLASS.values() if c == PIN_SIDECAR})
-        present = [n for n in names if os.path.isfile(sd / n) and not os.path.islink(sd / n)]
+        present = [n for n in names if _regular_of_ours(sd / n)]
         if not present:
             return
         dd = sidecar_dir(dest)
@@ -611,11 +668,11 @@ class ProjectManager:
                 from fuzzlab.core.secretfile import create_secret
                 create_secret(dd / n, (sd / n).read_bytes())
 
-    async def close(self, *, discard: bool = False) -> list[str]:
-        """Close the open project; returns any files a discard could not remove."""
+    async def close(self, *, discard: bool = False) -> None:
+        """Close the open project (a discard's leftovers are reported by `_switch`)."""
         async with self.lock:
             self._check_leave(discard)
-            return await asyncio.to_thread(self._switch, None, discard)
+            await asyncio.to_thread(self._switch, None, discard)
 
     async def discard_leftover(self, name: str) -> list[str]:
         async with self.lock:
@@ -626,16 +683,17 @@ class ProjectManager:
             raise ProjectError("not a temporary project name")
         if self.current is not None and self.current.path.name == name:
             raise ProjectError("that temporary project is open; close it instead")
-        d = self._checked_dir()
-        if d is None:
-            raise ProjectError("no projects directory")
-        tdir = d / TEMP_DIRNAME
+        tdir = self._temp_dir()
+        if tdir is None:
+            raise ProjectError("no private .temporary directory")
         sd = sidecar_dir(tdir / name)
         fd = None
-        if os.path.isdir(sd) and not os.path.islink(sd):
+        if _private_dir_ok(sd):
             fd = _acquire_owner(sd)              # refuses one another UI holds open
-        _release_owner(fd)
-        return _remove_project_files(tdir, name)
+        try:                                     # held until the files are gone
+            return _remove_project_files(tdir, name)
+        finally:
+            _release_owner(fd)
 
     def _leave(self, discard_temporary: bool = False) -> list[str]:
         """Close the open project (the lock is held). A temporary one is deleted when
@@ -645,10 +703,12 @@ class ProjectManager:
         self.current = None
         if cur is None or cur.kind != "temporary":
             return []
-        _release_owner(cur.owner_fd)
-        if not discard_temporary:
-            return []
-        return _remove_project_files(cur.path.parent, cur.path.name, expect=cur.inode)
+        try:                     # the owner lock is held until the files are gone
+            if not discard_temporary:
+                return []
+            return _remove_project_files(cur.path.parent, cur.path.name, expect=cur.inode)
+        finally:
+            _release_owner(cur.owner_fd)
 
     async def migrate_pending(self, *, discard: bool = False) -> str:
         """Accept the migration offer: verified backup, migrate, then open the file."""
@@ -682,7 +742,10 @@ class ProjectManager:
         if store is None:
             raise NoProject("the project has no data yet")
         with store:
-            core_project.set_meta(store, notes=notes, targets=targets)
+            try:
+                core_project.set_meta(store, notes=notes, targets=targets)
+            except ValueError as exc:            # a bound (notes / targets length)
+                raise ProjectError(str(exc)) from exc
 
     async def make_private(self) -> None:
         async with self.lock:
@@ -701,17 +764,17 @@ class ProjectManager:
                 raise NoProject("open or create a project first")
             path = await asyncio.to_thread(self._ensure_created)
             pinned = pin_values(spec, values, path)
-            await asyncio.to_thread(self._ensure_dir, sidecar_dir(path))
+            await asyncio.to_thread(self._check_sidecars, spec, pinned)
             launch_id, token_value = await asyncio.to_thread(
                 self._record_launch, path, spec, pinned)
-            argv = argv_builder(spec, pinned)
-            env = {**os.environ, LAUNCH_TOKEN_ENV: token_value}
 
             def on_done(returncode, stopping, _path=path, _lid=launch_id):
                 core_project.finish_launch(_path, _lid,
                                            core_project.status_for(returncode, stopping),
                                            returncode)
             try:
+                argv = argv_builder(spec, pinned)
+                env = {**os.environ, LAUNCH_TOKEN_ENV: token_value}
                 token = await self.runner.launch(argv, env=env, project=path,
                                                  command=spec.name, on_done=on_done,
                                                  umask=0o077)
@@ -722,11 +785,30 @@ class ProjectManager:
             self._launches[token] = launch_id
             return token, argv
 
+    def _check_sidecars(self, spec, pinned: dict[str, Any]) -> None:
+        """Before a pinned job starts: its project directory is private and ours, and each
+        intermediate file it will write (with its SQLite side files) is absent or a
+        regular, singly linked file of ours — never a symlink a tool's ``open()`` would
+        follow out of the project (code review B)."""
+        project = pinned.get("store")
+        if project:
+            self._ensure_dir(sidecar_dir(project))
+        for opt in spec.options:
+            cls, _detail = OPTION_CLASS.get((spec.name, opt.dest), (NOT_PATH, ""))
+            if cls != PIN_SIDECAR:
+                continue
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                target = Path(str(pinned[opt.dest]) + suffix)
+                if os.path.lexists(target) and not _regular_of_ours(target, single=True):
+                    raise ProjectError(f"{target.name} in the project directory is not a "
+                                       "plain file of this user; refusing to write it")
+
     def live_launch_ids(self) -> list[int]:
         """Launch ids of jobs this UI is still running (or has not yet recorded)."""
         if self.runner is None:
             return []
-        return [lid for tok, lid in self._launches.items() if self.runner.unrecorded(tok)]
+        return [lid for tok, lid in list(self._launches.items())   # snapshot (threads)
+                if self.runner.unrecorded(tok)]
 
     def history(self) -> list[dict[str, Any]] | None:
         """The open project's run history, or None when it has no data yet."""
@@ -785,14 +867,31 @@ def _head() -> int:
 
 # --- the recent list's one parser (PA-0108) ----------------------------------------
 
+RECENT_MAX_BYTES = 1_000_000
+
+
 def _parse_recent(path: Path) -> tuple[list[dict[str, Any]], int]:
-    """``(entries, malformed_count)``. A missing file is empty; a malformed one, or a
-    malformed entry, is skipped and counted — never fabricated."""
+    """``(entries, malformed_count)``. A missing file is empty; a malformed one — not a
+    regular file (a symlink is never followed), larger than `RECENT_MAX_BYTES` (never
+    read past it), not JSON — or a malformed entry is skipped and counted, never
+    fabricated."""
     try:
-        raw = path.read_bytes()
+        # O_NONBLOCK: a FIFO planted at the path must not hang the page (it is refused
+        # by the regular-file check below, never read).
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return [], 0
-    if len(raw) > 1_000_000:
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:              # a symlink: refused, counted
+            return [], 1
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return [], 1
+        raw = os.read(fd, RECENT_MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > RECENT_MAX_BYTES:
         return [], 1
     try:
         data = json.loads(raw)
@@ -826,6 +925,27 @@ def _acquire_owner(sd: Path) -> int | None:
         os.close(fd)
         raise ProjectError("that temporary project is in use by another fuzzlab web")
     return fd
+
+
+def _private_dir_ok(d: Path) -> bool:
+    """``d`` is a directory (not a symlink) owned by this user with no group/other bits."""
+    try:
+        st = os.lstat(d)
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode)
+            and st.st_uid == os.getuid() and not st.st_mode & 0o077)
+
+
+def _regular_of_ours(p: Path, *, single: bool = False) -> bool:
+    """``p`` is a regular file (not a symlink) owned by this user; ``single``: and has
+    exactly one hard link (a second name could be outside the project)."""
+    try:
+        st = os.lstat(p)
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid()
+            and (not single or st.st_nlink == 1))
 
 
 def _release_owner(fd: int | None) -> None:

@@ -16,6 +16,7 @@ listener but sends nothing until a proxied client drives in-scope traffic throug
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -260,18 +261,30 @@ class RepeaterController:
     def __init__(self, cfg, sender=None) -> None:
         self.cfg = cfg
         self._sender = sender
-        self._run_ids: dict[str, int] = {}
+        self._run_ids: dict[tuple, int] = {}
         self._run_lock = threading.Lock()
         self._local = threading.local()
 
     def _path(self) -> str | None:
         return self.cfg.get("store_path")
 
+    def _key(self):
+        """The open project's identity: its path and the file's ``(st_dev, st_ino)``, so a
+        project file replaced at the same path is a different project (code review A)."""
+        path = self._path()
+        if path is None:
+            return None
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return (path, None)
+        return (path, (st.st_dev, st.st_ino))
+
     def _thread_store(self):
         """This calling thread's persistent store for the open project, if this thread
         already has one (else None). A handle cached for another project is closed."""
         store = getattr(self._local, "store", None)
-        if store is not None and getattr(self._local, "path", None) != self._path():
+        if store is not None and getattr(self._local, "path", None) != self._key():
             try:
                 store.close()
             finally:
@@ -298,16 +311,17 @@ class RepeaterController:
             if path is None:
                 raise NoProject("no project is open")
             store = Store(path, create=False)
+            key = self._key()
             with self._run_lock:
-                if path not in self._run_ids:
-                    self._run_ids[path] = store.start_run(
+                if key not in self._run_ids:
+                    self._run_ids[key] = store.start_run(
                         "repeater", self.cfg.get("target_base_url", ""))
-                run_id = self._run_ids[path]
+                run_id = self._run_ids[key]
             rep = Repeater(store, run_id, sender,
                            history=HistoryWriter(store, run_id, batch_size=1))
             self._local.store = store
             self._local.rep = rep
-            self._local.path = path
+            self._local.path = key
         return rep
 
     @staticmethod

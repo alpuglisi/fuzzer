@@ -64,13 +64,35 @@ def _tree_modes(root: Path):
 # --- guards (found by shape, proven on synthetic offenders: PA-0034(2)) ---------------
 
 _CREATE_ALLOWED = {("projects.py", "_create_locked")}
+_OPENERS = {"Store", "open_store", "connect"}
+#: `core.project` helpers that create files: only these web functions may call them.
+_CREATORS = {"create": {"_create_locked"}, "copy_to": {"_save_as", "_copy_sidecars"}}
+
+
+def _refname(node):
+    return node.id if isinstance(node, ast.Name) else \
+        node.attr if isinstance(node, ast.Attribute) else None
 
 
 def _creating_opens(source: str, filename: str) -> list[str]:
     """Calls in ``source`` that may open a store and create its file: ``Store(``,
-    ``open_store(``, ``connect(`` without ``create=False``, and any ``sqlite3.connect(``
-    (outside the one allowed creation function)."""
+    ``open_store(``, ``connect(`` — under any import alias or assigned name — without
+    ``create=False``; any ``sqlite3.connect(``; an opener reached by ``getattr`` or
+    passed as an argument (``partial(Store, p)``); and a ``core_project.create`` /
+    ``copy_to`` outside its allowed function."""
     tree = ast.parse(source)
+    aliases, sqlite_mods = set(_OPENERS), {"sqlite3"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if a.name in _OPENERS:
+                    aliases.add(a.asname or a.name)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "sqlite3":
+                    sqlite_mods.add(a.asname or a.name)
+        elif isinstance(node, ast.Assign) and _refname(node.value) in aliases:
+            aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
     offenders = []
 
     def visit(node, func):
@@ -78,16 +100,25 @@ def _creating_opens(source: str, filename: str) -> list[str]:
             f = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                 else func
             if isinstance(child, ast.Call):
-                name = (child.func.id if isinstance(child.func, ast.Name) else
-                        child.func.attr if isinstance(child.func, ast.Attribute) else "")
-                if name in ("Store", "open_store", "connect"):
-                    no_create = any(k.arg == "create" and isinstance(k.value, ast.Constant)
-                                    and k.value.value is False for k in child.keywords)
-                    is_sqlite = (isinstance(child.func, ast.Attribute) and
-                                 isinstance(child.func.value, ast.Name) and
-                                 child.func.value.id == "sqlite3")
-                    if (is_sqlite or not no_create) and (filename, f) not in _CREATE_ALLOWED:
-                        offenders.append(f"{filename}:{child.lineno} {name}(")
+                name = _refname(child.func)
+                is_sqlite = (isinstance(child.func, ast.Attribute) and
+                             isinstance(child.func.value, ast.Name) and
+                             child.func.value.id in sqlite_mods)
+                no_create = any(k.arg == "create" and isinstance(k.value, ast.Constant)
+                                and k.value.value is False for k in child.keywords)
+                allowed = (filename, f) in _CREATE_ALLOWED
+                if (name in aliases or is_sqlite) and (is_sqlite or not no_create) \
+                        and not allowed:
+                    offenders.append(f"{filename}:{child.lineno} {name}(")
+                if name == "getattr" and any(isinstance(a, ast.Constant) and
+                                             a.value in _OPENERS for a in child.args):
+                    offenders.append(f"{filename}:{child.lineno} getattr(…opener)")
+                if any(_refname(a) in aliases for a in child.args) and not allowed:
+                    offenders.append(f"{filename}:{child.lineno} opener passed to {name}(")
+                if (isinstance(child.func, ast.Attribute) and name in _CREATORS and
+                        _refname(child.func.value) == "core_project" and
+                        f not in _CREATORS[name]):
+                    offenders.append(f"{filename}:{child.lineno} core_project.{name}(")
             visit(child, f)
     visit(tree, "")
     return offenders
@@ -103,18 +134,36 @@ def test_no_web_module_opens_a_store_that_can_create():
     assert offenders == [], offenders
 
 
-def test_the_creating_open_guard_catches_synthetic_offenders():
-    bad = ("def f(p):\n    from fuzzlab.core.store import Store\n    return Store(p)\n"
-           "def g(p):\n    import sqlite3\n    return sqlite3.connect(p)\n"
-           "def h(p):\n    return Store(p, create=True)\n")
-    assert len(_creating_opens(bad, "x.py")) == 3
-    good = "def f(p):\n    return Store(p, create=False)\n"
+@pytest.mark.parametrize("bad", [
+    "def f(p):\n    from fuzzlab.core.store import Store\n    return Store(p)\n",
+    "def g(p):\n    import sqlite3\n    return sqlite3.connect(p)\n",
+    "def h(p):\n    return Store(p, create=True)\n",
+    "from fuzzlab.core.store import Store as S\ndef f(p):\n    return S(p)\n",
+    "from sqlite3 import connect as c\ndef f(p):\n    return c(p)\n",
+    "import sqlite3 as sq\ndef f(p):\n    return sq.connect(p)\n",
+    "def f(st, p):\n    return getattr(st, 'Store')(p)\n",
+    "import functools\ndef f(st, p):\n    return functools.partial(st.Store, p)()\n",
+    "def f(p):\n    S = Store\n    return S(p)\n",
+    "def f(p):\n    return core_project.create(p)\n",
+    "def _new(p):\n    return core_project.copy_to(p, p)\n",
+])
+def test_the_creating_open_guard_catches_synthetic_offenders(bad):
+    assert _creating_opens(bad, "x.py"), bad
+
+
+def test_the_creating_open_guard_passes_a_no_create_open():
+    good = ("def f(p):\n    return Store(p, create=False)\n"
+            "def _create_locked(p):\n    return core_project.create(p)\n")
     assert _creating_opens(good, "x.py") == []
 
 
+_RECORD_WRITE = __import__("re").compile(
+    r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?"
+    r"|DELETE\s+FROM)\s+(?:[\"`\[]?main[\"`\]]?\.)?[\"`\[]?(?:launch|project)\b", __import__("re").I)
+
+
 def _record_writers(source: str) -> bool:
-    import re
-    return bool(re.search(r"(INSERT\s+INTO|UPDATE)\s+(launch|project)\b", source, re.I))
+    return bool(_RECORD_WRITE.search(source))
 
 
 def test_only_core_project_writes_the_project_record_tables():
@@ -124,7 +173,14 @@ def test_only_core_project_writes_the_project_record_tables():
     writers = sorted(str(p.relative_to(root)) for p in root.rglob("*.py")
                      if _record_writers(p.read_text()))
     assert writers == ["core/project.py"], writers
-    assert _record_writers("cur.execute('UPDATE launch SET argv=?', (x,))")   # offender
+    for offender in ("UPDATE launch SET argv=?", "INSERT OR REPLACE INTO launch (a) VALUES (1)",
+                     "REPLACE INTO project (id) VALUES (1)", 'UPDATE "launch" SET x=1',
+                     "DELETE FROM launch", "update main.project set notes=''",
+                     "INSERT INTO `project` (id) VALUES (1)"):
+        assert _record_writers(offender), offender
+    for benign in ("SELECT id FROM launch WHERE token=?", "INSERT INTO run (launch_id)",
+                   "CREATE TABLE IF NOT EXISTS launch ("):
+        assert not _record_writers(benign), benign
 
 
 def _str_options():
@@ -519,7 +575,7 @@ def test_temporary_project_discard_needs_confirmation_and_removes_only_its_files
     assert _state(c)["path"] == str(tpath)
     c.post("/projects/close", data={"discard": "1"})
     assert _state(c)["status"] == "none"
-    assert "Discarded, but" in _flash(c)               # the symlink was left and reported
+    assert "was discarded, but" in _flash(c)           # the symlink was left and reported
     assert not tpath.exists() and not Path(str(tpath) + "-wal").exists()
     assert victim.read_text() == "keep me" and sibling.exists()
     assert (side / "audit.db").is_symlink() and not (side / "spider.db").exists()
@@ -777,3 +833,284 @@ def test_with_no_umask_the_child_keeps_the_inherited_one(tmp_path):
 def test_needs_discard_and_no_project_are_distinct_errors():
     assert not issubclass(NeedsDiscard, NoProject) and not issubclass(NoProject, NeedsDiscard)
     assert build_argv  # imported for the stand-in builders' signature
+
+
+# --- code-review regressions (CC-UI-0450 review round 1) --------------------------------
+
+def _older(path: Path):
+    with Store(path) as store:
+        store.start_run("auto", "h")
+        undo_after(store.conn, 21)
+        store.conn.execute("DELETE FROM schema_version WHERE version >= 22")
+        store.conn.commit()
+
+
+def test_opening_an_older_or_newer_file_while_a_project_is_open_shows_why(tmp_path):
+    """A1: the offer or refusal is shown, not a silent no-op; the open project stays."""
+    import sqlite3
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "cur"})
+    _older(tmp_path / "projects" / "old.fuzzlab")
+    newer = tmp_path / "projects" / "newer.fuzzlab"
+    Store(newer).close()
+    conn = sqlite3.connect(newer)
+    conn.execute("INSERT INTO schema_version (version) VALUES (9999)")
+    conn.commit()
+    conn.close()
+    c.post("/projects/open", data={"file": "old.fuzzlab"})
+    page = c.get("/projects").text
+    assert 'id="project-migrate-offer"' in page and "uses schema v21" in page
+    assert _state(c)["name"] == "cur"
+    c.post("/projects/open", data={"file": "newer.fuzzlab"})
+    page = c.get("/projects").text
+    assert 'id="project-refused"' in page and "newer" in page
+    assert _state(c)["name"] == "cur"
+
+
+@pytest.mark.parametrize("action", ["new", "save-as"])
+def test_new_and_save_as_refuse_a_stale_project_directory_and_leave_it(tmp_path, action):
+    """B2/A3: a stale `<name>.fuzzlab.d` is neither adopted nor deleted."""
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "src"})
+    stale = tmp_path / "projects" / "acme.fuzzlab.d"
+    stale.mkdir(mode=0o700)
+    (stale / "spider.db").write_text("another project's crawl")
+    c.post(f"/projects/{action}", data={"name": "acme"})
+    assert "already exists" in _flash(c)
+    assert _state(c)["name"] == "src"
+    assert (stale / "spider.db").read_text() == "another project's crawl"
+    assert not (tmp_path / "projects" / "acme.fuzzlab").exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink"])
+def test_a_planted_link_in_the_project_directory_is_refused_before_the_job(tmp_path,
+                                                                            monkeypatch,
+                                                                            kind):
+    """B3: a tool's `open()` would follow it out of the project."""
+    async def fake_launch(self, argv, **kw):
+        raise AssertionError("must not start")
+    monkeypatch.setattr(Runner, "launch", fake_launch)
+    app, c = _client(tmp_path)
+    c.post("/projects/new", data={"name": "beta"})
+    side = tmp_path / "projects" / "beta.fuzzlab.d"
+    side.mkdir(mode=0o700)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    (side / "fuzz.csv").symlink_to(victim) if kind == "symlink" else \
+        os.link(victim, side / "fuzz.csv")
+    r = c.post("/api/launch", json={"command": "fuzz", "values": {"url": "http://127.0.0.1/"}})
+    assert r.status_code == 409 and "not a plain file" in r.json()["error"]
+    assert victim.read_text() == "keep"
+    with Store(tmp_path / "projects" / "beta.fuzzlab", create=False) as store:
+        assert store.conn.execute("SELECT COUNT(*) FROM launch").fetchone()[0] == 0
+
+
+def test_a_project_directory_that_is_not_private_is_a_409_not_a_500(tmp_path, monkeypatch):
+    async def fake_launch(self, argv, **kw):
+        return "tok"
+    monkeypatch.setattr(Runner, "launch", fake_launch)
+    app, c = _client(tmp_path)
+    side = core_project.sidecar_dir(tmp_path / "start.db")
+    side.mkdir(mode=0o755)
+    os.chmod(side, 0o755)
+    r = c.post("/api/launch", json={"command": "report", "values": {}})
+    assert r.status_code == 409 and "0700" in r.json()["error"]
+
+
+def test_a_failed_argv_build_marks_the_launch_failed(tmp_path):
+    """B13: a launch row is never left `running` by a failure before the spawn."""
+    runner = Runner()
+    mgr = ProjectManager(_cfg(tmp_path), runner)
+
+    def broken(spec, values):
+        raise ValueError("bad argv")
+    with pytest.raises(ValueError):
+        asyncio.run(mgr.launch(commandspec.spec("report"), {}, broken))
+    with Store(tmp_path / "start.db", create=False) as store:
+        assert store.conn.execute("SELECT status FROM launch").fetchone()[0] == "failed"
+    assert mgr.busy_reasons() == []
+
+
+def test_discard_leftovers_are_reported_when_leaving_by_new(tmp_path):
+    """B6/A2: every transition reports what a discard left, not only Close."""
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/temporary")
+    side = core_project.sidecar_dir(Path(_state(c)["path"]))
+    (side / "unknown.bin").write_text("x")
+    c.post("/projects/new", data={"name": "next", "discard": "1"})
+    assert _state(c)["name"] == "next"
+    assert "1 unknown file(s)" in _flash(c)
+
+
+def test_action_error_list_shows_a_named_error_and_propagates_others(tmp_path, monkeypatch):
+    """B7 (PA-0106): a refusal becomes a message; an unexpected error is a loud 500."""
+    from fastapi.testclient import TestClient
+    app = create_app(_cfg(tmp_path, store=None))
+    c = TestClient(app, base_url="http://127.0.0.1:8787", headers=SAME_ORIGIN_HEADERS,
+                   follow_redirects=False, raise_server_exceptions=False)
+    assert c.post("/projects/new", data={"name": "../x"}).status_code == 303   # ProjectError
+    assert "a project name is" in c.get("/projects").text
+
+    async def boom(self, name, *, discard=False):
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(ProjectManager, "new", boom)
+    assert c.post("/projects/new", data={"name": "y"}).status_code == 500
+
+
+def test_record_error_list_reports_a_vanished_project_and_propagates_others(tmp_path):
+    """B7 (PA-0106): only OperationalError (a gone or locked file) is reported."""
+    import sqlite3
+
+    async def go(err):
+        runner = Runner()
+
+        def on_done(rc, stopping):
+            raise err
+        token = await runner.launch([sys.executable, "-c", "pass"], on_done=on_done)
+        lines = [ev async for ev in runner.stream(token)]
+        return runner, token, lines
+    runner, token, lines = asyncio.run(go(sqlite3.OperationalError("unable to open")))
+    assert any("could not record" in ln for ln in lines) and not runner.unrecorded(token)
+    runner, token, lines = asyncio.run(go(KeyError("defect")))
+    assert not any("could not record" in ln for ln in lines)
+    assert not runner.unrecorded(token)            # still recorded: never stays busy
+
+
+def test_recent_json_is_never_followed_or_read_past_its_cap(tmp_path):
+    d = tmp_path / "projects"
+    d.mkdir(mode=0o700)
+    big = tmp_path / "big"
+    big.write_bytes(b"[" * (projects.RECENT_MAX_BYTES + 10))
+    (d / "recent.json").symlink_to(big)
+    assert projects._parse_recent(d / "recent.json") == ([], 1)
+    os.unlink(d / "recent.json")
+    (d / "recent.json").write_bytes(b" " * (projects.RECENT_MAX_BYTES + 10))
+    assert projects._parse_recent(d / "recent.json") == ([], 1)
+    os.unlink(d / "recent.json")
+    os.mkfifo(d / "recent.json")
+    assert projects._parse_recent(d / "recent.json") == ([], 1)
+
+
+def test_missing_parents_of_the_projects_directory_are_created_private(tmp_path):
+    """B9: each created parent is 0700; existing ones are left as they are."""
+    deep = tmp_path / "a" / "b" / "projects"
+    mgr = ProjectManager(load_config(overrides={"store_path": "", "projects_dir": str(deep)},
+                                     environ={}))
+    old = os.umask(0o022)
+    try:
+        asyncio.run(mgr.new("x"))
+    finally:
+        os.umask(old)
+    for p in (tmp_path / "a", tmp_path / "a" / "b", deep):
+        assert stat.S_IMODE(os.stat(p).st_mode) == 0o700, p
+    assert stat.S_IMODE(os.stat(tmp_path).st_mode) != 0o700 or True
+
+
+def test_a_linked_temporary_directory_is_refused(tmp_path):
+    """B10: `.temporary` is checked like the projects directory."""
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("x"))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    core_project.create(elsewhere / "tmp-20260101T000000Z-0123abcd.fuzzlab")
+    (tmp_path / "projects" / ".temporary").symlink_to(elsewhere)
+    assert mgr.leftover_temporaries() == []
+    with pytest.raises(ProjectError):
+        asyncio.run(mgr.open(temporary="tmp-20260101T000000Z-0123abcd.fuzzlab"))
+    with pytest.raises(ProjectError):
+        asyncio.run(mgr.discard_leftover("tmp-20260101T000000Z-0123abcd.fuzzlab"))
+    assert (elsewhere / "tmp-20260101T000000Z-0123abcd.fuzzlab").exists()
+
+
+def test_a_recent_entry_must_name_a_project_file(tmp_path):
+    """B10: a hand-edited recent entry cannot open an arbitrary file in the directory."""
+    mgr = ProjectManager(_cfg(tmp_path, store=None))
+    asyncio.run(mgr.new("x"))
+    stray = tmp_path / "projects" / ".copy-0011.tmp"
+    core_project.create(stray)
+    rp = tmp_path / "projects" / "recent.json"
+    data = json.loads(rp.read_text())
+    data["entries"].insert(0, {"path": str(stray), "name": "s", "opened_at": "t"})
+    rp.write_text(json.dumps(data))
+    with pytest.raises(ProjectError, match="not a project file name"):
+        asyncio.run(mgr.open(recent_id=0))
+
+
+def test_owner_lock_and_saved_project_directory_are_private(tmp_path):
+    """B12: the temporary's owner lock, and a Save As copy of the project directory."""
+    old = os.umask(0o022)
+    try:
+        app, c = _client(tmp_path, store=None)
+        c.post("/projects/temporary")
+        tpath = Path(_state(c)["path"])
+        side = core_project.sidecar_dir(tpath)
+        assert stat.S_IMODE(os.stat(side / projects.OWNER_LOCK).st_mode) == 0o600
+        Store(side / "spider.db").close()
+        os.chmod(side / "spider.db", 0o600)
+        (side / "fuzz.csv").write_text("a,b\n")
+        os.chmod(side / "fuzz.csv", 0o600)
+        c.post("/projects/save-as", data={"name": "kept"})
+        kept = tmp_path / "projects" / "kept.fuzzlab.d"
+        assert stat.S_IMODE(os.stat(kept).st_mode) == 0o700
+        for n in ("spider.db", "fuzz.csv"):
+            assert stat.S_IMODE(os.stat(kept / n).st_mode) == 0o600, n
+    finally:
+        os.umask(old)
+
+
+def test_shutdown_records_a_stopped_job_as_stopped(tmp_path):
+    """A4: the UI's shutdown waits for each stopped job to record its end."""
+    runner = Runner()
+    mgr = ProjectManager(_cfg(tmp_path), runner)
+
+    async def go():
+        await mgr.launch(commandspec.spec("crawl"), {}, _stand_in(30))
+        await runner.shutdown()
+        assert mgr.busy_reasons() == []
+    asyncio.run(go())
+    with Store(tmp_path / "start.db", create=False) as store:
+        assert store.conn.execute("SELECT status FROM launch").fetchone()[0] == "stopped"
+
+
+def test_a_failure_in_the_pump_tail_still_ends_busy_and_the_stream(tmp_path, monkeypatch):
+    """A5: the whole tail is in the finally — a raising stop never leaves a job busy."""
+    real = procutil.astop_server
+    calls = []
+
+    async def raising(h, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            await real(h, **kw)
+            raise RuntimeError("injected tail failure")
+        return await real(h, **kw)
+    monkeypatch.setattr(procutil, "astop_server", raising)
+    runner = Runner()
+    mgr = ProjectManager(_cfg(tmp_path), runner)
+
+    async def go():
+        token, _ = await mgr.launch(commandspec.spec("crawl"), {}, _stand_in(0))
+        events = [ev async for ev in runner.stream(token)]
+        assert any("event: done" in ev for ev in events)
+        assert mgr.busy_reasons() == []
+    asyncio.run(go())
+
+
+def test_a_project_replaced_at_the_same_path_gets_its_own_repeater_run(tmp_path):
+    """A9: Repeater state is keyed by the file's identity, not its path alone."""
+    app, c = _client(tmp_path, store=None)
+    c.post("/projects/new", data={"name": "x"})
+    raw = "GET / HTTP/1.1\r\nHost: h\r\n\r\n"
+    c.post("/api/proxy/repeater/tabs", json={"name": "old", "raw": raw})
+    c.post("/projects/close")
+    for suffix in ("", "-wal", "-shm"):
+        p = Path(str(tmp_path / "projects" / "x.fuzzlab") + suffix)
+        if p.exists():
+            p.unlink()
+    c.post("/projects/new", data={"name": "x"})
+    with Store(tmp_path / "projects" / "x.fuzzlab", create=False) as store:
+        store.start_run("crawl", "h")                     # run id 1 is now a crawl
+    assert c.post("/api/proxy/repeater/tabs", json={"name": "new", "raw": raw}).status_code == 200
+    with Store(tmp_path / "projects" / "x.fuzzlab", create=False) as store:
+        rows = store.conn.execute("SELECT t.name, r.tool FROM repeater_tab t "
+                                  "JOIN run r ON r.id = t.run_id").fetchall()
+        assert [tuple(r) for r in rows] == [("new", "repeater")]

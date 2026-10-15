@@ -290,7 +290,8 @@ def test_inspect_is_read_only_on_the_main_file(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["garbage", "symlink", "fifo", "directory", "trigger",
-                                  "view", "foreign-sqlite", "missing"])
+                                  "view", "foreign-sqlite", "missing", "same-name-trigger",
+                                  "virtual-table", "empty-schema-version"])
 def test_inspect_refuses_what_is_not_a_fuzzlab_store(tmp_path, kind):
     path = tmp_path / "x.fuzzlab"
     if kind == "garbage":
@@ -308,6 +309,25 @@ def test_inspect_refuses_what_is_not_a_fuzzlab_store(tmp_path, kind):
         conn = sqlite3.connect(path)
         conn.execute("CREATE TRIGGER t AFTER INSERT ON run BEGIN DELETE FROM finding; END"
                      if kind == "trigger" else "CREATE VIEW v AS SELECT 1")
+        conn.commit()
+        conn.close()
+    elif kind == "same-name-trigger":                 # code review B: own namespace
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TRIGGER schema_version AFTER INSERT ON finding "
+                     "BEGIN DELETE FROM finding; END")
+        conn.commit()
+        conn.close()
+    elif kind == "virtual-table":
+        Store(path).close()
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE VIRTUAL TABLE x USING fts5(a)")
+        conn.commit()
+        conn.close()
+    elif kind == "empty-schema-version":              # another app's db, version table empty
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE schema_version (version INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE accounts (x)")
         conn.commit()
         conn.close()
     elif kind == "foreign-sqlite":
@@ -494,6 +514,15 @@ def test_make_private(tmp_path):
     ("start", "admin:hunter2@127.0.0.1:8080", "hunter2"),
     ("categories", "x http://u:hunter2@h/ y", "hunter2"),
     ("password", "hunter2", "hunter2"),
+    # code review B: a password with `@`, a fragment token, a matrix parameter, and
+    # scheme-relative userinfo (PA-0091(1): name forms x value shapes)
+    ("base_url", "http://admin:p@ssw0rd@127.0.0.1:8080/?id=1", "ssw0rd"),
+    ("start", "admin:p@ss@127.0.0.1:8080/x", "p@ss"),
+    ("url", "http://h/#access_token=s3cr3tval&x=1", "s3cr3tval"),
+    ("url", "http://h/#/search?q=1&token=s3cr3tval", "s3cr3tval"),
+    ("url", "http://h/p;jsessionid=s3cr3tval?x=1", "s3cr3tval"),
+    ("url", "//u:hunter2@h/", "hunter2"),
+    ("url", "http://h/?api_key=s3cr3tval&apiKeys=s3cr3tval2", "s3cr3tval"),
     ("api_key", "abc123def", "abc123def"),
 ])
 def test_redact_for_record_removes_every_planted_secret_shape(dest, value, secret):
@@ -504,6 +533,8 @@ def test_redact_for_record_removes_every_planted_secret_shape(dest, value, secre
     ("base_url", "http://127.0.0.1:8080/app/"), ("param", "id"), ("author", "bob"),
     ("url", "http://127.0.0.1/p.php?id=1&page=2"), ("header_points", "User-Agent,Referer"),
     ("identity", "alice"), ("method", "GET"),
+    ("url", "http://h/#/search?q=apple"), ("url", "http://h/p;v=1?x=1"),
+    ("categories", "x@y.com"),
 ])
 def test_redact_for_record_keeps_benign_values(dest, value):
     assert redact_for_record(dest, value) == value

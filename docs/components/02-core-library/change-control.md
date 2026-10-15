@@ -52,6 +52,16 @@ Newest first.
   - [x] `redact_for_record`, `secretfile.locked` (+ credentials), `astart_server(umask=)` — done
   - [x] tests: `tests/test_core_project.py` (new), `tests/_downgrade.py`, contract-writers tables (+`project`, `launch`) — done
   - [x] FR-CORE-450..452, NFR-CORE-central-connection (exception), §5; ARCHITECTURE store-as-contract — done
+- Code review round 1 (with CC-UI-0450), fixed: `inspect` queries triggers and views on
+  their own (a trigger may share a table's name; reviewer B made one named
+  `schema_version` that deleted findings, and it was opened) and also refuses virtual
+  tables other than `flow_fts`/fts5, and a non-empty file whose `schema_version` is empty;
+  `redact_for_record` strips userinfo through the authority's **last** `@` (a password may
+  contain `@`), scheme-relative `//u:p@`, and redacts sensitive names in query-shaped
+  fragments and `;name=value` path parameters. Tests:
+  `tests/test_core_project.py::test_inspect_refuses_what_is_not_a_fuzzlab_store`
+  (same-name trigger, virtual table, empty schema version) and the extended
+  `test_redact_for_record_*` matrices.
 - Effectiveness (assessed pending): pending.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)

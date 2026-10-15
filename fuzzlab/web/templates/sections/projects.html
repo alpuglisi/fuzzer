@@ -49,24 +49,33 @@
         <button type="submit">Close</button>
       </form>
     </div>
-    {% elif project.status == 'pending' and project.pending.kind == 'older' %}
+    {% else %}
+    <p class="muted">No project is open{% if project.pending %} (see below){% endif %}.</p>
+    {% endif %}
+  </div>
+
+  {% if project.pending %}
+  <div class="card" id="project-pending">
+    {% if project.pending.kind == 'older' %}
+    <h2>Migration needed</h2>
     <p class="warn" id="project-migrate-offer"><b>{{ project.pending.path }}</b> uses store
       schema v{{ project.pending.schema_version }}; this fuzzlab is
       v{{ project.pending.head_version }}. It has not been opened or changed.</p>
     <div class="project-actions">
       <form method="post" action="/projects/migrate">
-        <button type="submit">Migrate (a verified backup is made first)</button>
+        {{ discard_box() }}
+        <button type="submit">Migrate and open (a verified backup is made first)</button>
       </form>
       <form method="post" action="/projects/dismiss"><button type="submit">Not now</button></form>
     </div>
-    {% elif project.status == 'pending' %}
+    {% else %}
+    <h2>Not opened</h2>
     <p class="bad" id="project-refused">Refused: <b>{{ project.pending.path }}</b> &mdash;
       {{ project.pending.detail }}</p>
     <form method="post" action="/projects/dismiss"><button type="submit">Dismiss</button></form>
-    {% else %}
-    <p class="muted">No project is open.</p>
     {% endif %}
   </div>
+  {% endif %}
 
   <div class="card">
     <h2>New project</h2>

@@ -18,8 +18,9 @@ save as / close, the recent list, path rules) lives in ``fuzzlab.web.projects``.
 - `ensure_metadata` is the one writer of the ``project`` row (created on the first UI
   open; ``created_at`` is the store's real creation time) and `read_metadata` its one
   parser (PA-0108).
-- `insert_launch` / `finish_launch` are the one writer of ``launch``; every recorded
-  value goes through ``core.redaction.redact_for_record`` (PA-0100).
+- This module is the one writer of ``launch`` (`insert_launch`, `finish_launch`, and
+  `ensure_metadata`'s orphan reconciliation) and of ``project``; every recorded value
+  goes through ``core.redaction.redact_for_record`` (PA-0100).
 - `copy_to` is the only way a project is copied: the SQLite **backup API** into a
   private temporary file, verified, then hard-linked into place (never a raw copy of a
   live WAL database, never a partial file under the final name).
@@ -56,6 +57,17 @@ MAX_NAME_CHARS = 200
 #: Launch statuses (`status_for`). ``unknown``: the UI ended before the job did, or the
 #: exit status could not be read.
 LAUNCH_STATUSES = ("running", "succeeded", "failed", "stopped", "unknown")
+
+#: The virtual tables migrations create, as ``(name, module)``; any other is refused.
+_OWN_VIRTUAL_TABLES = frozenset({("flow_fts", "fts5")})
+
+
+def _virtual_module(sql: str | None) -> str:
+    """The module of a ``CREATE VIRTUAL TABLE … USING <module>(…)`` statement."""
+    import re
+    m = re.search(r"\bUSING\s+([A-Za-z0-9_]+)", sql or "", re.I)
+    return m.group(1).lower() if m else ""
+
 
 #: The only errors `inspect` turns into a refusal; anything else propagates (PA-0106).
 _REFUSED_ERRORS = (sqlite3.DatabaseError, FileNotFoundError, PermissionError,
@@ -129,16 +141,26 @@ def inspect(path: str | Path) -> ProjectInfo:
 
 
 def _inspect_open(conn: sqlite3.Connection, p: Path, size: int, head: int) -> ProjectInfo:
-    kinds = {r[0]: r[1] for r in conn.execute(
-        "SELECT name, type FROM sqlite_master WHERE type IN ('table','trigger','view')")}
-    active = sorted(n for n, t in kinds.items() if t in ("trigger", "view"))
-    if active:
+    # Triggers and views have their own namespace (a trigger may share a table's name),
+    # so each kind is queried on its own, never folded into one name -> type map.
+    active = [f"{t} {n}" for t, n in conn.execute(
+        "SELECT type, name FROM sqlite_master WHERE type IN ('trigger','view') "
+        "ORDER BY type, name")]
+    virtual = [n for n, sql in conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' AND sql LIKE 'CREATE VIRTUAL%'")
+        if (n, _virtual_module(sql)) not in _OWN_VIRTUAL_TABLES]
+    if active or virtual:
         raise ProjectError(f"{p} contains schema objects fuzzlab never creates "
-                           f"({', '.join(active)}); refused as untrusted")
+                           f"({', '.join(active + ['virtual table ' + v for v in virtual])}); "
+                           "refused as untrusted")
+    kinds = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "schema_version" not in kinds:
         raise ProjectError(f"{p} is an SQLite database but not a fuzzlab store "
                            "(no schema_version table)")
     found = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] or 0
+    if found == 0 and kinds - {"schema_version"}:
+        raise ProjectError(f"{p} has tables but no recorded fuzzlab schema version; "
+                           "not a fuzzlab store")
     info = ProjectInfo(p, size, int(found), head,
                        application_id=int(conn.execute("PRAGMA application_id").fetchone()[0]))
     if size <= QUICK_CHECK_MAX_BYTES:

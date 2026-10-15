@@ -514,7 +514,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
                         "`fuzzlab web` without --with-proxy once to migrate or open it")
                 try:
                     await manager.require_writable()
-                except projects_mod.NoProject as exc:
+                except (projects_mod.NoProject, projects_mod.ProjectError) as exc:
                     raise RuntimeError(
                         f"{exc}: start `fuzzlab web` without --with-proxy once and migrate "
                         "or open the project from the Projects page") from exc
@@ -542,7 +542,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         """None once the open project exists (created if needed); else a 409 to return."""
         try:
             await manager.require_writable()
-        except projects_mod.NoProject as exc:
+        except (projects_mod.NoProject, projects_mod.ProjectError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return None
 
@@ -644,7 +644,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return JSONResponse({"error": "spec must be an object"}, status_code=400)
         try:
             path = await manager.require_writable()
-        except projects_mod.NoProject as exc:
+        except (projects_mod.NoProject, projects_mod.ProjectError) as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         from fuzzlab.core.store import Store
         with Store(path, create=False) as store:
@@ -790,7 +790,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             async with manager.lock:
                 try:
                     path = await asyncio.to_thread(manager._ensure_created)
-                except projects_mod.NoProject as exc:
+                except (projects_mod.NoProject, projects_mod.ProjectError) as exc:
                     return JSONResponse({"error": str(exc)}, status_code=409)
                 manager.extra_busy["automatic"] = "the automatic run"
             try:
@@ -863,7 +863,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             # FR-UI-456: every store-writing command runs pinned to the open project.
             try:
                 token, argv = await manager.launch(spec, values, build_argv)
-            except projects_mod.NoProject as exc:
+            except (projects_mod.NoProject, projects_mod.ProjectError) as exc:
                 return JSONResponse({"error": str(exc)}, status_code=409)
         else:
             argv = build_argv(spec, values)

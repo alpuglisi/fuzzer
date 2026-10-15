@@ -8,8 +8,11 @@ open project's metadata and run history). JSON: ``GET /api/projects``,
 with a 303 back to a page (PRG; works without JavaScript) and goes through
 ``SecurityGateMiddleware``'s same-origin gate like every state-changing request.
 
-A refusal is shown on the next page as a message the server holds (``manager.flash``):
-nothing from the request is reflected through the URL.
+A refusal is shown on the next page as a message the server holds (``manager.flash``,
+autoescaped like every rendered value): nothing is reflected through the URL. The
+message text names the refusal (it may quote the project name the operator typed). This
+replaces the design's ``?notice=<code>`` scheme (design-gate F18; a recorded deviation in
+CC-UI-0450): one local operator, one message queue, consumed by the next projects page.
 """
 
 from __future__ import annotations
@@ -25,9 +28,11 @@ from fuzzlab.core.project import ProjectError
 from fuzzlab.web.projects import NeedsDiscard, NoProject, ProjectBusy, ProjectManager
 
 #: What a project action may raise that becomes a message on the page (PA-0106: a
-#: named list; anything else is a server error, loudly).
-_ACTION_ERRORS = (ProjectError, ProjectBusy, NeedsDiscard, NoProject, ValueError,
-                  OSError, sqlite3.Error)
+#: named list — the manager converts the OS errors it expects into `ProjectError` at
+#: their site; ``OperationalError`` is a locked or vanished file; anything else is a
+#: server error, loudly).
+_ACTION_ERRORS = (ProjectError, ProjectBusy, NeedsDiscard, NoProject,
+                  sqlite3.OperationalError)
 
 
 async def _form(request: Request) -> dict[str, str]:
@@ -108,6 +113,8 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
     async def project_open(request: Request):
         async def go(f):
             recent = f.get("recent")
+            if recent not in (None, "") and not recent.isdigit():
+                raise ProjectError("no such recent project")
             await manager.open(
                 file=f.get("file") or None,
                 recent_id=int(recent) if recent not in (None, "") else None,
@@ -154,4 +161,8 @@ def register(app, templates, cfg, manager: ProjectManager) -> None:
 
     @app.exception_handler(NoProject)
     async def _no_project(_request, exc):                # a route that needs a project
+        return JSONResponse({"error": str(exc)}, status_code=409)
+
+    @app.exception_handler(ProjectError)
+    async def _project_error(_request, exc):             # e.g. a project dir not 0700
         return JSONResponse({"error": str(exc)}, status_code=409)
