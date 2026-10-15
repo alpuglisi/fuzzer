@@ -83,7 +83,12 @@ def _captured(method: str, url: str, content_type: str | None, body: dict | None
               page: str) -> str | None:
     row = {"method": method, "url": url, "content_type": content_type,
            "body_json": json.dumps(body) if body is not None else None, "page_url": page}
-    return captured_request(row)[0]
+    reason, kind, leaves = captured_request(row)
+    if reason is None and leaves == []:
+        # DISC-CAPTURE §5 (CC-AUD-0044): a multipart request is imported as an endpoint
+        # with no points ("multipart: not yet supported"): never fuzzed, the control
+        return f"an endpoint with no points ({kind}: not yet supported)"
+    return reason
 
 
 def _spa_form(controls, route: str, button: str = "Submit") -> str | None:

@@ -2405,3 +2405,16 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   3. **A new egress shape found anywhere joins that list** in the same change. (from
      BUG-0149)
   - Enforced by: tests/test_capture_egress.py::test_no_write_reaches_the_server_from_any_egress_shape, tests/test_capture_egress.py::test_the_shared_worker_page_is_measured_to_send
+
+- **PA-0156** — Strengthens `PA-0150` (assert only what the test alone performs) from
+  counts under a supervisor to any assertion over a shared fixture's log, after
+  BUG-0150: absence assertions over a module-shared lab's cumulative request log failed
+  once another test of the module (an `auto` run under D67, an M6 browser) sent to it.
+  1. **A test that asserts what one actor sent, or did not send, over a log a module- or
+     session-scoped fixture shares judges that actor's window only**: the fixture's
+     snapshot taken before any other test reaches it, or a slice taken just before the
+     actor runs.
+  2. **When a change makes any test send more** (a default flipped, a new probe), the
+     PA-0002 sweep covers every such assertion over each shared fixture's log. (from
+     BUG-0150)
+  - Enforced by: tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it, tests/test_spa_query.py::test_a_shell_that_writes_on_every_load_still_gives_hash_points

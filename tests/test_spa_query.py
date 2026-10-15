@@ -465,6 +465,13 @@ def _import(db, path):
     return store, run, counts
 
 
+def _crawl_seen(query_crawl, method, prefix=""):
+    """What the module crawl itself sent (its snapshot, taken before any other test of
+    the module reaches the shared lab; BUG-0150, PA-0156)."""
+    return [r for r in query_crawl["first_requests"]
+            if r[0] == method and r[1].startswith(prefix)]
+
+
 def _params(store, run):
     return {(r["url"], r["name"], r["location"]) for r in store.conn.execute(
         "SELECT e.url, p.name, p.location FROM parameter p JOIN endpoint e "
@@ -486,9 +493,10 @@ def query_crawl(tmp_path_factory):
                 sp = _crawl(lab, tmp / "s.db")
             # M10: this crawl's own requests, before any other test crawls the lab
             first = list(lab.requests)
+            first_ws = list(lab.ws_messages)
             store, run, counts = _import(tmp / "s.db", tmp / "u.db")
             yield {"lab": lab, "other": other, "sp": sp, "db": str(tmp / "s.db"),
-                   "first_requests": first, "windows": windows,
+                   "first_requests": first, "first_ws": first_ws, "windows": windows,
                    "store": store, "run": run, "counts": counts,
                    "store_path": str(tmp / "u.db")}
             store.close()
@@ -581,8 +589,7 @@ def test_two_findings_for_two_routes_sharing_a_name(query_crawl, tmp_path):
 def test_a_seed_load_cannot_write(query_crawl):
     """Q4: ``#/poster?msg=`` POSTs on load; inside the seed's window the server gets
     none (counted)."""
-    lab = query_crawl["lab"]
-    assert lab.seen("POST", "/api/send") == []
+    assert _crawl_seen(query_crawl, "POST", "/api/send") == []
     assert query_crawl["sp"].spa_counts["spa_query_writes_blocked"] >= 1
 
 
@@ -603,7 +610,7 @@ def test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     pages = _pages(db)
     assert not any("logout" in u for u in pages)
-    assert lab.seen("GET", "/rest/marker/LOGOUT") == []
+    assert _crawl_seen(query_crawl, "GET", "/rest/marker/LOGOUT") == []
     assert lab.base + "#/login?redirectUrl=/" in pages      # never the filler
     assert query_crawl["other"].requests == []               # nothing left the origin
     assert sp.spa_query_refused.get("destructive route") == 1
@@ -634,7 +641,7 @@ def test_the_probe_keeps_only_observed_names(query_crawl):
     assert c["spa_query_unpaired"] == 4 and c["spa_query_kept"] == 5
     assert c["spa_query_probe_loads"] == 21                 # every rendered route once
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
-    assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
+    assert _crawl_seen(query_crawl, "POST", "/api/beacon") == []   # never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
     params = _params(query_crawl["store"], query_crawl["run"])
     assert ("/rest/lookup", "k", "query") in params
@@ -701,7 +708,10 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
                              "/#/txn") for u, _n, _l in params)
         # the seeds and M6 are what this test is about: the writes the crawl recorded
         # (capture-and-abort) are probed by default (D67) and are opted out here, so
-        # every POST below could only come from a seed or M6
+        # every POST below could only come from a seed or M6. The lab is the module's
+        # shared one, which other tests' runs also reach (BUG-0150, PA-0156): what this
+        # run sent is judged on its own window of the log, the crawl's on its snapshot
+        start, ws_start = len(lab.requests), len(lab.ws_messages)
         run_auto(base_url=lab.base, store=store, run_id=run,
                  sender=RequestsProbeSender(session=session), mode="manual",
                  selected_categories=["xss"], points_source="crawl",
@@ -709,13 +719,17 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
         found = {(r["url"], r["param"]) for r in store.conn.execute(
             "SELECT url, param FROM finding WHERE run_id=?", (run,))}
     assert ("/#/track", "id") in found                      # M6 did run
-    assert lab.seen("POST", "/api/send") == [] and lab.seen("POST", "/api/beacon") == []
-    assert lab.seen("POST", "/api/autopost") == []
-    assert not any(m.startswith("ping-") for m in lab.ws_messages)
+    for log in (query_crawl["first_requests"], lab.requests[start:]):
+        posts = [r[1] for r in log if r[0] == "POST"]
+        assert not [p for p in posts if p.startswith(("/api/send", "/api/beacon",
+                                                      "/api/autopost"))], posts
+    assert not any(m.startswith("ping-") for m in lab.ws_messages[ws_start:])
     # the window's refusals are never queued from the load's request list and fetched
     # outside it (found by this test in review round 2)
-    assert lab.seen("GET", "/api/order/confirm") == [] and lab.seen("GET", "/api/send") == []
-    assert lab.seen("GET", "/api/autopost") == []
+    for log in (query_crawl["first_requests"], lab.requests[start:]):
+        gets = [r[1] for r in log if r[0] == "GET"]
+        assert not [g for g in gets if g.startswith(("/api/order/confirm", "/api/send",
+                                                     "/api/autopost"))], gets
 
 
 def test_two_crawls_give_the_same_pages_endpoints_and_parameters(query_crawl, tmp_path):
@@ -1549,7 +1563,9 @@ def test_a_shell_that_writes_on_every_load_still_gives_hash_points(query_crawl):
     assert db_rows(db, "SELECT url FROM discovered_requests WHERE source = 'transport' "
                        "AND url LIKE '%/socket.io/%'")
     assert ("3",) in db_rows(db, "SELECT head FROM ws_dropped")   # the shell pinged
-    assert lab.ws_messages == []
+    # the crawl's own forwarded messages: none (the module's lab is shared, and an M6
+    # browser of a later test forwards its pings; BUG-0150, PA-0156)
+    assert query_crawl["first_ws"] == []
     windows = {w["url"]: w for w in query_crawl["windows"]}
     track = windows[lab.base + "#/track?id=fuzzlab"]
     # (a): the start-up POST was made before the window, never blocked in it

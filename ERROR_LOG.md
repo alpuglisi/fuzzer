@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Tests: "nothing was sent" asserted over a module-shared lab's log failed by test order (fixed, BUG-0150, PA-0156)
+- **Symptom:** under `verify_change.py`'s parallel pass, `test_spa_query.py`'s M6 and shell tests found an `auto` probe of `/api/autopost` and 527 socket messages in the shared lab's log; both passed alone.
+- **Root cause:** absence assertions judged the module fixture's cumulative log, which other tests of the module (an `auto` run that, under D67, probes captured writes; an M6 browser) also write. PA-0150 covered counts under process supervisors, not shared fixture logs.
+- **Remediation:** the crawl's own snapshot (`first_requests`, new `first_ws`, `_crawl_seen`) and a slice before the test's own run; every such assertion on that fixture swept.
+- **Status:** Fixed.
+
 ## 2026-10-15 — Crawler: browser egress the route never sees broke the windows' "only safe GETs" claim (fixed for three shapes, one open; BUG-0149, PA-0155)
 - **Symptom:** measured in real Chromium before capture-and-abort relied on the context route: a `sendBeacon` and a `keepalive` fetch made on `pagehide`, `fetchLater`, and a SharedWorker's fetch reached a loopback server although the route aborted every non-GET it saw.
 - **Root cause:** the reveal and query windows' safety claim was enforced per mechanism the route sees, never as a server-side count over every egress shape a page can use (PA-0123 listed paths, not the property).

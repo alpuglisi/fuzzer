@@ -20,6 +20,9 @@ Newest first.
   GET link sets, op key always `''`, unchanged), `web/sitetree.py` (reads url/method;
   two endpoints of one URL and method show as two rows, unchanged code),
   `report/report.py` (counts), `scripts/funnel_report.py` (now op-aware).
+  PA-0301(3)'s table (`tests/test_destructive_routes_external_labs.py`): the three
+  multipart upload rows' computed verdict is now "an endpoint with no points" (it was
+  "unsupported content type"); the control (never fuzzed) is unchanged.
 - Risk: low-medium. A legacy spider DB still imports (its sources read as sent). The
   precedence drops a form only on an exact signature match.
 - Deliverables:
