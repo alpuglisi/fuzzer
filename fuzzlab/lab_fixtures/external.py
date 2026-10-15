@@ -508,7 +508,12 @@ def bwapp_level_problems(log_text: str, controls: Iterable[str], *,
     must appear with level ``1``, which shows the log carries the violation the check
     looks for. Every other logged request must carry an allowed level, there must be at
     least ``min_requests`` of them, and every level line must parse (none is dropped
-    silently)."""
+    silently).
+
+    Stated limit: Apache's ``%{security_level}C`` matches the cookie name without regard
+    to case, while PHP's ``$_COOKIE`` is case-sensitive, so a request carrying
+    ``SECURITY_LEVEL=0; security_level=1`` would log ``0`` and run at level 1. No pass
+    injects the cookie."""
     controls = list(controls)
     problems: list[str] = []
     entries: list[tuple[str, str]] = []

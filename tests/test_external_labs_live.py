@@ -139,6 +139,8 @@ class Lab:
                     run_bounded([self.engine, *rm, *ids], timeout=300)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{kind}: {exc!r}")
+        # Pods (podman only) rest on podman-compose labelling them with the project;
+        # unlike images, nothing here proves that query can find one (podman: [design]).
         kinds_left = ["ps", "volume", "network", "image"] + (
             ["pod"] if self.engine == "podman" else [])
         try:

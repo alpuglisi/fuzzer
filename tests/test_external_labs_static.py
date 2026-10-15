@@ -109,8 +109,11 @@ def test_the_compose_lint_passes_loopback_bindings(ports):
 
 # The engine is a literal name, its compose front end (``docker compose``,
 # ``docker-compose``), or a shell variable (``$ENGINE``, ``"${eng}"``, ``"${ENGINE:-docker}"``,
-# ``"${DC[@]}"``). Stated limit: an engine from a command substitution
-# (``$(which docker) run``) is not recognised.
+# ``"${DC[@]}"``). Stated limits: an engine from a command substitution
+# (``$(which docker) run``), a variable followed by ``compose`` (``"$ENGINE" compose
+# run``) and options between ``compose`` and ``run`` (``docker compose -f a.yml run``,
+# ``"${COMPOSE[@]}" -p proj run``) are not recognised. Matching the last form would
+# also read compose's own ``-p <project>`` as a publish.
 _RUN_LINE = re.compile(r"(?:\b(?:docker|podman)(?:-compose\b|\b(?:\s+compose\b)?)"
                        r"|\$\{?[A-Za-z_][A-Za-z0-9_]*(?:\[@\]|:-[^}]*)?\}?\"?)\s+"
                        r"(?:container\s+|pod\s+)?(?:run|create)\b")

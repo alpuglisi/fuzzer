@@ -189,6 +189,12 @@ Component code: **LAB**. Entry format and required fields: see
     (regenerated; only those three notes changed). FR-LAB-304 adds Juice Shop's
     `safetyMode`, the PA-0007 reachability GETs and the JUICE-0005 assertions. The three
     sweep follow-ups are now `[ ] todo` deliverables.
+- Code review round 4 (A AGREE, B AGREE; nits only, folded in as comments): the shell
+  lint states its remaining compose-form limits; `bwapp_level_problems` states the
+  cookie-name case limit (Apache matches it without regard to case, PHP does not); the
+  podman pod leftover query is stated as unproven (podman paths are `[design]`).
+  Not taken: reading the level log after the gt pass as well (B nit 1). The level check
+  already runs before the crawl floor, and a gt-floor failure is reported on its own.
   - A L1: lane B's PA-0300 pointer check accepted any URL with a path. It now requires
     a directory (`http://h/<dir>/`), with an origin-level offender
     (`test_an_origin_level_page_url_is_not_a_subpath_literal`); every current pointer
@@ -232,9 +238,10 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] ground truth (two dirs, .gitignore negations) — done
   - [x] static + hermetic tests, mutation checks — done
   - [x] live passes executed (exploratory, docker); gated live test file written — done
-  - [ ] the gated live file passes under the flag at the final commit — in-progress
-    (live run 3 failed on the first level check, live run 4 cannot pass the broken
-    control; the revised check runs in the next live run)
+  - [x] the gated live file passes under the flag — done. Live run 5 at 859bcfd passed
+    4/4 (1476 s). Live run 3 failed on the first level check and live run 4 on the
+    broken control. The final commit differs from 859bcfd only in comments and docs
+    (round-4 nits).
   - [x] CHANGELOG, FR-LAB-300..304, NFR lines, ARCHITECTURE, lab/README, runbook — done
   - [x] PA-0114 Juice table and BUG-0300/0301 protocol — done (lane B: CC-FUZZ-0300,
     CC-CORE-0301, CC-CRAWL-0300; merged on this branch)

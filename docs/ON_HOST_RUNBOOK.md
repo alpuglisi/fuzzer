@@ -169,8 +169,12 @@ socket under SELinux, netavark bridge isolation.
    ```
 4. **Reset** after anything destructive (bWAPP's `update.php` drops its database on a GET):
    `./labctl.sh reset bwapp --authorized`. **Tear down:** `./labctl.sh down <lab>`.
-5. **Live tests:** `FUZZLAB_LIVE_EXTERNAL_LABS=1 pytest -q tests/test_external_labs_live.py`
-   (each test uses its own compose project and port and cleans up after itself).
+5. **Live tests:** `FUZZLAB_LIVE_EXTERNAL_LABS=1 FUZZLAB_REQUIRE_BROWSER=1 pytest -q
+   tests/test_external_labs_live.py` (set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to your
+   Chromium if Playwright's own is not installed). Each test uses its own compose
+   project and port, and cleans up after itself. Executed 2026-10-15 under docker: 4
+   passed in about 25 minutes, most of it bWAPP's crawl pass with header points. Run
+   one pytest process at a time.
 
 ## Part B — Install the toolkit
 

@@ -1,9 +1,9 @@
 # BUG-0311 — An external-lab negative and three live checks rested on premises nobody had observed
 
 - Date: 2026-10-15
-- Status: fixed in code (CC-LAB-0300: e74fba8, revised in 9f4f267 and in the round-3
-  commit); live verification of the revised level check pending (see "Corrective
-  action, second revision")
+- Status: fixed (CC-LAB-0300: e74fba8, revised in 9f4f267 and 859bcfd). Verified
+  live: live run 5 at 859bcfd passed all four live tests, the bWAPP scoring test's
+  level check included (see "Corrective action, second revision")
 - ERROR_LOG: the 2026-10-15 entry "an external-lab negative and three live checks
   rested on premises nobody had observed". Rule: PA-0311.
 - Severity: medium. The ground truth would have scored a real finding as a false
@@ -148,6 +148,15 @@ Now:
 - The log is read from stdout only (stderr is Apache's error log), decoded with
   `errors="replace"`. The level check runs before the crawl floor, so a floor failure
   keeps its evidence.
+
+Live verification (2026-10-15): live run 5, from a clean detached worktree at 859bcfd
+under docker with `FUZZLAB_LIVE_EXTERNAL_LABS=1 FUZZLAB_REQUIRE_BROWSER=1`, passed all
+4 live tests in 1476 s. The bWAPP scoring test passed both floors and the level check:
+every logged request carried `0` or no cookie, both controls were logged with `1`, and
+the log saw at least 1000 requests. Live run 4 (9f4f267) had failed at the broken
+control, exactly as round 3 predicted. Its log showed the control as
+`('1', 'GET /bWAPP/portal.php?fuzzlab-level-control=… HTTP/1.1')`, so the channel itself
+worked.
 
 ## Recurrence review
 Searched `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for the same bug or the same root

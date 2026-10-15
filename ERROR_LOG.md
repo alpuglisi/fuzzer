@@ -36,7 +36,7 @@ Format per entry:
   unit-tested offline, with level-1 controls before and after the passes (code review
   rounds 2-3; the first version's control could never pass). Full RCA in
   `docs/bugs/BUG-0311-*`, rule PA-0311.
-- **Status:** Fixed in code; live verification of the revised level check pending
+- **Status:** Fixed (revised check verified live: live run 5 at 859bcfd, 4 passed)
 
 ## 2026-10-15 — External lab fixtures: the loopback exposure checks failed open (fixed, BUG-0310 / PA-0310, CC-LAB-0300, CC-CORE-0300)
 - **Symptom:** code review found that the pre-flight and post-boot checks passed podman's
