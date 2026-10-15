@@ -1161,6 +1161,11 @@ tracked in the requirements files, not here.
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
   normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
+- **A run's recorded target** `[built]` (CC-CORE-0500, FR-CORE-500): `core/runtarget.py`
+  is the one reader of the `target` table -- a run's target is its first row by id, its
+  origin `canonical_origin(base_url)`; ML, the report, the run page, finding detail, the
+  Repeater pivot and the site tree read through it (guard test). `core.evidence.
+  method_key` is the one method normalisation for joins.
 - **Process trees** `[built]` (CC-CORE-0048, FR-CORE-38, BUG-0125): `fuzzlab/procutil.py`,
   a stdlib-only leaf (the one module `fuzzlab.labgen` may import beyond itself and the
   label contract). Every long-lived child the toolkit or its tests start -- the five
@@ -1868,6 +1873,21 @@ tracked in the requirements files, not here.
   (no target traffic, so outside the `--authorized` gate; inside the control-plane
   state-change gate). `labctl.sh` gained `start`/`stop`/`ps` (FR-LAB-172); the page is
   FR-UI-15.
+- **Site map** (`/sitetree`, CC-UI-0500/0502, FR-UI-500..505) `[built]`: what the store
+  recorded, browsable like Burp's Site map -- host (canonical origin of each run's first
+  `target` row; a run without one is its own host) → path segments → SPA `#/route` (a
+  child of its document path) → endpoint (path + method; a stored endpoint's raw
+  `?query` is cut off by `sitetree.path_key` and never shown) → parameter (a finding's
+  location resolved from its run's candidates and parameter rows) → findings and
+  candidates. Roll-ups (findings by severity/category, candidates by oracle status, last
+  run, problem counts), filters (run, category, severity -- findings only, status, path),
+  lazy keyset paging with a constant statement count per request and a version-keyed
+  child-list cache (bounded by operation counts at 50 000 endpoints), polling refresh on
+  an `os.stat` store fingerprint (no SSE: a long-lived stream holds uvicorn's graceful
+  shutdown). Pure data layer `web/sitetree.py`, routes `web/sitetree_routes.py`, the UI
+  research's three panes (tree | contents / issues) in `sitetree.js`. Never shows a value
+  column or query string. Linear terms left for the integrator's index request:
+  `finding(run_id, url)`, `parameter(endpoint_id)`, a stored candidate path.
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

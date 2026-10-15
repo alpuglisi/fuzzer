@@ -237,6 +237,222 @@ Newest first.
   recorded (CC-CORE-0450).
 - Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). UI: `tests/test_web_projects.py` + `tests/test_web_projects_browser.py` 122 passed.
 
+### CC-UI-0503 — Site tree: independent code review, fixes and divergences (2026-10-15)
+- Change: the code review of CC-UI-0500/0501/0502 (reviewers A, correctness, and B,
+  safety/robustness/tests/process; read-only, both AGREE-WITH-FIXES). Fixed in this
+  lane, before merge:
+  - **Python work was quadratic** (B1, blocker): finding locations were resolved by a
+    scan of every candidate and parameter row per finding; now a per-request index
+    (`sitetree._Locations`), with an operation-count test at two sizes (design F6(e),
+    which had been missed).
+  - **400, not 500** (A5, B2): malformed origins, lone surrogates, ids outside
+    1..2^63-1 (`check_id`).
+  - **A malformed stored base URL** (A6, B3): BUG-0500, CC-CORE-0501.
+  - **The fingerprint changed on reads** (A1): a reader's empty WAL is ignored and the
+    WAL's inode/mtime are not used.
+  - **The refresh rebuilt the tree** (A2): it now updates in place, keeping focus,
+    selection, expansion and "Show more" pages; keyboard activation of "Show more" no
+    longer toggles its parent (A3); one page per click (A4, B13); a failed load
+    retries; stale Issues pages and network errors are handled; one reload per search.
+  - **"(method not recorded)"** listed other methods' candidates (A7): its groups now
+    come from findings only (G8).
+  - **Packed fields** (A10, B4): JSON instead of a `\x1f` separator.
+  - **Swallow lists** (B5): only the candidate projection keeps a named list; the other
+    SQL functions are total by construction; an AST guard fails on any broad handler in
+    `sitetree.py` / `sitetree_routes.py`, proven on synthetic offenders.
+  - **Truncation is shown** (B6); every cache and cap bound has a test.
+  - **Queries planted on `finding.url` / `page.url`** (B7).
+  - **ASCII-only path search everywhere** (A8, B11); the endpoint summary counts its own
+    rows (A13); escaped tab/CR/LF evidence passes the pre-filter (A9); location `None`
+    and `""` sort apart (A12); the parameter summary is one read transaction (A11, F12);
+    the static HTML-parsing guard follows imports transitively, bans more APIs and is
+    proven on a synthetic offender (B12); smaller cache bounds (B10).
+  - **Known defects outside this lane pinned** (B9, PA-0054(3)): `xfail(strict=True)`
+    tests for the ML DOM-XSS labelling gap (`ml/dataset.endpoint_key`) and for the two
+    disagreeing severity bands (`findingsview.derive_severity` vs
+    `results.severity_of`).
+  - **The page states its scope limits** (F16).
+  - **Round 2** (the reviewers' re-check of 1d02cd0, both AGREE-WITH-FIXES, all applied):
+    a candidate whose evidence JSON escapes a lone surrogate is *unreadable*, not a 500
+    (A-N2, B-N1; PA-0500(2)); `_Locations.steps` counts index construction, so a
+    revert to one index per finding fails the linearity test, and the public
+    per-finding resolver is removed (B-N2); a truncated endpoint with no group read
+    still says `truncated` (the flag travels with the list and its cache entry), and
+    the Contents pane shows it, browser-verified (B-N3); an expand overtaken by a
+    refresh is loaded by the refresh (A-N1); keyboard "Show more" keeps focus in the
+    tree, and removing a focused top-level node focuses the first item (A-N3, A-N5);
+    nodes too deep to key no longer collide in the refresh (A-N5); a no-op SQL condition
+    removed (A-N6); `raises=` on every strict xfail (B, nit); `origin_of`'s docstring says
+    the source fix is pending (A-N4).
+  - **Round 3** (re-check of cab3cea; B: AGREE; A: one finding, R3-1, introduced by the
+    round-2 race fix): an expand made during a refresh and the refresh reaching the same
+    empty node could both append its first page. A group's first-page load is now shared
+    (the refresh awaits the expand's), and appends skip an identity already present; a
+    browser test holds both fetches to force the interleaving (a mutant without either
+    protection fails it). The first version of that fix shared a load across
+    generations, so a filter change or a refresh got an older, stale load back and
+    rendered nothing; the clean-worktree run caught it before push (2 browser tests
+    failed), and a load is now shared only within one generation (mutant without the
+    guard fails both tests). Lesson applied: after every page-script change the whole
+    browser file is run, not only the new test.
+- Divergences from the agreed design (B8), recorded: G1 -- every node's whole child list
+  is read and cached, narrow ones included (the bound is the node's width; simpler, no
+  early-stop path); G11 -- the "inject a write" test became a call-order test of the
+  fingerprint before the snapshot (`_read`), which a moved fingerprint fails (mutation
+  checked); G2 -- the `x:error` sentinel comes only from the candidate projection, the
+  one function that can fail; G3 -- order refined (CC-UI-0500); the scope-limit text is
+  on the page.
+- Impact: UI and its tests only (plus CC-CORE-0501). No API change other than the added
+  `truncated` field and 400s for inputs that used to be 500s.
+- Risk: low.
+- Deliverables:
+  - [x] fixes above — done
+  - [x] tests: `tests/test_web_sitetree.py` 103 + 2 strict xfails,
+    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 15,
+    `tests/test_core_runtarget.py` 14 + 3 strict xfails — done
+  - [x] mutation checks: 29 back-end mutants and 13 UI mutants, all killed — done
+  - [x] closes CC-UI-0500's open deliverables (page CC-UI-0502, layout, review, docs) and
+    records the no-ML build re-run CC-UI-0501 left open — done
+- Effectiveness (assessed 2026-10-15): verified on the committed tree in a clean detached
+  worktree, with `FUZZLAB_REQUIRE_BROWSER=1`, over every test file that imports a module
+  this lane changed (68 files, a superset including indirect ML / web / report importers)
+  plus `test_requirements_traceability.py`, `test_no_ml.py`, `test_packaging.py` and
+  `test_contract_writers.py`: round 1 (1d02cd0) 1712 passed, 2 skipped, 5 xfailed; the
+  final run is quoted below. The 2 skips are `test_packaging.py:179` (the host's Debian
+  setuptools cannot build a wheel -- environment, pre-existing); the xfails are the five
+  strict pins. Browser tests: `test_web_sitetree_browser.py` 14 and
+  `test_web_pages_browser.py` 9 passed, 0 skipped. `tests/test_no_ml.py` 10 passed (the
+  re-run CC-UI-0501 left open).
+  **Final run** (9d6c409, clean detached worktree, `FUZZLAB_REQUIRE_BROWSER=1`, the same
+  file set): **1717 passed, 2 skipped, 5 xfailed**; browser files alone
+  (`test_web_sitetree_browser.py` 15 + `test_web_pages_browser.py` 9): **24 passed, 0
+  skipped**. Reviewers A and B: AGREE (rounds 1-3). This assesses CC-UI-0500, CC-UI-0501
+  and CC-UI-0502 as effective.
+
+### CC-UI-0502 — Site map page: the UI-research three-pane layout (2026-10-15)
+- Change: the site tree's page (CC-UI-0500's open deliverables): `templates/sections/
+  sitetree.html`, `static/js/sitetree.js` (WAI-ARIA treeview, lazy paging, contents
+  and Issues panes, filter bar, polling refresh; `textContent` only),
+  `static/css/sitetree.css`; NAV label "Site map"; `sitetree_poll_ms` config (default
+  5000 ms, used by tests). FR-UI-503 edited in place. The layout applies
+  `docs/research/ui-ia-competitive-analysis.md` §12.1/§12.3/§13.1 from
+  `origin/claude/new-session-jqk4ku` (branch confirmed by the operator).
+- Review: the layout delta went to reviewers A and B (F17, a reviewed divergence); both
+  AGREE-WITH-FIXES, all applied: no payload change; FR-UI-503 in place; "Site map"
+  naming; every research item not adopted listed with its reason; a severity text
+  equivalent; browser tests for every new behaviour and render site.
+- Research items not built, with reasons:
+  - Node states (discovered / requested / tested / out of scope): need a `flow` join,
+    a `page.discovered_from` writer (locked crawler/adapter) and project scope rules.
+  - Tested coverage %: needs distinct-parameter counting per subtree -- follow-up.
+  - Structure collapse and "mark a parameter structural": need persisted
+    `template_cluster_id` / project-stored overrides.
+  - Node actions: scan this branch and scope include/exclude belong to the IA /
+    project-files lanes; Send to Repeater stays on the finding page; **Copy URL is
+    prohibited** by FR-UI-504 (no URL rebuilt from parts).
+  - Filters "Has parameters", "Method", "Show SPA routes", "Untested": not FR-UI-501
+    filters (they would extend the gate-agreed back-end contract) -- follow-up. "Status
+    class": needs response status per node (`flow`, out of scope, F16). Regex search:
+    **declined** (a user regex run on the server is a ReDoS risk).
+  - Divergences: no `#` pseudo-node (routes sit under their document path with a
+    `route` badge, FR-UI-500); the leaf is (path, method) with parameter children, not
+    ZAP's `METHOD name(query)(body)` identity (gate F1); counts focus the in-page Issues
+    pane (the Findings view has no node filter); the contents table lists child nodes,
+    not flows (F16); no request/response pane (flows out of scope; findings keep no raw
+    bytes); diff-run lens and open-only severity (no triage state); a per-run origin for
+    crawl-only runs (research P14: locked `spider.py` / `fetcher.py` writers).
+- Impact: UI only; no API or payload change.
+- Risk: low-medium (attacker-influenced strings in a new client). Mitigated by the
+  text-only rendering, its static guard over every script the page loads, and a
+  browser test seeding markup into every render site.
+- Deliverables:
+  - [x] template / JS / CSS (~650 LOC) — done
+  - [x] `tests/test_web_sitetree_browser.py` (8): tree + badges, keyboard pattern,
+    contents + Issues paging, count -> Issues focus, status toggle + run lens, polling
+    refresh keeping expansion, markup rendered as text everywhere, scripts never parse
+    HTML strings; `tests/test_web_pages_browser.py` waits for the tree on `/sitetree` — done
+  - [x] UI mutation checks: `innerHTML` rendering, the severity text, the poll timer,
+    the Issues focus -- 4 of 4 killed — done
+- Effectiveness: pending -- assessed after the independent code review (CC-UI-0503).
+
+### CC-UI-0500 — Site tree: browse findings by origin and URL path (2026-10-15)
+- Change:
+  - **Data layer** `fuzzlab/web/sitetree.py` (pure; no FastAPI): node keys (host ->
+    path segments -> SPA route -> endpoint -> parameter -> findings/candidates),
+    `path_key` (a stored endpoint's raw `?query` is cut off and never shown), candidate
+    projection by shape (FK / pipeline via `oracle.finding_url` / unplaced / no path /
+    unreadable, content-addressed cache with no raw evidence), finding-location
+    resolution keyed on run + path + method + param (+ category first), roll-ups,
+    filters (run, category, severity -- findings only, status, path text), keyset
+    pagination with stored-path range and cursor narrowing, one read transaction per
+    request, a version-keyed bounded child-list cache, and `store_version` (an `os.stat`
+    + WAL-header fingerprint). Registered SQL functions catch only a named error list
+    and count what they cannot judge.
+  - **Routes** `fuzzlab/web/sitetree_routes.py`: `GET /sitetree`,
+    `/api/sitetree/{children,node,facets,version}` (sync, GET-only, read through
+    `_with_store`); `web/app.py` registers them in one block plus one NAV link.
+  - **Page** `templates/sections/sitetree.html`, `static/js/sitetree.js`,
+    `static/css/sitetree.css` (see Deliverables).
+  - FR-UI-500..505; NFR-UI-read-only / NFR-UI-redacted gain the site tree's tests.
+- Design gate (components README): rev 1 -> rev 3, reviewers A and B (read-only),
+  3/3 agreed. Notable outcomes: SSE dropped for polling (a long-lived stream holds
+  uvicorn's graceful shutdown and the lifespan shutdown that stops launched jobs,
+  BUG-0125); severity is a findings-only facet (the finding band and a candidate's
+  category band disagree for `ssti`); one core target reader (CC-CORE-0500,
+  CC-ML-0500, CC-UI-0501). Divergence found in implementation, reflected here: a
+  candidate whose parameter row lost its endpoint is classified *unplaced* before the
+  "auditor dict without a url" (*no path*) check, since it did have a location (G3
+  listed the two the other way round); every row still lands in exactly one class.
+- Impact:
+  - Read-only over the store; no schema change, no writes.
+  - New web -> `fuzzlab.oracle.oracle` / `oracle.probe` dependency, imported lazily
+    inside the candidate projection (for `finding_url`).
+  - Reads `core.urls`, `core.evidence`, `core.oracle_status`, `core.runmode`,
+    `core.runtarget`, `web.findingsview` (severity band).
+  - The project-files session's store switching reaches the tree through
+    `_with_store`; the version fingerprint is taken from the same `store_path` config
+    value (follow-up: route both through their accessor).
+- Risk: medium (attacker-influenced strings; every result table read; large stores).
+  Mitigations: planted-marker test over every value column and every API response;
+  stored-query test; strict key/filter validation; operation-count scale test at
+  >= 50 000 endpoints; read-only test; real-browser tests under
+  `FUZZLAB_REQUIRE_BROWSER=1`.
+- Index request for the integrator (no migrations in this lane): `finding(run_id, url)`;
+  `parameter(endpoint_id)`; a stored `candidate` path column written by
+  `audit/engine.evaluate` (or an expression index) -- each removes a stated linear term.
+- Deliverables:
+  - [x] `web/sitetree.py` (~1 330 LOC incl. docstrings) — done
+  - [x] `web/sitetree_routes.py` + `app.py` block/NAV (~120 LOC) — done
+  - [x] tests: `tests/test_web_sitetree.py` (82), `tests/test_web_sitetree_scale.py` (4) — done
+  - [x] mutation checks: 15 mutants of 13 mechanisms, all killed — done
+  - [ ] page: template / JS (treeview, polling) / CSS + browser tests — todo
+  - [ ] final layout from the UI-research branch (re-reviewed delta) — todo
+  - [ ] code review (two reviewers) — todo
+  - [ ] docs: ARCHITECTURE views, README UI section — todo
+- Effectiveness: pending.
+
+### CC-UI-0501 — The run page, finding detail, Repeater pivot and report read the run's target through core (2026-10-15)
+- Change: `web/results.run_detail` and `finding_detail`, `web/proxycontrol.
+  create_from_finding` and `report/report.build_report` take a run's target from
+  `core.runtarget.run_target` (its first `target` row; CC-CORE-0500) instead of their
+  own queries: an unordered `fetchone` (run page), a `LEFT JOIN target` on a non-unique
+  key (finding detail, Repeater pivot: one finding row per target row), and the **last**
+  row (`ORDER BY id DESC`, report).
+- Impact: run page, finding detail, "→ Repeater" from a finding, `fuzzlab report`. No
+  output change for stores current tools write (at most one target row per run).
+- Risk: low.
+- Deliverables:
+  - [x] four readers switched (~25 LOC) — done
+  - [x] `tests/test_core_runtarget.py::test_ml_and_report_readers_agree_with_the_core_reader`
+    (first row wins on a two-row store, for the report, run page and finding detail) — done
+- Effectiveness (assessed 2026-10-15): every test file importing a changed module
+  (`fuzzlab.ml.dataset` / `holdout`, `fuzzlab.report`, `fuzzlab.web.results` /
+  `proxycontrol`, `fuzzlab.core.evidence`; 48 files) re-run under
+  `FUZZLAB_REQUIRE_BROWSER=1`: 1363 passed, 1 error -- `tests/test_no_ml.py::
+  test_a_real_no_ml_build_passes_the_same_checks`, which builds from the tracked tree and
+  so could not see the then-uncommitted `core/runtarget.py`; re-run on the committed
+  tree (see the next CHANGELOG line / CC-UI-0500).
+
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
   candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could

@@ -447,6 +447,56 @@ Newest first.
   does not validate — a change to every tool's connection, for its own CC entry.
 - Effectiveness (assessed 2026-10-15): effective — full suite on a clean detached worktree of 578b2a4 (`FUZZLAB_REQUIRE_BROWSER=1`, real Chromium): **5782 passed, 44 skipped, 11 xfailed, 14 failed** in 63 min. The 14 failures are the labgen `--check` end-to-end tests, each failing on "'gitleaks' executable not found on PATH" (an environment gap; they fail identically on the base cdde39f, and none imports a module this change touches); the skips are missing external tools (gitleaks, nuclei, sqlmap, commix, sstimap, ZAP, gVisor/cgroup v1, MariaDB, bdist_wheel) and two documented spring_boot reproductions. The tree was clean after the run (no `./fuzzlab.db` or other default output; BUG-0452's guard armed). Every test file importing a changed module (48 files): 1681 passed, 0 skipped. Mutation checks: 62 mechanisms, each reverted with its named test failing, then restored. Review gate: two independent reviewers, five code-review rounds, both APPROVE on 4f6c46b (round 5). Store-level: `tests/test_core_project.py` 90 passed.
 
+### CC-CORE-0501 — `runtarget.origin_of`: a malformed stored base URL reads "no origin" (BUG-0500) (2026-10-15)
+- Change: `core.runtarget.origin_of(base_url)` -- `canonical_origin` with its documented
+  failure (`ValueError` from `urlsplit` on a malformed authority) turned into ``None``;
+  `run_origins` uses it, so ML's holdout origins and the site tree do too. FR-CORE-500
+  updated in place.
+- Why: BUG-0500 (found in the site tree's code review, reviewers A and B): one stored
+  target row such as `http://[::1` took every origin reader down. The source fix belongs
+  in `core/urls.py`, locked by another session: pinned by
+  `tests/test_core_runtarget.py::test_canonical_origin_is_total_for_malformed_authorities`
+  (`xfail(strict=True)`), so its fix turns that pin into a failure to remove.
+- Impact: a run with such a row reads "origin unreadable" (site tree) / unsealed (ML)
+  instead of crashing. No change for well-formed rows.
+- Risk: low.
+- Deliverables:
+  - [x] `origin_of` (~12 LOC) — done
+  - [x] tests: `::test_origin_of_is_total` (9 malformed inputs), the strict pin (3),
+    `tests/test_web_sitetree.py::test_a_malformed_stored_base_url_is_an_unreadable_origin_not_a_crash`
+    — done
+  - [x] BUG-0500, PA-0500, ERROR_LOG, sweep with dispositions — done
+- Effectiveness (assessed 2026-10-15): `tests/test_core_runtarget.py` 14 passed, 3 xfailed;
+  a mutant without the `ValueError` catch fails the malformed-base-url test.
+
+### CC-CORE-0500 — One reader for a run's recorded target; one method key (2026-10-15)
+- Change: new `fuzzlab/core/runtarget.py` (`run_target_rows`, `run_target`,
+  `run_origins`: a run's target is its first `target` row by id, its origin
+  `canonical_origin(base_url)`); `core.evidence.method_key` moved verbatim from
+  `ml.dataset`. The readers that each re-implemented the row choice now call it:
+  `ml/dataset.target_of` / `target_runs`, `ml/holdout._run_origins` (CC-ML-0500),
+  `report/report.build_report`, `web/results.run_detail` / `finding_detail`,
+  `web/proxycontrol.create_from_finding` (CC-UI-0501). FR-CORE-500.
+- Why: the site tree (CC-UI-0500, built next) needs a run's origin without the ML package, and the
+  design gate's sweep (PA-0063(1)/(2), PA-0002) found five private copies of the row
+  choice with three different rules: first row (ML), **last** row (`report`), an
+  unordered `fetchone` (`run_detail`) and a non-unique `LEFT JOIN` (`finding_detail`,
+  the Repeater pivot) that would duplicate a finding over several target rows.
+- Impact: ML, report, web readers (CC-UI-0501). No output change for any store current tools write
+  (one `run_pipeline` call per run writes at most one target row); only a degenerate
+  store with two target rows per run now reads the same row everywhere.
+  `core/migrations._backfill_holdout_seal` keeps its own read (a shipped migration
+  post-step; allowlisted with that reason).
+- Risk: low. Reviewed in the site-tree design gate (reviewers A and B, rev 1-3; the
+  sweep list was checked by both against a grep).
+- Deliverables:
+  - [x] `core/runtarget.py` (~60 LOC), `core.evidence.method_key` (~8 LOC) — done
+  - [x] reader switch in ML / report / web (~30 LOC) — done
+  - [x] `tests/test_core_runtarget.py`: guard + synthetic offender, first-row rule,
+    loopback alias, unusable origin, swept readers agree with the core reader — done
+- Effectiveness (assessed 2026-10-15): `tests/test_core_runtarget.py` 5 passed; every
+  test file importing a changed module re-run (see CC-UI-0501).
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

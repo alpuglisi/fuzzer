@@ -475,6 +475,38 @@ changed, and the reason. Reference the commit hash where useful.
   previous run's CSV when its own run collected nothing (BUG-0450, PA-0450). Design gate
   3/3 (two reviewers, three rounds). Page layout waits for the UI research.
 
+## 2026-10-15 (site tree: code-review fixes; BUG-0500)
+- **Why:** the independent code review (reviewers A and B) found a quadratic finding
+  -location step, 500s on hostile input, a fingerprint that changed on reads, a refresh
+  that rebuilt the tree, and a pre-existing defect: `canonical_origin` raises on a
+  malformed authority, so one stored target row broke every origin reader (BUG-0500).
+  **What:** all fixed in this lane, each pinned by a test and mutation-checked;
+  `core.runtarget.origin_of` is the total boundary (PA-0500); out-of-lane defects pinned
+  by strict xfails (CC-UI-0503, CC-CORE-0501).
+
+## 2026-10-15 (site map page: the UI-research three-pane layout)
+- **Why:** the site tree needed its page; the UI-research session's design (§12.3/§13.1,
+  branch `claude/new-session-jqk4ku`, confirmed by the operator) sets the layout.
+  **What:** `/sitetree` ("Site map"): a lazy WAI-ARIA tree with severity dots, counts and
+  route / client-side badges, the selected node's contents and issues, a filter bar and
+  a polling refresh; text-only rendering, browser-verified (CC-UI-0502, FR-UI-503).
+  Research items not built are listed with their reasons in CC-UI-0502.
+
+## 2026-10-15 (site tree: data layer and API)
+- **Why:** browse identified vulnerabilities by domain and URL path, like Burp's Site
+  map. **What:** `web/sitetree.py` + `/api/sitetree/*`: host (canonical origin) -> path
+  segments -> SPA routes -> endpoint -> parameter -> findings/candidates, roll-ups,
+  filters, lazy keyset paging bounded by operation counts at 50k endpoints, and never a
+  stored query or value column (CC-UI-0500, FR-UI-500..505). Page to follow.
+
+## 2026-10-15 (one reader for a run's target; site-tree groundwork)
+- **Why:** the site tree needs each run's origin without the ML package, and its design
+  gate found five private copies of "which `target` row is the run's" with three rules
+  (first, last, unordered). **What:** `core.runtarget` is the one reader (first row by
+  id, canonical origin) and `core.evidence.method_key` the one method key; ML, the
+  report, the run page, finding detail and the Repeater pivot read through them, and a
+  guard test fails on any other `target` read (CC-CORE-0500, CC-ML-0500, CC-UI-0501).
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

@@ -558,6 +558,107 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   `/` only if the requested project opened and no warning is waiting; otherwise it stays on
   `/projects`, where the messages are. "Opening a project never sends traffic."
 
+- **FR-UI-500** *(added CC-UI-0500, 2026-10-15)* **Site tree: nodes.** `/sitetree`
+  browses what the store recorded by origin and URL path, like Burp's Site map
+  (`web/sitetree.py`):
+  - **host** -- the canonical origin of each run's first `target` row
+    (`core.runtarget`, FR-CORE-500), so loopback aliases on one port are one host and
+    other ports or 127/8 addresses are not; a run without a recorded origin (no target
+    row, or one with no usable host) is its own host, labelled "origin not recorded" /
+    "origin unreadable" -- never inferred from `run.config_hash` or a hostname.
+  - **path segments** -- every source's stored path through `sitetree.path_key` (the
+    text before its first `?`; an endpoint may be stored with its POST form action's or
+    captured request's raw query, which is never shown, searched or used for identity);
+    `""` is an index (`/a/` -> `a` -> `/`).
+  - **SPA routes** -- a stored `#/route` (`core.urls.to_route_path`) is one last
+    segment, a child of its document path, labelled as a route.
+  - **endpoint** -- path + method (`core.evidence.method_key`); a finding with no
+    recorded method is "(method not recorded)", never GET.
+  - **parameter** -- name + location. A finding records no location: it is the unique
+    location among the same run's candidates at that path, method, parameter and
+    category (`to_category(vuln_class)`), else among its candidates and parameter rows
+    without the category (parameter rows carry none), else "location not recorded"
+    (`sitetree._Locations`, indexed once per request). A finding with no method matches any method.
+  - **items** -- findings (link `/findings/{id}`) and candidates.
+  - Candidates are placed by shape: FK (`parameter` -> `endpoint`), pipeline
+    (`core.evidence.parse_evidence`, path by `oracle.finding_url`); a parameter whose
+    endpoint is gone is *unplaced*, an auditor row without a url *no path*, anything
+    else *unreadable*. A row without a usable path is *unplaced*; the candidate
+    projection, the one registered SQL function that can fail, turns a named list of
+    errors into *error* (the others are total by construction; no handler in the site
+    tree catches broadly). All four are counted in the host's roll-up, never dropped
+    silently. Values are carried between SQL functions as JSON, so no character in a
+    target-supplied name can shift a field.
+  - Scope limits: SPA routes without a route query are not stored, so not shown; a run's
+    rows sit under its one recorded origin; proxy `flow` rows are not in the tree; a
+    legacy endpoint not starting with `/` is unplaced.
+- **FR-UI-501** *(added CC-UI-0500)* **Site tree: roll-ups and filters.**
+  - Each node shows, over its subtree and under the active filters: findings
+    (`label = 1`, the only value any writer writes) by severity (the finding page's band,
+    `findingsview.derive_severity`) and by category (`to_category`); candidates by
+    `oracle_status` (`checked` = "oracle checked, confirmed or not"; NULL or unknown =
+    `unrecorded`, never checked); recorded endpoints; the last run seen; problem counts.
+  - Filters (repeatable query values; OR within a facet, AND across): `run`; `category`;
+    `severity` (findings only -- candidates are never banded, so it excludes them);
+    `status` (`confirmed`, every `core.oracle_status` value, `unrecorded`); `q`, an
+    ASCII case-insensitive substring of the stored path. With any item facet set only
+    findings and candidates count, and a node shows only if its subtree holds one.
+- **FR-UI-502** *(added CC-UI-0500)* **Site tree: lazy, bounded, paged.**
+  - A node's children load on expand (`GET /api/sitetree/children?node=&after=&limit=`),
+    paged by a keyset cursor (default 200, max 1000; parameter items 50/200 by
+    `(id, kind)`). Node keys, filters and cursors are validated -- sizes bounded,
+    unknown fields, lone surrogates, malformed origins and ids outside 1..2^63-1 refused
+    with 400; a node that no longer resolves is 404 `gone`. An endpoint whose groups
+    reach `GROUP_CAP` (10 000) says `truncated`, and the page shows it.
+  - Each request is a constant number of statements in one read transaction. Dir nodes
+    narrow endpoint/page/finding rows by index-usable ranges on the stored path; a page
+    after the first narrows by its cursor. Findings and candidates are scanned per
+    selected run (no path index), and an endpoint's parameters by a scan of `parameter`
+    (no `endpoint_id` index) -- the stated linear terms.
+  - A node's whole child list is built once and cached against the store's version
+    fingerprint (taken before the snapshot), at most 8 lists, 60 000 children each and
+    100 000 in total, so walking a node of up to 60 000 children is linear; a wider node
+    is rebuilt for each page (the cursor narrows its range). Narrow nodes are cached too.
+  - Finding locations are resolved through a per-request index, so an endpoint or
+    parameter costs operations linear in its rows (`tests/test_web_sitetree_scale.py::
+    test_e_finding_location_resolution_is_linear`).
+  - Enforced by `tests/test_web_sitetree_scale.py` (>= 50 000 endpoints; statement,
+    fetched-row, function-call and VM-step counts, never wall-clock).
+- **FR-UI-503** *(added CC-UI-0500; layout CC-UI-0502)* **Site tree: the page.** The
+  page and its nav link are labelled **"Site map"** (UI research §12.1; the component
+  and these FRs keep "site tree"). Three panes (UI research §12.3/§13.1):
+  - **Tree** (left): a WAI-ARIA treeview (roving tabindex; arrows, Home/End,
+    Enter/Space), lazy per node with "Show more" paging. Each node shows a worst-severity
+    dot with a text equivalent, its findings count (a button that selects the node and
+    focuses Issues), an inconclusive count, a `route` badge on SPA routes and a
+    `client-side` badge on `fragment` parameters.
+  - **Contents** (top right): the selected node's host / path / method / parameter /
+    location / last run, its roll-up (findings by severity and category, candidates by
+    status, recorded endpoints, problem counts) and a table of its children.
+  - **Issues** (bottom right): the subtree's findings, newest first, paged, each linking
+    to `/findings/{id}` (`GET /api/sitetree/node`).
+  - A filter bar (status toggles, severity, category, one-run lens, path search; choices
+    from `GET /api/sitetree/facets`) that only hides nodes.
+  - Everything is rendered as text: no page script parses an HTML string
+    (`tests/test_web_sitetree_browser.py`).
+  - Research items not built, each with its reason, are listed in CC-UI-0502.
+- **FR-UI-504** *(added CC-UI-0500)* **Site tree: what is never shown.** Only computed
+  paths, parameter names and locations, methods, categories, statuses, vuln classes,
+  mechanisms, ids, runs (id, tool, start) and canonical origins. Never a value column
+  (`parameter.example`, form entries, candidate evidence beyond its projected fields,
+  finding evidence), a query string, a target's raw `base_url`, run notes or config;
+  nothing is "un-redacted" or rebuilt from parts.
+- **FR-UI-505** *(added CC-UI-0500)* **Site tree: live.** The page polls
+  `GET /api/sitetree/version` (the store file's `os.stat` and its WAL's size and
+  header; no SQLite; reads never change it) while visible and, when it changes,
+  refreshes in place -- the root, every expanded group (as many items as it shows) and
+  the selection -- keeping focus, expansion, selection and loaded pages, at most once
+  per poll interval; a node that is gone is removed. Stated residual: in rollback-journal
+  mode (only if WAL could not be set) an UPDATE within one mtime tick that keeps the file
+  size is not seen. SSE is not
+  used: a long-lived stream holds uvicorn's graceful shutdown, and with it the
+  lifespan shutdown that stops launched jobs (BUG-0125).
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the
@@ -602,6 +703,9 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   `project` metadata row and the `launch` rows (what the UI started, never tool
   output) — and deleting a temporary project the operator discarded.
   - Enforced by: `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
+
+  not violate this invariant.
+  - Enforced by: `tests/test_web_sitetree.py::test_site_tree_routes_are_read_only`, `tests/test_web_overview.py::test_overview_is_read_only_get_makes_no_writes`, `tests/test_web_findings.py::test_api_findings_and_page_are_read_only`, `tests/test_holdout_seal_table.py::test_readers_never_write_on_an_upgraded_store`, `tests/test_web_ml.py::test_anomaly_panel_is_read_only`, `tests/test_web_diagnostics.py::test_diagnostics_routes_are_read_only_no_store_file`
   - Not yet enforced: read-only by convention (a read-write `Store`); attempt/candidate counts and the /results, /runs/{id} and /proxy routes are unchecked; the Repeater writes `repeater_tab`/`run`/`flow`. (BUG-0111 sweep.)
 - **NFR-UI-browser-verified** *(added CC-UI-0036/CC-UI-0037, BUG-0063/BUG-0064,
   PA-0065)* Every HTML page loads in a real browser with zero page errors, zero console
@@ -644,9 +748,12 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - Enforced by: `web.projects.ProjectManager` (`lock`, `busy_reasons`), `web.runner.Runner` (`recorded`) — `tests/test_web_projects.py::test_a_real_job_records_provenance_privately_and_blocks_switching`, `tests/test_web_projects.py::test_busy_lasts_until_the_jobs_end_is_recorded`, `tests/test_web_projects.py::test_a_switch_issued_during_a_launch_waits_and_is_refused`, `tests/test_web_projects.py::test_a_spawn_failure_marks_the_launch_failed_and_never_leaves_it_busy`, `tests/test_web_projects.py::test_the_in_process_proxy_creates_its_project_and_keeps_it_busy`, `tests/test_web_projects.py::test_temporary_project_discard_needs_confirmation_and_removes_only_its_files`
   - Not yet enforced: a `fuzzlab` CLI process writing the same file outside the UI is not visible to it (stated residual).
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
+  *(CC-UI-0500:)* the site tree polls a store fingerprint (FR-UI-505) and holds no
+  long-lived connection.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
   - Enforced by (at write time): `tests/test_proxy_redaction.py::test_no_secret_reaches_any_persisted_copy`
-  - Not yet enforced: the Repeater returns and lists raw requests/responses; `run.html` renders plugin `config` unredacted; no UI test seeds a secret. (BUG-0111 sweep; reported to the operator.)
+  - Enforced by (site tree, CC-UI-0500): `tests/test_web_sitetree.py::test_no_planted_secret_reaches_any_sitetree_response`, `tests/test_web_sitetree.py::test_a_stored_query_is_never_shown_searched_or_split_into_nodes`, `tests/test_web_sitetree.py::test_host_labels_never_show_the_raw_base_url`
+  - Not yet enforced: the Repeater returns and lists raw requests/responses; `run.html` renders plugin `config` unredacted; outside the site tree no UI test seeds a secret. (BUG-0111 sweep; reported to the operator.)
 
 ## 5. Interfaces and data contracts
 A local HTTP server on loopback serving the control panel/dashboard. Reads the

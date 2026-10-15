@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Site map{% endblock %}
+{% block crumb %}Site map{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/findings.css">
+<link rel="stylesheet" href="/static/css/sitetree.css">{% endblock %}
+{% block content %}
+<!-- Site map (CC-UI-0500, FR-UI-500..505): the three panes of the UI-research design
+     (docs/research/ui-ia-competitive-analysis.md §12.3/§13.1): the tree, the selected
+     node's contents, and its issues. Everything below is filled by sitetree.js from
+     the read-only /api/sitetree/* routes, as text only. -->
+<section class="st" aria-labelledby="st-h1" id="sitetree-root" data-poll-ms="{{ poll_ms }}">
+  <h1 id="st-h1" class="visually-hidden">Site map</h1>
+
+  <form class="card st-toolbar" id="st-filters" role="search" aria-label="Filter the site map">
+    <fieldset class="st-group">
+      <legend class="visually-hidden">Status</legend>
+      <label class="st-chip"><input type="checkbox" name="status" value="confirmed"> Has findings</label>
+      <label class="st-chip"><input type="checkbox" name="status" value="inconclusive"> Inconclusive</label>
+      <label class="st-chip"><input type="checkbox" name="status" value="checked"> Oracle checked</label>
+      <details class="st-more">
+        <summary>More statuses</summary>
+        <label class="st-chip"><input type="checkbox" name="status" value="pending"> pending</label>
+        <label class="st-chip"><input type="checkbox" name="status" value="skipped_budget"> skipped (budget)</label>
+        <label class="st-chip"><input type="checkbox" name="status" value="no_confirmer"> no confirmer</label>
+        <label class="st-chip"><input type="checkbox" name="status" value="unrecorded"> unrecorded</label>
+      </details>
+    </fieldset>
+    <details class="st-more" id="st-severity-box">
+      <summary>Severity</summary>
+      <div id="st-severities" class="st-group"></div>
+    </details>
+    <label class="st-field">Category
+      <select id="st-category" name="category"><option value="">All categories</option></select>
+    </label>
+    <label class="st-field">Run
+      <select id="st-run" name="run"><option value="">All runs</option></select>
+    </label>
+    <label class="st-field st-search">Path
+      <input type="search" id="st-q" name="q" maxlength="512" autocomplete="off"
+             placeholder="Search paths&hellip;">
+    </label>
+    <p class="muted st-note">Counts follow the filters. Severity applies to confirmed
+      findings only.</p>
+    <details class="st-about">
+      <summary>What this map shows</summary>
+      <ul class="muted">
+        <li>Hosts are each run's recorded target origin; a run that recorded none (a plain
+          crawl or audit) is its own host, and all of a run's rows sit under its one origin.</li>
+        <li>Single-page-app routes appear only when the crawl saw them with a query.</li>
+        <li>Proxy history is not part of this map.</li>
+        <li>Stored query strings and recorded values (examples, evidence) are never shown;
+          open a finding for its details.</li>
+        <li>Rows the map cannot place (no usable path, unreadable evidence) are counted on
+          their host.</li>
+      </ul>
+    </details>
+  </form>
+
+  <div class="st-panes">
+    <div class="card st-tree-pane">
+      <h2 class="st-pane-h" id="st-tree-h">Sites</h2>
+      <ul role="tree" id="st-tree" class="st-tree" aria-labelledby="st-tree-h"></ul>
+      <p class="muted" id="st-empty" hidden>Nothing recorded yet. Run a tool with
+        <code>--store</code>, then this map fills in.</p>
+      <p class="muted" id="st-status" aria-live="polite"></p>
+    </div>
+    <div class="st-right">
+      <div class="card st-contents" id="st-contents">
+        <h2 class="st-pane-h">Contents</h2>
+        <p class="muted" id="st-contents-empty">Select a node to see its contents.</p>
+        <div id="st-node" hidden>
+          <dl class="kv st-node-kv" id="st-node-kv"></dl>
+          <div class="st-roll" id="st-roll"></div>
+          <p class="muted st-problems" id="st-node-truncated" hidden>List truncated: this
+            endpoint has more recorded groups than the site map reads at once, so these
+            counts are partial.</p>
+          <table class="st-table" id="st-children-table">
+            <caption class="visually-hidden">Children of the selected node</caption>
+            <thead><tr><th scope="col">name</th><th scope="col">kind</th>
+              <th scope="col">findings</th><th scope="col">candidates</th>
+              <th scope="col">inconclusive</th><th scope="col">last run</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card st-issues" id="st-issues" tabindex="-1">
+        <h2 class="st-pane-h">Issues</h2>
+        <p class="muted" id="st-issues-empty">No findings under this node.</p>
+        <table class="st-table" id="st-issues-table" hidden>
+          <caption class="visually-hidden">Findings under the selected node, newest first</caption>
+          <thead><tr><th scope="col">severity</th><th scope="col">class</th>
+            <th scope="col">location</th><th scope="col">mechanism</th>
+            <th scope="col">run</th><th scope="col">finding</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button type="button" id="st-issues-more" hidden>Show more findings</button>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/sitetree.js"></script>{% endblock %}

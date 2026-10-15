@@ -404,11 +404,12 @@ class RepeaterController:
             return None
         try:
             row = own.conn.execute(
-                "SELECT f.url, f.method, f.param, f.evidence, t.base_url "
-                "FROM finding f LEFT JOIN target t ON t.run_id = f.run_id "
-                "WHERE f.id=?", (finding_id,)).fetchone()
+                "SELECT run_id, url, method, param, evidence FROM finding WHERE id=?",
+                (finding_id,)).fetchone()
             if row is None:
                 return None
+            from fuzzlab.core.runtarget import run_target    # the one reader (CC-UI-0501)
+            target = run_target(own.conn, row["run_id"])
             try:
                 evidence = json.loads(row["evidence"]) if row["evidence"] else {}
             except (ValueError, TypeError):
@@ -416,7 +417,7 @@ class RepeaterController:
         finally:
             if own is not thread_store:
                 own.close()
-        base_url = row["base_url"] or self.cfg.get("target_base_url", "")
+        base_url = (target or {}).get("base_url") or self.cfg.get("target_base_url", "")
         from fuzzlab.web import results
         raw, host, port, use_tls = results.build_finding_raw_request(
             row["url"], row["method"], row["param"], evidence.get("payload", ""), base_url)

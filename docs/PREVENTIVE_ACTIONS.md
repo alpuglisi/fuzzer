@@ -2317,3 +2317,18 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   2. **Its tests include inputs that differ only in what the consumer treats as
      significant** (non-ASCII spaces, comment boundaries, quoting), each with a
      non-vacuity step proving the consumer reads them differently. (from BUG-0456)
+
+- **PA-0500** — Strengthens `PA-0096` and generalises `PA-0131(2)` and `PA-0108(1)`, after
+  BUG-0500: `canonical_origin` promised ``None`` for an unusable URL but raised on a
+  malformed authority, and one stored target row took every origin reader down.
+  1. **A function whose contract promises a sentinel for unusable input is total**, and
+     its tests feed the malformed inputs of every grammar it parses (for a URL: a bad
+     IPv6 bracket, an NFKC-invalid netloc, a bad port, a lone surrogate, control
+     characters) and assert the sentinel.
+  2. **A reader of stored data normalises each stored value through one total boundary**
+     (here `core.runtarget.origin_of`): a malformed row reads "unreadable", never takes
+     the reader down.
+  3. **The PA-0002 sweep lists every caller of the non-total function with a
+     disposition**; a known instance not fixed (here in a locked file) is pinned by a
+     strict xfail (`PA-0054(3)`). (from BUG-0500)
+

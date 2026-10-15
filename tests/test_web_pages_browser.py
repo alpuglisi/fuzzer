@@ -149,7 +149,9 @@ def tab(site):
 
 # --- (a) every HTML page: no errors, no CSP violations ----------------------
 
-_READY = {"/ml": ".uplot", "/diagnostics": ".diag-run-chip input"}
+_READY = {"/ml": ".uplot", "/diagnostics": ".diag-run-chip input",
+          # CC-UI-0500: the site map loads its tree after `load`; wait for it
+          "/sitetree": '#sitetree-root[data-ready="1"] [role="treeitem"]'}
 
 
 def _html_pages(app, seeded) -> list[str]:

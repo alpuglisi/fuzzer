@@ -246,6 +246,12 @@ Format per entry:
 - **Remediation:** `save_dataset` returns whether it wrote the file and `main` imports only then (CC-FUZZ-0450); the web UI pins `--output` to the project's own directory (FR-UI-456); PA-0450 and its sweep.
 - **Status:** Fixed (offline test; mutation-checked)
 
+## 2026-10-15 — core: `canonical_origin` raised on a malformed authority; one stored target row broke every origin reader (fixed at the reader boundary, BUG-0500/PA-0500)
+- **Symptom:** in the site tree's code review, a `target` row with `base_url = 'http://[::1'` made every `/api/sitetree/*` request return 500; ML's holdout origin reader fails the same way on such a store.
+- **Root cause:** `core.urls.canonical_origin` documents ``None`` for an unusable URL but calls `urlsplit` unguarded, which raises `ValueError` on a malformed IPv6 bracket or an NFKC-invalid netloc; stored-data readers called it directly.
+- **Remediation:** `core.runtarget.origin_of` turns that `ValueError` into ``None`` ("origin unreadable"); `run_origins` (and so ML) and the site tree go through it; a node key with such an origin is a 400 (CC-CORE-0501, CC-UI-0503). The source fix in `core/urls.py` (locked) is pinned by a strict xfail.
+- **Status:** Fixed at the reader boundary; source fix open (follow-up for the `core/urls.py` owner)
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.
