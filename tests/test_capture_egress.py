@@ -196,9 +196,35 @@ def test_a_captured_write_is_probed_by_default_and_never_with_the_opt_out(
     finally:
         lab.close()
     skipped = result.metrics["skipped_points"]
+    funnel = _funnel_row(tmp_path / "u.db", opt_out)
     if opt_out:
         assert posts == []
         assert ("/api/notes", "POST", "title", CAPTURED_WRITE_OPT_OUT) in skipped
+        assert funnel["refused"] == CAPTURED_WRITE_OPT_OUT and not funnel["buildable"]
     else:
         assert posts                                   # probed (D67)
         assert not [s for s in skipped if s[0] == "/api/notes"]
+        # BUG-0151 / PA-0157: the funnel reads the store this real run produced; the
+        # oracle ran the candidate (auto writes no attempt rows), so it is probed
+        assert funnel["discovered"] and funnel["buildable"]
+        assert funnel["stage"] in ("probed", "confirmed"), funnel
+
+
+def _funnel_row(store_path, opt_out):
+    """`scripts/funnel_report.py`'s row for the captured write, read from a store a real
+    crawl, import and `auto` run produced (PA-0157)."""
+    import importlib.util
+    from pathlib import Path
+
+    from fuzzlab.labels.contract import Case
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("funnel_report",
+                                                  root / "scripts" / "funnel_report.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    case = Case(case_id="C1", url="/api/notes", method="POST", param="title",
+                location="json", vuln_class="sqli", sink_context="sql",
+                expected_vulnerable=True, rendering="server")
+    (row,) = mod.funnel(str(store_path), None, cases=[case],
+                        probe_captured_writes=not opt_out)
+    return row

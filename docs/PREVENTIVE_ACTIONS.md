@@ -2418,3 +2418,16 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      PA-0002 sweep covers every such assertion over each shared fixture's log. (from
      BUG-0150)
   - Enforced by: tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it, tests/test_spa_query.py::test_a_shell_that_writes_on_every_load_still_gives_hash_points
+
+- **PA-0157** — Strengthens `PA-0071` (a reader depends only on what production writes),
+  after BUG-0151: the funnel's "probed" stage counted `attempt` rows, which `auto` never
+  writes, so it read zero for every `auto` run while its hand-built test passed.
+  PA-0071's guard checks a column has some writer, not that the measured pipeline
+  writes it.
+  1. **A metric stage** (a funnel stage, a report count, a score) **is tested against a
+     real store produced by the pipeline it measures**, not only against hand-built
+     rows; each stage it reports has at least one such test where the stage is reached.
+  2. **The PA-0002 sweep for this class covers every reader of a table that one
+     pipeline writes and another does not**, with each reader's scope; a sibling not
+     fixed is pinned by a strict xfail (`PA-0054(3)`). (from BUG-0151)
+  - Enforced by: tests/test_capture_egress.py::test_a_captured_write_is_probed_by_default_and_never_with_the_opt_out, tests/test_funnel_report.py::test_a_checked_candidate_with_no_attempt_row_reads_probed

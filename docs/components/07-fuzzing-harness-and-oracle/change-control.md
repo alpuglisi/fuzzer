@@ -18,6 +18,9 @@ Newest first.
   or an attempt row exists; a candidate the oracle never ran (`skipped_budget`,
   `no_confirmer`, `pending`) is reported refused with `oracle: <status>`. Earlier funnel
   numbers that showed few or no "probed" cases from `auto` runs under-read the stage.
+  This is the code defect BUG-0151 / PA-0157 (the full bug record; its sweep of
+  `attempt` readers found `web/results.py`'s category facet with the same defect,
+  pinned by `tests/test_attempt_readers.py` and reported).
 - Impact (other components / project): the default follows D67 (owner, 2026-10-15),
   which replaced the lane brief's original "skip by default" (DISC-CAPTURE §6's pending
   LAB-WRITES). Consumers of `injection_points_from_store` (searched): `run_auto`,

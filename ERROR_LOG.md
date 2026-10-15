@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Funnel report: the "probed" stage could never be reached by an `auto` run (fixed, BUG-0151, PA-0157)
+- **Symptom:** `scripts/funnel_report.py` counted a candidate as probed only through `attempt` rows; for an `auto` run "probed" equalled "confirmed".
+- **Root cause:** `harness/auto`'s oracle writes `candidate.oracle_status` and findings with no `attempt_id`; only greybox and the fuzz-CSV import write attempts. The funnel's test built rows by hand and never exercised "probed".
+- **Remediation:** probed = `oracle_status` `checked` / `inconclusive`, or an attempt; an unrun candidate is refused with `oracle: <status>`; a test reads the funnel from a store a real crawl, import and `auto` run produced (CC-FUZZ-0089). Sweep of `attempt` readers: `web/results.py`'s category facet has the same defect, pinned by a strict xfail and reported.
+- **Status:** Fixed (funnel); Open (`web/results.py`).
+
 ## 2026-10-15 — Tests: "nothing was sent" asserted over a module-shared lab's log failed by test order (fixed, BUG-0150, PA-0156)
 - **Symptom:** under `verify_change.py`'s parallel pass, `test_spa_query.py`'s M6 and shell tests found an `auto` probe of `/api/autopost` and 527 socket messages in the shared lab's log; both passed alone.
 - **Root cause:** absence assertions judged the module fixture's cumulative log, which other tests of the module (an `auto` run that, under D67, probes captured writes; an M6 browser) also write. PA-0150 covered counts under process supervisors, not shared fixture logs.
