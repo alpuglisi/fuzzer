@@ -44,6 +44,11 @@ def main(argv: list[str] | None = None) -> int:
 
     command, rest = argv[0], argv[1:]
 
+    # D71: the send rules a run turns off come only from that command's own flags,
+    # never from an inherited environment (`core.sendpolicy.apply` sets them).
+    from fuzzlab.core import sendpolicy
+    sendpolicy.set_disabled(())
+
     if command == "version":
         print(f"fuzzlab {__version__}")
         return 0

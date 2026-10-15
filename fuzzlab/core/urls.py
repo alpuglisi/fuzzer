@@ -292,9 +292,11 @@ def check_send_url(url: str, explicit: frozenset[str] = frozenset(),
 
     Every probe sender calls this first (NFR-FUZZ-safe, CC-FUZZ-0060), passing its
     send's ``method``. ``explicit`` holds :func:`url_key` values of operator-enumerated
-    (ground-truth) points.
+    (ground-truth) points. ``--allow-destructive-routes`` turns the URL rule off
+    (`core.sendpolicy`, D71); a refused method (``DELETE``) stays refused.
     """
-    reason = destructive_reason(url)
+    from fuzzlab.core import sendpolicy
+    reason = sendpolicy.destructive(destructive_reason(url))
     if reason is None and (method or "").upper() in REFUSED_SEND_METHODS:
         reason = f"{method.upper()} method"
     if reason is not None and url_key(url) not in explicit:

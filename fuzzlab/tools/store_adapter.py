@@ -80,11 +80,12 @@ def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
     """Why an entry list must never be sent as siblings, or None: any name or value
     tokenises destructive; with ``credential_names``, any name carries a credential
     token. The one check for forms and link sets (PA-0003)."""
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.redaction import is_credential_name
     from fuzzlab.core.urls import text_destructive_reason
     for name, value in entries:
         for text in (name, value):
-            reason = text_destructive_reason(text)          # never via a URL (BUG-0131)
+            reason = sendpolicy.destructive(text_destructive_reason(text))   # BUG-0131
             if reason:
                 return f"destructive entry {name}={value!r} ({reason!r})"
         if credential_names and is_credential_name(name):
@@ -382,6 +383,7 @@ def form_skip_reason(form: dict) -> str | None:
     (`formnav.settings_word`), its select name is too short to judge, or the crawler
     saw it act as a settings form (``form["verdict"]``, FR-CRAWL-10). GET selector
     forms are not subject to that rule (GET is safe)."""
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.urls import destructive_reason
     from fuzzlab.tools.formnav import VERDICT_SETTINGS, settings_word
     if (form.get("enctype") or "").startswith("multipart/"):
@@ -396,12 +398,13 @@ def form_skip_reason(form: dict) -> str | None:
             return f"POST selector named {select!r}: too short to tell it from a setting"
         if form.get("verdict") == VERDICT_SETTINGS:
             return "POST selector the crawler saw act as a settings form"
-    reason = credential_change_reason(form)
+    credentials = sendpolicy.enforced(sendpolicy.CREDENTIAL_CHANGES)    # D71
+    reason = credential_change_reason(form) if credentials else None
     if reason:
         return reason
-    if password_fields(form) and not login_shaped(form):
+    if credentials and password_fields(form) and not login_shaped(form):
         return "password form that is not a login form (settings, CAPTCHA or other)"
-    reason = destructive_reason(form["action_url"])
+    reason = sendpolicy.destructive(destructive_reason(form["action_url"]))
     if reason:
         return f"destructive action ({reason!r})"
     return entries_refusal(form["entries"])
@@ -556,16 +559,17 @@ def request_refusal(method: str, url: str, *, fuzz_json_writes: bool = False,
     None (FR-AUD-22): a method outside GET/POST/PUT/PATCH (DELETE included); PUT/PATCH
     without ``fuzz_json_writes``; a destructive or transaction URL (the shared
     `core.urls` rules); a URL on another origin than the page that sent it."""
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.urls import canonical_origin, destructive_reason, transaction_reason
     method = (method or "").upper()
     if method not in REQUEST_METHODS:
         return f"method {method or '(none)'} is never imported"
     if method in WRITE_METHODS and not fuzz_json_writes:
         return f"{method} imported only with --fuzz-json-writes"
-    reason = destructive_reason(url)
+    reason = sendpolicy.destructive(destructive_reason(url))
     if reason is not None:
         return f"destructive URL ({reason!r})"
-    reason = transaction_reason(url)
+    reason = sendpolicy.transaction(transaction_reason(url))
     if reason is not None:
         return f"transaction URL ({reason!r})"
     if page_url and "://" in (url or "") and "://" in page_url \
@@ -579,11 +583,13 @@ def body_refusal(url: str, leaves) -> str | None:
     or account-management body (`credential_change_rule`, the one rule forms use), a
     settings field (`formnav.settings_word` on any key), or a destructive or credential
     entry (`entries_refusal`, credential names checked on every non-password leaf)."""
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.redaction import is_credential_name
     from fuzzlab.tools.formnav import settings_word
     passwords = [name for name, segs, _p, _v in leaves
                  if any(is_credential_name(s) for s in segs)]
-    reason = credential_change_rule(passwords, url, what="body", field="password field")
+    reason = sendpolicy.credential_change(
+        credential_change_rule(passwords, url, what="body", field="password field"))
     if reason:
         return reason
     for name, segs, _p, _v in leaves:

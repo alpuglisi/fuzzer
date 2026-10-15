@@ -61,6 +61,7 @@ from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
+from fuzzlab.core import sendpolicy
 from fuzzlab.core.urls import canonical_origin, destructive_reason, document_key, url_key
 
 
@@ -89,6 +90,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        window: Callable[[str, str, bool], str | None] | None = None,
                        cookie_scope: Callable[[str], bool] | None = None,
                        on_session_withheld: Callable[[str, str, str], None] | None = None,
+                       strict: bool = False,
                        isolated_request: Callable[[], object] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
@@ -146,7 +148,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             if on_out_of_scope is not None:
                 on_out_of_scope(url)
             return True
-        reason = destructive_reason(url)
+        reason = destructive_reason(url) if strict else sendpolicy.destructive(
+            destructive_reason(url))
         if reason is not None and url_key(url) not in allow:
             logging.info(_scrubbed(f"blocked destructive browser request "
                                    f"{url.split('?', 1)[0]} ({reason!r})"))
@@ -718,7 +721,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
-               isolated_request: Callable[[], object] | None = None) -> None:
+               isolated_request: Callable[[], object] | None = None,
+               strict: bool = False) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
     (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
@@ -727,7 +731,9 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
     ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
-    (FR-CRAWL-14)."""
+    (FR-CRAWL-14). ``strict`` keeps the destructive rule even when
+    ``--allow-destructive-routes`` turned it off (`core.sendpolicy`, D71): the login
+    window passes it, so finding a login never navigates to a logout."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,
@@ -737,7 +743,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             headers=headers, header_scope=header_scope,
                                             window=window, cookie_scope=cookie_scope,
                                             on_session_withheld=on_session_withheld,
-                                            isolated_request=isolated_request))
+                                            isolated_request=isolated_request,
+                                            strict=strict))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "

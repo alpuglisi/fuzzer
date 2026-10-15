@@ -482,6 +482,35 @@ proposal is the lean quality-control review, Revision 3
   `qualified`, until the effectiveness evidence in QUALITY_POLICY §8 exists. The first
   recovery slice (a qualified baseline on the held-out labs) is still to do.
 
+### D71 — PyGoat gets an answer key; the CAPTCHA rule is dropped; three send rules get off-switches (owner, 2026-10-15)
+
+**The owner's decision:** "question 1) C question 2) drop the captcha rule. Keep the
+remaining three rules but add a flag to disable them. The remaining 3 will impact tool
+performance, we will need to better handle these at a later date. there will need to be
+some reconciliation process".
+
+- **PyGoat** (OWASP's deliberately vulnerable Django app): try again to get an answer
+  key written for it. That means setting it up again and having a blind curator write
+  the key. Not started; it waits for the owner to schedule it.
+- **CAPTCHA forms** are no longer refused. A CAPTCHA form is submitted like any other;
+  nothing solves the CAPTCHA.
+- **The destructive, transaction and credential-change rules stay on by default.**
+  Each has a lab-only flag that turns it off for one run: `--allow-destructive-routes`,
+  `--allow-transactions` and `--allow-credential-changes`, on `crawl`, `audit`, `auto`
+  (`scan`, `train run`) and `greybox-run` (`core/sendpolicy.py`, FR-CORE-45,
+  CC-CORE-0062).
+  - Implementation choices, stated for the owner:
+    - three flags, one per rule;
+    - the login flow keeps all three rules whatever the flags, so a login is found
+      the same way;
+    - a `DELETE` send stays refused;
+    - destructive *payloads* keep their own `--allow-destructive`.
+- **Open, for later:**
+  - The three rules cost findings. They are to be handled better later.
+  - A **reconciliation process** is needed for the cases they refuse. Its form is not
+    decided yet. One reading is that every refused case is accounted for as "refused
+    by rule X", never counted as a miss, and is revisited.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

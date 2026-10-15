@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from fuzzlab.core import get_logger
+from fuzzlab.core import get_logger, sendpolicy
 from fuzzlab.core.urls import (canonical_origin, document_key, in_origin_scope, origin_scope,
                                url_key)
 from fuzzlab.tools import navguard, spa
@@ -592,7 +592,7 @@ class LocalSpider:
         never sees: a hash navigation sends no request (FR-CRAWL-12)."""
         if url_key(url) in self._allow and spa.spa_fragment(url) is None:
             return None
-        reason = spa.route_destructive_reason(url)
+        reason = sendpolicy.destructive(spa.route_destructive_reason(url))
         if reason is not None and url not in self.skipped_destructive:
             self.skipped_destructive[url] = reason
             logging.info(f"skipped destructive link {url} ({reason!r})")
@@ -1739,7 +1739,7 @@ class LocalSpider:
             if sig in self._submitted_sigs:
                 continue
             self._submitted_sigs.add(sig)
-            why = spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
+            why = spa.form_refusal(form, route, named=named)
             if why:
                 self.spa_counts["forms_refused"] += 1
                 logging.info(f"SPA form on {page_url} not submitted: {why}")
@@ -2279,7 +2279,7 @@ class LocalSpider:
             if sig in self._submitted_sigs:
                 continue
             self._submitted_sigs.add(sig)
-            why = (spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
+            why = (spa.form_refusal(form, route, named=named)
                    or ("a password form (submitted only unauthenticated; not from a "
                        "reveal)" if spa.has_password(form) else None))
             if why:
@@ -2817,6 +2817,7 @@ def build_parser():
                         "read without a route). On with SPA routes in the Playwright "
                         "engine: every such load runs inside the reveal window, which "
                         "lets only safe GETs through (FR-CRAWL-17).")
+    sendpolicy.add_arguments(p)              # D71: lab-only off-switches for three rules
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
@@ -2864,6 +2865,7 @@ def session_manager_for(args):
 def parse_args(argv=None):
     p = build_parser()
     args = p.parse_args(argv)
+    sendpolicy.apply(args)                   # D71, before any side effect
     if args.auth_origin:                 # a usage error before any side effect (R5)
         from fuzzlab.session.manager import parse_auth_origins
         from fuzzlab.tools.authhttp import scope_hosts_for

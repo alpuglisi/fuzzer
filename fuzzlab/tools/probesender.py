@@ -14,6 +14,7 @@ from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
+from fuzzlab.core import sendpolicy
 from fuzzlab.core.urls import (DestructiveUrlRefused, canonical_origin, check_send_url,
                                to_path, transaction_reason, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
@@ -113,9 +114,9 @@ def prg_target(probe: Probe, url: str, method: str,
         check_send_url(target, explicit, method="GET")
     except DestructiveUrlRefused:
         return None, _skipped("destructive target")
-    if transaction_reason(target) is not None:
+    if sendpolicy.transaction(transaction_reason(target)) is not None:
         return None, _skipped("transaction target")
-    if account_endpoint_reason(target) is not None:
+    if sendpolicy.credential_change(account_endpoint_reason(target)) is not None:
         return None, _skipped("account target")
     if redirect_is_logout(location, url, None):
         return None, _skipped("login page")

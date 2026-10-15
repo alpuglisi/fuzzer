@@ -222,6 +222,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     handshake's any-port scope, the WebSocket residual and the missing CLI flag of the
     first fix are superseded by R1, R3 and R5.)*
 - **FR-SESS-19 (browser login for single-page apps, CC-SESS-0021)**
+  - **The send-rule flags never change a login (D71, CC-SESS-0026).** The login form
+    choice (`login_form_refusal`, `form_refusal(strict=True)`), the login window's
+    route guard (`guard_page(strict=True)`), the login-page candidates and the identity
+    probe use the destructive, transaction and credential-change rules directly,
+    whatever `--allow-destructive-routes`, `--allow-transactions` or
+    `--allow-credential-changes` say (FR-CORE-45).
   - **When.** Only as a fallback (detection only, D13): `_login` found no
     server-rendered login form and no Basic challenge, and the manager may use a
     browser (`SessionManager(browser_login=...)`; default on when the manager's fetches

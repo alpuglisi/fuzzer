@@ -10,7 +10,8 @@
   re-adopts the browser state once, a second one stops reveals.
 * **G1 (FR-CRAWL-15).** On a named route, invalid controls get ladder values (all
   fillers, none identifier-like) until the button is enabled; sensitive controls, object
-  selectors, identifier options, gated checkboxes and CAPTCHA forms are refused.
+  selectors, identifier options and gated checkboxes are refused. A CAPTCHA form is
+  submitted like any other since the owner dropped that rule (D71).
 * **G2 (FR-CRAWL-16).** Menus, dialogs and drawers are opened (gated labels, cards by
   their own ``el.click()``), what they reveal is queued through the normal gates, and the
   window closes with Escape and a reload.
@@ -378,15 +379,18 @@ def test_g1_never_fills_a_sensitive_or_credential_control(name, sensitive):
     assert bool(spa.g1_sensitive([name])) is sensitive
 
 
-@pytest.mark.parametrize("form,refused", [
-    ({"controls": [["captchaControl", "text"]], "hints": []}, True),
-    ({"controls": [["q", "text"]], "hints": ["g-recaptcha"]}, True),
-    ({"controls": [["q", "text"]], "hints": ["https://h/recaptcha/api2/anchor"]}, True),
-    ({"controls": [["q", "text"]], "hints": [], "challenge": True}, True),
-    ({"controls": [["comment", "textarea"]], "hints": ["capture", "captain"]}, False),
+@pytest.mark.parametrize("form", [
+    {"controls": [["captchaControl", "text"]], "hints": []},
+    {"controls": [["q", "text"]], "hints": ["g-recaptcha"]},
+    {"controls": [["q", "text"]], "hints": ["https://h/recaptcha/api2/anchor"]},
+    {"controls": [["q", "text"]], "hints": [], "challenge": True},
 ])
-def test_captcha_forms_are_refused(form, refused):
-    assert bool(spa.captcha_reason(form)) is refused
+def test_a_captcha_form_is_not_refused(form):
+    """D71: the owner dropped the CAPTCHA rule. Nothing solves the CAPTCHA; the form is
+    submitted like any other and the app's answer is recorded."""
+    form = dict(form, button="Send", button_aria="", action=None)
+    assert spa.form_refusal(form, "contact", named=None) is None
+    assert not hasattr(spa, "captcha_reason")
 
 
 def test_caps_are_positive_constants():
@@ -677,10 +681,11 @@ def test_g1_an_unsatisfiable_pattern_is_not_submittable_with_the_reason(g1):
     assert sp.spa_counts["g1_forms_unsatisfiable"] >= 1
 
 
-def test_g1_a_captcha_form_is_refused(g1):
+def test_g1_a_captcha_form_is_submitted(g1):
+    """D71: a CAPTCHA form on a named route is filled and submitted like any other."""
     lab, _sp, _db, logs = g1
-    assert "/api/sent/g1captcha" not in _paths(lab)
-    assert any("g1captcha not submitted: CAPTCHA form" in ln for ln in logs)
+    assert "/api/sent/g1captcha" in _paths(lab), logs
+    assert not any("CAPTCHA form" in ln for ln in logs)
 
 
 def test_g1_a_saved_card_picker_is_never_chosen_in(g1):

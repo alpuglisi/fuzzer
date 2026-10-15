@@ -281,6 +281,8 @@ plugin registry. It is the layer that makes the store the integration bus.
     allowance. `check_send_url(url, explicit)` raises `DestructiveUrlRefused`.
   - **Users:** the crawler and auditor (NFR-CRAWL-safe), every probe sender
     (FR-FUZZ-40), and login discovery's hop check (FR-SESS-13).
+  - **Off-switch (D71, FR-CORE-45):** `--allow-destructive-routes` turns the refusals
+    built on this rule off for a lab run; login discovery keeps it.
 
 - **FR-CORE-29** *(forms; `CC-CORE-0039`, 2026-10-13).*
   - `core/forms.form_record` describes a scraped form: action, method, enctype,
@@ -387,6 +389,30 @@ plugin registry. It is the layer that makes the store the integration bus.
     blanked to `name=`, and a SPA-route fragment's query redacted the same way.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
+
+- **FR-CORE-45** *(which send rules a run enforces; `CC-CORE-0062`, 2026-10-15, D71).*
+  - `core/sendpolicy.py` is the one switch for three rules: **destructive**
+    (`destructive_reason` / `text_destructive_reason`, FR-CORE-28), **transactions**
+    (`transaction_reason`) and **credential changes**
+    (`store_adapter.credential_change_rule`, plus the reveal window's account and
+    credential GET tokens and the importer's non-login password forms). All three are
+    enforced by default.
+  - `--allow-destructive-routes`, `--allow-transactions` and `--allow-credential-changes`
+    (on `crawl`, `audit`, `auto` / `scan` / `train run` and `greybox-run`) each turn one
+    off for that run, lab-only. The state is the `FUZZLAB_SEND_POLICY_OFF` environment
+    variable, set by the command from its own flags (`sendpolicy.apply`) and cleared by
+    `fuzzlab.cli.main`, so a browser worker or subprocess sees the same policy and a
+    stray value is never inherited.
+  - The rule functions stay pure classifiers. Every **refusal** passes its reason
+    through `sendpolicy.destructive` / `transaction` / `credential_change`.
+  - The **login flow keeps all three**: `browserlogin.login_form_refusal`
+    (`form_refusal(..., strict=True)`), the login window's guard
+    (`guard_page(..., strict=True)`), the login-page candidates, the identity probe and
+    `SessionManager._navigation_ok`.
+  - A `DELETE` send stays refused with the destructive rule off (`check_send_url`).
+  - Enforced by: `tests/test_send_policy.py` (each rule on and off at its refusal sites,
+    independence, the login flow kept strict, the stray-environment clear, the flags on
+    every traffic command).
 
 - **FR-CORE-41** *(a started server is up only when it owns its port; `CC-CORE-0057`,
   2026-10-15, BUG-0143).*

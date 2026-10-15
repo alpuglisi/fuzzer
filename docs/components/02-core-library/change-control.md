@@ -3,6 +3,68 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0062 — One switch for three send rules; the CAPTCHA rule dropped (2026-10-15)
+- Goal / acceptance: the owner's D71 decision. The CAPTCHA rule is gone. The
+  destructive, transaction and credential-change rules stay enforced by default, and
+  each can be turned off for one lab run with its own flag, without changing how a
+  login is found. Accepted when each rule refuses by default and passes with its flag
+  at every refusal site; when turning one off leaves the others on; when the login
+  flow keeps all three with every flag given; and when a stray environment value is
+  never inherited.
+- Change:
+  - **New `fuzzlab/core/sendpolicy.py`:** `add_arguments`, `apply`, `enforced`, and the
+    `destructive` / `transaction` / `credential_change` filters. The state is held in
+    `FUZZLAB_SEND_POLICY_OFF`.
+  - **Refusal sites swept**, each passing its reason through the switch:
+    - `core.urls.check_send_url`;
+    - `harness.auto` (crawl and header points, the header estimate);
+    - `tools.spa` (`classify_route`, `form_refusal` with a new `strict`, `label_refusal`,
+      `window_request_refusal`, `query_url_refusal`);
+    - `tools.spider._destructive`;
+    - `tools.navguard.make_route_handler` / `guard_page` (new `strict`);
+    - `tools.fetcher` (spider-DB skip, redirect hops);
+    - `tools.formnav` (action, options, redirect);
+    - `tools.probesender` (PRG target);
+    - `tools.store_adapter` (`entries_refusal`, `form_skip_reason`, `request_refusal`,
+      `body_refusal`).
+  - **Login kept strict:** `browserlogin.login_form_refusal` and the login window call
+    with `strict=True`. Login candidates, the identity probe and
+    `SessionManager._navigation_ok` are unchanged.
+  - **CAPTCHA:** `spa.captcha_reason` and `CAPTCHA_TOKENS` are removed, along with the
+    spider's two calls.
+  - **Flags** on `crawl`, `audit`, `auto` (and so `scan` and `train run`) and
+    `greybox-run`, classified in `cli_taxonomy`. `fuzzlab.cli.main` clears the variable.
+- Impact (other components / consumers / project):
+  - CRAWL (CC-CRAWL-0033), AUD (CC-AUD-0045), FUZZ (CC-FUZZ-0092), SESS (CC-SESS-0026)
+    and UI (CC-UI-0057). The rules' classifiers are unchanged (SP-09, SP-10, SP-11,
+    SP-19); new SP-35.
+  - With a flag given, a run may log itself out, delete or change lab data, or change
+    the lab user's password. Reset the lab between such runs.
+- Risk (class; consequence and exposure; mitigation or accepted-risk justification):
+  - High: it relaxes safety controls (QUALITY_POLICY §9). Exposure is limited to an
+    explicit lab-only flag on a command that already needs `--authorized`.
+  - Defaults are unchanged. The scope, origin, transport and loopback rules are
+    untouched. `DELETE` stays refused. The login flow stays strict. A stray
+    environment value is cleared at the top-level entry.
+  - Residual: a module run directly (`python -m fuzzlab.tools.spider`) also sets the
+    policy from its own flags (`parse_args`), but a library caller inherits the
+    process environment.
+- Hypothesis: none; this is an owner decision, not uncertain capability work. Its
+  detection effect (cases reached once a rule is off) is to be measured.
+- Verification / review: `scripts/verify_change.py --base 0063d5c`, and one combined
+  review (counts in CHANGELOG).
+- Deliverables:
+  - [x] sendpolicy owner and the sweep — done
+  - [x] CAPTCHA rule removed; its tests turned around — done
+  - [x] flags and taxonomy — done
+  - [x] tests (`tests/test_send_policy.py`) — done
+  - [ ] the reconciliation of cases these rules refuse (owner: "there will need to be
+    some reconciliation process") — todo, later
+- Rollback / recovery: revert the commit. Without a flag, the behaviour equals the
+  previous defaults minus the CAPTCHA rule.
+- Effectiveness (pending; control_status: implemented): judged by the next measured
+  lab run with and without the flags.
+
 ### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
 - Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
   subquery. It reads `runtarget.run_target_rows()` once per listing, the one reader the

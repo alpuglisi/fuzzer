@@ -3,6 +3,8 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0057 — The three D71 flags are classified in the CLI taxonomy; the top-level entry clears a stray policy (2026-10-15) — see CC-CORE-0062
+
 ### CC-UI-0056 — "Inconclusive" names a probe that got no response (BUG-0147) (2026-10-15)
 - Change: `fuzzlab/web/templates/run.html` and `fuzzlab/web/results.py`
   (`inconclusive_by`'s docstring and the coverage comment) define "inconclusive" as "a

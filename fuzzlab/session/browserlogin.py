@@ -198,7 +198,7 @@ def login_form_refusal(form: dict, route: str) -> str | None:
     why = credential_change_reason(shape)
     if why:
         return why
-    return form_refusal(form, route, named=None)
+    return form_refusal(form, route, named=None, strict=True)   # D71: login stays strict
 
 
 def account_endpoint_reason(url: str) -> str | None:
@@ -533,7 +533,8 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
             context = browser.new_context(service_workers="block")
             guard_page(context, allow=frozenset({url_key(base_url)}),
                        in_scope=gate.in_scope, on_out_of_scope=gate.note_out_of_scope,
-                       request_refusal=gate.request_refusal, observe=gate.observe)
+                       request_refusal=gate.request_refusal, observe=gate.observe,
+                       strict=True)              # D71: the flags never change a login
             page = context.new_page()
             inflight = _Inflight(page)
             page.on("dialog", lambda d: d.dismiss())    # an app's alert is never ours

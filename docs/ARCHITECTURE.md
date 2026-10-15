@@ -1161,6 +1161,10 @@ tracked in the requirements files, not here.
   run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
   normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
   `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
+- **Send-rule switch** `[built]` (CC-CORE-0062, FR-CORE-45, D71): `core/sendpolicy.py`
+  decides whether the destructive, transaction and credential-change refusals apply in
+  this run. All three are on by default; each has a lab-only `--allow-…` flag. The
+  login flow keeps them.
 - **A run's recorded target** `[built]` (CC-CORE-0500, FR-CORE-500): `core/runtarget.py`
   is the one reader of the `target` table -- a run's target is its first row by id, its
   origin `canonical_origin(base_url)`; ML, the report, the run page, finding detail, the

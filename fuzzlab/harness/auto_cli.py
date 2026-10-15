@@ -140,14 +140,18 @@ def build_parser() -> argparse.ArgumentParser:
                         "targets. DELETE is never imported.")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    from fuzzlab.core import sendpolicy
+    sendpolicy.add_arguments(p)              # D71: lab-only off-switches for three rules
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
 
 
 def main(argv: list[str]) -> int:
+    from fuzzlab.core import sendpolicy
     p = build_parser()
     args = p.parse_args(argv)
+    sendpolicy.apply(args)
 
     if args.dry_run:
         from fuzzlab.cli_dryrun import report

@@ -32,6 +32,7 @@ from urllib.parse import urljoin, urlsplit
 
 from fuzzlab.core.forms import FormEntries
 from fuzzlab.core.redaction import name_tokens
+from fuzzlab.core import sendpolicy
 from fuzzlab.core.urls import destructive_reason, text_destructive_reason, url_key
 
 #: A select or control named with one of these words configures something. Shared by
@@ -99,7 +100,7 @@ def refusal(record: dict, named: frozenset[str], allow_get: bool,
     action = record["action_url"]
     if not in_scope(action):
         return "action out of scope"
-    reason = destructive_reason(action)
+    reason = sendpolicy.destructive(destructive_reason(action))
     if reason:
         return f"action is destructive ({reason!r})"
     return None
@@ -111,7 +112,7 @@ def option_refusal(value: str, label: str) -> str | None:
         word = settings_word(text)
         if word:
             return f"settings word {word!r}"
-        reason = text_destructive_reason(text)              # never via a URL (BUG-0131)
+        reason = sendpolicy.destructive(text_destructive_reason(text))   # BUG-0131
         if reason:
             return f"destructive ({reason!r})"
     return None
@@ -155,7 +156,7 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
             log(f"selector {select!r}: non-redirect response {status}; stopped")
             break
         target = urljoin(record["action_url"], location).split("#")[0]
-        if not in_scope(target) or destructive_reason(target):
+        if not in_scope(target) or sendpolicy.destructive(destructive_reason(target)):
             log(f"selector {select!r}: redirect to {urlsplit(target).path} refused; stopped")
             break
         if url_key(target) in own:

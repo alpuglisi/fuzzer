@@ -214,13 +214,14 @@ def _crawl_url_refusal(url: str) -> str | None:
     ``#`` inside it hides nothing (``/#/a#/logout``; BUG-0131, CC-FUZZ-0077)."""
     from urllib.parse import urlsplit
 
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.urls import (destructive_reason, is_spa_route_fragment,
                                    text_destructive_reason)
     reason = destructive_reason(url)
     fragment = urlsplit(url or "").fragment
     if reason is None and is_spa_route_fragment(fragment):
         reason = text_destructive_reason(fragment)
-    return reason
+    return sendpolicy.destructive(reason)
 
 
 def injection_points_from_store(store, run_id: int, base_url: str,
@@ -373,6 +374,7 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
     (`core.http.header_point_refusal`)."""
     from urllib.parse import urlencode, urlsplit
 
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.forms import first_link_set
     from fuzzlab.core.urls import destructive_reason
     parts = urlsplit(base_url)
@@ -387,7 +389,7 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
         if path in seen or not _header_page(r["status"]):
             continue
         seen.add(path)
-        reason = destructive_reason(origin + path)
+        reason = sendpolicy.destructive(destructive_reason(origin + path))
         if reason is not None:
             if skipped is not None:
                 skipped.extend((path, "GET", name, f"destructive URL ({reason!r})")
@@ -410,6 +412,7 @@ def header_point_estimate(spider_db, names) -> tuple[int, int]:
     from pathlib import Path
     from urllib.parse import quote
 
+    from fuzzlab.core import sendpolicy
     from fuzzlab.core.urls import destructive_reason, to_path
     path = Path(spider_db)
     if not path.exists():
@@ -422,7 +425,8 @@ def header_point_estimate(spider_db, names) -> tuple[int, int]:
     finally:
         conn.close()
     pages = {to_path(url) for url, status in rows if _header_page(status)}
-    pages = {p for p in pages if destructive_reason(p) is None}   # as the builder checks
+    pages = {p for p in pages                                     # as the builder checks
+             if sendpolicy.destructive(destructive_reason(p)) is None}
     return len(pages), len(pages) * len(names) * header_point_cost()
 
 

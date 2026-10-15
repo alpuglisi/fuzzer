@@ -1483,7 +1483,11 @@ rewards) derives from it.
 - **NFR-FUZZ-deterministic** Given the same target state and inputs, oracle
   verdicts are reproducible (state reset via snapshot/restore between iterations).
 - **NFR-FUZZ-safe** Destructive payload classes off by default; auth endpoints
-  excluded from scope; no traffic off localhost.
+  excluded from scope; no traffic off localhost. *(D71, CC-FUZZ-0092:)* the destructive
+  URL, transaction and credential-change refusals of crawl points, header points and
+  the probe send gate can each be turned off for a lab run (FR-CORE-45); destructive
+  *payloads* keep their own `--allow-destructive` gate, and a `DELETE` send stays
+  refused.
   - Clause (in-app login forms; FR-FUZZ-44, CC-FUZZ-0064): the run's session is never
     sent to a path with an in-app login form **for store-sourced (crawl) points in
     `fuzzlab auto`**; such sends use an isolated session or none, and credential-change
@@ -1881,7 +1885,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     `reset`, `update`, `edit`, `modify`, `register`, `signup`, `create`, `forgot`,
     `recover`, `activate`, `password`, `passwd`, `pwd`, `pass`, `save`, `admin`,
     `manage`, `account`, `profile` or `users`; or a hidden object selector. Other
-    password forms (settings, CAPTCHA) are not imported either.
+    password forms (settings, CAPTCHA) are not imported either. *(D71, CC-FUZZ-0092:)*
+    `--allow-credential-changes` imports both kinds for a lab run (FR-CORE-45); a
+    password control is still never a point (below).
   - **The password is never fuzzed:** a password control is never a parameter, whatever
     its name, and no parameter on that path with a password-control name is a point.
     Its sibling value is `""`, as stored; the operator's password is never sent there.

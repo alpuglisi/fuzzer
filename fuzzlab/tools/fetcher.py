@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urljoin, parse_qsl
 import requests
 from bs4 import BeautifulSoup
 
-from fuzzlab.core import get_logger
+from fuzzlab.core import get_logger, sendpolicy
 from fuzzlab.core.forms import default_value
 from fuzzlab.core.urls import (canonical_origin, destructive_reason, in_origin_scope,
                                origin_scope)
@@ -183,7 +183,7 @@ def load_urls(spider_db="spider_results.db"):
         # spider DB written before the crawler gained its deny-list.
         kept = []
         for url, source in rows:
-            reason = destructive_reason(url)
+            reason = sendpolicy.destructive(destructive_reason(url))
             if reason is not None:
                 logging.info(f"skipped destructive URL {url} ({reason!r})")
                 continue
@@ -489,7 +489,7 @@ class ContentFetcher:
         origin = canonical_origin(url)
         resp = get_checked(self.session, url, self.timeout_ms / 1000,
                            lambda nxt: canonical_origin(nxt) == origin
-                           and destructive_reason(nxt) is None)
+                           and sendpolicy.destructive(destructive_reason(nxt)) is None)
         return resp.status_code, resp.headers.get('Content-Type', ''), resp.text, []
 
 
@@ -913,13 +913,18 @@ def build_parser():
     p.add_argument("--base-url", default=None,
                    help="Target base URL for authentication (required with --identity), "
                         "e.g. http://localhost:8080")
+    from fuzzlab.core import sendpolicy
+    sendpolicy.add_arguments(p)              # D71: lab-only off-switches for three rules
     from fuzzlab.cli_dryrun import add_dry_run_flag
     add_dry_run_flag(p)
     return p
 
 
 def parse_args():
-    return build_parser().parse_args()
+    from fuzzlab.core import sendpolicy
+    args = build_parser().parse_args()
+    sendpolicy.apply(args)
+    return args
 
 
 def print_summary(conn, out_name):

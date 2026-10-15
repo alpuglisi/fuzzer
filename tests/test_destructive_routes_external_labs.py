@@ -20,7 +20,7 @@ compute it:
 * ``form``     -- a crawled server-rendered form: `store_adapter.form_skip_reason`, on
   the app's own markup;
 * ``spa-form`` -- a single-page app form the crawler would submit:
-  `spa.form_refusal` then `spa.captcha_reason`, as the spider calls them.
+  `spa.form_refusal`, as the spider calls it (no CAPTCHA rule since D71).
 
 A route no gate refuses is listed as a ``residual`` with what it changes and why that
 is accepted, and its verdict is pinned to None so the row is revisited the day a rule
@@ -88,7 +88,7 @@ def _captured(method: str, url: str, content_type: str | None, body: dict | None
 
 def _spa_form(controls, route: str, button: str = "Submit") -> str | None:
     form = {"controls": controls, "button": button, "button_aria": "", "action": None}
-    return spa.form_refusal(form, route, named=None) or spa.captcha_reason(form)
+    return spa.form_refusal(form, route, named=None)
 
 
 @dataclass(frozen=True)
@@ -104,8 +104,8 @@ class Route:
 
 # --- Juice Shop (source: juice-catalogue-notes.md, server.ts routes) -----------------
 # The SPA's own change-password form (change-password.component.html: three password
-# controls on route /privacy-security/change-password) and contact form (a captcha
-# control): the crawler refuses to submit either, so their XHRs are never captured.
+# controls on route /privacy-security/change-password), refused, so its XHR is never
+# captured; and the contact form (a captcha control), submitted since D71.
 _JUICE_CHANGE_PASSWORD_SPA = [("ng.form0.currentPassword", "password"),
                               ("ng.form0.newPassword", "password"),
                               ("ng.form0.newPasswordRepeat", "password")]
@@ -199,7 +199,9 @@ JUICE_ROUTES = [
           "refused"),
     Route("juice", "POST", JUICE + "/api/Feedbacks",
           "creates a feedback row (CAPTCHA-gated)", "spa-form",
-          lambda: _spa_form(_JUICE_FEEDBACK_SPA, "contact"), "refused"),
+          lambda: _spa_form(_JUICE_FEEDBACK_SPA, "contact"),
+          "residual: the owner dropped the CAPTCHA rule (D71); a feedback row is "
+          "ordinary lab data, and the app rejects a wrong CAPTCHA answer itself"),
     Route("juice", "GET", JUICE + "/rest/user/change-password?current=a&new=b&repeat=b",
           "changes the bearer's password (changePassword.ts; current optional)",
           "spa-form", lambda: _spa_form(_JUICE_CHANGE_PASSWORD_SPA,

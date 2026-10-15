@@ -21,7 +21,8 @@ Pure helpers, testable without a browser; `tools/spider.py` wires them:
 * **forms phase 4** (FR-CRAWL-15/16) -- `window_request_refusal` (what the reveal
   window lets through), the label gate (`label_refusal`, `reveal_refusal`,
   `submitter_glyph`), constraint-aware filling (`g1_candidates`, `g1_sensitive`,
-  `select_refusal`, `checkbox_refusal`, `captcha_reason`) and the page-side scripts
+  `select_refusal`, `checkbox_refusal`; CAPTCHA forms are no longer refused, D71)
+  and the page-side scripts
   (`G1_READ_JS`, `PATTERN_TEST_JS`, `REVEAL_JS`, `MENU_ITEMS_JS`). `tools/spider.py`
   holds the window's state and runs them.
 * **route query parameters** (FR-CRAWL-17, forms phase 5) -- `scan_script` reads routes
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from fuzzlab.core.redaction import is_sensitive_name, name_tokens
+from fuzzlab.core import sendpolicy
 from fuzzlab.core.urls import (canonical_origin, destructive_reason, text_destructive_reason,
                                transaction_reason)
 
@@ -185,7 +187,7 @@ def classify_route(path: str) -> tuple[str, str | None]:
         return ROUTE_TRANSPORT, None
     if "*" in route or any(seg.startswith(":") for seg in route.split("/")):
         return ROUTE_PARAM, route
-    reason = destructive_reason("/" + route)
+    reason = sendpolicy.destructive(destructive_reason("/" + route))
     if reason:
         return ROUTE_DESTRUCTIVE, reason
     return ROUTE_OK, None
@@ -303,7 +305,8 @@ def _words(text: str) -> set[str]:
     return {t.lower() for t in name_tokens(text or "")}
 
 
-def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str | None:
+def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
+                 strict: bool = False) -> str | None:
     """Why this SPA form must never be submitted, or None (FR-CRAWL-13).
 
     ``form``: ``{"controls": [(name, kind)], "button": label, "button_aria": label,
@@ -319,14 +322,22 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
     destructive, settings-like or transaction route, button label, action or control
     name; a form with ``<input type=file>``; a credential-change form
     (`store_adapter.credential_change_reason`); a form whose only input is a one-time
-    code (2FA/TOTP)."""
+    code (2FA/TOTP).
+
+    The destructive, transaction and credential-change parts follow `core.sendpolicy`
+    (D71: each can be turned off for a lab run); ``strict`` keeps all three, for the
+    login flow's choice of a login form (`browserlogin.login_form_refusal`)."""
     from fuzzlab.tools.formnav import settings_word
     from fuzzlab.tools.store_adapter import credential_change_reason
+    keep = (lambda r: r) if strict else None
+    destructive = keep or sendpolicy.destructive
+    transaction = keep or sendpolicy.transaction
+    credential = keep or sendpolicy.credential_change
     if named and normalise_route(route) not in named:
         return f"route {route!r} not named by the operator"
     label = form.get("button") or ""
     aria = form.get("button_aria") or ""
-    glyph = submitter_glyph(form.get("button_icons") or "", label, aria)
+    glyph = destructive(submitter_glyph(form.get("button_icons") or "", label, aria))
     if glyph:
         return f"destructive button icon ({glyph!r})"
     # the button is refused when EITHER its visible text (icons removed) or its
@@ -334,26 +345,27 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
     for where, text in (("route", "/" + normalise_route(route)), ("button", label),
                         ("button aria-label", aria)):
         # a label is a text, never embedded in a URL: a '#' would hide the rest (BUG-0131)
-        reason = (text_destructive_reason(text) if where != "route"
-                  else destructive_reason(text) or text_destructive_reason(text))
+        reason = destructive(text_destructive_reason(text) if where != "route"
+                             else destructive_reason(text) or text_destructive_reason(text))
         if reason:
             return f"destructive {where} ({reason!r})"
         word = settings_word(text)
         if word:
             return f"settings-like {where} ({word!r})"
-        word = transaction_reason(text)
+        word = transaction(transaction_reason(text))
         if word:
             return f"transaction {where} ({word!r})"
     action = form.get("action")
     if action:
-        reason = route_destructive_reason(action) or transaction_reason(action)
+        reason = destructive(route_destructive_reason(action)) \
+            or transaction(transaction_reason(action))
         if reason:
             return f"destructive or transaction action ({reason!r})"
     kinds = [k for _n, k in form["controls"]]
     if kinds.count("file"):
         return "form with a file input"
     for name, _kind in form["controls"]:
-        reason = text_destructive_reason(name)                  # BUG-0131
+        reason = destructive(text_destructive_reason(name))     # BUG-0131
         if reason:
             return f"destructive control {name!r} ({reason!r})"
         word = settings_word(name)
@@ -364,7 +376,7 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None) -> str
              + [(label, "submit"), (aria, "submit")],
              "action_url": "/" + normalise_route(route),
              "entries": [(label, label), (aria, aria)]}
-    reason = credential_change_reason(shape)
+    reason = credential(credential_change_reason(shape))
     if reason:
         return reason
     typed = [(n, k) for n, k in form["controls"] if fillable(k)]
@@ -535,8 +547,8 @@ FORMS_JS = r"""
       ids.push(id);
       autocomplete.push(el.getAttribute('autocomplete') || '');
     });
-    // CAPTCHA hints (G1e): the attribute values and label texts of the container, judged
-    // by whole token in Python (`captcha_reason`); a canvas is an image challenge
+    // container hints (G1e): the attribute values and label texts of the container, and
+    // a canvas challenge -- recorded only; no CAPTCHA form is refused since D71
     const hints = [];
     for (const el of [c, ...c.querySelectorAll('*')].slice(0, 400)) {
       for (const a of ['id', 'class', 'name', 'aria-label', 'placeholder',
@@ -595,13 +607,14 @@ def label_refusal(text: str | None) -> str | None:
     from fuzzlab.session.browserlogin import _account_hit       # the one account rule
     from fuzzlab.tools.formnav import settings_word
     text = text or ""
-    reason = text_destructive_reason(text) or text_destructive_reason(_base_forms(text))
+    reason = sendpolicy.destructive(text_destructive_reason(text)
+                                    or text_destructive_reason(_base_forms(text)))
     if reason:
         return f"destructive ({reason!r})"
     word = settings_word(text)
     if word:
         return f"settings-like ({word!r})"
-    word = transaction_reason(text)
+    word = sendpolicy.transaction(transaction_reason(text))
     if word:
         return f"transaction ({word!r})"
     word = _account_hit(text)
@@ -629,24 +642,10 @@ def reveal_refusal(labels) -> str | None:
     return None
 
 
-# --- CAPTCHA (G1e) ---------------------------------------------------------------------
-#: A form whose controls or labels carry one of these tokens has a CAPTCHA: refused.
-CAPTCHA_TOKENS = frozenset({"captcha", "recaptcha", "hcaptcha", "turnstile"})
-
-
-def captcha_reason(form: dict) -> str | None:
-    """Why ``form`` is a CAPTCHA form (never submitted; no CAPTCHA is solved, G1e), or
-    None: a control name or a container hint (`FORMS_JS` ``hints``: attribute values and
-    label texts) with a `CAPTCHA_TOKENS` token (whole tokens), or a ``<canvas>``
-    challenge in the container."""
-    if form.get("challenge"):
-        return "CAPTCHA form (a canvas challenge)"
-    texts = [n for n, _k in form.get("controls") or []] + list(form.get("hints") or [])
-    for text in texts:
-        hit = {t.lower() for t in name_tokens(text or "")} & CAPTCHA_TOKENS
-        if hit:
-            return f"CAPTCHA form ({sorted(hit)[0]!r})"
-    return None
+# --- CAPTCHA (G1e): dropped by the owner (D71) -------------------------------------------
+# A CAPTCHA form is submitted like any other form: no CAPTCHA is solved, and the app's
+# answer to a wrong one is recorded like any other response. `FORMS_JS` still reports
+# a container's ``hints`` and a ``challenge`` canvas; nothing refuses on them.
 
 
 # --- G1: the constraint-aware ladder (FR-CRAWL-15) ---------------------------------------
@@ -896,22 +895,23 @@ def window_request_refusal(method: str, url: str, navigation: bool) -> str | Non
     method = (method or "").upper()
     if method not in ("GET", "HEAD"):
         return f"a {method or '(no method)'} request"
-    reason = route_destructive_reason(url)
+    reason = sendpolicy.destructive(route_destructive_reason(url))
     if reason:
         return f"a destructive GET ({reason!r})"
-    reason = transaction_reason(url)
+    reason = sendpolicy.transaction(transaction_reason(url))
     if reason:
         return f"a transaction GET ({reason!r})"
     parts = urlsplit(url or "")
     names = [unquote_plus(p.partition("=")[0]) for p in parts.query.split("&") if p]
     toks = {t.lower() for n in [unquote_plus(parts.path), *names] for t in name_tokens(n)}
     hit = toks & CREDENTIAL_TOKENS
-    if hit:
+    if hit and sendpolicy.enforced(sendpolicy.CREDENTIAL_CHANGES):
         return f"a credential token in a GET ({sorted(hit)[0]!r})"
     text = unquote_plus(parts.path) + " " + unquote_plus(parts.query)
     words = [t.lower() for t in name_tokens(text)]
     word = next((t for t in words if t in ACCOUNT_PATH_TOKENS), None) or (
         "sign up" if ("sign", "up") in set(zip(words, words[1:])) else None)
+    word = sendpolicy.credential_change(word)
     if word:
         return f"an account action in a GET ({word!r})"
     return None
@@ -1831,7 +1831,7 @@ def query_url_refusal(url: str) -> str | None:
     then the reveal window's own rule (`window_request_refusal` as a GET, not a
     navigation) on the URL and on its route fragment's path and query, which a hash URL
     hides from that rule."""
-    reason = route_destructive_reason(url)
+    reason = sendpolicy.destructive(route_destructive_reason(url))
     if reason:
         return f"destructive ({reason!r})"
     why = window_request_refusal("GET", url, False)

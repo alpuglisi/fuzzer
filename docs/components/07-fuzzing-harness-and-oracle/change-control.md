@@ -3,6 +3,8 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0092 — Crawl/header points and the probe send gate follow the send-policy switch; flags on auto and greybox-run (2026-10-15) — see CC-CORE-0062
+
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
 - Change:
   - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no

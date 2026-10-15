@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (D71: CAPTCHA rule dropped; off-switches for three send rules)
+- **What:**
+  - The crawler no longer refuses CAPTCHA forms; `spa.captcha_reason` is removed.
+  - `fuzzlab/core/sendpolicy.py` is the one switch for the destructive, transaction and credential-change rules. All three stay on by default. Each refusal site passes its reason through the switch; the login flow keeps all three (`strict=True`).
+  - New lab-only flags on `crawl`, `audit`, `auto`/`scan`/`train run` and `greybox-run`: `--allow-destructive-routes`, `--allow-transactions`, `--allow-credential-changes`. A `DELETE` send stays refused.
+  - D71 also records PyGoat (try again to get an answer key) and the reconciliation process still to design (CC-CORE-0062, CC-CRAWL-0033, CC-AUD-0045, CC-FUZZ-0092, CC-SESS-0026, CC-UI-0057).
+- **Why:** the owner's decision. These rules were the agent's choices and cost findings (F-016); the owner keeps three of them, with an off-switch, until they are handled better.
+
 ## 2026-10-15 (lean quality policy adopted as a bounded pilot, D70)
 - **What:** the owner adopted the lean quality-control review, Revision 3 (`docs/quality/LEAN_QC_PROPOSAL_REV3.md`). The changes:
   - **New policy.** `docs/QUALITY_POLICY.md` is the operating policy: a risk-based review and verification route; ordinary defects vs formal CAPA; R1 (systemic-diagnosis trigger), R2 (evidence for design-critical assumptions) and R3 (capability-transfer acceptance); twelve control families.

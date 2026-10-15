@@ -3,6 +3,8 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0033 — CAPTCHA forms are submitted; the crawler's destructive, transaction and credential refusals follow the send-policy switch (2026-10-15) — see CC-CORE-0062
+
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
 - Change:
   - **`tools/navguard.py`:** the one way a guarded page is navigated (PA-0138):

@@ -247,7 +247,9 @@ budget where a vulnerability is plausible.
   - **Never imported** (counted `request_refused`, nothing stored): a method outside
     GET/POST/PUT/PATCH (DELETE included); PUT/PATCH unless `fuzzlab auto
     --fuzz-json-writes` is given (and the URL passes the next rules); a URL
-    `destructive_reason` or `transaction_reason` flags; a URL on another origin than
+    `destructive_reason` or `transaction_reason` flags (each rule can be turned off for a
+    lab run, `--allow-destructive-routes` / `--allow-transactions`, FR-CORE-45, D71); a
+    URL on another origin than
     the page that sent it; a content type other than JSON (`application/json`,
     `application/*+json`) or form-encoded; a body that is malformed, not an object,
     empty, over 64 leaves or 16 levels; a **credential-change body**

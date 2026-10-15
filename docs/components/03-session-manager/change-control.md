@@ -3,6 +3,8 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0026 — The login flow keeps every send rule whatever the D71 flags (strict guard and form choice) (2026-10-15) — see CC-CORE-0062
+
 ### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
 - Change: `session/browserlogin.py` `_drive` loads the base page and each login route
   through `navguard.navigate` (commit, then a bounded load cut short after a refused

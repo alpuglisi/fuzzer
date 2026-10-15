@@ -3,6 +3,8 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0045 — The importer's and auditor's destructive, transaction and credential refusals follow the send-policy switch (2026-10-15) — see CC-CORE-0062
+
 ### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch` navigates through
   `navguard.navigate` (commit, then a bounded load cut short after a refused navigation;
