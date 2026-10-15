@@ -64,7 +64,22 @@ note of the same date.
     test therefore failed on the *unmutated* tree, and the mutation script, which lacked
     a restore check, had counted that failing test as a killed mutation. The entry
     wrapping was fixed, and the script now also asserts the restored test passes.
-  - Clean-tree suite: COUNTS_PENDING.
+  - Clean-tree certification of `6e84ca6` (the final Phase 1 commit, a detached worktree):
+    - fast suite (`-m "not slow"`): **5667 passed, 22 skipped, 13 xfailed, 14 failed**. The 14
+      failures are exactly the baseline's on the untouched base `cdde39f` (5345 passed, 22
+      skipped, 7 xfailed, 14 failed): labgen `--check` end-to-end tests that need the
+      `gitleaks` binary, which this container lacks. There are no new failures;
+    - slow-marked tests in the 88 files that import a changed module or are path-scanning
+      guards (PA-0403): **1 passed**;
+    - the 21 browser test files with `FUZZLAB_REQUIRE_BROWSER=1`: **1015 passed, 4
+      skipped (none a browser skip, which that flag would fail), 2 xfailed**.
+    - Process notes:
+      - The first slow-phase attempt passed `tests/_no_ml_child.py` (a helper that
+        blocks `fuzzlab.ml` when imported) as a test path and errored at collection. It
+        was re-run with helpers excluded.
+      - During the re-run's slow phase, the earlier job's browser phase was still
+        running, so two pytest processes overlapped for a few minutes. Overlap can only
+        cause spurious failures, not passes; the browser phase reported above ran alone.
 
 ### CC-FUZZ-0401 — CLI Phase 1 code-review fixes: D-9 counts only effective choices; the engine opens the store printed (BUG-0401); `train models` via `import_ml` (BUG-0403) (2026-10-15)
 - Change (reviewers A and B, the clean-tree suite; `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` Appendix F):
@@ -127,7 +142,7 @@ note of the same date.
     working saved default, fail-closed copy, `store_default`, the empty target, the proxy
     `--export-ca` order, the session environment clear.
   - The 10 Phase 1 mutation checks still hold.
-  - Clean-tree suite: COUNTS_PENDING.
+  - Clean-tree suite: see CC-FUZZ-0402 (one certification run, of the final commit).
 
 ### CC-FUZZ-0400 — `fuzzlab train` (training/benchmark group) and the CLI taxonomy; default store for `reveal-holdout` / `flow-anomaly` (FR-FUZZ-400, FR-FUZZ-401) (2026-10-15)
 - Change:
