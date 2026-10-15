@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (D69: every request carries real browser headers)
+- **What:** `docs/DECISIONS_AND_ROADMAP.md` records D69: BUG-0119 (browser headers on every seam send) lands on its own, separated from the dropped SQLi gate, using the measured Chromium navigation or fetch set per request kind (JSON-SEND).
+- **Why:** the owner's decision.
+
 ## 2026-10-15 (D68: the owner drops the BUG-0118 SQLi send gate)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D68: the SQLi send gate (branch `bug-0118-v3`) is not merged. `docs/claude_juicelab_failures.md` gains F-051 (a ledger re-registration that tripped the progress guard's bug-chain trigger).
 - **Why:** the owner's decision. The gate refused Juice Shop's login SQLi (F-017).

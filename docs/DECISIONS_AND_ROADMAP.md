@@ -444,6 +444,19 @@ which the owner approved separately earlier ("Apply PA-0062"). It is not landed 
 drop. Whether BUG-0119 lands on its own is listed for the owner. Its navigation header
 set on JSON sends is a known defect (F-043).
 
+### D69 — Every request carries real browser headers (owner, 2026-10-15)
+
+**The owner's decision:** "We are maintaining the use of real browser headers for every
+request."
+- BUG-0119, that every seam send carries a browser's header set, lands on its own,
+  separated from the dropped SQLi gate (D68).
+- "Real" means the header set the real browser sends for that kind of request, as
+  measured from Chromium:
+  - the navigation set for page loads and form posts;
+  - the fetch/XHR set for API (JSON) calls (JSON-SEND, BUG-0152).
+- The caller's own headers always win. That includes a header point's value, and an
+  app's captured `Accept`.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
