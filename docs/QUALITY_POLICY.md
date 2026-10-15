@@ -243,9 +243,9 @@ The change record lives in the commit trailers and in one controlled entry.
   `feature`, `safety`, `process`, `docs`, `refactor` or `test`. `Risk:` is `low`,
   `medium` or `high`. Git reads trailers only from the message's final paragraph, so
   they go in the same block as `Co-Authored-By`. The Stop hook
-  `.claude/hooks/check_bookkeeping.py` checks the
-  trailers, and checks that a `defect` change or a bug report comes with its `ERROR_LOG.md`
-  entry (PA-0020 corrected; there is no keyword scan).
+  `.claude/hooks/check_bookkeeping.py` checks the trailers, and checks that a `defect`
+  change or a bug report comes with its `ERROR_LOG.md` entry (PA-0020 corrected; there is
+  no keyword scan).
 - **One controlled entry.** For a component change, that is its `change-control.md`
   entry. Its template has the fields `goal`, `acceptance`, `hypothesis`, `verification`,
   `review` and `control_status`, plus `rollback`. A multi-component change writes the
