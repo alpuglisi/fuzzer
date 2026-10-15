@@ -149,7 +149,8 @@ def test_the_scan_finds_the_known_implementations():
             ("fuzzlab.harness.auto", "_CountingSender"),
             ("fuzzlab.harness.auto", "_FragmentGuard"),               # forms phase 3
             ("fuzzlab.oracle.oracle", "_FormBoundSender"),
-            ("fuzzlab.oracle.oracle", "_PrgRun")} <= wrappers         # FR-FUZZ-49
+            ("fuzzlab.oracle.oracle", "_PrgRun"),                     # FR-FUZZ-49
+            ("fuzzlab.oracle.oracle", "_SessionNotes")} <= wrappers   # FR-SESS-20
 
 
 def test_every_seam_class_accepts_the_full_protocol_signature():

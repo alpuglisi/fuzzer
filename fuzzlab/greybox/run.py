@@ -31,6 +31,7 @@ from typing import Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
 from fuzzlab.core.store import MetricLogger
+from fuzzlab.core.urls import canonical_origin
 from fuzzlab.greybox.confirm import greybox_confirms
 from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
 from fuzzlab.greybox.recorder import record_attempt_signals
@@ -39,6 +40,7 @@ from fuzzlab.mutation.catalog import record_variant, refuse_destructive
 from fuzzlab.mutation.operators import default_operators
 from fuzzlab.mutation.semantics import SemanticsValidator
 from fuzzlab.oracle.probe import Probe, UnplaceableLocation
+from fuzzlab.session.manager import OUT_OF_ORIGIN
 
 DEFAULT_APP_ROOT = "/var/www/html"
 _SQL_ERR = re.compile(
@@ -102,7 +104,13 @@ class RequestsCorrelatingSender:
 
     Coverage/DB-fault correlation only needs the id header; authentication is optional
     (the lab's SQLi/XSS endpoints are reachable anonymously). Pass ``cookie`` to probe
-    an authenticated surface. ``id_factory`` is injectable for deterministic tests.
+    an authenticated surface, with ``cookie_origins``, the session's canonical origins
+    (`SessionManager.session_origins_for`): the cookie is attached only to a probe on
+    one of them; a probe on another origin (another port of the same host: another
+    app) goes out without it, is counted (`session_out_of_origin`) and its probe says
+    so (``Probe.session``; FR-SESS-20, BUG-0134). A cookie without origins is refused
+    at construction (fail closed). ``id_factory`` is injectable for deterministic
+    tests.
     """
 
     #: Operator-enumerated (ground-truth) URLs that may be probed even when they look
@@ -111,9 +119,13 @@ class RequestsCorrelatingSender:
 
     def __init__(self, *, header: str = "X-Fzl-Cov", timeout: float = 15.0,
                  cookie: str | None = None, cookie_secure_only: bool = False,
+                 cookie_origins: frozenset[str] | None = None,
                  id_factory: Callable[[], str] | None = None, session=None,
                  is_auth_endpoint: Callable[[str], bool] | None = None):
         import requests
+        if cookie and not cookie_origins:
+            raise ValueError("a session cookie needs the session's origins "
+                             "(cookie_origins; FR-SESS-20): it would be sent nowhere")
         self._requests = requests
         if session is None:
             from fuzzlab.core.http import DEFAULT_BROWSER_HEADERS
@@ -124,6 +136,9 @@ class RequestsCorrelatingSender:
         self._timeout = timeout
         self._cookie = cookie
         self._cookie_secure_only = cookie_secure_only    # BUG-0098: https-only cookie
+        self._cookie_origins = frozenset(cookie_origins or ())   # FR-SESS-20
+        #: probes sent without the cookie because their origin is not the session's
+        self.session_out_of_origin = 0
         self._id_factory = id_factory or (lambda: uuid.uuid4().hex)
         self._is_auth_endpoint = is_auth_endpoint
         self.auth_endpoint_anonymous_sends = 0
@@ -144,10 +159,14 @@ class RequestsCorrelatingSender:
             jar.clear()
         cid = self._id_factory()
         headers = {self._header: cid}
-        cookie = self._cookie
+        cookie, note = self._cookie, None
         if cookie and self._is_auth_endpoint is not None and self._is_auth_endpoint(url):
             cookie = None
             self.auth_endpoint_anonymous_sends += 1
+        if cookie and canonical_origin(url) not in self._cookie_origins:
+            # FR-SESS-20 (BUG-0134): another origin is another app: never its cookie
+            cookie, note = None, OUT_OF_ORIGIN
+            self.session_out_of_origin += 1
         if cookie:
             if self._cookie_secure_only and not url.lower().startswith("https:"):
                 from fuzzlab.session.manager import SessionAuthError
@@ -179,10 +198,11 @@ class RequestsCorrelatingSender:
         try:
             r = self._session.request(method.upper(), url, **kwargs)
             probe = Probe(status=r.status_code, text=r.text,
-                          elapsed=time.perf_counter() - start, headers=dict(r.headers))
+                          elapsed=time.perf_counter() - start, headers=dict(r.headers),
+                          session=note)
         except self._requests.RequestException as exc:
             probe = Probe(status=0, text=f"<request-error: {exc}>",
-                          elapsed=time.perf_counter() - start)
+                          elapsed=time.perf_counter() - start, session=note)
         return probe, cid
 
 
@@ -329,7 +349,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
                "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0,
                "mutation_variants_probed": 0, "mutation_variants_recorded": 0,
-               "destructive_refused": 0}
+               "destructive_refused": 0, "session_out_of_origin": 0}
 
     if lab_control is not None:
         lab_control.snapshot("baseline")
@@ -392,6 +412,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 "screening": screening,
                 "mutation_variant": spec.base is not None,
             }
+            if probe.session:                    # sent without the session (FR-SESS-20)
+                features["session"] = probe.session
             attempt_id = _insert_attempt(store, run_id, spec.family, features, reward)
             record_attempt_signals(
                 store, attempt_id,
@@ -399,6 +421,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 db_fault=fault.faulted, reward=reward)
 
             summary["attempts"] += 1
+            if probe.session:
+                summary["session_out_of_origin"] += 1
             _record_coverage_metric(coverage_metrics, summary["attempts"], frontier)
             summary["coverage_lines_seen"] += len(cov_lines)
             summary["max_reward"] = max(summary["max_reward"], reward)
@@ -437,6 +461,9 @@ def run_greybox(*, base_url: str, store, run_id: int,
     _record_metric(store, run_id, "greybox_m10_would_confirm",
                    summary["m10_would_confirm"])
     _record_metric(store, run_id, "greybox_frontier_size", frontier.size)
+    if summary["session_out_of_origin"]:                       # FR-SESS-20 (O2)
+        _record_metric(store, run_id, "greybox_session_out_of_origin",
+                       summary["session_out_of_origin"])
     if mutation_variants:
         _record_metric(store, run_id, "greybox_mutation_variants_probed",
                        summary["mutation_variants_probed"])

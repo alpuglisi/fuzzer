@@ -3,6 +3,30 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0042 — A failed load in the auditor's browser ends the previous page (BUG-0136 review, X1's twin) (2026-10-14)
+- Change: `tools/fetcher.py` `ContentFetcher.fetch`. When the rendered fetch of a URL
+  fails (a refused navigation, a timeout, anything), the page is sent to `about:blank`
+  before the static fallback (`contextlib.suppress(PlaywrightError)`). Before,
+  BUG-0136's ERR_ABORTED left the page shown before alive in the fetcher's one page;
+  its timers' requests went on and were listed in the next URL's `xhr_urls`.
+  `PlaywrightError` is imported with `sync_playwright`, with a stand-in when Playwright
+  is absent. Same fix as the crawler's X1 (CC-CRAWL-0028 amendment); BUG-0136's sweep
+  found it, and its row is marked fixed (added in review).
+- Impact: the auditor's XHR-derived surface is attributed to the page that made it. No
+  scope, session or interface change.
+- Risk: low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_navigation_aborts.py::test_the_auditors_failed_load_ends_the_previous_document`,
+    real Chromium: a 50 ms POST ticker on A, /go redirecting to /logout.php, then /next)
+    — done
+  - [x] mutation check — done
+  - [x] FR-AUD-18 traced in place; CHANGELOG — done
+- Effectiveness (assessed 2026-10-14): the test passed 10 of 10 repeated runs.
+  Mutation check: without the line it fails 3 of 3 (the page at the fallback is still
+  A). With that assertion moved last, the leak shows: 9 ticks reached the server after
+  the fallback's own request, and `/tick` was listed in `/next`'s XHRs. The related files (every test file importing `tools/browserexec.py` or `tools/fetcher.py`, the changed test files, the traceability guard, plus `test_oracle_browser.py` and `test_auto.py`; 16 files, FUZZLAB_REQUIRE_BROWSER=1): 866 passed, 2 xfailed, 0 skipped, 0 failed.
+
 ### CC-AUD-0040 — The auditor's browser adopts a browser login's localStorage (BUG-0132 sweep) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher._start_browser` creates its context with
   `browserauth.context_options(session)`, the one adoption helper the crawl uses now too

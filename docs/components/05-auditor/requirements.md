@@ -168,6 +168,12 @@ budget where a vulnerability is plausible.
   (`core.forms.default_value`): a select's selected or first option, a textarea's
   text, a checkbox's value or `on`. These values feed the value-based indicator
   rules.
+  *(CC-AUD-0042, BUG-0136 review:)* each URL's rendered result (its DOM and its XHR
+  list) comes from that URL's page only. When the browser cannot load a URL (a refused
+  navigation, a timeout), `ContentFetcher.fetch` sends its one page to `about:blank`
+  before the static fallback. The page shown before, which ERR_ABORTED leaves alive,
+  stops, and its requests are never listed under a later URL.
+  - Enforced by (a failed load ends the previous document; CC-AUD-0042): `ContentFetcher.fetch` — `tests/test_navigation_aborts.py::test_the_auditors_failed_load_ends_the_previous_document`
 
 - **FR-AUD-19** *(`CC-AUD-0031`, 2026-10-13).* A form point's candidate evidence
   carries its entry list (`"entries"`, secrets blank), so the oracle probes it with its

@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import logging
 import re
 import sqlite3
@@ -21,10 +22,14 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 # and inputs that are built by JavaScript are audited too. Without it, the
 # auditor falls back to fetching the raw HTML.
 try:
+    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
     _PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     _PLAYWRIGHT_AVAILABLE = False
+
+    class PlaywrightError(Exception):
+        """Stand-in so the module imports without Playwright (never raised)."""
 
 
 # --------------------------------------------------------------------------
@@ -433,6 +438,12 @@ class ContentFetcher:
                 html = self._page.content()
                 return status, ct, html, list(dict.fromkeys(self._xhr_urls))
             except Exception as e:
+                # BUG-0136 review (X1's twin, CC-AUD-0042): a failed load ends the
+                # previous document. A refused navigation is aborted with ERR_ABORTED,
+                # which leaves the page shown before it alive; its fetches would
+                # otherwise be listed under the URLs fetched next
+                with contextlib.suppress(PlaywrightError):
+                    self._page.goto("about:blank", timeout=self.timeout_ms)
                 # Chromium refuses to render some responses (downloads,
                 # application/octet-stream). Those URLs are still audit targets,
                 # so fall back to a plain request rather than losing the page.

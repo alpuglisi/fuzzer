@@ -3,6 +3,24 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0054 — `Request.session_decision`: the session addon's decision is a declared field (FR-SESS-20, BUG-0134 review round 2) (2026-10-14)
+- Change: `fuzzlab/core/http.py` `Request` gains `session_decision: str | None = None`.
+  `SessionManager.prepare` sets it to `"anonymous (out of origin)"` when it withholds the
+  identity's session (FR-SESS-20); `SeamProbeSender` reads it into `Probe.session`.
+  It replaces the dynamic attribute of CC-SESS-0023's round 1 (R6; reviewers A2-S3,
+  B2-R6). `HttpClient` neither reads nor changes it.
+- Impact (other components / project): SESS (writer), FUZZ (reader). The dataclass gains
+  a trailing field with a default, so every existing construction is unchanged; the
+  field is not persisted (flows are recorded without it).
+- Risk: low (an additive, defaulted field). Mitigated: the seam, auditor and fuzzer seam
+  suites pass; `tests/test_session_origin_scope.py::test_prepare_records_its_decision_on_the_request`
+  asserts the default and the value prepare sets.
+- Deliverables:
+  - [x] `core/http.py` field — done
+  - [x] FR-CORE-6 amended in place — done
+  - [x] test (above) — done
+- Effectiveness (assessed 2026-10-14): the related suites, the core seam suites included (`test_core_foundations.py`, `test_auditor_seam.py`, `test_fuzzer_seam.py`): **1490 passed, 2 xfailed, 0 skipped** with `FUZZLAB_REQUIRE_BROWSER=1`; the requirements traceability guard passes.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

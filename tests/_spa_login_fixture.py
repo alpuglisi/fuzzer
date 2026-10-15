@@ -80,6 +80,8 @@ async function doLogin() {
   const r = await fetch(target, {method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-From-App': '1'},
     body: JSON.stringify({email: email, password: pass})}).catch(() => null);
+  // an app that takes its login form away after a failed attempt
+  if (CFG.remove_form && (!r || r.status !== 200)) document.getElementById('lf').remove();
   if (!r || r.status !== 200) return;
   const j = await r.json();
   localStorage.setItem('token', j.authentication.token);
@@ -152,7 +154,7 @@ class LoginSpa:
                  script_delay: float = 0.0, leaky: bool = False, echo: bool = False,
                  invalid_200: bool = False, rotate: bool = False,
                  cookie_only: bool = False, clear_cookie: bool = False,
-                 lang: bool = False, followup_ms: int = 0):
+                 lang: bool = False, followup_ms: int = 0, remove_form: bool = False):
         self.password = password
         self.variant = variant
         self.other_port = other_port
@@ -185,6 +187,8 @@ class LoginSpa:
         #: the app waits this long after the login answer before its follow-up
         #: requests (a slow or loaded client, review of 26507a1)
         self.followup_ms = followup_ms
+        #: the app removes its login form after a failed (or refused) attempt
+        self.remove_form = remove_form
         self.requests: list[tuple[str, str, dict, bytes]] = []
         self.tokens: set[str] = set()
         self.revoked: set[str] = set()
@@ -215,7 +219,7 @@ class LoginSpa:
                "clear_ls": self.clear_ls, "poll": self.poll, "prefix": self.prefix,
                "leaky": self.leaky, "echo": self.echo, "rotate": self.rotate,
                "clear_cookie": self.clear_cookie, "lang": self.lang,
-               "followup_ms": self.followup_ms}
+               "followup_ms": self.followup_ms, "remove_form": self.remove_form}
         return _APP_JS.replace("__CFG__", json.dumps(cfg))
 
     def live(self, headers, *, cookie: bool | None = None) -> bool:

@@ -25,6 +25,8 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   headers/tokens) and connection pool.
 - **FR-SESS-2** Expose `prepare(request, identity)`, `observe(request, response,
   identity)`, and `ensure(identity)`, resolved against the request's host.
+  *(FR-SESS-20, CC-SESS-0023:)* the session is keyed by host but **sent by origin**:
+  `prepare` and `observe` resolve it by the request's canonical origin.
 - **FR-SESS-3 (login detection)** Detect a host's login dynamically: find the
   login form (a form containing an enabled password field), carry its other fields
   (e.g. a CSRF `user_token`, the submit button's `name=value`, a select's default)
@@ -78,13 +80,20 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     No allow rule overrides it, `auth_origins` included. A login page reached by a
     downgrade is refused before any POST. `FetchResponse.url` / `.history_schemes`
     report the final URL and every hop; a fetcher that does not report them falls back
-    to `base_url`'s scheme. Host scope stays host-level: an in-scope other port over
-    the same or an upgraded scheme is allowed, and `auth_origins` is the origin-precise
-    alternative.
+    to `base_url`'s scheme. ~~Host scope stays host-level *for the login handshake*: an
+    in-scope other port over the same or an upgraded scheme is allowed as a login
+    destination, and `auth_origins` is the origin-precise alternative.~~ *(Superseded by
+    FR-SESS-20, CC-SESS-0023, BUG-0134: the session itself is sent only to its origins;
+    and since review round 1 (R3) the login handshake too is origin-anchored: an
+    in-scope other port is no longer a login destination, only the base origin, its
+    same-host https upgrade at the default or same port, and `auth_origins` /
+    `--auth-origin`.)*
   - **Where credentials may go.** They are POSTed only to the login page's own
-    canonical origin, that host upgraded to https, an in-scope host, or an origin in
-    `SessionManager(auth_origins=[...])`. Anything else fails loudly, naming the
-    option.
+    canonical origin, that host upgraded to https, ~~an in-scope host,~~ or an origin in
+    `SessionManager(auth_origins=[...])` *(FR-SESS-20 R3: the in-scope-host clause is
+    superseded; the upgrade only at the default or the same port)*. Anything else fails loudly, naming the
+    option. *(FR-SESS-20, O12/R5:)* the refusal names the refused origin and the flag
+    that authorises it (`--auth-origin <origin>`).
   - **No automatic redirects.** The credential POST never follows them. 301/302/303
     are followed by hand as a GET, only to an allowed origin; 307/308 never. *(CC-SESS-0020,
     BUG-0123:)* every later hop of that chain is walked the same way, each checked by
@@ -98,22 +107,120 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     the same predicate as credential destinations. A fetcher that cannot refuse
     redirects must report the URL it was asked for, or discovery refuses.
   - **The anchor is operator input only:** the base URL's origin, its https upgrade,
-    in-scope hosts (any port: host-level scope, D12), and `auth_origins`, which is the
-    origin-precise alternative. A response-derived page is never an anchor.
+    ~~in-scope hosts (any port: host-level scope, D12),~~ and `auth_origins`, which is
+    the origin-precise alternative *(FR-SESS-20 R3: in-scope hosts superseded; the
+    upgrade at the default or the same port only)*. A response-derived page is never an
+    anchor.
   - **`SessionState.secure_only`.** Set when the login, a captured session or the stored
     `login_url` was https. An unknown legacy `login_url` fails closed.
   - **Where it is enforced.** An https session's cookies, tokens and Basic header are
     never sent over plain http:
     - `prepare`;
-    - `authorize`, after a plugin retarget, which also refuses another host;
+    - `authorize`, after a plugin retarget, which also refuses another host (and, since
+      FR-SESS-20, an origin outside the session's);
     - `session_header`;
     - greybox's sender.
-  - **Per host, by design (D12).** A session is keyed per host, so other ports of the
-    same host are allowed. Cookie Path is not enforced: a stated residual, since the
-    same origin learns nothing new.
+  - ~~**Per host, by design (D12).** A session is keyed per host, so other ports of the
+    same host are allowed.~~ **Superseded by FR-SESS-20 (CC-SESS-0023, BUG-0134):** the
+    session is still *keyed* per host (D12), but *sent* only to its own origins; another
+    port of the same host is another app. Cookie Path is not enforced: a stated
+    residual, since the same origin learns nothing new.
   - **No destructive hop** *(CC-SESS-0015, BUG-0111).* Discovery and the post-login
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
+- **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
+  O1-O13; review rounds 1-2, R1-R9, T1-T6)**
+  - **Origins (O1).** `SessionState.origins` is a set of canonical origins
+    (`core.urls.canonical_origin`: scheme, host, port; loopback aliases one origin):
+    the base URL the login ran from, the login page, the credential destination and the
+    operator's `auth_origins`, from one function (`manager.session_origins`). A Basic
+    session's is the base URL's. **In memory only:** never persisted, so a resumed
+    record never applies a session by itself. Not secret (shown in `redacted()`).
+  - **prepare (O2).** The session is applied only when the request's canonical origin
+    is one of them. A request to an in-scope host but another origin goes out
+    **anonymously** (that app's anonymous visitor), never triggers a login there, is
+    logged once per (origin, identity) and counted (`out_of_origin_sends`, reported as
+    `session_out_of_origin` by the crawl, auto and greybox summaries). *(R6, T4:)*
+    `prepare` records its decision on the request it was given, in the declared field
+    `core.http.Request.session_decision` (CC-CORE-0054; `"anonymous (out of origin)"`);
+    the seam sender copies it into `Probe.session` after the send, never recomputing it; the oracle copies that into
+    `Verdict.evidence["session"]`, greybox into the attempt's features.
+    *(R9:)* an https-only session's **plain-http** request to another port of its host
+    is refused loudly (`SessionAuthError`, BUG-0098's floor runs before the origin
+    rule), never sent anonymously: it fails closed.
+  - **ensure (O3).** A login runs only from an operator base or a base whose origin is
+    one of the existing `(host, identity)` session's origins (or, before any session,
+    the operator base's origin); never from a request's directory on another origin.
+    Otherwise `SessionAuthError` names the remedy: a distinct identity name per app
+    (D38: refuse rather than warn). An isolated copy raises it as `IsolatedLoginFailed`.
+  - **authorize / observe (O4).** A plugin retarget that carries the session to an
+    origin outside the session's (another port included) is refused, as another host
+    is. *Carries* (`_carries`; R7, narrowed by T2): a secret-looking value -- any
+    Authorization value or its token, a cookie value `looks_like_identifier` holds for
+    or of at least 8 characters -- contained anywhere in the request's headers (an
+    edited `sid=<v>'OR1` still counts); any other cookie only as its exact `name=value`
+    pair in `Cookie` (a short plain value like `en` or `0` is ordinary header text); an anonymous out-of-origin request may
+    still be edited on its own origin. `observe` finds the session by origin
+    membership, so another app's login page never logs it out.
+  - **verify_live and the probe differential (O5).** `_navigate(session_origins=)`
+    refuses a hop outside the origins before it is fetched; a probe candidate on another
+    origin is never fetched; both fail closed.
+  - **greybox (O6).** `_cookie_for` returns the session's origins and
+    `RequestsCorrelatingSender(cookie_origins=)` attaches the cookie only to a probe on
+    one of them (a cookie without origins is refused at construction).
+  - **Proxy adoption (O7).** `SessionCapture` records the canonical origins of the
+    observed URLs on its host; `adopt` refuses a session with none.
+  - **Browser (O8; R1/R2).** `browserauth.header_scope_for` admits an in-scope URL on
+    one of the session's origins (and the https floor). Browser cookies are
+    port-agnostic (RFC 6265 §8.5), so in an authenticated context (`cookie_scope`) the
+    guarded route, for an in-scope origin outside the session's:
+    - **aborts every document** (a navigation, top-level or frame, and a redirect landing
+      there) with ERR_ABORTED (`"aborted"`, T1: the page stays where it is, no error page)
+      and **every WebSocket**: a document loaded there would run that app's script with
+      the context's cookies and `localStorage` (R1, review A-M1, seen live);
+    - fetches every other request there (and every hop) through **one cookie-less
+      request context per guard** (`isolated_request`, a `playwright.request.new_context()`
+      with no storage, made once when the guard is built and kept for its life; every
+      fetch carries an explicit empty `Cookie`, so that context's own jar is never sent:
+      review round 3, V1), never `route.fetch` or the
+      context's client, and fulfils it with `Set-Cookie` removed, so that origin can
+      neither read nor write the jar (R2, review A-M2, seen live);
+    - the crawl records such a page as skipped, with its kind ("crawl that origin
+      separately, or --auth-origin"); a page navigation whose own target or redirect
+      landing was withheld, or whose main frame committed on an in-scope origin outside
+      the session's, extracts nothing, while a script-initiated navigation away leaves
+      the page extracted (T1); an out-of-scope commit is BUG-0123's scope abort, counted
+      under its own reason, never this one (V2); the spider's `_isolated_submit` drops the jar's
+      cookies for such an action (FR-CRAWL-14).
+  - **Listeners and auth endpoints (O9).** FR-SESS-16's listener gets the logout's
+    origin; lane A's header breaker and lane B's single-session breaker compare it with
+    the run's session's origins. `is_auth_endpoint` compares origin and path.
+  - **session_header(s) / `session print` (O10)** refuse a base URL whose origin is not
+    one of the session's.
+  - **Isolated copies (O11)** compute the same origins from the same inputs and
+    enforce them.
+  - **The login handshake (R3).** A login may go only to its anchors
+    (`_login_anchors`): the base URL's origin, its https upgrade on the same host at the
+    default or the same port, and `auth_origins`. An in-scope host on another port is no
+    longer one (it widened O1's origins too). `_verify_authenticated` carries the
+    session's header only to the session's origins; a post-login redirect elsewhere is
+    not followed and warns.
+  - **Advice (O12; R5).** Every refusal and warning names the origin and the flag:
+    `--auth-origin ORIGIN` (repeatable) on `crawl`, `auto`, `session print` and
+    `greybox-run` authorises an origin as both a credential destination and a session
+    origin. Each value must be a bare http(s) origin (no user, path, query or fragment)
+    whose host is in the CLI's scope, compared canonically (T5: `localhost` ≡
+    `127.0.0.1`), else a usage error before any side effect
+    (`manager.parse_auth_origins`). `adopt` unions the manager's `auth_origins` into a
+    captured session's origins.
+  - **Residuals (O13, stated; each pinned by a test, BUG-0134).** The key stays
+    `(host, identity)` (credentials and the store's session rows are host-keyed;
+    re-keying would orphan stored credentials): two apps on one host need distinct
+    identity names (CLI help; refused, never shared). The login's https upgrade on the
+    same host (default or same port) is a login anchor. Anonymous static jars
+    (`requests.Session`) are port-agnostic but never hold session material. *(The login
+    handshake's any-port scope, the WebSocket residual and the missing CLI flag of the
+    first fix are superseded by R1, R3 and R5.)*
 - **FR-SESS-19 (browser login for single-page apps, CC-SESS-0021)**
   - **When.** Only as a fallback (detection only, D13): `_login` found no
     server-rendered login form and no Basic challenge, and the manager may use a
@@ -148,7 +255,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     change; users / accounts without a login token) is aborted before it is sent,
     whatever its body (review round 1, A-S1: a client-side hashed password included),
     and again on a 307/308 hop that keeps the body. Aborted-request logs name the host
-    only.
+    only. *(CC-SESS-0023 amendment, BUG-0136 review X3:)* a refused submission leaves
+    the login page alive (an aborted navigation keeps the document, BUG-0136; a refused
+    fetch never replaced it), so when the click produced no login request and something
+    was refused in the window, the password field is cleared before the context is torn
+    down. The clear is in place and never waits (`page.evaluate`, clear if present;
+    BUG-0137 review Z5): an app that removed the field costs nothing.
   - **The form.** On the base page, then on SPA routes (from the app's own scripts and
     links, hash or history mode) and same-origin links whose last segment is a login
     word (`detect._LOGIN_SEGMENTS`, whole segment), at most 5: the first rendered form
@@ -219,11 +331,13 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     another origin needs that origin in `auth_origins`. An app that makes no
     credential-dependent GET after its login cannot be confirmed (fails loudly).
     Username detection depends on `_USERNAME_HINT` (BUG-0121). Juice Shop itself has
-    not been exercised here (offline fixture only). *(CC-SESS-0022 review:)* the jar
+    not been exercised here (offline fixture only). ~~*(CC-SESS-0022 review:)* the jar
     cookies and the bearer reach any port on the session's host, per PA-0123's stated
     host-level exception (FR-SESS-12/13); origin-scoped sessions are a separate
-    follow-up (reviewer A). A jar cookie's `path` is not kept: a `path=/admin` cookie is
-    sent host-wide (A-N2).
+    follow-up (reviewer A).~~ **Superseded by FR-SESS-20 (CC-SESS-0023, BUG-0134):** the
+    jar cookies and the bearer go only to the session's origins (the base URL's and the
+    login request's, plus `auth_origins`). A jar cookie's `path` is not kept: a
+    `path=/admin` cookie is sent origin-wide (A-N2).
 - **FR-SESS-18 (logout by redirect, CC-SESS-0019, BUG-0122)**
   - A redirect is a logout only when its target, resolved against the page, is either:
     - the session's own login URL: same host and path, an http→https upgrade on
@@ -265,8 +379,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - **`verify_live(host, identity, base_url)`** re-checks the run's session with one
     fresh-fetcher walk of the operator's base carrying its cookies; on failure it marks
     the state invalid and persists that, without telling listeners. The session goes
-    only to its own host: a hop to any other host is never fetched and raises
-    `SessionAuthError` ("cannot verify"), as an unapproved hop does.
+    only to its own origins *(FR-SESS-20; before: its own host)*: a hop to any other
+    origin, another port of the same host included, is never fetched and raises
+    `SessionAuthError` ("cannot verify"), as an unapproved hop does. A copy's session
+    gets the same origins as the run's (O11).
   - **Reasons.** `IsolatedLoginFailed.reason` is a fixed text, never a URL or value; it
     is what reports and logs show.
   - **Accepted:** an equal session id shorter than 16 characters, low-entropy, under a
@@ -274,7 +390,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     `wordpress_logged_in_*`, `express:sess`, `remember_web_*`) would be accepted as
     distinct. No realistic framework issues such ids.
 - **FR-SESS-16 (logout listeners, CC-SESS-0017)**
-  - `add_logout_listener(fn)` registers `fn(host, identity)`. `observe` calls it once
+  - `add_logout_listener(fn)` registers `fn(origin, identity)` *(FR-SESS-20; before:
+    `fn(host, identity)`)*: `origin` is the canonical origin of the response that showed
+    the logout, one of the session's origins; a listener compares it with
+    `session_origins_for(target, identity)`, never a host. `observe` calls it once
     each time it marks a valid session of this manager logged out; the check-and-set
     is atomic, so concurrent sends seeing one logout tell it once.
   - It runs inside the observing send, after the state is invalid, and its errors
@@ -298,7 +417,10 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     URL (an adopted session), any password input still counts.
   - **Known limitation (D12).** Sessions and remembered bases are keyed per
     `(host, identity)`, so two sub-path apps on one host:port share them. Use distinct
-    identities per app.
+    identities per app. *(FR-SESS-20:)* two apps on **different ports** of one host no
+    longer share a session's sends (each origin is its own), but still share the
+    host-keyed credential entry and session slot under one identity name: an operator
+    base on another origin is refused, naming the remedy (distinct identity names).
 - **FR-SESS-14 (login form serialised as a browser would, CC-SESS-0014, BUG-0110)**
   - **The credential POST body** is the login form's entry list from
     `core.forms.form_entries` (FR-CORE-27), with the username and password entries
@@ -322,16 +444,19 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   - Enforced by (isolated copies, FR-SESS-17): never persisted, and no credential value in an isolation error or report — `tests/test_login_form_isolation.py::test_the_isolated_session_is_never_persisted`, `tests/test_login_form_isolation.py::test_isolation_errors_and_report_carry_no_secret_values`
   - Enforced by (browser login, FR-SESS-19): a unique password never reaches the spider DB, the store, the logs (with `DEBUG=pw:api`), an exception or a repr; `SessionState`'s secrets are `repr=False` — `tests/test_session_browser_login.py::test_the_password_appears_nowhere`, `tests/test_session_browser_login.py::test_session_state_repr_and_str_hold_no_secret`, `tests/test_session_browser_login.py::test_the_driver_starts_without_debug_logging`, `tests/test_session_browser_login.py::test_a_failure_text_never_holds_the_password`
   - Enforced by (browser login: where the password may go): `browserlogin.LoginGate`, `navguard.make_route_handler(request_refusal=)` — `tests/test_session_browser_login.py::test_the_password_never_leaves_to_another_port`, `tests/test_session_browser_login.py::test_the_window_gate_refuses_a_non_destination_only_in_the_window`, `tests/test_session_browser_login.py::test_a_login_route_posting_to_api_users_creates_nothing`, `tests/test_session_browser_login.py::test_a_sign_up_button_on_the_login_route_is_never_clicked`, `tests/test_session_browser_login.py::test_register_and_change_password_forms_on_the_login_route_are_never_used`, `tests/test_session_browser_login.py::test_a_hashed_password_posted_to_api_users_sends_nothing`, `tests/test_session_browser_login.py::test_every_write_to_an_account_endpoint_is_refused_in_the_window`, `tests/test_session_browser_login.py::test_a_body_keeping_redirect_to_an_account_endpoint_is_refused_at_the_hop`
+  - Enforced by (a refused submission leaves no password in the page; BUG-0136 review X3): `browserlogin._drive` — `tests/test_session_browser_login.py::test_a_refused_submission_leaves_no_password_in_the_page`, `tests/test_session_browser_login.py::test_clearing_a_password_field_the_app_removed_costs_nothing`
   - Enforced by (an abandoned browser login sends nothing; no second login beside it; review round 1): `browserlogin.run` cancellation, `LoginGate.cancelled`, `_LIVE` — `tests/test_session_browser_login.py::test_an_abandoned_login_never_sends_the_password`, `tests/test_session_browser_login.py::test_a_cancelled_gate_refuses_every_request`, `tests/test_session_browser_login.py::test_a_cancelled_login_stops_at_a_checkpoint`, `tests/test_session_browser_login.py::test_no_second_login_starts_beside_an_abandoned_one`
   - Enforced by (the password never kept through URLs or storage; review round 1, A-M2): `browserlogin.strip_url`, `drop_secret_values`, `SessionState.non_secret_state` — `tests/test_session_browser_login.py::test_the_password_is_kept_out_of_urls_and_storage`, `tests/test_session_browser_login.py::test_persisted_login_urls_carry_no_query_or_fragment`, `tests/test_session_browser_login.py::test_storage_values_carrying_the_password_are_dropped`
-  - Not yet enforced: no test runs the server-form login (`_login`) with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.)
+  - Enforced by (origin-scoped sessions, FR-SESS-20, BUG-0134: a session never reaches another app on another port): `SessionManager.prepare` / `_check_base` / `authorize` / `_navigate(session_origins=)` / `_check_origin`, `browserauth.header_scope_for`, `navguard.make_route_handler(cookie_scope=)`, `greybox.run.RequestsCorrelatingSender(cookie_origins=)` — `tests/test_session_origin_scope.py::test_a_send_to_another_port_carries_no_session_and_never_logs_in_there`, `tests/test_session_origin_scope.py::test_an_operator_base_on_another_port_is_refused_with_the_remedy`, `tests/test_session_origin_scope.py::test_a_plugin_retarget_to_another_port_is_refused`, `tests/test_session_origin_scope.py::test_verify_live_never_follows_a_redirect_to_another_port`, `tests/test_session_origin_scope.py::test_greybox_attaches_the_cookie_only_in_origin`, `tests/test_session_origin_scope.py::test_an_authenticated_crawl_never_hands_the_session_to_another_port`, `tests/test_session_origin_scope.py::test_session_headers_refuse_a_base_on_another_origin`, `tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts`, `tests/test_session_origin_scope.py::test_the_route_aborts_other_origin_documents_and_fetches_the_rest_cookie_less`, `tests/test_session_origin_scope.py::test_a_websocket_to_another_origin_is_never_connected_in_an_authenticated_context`, `tests/test_session_origin_scope.py::test_a_form_action_on_another_port_is_refused_with_the_advice`, `tests/test_session_origin_scope.py::test_the_post_login_check_keeps_the_header_inside_the_sessions_origins`
+  - Not yet enforced: no test runs the server-form login (`_login`) with a logger and checks the log; `login_url` is persisted without `redact_url`. (BUG-0111 sweep.) (The BUG-0134 sweep's login-handshake residual is closed: since review round 1, R3, those hops are refused.)
 - **NFR-SESS-portable** Works on interactive desktops, headless hosts, containers,
   and CI via the credential-store backend resolution (D12).
 - **NFR-SESS-zero-config** No per-host auth configuration: the only per-host input
   is the credentials in the vault; everything else is detected.
 
 ## 5. Interfaces and data contracts
-`prepare`/`observe`/`ensure` API resolved by host; attaches as a proxy addon so
+`prepare`/`observe`/`ensure` API resolved by host, the session sent by origin
+(`SessionState.origins`, FR-SESS-20); attaches as a proxy addon so
 hand-driven traffic is also handled. Obtains credentials from the credential store
 keyed by host (D12); writes only non-secret, redacted session state to the store.
 Internally, the detected mechanism maps to an auth handler (cookie/form,

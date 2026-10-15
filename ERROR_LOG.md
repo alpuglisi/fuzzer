@@ -18,6 +18,30 @@ Format per entry:
 
 ---
 
+## 2026-10-14 — Oracle/M6: a page the browser executor could not load ended the confirmation run (fixed, BUG-0137/PA-0137)
+- **Symptom:** one DOM/stored XSS candidate whose page timed out, crashed or had its own redirect refused raised out of `oracle.confirm` and `pipeline._confirm`; every later candidate stayed `pending`. After BUG-0136, a page that navigates by script to a refused URL before `load` also cost 8 s, then raised.
+- **Root cause:** `PlaywrightBrowserExecutor.run` mapped only a launch failure to "no verdict" (BUG-0126); a Playwright error of its context, plant or observe navigation escaped, and no layer above contains a mechanism's raw errors.
+- **Remediation:** CC-FUZZ-0083: the observe navigation waits for the commit, then for `load` for at most 3 s (suppressed). A Playwright error, or a page that never loaded, with no hit is `UnplaceableLocation` with a URL-free reason; a hit at any point counts. Only Playwright errors are caught. See `docs/bugs/BUG-0137-an-m6-page-failure-ended-the-confirmation-run.md`, PA-0137.
+- **Status:** Fixed.
+
+## 2026-10-14 — Crawler: a refused script navigation replaced the page with Chromium's error page (fixed, BUG-0136/PA-0136)
+- **Symptom:** a page whose script navigated after load to an out-of-scope host or a destructive URL was stored with Chromium's error page as its content; its links were never crawled.
+- **Root cause:** `navguard`'s route aborted refused navigations with the default error code (Chromium then commits its error page); only the reveal window and BUG-0134's withheld branch used `"aborted"`.
+- **Remediation:** one rule: every abort of a document request uses `"aborted"`, a subresource the default (`navguard._abort_code`). CC-CRAWL-0028. `docs/bugs/BUG-0136-a-refused-navigation-replaced-the-page-with-an-error-page.md`.
+- **Status:** Fixed (real Chromium; mutation-checked)
+
+## 2026-10-14 — BUG-0134's first fix still leaked in the browser and the login (fixed in review round 1, BUG-0134/PA-0134)
+- **Symptom:** reviewer A, live in real Chromium: a redirected navigation landing on another port was answered under A's URL, so B's script read A's `document.cookie` / `localStorage`; `route.fetch` stored B's `Set-Cookie` in the shared jar (replacing A's `sid`); the login still accepted an in-scope host on any port (and an https upgrade to any port).
+- **Root cause:** the first fix withheld request headers only, while the browser shares a jar and storage with every document it loads; the login's anchor kept FR-SESS-12's host-level clause.
+- **Remediation:** other-origin documents and WebSockets aborted; other-origin subresources fetched through a cookie-less request context with `Set-Cookie` stripped; login anchors are origins (`--auth-origin` added). See BUG-0134's "Review round 1" section.
+- **Status:** Fixed (real Chromium and real loopback servers; mutation-checked)
+
+## 2026-10-14 — Session manager: a session was sent to every port of its host (fixed, BUG-0134/PA-0134)
+- **Symptom:** on a loopback lab, Juice Shop's session cookie and bearer (`127.0.0.1:3000`) were attached to requests to bWAPP (`:8090`) and any other port of `127.0.0.1` the crawl or a probe reached; a request there could log in there with the host's credential; another app's login page logged the session out; greybox and an any-port browser crawl did the same (BUG-0132 review, reviewer A S2).
+- **Root cause:** the session's send scope was its storage key's host, decided by hostname comparisons at each carrier (`prepare`, `ensure`, `authorize`, `observe`, `_navigate(session_host=)`, `header_scope_for`, greybox, the breakers' listeners, `is_auth_endpoint`), kept as a "stated exception" after PA-0123 made scope an origin.
+- **Remediation:** `SessionState.origins` (base, login page, credential destination, `auth_origins`; in memory only); every carrier checks origin membership; another origin goes out anonymously, never logs in there, is counted and stamped `anonymous (out of origin)`; the browser route withholds the port-agnostic jar from another origin. CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023. `docs/bugs/BUG-0134-session-sent-to-another-port-of-the-host.md`.
+- **Status:** Fixed (real loopback servers on two ports and real Chromium; residuals in the bug's sweep table)
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.

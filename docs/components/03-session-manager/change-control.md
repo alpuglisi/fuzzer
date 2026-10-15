@@ -3,6 +3,163 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0023 — Origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change: built to Revision 2 of `origin-scope-draft.md` (reviewers A and B reconciled;
+  O1-O13), the design that cleared the pre-change review gate.
+  - **`session/state.py`:** `SessionState.origins: frozenset[str]` (canonical origins;
+    in memory only, not in `non_secret_state`; shown in `redacted()`).
+  - **`session/manager.py`:**
+    - `session_origins(*urls, auth_origins=)` (the one derivation) and
+      `_origins_of(base, *urls)`: base URL, login page, credential destination,
+      `auth_origins` (O1); set by `_login`, `_browser_login_state` and `_basic_login`.
+    - `prepare` (O2): `_state_for(url, identity)` finds the session by origin
+      membership; another origin is sent anonymously, never logs in, is logged once per
+      (origin, identity) and counted (`_withhold`, `out_of_origin_sends`);
+      `session_note(url, identity)` reports `OUT_OF_ORIGIN` ("anonymous (out of
+      origin)"). The BUG-0098 transport refusal still comes first (loud).
+    - `ensure` (O3): `_check_base` (before and under the login lock) refuses a base
+      outside the existing session's origins (or the operator base's origin), naming
+      `DISTINCT_IDENTITY_ADVICE`; an isolated copy raises it as `IsolatedLoginFailed`.
+    - `authorize` (O4): a retarget carrying the session (`_carries`) to an origin outside
+      the session's is refused; `observe` finds the session by origin membership and
+      tells listeners `(origin, identity)` (FR-SESS-16's signature changes).
+    - `_navigate(session_origins=)` replaces `session_host=` (O5): `verify_live`,
+      `_spa_probe` (candidate filter by origin) and `_probe_fetch`.
+    - `is_auth_endpoint` / `_auth_endpoints` by origin + path (O9;
+      `_record_auth_endpoints`); `auth_endpoints(host)` kept for display.
+    - `session_header(s)` check `_check_origin` at the action (O10);
+      `session_origins_for(url, identity)` for greybox and the breakers' listeners.
+    - `adopt` refuses a state without origins (O7).
+    - O12: the destination and navigation refusals name the origin and
+      `auth_origin_advice`; `_warn_other_origins` warns when the login handshake
+      fetched an origin not in the session's (`seen` threaded through `_navigate`,
+      `_discover_login_form`, `_post_credentials`, `_verify_authenticated`).
+  - **`session/cli.py`** (O13): `--identity` / `--base-url` help names a distinct
+    identity per app.
+- Impact (other components / project):
+  - **CRAWL** (CC-CRAWL-0026): `browserauth.header_scope_for` by origins;
+    `BrowserSession.cookie_scope`; `navguard.guard_page(cookie_scope=,
+    on_session_withheld=)`; the spider withholds the jar from another origin.
+  - **FUZZ** (CC-FUZZ-0080): greybox `cookie_origins`; `Probe.session`; the oracle's
+    `_SessionNotes` stamps `evidence["session"]`; lane A/B listeners by origin;
+    `session_out_of_origin` in the auto and greybox summaries.
+  - **PROXY** (CC-PROXY-0023): `SessionCapture` records origins.
+  - **Contracts:** `add_logout_listener`'s callback now receives `(origin, identity)`;
+    `RequestsCorrelatingSender(cookie=)` needs `cookie_origins`; `Probe.session` is new.
+    No persisted field changes (origins are in memory only); the keyring layout and the
+    store's `session_state` rows are unchanged (key stays `(host, identity)`, O13).
+  - **AUD:** no code change (its browser scope is the base origin only, a subset of the
+    session's origins; `header_scope_for` is origin-based through `browserauth`).
+- Risk: medium. It strictly narrows where secrets go (no new host, method or request),
+  but changes a callback signature and makes a run send some requests anonymously that
+  used to carry a session (a run that relied on one identity across two ports now needs
+  `auth_origins` or two identities; refused loudly with the remedy). Mitigated: every
+  mechanism has a test that fails when it is reverted (mutation checks below); the
+  existing session, isolation, browser and sender suites pass.
+- Deliverables:
+  - [x] code (`session/state.py`, `session/manager.py`, `session/cli.py`) — done
+  - [x] tests: `tests/test_session_origin_scope.py` (two real loopback servers; real
+    Chromium for the crawl); updated `test_session_transport_binding.py` (the
+    "another port allowed by design" test inverted), `test_logout_listener.py`,
+    `test_login_form_isolation.py` (copy origins, origin listener),
+    `test_proxy_session_capture.py` — done
+  - [x] BUG-0134 (RCA, recurrence review, prior-PA failure analysis, PA-0002 sweep
+    table), PA-0134, ERROR_LOG, CHANGELOG — done
+  - [x] FR-SESS-20 added; FR-SESS-2/12/13/15/16/17/19 amended in place (the host-level
+    exception marked superseded, not deleted); NFR-SESS-redaction traced;
+    ARCHITECTURE.md §3 — done
+  - [x] mutation checks (below) — done
+- Effectiveness (assessed 2026-10-14): effective. Mutation checks, each reverted
+  temporarily and restored, every named test failing under it:
+  - prepare's origin test (host-keyed lookup, no membership check): 3 of 3 failed
+    (`test_a_send_to_another_port_carries_no_session_and_never_logs_in_there`,
+    `test_every_session_header_is_withheld_on_another_origin`,
+    `test_an_adopted_capture_is_sent_only_to_its_origins`);
+  - `_navigate`'s origin test: 2 of 2 failed (`verify_live`, the probe differential);
+  - `header_scope_for` back to the host compare: 2 of 2 failed (the header-scope test
+    and the AST guard `test_no_session_send_decision_compares_hosts`);
+  - the cookie strip: 2 of 2 failed (the route unit test and the real-Chromium crawl);
+  - the strip's landing rule (redirect re-request): 2 of 2 failed (same two);
+  - greybox's gate: 1 of 1 failed;
+  - ensure's base rule: `test_an_operator_base_on_another_port_is_refused_with_the_remedy`
+    failed; `test_session_headers_refuse_a_base_on_another_origin` still passed because
+    the action check (`_check_origin`, O10) refuses independently (defence in depth).
+  Related suites (session, transport binding, listeners, persistence, sub-path, probe
+  senders, proxy capture, greybox, destructive URLs, credential destinations, detect,
+  sender conformance, oracle, browserauth, lane A/B isolation, PRG, JSON points, spider
+  scope, dry run, traceability, loopback listeners, auto, browser login, browser scope,
+  SPA capture, forms phase 4, and the new `tests/test_session_origin_scope.py` with 40
+  tests): **1421 passed, 2 xfailed, 0 skipped** with `FUZZLAB_REQUIRE_BROWSER=1`. The
+  full suite is the coordinator's run.
+- Review round 1 of 0046b77 (reviewers A and B, AGREE-with-changes; reconciled fix list
+  R1-R9, D40; a follow-up commit on the same branch, 2026-10-14):
+  - **R3 (A-M3):** `_credential_destination_ok` now checks `_login_anchors` (the base
+    origin, its https upgrade on the same host at the default or the same port,
+    `auth_origins`); the in-scope-host and any-port-upgrade clauses are gone (they also
+    widened O1's origins). `_verify_authenticated` passes `session_origins`. A refused
+    post-login redirect warns. Supersedes this entry's "login handshake residual".
+  - **R5 (D-a):** `parse_auth_origins` / `AUTH_ORIGIN_HELP`; `--auth-origin` on `session
+    print` (and crawl, auto, greybox-run: CC-CRAWL-0026, CC-FUZZ-0080);
+    `tools/authhttp.py` threads `auth_origins` through `_build_parts`,
+    `make_session_manager`, `make_auth_with_isolation` (`scope_hosts_for`); every advice
+    names the flag; `adopt` unions the manager's `auth_origins` (A-N2).
+  - **R6 (B-S1, A-S3):** `prepare` records `request.session_decision`; `session_note`
+    is removed (it recomputed after the send).
+  - **R7 (A-S1):** `_carries` by containment of each secret value.
+  - **R8/R9:** BUG-0134's appended review section; FR-SESS-20 states the https floor on
+    other-port http sends.
+  - Mutation checks (each reverted temporarily, restored): R3a (the in-scope any-port
+    clause restored) fails 5 tests, including the AST guard; R3b (`_verify_authenticated`
+    without `session_origins`) fails its test; R4 (guard without see-through, name
+    taint or membership) fails 5 synthetic offenders. R1/R2: see CC-CRAWL-0026.
+  - Effectiveness (review round 1): the related suites (as in this entry's
+    effectiveness, plus `test_auto_cli_side_effects.py`; `tests/test_session_origin_scope.py`
+    now has 69 tests): **1464 passed, 2 xfailed, 0 skipped** with
+    `FUZZLAB_REQUIRE_BROWSER=1`. The full suite is the coordinator's run.
+- Review round 2 of 97101a9 (reviewer B AGREE; reviewer A AGREE-with-changes, both browser
+  leaks verified gone live; reconciled list T1-T6, D45; a follow-up commit, 2026-10-14):
+  - **T2 (A2-S1):** `_carries` matches by containment only secret-looking values (any
+    Authorization value or token; a cookie value `looks_like_identifier` holds for, or
+    of at least `CARRIED_MIN_LEN` = 8); any other cookie only as its exact `name=value`
+    pair. An anonymous out-of-origin request's own edit with ordinary browser headers is
+    no longer refused because `en` or `0` appear in `Accept-Language`.
+  - **T4 (A2-S3, B2-R6):** `prepare` sets the declared `Request.session_decision`
+    (CC-CORE-0054); the `SESSION_DECISION` dynamic attribute of round 1 is removed.
+  - **T5 (A2-OP2, B2-S1):** `parse_auth_origins` compares canonical origins with the
+    canonical scope (`localhost` ≡ `127.0.0.1`; another 127/8 address is not).
+  - **T3 (A2-S2):** the host-compare guard's allowances pin each allowed function's
+    count; `parse_auth_origins` no longer holds a host compare (its allowance removed).
+  - Mutation checks: T2 (containment for every cookie value again) fails
+    `test_carries_matches_short_plain_cookies_only_as_exact_pairs`; T3 (an allowance
+    passing any count) fails `test_an_extra_host_compare_in_an_allowed_function_is_flagged`.
+    T1: see CC-CRAWL-0026.
+  - Effectiveness (review round 2): the related suites (round 1's set, plus the core seam suites) with `FUZZLAB_REQUIRE_BROWSER=1`: **1490 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 74 tests. The full suite is the coordinator's run.
+- Review round 3 of 9f417ae (2026-10-14; V1, V2; code in CC-CRAWL-0026): FR-SESS-20's
+  browser bullet is edited in place: the isolated context is made once per guard and
+  every fetch through it carries an empty `Cookie`; only an in-scope commit off the
+  session's origins is FR-SESS-20's. No session-manager code changed.
+- Amendment, BUG-0136 review (2026-10-14; X3, reviewer B-S2): the browser login's
+  guard now aborts a refused navigation with ERR_ABORTED (BUG-0136), so a refused
+  submission leaves the login page alive (a refused fetch never replaced it either).
+  `browserlogin._drive`: when the click produced no login request and something was
+  refused in the window (`window_refusals`, or an `account_refusal`), the password
+  field is cleared (`page.fill(pw, "")`, a Playwright error suppressed) before
+  `storage_state()` and teardown. FR-SESS-19 is edited in place.
+  - Tests: `tests/test_session_browser_login.py::test_a_refused_submission_leaves_no_password_in_the_page`
+    (real Chromium, `other` and `users` variants). A spy on `navguard.release` records
+    only whether a password field still holds a value, never the value.
+  - Effectiveness: 2 passed. Mutation check: dropping the `page.fill` fails both.
+- Amendment, BUG-0137 final review (2026-10-14; Z5, reviewer B-S4): the X3 clear never
+  waits. `page.fill(pw, "", timeout=timeout_ms)` waited for the field, so an app that
+  removed it after the refused submission held the teardown for the login's
+  `timeout_ms` (10 s). It is now `page.evaluate` of a clear-if-present
+  (`_CLEAR_IF_PRESENT`), with a Playwright error suppressed. FR-SESS-19 is edited in
+  place.
+  - Tests: `tests/test_session_browser_login.py::test_clearing_a_password_field_the_app_removed_costs_nothing`
+    (real Chromium; the fixture's new `remove_form` takes the login form away after a
+    failed attempt). The login fails in 2.0 s; with the old waited `fill` it took 12.0 s
+    and the test fails. X3's own tests still pass.
+
 ### CC-SESS-0022 — A browser login's session carries the cookies its app set (BUG-0132) (2026-10-14)
 - Change:
   - **`session/manager.py`:** `_jar_cookies(storage_state, host, secure_ok=)`: the

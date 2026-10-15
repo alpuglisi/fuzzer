@@ -342,6 +342,7 @@ def test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_
             return R()
 
     sender = RequestsCorrelatingSender(cookie="PHPSESSID=s", session=S(),
+                                       cookie_origins=frozenset({"http://h:80"}),
                                        is_auth_endpoint=lambda u: u.endswith("/login.php"))
     sender.send_correlated("http://h/login.php", "u", "x")
     sender.send_correlated("http://h/a.php", "id", "1")
@@ -534,6 +535,12 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
         def wait_for_timeout(self, ms):              # the settle poll (BUG-0126)
             pass
 
+        def wait_for_load_state(self, state, **kw):  # the bounded load wait (BUG-0137)
+            pass
+
+        def once(self, event, fn):                   # the load time (BUG-0137 review)
+            pass
+
     class Context:
         request = types.SimpleNamespace(post=lambda *a, **k: None)
 
@@ -568,6 +575,7 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
 
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
+    fake.Error = type("Error", (Exception,), {})       # playwright.sync_api.Error
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
     monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS", 0)
     PlaywrightBrowserExecutor().run(

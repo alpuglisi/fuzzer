@@ -48,7 +48,11 @@ that shares the store, never a mandatory pipeline (D5).
   adopt. This is the path for logins the session manager's detection can't parse
   (MFA, CAPTCHA, multi-step, exotic SPA), keeping the toolkit authenticated without
   a per-host config file. Captured secrets are redacted on write and never
-  persisted in cleartext.
+  persisted in cleartext. *(CC-PROXY-0023, FR-SESS-20, BUG-0134:)* `SessionCapture`
+  records the canonical origins of the URLs it observes on its host
+  (`observe_request` / `observe_response` with `url=`); the adopted session is sent
+  only to them (and to the manager's `auth_origins`, which `adopt` adds; review round
+  1, R5), and the manager refuses a capture with no observed origin.
 
 - **FR-PROXY-10 (CA leaf hygiene, CC-PROXY-0019, BUG-0079)** A leaf is minted only
   for a valid host: an IP literal, or an IDNA, lower-cased `[a-z0-9_-]` label

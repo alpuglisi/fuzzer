@@ -85,8 +85,8 @@ class _Route:
         self.fetched.append(self.request.url)
         return self.site.get(self.request.url, _Resp())
 
-    def abort(self):
-        self.outcome = "abort"
+    def abort(self, code=None):
+        self.outcome, self.code = "abort", code
 
     def continue_(self):
         self.outcome = "continue"
@@ -348,6 +348,12 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
         def wait_for_timeout(self, ms):              # the settle poll (BUG-0126)
             pass
 
+        def wait_for_load_state(self, state, **kw):  # the bounded load wait (BUG-0137)
+            pass
+
+        def once(self, event, fn):                   # the load time (BUG-0137 review)
+            pass
+
     class Context:
         request = types.SimpleNamespace(
             post=lambda url, **kw: seen["posts"].append((url, kw)))
@@ -389,6 +395,7 @@ def test_the_m6_browser_is_launched_scoped_and_plants_without_redirects(monkeypa
 
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
+    fake.Error = type("Error", (Exception,), {})       # playwright.sync_api.Error
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
     monkeypatch.setattr(PlaywrightBrowserExecutor, "SETTLE_MS", 0)
     PlaywrightBrowserExecutor().run(
@@ -792,6 +799,7 @@ def test_the_m6_executor_uses_the_configured_chromium(monkeypatch):
 
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
+    fake.Error = type("Error", (Exception,), {})       # playwright.sync_api.Error
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
     monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/opt/chrome")
     from fuzzlab.oracle.probe import UnplaceableLocation
@@ -829,6 +837,7 @@ def test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative(mon
 
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
+    fake.Error = type("Error", (Exception,), {})       # playwright.sync_api.Error
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
     executor = PlaywrightBrowserExecutor()
     request = ExecRequest(url="http://127.0.0.1:3000/", param="q", value="x",
@@ -924,6 +933,7 @@ def test_a_driver_that_cannot_start_is_no_verdict_too(monkeypatch):
 
     fake = types.ModuleType("playwright.sync_api")
     fake.sync_playwright = PW
+    fake.Error = type("Error", (Exception,), {})       # playwright.sync_api.Error
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
     with pytest.raises(UnplaceableLocation, match="driver not found"):
         PlaywrightBrowserExecutor().run(

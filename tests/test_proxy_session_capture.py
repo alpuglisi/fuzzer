@@ -53,8 +53,8 @@ def test_adopt_into_manager_authenticates_without_login(tmp_path):
         # A manager that could never log in on its own (no creds, empty scope).
         mgr = SessionManager(credentials=None, scope_hosts=[], store=store)
         cap = SessionCapture(HOST, "user")
-        cap.observe_response(LOGIN_RESP)
-        cap.observe_request(NEXT_REQ)
+        cap.observe_response(LOGIN_RESP, url="http://127.0.0.1:8080/login")
+        cap.observe_request(NEXT_REQ, url="http://127.0.0.1:8080/home")
         cap.adopt_into(mgr)
 
         # prepare() now applies the captured cookie — no login handshake happens.
@@ -67,7 +67,7 @@ def test_adopt_persists_only_non_secret_metadata(tmp_path):
     with Store(tmp_path / "u.db") as store:
         mgr = SessionManager(credentials=None, scope_hosts=[], store=store)
         cap = SessionCapture(HOST, "user")
-        cap.observe_response(LOGIN_RESP)
+        cap.observe_response(LOGIN_RESP, url="http://127.0.0.1:8080/login")
         cap.adopt_into(mgr)
 
         row = store.get_session_state(HOST, "user")
