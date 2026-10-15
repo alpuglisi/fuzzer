@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Oracle: reflected XSS typed only the first place a value reflected in, so a raw second place was never tried (fixed, BUG-0154, PA-0160)
+- **Symptom:** on a dev lab, a stored value shown escaped in an edit form's `<input value>` and raw in a paragraph was not confirmed: the attribute break-out (escaped) was the only one sent. A text break-out would have landed raw. Reproduced offline on synthetic edit-form and search-page shapes.
+- **Root cause:** `context.locate_reflection` returned one reflection (the first of script, attribute, text), and `ReflectedXssStrategy` tried only that context's break-outs. Since BUG-0083 the design had typed one context per page, and every fixture reflected in one place only.
+- **Remediation:** `context.locate_reflections` types every distinct context (document order within script, attribute, text); `locate_reflection` is now its first element. `ReflectedXssStrategy` tries each context's break-outs in rounds, at most `MAX_BREAKOUTS = 6` sends in all (a single-context page costs what it did), confirms on any one, and records the context that confirmed. PRG observation unchanged. Tests and guards in `tests/test_oracle_xss_multicontext.py` (CC-FUZZ-0091).
+- **Status:** Fixed.
+
+## 2026-10-15 — Oracle: an attribute's quote was read from the nearest `=`, so a raw value in a quoted query link got the unquoted break-out (fixed, BUG-0155, PA-0161)
+- **Symptom:** a raw reflection in `<a href="/find?term=VALUE">` was never confirmed. The typing called the value unquoted and sent `x TOKEN=1`, which stays inside the quoted value. Found while building BUG-0154's per-attribute contexts.
+- **Root cause:** `context._raw_attr_quote` scanned back from the first raw occurrence of the marker for the nearest `=` and read the character after it. An `=` inside the value (any query string) or an earlier tag-like occurrence (a comment, `a<b` in a script) gave the wrong quote.
+- **Remediation:** the quote is lexed from the attribute's own start tag, located through the parser's `sourceline`/`sourcepos`, by the HTML tokenizer's attribute rules (`_start_tag_attrs`). The old reading is a fallback only for a tag with no source position. An AST guard forbids backward scans in `fuzzlab/oracle/` except that fallback (CC-FUZZ-0091).
+- **Status:** Fixed.
+
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
 - **Root cause:**

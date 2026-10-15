@@ -1661,7 +1661,9 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 - **FR-FUZZ-39** *(structural reflected-XSS confirmation; `CC-FUZZ-0057`, 2026-10-13,
   BUG-0083).* `ReflectedXssStrategy` types where a marker lands, from the observed
   response (never `candidate.sink_context`, which no strategy reads, guarded by an AST
-  test). It sends at most 3 break-outs, and confirms only on their structural effect in
+  test). It sends at most 3 break-outs per context *(amended in place, `CC-FUZZ-0091`,
+  2026-10-15: every context the marker lands in is typed and tried, at most 6
+  break-outs in all; see FR-FUZZ-54)*, and confirms only on their structural effect in
   the parsed response:
   - **script:** the token in JavaScript **code** state. The fail-closed lexer handles
     strings, comments and regex literals.
@@ -1709,6 +1711,33 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 
     A real ECMAScript parser, or browser-sentinel confirmation (M6), remains the
     stronger path.
+- **FR-FUZZ-54** *(every reflection context is tried; `CC-FUZZ-0091`, 2026-10-15,
+  BUG-0154, BUG-0155).* M5 types **every distinct context** a marker is reflected in
+  (`oracle/context.locate_reflections`), not the first, and tries each context's
+  FR-FUZZ-39 break-outs. A value escaped in one place and raw in another (an edit
+  form's control and a read-only view; a search box and a heading; a script string and
+  text) is confirmed through the raw place.
+  - **Contexts and order:** executing scripts (one entry per distinct lexer state at an
+    occurrence), then attribute values (executability, whether the marker starts the
+    value, the attribute's own quote), then text (the innermost inert parent). Each
+    group is in document order, and equal contexts appear once. The text of an
+    executing script is its script context only. `locate_reflection` is the first entry
+    (None when nothing reflects).
+  - **Tries and cap:** tries go in rounds (each context's most specific try before any
+    context's second), a fragment is sent once, and at most
+    `ReflectedXssStrategy.MAX_BREAKOUTS = 6` break-outs follow the typing probe. A
+    single-context page costs what it did (1 + at most 3), and any two contexts are tried
+    in full. It confirms on any one try.
+  - **Evidence:** `context` and `reflection` (the typing of the context whose break-out
+    confirmed: its quote, lexer state, inert parent …) and `contexts` (how many were
+    typed). Post/redirect/get observation (FR-FUZZ-49: `prg`, `prg-redirect`) is
+    unchanged.
+  - **Attribute quoting (BUG-0155):** the quote is lexed from the attribute's own start
+    tag, which is located through the parser's `sourceline` / `sourcepos`, by the HTML
+    tokenizer's attribute rules. An `=` or `>` inside a value no longer misreads it
+    (`href="/x?q=VALUE"` is double-quoted). The old nearest-`=` reading is a fallback
+    only for a tag with no source position.
+  - Tests: `tests/test_oracle_xss_multicontext.py` (loopback servers; PA-0160, PA-0161).
 - **FR-FUZZ-40** *(auth endpoints and destructive URLs; `CC-FUZZ-0060`, 2026-10-13,
   BUG-0112; NFR-FUZZ-safe).*
   - **Send-time gate.** Every probe sender (`SeamProbeSender`, `RequestsProbeSender`,

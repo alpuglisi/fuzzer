@@ -30,8 +30,8 @@ from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
 from fuzzlab.greybox.coverage import CoverageSource, app_lines
 from fuzzlab.greybox.dbfault import DbFaultSource
 from fuzzlab.greybox.reward import GreyboxSignal
-from fuzzlab.oracle.context import (locate_reflection, split_form_control_values,
-                                    xss_breakouts)
+from fuzzlab.oracle.context import (Reflection, locate_reflections,
+                                    split_form_control_values, xss_breakouts)
 from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import (Candidate, Probe, ProbeUnobserved, Sender,
                                   UnplaceableLocation, Verdict)
@@ -651,16 +651,53 @@ def _renders_as_html(probe) -> bool:
     return main == "" or main in _HTML_TYPES
 
 
+def _describe(ref: Reflection) -> dict:
+    """A reflection's typing for a finding's evidence: its context and every field
+    that is set (the quote, the lexer state, an inert parent, ...)."""
+    out = {"context": ref.context}
+    for name in ("js_state", "quote", "inert_parent"):
+        if getattr(ref, name) is not None:
+            out[name] = getattr(ref, name)
+    for name in ("attr_exec", "attr_at_start"):
+        if getattr(ref, name):
+            out[name] = True
+    return out
+
+
 class ReflectedXssStrategy(ConfirmationStrategy):
     vuln_class = "xss-reflected"
     mechanism = "reflected-context"
     category = "xss"
     prg = True                                       # FR-FUZZ-49
+    #: Break-out sends per candidate, every context together (FR-FUZZ-54, BUG-0154);
+    #: the typing probe comes on top. One context offers at most 3 (`xss_breakouts`),
+    #: so a single-context page costs what it did (1 + at most 3), and any two
+    #: contexts are tried in full. The common multi-context page (an edit form's
+    #: attribute beside a text echo; a search box beside a heading; a script beside
+    #: text) needs 2. The cap bounds a page that types many distinct contexts.
+    MAX_BREAKOUTS = 6
+
+    @staticmethod
+    def _tries(refs, token: str) -> list[tuple]:
+        """``(reflection, kind, fragment, check)`` for every typed context, in rounds:
+        each context's most specific break-out before any context's second, so a cap
+        never starves a later context; a fragment already listed is not sent again
+        (its structural check is page-wide)."""
+        per = [[(ref, *t) for t in xss_breakouts(ref, token)] for ref in refs]
+        out, seen = [], set()
+        for rank in range(max((len(p) for p in per), default=0)):
+            for tries in per:
+                if rank < len(tries) and tries[rank][2] not in seen:
+                    seen.add(tries[rank][2])
+                    out.append(tries[rank])
+        return out
 
     def confirm(self, candidate, sender):
-        """Type where a marker reflects, then try the break-outs that context allows
-        (at most 3) and confirm only on their **structural** effect in the parsed
-        response: an element outside any inert element, an injected attribute, or the
+        """Type every context a marker reflects in (`locate_reflections`, BUG-0154),
+        then try the break-outs each context allows (at most 3 per context,
+        `MAX_BREAKOUTS` in all) and confirm on any one, only on its **structural**
+        effect in the parsed response: an element outside any inert element, an
+        injected attribute, or the
         token in JavaScript code state (BUG-0083, FR-FUZZ-39), in a response a browser
         renders as HTML (`_renders_as_html`, BUG-0127). The context is always
         observed: no strategy reads the auditor's coarse ``sink_context`` (``html``,
@@ -676,16 +713,19 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         token = _token()
         marker = f"zqxm{token}"
         first = _observed(self._send(sender, candidate, marker))
-        ref = locate_reflection(first.text, marker)
-        if ref is None:
+        refs = locate_reflections(first.text, marker)
+        if not refs:
             return None
         probe_token = f"zqxb{token}"
-        for kind, fragment, check in xss_breakouts(ref, probe_token):
+        for ref, kind, fragment, check in self._tries(refs, probe_token)[
+                :self.MAX_BREAKOUTS]:
             probe = self._send(sender, candidate, fragment)
             second = _observed(probe)
             if check(second.text) and _renders_as_html(second):        # BUG-0127
+                # which context confirmed (its typing), among how many typed
                 evidence = {"context": ref.context, "breakout": kind,
-                            "signature": fragment}
+                            "signature": fragment, "reflection": _describe(ref),
+                            "contexts": len(refs)}
                 if _via_prg(probe):
                     if _rode_the_redirect(probe, [fragment, probe_token]):
                         evidence["observation"] = "prg-redirect"

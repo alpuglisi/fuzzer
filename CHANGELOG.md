@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (reflected XSS tries every context a value reflects in; BUG-0154, BUG-0155)
+- **What:** `oracle/context.locate_reflections` types every distinct place a marker reflects in, and `ReflectedXssStrategy` tries each place's break-outs (at most 6 sends in all; a single-place page costs what it did) and records which place confirmed. An attribute's quote is now lexed from its own start tag (CC-FUZZ-0091, FR-FUZZ-54, PA-0160, PA-0161).
+- **Why:** a page that shows a value escaped in one place and raw in another (an edit form's input beside a paragraph, a search box beside a heading) was never tried in the raw place. A raw value in a quoted query link got the wrong break-out.
+
 ## 2026-10-15 (D68: the owner drops the BUG-0118 SQLi send gate)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D68: the SQLi send gate (branch `bug-0118-v3`) is not merged. `docs/claude_juicelab_failures.md` gains F-051 (a ledger re-registration that tripped the progress guard's bug-chain trigger).
 - **Why:** the owner's decision. The gate refused Juice Shop's login SQLi (F-017).

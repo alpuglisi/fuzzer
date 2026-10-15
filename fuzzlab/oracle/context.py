@@ -2,13 +2,15 @@
 
 Classifies *where* a reflected marker lands in a response — the sink context —
 which tells the reflected-XSS mechanism (M5) whether a break-out would execute and
-which break-out to use, and judges a break-out by its **structural** effect on the
+which break-out to use -- in every context the marker lands in, not only the first
+(BUG-0154) -- and judges a break-out by its **structural** effect on the
 parsed response (BUG-0083), never by a substring surviving somewhere.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import unescape as _unescape
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
@@ -245,11 +247,6 @@ def script_executes(tag) -> bool:
     return not (kind == "classic" and "nomodule" in tag.attrs)
 
 
-def _js_state_at(src: str, needle: str) -> str | None:
-    i = src.find(needle)
-    return None if i < 0 else js_states(src)[i]
-
-
 def js_token_in_code(src: str, token: str) -> bool:
     """True when ``token`` occurs in ``src`` in **code** state (never when unsure)."""
     states = None
@@ -286,8 +283,11 @@ def _js_url_body(value: str) -> str | None:
 
 
 def _raw_attr_quote(html: str, marker: str) -> str | None:
-    """The quote delimiting the attribute value that holds ``marker`` in the raw HTML
-    (BeautifulSoup does not keep it): ``"``, ``'``, or ``""`` for unquoted."""
+    """A fallback only (`_attr_quote` reads the attribute's own start tag): the quote
+    before the nearest ``=`` left of the first raw occurrence of ``marker`` inside
+    something tag-like. It misreads a value holding an ``=`` before the marker
+    (``href="/s?q=MARK"`` reads as unquoted, BUG-0155), so it is used only when the
+    parser gave no source position for the tag."""
     start = 0
     while True:
         i = html.find(marker, start)
@@ -304,6 +304,77 @@ def _raw_attr_quote(html: str, marker: str) -> str | None:
         start = i + 1
 
 
+def _start_tag_attrs(html: str, pos: int) -> list[tuple[str, str | None, str]]:
+    """``(name, quote, raw value)`` of each attribute of the start tag at ``html[pos]``
+    (a ``<``), lexed by the HTML tokenizer's attribute states: a name runs to
+    whitespace, ``/``, ``>`` or ``=`` (its first character may be ``=``); a value is
+    double-quoted, single-quoted (to the matching quote, ``>`` included) or unquoted
+    (to whitespace or ``>``). ``quote`` is ``"``, ``'``, ``""`` for unquoted, or None
+    for an attribute with no value. Names are lower-cased, as the parser stores them."""
+    n, out = len(html), []
+    i = pos + 1
+    while i < n and html[i] not in _ASCII_WS and html[i] not in "/>":
+        i += 1                                    # the tag name
+    while i < n:
+        while i < n and (html[i] in _ASCII_WS or html[i] == "/"):
+            i += 1
+        if i >= n or html[i] == ">":
+            break
+        start, i = i, i + 1
+        while i < n and html[i] not in _ASCII_WS and html[i] not in "/>=":
+            i += 1
+        name = html[start:i].lower()
+        while i < n and html[i] in _ASCII_WS:
+            i += 1
+        if i >= n or html[i] != "=":
+            out.append((name, None, ""))
+            continue
+        i += 1
+        while i < n and html[i] in _ASCII_WS:
+            i += 1
+        if i < n and html[i] in "\"'":
+            q = html[i]
+            end = html.find(q, i + 1)
+            end = n if end == -1 else end
+            out.append((name, q, html[i + 1:end]))
+            i = end + 1
+        else:
+            end = i
+            while end < n and html[end] not in _ASCII_WS and html[end] != ">":
+                end += 1
+            out.append((name, "", html[i:end]))
+            i = end
+    return out
+
+
+def _line_starts(html: str) -> list[int]:
+    """The offset of each line's first character, as `html.parser` counts lines
+    (``\\n`` only), for a tag's ``sourceline`` / ``sourcepos``."""
+    starts = [0]
+    i = html.find("\n")
+    while i != -1:
+        starts.append(i + 1)
+        i = html.find("\n", i + 1)
+    return starts
+
+
+def _attr_quote(html: str, tag, attr: str, marker: str, line_starts) -> str | None:
+    """The quote of attribute ``attr`` of ``tag`` (the one holding ``marker``), read
+    from the tag's own start tag in the raw text (BUG-0155): the parser keeps the
+    tag's source position but not its quoting. The last same-named attribute holding
+    the marker wins, as the parser keeps the last duplicate. With no source position
+    (another parser), the old nearest-``=`` reading is the fallback."""
+    line, col = getattr(tag, "sourceline", None), getattr(tag, "sourcepos", None)
+    if line is not None and col is not None and 0 < line <= len(line_starts()):
+        pos = line_starts()[line - 1] + col
+        if html.startswith("<", pos):
+            found = [q for name, q, raw in _start_tag_attrs(html, pos)
+                     if name == attr.lower() and marker in _unescape(raw)]
+            if found:
+                return found[-1]
+    return _raw_attr_quote(html, marker)
+
+
 @dataclass(frozen=True)
 class Reflection:
     """Where a marker landed: ``context`` is ``script`` / ``attribute`` / ``html``."""
@@ -315,33 +386,79 @@ class Reflection:
     inert_parent: str | None = None               # html: the innermost inert ancestor
 
 
-def locate_reflection(html: str, marker: str) -> Reflection | None:
-    """Type the first reflection of ``marker`` (executing script, then attribute, then
-    text). A marker in a script that never runs (`script_executes`) is text inside a
+def _js_states_of(src: str, marker: str) -> list[str]:
+    """The lexer state at each occurrence of ``marker`` in ``src``, in order."""
+    out, states, i = [], None, src.find(marker)
+    while i != -1:
+        states = states or js_states(src)
+        out.append(states[i])
+        i = src.find(marker, i + 1)
+    return out
+
+
+def locate_reflections(html: str, marker: str) -> list[Reflection]:
+    """Every distinct context ``marker`` is reflected in (BUG-0154), in a fixed order:
+    executing scripts (by the lexer state at each occurrence), then attribute values
+    (with their executability, position and raw quote), then text (with its innermost
+    inert parent), each group in document order; equal contexts appear once. An
+    empty list means no reflection. A page that shows a value escaped in one place
+    and raw in another (an edit form's ``<input value>`` beside a ``<p>``) is typed in
+    both, so the raw place's break-out is tried too.
+
+    A marker in a script that never runs (`script_executes`) is text inside a
     raw-text element: ``html`` with ``inert_parent="script"``, whose only try is the
-    ``</script>`` element break-out (BUG-0093)."""
+    ``</script>`` element break-out (BUG-0093). The text of an executing script is its
+    script context only. A marker the parser shows nowhere (e.g. inside a tag name) is
+    typed ``html``, as before."""
     if not html or marker not in html:
-        return None
+        return []
     soup = BeautifulSoup(html, "html.parser")
+    found: list[Reflection] = []
+
+    def add(ref: Reflection) -> None:
+        if ref not in found:
+            found.append(ref)
+
+    running = set()
     for script in soup.find_all("script"):
         text = script.get_text() or ""
         if marker in text and script_executes(script):
-            return Reflection("script", js_state=_js_state_at(text, marker))
+            running.add(id(script))
+            for state in _js_states_of(text, marker):
+                add(Reflection("script", js_state=state))
+    starts: list[int] | None = None
+
+    def line_starts() -> list[int]:
+        nonlocal starts
+        starts = starts if starts is not None else _line_starts(html)
+        return starts
     for tag in soup.find_all(True):
         for attr, value in tag.attrs.items():
             for val in (value if isinstance(value, list) else [value]):
-                if isinstance(val, str) and marker in val:
-                    exec_attr = _is_exec_attr(tag.name, attr)
-                    js = _js_url_body(val) if exec_attr else None
-                    return Reflection(
-                        "attribute", attr_exec=exec_attr,
-                        js_state=_js_state_at(js, marker) if js is not None else None,
-                        attr_at_start=val.lstrip().startswith(marker),
-                        quote=_raw_attr_quote(html, marker))
+                if not (isinstance(val, str) and marker in val):
+                    continue
+                exec_attr = _is_exec_attr(tag.name, attr)
+                js = _js_url_body(val) if exec_attr else None
+                quote = _attr_quote(html, tag, attr, marker, line_starts)
+                states = (_js_states_of(js, marker) if js is not None else []) or [None]
+                for state in states:
+                    add(Reflection("attribute", attr_exec=exec_attr, js_state=state,
+                                   attr_at_start=val.lstrip().startswith(marker),
+                                   quote=quote))
     for text in soup.find_all(string=lambda s: s is not None and marker in s):
+        if id(text.parent) in running:
+            continue
         inert = next((p.name for p in text.parents if p.name in INERT_ELEMENTS), None)
-        return Reflection("html", inert_parent=inert)
-    return Reflection("html")
+        add(Reflection("html", inert_parent=inert))
+    return found or [Reflection("html")]
+
+
+def locate_reflection(html: str, marker: str) -> Reflection | None:
+    """The first of `locate_reflections` (executing script, then attribute, then
+    text), or None when ``marker`` is not reflected. Kept for callers that type one
+    reflection; a confirmer tries them all (BUG-0154)."""
+    found = locate_reflections(html, marker)
+    return found[0] if found else None
 
 
 def _in_form_control(node) -> bool:
@@ -411,8 +528,10 @@ def js_executes(html: str, token: str) -> bool:
 
 
 def xss_breakouts(ref: Reflection, token: str):
-    """``(kind, fragment, check)`` tries for a reflection, at most 3, most specific
-    first; ``check(html)`` judges the second response structurally."""
+    """``(kind, fragment, check)`` tries for **one** reflection, at most 3, most
+    specific first; ``check(html)`` judges the second response structurally. A page
+    reflecting in several contexts gets each context's tries (`locate_reflections`;
+    the confirmer caps the total, FR-FUZZ-54)."""
     tries = []
     if ref.context == "script":
         frag = _js_breakout(ref.js_state, token)

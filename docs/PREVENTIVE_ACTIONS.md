@@ -2389,3 +2389,37 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A hand-written HTTP response that closes its connection says
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
+
+- **PA-0160** — Strengthens `PA-0084(2)` and `PA-0133(2)`, and carries `PA-0311(1)` from
+  ground-truth labels to confirmers, after BUG-0154: reflected XSS typed only the first
+  place a value reflected in, so an edit page showing the value escaped in its control
+  and raw in a paragraph was never tried in the paragraph. PA-0084(2) asked for one
+  fixture per context, and PA-0133(2)'s realistic edit-form fixture was enforced for the
+  evaluation markers only.
+  1. **A confirmer judges every place its input is output.** A typing step returns every
+     distinct context (`oracle/context.locate_reflections`), never the first. A
+     single-place helper (`locate_reflection`) is a wrapper for non-confirming callers
+     only, and is never called in `fuzzlab/oracle/` (an AST guard, proven on a
+     synthetic offender).
+  2. **Its fixtures include a page that outputs the value in two places, escaped in one
+     and raw in the other, in both orders,** beside the both-escaped negative; at least
+     one is a post/redirect/get page. A mutation check (the first place only) fails them.
+  3. **A per-place cost has a stated total cap that keeps the single-place cost**
+     (`ReflectedXssStrategy.MAX_BREAKOUTS`), and the tries go in rounds so the cap never
+     starves a later place. (from BUG-0154)
+  - Enforced by: tests/test_oracle_xss_multicontext.py::test_no_oracle_module_types_a_single_reflection, tests/test_oracle_xss_multicontext.py::test_the_single_reflection_guard_catches_an_offender, tests/test_oracle_xss_multicontext.py::test_typing_only_the_first_context_misses_the_raw_place, tests/test_oracle_xss_multicontext.py::test_a_prg_edit_page_escaped_in_its_control_and_raw_in_text_is_a_stored_finding, tests/test_oracle_xss_multicontext.py::test_the_send_count_cap_is_respected
+
+- **PA-0161** — Strengthens `PA-0103` (a hand-written lexer is tested on every ambiguity)
+  and `PA-0131(1)` (judge an input in its own grammar), after BUG-0155: an attribute's
+  quote was read from the nearest `=` before the marker, so a raw value in
+  `href="/x?q=VALUE"` was typed unquoted and given a break-out that cannot escape.
+  PA-0103 named lexers, and a backward scan was not seen as one.
+  1. **A confirmer reads a structural fact about markup (quoting, the context of a
+     position) by lexing from the element's own start,** located through the parser's
+     source position (`sourceline` / `sourcepos`). It never scans back from an
+     occurrence for the nearest delimiter. An AST guard allows no `rfind` / `rindex` in
+     `fuzzlab/oracle/` but the listed fallback, and is proven on a synthetic offender.
+  2. **Such a reader is tested on its grammar's ambiguities:** the delimiter inside a
+     value, a tag-like comment, `<` in a script, line endings and duplicate attributes.
+     A mutation check (the old reading) fails a true positive. (from BUG-0155)
+  - Enforced by: tests/test_oracle_xss_multicontext.py::test_no_oracle_module_reads_markup_by_scanning_back, tests/test_oracle_xss_multicontext.py::test_the_backward_scan_guard_catches_an_offender, tests/test_oracle_xss_multicontext.py::test_the_nearest_equals_reading_was_the_defect, tests/test_oracle_xss_multicontext.py::test_the_quote_is_lexed_from_the_parsers_source_position

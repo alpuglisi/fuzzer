@@ -3,6 +3,73 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0091 — Reflected XSS tries every context a value reflects in; an attribute's quote is its own (BUG-0154, BUG-0155) (2026-10-15)
+- Change:
+  - `oracle/context.py`:
+    - `locate_reflections(html, marker)` returns every distinct context, in a fixed
+      order: executing scripts (one entry per distinct lexer state at an occurrence),
+      then attribute values, then text (innermost inert parent). Each group is in
+      document order, and equal contexts appear once. The text of an executing script is
+      its script context only. An empty list means no reflection.
+    - `locate_reflection` is now `locate_reflections(...)[0]` (None when nothing
+      reflects). `_js_state_at` (its only user was the old body) is removed.
+    - BUG-0155: `_start_tag_attrs` lexes a start tag's attributes by the HTML tokenizer's
+      attribute states. `_attr_quote` finds the attribute's own start tag through the
+      parser's `sourceline` / `sourcepos` (with `_line_starts`). `_raw_attr_quote` is
+      kept only as the fallback for a tag with no source position.
+    - `xss_breakouts` is unchanged (at most 3 tries for one reflection); its docstring
+      says so.
+  - `oracle/strategies.py`, `ReflectedXssStrategy`:
+    - `_tries(refs, token)` puts every context's break-outs in rounds and sends each
+      fragment once.
+    - `MAX_BREAKOUTS = 6` caps the break-out sends after the typing probe. It confirms on
+      any one.
+    - The evidence adds `reflection` (`_describe`: the confirming context's typing) and
+      `contexts` (how many were typed). `context`, `breakout`, `signature` and the PRG
+      `observation` are as before.
+  - Tests: `tests/test_oracle_xss_multicontext.py` (new, 27 tests, loopback
+    `ThreadingHTTPServer` fixtures with generic routes and fields only).
+- Impact (other components / project):
+  - Callers of the changed functions, found by searching `fuzzlab/`, `tests/` and
+    `scripts/` for `locate_reflection`, `xss_breakouts`, `Reflection` and
+    `type_reflection`:
+    - `oracle/strategies.ReflectedXssStrategy` was the only `fuzzlab/` caller of
+      `locate_reflection` and `xss_breakouts`. It now calls `locate_reflections`.
+    - `tests/test_forms_phase2.py::test_no_sqli_or_xss_payload_is_unsendable_in_a_header`
+      builds `Reflection(ctx, quote=…)` and calls `xss_breakouts`: unchanged signature.
+    - `type_reflection` (tests only: `test_oracle.py`, `test_oracle_xss_structural.py`)
+      is unchanged.
+    - `mutation/xss.py` imports only `CONTEXTS`: unchanged.
+  - Consumers of the evidence: `oracle/oracle.py` stores it as JSON. Nothing in
+    `fuzzlab/` reads M5's evidence keys. `tests/test_oracle.py` reads `context`, and
+    `tests/test_prg_observation.py` reads `signature` and `observation`: kept.
+  - Cost: a page typed in one context sends what it did (`test_the_lab_sinks` still
+    asserts at most 4). A page with several contexts sends 1 + up to 6. The scheduler's
+    `reflected-context` prior and the budget accounting are per request, so both count
+    these sends as before.
+  - No store schema, CLI or UI change. Ground truth unchanged.
+- Risk: low to medium.
+  - More break-outs reach a multi-context page. Every one is the same kind already sent,
+    and the total is capped.
+  - A new true positive can now confirm where none did. The confirmation itself (the
+    structural checks, the HTML rendering precondition) is unchanged, and the
+    both-escaped and every existing negative fixture stay negative.
+  - The quote lexer follows the HTML tokenizer, and `html.parser` can tokenize some
+    malformed tags differently. The lexer then finds no matching attribute, and the old
+    reading is used: never worse than before.
+- Process note (deviation): this lane could not run the pre-change review gate
+  (`docs/components/README.md`, two independent reviewer agents), because it has no
+  agent-dispatch tool. The entry was drafted before the tests were final. The
+  orchestrator's independent review stands in for the gate and is still owed.
+- Deliverables:
+  - [x] `oracle/context.py`, `oracle/strategies.py` — done
+  - [x] `tests/test_oracle_xss_multicontext.py` (with 2 AST guards and 2 mutation checks)
+    — done
+  - [x] BUG-0154, BUG-0155, PA-0160, PA-0161, ERROR_LOG, CHANGELOG; FR-FUZZ-54 (FR-FUZZ-39
+    amended in place) — done
+  - [ ] independent review (the pre-change gate, see process note) — todo (orchestrator)
+- Effectiveness (assessed pending): verification counts are in the lane report.
+
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
 - Change:
   - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no
