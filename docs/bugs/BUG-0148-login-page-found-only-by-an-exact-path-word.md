@@ -23,8 +23,9 @@ failed with:
 > the base page or a login route)
 
 The authenticated crawl never started. That message is the only lab fact this fix
-uses. The lab's routes, labels and source were not read, and no fixture copies its
-shape (PA-0154(d)).
+uses; the lab's routes, labels and source were not read. The first version's tests did
+contain one route and label pair that mirrors that lab (found in review B, B1); it was
+removed in ef477f0, and no fixture now copies the lab's shape (PA-0154(4)).
 
 ## What it caused to fail
 - No authenticated discovery or fuzzing on any app whose login route has no exact
@@ -125,7 +126,7 @@ end through their downstream gates against other frameworks' defaults. The vocab
 was also copied rather than owned.
 
 ## Corrective action
-CC-SESS-0025 (commits on branch `bug-0148`), per design v2 sections 1-8:
+CC-SESS-0025, per design v2 sections 1-8. Commits on branch `bug-0148`: 223518b (the fix), c169a06 (two guard findings of the first harness run), 2aef9ee (bookkeeping), ef477f0 (combined reviews A and B; see "Combined review" below).
 - **SP-16, one owner** (`detect.login_path_match`, modes `logout` and `candidate`):
   `looks_like_login_url` is its thin wrapper, unchanged for its callers; rank 1 (whole
   segment, `session(s)/new`) and rank 2 (final token, final login pair; own-case
@@ -142,7 +143,7 @@ CC-SESS-0025 (commits on branch `bug-0148`), per design v2 sections 1-8:
 - **Order and cap:** base page, affordances, rank 1, rank 2; at most 5 distinct.
 - **Hidden forms refused** (`is_visible` first, errors caught).
 - **Gates:** route/action overrides for `new`, `users`, `account`, `admin` when that
-  location names a login; a checkbox's hidden companion is not an object selector.
+  location is a login page's own name (review A, A1); hidden fields are framework tokens on the login path (review B, B2(b)).
 - **Pre-window writes aborted**, counted and named (host and path).
 - **Requests side:** `detect.login_links` (affordance links, then rank-1 links) before
   the fixed paths.
@@ -163,7 +164,7 @@ from framework documentation defaults only.
    `/users/new`, which an existing test refuses.
 2. Section 2 gained one rule the matrix found: a hidden control that has the name of a
    checkbox in the same form is that checkbox's unchecked value (Rails `check_box`,
-   ASP.NET), not an object selector. Without it Devise's default page is refused.
+   ASP.NET), not an object selector. Without it Devise's default page is refused. *(Replaced in ef477f0 by review B's general rule, B2(b).)*
 3. Section 5 reverses two assertions of `tests/test_session_browser_login.py` that
    pinned "nothing is refused before the window"
    (`test_the_request_side_gate_needs_the_window`,
@@ -237,7 +238,7 @@ PA-0301(1), PA-0003 and SP-16.
 | `browserlogin.LOGIN_PATH_TOKENS` / `LOGIN_PATH_PAIRS` (a copy) | copied vocabulary | **fixed**: derived from `detect` |
 | `browserlogin` imports `_LOGIN_SEGMENTS`, `_USERNAME_HINT` | private vocabulary import | **fixed**: public names; AST guard |
 | `login_form_refusal` (via `account_word_reason`, `credential_change_reason`, `form_refusal`'s `settings_word`) refusing `new` / `users` / `account` / `admin` | deny rule refusing framework defaults | **fixed** for a location that names a login; framework matrix test |
-| `store_adapter._object_selector` on a checkbox companion (`user[remember_me]`) | deny rule refusing a framework default | **fixed** in the login path (`_without_checkbox_companions`); the import-side rule is unchanged (design section 2) |
+| `store_adapter._object_selector` on a checkbox companion (`user[remember_me]`) | deny rule refusing a framework default | **fixed** in the login path: after the login-shape and account-word gates, hidden fields are not judged as object selectors (review B, B2(b); replaces the first version's checkbox-companion rule); the import-side rule is unchanged |
 | `_pick_form` waiting on a stale mark of a hidden form | a hidden login stops the search | **fixed**: `is_visible` first, errors caught |
 | `manager._discover_login_form` fixed paths only | find by word list | **fixed**: `detect.login_links` first; fixed paths kept as the fallback |
 | `store_adapter._CHANGE_TOKENS` (`admin`, `account`, `users`, ...) on the import side | deny rule | **not changed** (design section 2: the import-side rule is unchanged); its stated accepted false positives remain an import-side choice |
@@ -247,10 +248,13 @@ PA-0301(1), PA-0003 and SP-16.
 | `spa.REVEAL_JS` toggle words and Material selectors | fitted to one component library (F-014) | **listed** for the spa.py owner |
 | `spa.scan_routes` / `scan_query_params` on by default | reading the app's code (F-014) | **listed**: follow-on "retire script route scanning" |
 | `spa.py` imports `store_adapter._FILLERS`, `_TEXT_FILLER`; `harness/auto.py` imports `strategies._TIMING_TEMPLATES`; `labgen/.../django_live_boot.py` imports `live_boot._NO_REDIRECT_OPENER` | private vocabulary import | **listed** in the guard's allowlist with reasons (files owned by another lane or out of scope); a stale entry fails |
-| `spa.label_refusal` imports `browserlogin._account_hit` (a private function) | private import | **listed**: a function, not vocabulary; the guard is for constants |
+| `spa.label_refusal` imports `browserlogin._account_hit` (a private function) | private import | **debt** (review B, B5): a function, not vocabulary; the guard (`tests/test_private_vocabulary.py`) judges constants |
 | `detect._USERNAME_HINT` (a substring regex) | ranks controls already found | **kept**: it picks among the one login-shaped form's controls, never finds a page (BUG-0121 owns it) |
 | `detect.find_login_form` (requests side) applies no `login_form_refusal` | gate-less path | **listed**: unchanged behaviour; it now also sees affordance and rank-1 pages |
 | `manager` assumes `urljoin(base, "logout")` as the logout URL | fitted path | **listed**: follow-on below |
+| `store_adapter._CHANGE_TOKENS`, `formnav.SETTINGS_WORDS`, `browserlogin.ACCOUNT_WORDS` on the import side | existing keyword rules never run through a framework matrix | **debt** under PA-0154(2) (it binds new or changed rules); not changed here |
+| `account_endpoint_reason` (the in-window write gate) treats `auth`, `session` or `token` in a path as a login token, so a POST to `/auth/users/` (a Djoser-style registration API) is not refused in the window (review A, A1) | endpoint vocabulary too wide for a deny exception | **listed**: unchanged behaviour since CC-SESS-0021; the form gates no longer accept such a form (A1), which closes the path this fix opened. Follow-on |
+| `harness/auto.py` reads `strategies.SqliBooleanStrategy._FAMILIES` | private class constant | **listed** in the guard's allowlist (another lane's file) |
 | `probesender.py` `redirect_is_logout` | SP-16 caller | **unchanged** (logout mode identical; tested over a corpus) |
 
 ### Named follow-ons
@@ -263,3 +267,59 @@ PA-0301(1), PA-0003 and SP-16.
   `_browser_login_state` and the persisted state).
 - Retiring script route scanning (F-014).
 - `spa.FORMS_JS`'s re-marking of a hidden form (pinned above).
+
+## Combined review (reviews A and B of the build; fixed in ef477f0)
+| Item | Finding | Disposition |
+|---|---|---|
+| A1 | The override used the endpoint vocabulary: `/auth/users/`, `/auth/account`, `/auth/admin/users`, `auth/users/new` were accepted | **fixed**: `names_login_page` (rank 1 on that location only); the four are negatives in `test_the_override_keeps_every_other_refusal`; the matrix still passes |
+| A2 | The requests side took the first password form of a linked page | **fixed**: `login_form_core_refusal` is the one gate both paths call; `detect.login_forms` offers every form; `test_the_requests_side_never_fills_a_registration_form_before_the_login` |
+| A3 | A menu's `href="#"` was visited as a link | **fixed**: the same-page check at both levels; `account-menu-hash-link` shape |
+| A4 | The logout-parity test compared the function with itself | **fixed**: against a frozen copy of the 13b1cff rule over a corpus |
+| A5 | WebSocket messages held only during clicks | **fixed**: held for the whole pre-window phase |
+| A6 | `OPTIONS` (and `HEAD`) aborted before the window | **fixed**: they pass; the GraphQL-POST cost is stated in FR-SESS-21 and the diagnosis |
+| A7 | A failed return to the base page ended the login | **fixed**: caught; path candidates and the diagnosis follow |
+| A8 | `input[type=button]` was not an affordance | **fixed**; `input-button-opener` shape |
+| A9 | A rank-2 app page is filled when nothing better is found | **residual**, pinned: `test_residual_a_rank_2_decoy_alone_is_never_filled` (strict xfail) |
+| A10 | No discovery time budget | **fixed**: `DISCOVERY_BUDGET_S` (60 s); `test_the_search_stops_at_its_time_budget_with_a_diagnosis` |
+| A11 | The guard missed attribute access | **fixed** (with B5) |
+| A12 | The `FORMS_JS` re-marking needs its own number | **done**: BUG-0151 / PA-0157; the strict xfail stays |
+| B1 | A lab-mirroring route and label pair in the tests | **fixed**: neutral compounds (`memberlogin`, `customerlogin`), the decoy renamed (`exercise_login`), the corpus's lab page names replaced; line 26 corrected |
+| B2(a) | Exact-label affordances missed "User Login", "Login / Register", ... | **fixed**: a label containing a login word or pair, no logout word; account words waived in the label gate. **Deviation:** a label that only *contains* one ranks after the rank-1 path candidates (an exact one before them). Without it the decoy test failed: "Exercise: login form" became an affordance, and its login-shaped form got the credentials before `/login`, which the form gates cannot stop |
+| B2(b) | Drupal and Keycloak refused on hidden fields | **fixed**: hidden fields are not judged as object selectors on the login path (they are still judged for account and destructive words); replaces the checkbox-companion rule |
+| B2(c) | Drupal, Keycloak and WordPress in the matrix | **done**, from their documented default forms |
+| B2(d) | Redirect variants, an absolute action, Moodle | **done**: Rails `require_authentication` and Devise `authenticate_user!` redirects, Laravel's absolute action, Moodle `login/index.php` (rank 1) |
+| B2(e) | What still fails | strict xfails and FR-SESS-21 residuals |
+| B3 | Reads sent as POST are aborted before the window | **residual**: `test_residual_a_graphql_query_before_the_login` (strict xfail); `TODO(SP-37)` at the rule for the integration |
+| B4 | The guard ran with the Chromium matrix | **fixed**: `tests/test_private_vocabulary.py` |
+| B5 | Attribute access and relative imports | **fixed**, each with a synthetic offender; class constants read across modules too (`SqliBooleanStrategy._FAMILIES` listed); private rule functions recorded as debt |
+| B6 | Icon-ligature words in `DISCLOSURE_WORDS` | **fixed**: `LABEL_FILLER` plus user, profile, me, menu; the `aria-haspopup` / `aria-expanded` signal decides |
+| B7 | PA-0154 wording | **fixed**: PA-0124 and PA-0111 named; item 2 scoped to new or changed rules, existing ones listed as debt; items 1 and 4 stated as review rules |
+| B8 | Bookkeeping | **done**: CC-SESS-0025's counts; the measurement output quoted below; commit hashes above |
+| B9 | `[role=tab]`, `<summary>`, same-origin iframes | **residuals**, strict xfails |
+| B10 | Do not edit `docs/claude_juicelab_failures.md` | not edited |
+
+### Measurement output (section 0, condensed; ports replaced)
+```
+{"1_hidden_modal": {"forms_found": 2, "marked_ids_now": ["r1f1b", "r1f1c0", "r1f1c1"],
+ "is_enabled_hidden_form0": "raised TimeoutError: Page.is_enabled: Timeout 2000ms exceeded.",
+ "is_visible_hidden_form0": false, "is_enabled_hidden_form1": true,
+ "is_visible_hidden_form1": false, "is_visible_after_open": true,
+ "after_open_visible_enabled": [true, true]},
+ "2_labels": {"li": [["Log in", "", ""], false], "vis": [["Sign in", "", ""], false],
+  "icon": [["Sign in", "", ""], true], "icononly": [["", "Sign in", ""], true],
+  "srtext": [["Log in", "", ""], true], "acct": [["", "", ""], true]},
+ "3_click_vetted": {"hidden": {"raised": "TimeoutError",
+  "first_line": "Page.click: Timeout 3000ms exceeded."},
+  "covered": {"result": "dispatched", "clicked": "covered"}},
+ "4_prewindow_writes": {"request_refusal_saw": [["POST", "/api/onload"],
+  ["POST", "/api/clicked"]], "server_received_posts": []},
+ "5_click_navigations": {
+  "link": {"window_saw": [["GET", "/accounts/login/", true]], "url_after": "/nav",
+   "server_received": [], "password_forms_after": 0},
+  "go": {"window_saw": [["GET", "/users/sign_in", true]], "url_after": "/nav",
+   "server_received": [], "password_forms_after": 0},
+  "push": {"window_saw": [], "url_after": "/signin", "server_received": [],
+   "password_forms_after": 1},
+  "post": {"window_saw": [["POST", "/do", true]], "url_after": "/nav",
+   "server_received": [], "password_forms_after": 0}}}
+```

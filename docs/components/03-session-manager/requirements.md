@@ -129,61 +129,81 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     probe never fetch a URL `core.urls.destructive_reason` flags (a redirect to
     `logout`, `reset`, ...), other than the operator's own base URL.
 - **FR-SESS-21 (finding the login page by what every stack shares, CC-SESS-0025,
-  BUG-0148; design v2 after reviews A and B)**
+  BUG-0148; design v2 after reviews A and B; combined reviews A and B of the build)**
   - **One login vocabulary and rule (SP-16).** `detect.login_path_match(target, *,
     mode)` owns every login-URL decision. ``mode="logout"`` is `looks_like_login_url`'s
-    rule, unchanged (FR-SESS-18; `redirect_is_logout`, the probe sender).
-    ``mode="candidate"`` ranks where the browser login may look: rank 1 for a whole
-    login segment or ``session(s)/new``; rank 2 for a final `name_tokens` token or a
-    final login pair (``wp-login``, ``UserLogin``, ``user-sign-in``). No prefix or
-    suffix of a run-together word (``userlogin`` is found by its affordance, never by
-    its path). Every logout positive is a candidate. The vocabulary is public in
+    rule, unchanged since 13b1cff (FR-SESS-18; `redirect_is_logout`, the probe sender;
+    pinned against a frozen copy). ``mode="candidate"`` ranks where the browser login
+    may look: rank 1 for a whole login segment, ``session(s)/new`` or a login
+    directory's front controller (``login/index.php``); rank 2 for a final `name_tokens`
+    token or a final login pair (``wp-login``, ``MemberLogin``, ``member-sign-in``). No
+    prefix or suffix of a run-together word (``memberlogin`` is found by its affordance,
+    never by its path). Every logout positive is a candidate. The vocabulary is public in
     `session/detect.py` (`LOGIN_WORDS`, `LOGIN_PAIRS`, `LOGIN_ENDPOINT_TOKENS`,
-    `AFFORDANCE_FILLER`, `USERNAME_HINT`); `browserlogin.LOGIN_PATH_TOKENS` /
-    `LOGIN_PATH_PAIRS` are those sets, not copies; no module imports a `_LOGIN_*` name.
+    `LABEL_FILLER`, `LOGOUT_WORDS`, `USERNAME_HINT`); `browserlogin.LOGIN_PATH_TOKENS` /
+    `LOGIN_PATH_PAIRS` are those sets; no module reads another module's private
+    constant (`tests/test_private_vocabulary.py`).
   - **The affordance first (browser, `browserlogin._Discovery`).** When the base page
     shows no acceptable form, its own login affordances are read with the one label
-    reader (`spa.LABELS_JS`) over `a[href]`, `button`, `[role=button]`, `[role=link]`
-    and `[role=menuitem]`, never a form's submitter (`input[type=submit|image]`, a
-    submit `<button>` of a form). A label is an affordance when its tokens, filler
-    (to, your, my, account, here, now, please) dropped, are exactly login, signin,
-    logon, log in, sign in or log on (`detect.login_affordance`), and it passes
-    `spa.submitter_glyph` and `spa.label_refusal`. Affordances are deduplicated by
-    target (link key, or labels plus ordinal). An in-scope, non-destructive link is
-    visited with `navguard.navigate` (read visible or not); any other affordance is
-    clicked with `spa.click_vetted` in the reveal window (`LoginGate.window_refusal`
-    over `spa.window_request_refusal`, `LoginGate.ws_hold`): a navigation it triggers
-    is captured, not followed, and visited next through `navigate` and the gates;
-    before each click after the first the base page is reloaded and the control found
-    again by its labels and ordinal. One level of an account menu (`aria-haspopup` or
-    `aria-expanded=false`, an account-like label or an icon with no label) is opened
-    to look inside it. A candidate that is hidden, gone or refused is recorded and the
-    next one is tried.
-  - **Order.** The base page; affordance links and clicks; rank-1 path candidates
-    (script and link routes); rank-2. At most 5 distinct candidates after the base page.
+    reader (`spa.LABELS_JS`) over `a[href]`, `button`, `[role=button]`, `[role=link]`,
+    `[role=menuitem]` and `input[type=button]`, never a form's submitter
+    (`input[type=submit|image]`, a submit `<button>` of a form). A label is an
+    affordance when its aria-label or text **contains** a login word or pair and neither
+    has a logout word (out, logout, signout, exit) (`detect.login_affordance`); it passes
+    `spa.submitter_glyph` and `spa.label_refusal` with its account words waived (a
+    "Login / Register" label is accepted; the form gates protect the fill). Affordances
+    are deduplicated by target (link key, or labels plus ordinal). An in-scope,
+    non-destructive link to another document is visited with `navguard.navigate` (read
+    visible or not); any other affordance, a same-page link (``href="#"``, ``#modal``)
+    included, is clicked with `spa.click_vetted` in the reveal window
+    (`LoginGate.window_refusal` over `spa.window_request_refusal`, `LoginGate.ws_hold`):
+    a navigation it triggers is captured, not followed, and visited next through
+    `navigate` and the gates; before each click after the first the base page is
+    reloaded and the control found again by its labels and ordinal. One level of a
+    disclosure (`aria-haspopup` or `aria-expanded=false`, a label of filler and
+    account words only, or an icon with no label) is opened to look inside it. A
+    candidate that is hidden, gone or refused is recorded and the next one is tried.
+  - **Order.** The base page; affordances whose label is exactly a login word or pair
+    (filler aside); rank-1 path candidates (script and link routes); affordances whose
+    label only contains one; rank-2 path candidates. At most 5 distinct candidates after
+    the base page, and at most `DISCOVERY_BUDGET_S` (60 s, inside the 120 s login
+    deadline), after which the diagnosis is given.
   - **Hidden forms.** A form whose password control is not visible (a pre-rendered
     modal) is refused, so the search reaches the control that opens it.
-  - **The gates accept the frameworks' own login pages.** When a route (or a form
-    action's path) names a login (`browserlogin.login_named`), the gates see it without
-    `new`, `users`, `account` and `admin` (Rails ``session/new``, Devise
-    ``users/sign_in``, ASP.NET Identity ``Identity/Account/Login``, Django
-    ``admin/login``); each location is judged on its own. A hidden control named as a
-    checkbox of the same form (its unchecked value: Devise's ``user[remember_me]``) is
-    not an object selector. Button labels, control names, password count and shape,
-    and credential-change detection keep every rule.
+  - **The gates, one implementation for both paths** (`browserlogin.login_form_core_refusal`):
+    exactly one password control, login-shaped, no account word on the route, button
+    labels, action or any control name, no destructive control name, action or route,
+    and not a credential-change form judged **without the hidden fields** (on a form
+    that passed the gates above a hidden field is a framework token: Drupal
+    ``form_build_id``, Keycloak ``credentialId``, Rails ``authenticity_token``, a
+    checkbox's hidden value; the object-selector refusal stays for import). When a route
+    or a form action's path is a login page's own name (`browserlogin.names_login_page`:
+    `login_path_match` rank 1 on that location; never the endpoint vocabulary, so
+    ``/auth/users/`` stays refused), the gates see it without `new`, `users`, `account`
+    and `admin`. The browser login adds `spa.form_refusal` (on the form without its
+    hidden fields).
   - **Before the window** (from launch to the first fill) every write (any method but
-    GET and HEAD: on page load, on a route visit, on a click) is aborted, counted and
-    named by host and path (`LoginGate.request_refusal`); a successful login logs them.
+    GET, HEAD and OPTIONS: on page load, on a route visit, on a click) is aborted,
+    counted and named by host and path (`LoginGate.request_refusal`); a successful
+    login logs them. Page-to-server WebSocket messages are held until the window opens.
+    **A stated cost:** a read the app sends as a POST (an Apollo or Relay GraphQL query,
+    SignalR's ``negotiate``, a JSON-RPC read) is aborted too, so a login rendered only
+    after one is not found; the diagnosis says so (to be routed through DISC-CAPTURE's
+    SP-37 `capture.capture_refusal` at integration).
   - **The requests side** (`SessionManager._discover_login_form`): the base page, then
-    its affordance links and rank-1 links (`detect.login_links`, at most 5, each first
-    passing `_navigation_ok`), then the fixed fallback paths.
+    its login links in the browser's order (`detect.login_links`, at most 5, each first
+    passing `_navigation_ok`), then the fixed fallback paths; on every page the first
+    password form the shared gates accept (`detect.login_forms`), never simply the first.
   - **Diagnosis.** A failure lists every candidate tried and why it failed, the aborted
     pre-window writes, an affordance leading outside the login scope ("needs
-    --auth-origin"), an identifier-first page, and "no login affordance found (English
-    labels only)". It never holds the password.
+    --auth-origin"), an identifier-first page, a spent time budget, and "no login
+    affordance found (English labels only)". It never holds the password.
   - **Stated residuals** (strict xfails in `tests/test_login_discovery.py`): a form in a
-    shadow root, a clickable `div` with no role, non-English labels, identifier-first
-    (two-step) login. Named follow-ons: BUG-0148's section "Named follow-ons".
+    shadow root; a clickable `div` with no role; `[role=tab]`; `<summary>`; a login form
+    in a same-origin iframe; non-English labels; identifier-first (two-step) login; a
+    login rendered after a GraphQL POST; a rank-2 app page with a login-shaped form is
+    filled when nothing better is found; `spa.FORMS_JS`'s re-marking of a hidden form
+    (BUG-0151). Named follow-ons: BUG-0148's section "Named follow-ons".
 - **FR-SESS-20 (origin-scoped sessions, CC-SESS-0023, BUG-0134; design Revision 2,
   O1-O13; review rounds 1-2, R1-R9, T1-T6)**
   - **Origins (O1).** `SessionState.origins` is a set of canonical origins

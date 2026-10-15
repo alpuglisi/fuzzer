@@ -1345,7 +1345,8 @@ tracked in the requirements files, not here.
   window, one level of an account menu opened), then by path candidates ranked by the
   one SP-16 owner (`detect.login_path_match`); writes before the login window are
   aborted; the requests-side discovery follows the base page's login links before its
-  fixed paths.
+  fixed paths, and both paths judge every form through one shared gate
+  (`browserlogin.login_form_core_refusal`).
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
   identity)`, `ensure(identity)`, resolved by the request's host and **sent by
   origin**: a session carries `SessionState.origins` (base, login page, credential

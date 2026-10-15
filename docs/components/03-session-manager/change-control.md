@@ -10,7 +10,7 @@ Newest first.
     ``logout`` (`looks_like_login_url`'s rule, now its thin wrapper) and ``candidate``
     (rank 1 whole segment or ``session(s)/new``; rank 2 final token or final login
     pair; no prefix/suffix rule). Public vocabulary `LOGIN_WORDS`, `LOGIN_PAIRS`,
-    `LOGIN_ENDPOINT_TOKENS`, `AFFORDANCE_FILLER`, `USERNAME_HINT`;
+    `LOGIN_ENDPOINT_TOKENS`, `AFFORDANCE_FILLER` (now `LABEL_FILLER`), `USERNAME_HINT`;
     `login_affordance(text, aria)`; `login_links(html, page_url)` for the requests side.
   - `session/browserlogin.py`: `LOGIN_PATH_TOKENS` / `LOGIN_PATH_PAIRS` are detect's
     sets; `_login_routes` replaced by `_Discovery` (affordances read with
@@ -70,6 +70,30 @@ Newest first.
   and the base-URL registry (`_Discovery.__init__` registered, the stale
   `_login_routes` entry removed); fixed in c169a06. Final verification counts are in
   the lane report. The held-out lab is not re-run by this lane (blind).
+- Amendment, combined reviews A and B of the build (2026-10-15; ef477f0): every item and
+  its disposition is in BUG-0148, "Combined review". In short:
+  - the gate override applies only where a route or action is a login page's own name
+    (`browserlogin.names_login_page`, rank 1), never the endpoint vocabulary (A1);
+  - one gate for both paths (`login_form_core_refusal`); the requests side judges every
+    password form of a page (`detect.login_forms`, `gate_description`) (A2);
+  - affordances: a label that contains a login word or pair and no logout word
+    (`detect.affordance_rank`); an exact label ranks before rank-1 paths, a contained
+    one after them (a recorded deviation from B2(a)); `input[type=button]`; same-page
+    links clicked; disclosure words from `detect.LABEL_FILLER` (A3, A8, B2(a), B6);
+  - hidden fields are framework tokens on the login path (B2(b)); Moodle's
+    `login/index.php` is rank 1 (B2(d));
+  - pre-window: GET, HEAD and OPTIONS pass; WebSocket messages held until the window;
+    the GraphQL-POST cost stated, `TODO(SP-37)` at the rule (A5, A6, B3);
+  - a guarded return to the base page; a 60 s discovery budget (A7, A10);
+  - tests: Drupal, Keycloak, WordPress, two redirect variants, Laravel's absolute
+    action, Moodle, three SPA variants, the registration-first page; strict xfails for
+    the residuals (A9, B3, B9); the private-vocabulary guard moved to
+    `tests/test_private_vocabulary.py` with relative imports and attribute access (B4,
+    B5); lab-shaped vectors removed (B1); BUG-0151 / PA-0157 (A12).
+- Risk (amendment): the requests side now refuses forms it accepted before (a
+  password-only form, or one with an account word on a control): a login that only
+  such a form serves is no longer found there. Accepted: the browser path had the same
+  gates already, and the old behaviour sent credentials to registration forms (A2).
 
 ### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
 - Change: `session/browserlogin.py` `_drive` loads the base page and each login route

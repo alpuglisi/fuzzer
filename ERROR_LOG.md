@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Crawler/session: `spa.FORMS_JS` re-marks a hidden form's controls (consumer fixed; producer open, BUG-0151, PA-0157)
+- **Symptom:** on a page with a pre-rendered hidden login modal, the browser login raised `TimeoutError: Page.is_enabled` instead of trying the control that opens it (measured in BUG-0148's section 0).
+- **Root cause:** `FORMS_JS` marks the hidden form's controls, then marks them again for the `<body>` as a second container (its one shown button is the modal opener), so the first form's ids vanish; `_pick_form` waited on one.
+- **Remediation:** the consumer reads `is_visible` first and catches failures per form (BUG-0148, CC-SESS-0025). The producer fix is deferred to `spa.py`'s owner; pinned by a strict xfail.
+- **Status:** Open (producer).
+
 ## 2026-10-15 — Session: the browser login found a login page only by an exact path word (fixed, BUG-0148, PA-0154)
 - **Symptom:** on the blind held-out lab, `fuzzlab crawl --identity ...` failed with "no login form was found in the browser (no rendered form with a password control on the base page or a login route)"; the authenticated crawl never started (0 endpoints).
 - **Root cause:** login discovery was built on a word list fitted to the development labs (a route's last segment exactly `login`, `signin`, ...; a narrower private copy of SP-16's vocabulary), never on the page's own "Log in" / "Sign in" control; and the form gates were never tested against other frameworks' defaults, so they refused the standard login pages of Rails, Devise, ASP.NET Identity and Django admin. A pre-rendered hidden login modal raised a `TimeoutError` out of the login (measured).

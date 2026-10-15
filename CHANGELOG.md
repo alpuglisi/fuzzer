@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0148: combined reviews A and B; BUG-0151 recorded)
+- **What:** the gate override is limited to a login page's own name; both login paths share one form gate and the requests side judges every form; affordances match labels that contain a login word (exact ones first); hidden fields are framework tokens on the login path; OPTIONS passes and WebSocket messages are held before the window; a discovery time budget; Drupal, Keycloak, WordPress, Moodle and redirect variants join the matrix; the private-vocabulary guard has its own file and sees attribute access. BUG-0151 / PA-0157 record `FORMS_JS`'s re-marking (producer fix deferred to spa.py's owner). CC-SESS-0025 amendment.
+- **Why:** the two reviews found a gate override wide enough to accept a registration API, a requests-side picker with no gate, and framework defaults and labels the first version still missed.
+
 ## 2026-10-15 (BUG-0148: find the login page by what every stack shares)
 - **What:** the browser login finds a login page by the page's own "Log in" / "Sign in" link or button first (links visited, other controls clicked in the reveal window, one level of an account menu), then by path candidates ranked by one SP-16 owner (`detect.login_path_match`); hidden login forms are refused; the gates accept Rails, Devise, ASP.NET Identity and Django admin default login pages; every write before the login window is aborted and named; the requests-side discovery follows the base page's login links; failures list every candidate. PA-0154; CC-SESS-0025; FR-SESS-21; SP-16 updated.
 - **Why:** on the blind held-out lab the login was never found, so the authenticated crawl never started. The discovery rule was a word list fitted to the development labs (F-013, F-049).

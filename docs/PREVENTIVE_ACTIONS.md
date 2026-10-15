@@ -2393,23 +2393,43 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
 
 - **PA-0154** — **A rule that finds something rests on a signal every technology
   shares, and every keyword rule is tested across frameworks, not against a lab.**
-  Supersedes `PA-0122(4)` and strengthens `PA-0301(1)`, `PA-0003` and SP-16, after
-  BUG-0148: the browser login found a login page only by an exact path word, never by
-  the page's own "Log in" control, kept a narrower copy of SP-16's vocabulary through a
-  private import, and its form gates refused the default login pages of Rails, Devise,
-  ASP.NET Identity and Django admin.
+  Supersedes `PA-0122(4)`; strengthens `PA-0301(1)`, `PA-0124`, `PA-0111(3)`, `PA-0003`
+  and SP-16, after BUG-0148: the browser login found a login page only by an exact path
+  word, never by the page's own "Log in" control, kept a narrower copy of SP-16's
+  vocabulary through a private import, and its form gates refused the default login
+  pages of Rails, Devise, ASP.NET Identity and Django admin.
   1. **A rule that finds something** (a login page, a parameter, a route) **has a primary
      signal every technology shares**, such as a UI affordance or an observed request. A
-     word list may only rank candidates or add to them.
-  2. **Every keyword rule (allow, deny or discovery) is tested end to end, through every
-     downstream gate, against a table of framework defaults** taken from framework
-     documentation (here `tests/_framework_login_fixture.py`), never from a lab.
-  3. **No module imports another module's private vocabulary** (a `_UPPER_CASE` constant
-     of another module); a known instance in a file the change may not edit is listed
-     with its reason, and a stale entry fails. Enforced by an AST guard proven on
-     synthetic offenders (`PA-0034(2)`).
+     word list may only rank candidates or add to them. *(A review rule: no test can
+     tell a primary signal from a ranking one.)*
+  2. **Every new or changed keyword rule (allow, deny or discovery) is tested end to
+     end, through every downstream gate, against a table of framework defaults** taken
+     from framework documentation (here `tests/_framework_login_fixture.py`), never from
+     a lab. Existing keyword rules not yet tested this way are debt, listed in BUG-0148
+     (e.g. `store_adapter._CHANGE_TOKENS`, `formnav.SETTINGS_WORDS`, `ACCOUNT_WORDS` on
+     the import side).
+  3. **No module reads another module's private vocabulary** (a `_UPPER_CASE` constant
+     of another module or of its class, by import, relative import or attribute
+     access); a known instance in a file the change may not edit is listed with its
+     reason, and a stale entry fails. Enforced by an AST guard proven on synthetic
+     offenders (`PA-0034(2)`).
   4. **No fixture copies the shape of the lab that failed.** A fix proven on the failing
-     lab's shape proves fit, not transfer.
+     lab's shape proves fit, not transfer. *(A review rule: the blind lab's shape is
+     unknown to the tests by design, so no test can compare against it.)*
 
   (from BUG-0148)
-  - Enforced by: tests/test_login_discovery.py::test_no_module_imports_another_modules_private_vocabulary, tests/test_login_discovery.py::test_the_private_vocabulary_guard_catches_synthetic_offenders, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_and_accepted, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_without_a_browser, tests/test_login_discovery.py::test_framework_default_login_forms_pass_the_gates
+  - Enforced by: tests/test_private_vocabulary.py::test_no_module_imports_another_modules_private_vocabulary, tests/test_private_vocabulary.py::test_the_private_vocabulary_guard_catches_synthetic_offenders, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_and_accepted, tests/test_login_discovery.py::test_framework_default_login_pages_are_found_without_a_browser, tests/test_login_discovery.py::test_framework_default_login_forms_pass_the_gates
+
+- **PA-0157** — **A page script that marks elements for later selection gives each mark
+  exactly once, and a consumer never waits on a mark.** After BUG-0151: `spa.FORMS_JS`
+  marks a hidden form's controls, then re-marks them for an enclosing container, so the
+  first form's selectors no longer exist; `page.is_enabled` on one waited out its
+  timeout and raised out of the browser login (BUG-0148 measurement).
+  1. **A consumer reads a mark with a call that does not wait** (`is_visible`,
+     `query_selector`) before any call that waits for the element, and catches the
+     failure per candidate.
+  2. **A marking script never overwrites another item's mark**; until `spa.py`'s owner
+     fixes `FORMS_JS`, the defect is pinned by
+     `tests/test_login_discovery.py::test_residual_forms_js_marks_stay_unique_for_a_hidden_form`
+     (strict xfail). (from BUG-0151)
+  - Enforced by: tests/test_login_discovery.py::test_framework_default_login_pages_are_found_and_accepted
