@@ -271,6 +271,9 @@ REGISTRY = {
     "fuzzlab.session.manager:SessionManager._spa_probe": Covered(_SPA_SUBPATH),
     "fuzzlab.session.manager:SessionManager._probe_fetch": Covered(_SPA_SUBPATH),
     "fuzzlab.session.manager:SessionManager._discover_login_form": Covered(_SUB_LOGIN),
+    # BUG-0148 review A2: every form of a discovery page goes through the shared gate,
+    # its route taken relative to the sub-path base (the same test drives it)
+    "fuzzlab.session.manager:_gated_login_form": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._navigate": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._navigation_ok": Covered(_SUB_LOGIN),
     "fuzzlab.session.manager:SessionManager._credential_destination_ok": Covered(_SUB_LOGIN),
