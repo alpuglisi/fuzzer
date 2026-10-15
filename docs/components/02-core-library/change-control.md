@@ -3,6 +3,63 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0301 — BUG-0301 recorded: the destructive rule misses Juice Shop's GET password change and data erasure (deferred to the `core/urls.py` lock owner); PA-0301's sweep (2026-10-15)
+- Change: documentation and tests only; no production code changes (`fuzzlab/core/urls.py`
+  is locked by another session).
+  - BUG-0301 recorded in full: `ERROR_LOG.md`,
+    `docs/bugs/BUG-0301-destructive-rule-missed-juice-password-change-and-data-erasure.md`,
+    and PA-0301. `destructive_reason` and `transaction_reason` return None for
+    `GET /rest/user/change-password?current=&new=&repeat=` and `/dataerasure`, so the
+    send gate passes both, and the real erasure form passes `form_skip_reason`.
+  - New `tests/test_destructive_routes_external_labs.py`:
+    - strict xfails for both URLs: the URL rule, the send gate, and the erasure form as a
+      POST action;
+    - `test_bug_0301_is_what_the_xfails_claim`, and the compensating controls computed;
+    - the Juice Shop PA-0114 table (36 routes) and the bWAPP table (39 routes; the
+      existing `BWAPP_DESTRUCTIVE_GETS` checked as a subset), each row with its real
+      gate's computed verdict, or a residual pinned to None;
+    - the generated labs' state-changing routes, enumerated from `lab/manifests/*.yaml`
+      and `lab/ground-truth*/`;
+    - PA-0301's compound and verb-object spelling scan over every lab route, with
+      synthetic offenders.
+- Impact: CORE's rule is unchanged. Its consumers CRAWL (link and form gates), AUD
+  (captured-request import) and FUZZ (send gate) keep today's behaviour. They gain the
+  pinned gap and the tables. The requirement lines are under CC-CRAWL-0300 and
+  CC-FUZZ-0300.
+- Risk: medium until fixed: an imported change-password URL, or a crawled erasure form,
+  would be fuzzed. Mitigated meanwhile by the compensating controls stated in BUG-0301,
+  and by Lane A's live assertion that neither path reaches the store (design §5.6). The
+  tests carry no risk. The strict xfails turn into hard failures (XPASS(strict)) when
+  the rule is fixed. That is intended: per MULTI_AGENT §6 the fixing lane deletes them in
+  its own merge, and the stale-disposition check then asks it to drop the two
+  `SPELLING_DISPOSITIONS` entries. **The orchestrator (Lane A) must tell the session
+  that owns `core/urls.py` about these four markers before this branch merges**. This
+  lane cannot reach that session, so the relay is Lane A's.
+- Deliverables:
+  - [x] BUG-0301 report, ERROR_LOG line, PA-0301 — done
+  - [x] strict xfails, reason check, compensating-control test — done
+  - [x] Juice Shop and bWAPP PA-0114 tables, generated-lab sweep, spelling scan with
+    synthetic offenders — done
+  - [ ] lock owner told about the strict-xfail markers (relayed by Lane A) — todo
+  - [ ] corrective action in `core/urls.py` (lock owner; suggested fix in BUG-0301) — todo
+- Review: the pre-change gate was cleared by design rev 2 (3/3 AGREE, §12); the drafts are in its §10 (CC-FUZZ-0300, CC-CORE-0301) and §12 (CC-CRAWL-0300).
+- Effectiveness (assessed 2026-10-15): BUG-0301 itself stays pending until the corrective
+  action lands. The tests are effective:
+  - `tests/test_destructive_routes_external_labs.py` run alone: 83 passed, 4 xfailed;
+  - the sweep found no further gap (BUG-0302..0305 unused).
+  - Mutation checks, each restored after:
+    - the compound scan matching whole tokens only fails
+      `test_no_lab_route_hides_a_destructive_word_in_a_compound` and
+      `test_the_spelling_scan_catches_synthetic_offenders`; so does disabling the
+      verb-object branch;
+    - dropping the `/dataerasure` disposition fails the scan test;
+    - removing the `reset_code` field from bWAPP's real `secret_change` form fails that
+      table row (its verdict is computed, not asserted).
+  - With the corrective action simulated in memory (`dataerasure` token, `(change,
+    password)` pair; no file edited), exactly the four strict xfails turn
+    XPASS(strict). The reason pin and the stale-disposition check also fail. Those are
+    the markers and entries the fixing lane must update in its own merge.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

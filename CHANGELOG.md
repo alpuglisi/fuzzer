@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (Lane B: BUG-0300 and BUG-0301 recorded and pinned; PA-0300 base-URL registry, PA-0301 destructive-spelling sweep)
+- **Why:** adopting bWAPP (served under `/bWAPP/`) and Juice Shop as permanent fixtures
+  surfaced two defects in files locked by another session: ground-truth points double an
+  operator sub-path (BUG-0300, `harness/auto.py`), and the destructive rule misses Juice
+  Shop's GET password change and `/dataerasure` (BUG-0301, `core/urls.py`).
+- **What:** both bugs are documented in full and pinned by strict xfails; their
+  corrective actions are deferred to the lock owner (CC-FUZZ-0300, CC-CORE-0301).
+  PA-0300's registry test finds every function that takes an operator base URL and
+  requires its sub-path test or a named bug. PA-0301's tables judge every Juice Shop and
+  bWAPP destructive route by its real gate, and a compound-spelling scan runs over every
+  lab's routes. Spec lines are added for NFR-CRAWL-safe (CC-CRAWL-0300), NFR-FUZZ-safe and
+  FR-FUZZ-41.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

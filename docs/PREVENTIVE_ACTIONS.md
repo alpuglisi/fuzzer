@@ -1700,3 +1700,46 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+- **PA-0300** — Strengthens `PA-0113` (related: `PA-0067(1)/(3)`, `PA-0020`, `PA-0033`),
+  after BUG-0300: ground-truth points doubled an operator sub-path (`…/bWAPP/` +
+  `/bWAPP/x.php`). PA-0113(3) asked for a sub-path test of every component taking an
+  operator URL, but nothing listed those components, and BUG-0113's sweep cleared
+  `points_from_ground_truth` "by contract" with no written contract and no test.
+  1. **Every function in `fuzzlab/` that takes an operator base URL is registered** in
+     `tests/test_base_url_subpath_registry.py`. Functions are found by AST: a parameter
+     whose name ends in `url` with a qualifier `base`/`start`/`target`/`root`/`app`/
+     `site`/`entry`, or a bare `base`/`start`/`root` used as a URL. Each entry points
+     to a test that drives the function with a sub-path base (checked by AST to exist
+     and to contain a sub-path URL), or to a strict xfail naming its bug. A new such
+     function without an entry fails, and so does a stale entry. Proven on synthetic
+     offenders (`PA-0034(2)`).
+  2. **A join states its convention.** A stored or observed path (`to_path`, a
+     ground-truth url: the full request path) joins to the base's **origin**. An app's
+     own route path (a generated cell's served path) joins to the base's **path**. A
+     sweep verdict "by contract" names where the contract is written, or the site
+     counts as unswept (`PA-0067(1)`).
+  3. **A recurrence in a site a prior sweep cleared re-sweeps every site that sweep
+     cleared** (`PA-0067(3)`), recorded in the bug report. (from BUG-0300)
+
+- **PA-0301** — Strengthens `PA-0114` and `PA-0022` (related: `PA-0122`), after
+  BUG-0301: the destructive rule missed Juice Shop's `/dataerasure` (one token) and
+  `GET /rest/user/change-password` (a verb-object pair). PA-0114's from-source
+  enumeration found them, but it is a per-adoption check, so the rule had already
+  shipped without them. PA-0022's vocabulary check covered collisions (false
+  positives), never missed spellings.
+  1. **A keyword deny rule is checked against the spellings it was not written for**:
+     compound and concatenated tokens (`dataerasure`, `accountdelete`), noun forms of
+     its verbs (`erasure`), and credential verb-object pairs in either order
+     (`change-password`, `password_change`). This is a test:
+     `tests/test_destructive_routes_external_labs.py::test_no_lab_route_hides_a_destructive_word_in_a_compound`
+     scans every lab route, and each hit the rule does not refuse needs a written
+     disposition. A stale disposition fails. Proven on synthetic offenders
+     (`PA-0034(2)`).
+  2. **The PA-0002 sweep for this class runs the rule over every lab's enumerated
+     state-changing routes**: the generated labs' manifests and ground truth, and each
+     adopted third-party lab's PA-0114 table. Each route the rule does not refuse is
+     listed with its compensating control, or as a stated residual.
+  3. **A table row records its gate's computed verdict** (`PA-0001`): the URL rule,
+     the request/method gate, the body gate, the form gate or the SPA form gate,
+     whichever must stop it. A residual's verdict is pinned to None, so the row is
+     revisited when a rule starts refusing it. (from BUG-0301)

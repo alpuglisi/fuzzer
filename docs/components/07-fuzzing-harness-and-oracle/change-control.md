@@ -22,6 +22,65 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0300 — BUG-0300 recorded: ground-truth points double an operator sub-path (deferred to the `auto.py` lock owner); PA-0300's base-URL registry (2026-10-15)
+- Change: documentation and tests only; no production code changes (`fuzzlab/harness/auto.py`
+  and `fuzzlab/greybox/run.py` are locked by another session).
+  - BUG-0300 recorded in full: `ERROR_LOG.md`,
+    `docs/bugs/BUG-0300-ground-truth-points-doubled-an-operator-sub-path.md`, and PA-0300.
+    `points_from_ground_truth` joins a ground-truth url (a full request path,
+    `/bWAPP/sqli_1.php`) to the whole base (`base_url.rstrip("/") + path`). A base under a
+    sub-path doubles it. There are four sites: three branches in `auto.py`, and greybox's
+    `points_with_classes` (its URL and its class lookup).
+  - New `tests/test_base_url_subpath_registry.py`:
+    - strict xfails `test_ground_truth_points_join_absolute_paths_to_the_origin` and
+      `test_greybox_ground_truth_points_join_absolute_paths_to_the_origin`, plus
+      `test_bug_0300_is_what_the_xfails_claim` (PA-0054(3));
+    - PA-0300's registry. The design (§10 draft) put the BUG-0300 xfail in Lane A's
+      `tests/test_external_labs_static.py`. It lives here instead, beside the registry
+      that points to it, so the two lanes never edit one file;
+    - AST discovery of every `fuzzlab/` function taking an operator base URL;
+    - each discovered function mapped to a sub-path test or a strict xfail;
+    - synthetic offenders;
+    - new sub-path tests for the functions that had none (listed in the deliverables).
+  - Requirements: FR-FUZZ-41 gains a `Not yet enforced:` line for BUG-0300 and an
+    `Enforced by:` line for the registry. NFR-FUZZ-safe gains BUG-0301's
+    `Not yet enforced:` line (that defect is recorded under CC-CORE-0301; the NFR is
+    FUZZ's).
+- Impact: FUZZ only (tests and docs). Operators must pass the origin as `--base-url`
+  for ground-truth runs until the fix lands (design §5.3; Lane A's runbook). No
+  interface change. Lane A's gt pass already uses the origin base.
+- Risk: low. Tests and documentation only. The strict xfails become hard failures the
+  moment the lock owner fixes BUG-0300 (XPASS(strict)). That is intended: per
+  MULTI_AGENT §6 the fixing lane deletes them in its own merge and changes the two
+  registry entries to `Covered`. **The orchestrator (Lane A) must tell the session that
+  owns `harness/auto.py` and `greybox/run.py` about these two markers before this
+  branch merges**. This lane cannot reach that session, so the relay is Lane A's.
+- Deliverables:
+  - [x] BUG-0300 report, ERROR_LOG line, PA-0300 — done
+  - [x] strict xfails + `test_bug_0300_is_what_the_xfails_claim` — done
+  - [x] registry, discovery rule, synthetic offenders, pointer checks — done
+  - [x] sub-path tests for uncovered functions — done
+  - [x] FR-FUZZ-41 and NFR-FUZZ-safe lines — done
+  - [ ] lock owner told about the strict-xfail markers (relayed by Lane A) — todo
+  - [ ] corrective action in `auto.py` / `greybox/run.py` (lock owner) — todo
+- Review: the pre-change gate was cleared by design rev 2 (3/3 AGREE, §12); the drafts are in its §10 (CC-FUZZ-0300, CC-CORE-0301) and §12 (CC-CRAWL-0300).
+- Effectiveness (assessed 2026-10-15): BUG-0300 itself stays pending until the corrective
+  action lands. The guard is effective:
+  - `tests/test_base_url_subpath_registry.py` run alone: 12 passed, 2 xfailed;
+  - 53 functions discovered and 53 registered (51 `Covered`, 2 `XFail` BUG-0300);
+  - new sub-path tests for the 17 functions that had none: greybox `_cookie_for` and
+    `run_greybox`, the four identifier-SQLi builders, `assert_loopback`, five `authhttp`
+    builders, `session_header(s)`, `browser_session` / `header_scope_for`, and
+    `build_finding_raw_request`;
+  - every pointer was verified by a traced run of the 24 pointed tests: each called
+    its function with a base whose path is not `/` (53/53).
+  - Mutation checks, each restored after:
+    - removing one registry entry fails `test_every_base_url_function_is_registered`;
+    - breaking the name rule (`== "url"` -> `"uri"`), or disabling the bare-`base` use
+      rule, fails that test and `test_the_registry_guard_catches_synthetic_offenders`;
+    - making the sub-path pointer check vacuous fails the synthetic-offender test.
+  - Run with the other files below: 198 passed, 6 xfailed.
+
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
   literal sat in the edit field (`<input value="#{728*889}">`) and its rule was
