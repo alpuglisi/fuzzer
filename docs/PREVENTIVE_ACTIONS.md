@@ -1700,3 +1700,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+- **PA-0450** — Strengthens `PA-0075` (a provenance claim is backed by a recorded fact)
+  from store rows to **file handoffs**, after BUG-0450: `fuzz` imported a previous run's
+  CSV as its own attempts because the file existed at the default path.
+  1. **A step imports, cites or attributes an artifact to the current run only on a
+     fact from its producer that this run wrote it** (a return value, a this-run token
+     or record) — never because the path exists.
+  2. **A fixed default output path shared by every run in a directory is a provenance
+     hazard.** A tool that writes one makes "wrote nothing" visible to its consumer; the
+     web UI pins such paths per project (`web.projects.OPTION_CLASS`, FR-UI-456), and a
+     new path option must be classified there (a discovery test fails otherwise).
+  3. **Each such handoff has a test that runs the producer empty over a pre-existing
+     file.** The PA-0002 sweep is by mechanism: every import of a file into the store,
+     with a disposition per site (recorded in BUG-0450). (from BUG-0450)

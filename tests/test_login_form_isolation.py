@@ -850,6 +850,8 @@ def test_migration_21_adds_password_fields_and_legacy_rows_read_empty(tmp_path):
     path = tmp_path / "legacy.db"
     with Store(path) as store:                    # turn it back into a v20 store
         run = store.start_run("auto", "h")
+        from tests._downgrade import undo_after
+        undo_after(store.conn, 21)                # 22+ (project files, CC-CORE-0450)
         store.conn.execute("ALTER TABLE form DROP COLUMN password_fields")
         store.conn.execute("DELETE FROM schema_version WHERE version >= 21")
         eid = store.conn.execute("INSERT INTO endpoint (run_id, url, method, source) "

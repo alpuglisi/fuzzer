@@ -565,3 +565,42 @@ def redact_captured_body(body: bytes, content_type: str):
         return _blank_tree(doc, namer), None
     except Exception:                       # total (PA-0096): never raises, never stores
         return None, "redaction failed"
+
+
+# --- the project-record boundary (CC-CORE-0450, FR-UI-456, NFR-UI-project-provenance-redacted)
+
+#: ``scheme://user[:password]@`` — URL userinfo, anywhere in a value.
+_URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s@?#]*@")
+#: A scheme-less ``user:password@host`` at the start of a value or of a whitespace-
+#: separated piece (reviewer B, design round 2).
+_BARE_USERINFO = re.compile(r"(^|\s)[^\s/@:]+:[^\s/@]*@(?=[^\s@])")
+#: What a stripped userinfo becomes.
+USERINFO_PLACEHOLDER = "***@"
+
+
+def redact_for_record(dest: str, value):
+    """The one writer-side redactor for what the web UI records about a job or a project
+    (``launch.argv``, ``launch.target``, ``project.targets``; PA-0100: one boundary).
+
+    - a value whose option name (``dest``) `is_sensitive_name` flags → `PLACEHOLDER`;
+    - URL userinfo (``http://user:pw@``) and a scheme-less ``user:pw@`` → ``***@``;
+    - each URL-shaped piece's sensitive query values → `redact_url`.
+
+    Non-strings are returned unchanged (counts, booleans). Never raises on a string."""
+    if not isinstance(value, str):
+        return value
+    if dest and is_sensitive_name(dest):
+        return PLACEHOLDER
+    out = _URL_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, value)
+    out = _BARE_USERINFO.sub(lambda m: m.group(1) + USERINFO_PLACEHOLDER, out)
+    pieces = re.split(r"(\s+)", out)
+    return "".join(_redact_piece(p) for p in pieces)
+
+
+def _redact_piece(piece: str) -> str:
+    if "?" not in piece:
+        return piece
+    try:
+        return redact_url(piece)
+    except ValueError:                       # an unparseable authority (e.g. a bad IPv6)
+        return PLACEHOLDER if "=" in piece.split("?", 1)[1] else piece

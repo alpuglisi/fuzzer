@@ -18,7 +18,8 @@ from fuzzlab.core.store import Store
 
 ROOT = Path(__file__).resolve().parent.parent / "fuzzlab"
 CONTRACT_TABLES = ("candidate", "attempt", "flow", "finding", "model", "run_metrics",
-                   "run_plugin", "holdout_metric", "holdout_reveal", "target", "run")
+                   "run_plugin", "holdout_metric", "holdout_reveal", "target", "run",
+                   "project", "launch")                       # migration 22, CC-CORE-0450
 #: Columns with no production writer, and why that is acceptable. Readers of these must
 #: not present them as recorded facts (BUG-0069).
 ALLOWLIST = {

@@ -211,3 +211,9 @@ th {
   .brand span, nav.tabs a span:not(.ic), .side-sep, .side-foot { display: none; }
   .content { padding: 1rem .8rem; }
 }
+
+/* project files (CC-UI-0450): the topbar chip links to /projects; the banner says why
+   no project is open. Layout beyond this skeleton follows the UI research (FR-UI-454). */
+.project-chip { text-decoration: none; color: inherit; }
+.project-chip:hover { border-color: var(--accent); }
+.project-banner { margin-bottom: 1rem; }

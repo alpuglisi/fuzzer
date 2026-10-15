@@ -1317,16 +1317,22 @@ async def _stream_reader(loop: Any, pipe: Any) -> Any:
 async def astart_server(argv: Sequence[str], *, env: dict[str, str] | None = None,
                         stdin: Any = subprocess.DEVNULL, stdout: Any = None, stderr: Any = None,
                         grace: float = DEFAULT_GRACE_S, allow_thread: bool = False,
-                        ready_timeout: float = READY_TIMEOUT_S) -> ServerHandle:
+                        ready_timeout: float = READY_TIMEOUT_S,
+                        umask: int | None = None) -> ServerHandle:
     """:func:`start_server` for asyncio: ``handle.proc`` offers ``stdout`` / ``stderr``
     (:class:`asyncio.StreamReader` for ``PIPE``), ``wait()``, ``communicate()`` and
     ``returncode`` -- and never reaps the supervisor before the owner's sweep. The
-    forking thread is the event loop's."""
+    forking thread is the event loop's.
+
+    ``umask`` (CC-CORE-0450): set on the supervisor, so the whole tree inherits it -- the
+    web UI starts project-pinned jobs with ``0o077`` so every file a tool creates in a
+    project's directory is private. ``None`` keeps this process's umask."""
     import asyncio
 
     _check_thread(allow_thread)
     loop = asyncio.get_running_loop()
-    h, popen = _spawn_supervisor(argv, grace, env=env, stdin=stdin, stdout=stdout, stderr=stderr)
+    h, popen = _spawn_supervisor(argv, grace, env=env, stdin=stdin, stdout=stdout, stderr=stderr,
+                                 umask=-1 if umask is None else umask)
     h.proc = _AsyncSupervisorProc(h, popen, await _stream_reader(loop, popen.stdout),
                                   await _stream_reader(loop, popen.stderr))
     return await loop.run_in_executor(None, _complete_start, h, h._status, ready_timeout,

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Projects{% endblock %}
+{% block crumb %}Projects{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/projects.css">{% endblock %}
+{% block content %}
+{# Leaving a temporary project deletes it: each form that would leave it carries this
+   explicit, required confirmation (the server enforces it too: NeedsDiscard). #}
+{% macro discard_box() %}{% if project.kind == 'temporary' %}<label class="discard"><input
+  type="checkbox" name="discard" value="1" required> discard the open temporary
+  project</label>{% endif %}{% endmacro %}
+{# CC-UI-0450 (FR-UI-450..457): a functional skeleton; the page layout follows the UI
+   research branch once it lands. Every action is a plain POST form (PRG). #}
+<section class="panel" aria-labelledby="projects-h1" id="projects-root">
+  <h1 id="projects-h1" class="visually-hidden">Projects</h1>
+
+  {% for f in flash %}
+  <p class="card flash {{ 'ok' if f.level == 'ok' else ('warn' if f.level == 'warn' else 'bad') }}"
+     role="status">{{ f.text }}</p>
+  {% endfor %}
+
+  <div class="card" id="project-current">
+    <h2>Open project</h2>
+    {% if project.status == 'open' %}
+    <p><b>{{ project.name }}</b>{% if project.kind == 'temporary' %}
+      <span class="pill">temporary</span>{% endif %}
+      &middot; <code>{{ project.path }}</code>
+      {% if not project.exists %}<span class="muted">(created on its first run)</span>{% endif %}
+      &middot; <a href="/project">run history</a></p>
+    {% if project.private == false %}
+    <form method="post" action="/projects/make-private" class="inline">
+      <p class="warn">This file can be read by other users on this machine.
+        <button type="submit">Make it private (0600)</button></p>
+    </form>
+    {% endif %}
+    {% if project.busy %}
+    <p class="warn" id="project-busy">Being written by: {{ project.busy | join('; ') }}.
+      Switching, saving as and closing wait until that ends.</p>
+    {% endif %}
+    <div class="project-actions">
+      <form method="post" action="/projects/save-as">
+        <label>Save as <input name="name" required maxlength="64" placeholder="name"></label>
+        <button type="submit">Save as</button>
+      </form>
+      <form method="post" action="/projects/close">
+        {% if project.kind == 'temporary' %}
+        <label><input type="checkbox" name="discard" value="1"> discard this temporary
+          project and its runs</label>
+        {% endif %}
+        <button type="submit">Close</button>
+      </form>
+    </div>
+    {% elif project.status == 'pending' and project.pending.kind == 'older' %}
+    <p class="warn" id="project-migrate-offer"><b>{{ project.pending.path }}</b> uses store
+      schema v{{ project.pending.schema_version }}; this fuzzlab is
+      v{{ project.pending.head_version }}. It has not been opened or changed.</p>
+    <div class="project-actions">
+      <form method="post" action="/projects/migrate">
+        <button type="submit">Migrate (a verified backup is made first)</button>
+      </form>
+      <form method="post" action="/projects/dismiss"><button type="submit">Not now</button></form>
+    </div>
+    {% elif project.status == 'pending' %}
+    <p class="bad" id="project-refused">Refused: <b>{{ project.pending.path }}</b> &mdash;
+      {{ project.pending.detail }}</p>
+    <form method="post" action="/projects/dismiss"><button type="submit">Dismiss</button></form>
+    {% else %}
+    <p class="muted">No project is open.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>New project</h2>
+    <div class="project-actions">
+      <form method="post" action="/projects/new">
+        <label>Name <input name="name" required maxlength="64"
+          pattern="[A-Za-z0-9]([A-Za-z0-9._ \-]{0,62}[A-Za-z0-9_\-])?" placeholder="e.g. pff-oct"></label>
+        {{ discard_box() }}
+        <button type="submit">Create</button>
+      </form>
+      <form method="post" action="/projects/temporary">
+        {{ discard_box() }}
+        <button type="submit">Temporary project</button>
+      </form>
+    </div>
+    {% if project.kind == 'temporary' %}<p class="warn">Creating or opening another project
+      discards the open temporary one (tick the box to confirm); use Save as first to keep
+      it.</p>{% endif %}
+    <p class="muted">Projects live in <code>{{ projects_dir }}</code> (one <code>.fuzzlab</code>
+      file each, readable by you only).</p>
+  </div>
+
+  <div class="card">
+    <h2>Open a project</h2>
+    {% if files %}
+    <table id="project-files">
+      <caption class="visually-hidden">Project files in the projects directory</caption>
+      <thead><tr><th scope="col">file</th><th scope="col">modified</th>
+        <th scope="col">size</th><th scope="col"></th></tr></thead>
+      <tbody>
+      {% for f in files %}
+        <tr><td><code>{{ f.file }}</code></td><td>{{ f.modified }}</td><td>{{ f.size }}</td>
+          <td>{% if f.current %}<span class="muted">open</span>{% else %}
+            <form method="post" action="/projects/open">
+              <input type="hidden" name="file" value="{{ f.file }}">
+              {{ discard_box() }}
+              <button type="submit">Open</button></form>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">No project files yet.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Recent</h2>
+    {% if recent %}
+    <table id="project-recent">
+      <caption class="visually-hidden">Recently opened projects, newest first</caption>
+      <thead><tr><th scope="col">name</th><th scope="col">path</th>
+        <th scope="col">opened</th><th scope="col"></th></tr></thead>
+      <tbody>
+      {% for r in recent %}
+        <tr><td>{{ r.name }}</td><td><code>{{ r.path }}</code></td><td>{{ r.opened_at }}</td>
+          <td>{% if r.exists %}<form method="post" action="/projects/open">
+              <input type="hidden" name="recent" value="{{ r.id }}">
+              {{ discard_box() }}
+              <button type="submit">Open</button></form>
+            {% else %}<span class="muted">missing</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">Nothing opened yet.</p>{% endif %}
+  </div>
+
+  {% if leftovers %}
+  <div class="card" id="project-leftovers">
+    <h2>Unsaved temporary projects</h2>
+    <p class="muted">Left by an earlier session. Open one to keep working (then Save as), or
+      discard it.</p>
+    <table>
+      <caption class="visually-hidden">Leftover temporary projects</caption>
+      <tbody>
+      {% for t in leftovers %}
+        <tr><td><code>{{ t }}</code></td>
+          <td><form method="post" action="/projects/open">
+            <input type="hidden" name="temporary" value="{{ t }}">
+            {{ discard_box() }}
+            <button type="submit">Open</button></form></td>
+          <td><form method="post" action="/projects/discard-temporary">
+            <input type="hidden" name="temporary" value="{{ t }}">
+            <button type="submit">Discard</button></form></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

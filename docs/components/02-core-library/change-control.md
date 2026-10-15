@@ -3,6 +3,57 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0450 — Project files: migration 22 (project metadata, launch provenance), `core.project`, newer-schema refusal (2026-10-15)
+- Change:
+  - `core/migrations.py`: migration 22 — `project` (one metadata row), `launch` (a UI
+    job: random `token`, command, redacted argv, target, start/finish, status, exit code),
+    `run.launch_id`; post-step stamps `PRAGMA application_id = 0x467A4C62` ("FzLb",
+    `APPLICATION_ID`). New `head_version()`; `migrate()` raises `SchemaTooNew` before any
+    write when a store is newer than this build (FR-CORE-452).
+  - `core/store.py`: `open_store` / `connect` / `Store` take `create=False` (a `mode=rw`
+    URI: an existing file only); every connection sets `trusted_schema=OFF`; `Store`
+    closes its connection when `migrate()` raises; `start_run` links `launch_id` from
+    `FUZZLAB_LAUNCH_TOKEN` (`LAUNCH_TOKEN_ENV`) only to a `launch` row of the same store
+    (FR-CORE-451); `ABORTED_PREFIX` + `is_aborted`, the one reader of `mark_aborted`'s note.
+  - New `core/project.py` (FR-CORE-450): `inspect` (read-only on the main file; typed
+    `ProjectError` from a named error list; refuses non-fuzzlab files, triggers/views, a
+    failed `quick_check`), `version_state`, `create` (0600, `O_EXCL`, `O_NOFOLLOW`),
+    `ensure_metadata` (`BEGIN IMMEDIATE`; `created_at` = the store's real creation time;
+    orphaned `running` launches → `unknown`), `read_metadata` (one validating parser),
+    `set_meta` / `add_target` / `rename` (bounded, redacted), `insert_launch` /
+    `finish_launch` / `status_for`, `run_history`, `copy_to` (backup API → private
+    rollback-journal temp → side-file check → `quick_check` → fsync → hard link → dir
+    fsync), `migrate_with_backup`, `make_private`, `sidecar_dir`.
+  - `core/redaction.py`: `redact_for_record(dest, value)` — the one writer-side
+    redactor for what the UI records (URL userinfo, scheme-less `user:pw@`, sensitive
+    query values, a sensitive option's value).
+  - `core/secretfile.py`: `locked(path)` — the shared interprocess lock (per-path thread
+    lock + `flock` on `<path>.lock`, never mkdirs); `core/credentials.py` now uses it
+    (PA-0003; its own mkdir kept).
+  - `procutil.astart_server(..., umask=)` — set on the supervisor, inherited by the tree.
+- Impact (other components / project): **every store** gains two empty tables, one NULL
+  column and the application id on its next open (additive). **Every tool**: `start_run`
+  reads one environment variable (unset outside UI jobs → NULL, as before); a store from a
+  newer build is now refused instead of written. UI (CC-UI-0450) is the consumer. Tests
+  that fake older stores undo migration 22 through the new `tests/_downgrade.py`
+  (`test_holdout_seal_table.py`, `test_login_form_isolation.py`). No locked file changed.
+- Risk (level; mitigation or accepted-risk justification): medium (a migration and a
+  change to the shared `start_run`). Mitigation: additive and atomic (injected-failure
+  test, PA-0088), concurrent first opens tested with two processes, legacy-store upgrade
+  tested, `SchemaTooNew` mutation-checked; `trusted_schema=OFF` is safe because
+  migrations create no trigger, view or schema function (FTS5 works with it off). Stated
+  exception to NFR-CORE-central-connection: `copy_to`'s private destination (a WAL
+  destination could leave data in a `-wal` the hard link does not carry). Residual: the
+  CLI still migrates an older store silently, as before.
+- Deliverables:
+  - [x] migration 22 + post-step, `head_version`, `SchemaTooNew` — done
+  - [x] `Store(create=False)`, `trusted_schema=OFF`, close on migrate failure, launch linkage, `is_aborted` — done
+  - [x] `core/project.py` — done
+  - [x] `redact_for_record`, `secretfile.locked` (+ credentials), `astart_server(umask=)` — done
+  - [x] tests: `tests/test_core_project.py` (new), `tests/_downgrade.py`, contract-writers tables (+`project`, `launch`) — done
+  - [x] FR-CORE-450..452, NFR-CORE-central-connection (exception), §5; ARCHITECTURE store-as-contract — done
+- Effectiveness (assessed pending): pending.
+
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
 - Change:
   - **`core/urls.py`:** `text_destructive_reason(text)` -- `destructive_reason`'s tokens

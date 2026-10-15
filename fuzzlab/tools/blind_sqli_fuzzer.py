@@ -207,15 +207,19 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
     return rows
 
 
-def save_dataset(rows, filename):
+def save_dataset(rows, filename) -> bool:
+    """Write ``rows`` to ``filename``; return whether this call wrote it. With no rows
+    nothing is written, so a file already at ``filename`` is some *earlier* run's
+    (BUG-0450)."""
     if not rows:
         print("[-] No rows collected; nothing written.")
-        return
+        return False
     with open(filename, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
     print(f"\n[+] Logged {len(rows)} observations to {filename!r}")
+    return True
 
 
 def build_parser():
@@ -289,7 +293,7 @@ def main(argv=None):
             sender, args.url, args.param, args.baseline_iterations, args.timeout
         )
         rows = run_fuzzing_cycle(sender, args.url, args.param, baseline, PAYLOADS, args)
-        save_dataset(rows, args.output)
+        wrote = save_dataset(rows, args.output)
         if args.store:
             from fuzzlab.core.config import load_config
             from fuzzlab.core.store import Store
@@ -298,7 +302,10 @@ def main(argv=None):
             from fuzzlab.tools.probesender import make_probe_sender
             with Store(args.store) as store:
                 run_id = store.start_run("fuzzer", load_config().hash())
-                counts = store_adapter.import_fuzz_csv(args.output, store, run_id)
+                # Only this run's own CSV: a file left at --output by an earlier run (or
+                # another project's) is never imported as this run's attempts (BUG-0450).
+                counts = (store_adapter.import_fuzz_csv(args.output, store, run_id)
+                          if wrote else {"attempt": 0})
                 # Deterministic confirmation: the oracle is the sole finding-writer,
                 # replacing the fuzzer's provisional timing-only findings.
                 probe = make_probe_sender(args.url, args.identity, args.timeout)

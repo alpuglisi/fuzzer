@@ -449,6 +449,35 @@ plugin registry. It is the layer that makes the store the integration bus.
     (a container's, joined with nsenter) would not count as exposed, even though that
     namespace may be bridged with published ports. Nothing launches servers that way
     today.
+- **FR-CORE-450** *(project files; `CC-CORE-0450`, 2026-10-15; migration 22).* A store
+  is a project. Migration 22 adds `project` (one metadata row: name, created_at — the
+  store's own creation time, `MIN(schema_version.applied_at)` — opened_at, notes,
+  targets, the fuzzlab versions that created and last opened it, the schema version it
+  was created at), `launch` (FR-CORE-451) and `run.launch_id`, and stamps the fuzzlab
+  SQLite `application_id` (`migrations.APPLICATION_ID`). The migration writes no
+  metadata row; `core.project.ensure_metadata` creates it on the first UI open (one
+  `BEGIN IMMEDIATE`, re-checked) and marks orphaned `running` launches `unknown`.
+  `core.project` is the one writer and parser of both tables; `inspect` reads a file
+  without writing its main file and refuses (typed `ProjectError`, from a named list of
+  errors) anything that is not a fuzzlab store, holds a trigger or view, or fails
+  `quick_check`; `create` makes a file 0600 / `O_EXCL` / `O_NOFOLLOW`; `copy_to` copies
+  with the SQLite backup API into a private temporary file (rollback journal), checks no
+  side file holds data, `quick_check`s, fsyncs and hard-links it into place;
+  `migrate_with_backup` writes a verified backup before migrating.
+  `Store(path, create=False)` / `open_store(..., create=False)` open an existing file
+  only (a `mode=rw` URI); every connection sets `trusted_schema=OFF`.
+- **FR-CORE-451** *(launch provenance; `CC-CORE-0450`).* A job the web UI starts is a
+  `launch` row with a random 32-hex `token`; the UI gives the child
+  `FUZZLAB_LAUNCH_TOKEN`, and `Store.start_run` links each run it creates
+  (`launch_id`) only when that token names a `launch` row of the same store — anything
+  else links nothing. Every recorded value passes `core.redaction.redact_for_record`.
+  `store.is_aborted` is the one reader of `mark_aborted`'s `aborted: ` note.
+- **FR-CORE-452** *(newer schemas; `CC-CORE-0450`).* `migrations.migrate` raises
+  `SchemaTooNew` (before any write) when a store's schema is above this build's
+  `head_version()`; `Store` closes its connection on that or any migration error. Each
+  migration remains its own transaction, so a failed multi-version upgrade leaves the
+  store at the last version that completed (`migrate_with_backup` names it and the
+  backup).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
@@ -456,8 +485,11 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **NFR-CORE-central-connection** Every process and test that opens the store
   connection directly (not via `Store`) routes through the single central
   `open_store()` constructor (WAL, `busy_timeout=10000`, `synchronous=NORMAL`,
-  `foreign_keys=ON`, connect-time `timeout=10.0`), so the WAL/concurrency
-  design lives in one place. `connect()` is a backward-compatible alias for it.
+  `foreign_keys=ON`, `trusted_schema=OFF`, connect-time `timeout=10.0`), so the
+  WAL/concurrency design lives in one place. `connect()` is a backward-compatible alias
+  for it. One stated exception (CC-CORE-0450): `core.project.copy_to` opens its private
+  copy destination with a plain rollback-journal connection, because a WAL destination
+  could leave data in a `-wal` that the hard link publishing the copy does not carry.
 - **NFR-CORE-deterministic** Feature extraction is a pure function of
   (request, response, baseline); recomputable over history.
 - **NFR-CORE-secrets** Secrets are referenced, never stored in the store or
@@ -471,7 +503,8 @@ plugin registry. It is the layer that makes the store the integration bus.
 
 ## 5. Interfaces and data contracts
 Owns the store schema and migrations. Writes `run`, `schema_version`,
-`request_budget`, `model`, `metric_series`, `saved_views`. Exposes Python APIs
+`request_budget`, `model`, `metric_series`, `saved_views`, and (CC-CORE-0450) `project`
+and `launch`. Exposes Python APIs
 consumed by every tool and ML component.
 
 ## 6. Dependencies (components)

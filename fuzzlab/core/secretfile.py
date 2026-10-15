@@ -23,6 +23,12 @@ in full, raises on no progress, and ``fsync``\\ s before returning.
 The directory fsync is skipped only where the platform cannot do it — no
 ``O_DIRECTORY``, or ``EINVAL`` / ``ENOTSUP`` / ``EOPNOTSUPP`` (`UNSUPPORTED_ERRNOS`) —
 never on any other error (PA-0106: an explicit swallow list).
+
+`locked` serialises a read-modify-write of a shared file (BUG-0108, PA-0109): a per-path
+thread lock plus an exclusive ``flock`` on ``<path>.lock`` (0600, ``O_NOFOLLOW``, never
+the file itself, whose inode each `replace_secret` changes). It never creates the
+directory: the caller owns that decision (a lazily created, checked directory stays
+lazy). The ``flock`` blocks, so async callers run it off the event loop.
 """
 
 from __future__ import annotations
@@ -30,7 +36,14 @@ from __future__ import annotations
 import errno
 import os
 import secrets
+import threading
+from contextlib import contextmanager
 from pathlib import Path
+
+try:                                                # POSIX only
+    import fcntl
+except ImportError:                                 # pragma: no cover - non-POSIX
+    fcntl = None
 
 _MODE = 0o600
 #: The only errors that mean "this platform/filesystem cannot fsync a directory".
@@ -96,6 +109,33 @@ def replace_secret(path: str | Path, data: bytes) -> None:
         raise DurabilityUnknown(
             exc.errno, f"replacement visible at {path}; crash durability not established "
                        f"({exc.strerror or exc}) — retrying the write is safe") from exc
+
+
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _thread_lock(path: Path) -> threading.Lock:
+    key = os.path.abspath(path)
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(key, threading.Lock())
+
+
+@contextmanager
+def locked(path: str | Path):
+    """Hold the interprocess lock for ``path`` (see the module docstring). ``flock`` is
+    advisory and unreliable on NFS; without ``fcntl`` only threads are serialised."""
+    path = Path(path)
+    with _thread_lock(path):
+        if fcntl is None:
+            yield
+            return
+        fd = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, _MODE)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)                            # releases the flock
 
 
 def _unlink_quietly(path) -> None:

@@ -3,6 +3,65 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0450 — Project files: new / open / temporary / save as / close, recent list, run history, jobs pinned to the project (2026-10-15)
+- Change:
+  - New `web/projects.py`: `ProjectManager` (one open project; startup binds the
+    configured `store_path` only if its schema is this build's — an older file waits for
+    the migration offer, a newer/invalid one is refused; lifecycle under one
+    `asyncio.Lock` with a busy check; temporary projects with an owner `flock` and an
+    exact-file discard; the recent list under `secretfile.locked` + `replace_secret`;
+    names only from the browser, files confined to the projects directory),
+    `ProjectBoundConfig` (every existing `cfg.get("store_path")` follows the open
+    project, `None` when none is open), `open_reader` (never creates), `OPTION_CLASS` /
+    `pin_values` / `is_pinned` (every `str` option of every spec classified; `--store`
+    and intermediates pinned), `record_argv`.
+  - New `web/projectroutes.py`: `/projects`, `/project`, `/api/projects`,
+    `/api/project/history`, and PRG POSTs (`new`, `temporary`, `open`, `save-as`, `close`,
+    `migrate`, `dismiss`, `discard-temporary`, `make-private`, `/project/meta`); refusals
+    become a server-held message, never reflected text.
+  - `web/app.py`: one registration call; `create_app` wraps the config, pops
+    `FUZZLAB_LAUNCH_TOKEN` from its own environment, readers use `open_reader`, writers
+    (saved views, Repeater, in-process proxy) call `require_writable()` first; pinned
+    launches go through `ProjectManager.launch` (409 with no project); the dry run shows
+    the pin; the automatic run holds a frozen path and counts as busy; `--with-proxy`
+    keeps the project busy and refuses a waiting/refused start-up project with the remedy;
+    nav gains "Project"; the shell context carries the project.
+  - `web/runner.py`: `launch(project=, command=, on_done=, umask=)`; `_Run.project` set
+    only after a successful spawn; `on_done` runs off the loop before `done` (always sent;
+    a named error list reported on the stream); `recorded`; `pinned_jobs`, `unrecorded`;
+    `shutdown` marks jobs stopping.
+  - `web/proxycontrol.py`: Repeater stores and run ids keyed by project path (a switch
+    gives the new project its own `repeater` run); opens never create; the proxy's history
+    store opens with `create=False`.
+  - Templates: `base.html` project chip + banner; new `sections/projects.html`,
+    `sections/project.html`, `static/css/projects.css` (a functional skeleton — the layout
+    follows the UI research, pending); `run.html` findings anchor.
+- Impact (other components / project): launched store-writing commands now always write
+  the open project; a typed `--store`, `--db`, `--spider-db`, `--out` (audit) or
+  `--output` (fuzz) is overridden, and the default intermediates move from the working
+  directory into `<project>.d/`. Site-tree session: its route reading
+  `cfg.get("store_path")` follows the project automatically, but must open the store with
+  `projects.open_reader` (or `Store(path, create=False)`) — the AST guard
+  `tests/test_web_projects.py::test_no_web_module_opens_a_store_that_can_create` fails on a
+  creating open in `fuzzlab/web/`. CLI-restructure session: no dependency (no CLI flag
+  added; a `fuzzlab web --project` flag is a follow-up for that session). Core:
+  CC-CORE-0450; fuzzer: CC-FUZZ-0450.
+- Risk (level; mitigation or accepted-risk justification): medium. Mitigations: path
+  confinement and name grammar, 0600/0700 + child umask, one lock + busy-until-recorded,
+  typed refusals, cross-site gate on every new POST (tested), browser page walk.
+  Residuals (stated in the NFRs): a path swap between validation and SQLite's open by a
+  process of the same user; a CLI process writing the same file is invisible to the UI;
+  the Repeater stores typed requests as typed; with `--with-proxy` the project cannot be
+  switched.
+- Deliverables:
+  - [x] `web/projects.py`, `web/projectroutes.py`, app/runner/proxycontrol wiring — done
+  - [x] skeleton pages + topbar chip/banner — done (layout: pending the UI research branch)
+  - [x] tests: `tests/test_web_projects.py` (new); `test_web_launcher_browser.py` (pinned preview), `test_web_repeater.py` (controller never creates) updated — done
+  - [x] FR-UI-450..457, NFR-UI-project-{private,paths-confined,provenance-redacted,switch-safe}, NFR-UI-read-only amended, §5; traceability classification; runbook section — done
+  - [ ] page layout from the UI research — todo (blocked on the research branch)
+- Review: design gate 3/3 (reviewers A and B, three rounds); code review: pending.
+- Effectiveness (assessed pending): pending.
+
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
   candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could

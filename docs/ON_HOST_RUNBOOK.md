@@ -708,6 +708,43 @@ Everything stays loopback, on infrastructure you own.
    ```
    **Exit:** non-trivial recall on the second target (`generalizes=True`).
 
+## Part M — Project files in the web UI (CC-UI-0450) `[run]`
+
+The UI works on saved **project files**, as Burp Suite and ZAP do. A project is one
+fuzzlab store (`<name>.fuzzlab`, readable by you only); every run launched from the UI
+while it is open is saved in it.
+
+### M.1 One command
+
+```bash
+# where projects live (default ~/.local/share/fuzzlab/projects); start with none open
+FUZZLAB_PROJECTS_DIR=~/fuzzlab-projects FUZZLAB_STORE_PATH= fuzzlab web
+```
+
+Open `http://127.0.0.1:8787/projects`: **New** (a name), **Temporary project**, **Open**
+(files in the projects directory, or **Recent**), **Save as**, **Close**. The topbar chip
+on every page names the open project; `/project` shows its notes, targets and run
+history. Without `FUZZLAB_STORE_PATH=` the configured store (default `./fuzzlab.db`)
+opens as the project, as before; an older store is offered for migration (a verified
+backup goes to `<file>.d/backups/` first) and is not touched until you accept.
+
+Verified (2026-10-15, this build, offline — no target needed): with the command above on
+port 8799, `GET /api/projects` answered `"status": "none"`; `POST /projects/new
+name=pff-oct` (same-origin) answered `303 /projects`; the state became `open pff-oct`,
+private; the directory held `pff-oct.fuzzlab`, `recent.json` and `recent.json.lock`, all
+`-rw-------`, in a `drwx------` directory.
+
+### M.2 What to expect
+- Launched commands are pinned: the Launcher's `--store` (and crawl `--db`,
+  `--spider-db`, audit `--out`, fuzz `--output`) always point at the open project and its
+  `<file>.d/` directory, whatever the form says; the dry run shows it.
+- Switching, Save as and Close are refused while a job writes the project (and always
+  with `--with-proxy`, whose history goes into the start-up project).
+- Leaving a temporary project deletes it only when you tick "discard"; use Save as to
+  keep it. Unsaved temporaries from an earlier session are listed for Open or Discard.
+- A project file never holds a credential (they stay in the keyring); notes are plain
+  text — never put secrets there.
+
 ## Running everything in one pass (Parts A, C–L)
 
 `scripts/on_host_full_run.sh` runs the commands from Parts A and C through L

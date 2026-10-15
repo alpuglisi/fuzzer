@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — fuzzer: an empty run imported the previous run's CSV (fixed, BUG-0450/PA-0450)
+- **Symptom:** found in design review of project files (CC-UI-0450): `fuzzlab fuzz --store S` with a run that collected no rows still imported `--output` (default `blind_sqli_dataset.csv` in the working directory) — an earlier run's, possibly another target's or project's — as its own attempts; with no such file it crashed with `FileNotFoundError` before the oracle confirmation.
+- **Root cause:** provenance inferred from presence: `save_dataset` wrote nothing for an empty run and returned no fact, and `main` imported the path unconditionally (a recurrence of PA-0075's root cause at the file layer).
+- **Remediation:** `save_dataset` returns whether it wrote the file and `main` imports only then (CC-FUZZ-0450); the web UI pins `--output` to the project's own directory (FR-UI-456); PA-0450 and its sweep.
+- **Status:** Fixed (offline test; mutation-checked)
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.

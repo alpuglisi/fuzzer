@@ -23,6 +23,10 @@ SAFETY = {
     "NFR-UI-read-only", "NFR-UI-redacted", "NFR-UI-no-auto-run",
     "NFR-UI-control-plane-hardened",
     "NFR-LAB-cleanup",  # BUG-0125: leaked lab servers OOM-killed the host
+    # CC-UI-0450 (project files): privacy, path confinement, redacted provenance, and
+    # no switching or deleting a project while it is written.
+    "NFR-UI-project-private", "NFR-UI-project-paths-confined",
+    "NFR-UI-project-provenance-redacted", "NFR-UI-project-switch-safe",
 }
 #: Everything else, with the reason it is not a safety guarantee.
 NOT_SAFETY = {

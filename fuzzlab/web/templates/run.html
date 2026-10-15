@@ -28,7 +28,7 @@
 </div>
 
 <div class="card">
-  <h2>Findings ({{ detail.findings | length }})</h2>
+  <h2 id="findings">Findings ({{ detail.findings | length }})</h2>
   {% if detail.findings %}
   <table>
     <thead><tr><th>class</th><th>url</th><th>method</th><th>param</th><th>mechanism</th></tr></thead>

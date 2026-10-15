@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
-from fuzzlab.core.secretfile import DurabilityUnknown, replace_secret
+from fuzzlab.core.secretfile import DurabilityUnknown, locked, replace_secret
 
 try:                                    # POSIX advisory locks; absent on Windows
     import fcntl
@@ -213,17 +213,10 @@ class _CryptographyFileBackend:
         inode, which each save replaces). Without ``fcntl`` (non-POSIX) only threads
         are serialised; ``flock`` is advisory and unreliable on NFS — both stated."""
         with self._thread_lock:
-            if fcntl is None:
+            if fcntl is not None:
+                self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with locked(self._path):         # the one lock helper (PA-0003)
                 yield
-                return
-            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd = os.open(str(self._path) + ".lock",
-                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-                yield
-            finally:
-                os.close(fd)                     # releases the flock
 
     def _fernet(self, salt: bytes):
         from cryptography.fernet import Fernet

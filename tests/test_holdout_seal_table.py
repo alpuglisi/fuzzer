@@ -49,6 +49,8 @@ def test_a_seal_survives_its_calibration_being_wiped(tmp_path):
 
 def _downgrade_to_18(store):
     """Turn a fresh store back into a version-18 one (as an older build left it)."""
+    from tests._downgrade import undo_after
+    undo_after(store.conn, 21)                     # 22+ (project files, CC-CORE-0450)
     store.conn.execute("DROP TABLE holdout_seal")
     store.conn.execute("DROP TABLE holdout_seal_meta")
     # and undo every later migration (20: the form table)

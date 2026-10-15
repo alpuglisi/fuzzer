@@ -17,6 +17,7 @@ only *reads* results the tools already wrote to the store.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -32,6 +33,9 @@ from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
 from fuzzlab.web import commandspec, findingsview, labcontrol, mlview, results, savedviews
+from fuzzlab.web import projects as projects_mod
+from fuzzlab.web.projectroutes import register as _register_project_routes
+from fuzzlab.web.projects import ProjectBoundConfig, ProjectManager, open_reader
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -218,6 +222,8 @@ NAV: list[dict[str, Any]] = [
         # U1/CC-UI-0028: Overview is now the landing route ("/"); Launcher moved to
         # its own route ("/launcher") so the dashboard doesn't overload it (R-10).
         {"id": "overview", "label": "Overview", "href": "/", "icon": "◆"},
+        # CC-UI-0450: the open project's metadata and run history; /projects manages it.
+        {"id": "project", "label": "Project", "href": "/project", "icon": "▣"},
         {"id": "launcher", "label": "Launcher", "href": "/launcher", "icon": "▸"},
         # CC-UI-0033: on/off switches for the lab's own containers (labctl.sh start/stop).
         {"id": "lab", "label": "Lab", "href": "/lab", "icon": "⏻"},
@@ -246,7 +252,7 @@ class LauncherState:
 
 def _tool_commands(cfg: Config) -> list[dict[str, str]]:
     base = cfg.get("target_base_url", "http://localhost")
-    store = cfg.get("store_path", "fuzzlab.db")
+    store = cfg.get("store_path") or "<no project open>"
     return [
         {"name": "crawler", "cmd": f"fuzzlab crawl --start {base} --store {store}"},
         {"name": "auditor",
@@ -271,20 +277,18 @@ def _known_categories() -> list[str]:
 # --- store-backed results (read-only; never creates the store file) -----------
 
 def _read_runs(cfg: Config) -> list[dict]:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return []
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return results.list_runs(store)
 
 
 def _read_detail(cfg: Config, run_id: int) -> dict | None:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return None
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return results.run_detail(store, run_id)
 
 
@@ -292,11 +296,10 @@ def _read_ml(cfg: Config, run_id: int | None = None) -> dict:
     """The whole read-only ML overview (U4/CC-UI-0031, CC-ML-0010) — every panel from
     already-stored model internals; `{"available_any": False}` when the store has
     nothing to show yet (no model trained, no bandit posteriors, ...)."""
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return {"run_id": run_id, "available_any": False}
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         overview = mlview.ml_overview(store, run_id)
     overview["available_any"] = any(
         isinstance(v, dict) and v.get("available") for v in overview.values())
@@ -304,56 +307,51 @@ def _read_ml(cfg: Config, run_id: int | None = None) -> dict:
 
 
 def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return []
-    from fuzzlab.core.store import Store
     from fuzzlab.web import proxyview
-    with Store(path) as store:
+    with store:
         return proxyview.list_flows(store, query=query)
 
 
 def _read_overview(cfg: Config) -> dict:
     """The Overview dashboard's aggregate (U1/CC-UI-0028); empty-store safe, never
     creates the store file."""
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return {
             "total_findings": 0, "severity": dict.fromkeys(
                 ("critical", "high", "medium", "low", "info"), 0),
             "total_runs": 0, "runs_last_7d": 0, "recent_runs": [], "last_run": None,
             "detection_quality": None, "efficiency": None,
         }
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return results.overview_summary(store)
 
 
 def _read_flow(cfg: Config, flow_id: int) -> dict | None:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return None
-    from fuzzlab.core.store import Store
     from fuzzlab.web import proxyview
-    with Store(path) as store:
+    with store:
         return proxyview.flow_detail(store, flow_id)
 
 
 def _read_findings(cfg: Config) -> list[dict]:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return []
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return findingsview.list_findings(store)
 
 
 def _read_finding(cfg: Config, finding_id: int) -> dict | None:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return None
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return findingsview.finding_detail(store, finding_id)
 
 
@@ -362,11 +360,10 @@ def _read_finding(cfg: Config, finding_id: int) -> dict | None:
 # as the Repeater's "create tab" (never an implicit side effect of a GET).
 
 def _saved_views(cfg: Config, table_key: str) -> list[dict]:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return []
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return savedviews.list_views(store, table_key)
 
 
@@ -378,11 +375,10 @@ def _saved_views(cfg: Config, table_key: str) -> list[dict]:
 # without FastAPI.
 
 def _with_store(cfg: Config, fn: Callable[[Any], Any], default: Any) -> Any:
-    path = cfg.get("store_path", "fuzzlab.db")
-    if not results.store_exists(path):
+    store = open_reader(cfg.get("store_path"))
+    if store is None:
         return default
-    from fuzzlab.core.store import Store
-    with Store(path) as store:
+    with store:
         return fn(store)
 
 
@@ -451,12 +447,15 @@ def _shell_context(cfg: Config, active: str | None = None) -> dict[str, Any]:
     authorization state, and the nav/active section the topbar/sidebar render.
     Merged into each TemplateResponse so the shell is identical on every route —
     each section's own route (U0/CC-UI-0025), a run detail, and the not-found page."""
+    manager = getattr(cfg, "manager", None)
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
         "authorized": bool(cfg.get("authorized", False)),
         "nav": NAV,
         "active": active,
+        # CC-UI-0450 (FR-UI-454): the open project, shown on every page.
+        "project": manager.state() if manager is not None else None,
     }
 
 
@@ -490,14 +489,37 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     starts it on lifespan startup and stops it on shutdown, so live interception shares
     this event loop (Phase 0.4). ``None`` (the default) leaves the proxy tab dormant.
     """
-    cfg = cfg or load_config()
+    base_cfg = cfg or load_config()
     state = LauncherState()
     runner = Runner()
+    # --- project files (CC-UI-0450): every reader below asks `cfg` for the store, and
+    # `cfg` answers with the open project (or None). The UI process itself never links
+    # its own runs (Repeater, proxy) to a launch: only its children carry the token.
+    os.environ.pop(projects_mod.LAUNCH_TOKEN_ENV, None)
+    manager = ProjectManager(base_cfg, runner)
+    cfg = ProjectBoundConfig(
+        values={k: v for k, v in base_cfg.values.items() if k != "store_path"},
+        manager=manager)
     repeater_ctl = RepeaterController(cfg)
 
     @asynccontextmanager
     async def _lifespan(_app):
         if proxy is not None:
+            if proxy.config.store_path:
+                # The in-process proxy records flows into the startup project: make it
+                # exist (0600, metadata) and keep it busy while the proxy runs.
+                if os.path.abspath(proxy.config.store_path) != manager.store_path():
+                    raise RuntimeError(
+                        "the in-process proxy must record into the open project; start "
+                        "`fuzzlab web` without --with-proxy once to migrate or open it")
+                try:
+                    await manager.require_writable()
+                except projects_mod.NoProject as exc:
+                    raise RuntimeError(
+                        f"{exc}: start `fuzzlab web` without --with-proxy once and migrate "
+                        "or open the project from the Projects page") from exc
+                manager.extra_busy["proxy"] = "the in-process proxy (restart without "\
+                                              "--with-proxy to switch projects)"
             await proxy.start()
         try:
             yield
@@ -515,6 +537,14 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
                        allowed_origins=allowed_origins)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+    async def _writable_or_409():
+        """None once the open project exists (created if needed); else a 409 to return."""
+        try:
+            await manager.require_writable()
+        except projects_mod.NoProject as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return None
 
     def _resolve(name: str):
         """Look up a launchable activity's spec, or None if unknown."""
@@ -590,6 +620,8 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             finding_id = int(form.get("finding_id", ""))
         except (TypeError, ValueError):
             return RedirectResponse(url="/findings", status_code=303)
+        if await _writable_or_409() is not None:
+            return RedirectResponse(url="/projects", status_code=303)
         tab = repeater_ctl.create_from_finding(finding_id)
         if tab is None:
             return RedirectResponse(url="/findings", status_code=303)
@@ -610,8 +642,12 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         spec = body.get("spec") or {}
         if not isinstance(spec, dict):
             return JSONResponse({"error": "spec must be an object"}, status_code=400)
+        try:
+            path = await manager.require_writable()
+        except projects_mod.NoProject as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
         from fuzzlab.core.store import Store
-        with Store(cfg.get("store_path", "fuzzlab.db")) as store:
+        with Store(path, create=False) as store:
             view = savedviews.create_view(store, table_key, name, spec,
                                           bool(body.get("pinned", False)))
         return {"view": view}
@@ -622,11 +658,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         spec = body.get("spec")
         if spec is not None and not isinstance(spec, dict):
             return JSONResponse({"error": "spec must be an object"}, status_code=400)
-        path = cfg.get("store_path", "fuzzlab.db")
-        if not results.store_exists(path):
+        store = open_reader(cfg.get("store_path"))
+        if store is None:
             return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
-        from fuzzlab.core.store import Store
-        with Store(path) as store:
+        with store:
             view = savedviews.update_view(
                 store, view_id, name=body.get("name"), spec=spec,
                 pinned=body.get("pinned"))
@@ -636,11 +671,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     @app.delete("/api/views/{view_id}")
     def views_delete(view_id: int):
-        path = cfg.get("store_path", "fuzzlab.db")
-        if not results.store_exists(path):
+        store = open_reader(cfg.get("store_path"))
+        if store is None:
             return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
-        from fuzzlab.core.store import Store
-        with Store(path) as store:
+        with store:
             ok = savedviews.delete_view(store, view_id)
         if not ok:
             return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
@@ -741,7 +775,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
                 "categories": _known_categories()}
 
     @app.post("/api/run/automatic")
-    def run_automatic():
+    async def run_automatic():
         if not cfg.get("authorized"):
             return JSONResponse(
                 {"error": "not authorized; set authorized:true (lab-only)"},
@@ -751,7 +785,19 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if pipeline is None:
             state.last_result = {"status": "pipeline not wired (use the CLI: fuzzlab auto)"}
         else:
-            state.last_result = pipeline(cfg)
+            # An in-process pipeline writes the open project for its whole run: it gets
+            # a frozen snapshot of that path and keeps the project busy (CC-UI-0450).
+            async with manager.lock:
+                try:
+                    path = await asyncio.to_thread(manager._ensure_created)
+                except projects_mod.NoProject as exc:
+                    return JSONResponse({"error": str(exc)}, status_code=409)
+                manager.extra_busy["automatic"] = "the automatic run"
+            try:
+                snapshot = Config(values={**base_cfg.values, "store_path": path})
+                state.last_result = await asyncio.to_thread(pipeline, snapshot)
+            finally:
+                manager.extra_busy.pop("automatic", None)
         return {"mode": "automatic", "result": state.last_result}
 
     @app.get("/api/runs")
@@ -785,8 +831,13 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return JSONResponse({"error": f"unknown command {body.get('command')!r}"},
                                 status_code=400)
         values = body.get("values") or {}
-        # A dry run plans and reports the exact command and never sends traffic (FR-UI-5).
+        # A dry run plans and reports the exact command and never sends traffic (FR-UI-5);
+        # it shows the project pinning (FR-UI-456) but never creates the project.
+        pinned = projects_mod.is_pinned(spec)
+        if pinned and manager.store_path() is not None:
+            values = projects_mod.pin_values(spec, values, manager.store_path())
         return {
+            "project_pinned": pinned,
             "command": spec.name,
             "argv": build_argv(spec, values),
             "display": display_command(spec, values),
@@ -807,8 +858,16 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return JSONResponse(
                 {"error": "not authorized; set authorized:true (lab-only)"},
                 status_code=403)
-        argv = build_argv(spec, body.get("values") or {})
-        token = await runner.launch(argv)
+        values = body.get("values") or {}
+        if projects_mod.is_pinned(spec):
+            # FR-UI-456: every store-writing command runs pinned to the open project.
+            try:
+                token, argv = await manager.launch(spec, values, build_argv)
+            except projects_mod.NoProject as exc:
+                return JSONResponse({"error": str(exc)}, status_code=409)
+        else:
+            argv = build_argv(spec, values)
+            token = await runner.launch(argv)
         state.history.append(f"launched {spec.name}")
         return {"token": token, "argv": argv}
 
@@ -998,12 +1057,16 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.post("/api/proxy/repeater/tabs")
     async def repeater_create(request: Request):
         b = await request.json()
+        if (refused := await _writable_or_409()) is not None:
+            return refused
         return repeater_ctl.create_tab(b.get("name", ""), b.get("host", "127.0.0.1"),
                                        b.get("port", 80), b.get("raw", ""),
                                        bool(b.get("use_tls")))
 
     @app.post("/api/proxy/repeater/from-flow/{flow_id}")
     async def repeater_from_flow(flow_id: int):
+        if (refused := await _writable_or_409()) is not None:
+            return refused
         tab = repeater_ctl.create_from_flow(flow_id)
         if tab is None:
             return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
@@ -1027,6 +1090,8 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             flow_id = int(form.get("flow_id", ""))
         except (TypeError, ValueError):
             return RedirectResponse(url="/proxy", status_code=303)
+        if await _writable_or_409() is not None:
+            return RedirectResponse(url="/projects", status_code=303)
         tab = repeater_ctl.create_from_flow(flow_id)
         if tab is None:
             return RedirectResponse(url="/proxy", status_code=303)
@@ -1043,11 +1108,14 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             raw = (await request.json()).get("raw")
         except Exception:  # noqa: BLE001 - empty/non-JSON body → send the saved request
             pass
+        if (refused := await _writable_or_409()) is not None:
+            return refused
         out = repeater_ctl.send(tab_id, raw)
         if out is None:
             return JSONResponse({"error": f"tab {tab_id} not found"}, status_code=404)
         return out
 
+    _register_project_routes(app, templates, cfg, manager)
     return app
 
 

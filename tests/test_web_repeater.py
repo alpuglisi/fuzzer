@@ -56,6 +56,10 @@ def test_create_list_and_send_with_injected_sender(tmp_path):
 
     ctrl = RepeaterController(_cfg(tmp_path / "r.db"), sender=fake)
     assert ctrl.list_tabs() == []                       # read-only, no store yet
+    assert not (tmp_path / "r.db").exists()
+    # The controller never creates a store (CC-UI-0450): its routes first call
+    # ProjectManager.require_writable(), which creates the project file; stand in here.
+    Store(tmp_path / "r.db").close()
     tab = ctrl.create_tab("t", "127.0.0.1", 8080, "GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
     tabs = ctrl.list_tabs()
     assert len(tabs) == 1 and tabs[0]["name"] == "t" and tabs[0]["port"] == 8080

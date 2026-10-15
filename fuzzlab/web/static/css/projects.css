@@ -1,0 +1,12 @@
+/* Projects pages (CC-UI-0450) — functional skeleton; layout follows the UI research. */
+.project-actions { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+.project-actions form { display: flex; gap: .5rem; align-items: center; }
+.project-facts { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; }
+.project-facts dt { color: var(--muted); }
+.project-meta-form { display: grid; gap: .6rem; max-width: 48rem; }
+.project-meta-form textarea { width: 100%; }
+.flash { margin-bottom: .8rem; }
+code.argv { font-size: .85rem; word-break: break-all; }
+.status-failed, .status-aborted { color: var(--crit); }
+.status-succeeded { color: var(--ok); }
+.status-running, .status-unknown, .status-stopped { color: var(--warn); }

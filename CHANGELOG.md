@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (UI project files, Burp/ZAP-style; CC-UI-0450, CC-CORE-0450, CC-FUZZ-0450, BUG-0450)
+- **Why:** the owner wants the UI to work on saved project files: every run of a session
+  saved in that session's file, opened later to continue or review.
+- **What:** a project is one store (`.fuzzlab`, migration 22: `project` metadata,
+  `launch` provenance, `run.launch_id`); the UI gets new / open / temporary / save as
+  (SQLite backup API) / close, a recent list, the open project on every page, and a run
+  history; every launched store-writing command is pinned to the open project; paths are
+  confined to a private projects directory; files 0600; no switching while a job writes;
+  an older store is migrated only after a verified backup and the operator's consent, a
+  newer one refused (now in core too). Found in review and fixed: `fuzz` imported a
+  previous run's CSV when its own run collected nothing (BUG-0450, PA-0450). Design gate
+  3/3 (two reviewers, three rounds). Page layout waits for the UI research.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

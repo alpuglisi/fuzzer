@@ -509,6 +509,48 @@ ALTER TABLE form ADD COLUMN password_fields TEXT NOT NULL DEFAULT '[]';
 """
 
 
+#: Migration 22 (UI project files, CC-CORE-0450, FR-CORE-450/451): a store is a project.
+#: ``project`` is its one metadata row, written only by ``core.project`` on the first UI
+#: open (never here: a CLI open migrates too and cannot name the project). ``launch`` is a
+#: job the UI started in this project; ``run.launch_id`` links each run that job created
+#: (``Store.start_run`` resolves the child's ``FUZZLAB_LAUNCH_TOKEN`` against
+#: ``launch.token``). Additive; legacy runs read NULL ("not launched from the UI").
+_M0022 = """
+CREATE TABLE IF NOT EXISTS project (
+    id                     INTEGER PRIMARY KEY CHECK (id = 1),
+    name                   TEXT NOT NULL,
+    created_at             TEXT NOT NULL,
+    opened_at              TEXT NOT NULL,
+    notes                  TEXT NOT NULL DEFAULT '',
+    targets                TEXT NOT NULL DEFAULT '[]',
+    created_by_version     TEXT NOT NULL,
+    opened_by_version      TEXT NOT NULL,
+    created_schema_version INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS launch (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    token       TEXT NOT NULL UNIQUE,
+    command     TEXT NOT NULL,
+    argv        TEXT NOT NULL,
+    target      TEXT,
+    started_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT,
+    status      TEXT NOT NULL DEFAULT 'running',
+    exit_code   INTEGER
+);
+ALTER TABLE run ADD COLUMN launch_id INTEGER REFERENCES launch(id);
+"""
+
+#: SQLite header ``application_id`` (offset 68) that marks a fuzzlab store: "FzLb".
+APPLICATION_ID = 0x467A4C62
+
+
+def _mark_application_id(conn: sqlite3.Connection) -> None:
+    """Migration 22's post-step: stamp the fuzzlab ``application_id`` (transactional, so a
+    failed migration leaves it unset)."""
+    conn.execute(f"PRAGMA application_id = {APPLICATION_ID}")
+
+
 def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
     """Migration 19's post-step: copy every present ``holdout`` record of an existing
     model row (valid or malformed, as recorded) into `holdout_seal`, then record the
@@ -552,7 +594,7 @@ def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
 
 
 #: Python steps run inside a migration's own transaction, after its SQL.
-POST_STEPS = {19: _backfill_holdout_seal}
+POST_STEPS = {19: _backfill_holdout_seal, 22: _mark_application_id}
 
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
@@ -577,6 +619,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (19, _M0019),
     (20, _M0020),
     (21, _M0021),
+    (22, _M0022),
 ]
 
 
@@ -613,6 +656,23 @@ def split_statements(script: str) -> list[str]:
     return out
 
 
+class SchemaTooNew(RuntimeError):
+    """The store was written by a newer fuzzlab (its schema version is above this
+    build's head). Refused before any write (FR-CORE-452, PA-0083(1)): an older build
+    writing into a newer schema could corrupt what it does not know about."""
+
+    def __init__(self, found: int, head: int) -> None:
+        super().__init__(f"store schema v{found} is newer than this fuzzlab's v{head}; "
+                         "open it with a newer fuzzlab")
+        self.found = found
+        self.head = head
+
+
+def head_version() -> int:
+    """The newest schema version this build knows (the source of truth, PA-0001)."""
+    return max(v for v, _ in MIGRATIONS)
+
+
 def migrate(conn: sqlite3.Connection) -> int:
     """Apply all pending migrations in order. Idempotent and safe under concurrency.
     Returns the new version.
@@ -626,6 +686,9 @@ def migrate(conn: sqlite3.Connection) -> int:
     """
     _ensure_version_table(conn)               # CREATE ... IF NOT EXISTS: race-safe
     conn.commit()
+    found = current_version(conn)
+    if found > head_version():                # a newer build's store: never write it
+        raise SchemaTooNew(found, head_version())
     saved = conn.isolation_level
     conn.isolation_level = None               # explicit transactions below
     try:
