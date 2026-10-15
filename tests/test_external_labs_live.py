@@ -89,6 +89,8 @@ class Lab:
         self.project = compose_project(discover_labs()[name]) + self.suffix
         self.base = f"http://127.0.0.1:{self.port}"
         self.env = {**os.environ,
+                    # the tree under test, not whatever fuzzlab the venv has installed
+                    "PYTHONPATH": str(REPO),
                     "FUZZLAB_PYTHON": os.sys.executable,
                     "FUZZLAB_EXT_PROJECT_SUFFIX": self.suffix,
                     self.meta.port_env: str(self.port),
@@ -112,17 +114,31 @@ class Lab:
         label = f"label=com.docker.compose.project={self.project}"
         argv = ([self.engine, "ps", "-a", "-q", "--filter", label] if kind == "ps"
                 else [self.engine, kind, "ls", "-q", "--filter", label])
+        if kind == "image":           # images compose built for this project
+            argv = [self.engine, "image", "ls", "-q", "--filter", label]
         return run_bounded(argv, timeout=60).stdout.split()
 
-    def teardown(self) -> None:
-        self.labctl("down", self.name, timeout=600)
-        for kind, rm in (("ps", ["rm", "-f"]), ("network", ["network", "rm"]),
-                         ("volume", ["volume", "rm", "-f"])):
-            ids = self.project_ids(kind)
-            if ids:
-                run_bounded([self.engine, *rm, *ids], timeout=120)
-        left = self.project_ids("ps") + self.project_ids("volume")
-        assert left == [], f"{self.project} left {left}"
+    def teardown(self) -> list[str]:
+        """Every step runs whatever the one before did; errors are collected, not raised
+        midway (review A8). Returns what is left of the project."""
+        errors: list[str] = []
+        try:
+            self.labctl("down", self.name, timeout=600)
+        except Exception as exc:  # noqa: BLE001 - the label sweep below still runs
+            errors.append(f"labctl down: {exc!r}")
+        kinds = [("ps", ["rm", "-f"]), ("network", ["network", "rm"]),
+                 ("volume", ["volume", "rm", "-f"]), ("image", ["image", "rm", "-f"])]
+        if self.engine == "podman":
+            kinds.insert(1, ("pod", ["pod", "rm", "-f"]))
+        for kind, rm in kinds:
+            try:
+                ids = self.project_ids(kind)
+                if ids:
+                    run_bounded([self.engine, *rm, *ids], timeout=300)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{kind}: {exc!r}")
+        left = self.project_ids("ps") + self.project_ids("volume") + self.project_ids("network")
+        return errors + [f"{self.project} left {left}"] if left else errors
 
     def store_credential(self, username: str, password: str) -> None:
         code = ("from fuzzlab.core.credentials import CredentialStore\n"
@@ -149,8 +165,30 @@ def lab_factory(tmp_path, monkeypatch):
         return lab
 
     yield make
+    problems = []
     for lab in labs:
-        lab.teardown()
+        problems += lab.teardown()
+    assert problems == [], problems
+
+
+def _sender(base: str, identity: str, cls=None):
+    """The authenticated sender `make_probe_sender` builds, keeping its session manager
+    so the test can read the run's own session afterwards."""
+    from fuzzlab.tools.authhttp import make_auth_with_isolation
+    from fuzzlab.tools.probesender import SeamProbeSender
+    manager, client, isolated = make_auth_with_isolation(base, 15.0)
+    sender = (cls or SeamProbeSender)(client, identity, manager=manager, base_url=base,
+                                      isolated_client=isolated)
+    return sender, manager
+
+
+def _get(url: str, headers=None):
+    """A direct check of the lab: no proxy from the environment (the run's cookie must
+    never go to a proxy, PA-0082), no redirects."""
+    import requests
+    s = requests.Session()
+    s.trust_env = False
+    return s.get(url, headers=headers or {}, timeout=15, allow_redirects=False)
 
 
 def _up(lab: Lab) -> None:
@@ -181,13 +219,15 @@ def _score(store_path: Path, gt_dir: Path):
 
 
 def _checked_candidates(store, run_id: int) -> set[tuple[str, str, str, str]]:
-    """``(path, method, param, category)`` of every candidate the oracle checked, read
+    """``(path, method, param, category)`` of every candidate the oracle actually checked
+    (status ``CHECKED`` only: not budget-skipped, inconclusive or confirmer-less), read
     from the candidate's own evidence (ground-truth points have no parameter rows)."""
+    from fuzzlab.core.oracle_status import CHECKED
     from fuzzlab.core.urls import to_path, to_route_path
     out = set()
     for row in store.conn.execute(
             "SELECT evidence, oracle_status FROM candidate WHERE run_id = ?", (run_id,)):
-        if row["oracle_status"] in (None, "pending", "skipped"):
+        if row["oracle_status"] != CHECKED:
             continue
         ev = json.loads(row["evidence"] or "{}")
         url = ev.get("url") or ""
@@ -197,10 +237,42 @@ def _checked_candidates(store, run_id: int) -> set[tuple[str, str, str, str]]:
     return out
 
 
+def _probed_params(store_path: Path) -> set[str]:
+    from fuzzlab.core.store import Store
+    with Store(str(store_path)) as s:
+        run = s.conn.execute("SELECT MAX(id) m FROM run").fetchone()["m"]
+        return {json.loads(r["evidence"] or "{}").get("param") or "" for r in s.conn.execute(
+            "SELECT evidence FROM candidate WHERE run_id = ?", (run,))}
+
+
+def _run_auto_bounded(deadline: float = 3600, **kw) -> None:
+    """``run_auto`` in-process (the test owns the OOB listener and the session), on a
+    thread with a deadline: a hung pass fails the test instead of blocking pytest."""
+    import threading
+
+    from fuzzlab.harness.auto import run_auto
+    from fuzzlab.core.store import Store
+    errors: list[BaseException] = []
+
+    def target():
+        try:
+            with Store(str(kw.pop("store_path"))) as s:
+                run = s.start_run("auto", "127.0.0.1")
+                run_auto(store=s, run_id=run, **kw)
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the test thread
+            errors.append(exc)
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    t.join(deadline)
+    assert not t.is_alive(), f"in-process gt pass exceeded {deadline}s"
+    if errors:
+        raise errors[0]
+
+
 def _assert_pass(gt, report, checked, floor: set[str], pass_tag: str) -> None:
     from fuzzlab.core.runmode import to_category
     assert floor <= set(report.matched), (sorted(floor - set(report.matched)), report.as_dict())
-    negatives = {c.case_id for c in gt.negatives() if pass_tag in _reach(c)}
+    negatives = {c.case_id for c in gt.negatives()}
     assert not negatives & set(report.false_alarms), report.false_alarms
     for case in gt.cases:
         if pass_tag not in _reach(case):
@@ -214,8 +286,7 @@ def _assert_pass(gt, report, checked, floor: set[str], pass_tag: str) -> None:
 def test_juice_shop_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     lab = lab_factory("juice-shop")
     _up(lab)
-    import requests
-    cfg = requests.get(lab.base + "/rest/admin/application-configuration", timeout=15).json()
+    cfg = _get(lab.base + "/rest/admin/application-configuration").json()
     assert cfg["config"]["challenges"]["safetyMode"] == "disabled"
 
     # crawl pass: the login route's JSON request is captured, then crawl points are fuzzed
@@ -236,11 +307,8 @@ def test_juice_shop_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     # gt pass, in-process, with an OOB listener this test owns
     for k, v in lab.keyring_env().items():
         monkeypatch.setenv(k, v)
-    from fuzzlab.core.store import Store
-    from fuzzlab.harness.auto import run_auto
     from fuzzlab.oracle.oob import OobListener
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-    from fuzzlab.tools.probesender import make_probe_sender
     from fuzzlab.labels import contract
 
     class RecordingOob(OobListener):
@@ -253,24 +321,33 @@ def test_juice_shop_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
             self.tokens.append(token)
             return token
 
+    from fuzzlab.tools.probesender import SeamProbeSender
+
+    class RecordingSender(SeamProbeSender):
+        """Records (url, param, value) of every send, to tie OOB tokens to a point."""
+        sends: list = []
+
+        def send(self, url, param, value, timing=False, method="GET", location="query",
+                 content_type=None, entries=None, prg=False):
+            RecordingSender.sends.append((url, param, str(value)))
+            return super().send(url, param, value, timing=timing, method=method,
+                                location=location, content_type=content_type,
+                                entries=entries, prg=prg)
+
     if lab.env.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
         monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE",
                            lab.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"])
     oob = RecordingOob()
     oob.start()
     store = lab.tmp / "juice_gt.db"
-    sender = make_probe_sender(lab.base, lab.meta.identity)
+    sender, manager = _sender(lab.base, lab.meta.identity, cls=RecordingSender)
     # PA-0007: the run's own session reaches the cookie-authenticated /profile
-    hdrs = sender.manager.session_headers("127.0.0.1", lab.meta.identity, lab.base,
-                                          operator=True)
-    assert requests.get(lab.base + "/profile", headers=hdrs, timeout=15,
-                        allow_redirects=False).status_code == 200
+    hdrs = manager.session_headers("127.0.0.1", lab.meta.identity, lab.base, operator=True)
+    assert _get(lab.base + "/profile", hdrs).status_code == 200
     try:
-        with Store(str(store)) as s:
-            run = s.start_run("auto", "127.0.0.1")
-            run_auto(base_url=lab.base, store=s, run_id=run, sender=sender,
-                     ground_truth=contract.load(gt_dir), points_source="ground-truth",
-                     browser=PlaywrightBrowserExecutor(), oob=oob)
+        _run_auto_bounded(store_path=store, base_url=lab.base, sender=sender,
+                          ground_truth=contract.load(gt_dir), points_source="ground-truth",
+                          browser=PlaywrightBrowserExecutor(), oob=oob)
     finally:
         oob.stop()
     gt, report, checked = _score(store, gt_dir)
@@ -280,7 +357,11 @@ def test_juice_shop_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     # loopback-only listener. The day it is detected this fails and must be updated.
     assert "JUICE-0005" in report.missed
     assert ("/profile/image/url", "POST", "imageUrl", "ssrf") in checked
-    assert oob.tokens and all(oob.hits(t) == [] for t in oob.tokens)
+    image_tokens = [t for t in oob.tokens
+                    if any(u.endswith("/profile/image/url") and p == "imageUrl"
+                           and f"/cb/{t}" in v for u, p, v in RecordingSender.sends)]
+    assert image_tokens, "no OOB callback was sent in /profile/image/url imageUrl"
+    assert all(oob.hits(t) == [] for t in image_tokens)
 
 
 # --- bWAPP --------------------------------------------------------------------------
@@ -328,28 +409,17 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     if lab.env.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE"):
         monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE",
                            lab.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"])
-    import requests
-    from fuzzlab.core.store import Store
-    from fuzzlab.harness.auto import run_auto
     from fuzzlab.labels import contract
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-    from fuzzlab.tools.probesender import make_probe_sender
-    sender = make_probe_sender(lab.base, lab.meta.identity)
-    hdrs = sender.manager.session_headers("127.0.0.1", lab.meta.identity, lab.base, operator=True)
-    assert requests.get(lab.base + "/bWAPP/portal.php", headers=hdrs, timeout=15,
-                        allow_redirects=False).status_code == 200      # PA-0007
+    sender, manager = _sender(lab.base, lab.meta.identity)
+    hdrs = manager.session_headers("127.0.0.1", lab.meta.identity, lab.base, operator=True)
+    assert _get(lab.base + "/bWAPP/portal.php", hdrs).status_code == 200      # PA-0007
     store = lab.tmp / "bwapp_gt.db"
-    with Store(str(store)) as s:
-        run = s.start_run("auto", "127.0.0.1")
-        run_auto(base_url=lab.base, store=s, run_id=run, sender=sender,
-                 ground_truth=contract.load(gt_dir), points_source="ground-truth",
-                 browser=PlaywrightBrowserExecutor())
+    _run_auto_bounded(store_path=store, base_url=lab.base, sender=sender,
+                      ground_truth=contract.load(gt_dir), points_source="ground-truth",
+                      browser=PlaywrightBrowserExecutor())
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_GT_FLOOR, "gt")
-    # the labels rest on level 0: the run's own session still carries it
-    cookie = sender.manager.session_headers("127.0.0.1", lab.meta.identity, lab.base,
-                                            operator=True).get("Cookie", "")
-    assert "security_level=0" in cookie
 
     # crawl pass (sub-path base for discovery, PA-0113), header points included
     spider = lab.tmp / "bwapp_spider.db"
@@ -365,12 +435,8 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-3000:]
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_CRAWL_FLOOR, "crawl")
-    # nothing in the run touched the security-level form (selections.php / level set)
-    logs = run_bounded([lab.engine, "logs", next(
-        c for c in lab.project_ids("ps")
-        if "web" in run_bounded([lab.engine, "inspect", "--format",
-                                 "{{index .Config.Labels \"com.docker.compose.service\"}}", c],
-                                timeout=60).stdout)], timeout=120)
-    assert "security_level_set.php" not in logs.stdout + logs.stderr
-    assert "form_security_level" not in logs.stdout + logs.stderr
-    json.dumps(report.as_dict())
+    # The labels rest on security level 0, kept in the login-time `security_level` cookie.
+    # It stays 0 structurally: the senders adopt no response cookie, so only a probe of
+    # the level form itself could matter -- and neither pass probed it (review B2).
+    for path in (lab.tmp / "bwapp_gt.db", store):
+        assert not {"security_level", "form_security_level"} & _probed_params(path), path

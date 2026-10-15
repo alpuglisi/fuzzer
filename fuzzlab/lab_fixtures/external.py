@@ -74,6 +74,8 @@ class ExternalLabError(RuntimeError):
 class LabMeta:
     """What compose cannot hold about a lab."""
     name: str
+    #: The compose service that publishes the app's port.
+    service: str
     port_env: str
     default_port: int
     container_port: int
@@ -88,9 +90,9 @@ class LabMeta:
 
 
 LAB_META: dict[str, LabMeta] = {
-    "bwapp": LabMeta("bwapp", "BWAPP_PORT", 8092, 80, "/bWAPP/", "/bWAPP/login.php",
+    "bwapp": LabMeta("bwapp", "web", "BWAPP_PORT", 8092, 80, "/bWAPP/", "/bWAPP/login.php",
                      "bwapp-bee", "bee", False),
-    "juice-shop": LabMeta("juice-shop", "JUICE_PORT", 3000, 3000, "/",
+    "juice-shop": LabMeta("juice-shop", "app", "JUICE_PORT", 3000, 3000, "/",
                           "/rest/admin/application-version", "juice-user",
                           "juice-user@fuzzlab.lab", True),
 }
@@ -170,6 +172,11 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
     applies. On any mismatch the partial file is removed and ``ExternalLabError``
     raised -- never a substitute."""
     dest = cache_path() if dest is None else dest
+    if dest.exists() and not dest.is_file():
+        raise ExternalLabError(f"{dest} exists and is not a file")
+    if dest.parent.is_dir():                    # a killed download's leftovers
+        for stale in dest.parent.glob(".bwapp-*.part"):
+            stale.unlink()
     if dest.is_file():
         digest, got = _sha256_file(dest)
         if digest == sha256 and got == size:
@@ -188,10 +195,14 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
                 raise ExternalLabError(f"refusing a non-https download hop: {current}")
             resp = session.get(current, stream=True, timeout=timeout, allow_redirects=False)
             if resp.status_code in (301, 302, 303, 307, 308):
-                current = urljoin(current, resp.headers.get("Location", ""))
+                location = resp.headers.get("Location", "")
                 resp.close()
+                if not location:
+                    raise ExternalLabError("a download redirect without a Location")
+                current = urljoin(current, location)
                 continue
             if resp.status_code != 200:
+                resp.close()
                 raise ExternalLabError(f"bWAPP download failed: HTTP {resp.status_code}")
             h = hashlib.sha256()
             got = 0
@@ -207,11 +218,17 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
                     fh.write(chunk)
                 fh.flush()
                 os.fsync(fh.fileno())
+            resp.close()
             if got != size or h.hexdigest() != sha256:
                 raise ExternalLabError(
                     f"bWAPP download does not match the pin (sha256 {h.hexdigest()}, "
                     f"{got} bytes; expected {sha256}, {size} bytes)")
             os.replace(tmp, dest)
+            dfd = os.open(dest.parent, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
             return dest
         raise ExternalLabError(f"too many redirects fetching {url}")
     finally:
@@ -261,25 +278,41 @@ def _host_ip_problems(service: str, host_ip: str, binding: Any) -> list[str]:
     return []
 
 
+#: ``network_mode`` values a fixture may use: anything else (``host``, podman's
+#: ``ns:<path>``, ``slirp4netns``/``pasta`` options, ``container:<id>``) can join the
+#: host's namespace or reach its loopback, so it is refused (an allowlist, review A1).
+ALLOWED_NETWORK_MODES = frozenset({"", "none", "bridge", "default"})
+
+
 def config_problems(doc: Mapping[str, Any]) -> list[str]:
     """Safety problems in a compose document (raw file or rendered ``config``): every
-    published port on a literal loopback IP; no host network or pid namespace, no
-    privileged container, no joining another project's container namespace."""
+    published port on a literal loopback IP; ``network_mode`` only from an allowlist (or
+    ``service:`` another service of this project); no external or host-driver network;
+    no host pid namespace and no privileged container."""
     problems: list[str] = []
     services = doc.get("services") or {}
     if not isinstance(services, Mapping):
         return ["compose document has no services mapping"]
+    networks = doc.get("networks") or {}
+    if not isinstance(networks, Mapping):
+        problems.append("top-level networks is not a mapping")
+        networks = {}
+    for net_name, net in networks.items():
+        net = net if isinstance(net, Mapping) else {}
+        if net.get("external") not in (None, False, "false", "False"):
+            problems.append(f"network {net_name}: external (not owned by the project)")
+        if str(net.get("name") or "") == "host" or str(net.get("driver") or "") == "host":
+            problems.append(f"network {net_name}: the host network")
     for name, svc in services.items():
         if not isinstance(svc, Mapping):
             problems.append(f"{name}: not a mapping")
             continue
         mode = str(svc.get("network_mode") or "")
-        if mode == "host":
-            problems.append(f"{name}: network_mode: host")
-        elif mode.startswith("container:"):
-            problems.append(f"{name}: network_mode {mode!r} joins a container outside the project")
-        elif mode.startswith("service:") and mode.split(":", 1)[1] not in services:
-            problems.append(f"{name}: network_mode {mode!r} names no service of this project")
+        if mode.startswith("service:"):
+            if mode.split(":", 1)[1] not in services:
+                problems.append(f"{name}: network_mode {mode!r} names no service of this project")
+        elif mode not in ALLOWED_NETWORK_MODES:
+            problems.append(f"{name}: network_mode {mode!r} is not allowed")
         if str(svc.get("pid") or "") == "host":
             problems.append(f"{name}: pid: host")
         if svc.get("privileged") in (True, "true", "True"):
@@ -303,13 +336,19 @@ def load_compose_document(text: str) -> Mapping[str, Any]:
 
 # --- post-boot exposure check -----------------------------------------------------------
 
-def exposure_problems(inspects: list[Mapping[str, Any]], host_listeners: Iterable[Any]
-                      ) -> tuple[list[str], list[str]]:
+def exposure_problems(inspects: list[Mapping[str, Any]], host_listeners: Iterable[Any],
+                      project: str | None = None,
+                      netns_of: Callable[[int], str | None] | None = None,
+                      host_netns: str | None = None) -> tuple[list[str], list[str]]:
     """``(problems, notes)`` for a project's containers (engine ``inspect`` output) and
     the host's LISTEN table. Fails closed: no container, host networking, a binding with
     an empty (= every interface) or non-loopback ``HostIp``, or a non-loopback host
-    listener on a published port. A published port with no host listener is a note
-    (an engine without a userland proxy publishes through NAT only); ``inspect`` is the
+    listener on a published port. ``NetworkMode`` must be ``bridge``/``default``/``none``,
+    a network of the project (``<project>_...``) or another project container's
+    namespace; and, where it can be read, a container's network namespace must not be
+    the host's (``netns_of(State.Pid)`` vs ``host_netns``) -- whatever the engine calls
+    its mode (review A1). A published port with no host listener is a note (an engine
+    without a userland proxy publishes through NAT only); ``inspect`` is the
     authoritative check (PA-0130(4))."""
     from fuzzlab.core.net import is_loopback_host
     problems: list[str] = []
@@ -317,19 +356,30 @@ def exposure_problems(inspects: list[Mapping[str, Any]], host_listeners: Iterabl
     if not inspects:
         return ["no container of the project was found (cannot prove it is loopback-only)"], notes
     published: set[int] = set()
+    ids = {str(c.get("Id") or "") for c in inspects} - {""}
     for c in inspects:
         cname = str(c.get("Name") or c.get("Id") or "?").lstrip("/")
         hc = c.get("HostConfig") or {}
-        if str(hc.get("NetworkMode") or "") == "host":
-            problems.append(f"{cname}: host network mode")
+        mode = str(hc.get("NetworkMode") or "")
+        joined = mode.split(":", 1)[1] if mode.startswith("container:") else None
+        if not (mode in ("bridge", "default", "none")
+                or (project and mode.startswith(project + "_"))
+                or (joined and any(i.startswith(joined) for i in ids))):
+            problems.append(f"{cname}: network mode {mode!r} is not a project network")
+        pid = (c.get("State") or {}).get("Pid")
+        if netns_of is not None and host_netns and isinstance(pid, int) and pid > 0:
+            ns = netns_of(pid)
+            if ns and ns == host_netns:
+                problems.append(f"{cname}: runs in the host's network namespace")
         if hc.get("Privileged"):
             problems.append(f"{cname}: privileged")
-        bindings = dict(hc.get("PortBindings") or {})
-        for key, val in ((c.get("NetworkSettings") or {}).get("Ports") or {}).items():
-            if val:
-                bindings.setdefault(key, val)
+        bindings: dict[str, list[Any]] = {}
+        for source in (hc.get("PortBindings") or {},
+                       (c.get("NetworkSettings") or {}).get("Ports") or {}):
+            for key, val in source.items():
+                bindings.setdefault(key, []).extend(val or [])
         for cport, binds in bindings.items():
-            for b in binds or []:
+            for b in binds:
                 host_ip = str((b or {}).get("HostIp") or "")
                 host_port = str((b or {}).get("HostPort") or "")
                 if not host_ip:
@@ -351,6 +401,34 @@ def exposure_problems(inspects: list[Mapping[str, Any]], host_listeners: Iterabl
     return problems, notes
 
 
+def published_port(meta: LabMeta, project: str, engine: str, *,
+                   runner: Callable[..., Any] | None = None) -> int:
+    """The loopback host port the running project actually publishes for the lab's app
+    (review A9: the bootstrap must target the running lab, not whatever the port
+    variable says now). Raises when there is none, or it is not on loopback."""
+    from fuzzlab.core.net import is_loopback_host
+    if runner is None:
+        from fuzzlab.procutil import run_bounded as runner
+    try:
+        ids = _engine_json(engine, ["ps", "-q", "--no-trunc", "--filter",
+                                    f"label={PROJECT_LABEL}={project}", "--filter",
+                                    f"label=com.docker.compose.service={meta.service}"],
+                           runner).split()
+        inspects = json.loads(_engine_json(engine, ["inspect", *ids], runner)) if ids else []
+    except (ExternalLabError, ValueError, OSError) as exc:
+        raise ExternalLabError(f"cannot read the published port of {project}: {exc}") from None
+    for c in inspects if isinstance(inspects, list) else []:
+        sources = ((c.get("HostConfig") or {}).get("PortBindings") or {},
+                   (c.get("NetworkSettings") or {}).get("Ports") or {})
+        for source in sources:
+            for b in source.get(f"{meta.container_port}/tcp") or []:
+                port = str((b or {}).get("HostPort") or "")
+                if port.isdigit() and is_loopback_host(str((b or {}).get("HostIp") or "")):
+                    return int(port)
+    raise ExternalLabError(f"{project}: no running {meta.service} container publishes "
+                           f"{meta.container_port} on loopback (is the lab up?)")
+
+
 def _engine_json(engine: str, args: list[str], runner: Callable[..., Any]) -> Any:
     res = runner([engine, *args], timeout=60)
     if res.returncode != 0:
@@ -365,6 +443,9 @@ def check_exposure(project: str, engine: str, *, runner: Callable[..., Any] | No
     LISTEN table. Any engine error is a problem (fail closed)."""
     if engine not in ("docker", "podman"):
         raise ExternalLabError(f"unknown engine {engine!r}")
+    import subprocess
+
+    from fuzzlab.procutil import ProcUtilError, host_netns, netns_of
     if runner is None:
         from fuzzlab.procutil import run_bounded as runner
     if listeners is None:
@@ -373,9 +454,16 @@ def check_exposure(project: str, engine: str, *, runner: Callable[..., Any] | No
         ids = _engine_json(engine, ["ps", "-a", "-q", "--no-trunc", "--filter",
                                     f"label={PROJECT_LABEL}={project}"], runner).split()
         inspects = json.loads(_engine_json(engine, ["inspect", *ids], runner)) if ids else []
-    except (ExternalLabError, ValueError) as exc:
-        return [f"exposure check could not inspect the project: {exc}"], []
-    return exposure_problems(inspects, listeners())
+        host_listeners = listeners()
+    except (ExternalLabError, ValueError, OSError, subprocess.TimeoutExpired,
+            ProcUtilError) as exc:
+        return [f"exposure check could not inspect the project: {type(exc).__name__}: "
+                f"{exc}"], []
+    if not isinstance(inspects, list):
+        return ["exposure check could not inspect the project: unexpected inspect output"], []
+    return exposure_problems(inspects, host_listeners, project=project,
+                             netns_of=lambda pid: netns_of(pid) or None,
+                             host_netns=host_netns())
 
 
 # --- bootstrap HTTP client --------------------------------------------------------------
@@ -467,8 +555,9 @@ def resolve_credential(meta: LabMeta, *, host: str, keyring_store: Any, opened_s
                        ) -> ResolvedCredential:
     """Keyring first (a store with the env channel off), then the operator's opened store
     (whose gated ``FUZZLAB_CRED_<HOST>_<IDENTITY>`` channel follows the operator's own
-    ``allow_env_credentials`` switch), then an interactive prompt (TTY only), then -- for
-    a lab whose account we create -- a fresh random password."""
+    ``allow_env_credentials`` switch), then an interactive prompt (TTY only; an empty
+    answer is refused), then -- with no prompt, for a lab whose account we create -- a
+    fresh random password."""
     cred = keyring_store.get(host, meta.identity)
     if cred is not None:
         return ResolvedCredential(cred.username, cred.password, "keyring")
@@ -479,6 +568,7 @@ def resolve_credential(meta: LabMeta, *, host: str, keyring_store: Any, opened_s
         pw = prompt(f"password for {meta.identity} ({meta.default_username}): ")
         if pw:
             return ResolvedCredential(meta.default_username, pw, "prompt")
+        raise ExternalLabError("no password entered")
     if generate and meta.may_generate_password:
         return ResolvedCredential(meta.default_username, secrets.token_urlsafe(24), "generated")
     raise ExternalLabError(
@@ -623,20 +713,23 @@ _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
-              keyring_store: Any = None, opened_store: Any = None,
+              port: int | None = None, keyring_store: Any = None, opened_store: Any = None,
               prompt: Callable[[str], str] | None = None, generate: bool = True,
               session_factory: Callable[[], Any] | None = None,
               deadline: float = 180.0) -> BootstrapResult:
     """Bring ``name`` to a usable state and store its lab identity (only after a verified
     login)."""
     meta = lab_meta(name)
-    client = _LabClient(base_url(meta, environ), session_factory=session_factory)
+    origin = f"http://127.0.0.1:{port}" if port else base_url(meta, environ)
+    client = _LabClient(origin, session_factory=session_factory)
     host = urlsplit(client.origin).hostname or "127.0.0.1"
     if keyring_store is None or opened_store is None:
         from fuzzlab.core.config import load_config
         from fuzzlab.core.credentials import CredentialStore
-        keyring_store = keyring_store or CredentialStore(allow_env=False)
-        opened_store = opened_store or CredentialStore.open(load_config())
+        if keyring_store is None:
+            keyring_store = CredentialStore(allow_env=False)
+        if opened_store is None:
+            opened_store = CredentialStore.open(load_config())
     cred = resolve_credential(meta, host=host, keyring_store=keyring_store,
                               opened_store=opened_store, prompt=prompt, generate=generate)
     notes = _BOOTSTRAPS[name](client, cred, deadline=deadline)
@@ -669,6 +762,9 @@ def _build_parser() -> argparse.ArgumentParser:
                                          "(sends traffic: needs --authorized)")
     s.add_argument("lab")
     s.add_argument("--authorized", action="store_true")
+    s.add_argument("--engine", choices=["docker", "podman"],
+                   help="with --project: target the port the running project publishes")
+    s.add_argument("--project")
     return p
 
 
@@ -704,13 +800,23 @@ def main(argv: list[str] | None = None) -> int:
                 print("bootstrap sends traffic to the lab: pass --authorized "
                       "(lab-only, your own loopback lab)", file=sys.stderr)
                 return 2
-            res = bootstrap(meta.name, prompt=_tty_prompt())
+            port = None
+            if args.project and args.engine:
+                port = published_port(meta, args.project, args.engine)
+            res = bootstrap(meta.name, port=port, prompt=_tty_prompt())
             print(f"{res.lab}: identity {res.identity!r} ready "
                   f"({res.credential_source}{', stored' if res.stored else ''}); "
                   + "; ".join(res.notes))
             return 0
     except ExternalLabError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - credential/keyring/HTTP/OS errors: one line
+        from fuzzlab.core.credentials import CredentialError
+        import requests
+        if not isinstance(exc, (CredentialError, requests.RequestException, OSError)):
+            raise
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     return 2
 

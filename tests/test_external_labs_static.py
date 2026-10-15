@@ -76,6 +76,15 @@ _COMPOSE_OFFENDERS = {
     "privileged": {"services": {"a": {"privileged": True}}},
     "another project's container": {"services": {"a": {"network_mode": "container:other"}}},
     "unknown service namespace": {"services": {"a": {"network_mode": "service:ghost"}}},
+    "podman host netns by path": {"services": {"a": {"network_mode": "ns:/proc/1/ns/net"}}},
+    "slirp4netns host loopback": {"services": {"a": {
+        "network_mode": "slirp4netns:allow_host_loopback=true"}}},
+    "pasta": {"services": {"a": {"network_mode": "pasta"}}},
+    "external host network": {"services": {"a": {"networks": ["h"]}},
+                              "networks": {"h": {"name": "host", "external": True}}},
+    "external network": {"services": {"a": {"networks": ["n"]}},
+                         "networks": {"n": {"external": True}}},
+    "host driver": {"services": {"a": {"networks": ["n"]}}, "networks": {"n": {"driver": "host"}}},
 }
 
 
@@ -97,9 +106,11 @@ def test_the_compose_lint_passes_loopback_bindings(ports):
 
 # --- 2. shell publish lint (lab/ and scripts/) --------------------------------------------
 
-_RUN_LINE = re.compile(r"\b(?:docker|podman)\s+(?:container\s+)?run\b")
-_PUBLISH = re.compile(r"(?:^|\s)(?:-p|--publish)(?:\s+|=)(\S+)")
-_HOST_NET = re.compile(r"--(?:network|net)(?:\s+|=)host\b")
+_RUN_LINE = re.compile(r"(?:\b(?:docker|podman)\b|\$\{?ENGINE\}?\"?)\s+"
+                       r"(?:container\s+|pod\s+)?(?:run|create)\b")
+_PUBLISH = re.compile(r"(?:^|\s)(?:-p\s*|--publish(?:\s+|=))(\S+)")
+_PUBLISH_ALL = re.compile(r"(?:^|\s)(?:-P|--publish-all)(?:\s|=|$)")
+_HOST_NET = re.compile(r"--(?:network|net)(?:\s+|=)[\"']?host\b")
 
 
 def shell_publish_problems(text: str, name: str = "<mem>") -> list[str]:
@@ -112,6 +123,8 @@ def shell_publish_problems(text: str, name: str = "<mem>") -> list[str]:
             continue
         if _HOST_NET.search(line):
             out.append(f"{name}:{n}: host network")
+        if _PUBLISH_ALL.search(line):
+            out.append(f"{name}:{n}: publishes every port on every interface")
         for spec in _PUBLISH.findall(line):
             if not spec.strip("'\"").startswith("127.0.0.1:"):
                 out.append(f"{name}:{n}: publishes {spec}")
@@ -137,6 +150,14 @@ def test_no_shell_script_publishes_beyond_loopback():
     "docker container run \\\n  -p 9000:9000 img\n",
     "docker run --network host img\n",
     "podman run --net=host img\n",
+    "docker run -p3000:3000 img\n",
+    "docker run -P img\n",
+    "docker run --publish-all img\n",
+    "docker create -p 80:80 img\n",
+    "podman pod create -p 80:80 p\n",
+    'docker run --network="host" img\n',
+    '"$ENGINE" run -p 80:80 img\n',
+    "${ENGINE} run -p 80:80 img\n",
 ])
 def test_the_shell_lint_flags_synthetic_offenders(src):
     assert shell_publish_problems(src), src
@@ -144,6 +165,7 @@ def test_the_shell_lint_flags_synthetic_offenders(src):
 
 def test_the_shell_lint_passes_loopback_publishes():
     assert shell_publish_problems("docker run -p 127.0.0.1:3000:3000 img\n"
+                                  "docker run -p127.0.0.1:1:1 --network bwapp-net img\n"
                                   "# docker run -p 80:80 (a comment)\n") == []
 
 
@@ -370,6 +392,20 @@ def test_every_reachable_case_has_its_point(lab):
             assert (case.url, case.method, case.param) in points, case.case_id
 
 
+def test_each_live_floor_holds_only_positives_tagged_for_its_pass():
+    """B-r2.5: a floor id must be a positive the pass can reach by its tag."""
+    import importlib
+    live = importlib.import_module("tests.test_external_labs_live")
+    for lab, floors in (("juice-shop", {"gt": live.JUICE_GT_FLOOR,
+                                        "crawl": live.JUICE_CRAWL_FLOOR}),
+                        ("bwapp", {"gt": live.BWAPP_GT_FLOOR,
+                                   "crawl": live.BWAPP_CRAWL_FLOOR})):
+        gt = contract.load(GT_DIRS[lab])
+        for tag, floor in floors.items():
+            allowed = {c.case_id for c in gt.positives() if tag in reach_of(c)}
+            assert floor and floor <= allowed, (lab, tag, sorted(floor - allowed))
+
+
 @pytest.mark.parametrize("lab", sorted(GT_DIRS))
 def test_case_ids_are_opaque(lab):
     words = {w for vc in scoreable_classes() for w in re.split(r"[-_]", vc)}
@@ -511,6 +547,30 @@ def test_fetch_refuses_a_mismatch_and_leaves_nothing(tmp_path, hops, size_delta)
     assert list((tmp_path / "c").iterdir()) == []
 
 
+@pytest.mark.parametrize("hops", [
+    [_Resp(302, headers={"Location": "https://m.example/x"})] * 7,   # too many redirects
+    [_Resp(302, headers={})],                                        # no Location
+])
+def test_fetch_refuses_redirect_loops_and_empty_locations(tmp_path, hops):
+    with pytest.raises(ext.ExternalLabError):
+        ext.fetch_bwapp(session=_FetchSession(hops), dest=tmp_path / "c" / "z.zip",
+                        sha256="0" * 64, size=1)
+
+
+def test_fetch_sweeps_a_killed_downloads_part_files(tmp_path):
+    body = b"x" * 10
+    (tmp_path / ".bwapp-old.part").write_bytes(b"partial")
+    ext.fetch_bwapp(session=_FetchSession([_Resp(200, body)]), dest=tmp_path / "z.zip",
+                    sha256=hashlib.sha256(body).hexdigest(), size=10)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["z.zip"]
+
+
+def test_fetch_refuses_a_directory_in_place_of_the_cache_file(tmp_path):
+    (tmp_path / "z.zip").mkdir()
+    with pytest.raises(ext.ExternalLabError):
+        ext.fetch_bwapp(session=_FetchSession([]), dest=tmp_path / "z.zip")
+
+
 def test_fetch_rehashes_a_cached_file_and_replaces_a_bad_one(tmp_path):
     body = b"x" * 10
     dest = tmp_path / "z.zip"
@@ -558,6 +618,47 @@ def test_the_exposure_check_fails_closed(inspects, listeners):
     assert problems
 
 
+@pytest.mark.parametrize("mode", ["host", "ns:/proc/1/ns/net", "slirp4netns", "pasta",
+                                  "container:not-ours", "other-project_net"])
+def test_the_exposure_check_allows_only_project_network_modes(mode):
+    problems, _ = ext.exposure_problems([_inspect(mode=mode)], [], project="fuzzlab-bwapp")
+    assert any("network mode" in p for p in problems), (mode, problems)
+
+
+@pytest.mark.parametrize("mode", ["bridge", "default", "none", "fuzzlab-bwapp_bwapp-net"])
+def test_the_exposure_check_accepts_project_network_modes(mode):
+    problems, _ = ext.exposure_problems([_inspect(mode=mode)], [_L("127.0.0.1", 8092)],
+                                        project="fuzzlab-bwapp")
+    assert problems == []
+
+
+def test_a_container_joined_to_a_project_container_passes():
+    a = {**_inspect(), "Id": "abc123"}
+    b = {"Name": "/db", "Id": "def", "HostConfig": {"NetworkMode": "container:abc123"}}
+    assert ext.exposure_problems([a, b], [_L("127.0.0.1", 8092)], project="p") == ([], [])
+
+
+def test_a_container_in_the_host_netns_is_exposed_whatever_its_mode_says():
+    c = {**_inspect(), "State": {"Pid": 4242}}
+    problems, _ = ext.exposure_problems([c], [_L("127.0.0.1", 8092)], project="p",
+                                        netns_of=lambda pid: "net:[1]", host_netns="net:[1]")
+    assert any("host's network namespace" in p for p in problems)
+    ok, _ = ext.exposure_problems([c], [_L("127.0.0.1", 8092)], project="p",
+                                  netns_of=lambda pid: "net:[2]", host_netns="net:[1]")
+    assert ok == []
+
+
+def test_bindings_from_both_inspect_sources_are_all_checked():
+    only_settings = {"Name": "/x", "HostConfig": {"NetworkMode": "bridge", "PortBindings": {}},
+                     "NetworkSettings": {"Ports": {"80/tcp": [{"HostIp": "0.0.0.0",
+                                                               "HostPort": "8092"}]}}}
+    assert ext.exposure_problems([only_settings], [])[0]
+    mixed = _inspect()
+    mixed["NetworkSettings"] = {"Ports": {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8092"},
+                                                     {"HostIp": "::", "HostPort": "8092"}]}}
+    assert ext.exposure_problems([mixed], [_L("127.0.0.1", 8092)])[0]
+
+
 def test_an_empty_host_ip_is_named_as_every_interface():
     problems, _ = ext.exposure_problems([_inspect(host_ip="")], [])
     assert any("every interface" in p for p in problems), problems
@@ -589,12 +690,45 @@ def test_check_exposure_selects_by_the_exact_project_label():
     assert r.calls[1][:2] == ["docker", "inspect"]
 
 
-@pytest.mark.parametrize("runner", [_Runner(ps=""), _Runner(ps="abc", fail="inspect"),
-                                    _Runner(ps="abc", inspect="not json"),
-                                    _Runner(fail="ps")])
+class _RaisingRunner:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __call__(self, argv, timeout):
+        raise self.exc
+
+
+@pytest.mark.parametrize("runner", [
+    _Runner(ps=""), _Runner(ps="abc", fail="inspect"), _Runner(ps="abc", inspect="not json"),
+    _Runner(fail="ps"), _Runner(ps="abc", inspect='{"not": "a list"}'),
+    _RaisingRunner(FileNotFoundError("docker")),
+    _RaisingRunner(subprocess.TimeoutExpired(["docker"], 60)),
+])
 def test_check_exposure_fails_closed_on_engine_errors(runner):
     problems, _ = ext.check_exposure("p", "podman", runner=runner, listeners=lambda: [])
     assert problems
+
+
+def test_check_exposure_fails_closed_when_the_host_table_cannot_be_read():
+    def boom():
+        raise OSError("no /proc")
+    problems, _ = ext.check_exposure("p", "docker", runner=_Runner(ps="a", inspect="[]"),
+                                     listeners=boom)
+    assert problems
+
+
+def test_published_port_reads_the_running_project():
+    meta = ext.LAB_META["juice-shop"]
+    c = {"HostConfig": {"PortBindings": {"3000/tcp": [{"HostIp": "127.0.0.1",
+                                                       "HostPort": "3005"}]}}}
+    r = _Runner(ps="id1\n", inspect=json.dumps([c]))
+    assert ext.published_port(meta, "fuzzlab-juice-shop", "docker", runner=r) == 3005
+    assert "label=com.docker.compose.service=app" in r.calls[0]
+    for bad in ([], [{"HostConfig": {"PortBindings": {"3000/tcp": [{"HostIp": "0.0.0.0",
+                                                                     "HostPort": "3005"}]}}}]):
+        with pytest.raises(ext.ExternalLabError):
+            ext.published_port(meta, "p", "docker",
+                               runner=_Runner(ps="id1\n", inspect=json.dumps(bad)))
 
 
 def test_host_listen_sockets_sees_a_real_loopback_listener():
@@ -689,6 +823,39 @@ def test_bwapp_bootstrap_stores_only_after_a_verified_level_0_login(capsys, capl
         assert sess.trust_env is False and sess.proxies == {}
     out = capsys.readouterr()
     assert "bug" not in out.out + out.err + caplog.text
+
+
+@pytest.mark.parametrize("password_ok", [True, False], ids=["success", "failed-login"])
+def test_the_cli_bootstrap_never_shows_the_secret(monkeypatch, capsys, caplog, password_ok):
+    import secrets as _s
+    secret = "S3cr3t-" + _s.token_hex(8)
+    routes = _bwapp_routes(password_ok=secret if password_ok else "other")
+    real = ext.bootstrap
+    seen = {}
+
+    def boot(name, **kw):
+        try:
+            res = real(name, environ={}, keyring_store=_Store(),
+                       opened_store=_Store(_Cred("bee", secret)),
+                       session_factory=lambda: _FakeLabSession(routes, []), deadline=1.0)
+        except ext.ExternalLabError as exc:
+            seen["exc"] = f"{exc!s} {exc!r}"
+            raise
+        seen["res"] = repr(res)
+        return res
+    monkeypatch.setattr(ext, "bootstrap", boot)
+    rc = ext.main(["bootstrap", "bwapp", "--authorized"])
+    assert rc == (0 if password_ok else 1)
+    out = capsys.readouterr()
+    for text in (out.out, out.err, caplog.text, *seen.values()):
+        assert secret not in text
+
+
+def test_an_empty_prompt_answer_never_generates_a_password():
+    with pytest.raises(ext.ExternalLabError, match="no password"):
+        ext.resolve_credential(ext.LAB_META["juice-shop"], host="127.0.0.1",
+                               keyring_store=_Store(), opened_store=_Store(),
+                               prompt=lambda _: "", generate=True)
 
 
 def test_bwapp_bootstrap_never_stores_an_unverified_password():

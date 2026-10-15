@@ -65,7 +65,9 @@ Newest first.
 - Change:
   - `fuzzlab/procutil.py`: `host_listen_sockets()` returns a `Listener` (pid 0) for every
     LISTEN socket of this process's network namespace, through the existing
-    `_listen_table` parser (PA-0087: no second parser). 10 lines. FR-CORE-300.
+    `_listen_table` parser (PA-0087: no second parser); `netns_of(pid)` / `host_netns()`
+    expose the existing namespace readers (added in code review A1: the exposure check
+    compares each container's namespace with the host's). ~20 lines. FR-CORE-300.
   - `tests/test_procutil_guard.py`: `FORKING_TOOLS` gains `bash`, `sh`, `docker`,
     `podman`, `docker-compose`, `podman-compose`, with six synthetic offenders
     (PA-0034(2)). The sweep (the guard's own AST scan with the new list) found one site,

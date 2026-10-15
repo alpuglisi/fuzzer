@@ -139,7 +139,9 @@ socket under SELinux, netavark bridge isolation.
    ```bash
    fuzzlab session set-credential --host 127.0.0.1 --identity bwapp-bee --username bee
    ```
-2. **Bring each up** (pre-flight, build, exposure check, then the bootstrap):
+2. **Bring each up** (pre-flight, build, exposure check, then the bootstrap). `extctl.sh`
+   runs its Python helper with `${FUZZLAB_PYTHON:-python3}`; if fuzzlab lives in a venv,
+   export `FUZZLAB_PYTHON=/path/to/venv/bin/python` first:
    ```bash
    cd lab
    ./labctl.sh up bwapp --authorized
@@ -157,12 +159,12 @@ socket under SELinux, netavark bridge isolation.
    fuzzlab auto --base-url http://127.0.0.1:8092 --store bwapp.db \
      --ground-truth lab/ground-truth-bwapp --points ground-truth \
      --identity bwapp-bee --browser --authorized
-   # executed: tp=18 fp=2 fn=28 tn=4 (the 2 "fp" were real, unlisted reflections now in the
-   # contract as BWAPP-0051/0052)
+   # executed 2026-10-15, scored against the final contract (58 cases): tp=20 fp=0 tn=3
+   # (the run's two then-unlisted detections are now BWAPP-0051/0052)
    fuzzlab auto --base-url http://127.0.0.1:3000 --store juice.db \
      --ground-truth lab/ground-truth-juice-shop --points ground-truth \
      --identity juice-user --browser --oob --authorized
-   # executed: tp=4 fp=0 (JUICE-0002/0003/0004/0006); JUICE-0005 (SSRF) is a documented
+   # executed: tp=4 fp=0 tn=3 (JUICE-0002/0003/0004/0006); JUICE-0005 (SSRF) is a documented
    # miss: the container's bridge network cannot reach the loopback-only OOB listener
    ```
 4. **Reset** after anything destructive (bWAPP's `update.php` drops its database on a GET):

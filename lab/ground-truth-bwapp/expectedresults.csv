@@ -49,7 +49,7 @@ BWAPP-0043,/bWAPP/unvalidated_redir_fwd_2.php,GET,ReturnUrl,query,open_redirect,
 BWAPP-0044,/bWAPP/http_response_splitting.php,GET,url,query,open_redirect,true,/bWAPP/http_response_splitting.php,sink,,direct
 BWAPP-0045,/bWAPP/directory_traversal_1.php,GET,page,query,path_traversal,true,/bWAPP/directory_traversal_1.php,sink,,direct
 BWAPP-0046,/bWAPP/directory_traversal_2.php,GET,directory,query,path_traversal,true,/bWAPP/directory_traversal_2.php,sink,,direct
-BWAPP-0047,/bWAPP/sqli_17.php,GET,User-Agent,header,xss-reflected,false,/bWAPP/sqli_17.php,sink,,direct
+BWAPP-0047,/bWAPP/sqli_17.php,GET,User-Agent,header,xss-reflected,true,/bWAPP/sqli_17.php,sink,,direct
 BWAPP-0048,/bWAPP/xss_stored_4.php,GET,User-Agent,header,sqli,false,/bWAPP/xss_stored_4.php,sink,,direct
 BWAPP-0049,/bWAPP/xss_stored_1.php,POST,entry,body,sqli,false,/bWAPP/xss_stored_1.php,sink,,direct
 BWAPP-0050,/bWAPP/htmli_stored.php,POST,entry,body,sqli,false,/bWAPP/htmli_stored.php,sink,,direct
@@ -59,3 +59,5 @@ BWAPP-0053,/bWAPP/iframei.php,GET,ParamUrl,query,xss-reflected,true,/bWAPP/ifram
 BWAPP-0054,/bWAPP/iframei.php,GET,ParamWidth,query,xss-reflected,true,/bWAPP/iframei.php,sink,,direct
 BWAPP-0055,/bWAPP/iframei.php,GET,ParamHeight,query,xss-reflected,true,/bWAPP/iframei.php,sink,,direct
 BWAPP-0056,/bWAPP/sqli_5.php,GET,title,query,sqli,true,/bWAPP/sqli_5.php,sink,,direct
+BWAPP-0057,/bWAPP/sqli_1.php,GET,title,query,xss-reflected,true,/bWAPP/sqli_1.php,sink,,direct
+BWAPP-0058,/bWAPP/sqli_6.php,POST,title,body,xss-reflected,true,/bWAPP/sqli_6.php,sink,,direct

@@ -15,10 +15,17 @@ changed, and the reason. Reference the commit hash where useful.
   {up|down|status|reset|bootstrap} <lab>` through `lab/external/extctl.sh` with a config
   pre-flight and a fail-closed exposure check; an idempotent, `--authorized` bootstrap that
   puts the lab identity in the keyring after a verified login; ground truth
-  `lab/ground-truth-bwapp` (56 cases) and `lab/ground-truth-juice-shop` (13) with per-case
+  `lab/ground-truth-bwapp` (58 cases) and `lab/ground-truth-juice-shop` (13) with per-case
   reach tags; static, hermetic and gated live tests (CC-LAB-0300, CC-LAB-0301,
   CC-CORE-0300, CC-ML-0300; FR-LAB-300..304, FR-CORE-300). Juice Shop runs with its own
   `NODE_ENV=unsafe`; its SSRF row is a documented miss under the bridge network.
+- **Code review (reviewers A and B, round 1):** the network-mode checks became an
+  allowlist (podman `ns:`/slirp/pasta modes and external host networks were let through)
+  with a host-namespace comparison; engine errors no longer read as "nothing left"; the
+  exposure check combines both inspect port sources and fails closed on every engine
+  error; the bootstrap targets the port the running project publishes; a source-disproven
+  negative (bWAPP's error echo) became a positive; the live test's level checks and status
+  filter were wrong and are replaced.
 ## 2026-10-15 (Lane B: BUG-0300 and BUG-0301 recorded and pinned; PA-0300 base-URL registry, PA-0301 destructive-spelling sweep)
 - **Why:** adopting bWAPP (served under `/bWAPP/`) and Juice Shop as permanent fixtures
   surfaced two defects in files locked by another session: ground-truth points double an

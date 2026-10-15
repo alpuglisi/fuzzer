@@ -7,7 +7,7 @@
 #   ./labctl.sh down      <lab>                  stop and remove (data volumes kept)
 #   ./labctl.sh reset     <lab> [--authorized]   drop everything incl. volumes, then up
 #   ./labctl.sh status    <lab>                  0 running + loopback-only, 1 not running,
-#                                                3 exposed
+#                                                2 engine error, 3 exposed
 #   ./labctl.sh bootstrap <lab> --authorized     install / register the lab identity
 #
 # <lab> is a directory here with a compose.yaml (bwapp, juice-shop). Nothing sends
@@ -57,12 +57,17 @@ if [ -z "$NAME" ]; then
   exit 2
 fi
 PROJECT="${NAME}${SUFFIX}"
+if [[ ! "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "invalid compose project name: ${PROJECT}" >&2
+  exit 2
+fi
 LABEL="com.docker.compose.project=${PROJECT}"
 DC=("${COMPOSE[@]}" -p "$PROJECT" -f "$lab/compose.yaml")
 PY="${FUZZLAB_PYTHON:-python3}"
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-_py() { "$PY" -m fuzzlab.lab_fixtures.external "$@"; }
+# Run from the repo root, so lab/external is not first on Python's import path.
+_py() { (cd "$REPO_ROOT" && "$PY" -m fuzzlab.lab_fixtures.external "$@"); }
 
 # The project's resources, by the exact compose project label.
 _ids() {  # <ps|network|volume|pod>
@@ -94,7 +99,13 @@ _force_clean() {
   return 0
 }
 
-_leftovers() { [ -n "$(_ids ps 2>/dev/null)" ]; }
+# True when the project still has containers -- or when the engine cannot say (an
+# engine error never reads as "nothing left", PA-0059(1)).
+_leftovers() {
+  local out
+  out="$(_ids ps 2>/dev/null)" || return 0
+  [ -n "$out" ]
+}
 
 # Refuse a resolved config that publishes beyond loopback, before anything starts.
 _preflight() {
@@ -112,7 +123,8 @@ _bootstrap() {
     echo "bootstrap sends traffic to the lab: pass --authorized" >&2
     return 2
   fi
-  _py bootstrap "$lab" --authorized
+  # The port the running project publishes, not whatever the port variable says now.
+  _py bootstrap "$lab" --authorized --engine "$ENGINE" --project "$PROJECT"
 }
 
 _up() {
@@ -130,6 +142,10 @@ _up() {
     echo "exposure check failed: tearing ${PROJECT} down" >&2
     "${DC[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
     _force_clean drop-volumes
+    if _leftovers; then
+      echo "EXPOSED STACK STILL RUNNING: containers of ${PROJECT} could not be removed;" \
+           "stop them now (${ENGINE} ps --filter label=${LABEL})" >&2
+    fi
     exit 3
   fi
   if [ "$AUTHORIZED" -eq 1 ]; then _bootstrap; fi
@@ -142,7 +158,9 @@ case "$op" in
     ;;
   down)
     # PA-0130(4): check while live, report, never abort the cleanup.
-    if ! _exposure; then echo "warning: exposure check failed while live" >&2; fi
+    if _leftovers && ! _exposure; then
+      echo "warning: exposure check failed while live" >&2
+    fi
     "${DC[@]}" down --remove-orphans || true
     if _leftovers; then
       echo "down left containers of ${PROJECT} behind; force-cleaning" >&2
@@ -160,8 +178,12 @@ case "$op" in
     _up
     ;;
   status)
-    "${DC[@]}" ps
-    if [ -z "$("$ENGINE" ps -q --filter "label=${LABEL}" 2>/dev/null)" ]; then
+    "${DC[@]}" ps || true
+    if ! running="$("$ENGINE" ps -q --filter "label=${LABEL}" 2>/dev/null)"; then
+      echo "${lab}: cannot query ${ENGINE}" >&2
+      exit 2
+    fi
+    if [ -z "$running" ]; then
       echo "${lab}: not running"
       exit 1
     fi

@@ -6292,16 +6292,21 @@ lane) can submit a payload as
   dispatch fires only for those five operations **and** a lab name that is a directory of
   `lab/external/` with a `compose.yaml`, so every existing subcommand keeps its meaning. The
   registry is the directory layout. `up`: (bWAPP) fetch → pre-flight (the resolved compose
-  config is refused if any port is published on a non-loopback or unnamed host IP, or a
-  service uses the host network/pid namespace, is privileged, or joins a foreign
-  container) → `up -d --build` (one retry through the force-clean) → exposure check (every
-  container of the project inspected, fail closed: no container, an empty or non-loopback
-  `HostIp`, host networking, or a non-loopback host LISTEN row on a published port; a
-  failure tears the stack down, exit 3) → bootstrap with `--authorized` only. `down`:
-  exposure check first (reported, never aborts), `down`, then the real post-state (any
-  container still carrying the project label → force-clean → exit 1 if any remain).
-  `reset`: drop everything including volumes, then `up`. `status`: 0 running and
-  loopback-only, 1 not running, 3 exposed. One force-clean helper removes the project's
+  config is refused if any port is published on a non-loopback or unnamed host IP, a
+  `network_mode` is not in the allowlist `none`/`bridge`/`default`/`service:<own
+  service>`, a network is external or host-driven, or a service uses the host pid
+  namespace or is privileged) → `up -d --build` (one retry through the force-clean) →
+  exposure check (every container of the project inspected, fail closed: no container,
+  any engine/OS error, an empty or non-loopback `HostIp` in either inspect source, a
+  network mode that is not a project network, a container in the host's network
+  namespace, or a non-loopback host LISTEN row on a published port; a failure tears the
+  stack down, says so loudly if anything survives, exit 3) → bootstrap with
+  `--authorized` only, against the port the running project publishes. `down`: exposure
+  check first when anything runs (reported, never aborts), `down`, then the real
+  post-state (any container still carrying the project label, or an engine that cannot
+  say → force-clean → exit 1 if any remain). `reset`: drop everything including volumes,
+  then `up`. `status`: 0 running and loopback-only, 1 not running, 2 engine error,
+  3 exposed. One force-clean helper removes the project's
   containers, pod, networks and (on reset) volumes by the exact compose project label,
   never by a name pattern. `FUZZLAB_EXT_PROJECT_SUFFIX` isolates a test run's project.
 - **FR-LAB-302** *(external lab bootstrap and identities; `CC-LAB-0300`).* `bootstrap`
@@ -6332,7 +6337,12 @@ lane) can submit a payload as
   category the positives make the run test. Every point passes the destructive and
   transaction rules. bWAPP urls keep the `/bWAPP/` sub-path, so a ground-truth-points run
   uses the origin as its base (`BUG-0300`). Juice Shop's labels assume `safetyMode`
-  disabled; bWAPP's assume security level 0. **Data role:** these are external validation
+  disabled; bWAPP's assume security level 0. Excluded bWAPP bugs and their reasons are
+  listed in `CC-LAB-0300` (an `UPDATE users` SQLi, libxml-blocked XXE, a CAPTCHA page,
+  out-of-class bug names and classes outside the labels enum). Stated residual: today's
+  crawler never records Juice Shop's `/redirect?to=` links (behind the side-nav reveal,
+  whose queued navigation answers 302 off-origin), so JUICE-0001 is `[reach: none]` until
+  the crawler records such a link (follow-up for the crawler component). **Data role:** these are external validation
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
@@ -6355,7 +6365,7 @@ lane) can submit a payload as
   - Enforced by (BUG-0130 follow-up: "checked after boot, and at stop while live". The runtime check is authoritative and the source rules are lints. Exposed means non-loopback in the host's network namespace. A deliberate wildcard bind in a test happens only in a private netns): `tests/test_loopback_listeners.py::test_every_server_site_checks_loopback_right_after_boot`, `tests/test_loopback_listeners.py::test_the_boot_check_rule_flags_synthetic_offenders`, `tests/test_loopback_listeners.py::test_no_test_binds_a_wildcard_address_outside_a_private_netns`, `tests/test_loopback_listeners.py::test_the_netns_rule_flags_synthetic_offenders`, `tests/test_procutil.py::test_a_wildcard_bind_in_a_private_netns_is_listed_but_not_exposed`, `tests/test_procutil.py::test_a_failing_listener_check_never_aborts_the_stop`, `tests/test_procutil.py::test_an_exposed_server_that_was_also_lost_reports_both`
   - Enforced by (dual-use services default off): compose profiles — `tests/test_lab_downgrade.py::test_frontend_is_gated_off_by_a_profile`, `tests/test_web_lab.py::test_profiled_services_carry_their_compose_profile`
   - Enforced by (the identifier-SQLi oracle stays on its loopback target; CC-LAB-0253, BUG-0123): `default_http_runner` same-origin redirects only, `_build_url` origin check — `tests/test_redirect_scope_sweep.py::test_the_oracle_runner_never_follows_a_redirect_off_its_origin`, `tests/test_redirect_scope_sweep.py::test_an_absolute_endpoint_path_cannot_replace_the_checked_base`
-  - Enforced by (bound to localhost: the external lab fixtures, bWAPP and Juice Shop; CC-LAB-0300, CC-LAB-0301): every compose file under `lab/` and every `docker|podman run` in `lab/` and `scripts/` linted, a pre-flight of the resolved compose config before `up`, and a fail-closed post-boot exposure check of the running project (engine inspect + the host LISTEN table) that tears an exposed stack down — `tests/test_external_labs_static.py::test_every_compose_file_publishes_on_loopback_only`, `tests/test_external_labs_static.py::test_the_compose_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_no_shell_script_publishes_beyond_loopback`, `tests/test_external_labs_static.py::test_the_shell_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_the_exposure_check_fails_closed`, `tests/test_external_labs_static.py::test_check_exposure_fails_closed_on_engine_errors`, `tests/test_external_labs_extctl.py::test_up_refuses_a_config_that_fails_the_preflight`, `tests/test_external_labs_extctl.py::test_up_tears_down_an_exposed_stack_and_exits_3`, `tests/test_external_labs_static.py::test_the_bwapp_db_has_no_network_and_its_socket_volume_is_tmpfs`
+  - Enforced by (bound to localhost: the external lab fixtures, bWAPP and Juice Shop; CC-LAB-0300, CC-LAB-0301): every compose file under `lab/` and every `docker|podman run` in `lab/` and `scripts/` linted, a pre-flight of the resolved compose config before `up`, and a fail-closed post-boot exposure check of the running project (engine inspect + the host LISTEN table) that tears an exposed stack down — `tests/test_external_labs_static.py::test_every_compose_file_publishes_on_loopback_only`, `tests/test_external_labs_static.py::test_the_compose_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_no_shell_script_publishes_beyond_loopback`, `tests/test_external_labs_static.py::test_the_shell_lint_flags_synthetic_offenders`, `tests/test_external_labs_static.py::test_the_exposure_check_fails_closed`, `tests/test_external_labs_static.py::test_check_exposure_fails_closed_on_engine_errors`, `tests/test_external_labs_extctl.py::test_up_refuses_a_config_that_fails_the_preflight`, `tests/test_external_labs_extctl.py::test_up_tears_down_an_exposed_stack_and_exits_3`, `tests/test_external_labs_static.py::test_the_bwapp_db_has_no_network_and_its_socket_volume_is_tmpfs`, `tests/test_external_labs_static.py::test_the_exposure_check_allows_only_project_network_modes`, `tests/test_external_labs_static.py::test_a_container_in_the_host_netns_is_exposed_whatever_its_mode_says`, `tests/test_external_labs_static.py::test_bindings_from_both_inspect_sources_are_all_checked`, `tests/test_external_labs_extctl.py::test_an_exposed_stack_that_cannot_be_removed_is_reported_loudly`
   - Enforced by (nothing is sent to an external lab without `--authorized`; credentials only to the loopback origin, CC-LAB-0300): `tests/test_external_labs_extctl.py::test_bootstrap_without_authorized_sends_nothing`, `tests/test_external_labs_static.py::test_the_cli_bootstrap_without_authorized_sends_nothing`, `tests/test_external_labs_static.py::test_the_lab_client_refuses_anything_but_a_loopback_http_origin`, `tests/test_external_labs_static.py::test_bwapp_bootstrap_stores_only_after_a_verified_level_0_login`
   - Not yet enforced (external lab fixtures, CC-LAB-0300): their bridge networks have egress (Juice Shop fetches external URLs at startup and on its web3 routes; both apps have SSRF-capable code), and Juice Shop's `NODE_ENV=unsafe` and bWAPP's command/code-injection pages are code execution inside their containers (contained by dropped capabilities, `no-new-privileges` and a loopback-only publish, not by a network boundary). The podman / podman-compose / SELinux / netavark / pasta paths of these fixtures were not run (only docker was available): `network_mode: none` under podman-compose's pod mode, the cross-container unix socket under SELinux MCS labels, bridge isolation under netavark and pasta's host-loopback mapping are unverified (`Not yet verified`).
   - Not yet enforced: **no outbound route** — the app networks are ordinary bridges with egress, and the lab has real outbound sinks (SSRF, webhooks); it needs an internal backend network or a host firewall. There is no lab-level "destructive class" beyond profiles. (BUG-0111 sweep, 2026-10-13; reported to the operator.)

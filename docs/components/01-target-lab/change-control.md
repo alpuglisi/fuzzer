@@ -44,7 +44,7 @@ Component code: **LAB**. Entry format and required fields: see
     registry from the directory layout, the pins, `fetch_bwapp`, `config_problems`
     (pre-flight), `exposure_problems`/`check_exposure` (fail closed), the bootstrap client
     and `bootstrap_bwapp`/`bootstrap_juice_shop`, a CLI.
-  - **Ground truth** `lab/ground-truth-bwapp/` (56 cases: 52 positives, 4 negatives) and
+  - **Ground truth** `lab/ground-truth-bwapp/` (58 cases: 55 positives, 3 negatives) and
     `lab/ground-truth-juice-shop/` (13 cases: 10 positives, 3 negatives), with `[reach:]`
     and `[prov:]` tags; `.gitignore` negations (PA-0038) and licence ignores.
   - **Tests** `tests/test_external_labs_static.py`, `tests/test_external_labs_extctl.py`
@@ -72,6 +72,77 @@ Component code: **LAB**. Entry format and required fields: see
     `iframei.php` ParamUrl/ParamWidth/ParamHeight (structurally reflected XSS in an
     attribute; BWAPP-0053..0055) and `sqli_5.php` title (SOAP to the container's own
     localhost works, time-based SQLi; BWAPP-0056).
+  - The Juice Shop crawl pass was narrowed to the login route (`--start /#/login
+    --max-depth 0 --no-reveal --submit-spa-forms login`, about a minute): a full reveal
+    crawl took ~22 min and reached no further in-class point (no `/profile`, no search
+    example, no `/redirect` link), so JUICE-0002/0004/0006/0008/0011/0012 lost the
+    design's `crawl` tag and are `gt` only.
+  - Not built from the design: the §5.2(d) `run_targets` call in the live test (parity
+    was shown by an executed `run_targets` run instead: the runbook's T10.6 snippet,
+    tp=2 fp=0 with the same keys as the CLI); and the §5.6 BUG-0301 compensating-control
+    assertion (vacuous under a login-route crawl; the exploratory full crawl's store had
+    no point or form for either path, and lane B computes the gates in
+    `tests/test_destructive_routes_external_labs.py`). Follow-up recorded for the schema:
+    an optional `entries` (sibling fields) on ground-truth points, which needs the points
+    schema and the locked `harness/auto.py`.
+- Excluded from the ground truth, with reasons (design §5.5):
+  - bWAPP `sqli_8-2.php` / `xxe-2.php`: SQL injection inside an `UPDATE users` (a probe can
+    rewrite every account); their XXE is not exploitable here (libxml2 2.9.4 substitutes
+    no entity, verified live).
+  - `sqli_9.php` (behind an image CAPTCHA); `ws_soap.php` (raw SOAP body, no point shape);
+    `xss_ajax_1-2.php` (XML response, class ambiguous); `htmli_current_url.php` (fires only
+    on unencoded raw URIs); `xss_php_self.php` via PATH_INFO (a path location);
+    `test.php`, the `login` attribute reflections of `xss_stored_3`/`csrf_3`/
+    `insecure_direct_object_ref_1`/`ldap_connect` and the smgmt cookie reflections
+    (state-changing or out of crawl reach); `ssii.php` (out-of-class bug name, structurally
+    stored XSS: follow-up).
+  - Command injection, file inclusion and PHP code injection (not in the labels enum;
+    their strategies' hyphenated `vuln_class` also breaks PA-0047(2), in the locked
+    `strategies.py`): follow-up. `iframei.php` and `sqli_5.php`, first excluded, were
+    re-included after the crawl pass confirmed them.
+  - Cross-check with the 2026-10-14 50-finding run: its notes (CC-FUZZ-0063..0065) list
+    only the new findings by page, and each in-class one maps to a positive here --
+    sqli_17 User-Agent SQLi (BWAPP-0017), xss_user_agent / xss_stored_4 User-Agent and
+    xss_referer Referer XSS (0035, 0041, 0034), sqli_13 SQLi and XSS (0004, 0052), the three
+    iframei parameters (0053-0055), sqli_11/sqli_14/sqli_12 (0011, 0012, 0016) and the
+    login-form SQLi on sqli_3/sqli_16/xss_login (0006, 0008, 0009); `commandi`,
+    `commandi_blind` and `rlfi` are the excluded classes above. The run's full finding
+    list was not recorded, so the rest of its 50 cannot be cross-checked.
+- Code review (reviewers A and B, round 1, both REVISE; fixed on this branch before merge):
+  - A1 (must): the network-mode checks were a denylist: podman `ns:/proc/1/ns/net`,
+    `slirp4netns:allow_host_loopback`, `pasta` and an external network named `host`
+    passed the pre-flight and the post-check. Now an allowlist in both, an external or
+    host-driver network is refused, and every container's network namespace is compared
+    with the host's (`procutil.netns_of`/`host_netns`).
+  - A2/A3: an engine error read as "nothing left" (`down` exit 0) or "not running"; the
+    exposed-stack teardown never checked it worked. Now leftovers on error, `status` exit
+    2, and a loud message if an exposed stack survives the teardown.
+  - A4/A5: the two inspect port sources are combined (not `setdefault`), and the check
+    fails closed on every engine/OS/timeout error. A6: the shell lint covers `create`,
+    `pod create`, attached `-p`, `-P`/`--publish-all`, quoted `host` and a variable engine.
+  - A7: the secret-leak test runs the CLI on success and failed-login paths with a
+    distinctive secret. A9: the bootstrap targets the port the running project publishes
+    (`published_port`). A8/A16: the live teardown is exception-safe, removes podman pods
+    and built images, and cookie-bearing checks ignore proxy env. A10-A18: project-name
+    validation, `podman-compose` stubbed, `is None` store selection, CLI errors mapped,
+    fetch closes responses, sweeps stale parts and fsyncs the directory, an empty prompt
+    never generates a password, Python runs from the repo root.
+  - B1 (must): BWAPP-0047 (sqli_17 User-Agent xss-reflected) was a source-disproven
+    negative: a User-Agent that breaks the INSERT prints the MySQL error raw (:102). Now a
+    positive; the same echo on sqli_1/sqli_6 `title` added (BWAPP-0057/0058). All three
+    verified live (`x' AND <b>zz</b>`).
+  - B2 (must): the live security-level checks were wrong by construction (the crawler
+    harmlessly GETs the "Set Security Level" link; POST bodies are not in the access log;
+    the session never adopts response cookies). Replaced: no probe of `security_level` /
+    `form_security_level` in either pass, plus the structural reason in a comment. The
+    second live run failed exactly there and passed everything before it.
+  - B3: checked candidates are `oracle_status == CHECKED` (the one vocabulary). B8: a
+    flagged negative fails in any pass. B7: a static test keeps each floor inside its
+    pass's reach tags (it caught BWAPP-0029, retagged `crawl,gt`). B10: every gt row
+    cites its gate's page:line. B12: in-process passes run under a deadline. B14: the
+    JUICE-0005 pin ties its OOB tokens to the `imageUrl` sends.
+  - B11: the crawler's Juice Shop `/redirect?to=` gap is recorded as a stated residual in
+    FR-LAB-303 and reported to the operator (crawler code is locked here).
 - Impact: LAB, plus a read-only use of CORE (`core.net`, `core.http` headers,
   `core.credentials`, the new `procutil.host_listen_sockets`, CC-CORE-0300). Existing
   `labctl.sh` subcommands unchanged (tested). Consumers: `harness.multitarget`,
@@ -102,7 +173,10 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] live passes executed (exploratory, docker); gated live test file — done
   - [x] CHANGELOG, FR-LAB-300..304, NFR lines, ARCHITECTURE, lab/README, runbook — done
   - [x] PA-0114 Juice table and BUG-0300/0301 protocol — done (lane B: CC-FUZZ-0300,
-    CC-CORE-0301, CC-CRAWL-0300)
+    CC-CORE-0301, CC-CRAWL-0300; merged on this branch)
+  - [ ] tell the lock-owning session about lane B's six strict-xfail markers before this
+    branch merges (MULTI_AGENT §6) — todo (relayed through the session report to the
+    integrator; this session has no channel to the lock owner)
 - Effectiveness (assessed 2026-10-15): partially (interim, 2026-10-15).
   - Live, docker, this session: both fixtures come up through `./labctl.sh up <lab>
     --authorized` (pre-flight, build, exposure check, bootstrap), `status` exits 0, and the
@@ -119,8 +193,9 @@ Component code: **LAB**. Entry format and required fields: see
     (`tests/test_oracle.py`, `tests/test_forms_phase2.py`) pass.
   - Mutation check over the new mechanisms: 29/29 killed (it found two test gaps first:
     a regex that could not match `BWAPP_SHA256`, and an untested level-0 check; both fixed).
-  - Pending: the bWAPP crawl-pass floor, the full live test file under the flag, the
-    code review and the clean-tree suite run (recorded in a follow-up note below).
+  - Pending at this entry's first writing: the bWAPP crawl-pass floor, the live test file
+    under the flag, the code review and the clean-tree suite run; see "Effectiveness,
+    final" in this entry.
 
 ### CC-LAB-0255 — Every lab server the harnesses and tests launch binds loopback, checked on its real sockets (BUG-0130) (2026-10-14)
 - Change:

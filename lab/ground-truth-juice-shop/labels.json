@@ -13,7 +13,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "node_juice_shop",
-      "notes": "[reach: none - needs a crawled /redirect?to= example (the confirmer's seeded form, BUG-0124); today's crawler never records one: the links sit behind the side-nav reveal, whose navigation is queued and then answers 302 off-origin (follow-up for the crawler)] [prov: redirectChallenge] routes/redirect.ts: res.redirect(to) when `to` merely CONTAINS an allowlisted URL (lib/insecurity.ts isRedirectAllowed, includes()); a plain foreign URL gets 406. Needs the crawled example so the confirmer's seeded second form (BUG-0124) carries an allowlisted URL; a ground-truth point has no example."
+      "notes": "[reach: none - needs a crawled /redirect?to= example (the confirmer's seeded form, BUG-0124); today's crawler never records one: the links sit behind the side-nav reveal, whose navigation is queued and then answers 302 off-origin (follow-up for the crawler)] [prov: redirectChallenge] routes/redirect.ts:14-18: res.redirect(to) when `to` merely CONTAINS an allowlisted URL (lib/insecurity.ts isRedirectAllowed, includes()); a plain foreign URL gets 406. Needs the crawled example so the confirmer's seeded second form (BUG-0124) carries an allowlisted URL; a ground-truth point has no example."
     },
     {
       "case_id": "JUICE-0002",
@@ -78,7 +78,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "node_juice_shop",
-      "notes": "[reach: gt] [prov: sstiChallenge] routes/updateUserProfile.ts stores username; routes/userProfile.ts:57-65 eval()s a #{...} username on GET /profile (post/redirect/get, FR-FUZZ-49). Needs safetyMode disabled (NODE_ENV=unsafe; gate usernameXssChallenge) and the token cookie (FR-SESS-19)."
+      "notes": "[reach: gt] [prov: sstiChallenge] routes/updateUserProfile.ts:38 stores username; routes/userProfile.ts:57-65 eval()s a #{...} username on GET /profile (post/redirect/get, FR-FUZZ-49). Needs safetyMode disabled (NODE_ENV=unsafe; gate usernameXssChallenge) and the token cookie (FR-SESS-19)."
     },
     {
       "case_id": "JUICE-0007",
@@ -91,7 +91,7 @@
       "expected_vulnerable": true,
       "rendering": "js",
       "stack": "node_juice_shop",
-      "notes": "[reach: gt] [prov: reflectedXssChallenge] frontend track-result.component.ts:49 wraps the id from /rest/track-order/:id in bypassSecurityTrustHtml ([innerHtml], .html:9); safetyMode disabled only (routes/trackOrder.ts:15). Informational: not asserted by this fixture's live test."
+      "notes": "[reach: gt] [prov: reflectedXssChallenge] frontend track-result.component.ts:49 wraps the id from /rest/track-order/:id in bypassSecurityTrustHtml ([innerHtml], .html:9); safetyMode disabled only (routes/trackOrder.ts:15). Its detection is not asserted by this fixture's live test (only that the point gets a checked candidate)."
     },
     {
       "case_id": "JUICE-0008",

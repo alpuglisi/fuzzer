@@ -435,6 +435,17 @@ def exposed_listeners(h: "ServerHandle", *, host_netns: str | None = None) -> li
     return [lst for lst in listeners(h) if _is_exposed(lst, ns)]
 
 
+def netns_of(pid: int) -> str:
+    """``net:[inode]`` of ``pid``'s network namespace, or ``""`` when unreadable
+    (CC-CORE-0300: lets a caller tell a container that shares the host's namespace)."""
+    return _netns(pid)
+
+
+def host_netns() -> str:
+    """This process's network namespace (CC-CORE-0300)."""
+    return _host_netns()
+
+
 def host_listen_sockets() -> list[Listener]:
     """Every LISTEN socket in this process's network namespace, whoever holds it
     (``pid`` 0: the owner is not looked up). For servers this code did not start --

@@ -27,8 +27,10 @@ _TOOLS = ("bash", "sed", "head", "tr", "grep", "dirname", "basename", "cat", "aw
           "touch", "rm", "mkdir")
 
 _ENGINE_STUB = r"""#!/bin/bash
-# Records argv; answers from state files in $STUB_DIR.
+# Records argv; answers from state files in $STUB_DIR. A *-compose binary behaves as
+# `<engine> compose`.
 echo "$(basename "$0") $*" >> "$STUB_DIR/calls"
+case "$(basename "$0")" in *-compose) set -- compose "$@" ;; esac
 case "$1 $2" in
   "compose version") exit 0 ;;
 esac
@@ -43,7 +45,8 @@ if [ "$1" = compose ]; then
   exit 0
 fi
 case "$1" in
-  ps) if [ -f "$STUB_DIR/ps_ids" ]; then cat "$STUB_DIR/ps_ids"; fi; exit 0 ;;
+  ps) if [ -f "$STUB_DIR/ps_fails" ]; then exit 1; fi
+      if [ -f "$STUB_DIR/ps_ids" ]; then cat "$STUB_DIR/ps_ids"; fi; exit 0 ;;
   rm) if [ ! -f "$STUB_DIR/sticky" ]; then rm -f "$STUB_DIR/ps_ids"; fi; exit 0 ;;
   network|volume|pod) if [ "$2" = ls ]; then echo "res-$1"; fi; exit 0 ;;
 esac
@@ -67,7 +70,7 @@ def stubs(tmp_path):
         real = shutil.which(tool)
         assert real, tool
         (bindir / tool).symlink_to(real)
-    for name in ("docker", "podman"):
+    for name in ("docker", "podman", "podman-compose"):
         (bindir / name).write_text(_ENGINE_STUB)
         (bindir / name).chmod(0o755)
     py = tmp_path / "py"
@@ -179,10 +182,14 @@ def test_bootstrap_without_authorized_sends_nothing(stubs):
     assert not any(c.startswith("py ") for c in _calls(stubs))
 
 
-def test_bootstrap_with_authorized_calls_the_python_bootstrap(stubs):
+_BOOT = ("py -m fuzzlab.lab_fixtures.external bootstrap bwapp --authorized --engine docker "
+         "--project fuzzlab-bwapp")
+
+
+def test_bootstrap_with_authorized_targets_the_running_project(stubs):
     res = _ext(stubs, "bootstrap", "bwapp", "--authorized")
     assert res.returncode == 0, res.stderr
-    assert _calls(stubs) == ["py -m fuzzlab.lab_fixtures.external bootstrap bwapp --authorized"]
+    assert _calls(stubs) == [_BOOT]
 
 
 def _dc(project="fuzzlab-bwapp", lab="bwapp"):
@@ -199,7 +206,7 @@ def test_up_preflights_starts_checks_exposure_and_bootstraps_only_when_authorize
                 f"{py} check-config bwapp", f"{_dc()} up -d --build",
                 f"{py} check-exposure bwapp --engine docker --project fuzzlab-bwapp"]
     if authorized:
-        expected.append(f"{py} bootstrap bwapp --authorized")
+        expected.append(_BOOT)
     assert _calls(stubs) == expected
     assert "http://127.0.0.1:8092/bWAPP/" in res.stdout
 
@@ -240,10 +247,35 @@ def test_down_checks_exposure_first_and_force_cleans_leftovers(stubs):
     res = _ext(stubs, "down", "bwapp")
     calls = _calls(stubs)
     assert res.returncode == 0, res.stderr
-    assert calls[0].startswith("py -m fuzzlab.lab_fixtures.external check-exposure")
-    assert f"{_dc()} down --remove-orphans" in calls
+    exposure = next(i for i, c in enumerate(calls) if "check-exposure" in c)
+    assert exposure < calls.index(f"{_dc()} down --remove-orphans")
     assert "docker rm -f c1" in calls
     assert not any("volume rm" in c for c in calls)            # down keeps data volumes
+
+
+def test_an_exposed_stack_that_cannot_be_removed_is_reported_loudly(stubs):
+    (stubs / "py_fail_check-exposure").write_text("3")
+    (stubs / "ps_ids").write_text("c1\n")
+    (stubs / "sticky").write_text("")
+    res = _ext(stubs, "up", "bwapp")
+    assert res.returncode == 3 and "EXPOSED STACK STILL RUNNING" in res.stderr
+
+
+def test_down_on_an_engine_error_never_reports_success(stubs):
+    (stubs / "ps_fails").write_text("")
+    res = _ext(stubs, "down", "bwapp")
+    assert res.returncode == 1 and "remain" in res.stderr
+
+
+def test_status_on_an_engine_error_is_its_own_failure(stubs):
+    (stubs / "ps_fails").write_text("")
+    assert _ext(stubs, "status", "bwapp").returncode == 2
+
+
+def test_down_of_a_stopped_lab_does_not_warn(stubs):
+    res = _ext(stubs, "down", "bwapp")
+    assert res.returncode == 0 and "warning" not in res.stderr
+    assert not any("check-exposure" in c for c in _calls(stubs))
 
 
 def test_down_fails_when_containers_survive_the_force_clean(stubs):
@@ -255,6 +287,7 @@ def test_down_fails_when_containers_survive_the_force_clean(stubs):
 
 def test_a_failed_exposure_check_never_aborts_down(stubs):
     (stubs / "py_fail_check-exposure").write_text("3")
+    (stubs / "ps_ids").write_text("c1\n")
     res = _ext(stubs, "down", "bwapp")
     assert res.returncode == 0 and "warning" in res.stderr
     assert f"{_dc()} down --remove-orphans" in _calls(stubs)
@@ -288,14 +321,19 @@ def test_a_project_suffix_isolates_every_call(stubs):
             assert "fuzzlab-bwapp-pytest-1" in c, c
 
 
-def test_the_podman_provider_uses_the_podman_engine_and_removes_its_pod(stubs):
+@pytest.mark.parametrize("compose,dc", [
+    ("podman-compose", "podman-compose -p fuzzlab-bwapp -f bwapp/compose.yaml down --remove-orphans"),
+    ("podman compose", "podman compose -p fuzzlab-bwapp -f bwapp/compose.yaml down --remove-orphans"),
+])
+def test_the_podman_provider_uses_the_podman_engine_and_removes_its_pod(stubs, compose, dc):
     (stubs / "ps_ids").write_text("c1\n")
-    res = _ext(stubs, "down", "bwapp", compose="podman-compose")
+    res = _ext(stubs, "down", "bwapp", compose=compose)
     calls = _calls(stubs)
     assert res.returncode == 0, res.stderr
+    assert dc in calls
     assert "podman rm -f c1" in calls
     assert "podman pod rm -f res-pod" in calls
-    assert "--engine podman" in calls[0]
+    assert any("--engine podman" in c for c in calls)
     assert not any(c.startswith("docker ") for c in calls)
 
 

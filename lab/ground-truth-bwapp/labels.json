@@ -13,7 +13,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection (GET/Search)] Sink sqli_1.php:143 (LIKE, MySQL; error shown :156). Handler needs only title. Verified live: a quote gives a MySQL syntax error."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection (GET/Search)] Sink sqli_1.php:143 (LIKE, MySQL; error shown :156). Handler needs only title. Verified live: a quote gives a MySQL syntax error. Gate (only this parameter): sqli_1.php:138."
     },
     {
       "case_id": "BWAPP-0002",
@@ -26,7 +26,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection (GET/Select)] Sink sqli_2.php:173 (numeric, unquoted). Handler needs only a truthy movie."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection (GET/Select)] Sink sqli_2.php:173 (numeric, unquoted). Handler needs only a truthy movie. Gate (only this parameter): sqli_2.php:162."
     },
     {
       "case_id": "BWAPP-0003",
@@ -39,7 +39,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection (POST/Search)] Sink sqli_6.php:143. Handler needs only title."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection (POST/Search)] Sink sqli_6.php:143. Handler needs only title. Gate (only this parameter): sqli_6.php:138."
     },
     {
       "case_id": "BWAPP-0004",
@@ -52,7 +52,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection (POST/Select)] Sink sqli_13.php:173 (numeric). Handler needs only movie."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection (POST/Select)] Sink sqli_13.php:173 (numeric). Handler needs only movie. Gate (only this parameter): sqli_13.php:162."
     },
     {
       "case_id": "BWAPP-0005",
@@ -65,7 +65,7 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "stack": "php_bwapp",
-      "notes": "[reach: gt] [prov: SQL Injection (AJAX/JSON/jQuery)] Sink sqli_10-2.php:64; the endpoint sqli_10-1.php calls by XHR (not a crawled link). Handler needs only a non-empty title."
+      "notes": "[reach: gt] [prov: SQL Injection (AJAX/JSON/jQuery)] Sink sqli_10-2.php:64; the endpoint sqli_10-1.php calls by XHR (not a crawled link). Handler needs only a non-empty title. Gate (only this parameter): sqli_10-2.php:57."
     },
     {
       "case_id": "BWAPP-0006",
@@ -143,7 +143,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection (SQLite)] Sink sqli_11.php:153 (SQLite). Verified live: a quote gives a SQLite error."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection (SQLite)] Sink sqli_11.php:153 (SQLite). Verified live: a quote gives a SQLite error. Gate (only this parameter): sqli_11.php:146."
     },
     {
       "case_id": "BWAPP-0012",
@@ -156,7 +156,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind (SQLite)] Sink sqli_14.php:138 (SQLite, boolean oracle)."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind (SQLite)] Sink sqli_14.php:138 (SQLite, boolean oracle). Gate (only this parameter): sqli_14.php:131."
     },
     {
       "case_id": "BWAPP-0013",
@@ -169,7 +169,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind - Boolean] Sink sqli_4.php:131 (MySQL; errors masked). Not confirmed by fuzzlab so far (CC-FUZZ-0065 notes): not in any live floor."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind - Boolean] Sink sqli_4.php:131 (MySQL; errors masked). Not confirmed by the 2026-10-14 run (CC-FUZZ-0065 notes); confirmed by both passes on this fixture (2026-10-15). Gate (only this parameter): sqli_4.php:126."
     },
     {
       "case_id": "BWAPP-0014",
@@ -182,7 +182,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind - Time] Sink sqli_15.php:65 (error_reporting off)."
+      "notes": "[reach: crawl,gt] [prov: SQL Injection - Blind - Time] Sink sqli_15.php:65 (error_reporting off). Gate (only this parameter): sqli_15.php:60."
     },
     {
       "case_id": "BWAPP-0015",
@@ -364,7 +364,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (JSON)] Raw in a JS string literal (xss_json.php:131), then innerHTML."
+      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (JSON)] Raw in a JS string literal (xss_json.php:131), then innerHTML. Gate (only this parameter): xss_json.php:24."
     },
     {
       "case_id": "BWAPP-0029",
@@ -377,7 +377,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: gt] [prov: XSS - Reflected (AJAX/JSON)] Raw echo xss_ajax_2-2.php:105, served text/html at level 0 (no Content-Type set; :91-95 only at level 1). The endpoint xss_ajax_2-1.php polls."
+      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (AJAX/JSON)] Raw echo xss_ajax_2-2.php:105, served text/html at level 0 (no Content-Type set; :91-95 only at level 1). The endpoint xss_ajax_2-1.php polls; the crawl captures it. Gate (only this parameter): xss_ajax_2-2.php:24."
     },
     {
       "case_id": "BWAPP-0030",
@@ -390,7 +390,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (Eval)] eval() of date in a script, xss_eval.php:261."
+      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (Eval)] eval() of date in a script, xss_eval.php:261. Gate (only this parameter): xss_eval.php:218."
     },
     {
       "case_id": "BWAPP-0031",
@@ -403,7 +403,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (HREF)] Unquoted href value, xss_href-2.php:189."
+      "notes": "[reach: crawl,gt] [prov: XSS - Reflected (HREF)] Unquoted href value, xss_href-2.php:189. Gate (only this parameter): xss_href-2.php:27."
     },
     {
       "case_id": "BWAPP-0032",
@@ -416,7 +416,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: HTTP Parameter Pollution] Same sink as xss_href-2 (hpp-2.php:189)."
+      "notes": "[reach: crawl,gt] [prov: HTTP Parameter Pollution] Same sink as xss_href-2 (hpp-2.php:189). Gate (only this parameter): hpp-2.php:27."
     },
     {
       "case_id": "BWAPP-0033",
@@ -546,7 +546,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: Unvalidated Redirects & Forwards (1)] Location set from url, unvalidated_redir_fwd_1.php:82. Verified live: 302 to a foreign URL."
+      "notes": "[reach: crawl,gt] [prov: Unvalidated Redirects & Forwards (1)] Location set from url, unvalidated_redir_fwd_1.php:82. Verified live: 302 to a foreign URL. Gate (only this parameter): unvalidated_redir_fwd_1.php:76."
     },
     {
       "case_id": "BWAPP-0043",
@@ -559,7 +559,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: Unvalidated Redirects & Forwards (2)] Location set from ReturnUrl, unvalidated_redir_fwd_2.php:39. Verified live."
+      "notes": "[reach: crawl,gt] [prov: Unvalidated Redirects & Forwards (2)] Location set from ReturnUrl, unvalidated_redir_fwd_2.php:39. Verified live. Gate (only this parameter): unvalidated_redir_fwd_2.php:33."
     },
     {
       "case_id": "BWAPP-0044",
@@ -572,7 +572,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: HTTP Response Splitting] Location set from url, http_response_splitting.php:43 (an open redirect; PHP 5.6 header() refuses a bare CR/LF, so it is not header injection). Verified live."
+      "notes": "[reach: crawl,gt] [prov: HTTP Response Splitting] Location set from url, http_response_splitting.php:43 (an open redirect; PHP 5.6 header() refuses a bare CR/LF, so it is not header injection). Verified live. Gate (only this parameter): http_response_splitting.php:37."
     },
     {
       "case_id": "BWAPP-0045",
@@ -585,7 +585,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: gt] [prov: Directory Traversal - Files] File read and echoed, directory_traversal_1.php:233/:144/:150. The rule needs this contract's sink_context (gt pass). Verified live: ../../../../etc/passwd is shown."
+      "notes": "[reach: gt] [prov: Directory Traversal - Files] File read and echoed, directory_traversal_1.php:233/:144/:150. The rule needs this contract's sink_context (gt pass). Verified live: ../../../../etc/passwd is shown. Gate (only this parameter): directory_traversal_1.php:223."
     },
     {
       "case_id": "BWAPP-0046",
@@ -598,7 +598,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: gt] [prov: Directory Traversal - Directories] Directory listed, directory_traversal_2.php:235/:143. Verified live: ../../../../etc lists passwd."
+      "notes": "[reach: gt] [prov: Directory Traversal - Directories] Directory listed, directory_traversal_2.php:235/:143. Verified live: ../../../../etc lists passwd. Gate (only this parameter): directory_traversal_2.php:225."
     },
     {
       "case_id": "BWAPP-0047",
@@ -608,10 +608,10 @@
       "location": "header",
       "vuln_class": "xss-reflected",
       "sink_context": "html",
-      "expected_vulnerable": false,
+      "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl] [prov: negative] Rendered through htmlspecialchars at every level (sqli_17.php:204)."
+      "notes": "[reach: crawl] [prov: unlisted by bWAPP (verified)] The stored rows render escaped (:204), but a User-Agent that breaks the INSERT makes the page print the MySQL error raw (:102), which quotes the input. Verified live: x' AND <b>zz</b> renders a b element."
     },
     {
       "case_id": "BWAPP-0048",
@@ -663,7 +663,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (found by fuzzlab, verified)] The MySQL error for a malformed movie is printed raw (sqli_2.php:188 prints mysql_error(), which quotes the input), so markup in movie renders as an element. Verified live: movie=1'<b>zz</b> renders a b element in the error text."
+      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (found by fuzzlab, verified)] The MySQL error for a malformed movie is printed raw (sqli_2.php:188 prints mysql_error(), which quotes the input), so markup in movie renders as an element. Verified live: movie=1'<b>zz</b> renders a b element in the error text. Gate (only this parameter): sqli_2.php:162."
     },
     {
       "case_id": "BWAPP-0052",
@@ -676,7 +676,7 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (found by fuzzlab, verified)] The MySQL error for a malformed movie is printed raw (sqli_13.php:188 prints mysql_error(), which quotes the input), so markup in movie renders as an element. Verified live: movie=1'<b>zz</b> renders a b element in the error text."
+      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (found by fuzzlab, verified)] The MySQL error for a malformed movie is printed raw (sqli_13.php:188 prints mysql_error(), which quotes the input), so markup in movie renders as an element. Verified live: movie=1'<b>zz</b> renders a b element in the error text. Gate (only this parameter): sqli_13.php:162."
     },
     {
       "case_id": "BWAPP-0053",
@@ -729,6 +729,32 @@
       "rendering": "server",
       "stack": "php_bwapp",
       "notes": "[reach: crawl] [prov: SQL Injection - Blind (WS/SOAP)] title is sent over SOAP to ws_soap.php (sqli_5.php:156-159), which concatenates it into a query (ws_soap.php:8); the SOAP call goes to the container's own localhost, which serves the app. Verified live: a SLEEP(3) payload takes 3.0 s against a 0.03 s baseline."
+    },
+    {
+      "case_id": "BWAPP-0057",
+      "url": "/bWAPP/sqli_1.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (verified)] A title that breaks the query makes the page print mysql_error() raw (sqli_1.php:156), which quotes the input from the failure point. Verified live: x' AND <b>zz</b> renders a b element. Not detected by fuzzlab's probes so far (they do not break the query first). Gate (only this parameter): sqli_1.php:138."
+    },
+    {
+      "case_id": "BWAPP-0058",
+      "url": "/bWAPP/sqli_6.php",
+      "method": "POST",
+      "param": "title",
+      "location": "body",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (verified)] A title that breaks the query makes the page print mysql_error() raw (sqli_6.php:156), which quotes the input from the failure point. Verified live: x' AND <b>zz</b> renders a b element. Not detected by fuzzlab's probes so far (they do not break the query first). Gate (only this parameter): sqli_6.php:138."
     }
   ]
 }
