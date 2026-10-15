@@ -374,7 +374,9 @@ def _note_received(req, url: str, answer) -> None:
                 "content-type", ""):
             return
         _RECEIVED[page] = (url_key(url), answer.text())
-    except (Error, TypeError):     # no frame (a service worker's); a page not weakref-able
+    # no frame (a service worker's request; a request double without one), or a page
+    # that cannot be weakly referenced: nothing is kept
+    except (AttributeError, Error, TypeError):
         return
 
 
