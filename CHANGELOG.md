@@ -361,6 +361,77 @@ changed, and the reason. Reference the commit hash where useful.
   lab's routes. Spec lines are added for NFR-CRAWL-safe (CC-CRAWL-0300), NFR-FUZZ-safe and
   FR-FUZZ-41.
 
+## 2026-10-15 (CLI Phase 1 code review, round 2)
+- **The working-view fix of round 1 broke plain working runs.** A fixed
+  `train_on=saved` made every working namespace without `--score`/`--rank` fail the
+  engine's rules. It was latent (Phase 2's `scan`) and caught before push.
+  `cli_taxonomy.working_namespace` now applies `saved` only with `--score`/`--rank`.
+- **Also:**
+  - The forwarding round-trip test is no longer tautological.
+  - The store guard's wiring is tested.
+  - An unknown `trained_on` reads as unknown, never as `run`.
+  - In the proxy dry run, the store is checked before the plan prints.
+  - Help never splits a command name.
+  - The UI hand-off no longer asks for the reveal in the launcher (FR-FUZZ-36).
+- Change controls: CC-FUZZ-0402, CC-CORE-0402, CC-UI-0402, CC-PROXY-0402, CC-ML-0402.
+
+## 2026-10-15 (CLI Phase 1 code review: three bugs fixed, D-9 tightened)
+- **Why:** two independent code reviewers (A, B) and the clean-tree suite found three
+  defects in this lane's own code, plus gaps against the agreed design.
+- **The three bugs:**
+  - **BUG-0401:** `train run` printed one store and the engine opened another (`~`).
+  - **BUG-0402:** the test store guard walked directories it does not own.
+  - **BUG-0403:** `train models` imported ML outside the optional-ML seam.
+- **What changed:**
+  - D-9 counts only training choices that take effect.
+  - The working view applies a saved model for `--score`/`--rank`.
+  - `copy_parser` fails closed on parser shapes it cannot copy, proven by a discovered
+    round trip over every parser (PA-0400).
+  - An empty target is refused.
+  - `proxy --export-ca` comes before any store work again.
+  - Help texts come from the one default constant.
+  - `train models` reads provenance the way `report` does (`core/modelinfo.py`).
+  - BUG-0400 and the UI follow-ups are recorded where the UI lane looks.
+- **Records:** PA-0401, PA-0402, PA-0403. CC-CORE-0401, CC-FUZZ-0401, CC-UI-0401,
+  CC-PROXY-0401, CC-ML-0401, CC-MUT-0401, CC-CRAWL-0400, CC-AUD-0400.
+
+## 2026-10-15 (CLI simplification, Phase 1: a default store; working runs vs training runs)
+- **Why:** the owner found the CLI too complicated. `--store` was required by six commands,
+  and training and benchmark options (ground truth, model training, holdouts, calibration)
+  were mixed into the working tool.
+- **What:**
+  - **`--store` is no longer required** by `report`, `train …`, `mutate-run`,
+    `reveal-holdout`, `flow-anomaly` and `proxy --record`. One resolution in
+    `core/storepath.py` (`--store`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`,
+    then `./fuzzlab.db`) is shared by those commands and the web UI's config, and its
+    default is unchanged. `auto` and `greybox-run` follow in Phase 2.
+  - **Read-only commands no longer create stores.** `report`, `reveal-holdout`,
+    `flow-anomaly` and `train models` refuse a missing store instead of creating one.
+  - **New `fuzzlab train` group:** `train run <url>` (it needs a training or benchmark
+    choice) and `train models` (label-free). `train reveal-holdout`, `train
+    flow-anomaly` and `train mutate` are the new names; the old ones still work.
+  - **Every flag classified.** `fuzzlab/cli_taxonomy.py` classifies every flag of every
+    command, and a working command refuses training, benchmark and lab-only flags by
+    name.
+  - **Grouped `fuzzlab --help`.**
+  - **`proxy --record`.**
+  - The design went through a 3-round, two-reviewer gate
+    (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`). Phase 2 (`fuzzlab scan <url>`, and the
+    default store for `auto`/`greybox-run`) waits for the BUG-0138 merge.
+  - Change controls: CC-CORE-0400, CC-FUZZ-0400, CC-UI-0400, CC-MUT-0400, CC-PROXY-0400,
+    CC-ML-0400.
+
+## 2026-10-15 (BUG-0400: the launcher's argv builder mis-serialises four argparse shapes)
+- Found during the CLI design review. `web/runner.build_flags` mis-serialises four
+  argparse shapes; it builds both the web launcher's real child argv and every
+  `--dry-run` display:
+  - a bare `nargs='*'` flag is written as `[]`;
+  - `nargs='*'`/`'+'` lists with items are written as their Python repr;
+  - a bare `const=""` flag is dropped;
+  - a dash-leading value is split off its flag.
+- Pinned by strict xfails from a discovery round-trip test over every action of every
+  registered parser. The fix is handed to the UI lane (BUG-0400, PA-0400).
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),

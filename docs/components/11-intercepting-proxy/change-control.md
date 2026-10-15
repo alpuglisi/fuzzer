@@ -24,6 +24,65 @@ Newest first.
   `auth_origins` into an adopted capture's origins
   (`tests/test_session_origin_scope.py::test_adopt_adds_the_operators_auth_origins`).
 
+### CC-PROXY-0402 — A bad `--store` fails before the dry-run plan is printed (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:** in the dry-run branch, `_recording` runs before `report(...)`.
+    `proxy --dry-run --store ""` used to print the whole plan and then exit 2 (reviews A
+    and B, round 2).
+- Impact (other components / project): none.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] code; FR-PROXY-400; test
+    `tests/test_cli_default_store.py::test_proxy_dry_run_with_an_empty_store_prints_no_plan`
+    — done
+- Effectiveness (assessed 2026-10-15): reverting the order fails the test. Effective.
+
+### CC-PROXY-0401 — `--export-ca` before any store resolution; `--store ""` is a usage error (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:** store resolution (`_recording`) runs in the dry-run branch, and
+    otherwise after `--export-ca`. `fuzzlab proxy --export-ca --store ""` exports the CA
+    as before.
+  - An explicit `--store ""` without `--export-ca` is now a usage error (PA-0105). It
+    used to mean "do not record", because it was falsy. **This was not recorded in
+    CC-PROXY-0400.**
+  - The `--record` help comes from `storepath.DEFAULT_RULE`.
+  - NFR-PROXY-dry-run gains a "Not yet enforced (BUG-0400)" line.
+- Impact (other components / project): none beyond the proxy CLI.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `proxy/cli.py`; FR-PROXY-400 updated — done
+  - [x] tests: `tests/test_cli_default_store.py::test_proxy_export_ca_comes_before_any_store_resolution`,
+    `::test_proxy_explicit_empty_store_is_a_usage_error` — done
+- Effectiveness (assessed 2026-10-15): resolving before `--export-ca` (a mutation)
+  fails the test. Effective.
+
+### CC-PROXY-0400 — `proxy --record`: record flow history into the default store (FR-PROXY-400) (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:**
+    - New `--record` records into the resolved store (`core.storepath`). `--store PATH`
+      alone still records there; with both, `--store` wins.
+    - Recording stays **opt-in**.
+    - The order is `--dry-run` / `--export-ca`, then `--authorized`, then
+      `require_loopback` (the existing order), then `check_writable`, then `Store`.
+    - The banner and the dry run name the store.
+- Impact (other components / project):
+  - The web launcher's proxy form gains a `--record` checkbox (commandspec
+    introspection).
+  - `web --with-proxy` is unchanged: it records to the UI's own `store_path`, which now
+    resolves the same way.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - Nothing is recorded unless asked.
+  - The loopback and `--authorized` gates come before any store work, which is tested.
+- Deliverables:
+  - [x] `proxy/cli.py` — done
+  - [x] tests: `tests/test_cli_default_store.py::test_proxy_records_nothing_unless_asked`,
+    `::test_proxy_record_checks_come_before_any_store_work`;
+    `tests/test_web_commandspec.py` and `tests/test_loopback_listeners.py` still green
+    — done
+  - [x] FR-PROXY-400 — done
+- Effectiveness (assessed 2026-10-15): the dry runs name the store only when recording;
+  usage errors leave nothing. Effective.
+
 ### CC-PROXY-0022 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-PROXY-safe, NFR-PROXY-dry-run, naming the enforcing code and the test functions that fail without it

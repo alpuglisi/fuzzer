@@ -495,6 +495,47 @@ plugin registry. It is the layer that makes the store the integration bus.
   of them with a `timeout=` must go through `run_bounded` (an unbounded call is held to it
   by review, not by the guard).
 
+- **FR-CORE-400** *(store resolution; `CC-CORE-0400`, 2026-10-15).* `--store` is not required
+  by the commands that resolve it (`report`, `train run`,
+  `train models`, `train reveal-holdout`/`reveal-holdout`, `train flow-anomaly`/
+  `flow-anomaly`, `train mutate`/`mutate-run`, and `proxy --record`). For those
+  commands, and for the web UI's `load_config()["store_path"]`,
+  `core/storepath.resolve` is the one resolution (PA-0003).
+  - **Exceptions in Phase 1:** `auto` and `greybox-run` still require `--store` (their
+    files were locked). They gain the default in Phase 2.
+  - **Opt-in only:** `crawl`, `audit` and `fuzz` keep `--store` as opt-in
+    consolidation, with no default.
+  - **Order:** `--store PATH`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then
+    `DEFAULT_STORE` (`fuzzlab.db` in the current directory, the shared project store).
+  - **Environment values:** an empty variable is unset, and `~` is expanded.
+    `from_environ` (the only reader of the two variables) never raises.
+  - **Explicit empty flag:** an explicit empty `--store` is a usage error.
+  - **Side effects:** resolution writes nothing.
+    - Writers create the store file on first use (`Store`). Its mode comes from the
+      umask, as for any explicit path; a private mode is part of the §8 per-user
+      follow-up.
+    - Non-creating commands (`report`, `train models`, `reveal-holdout`,
+      `flow-anomaly`) refuse a missing store. They do migrate an existing older store
+      when they open it.
+  - **Typed refusals:** a missing directory, or a path that is a directory or another
+    non-regular file, is refused with the typed `StorePathError` (a `ValueError`), which
+    each CLI prints as a usage error.
+  - **The printed line:** these commands' run summaries and read-only output name the
+    resolved store and its source (`describe`). A wrapper that forwards to an engine
+    passes the resolved store, so what it prints is what is opened (BUG-0401, PA-0401).
+  - **Help text:** the default rule is stated from `DEFAULT_STORE` (`DEFAULT_RULE`,
+    `store_help`), never restated.
+  - **Config hash:** with neither variable set, the config value and its hash are
+    unchanged.
+  - **Test isolation:** tests run with both variables cleared (from `pytest_configure`).
+    The session fails on any new or written `fuzzlab.db` in the repository tree (minus
+    pytest's temp base) or in an outside cwd's own files (`tests/_store_guard.py`, never
+    walking an unowned directory: BUG-0402, PA-0402).
+  - **Shared model facts:** `core/modelinfo.trained_on` is the one reading of what a
+    model row was trained on (absent = `run`; `run`/`earlier`/`saved` as recorded; any other value is `None`, PA-0108).
+    `report` (which shows it as `unknown`) and `train models` both use it, and it works
+    in a no-ML build.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).
@@ -531,4 +572,7 @@ None (foundational layer; it manages the project store).
 ## 8. Open questions
 - Package name.
 - Per-project database files plus a small global config database, versus one
-  global database.
+  global database. *(Answered 2026-10-15, FR-CORE-400: per project directory
+  (`./fuzzlab.db`, shared by the CLI and the web UI); a per-user location
+  (`$XDG_DATA_HOME/fuzzlab/default.db`) is pending the owner's decision with its listed
+  preconditions -- `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §4.8.)*

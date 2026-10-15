@@ -44,6 +44,15 @@ feedback and the scheduler.
   AST or canonical-form comparison of the fragment would otherwise conclude. Added
   after BUG-0026 (CC-MUT-0008) found the validator accepting such a mutation by
   default; see PA-0028.
+- **FR-MUT-400** *(default store; `CC-MUT-0400`, 2026-10-15).* `fuzzlab mutate-run`, also
+  reached as `fuzzlab train mutate`, takes an optional `--store` (FR-CORE-400).
+  - The store is created on first use and reused.
+  - An explicit empty `--store` is a usage error right after parsing (before
+    `--dry-run`).
+  - A missing directory is a usage error after `--authorized`, before any sender or
+    store.
+  - The summary and the dry run name the resolved store.
+
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
   rejects transformations that change meaning. This includes fail-closed handling
@@ -52,6 +61,7 @@ feedback and the scheduler.
   the destructive gate still applies to generated payloads. *(CC-MUT-0012, BUG-0082:)*
   the gate sits at the **send** (FR-MUT-9), not only at the record.
   - Enforced by: `mutation.catalog.refuse_destructive` at the send — `tests/test_destructive_send_gate.py::test_a_destructive_base_is_never_sent_nor_any_variant`, `tests/test_destructive_send_gate.py::test_a_variant_that_turns_destructive_is_not_sent`, `tests/test_destructive_send_gate.py::test_the_live_filter_refuses_at_the_send_itself`, `tests/test_destructive_send_gate.py::test_obfuscated_destructive_payloads_are_refused`, `tests/test_mutation_catalog.py::test_destructive_gate_refuses_by_default`
+  - Enforced by (through `fuzzlab train mutate`; CC-MUT-0400): `tests/test_train_cli.py::test_train_mutate_keeps_the_destructive_gate_off_by_default`
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
 - **NFR-MUT-offline** The LLM expansion path is offline and gated; nothing is sent
   to an external service without explicit opt-in.
@@ -63,6 +73,8 @@ feedback and the scheduler.
   logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
   `fuzzlab/cli_dryrun.py` helper.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_mutate_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_mutate_run_dry_run_reports_plan_and_sends_nothing`
+  - Enforced by (through `fuzzlab train mutate`; CC-MUT-0400): `tests/test_train_cli.py::test_train_mutate_dry_run_sends_nothing`, `tests/test_cli_default_store.py::test_mutate_dry_run_creates_nothing_and_names_the_store`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
 
 - **FR-MUT-8** `MutationSearch` optionally emits its per-step reward and novelty
   signal into `metric_series` (`source="mutation"`, `key="reward"`/`"novelty"`,

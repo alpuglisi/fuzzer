@@ -2195,3 +2195,47 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      done.
   3. **A status or enum filter names the value it means**, imported from its defining
      module (`PA-0001`), never a list of values to exclude. (from BUG-0311)
+
+- **PA-0400** — Strengthens `PA-0026` (enumerate an adapter's input shapes) and `PA-0036`
+  (never assume a round trip without checking), after BUG-0400: the launcher's argv builder
+  inverted argparse for the shapes it had when written and mis-serialised `nargs='*'`,
+  `const=""` and dash-leading values that other lanes' parsers added later.
+  1. **Code that maps between argv and argparse values for the project's parsers**
+     (introspection, serialisation, copying, forwarding) **states its contract as a round
+     trip** — parse, build, parse, compare values — **tested over every action of every
+     registered parser** (discovered, not listed), so a shape another lane adds later fails it.
+  2. **A shape it cannot express fails closed (raises)**; it never emits a different argv.
+  3. **Prefer forwarding the user's own argv verbatim** over re-serialising a parsed namespace.
+  (from BUG-0400)
+
+- **PA-0401** — Strengthens `PA-0400(3)` (forward verbatim) and `PA-0021` (one derivation
+  per convention), after BUG-0401: `train run` printed and checked the resolved store while
+  forwarding the user's raw `--store` (with `~`) to an engine that derives the path itself.
+  1. **A value a wrapper resolves and acts on** (checks, prints, records) **is forwarded in
+     its resolved form, in the position the downstream parser lets win** (last, for
+     argparse) -- never the raw text the downstream would derive differently. Every other
+     value is still forwarded verbatim.
+  2. **Its test parses the forwarded argv with the downstream's own parser** and compares
+     that value with the one the wrapper reported, over every spelling the user can give
+     (`~`, `..`, `=`, an abbreviation). (from BUG-0401)
+
+- **PA-0402** — A test-suite guard that observes the filesystem is bounded to what the suite
+  owns, after BUG-0402: the store guard walked the whole invocation cwd and reported tests'
+  own temp stores.
+  1. **It walks the repository tree only**, never a directory it does not own (the cwd, home,
+     the temp area); for those it checks named files, never a walk.
+  2. **It excludes the test framework's own scratch area** (pytest's basetemp).
+  3. **Its tests run it from a cwd outside the repository and with the basetemp inside the
+     walked tree.** (from BUG-0402)
+
+- **PA-0403** — Strengthens `PA-0040` and `PA-0044` (narrowed test sets miss cross-cutting
+  checks) from per-trigger rules into a rule about the verification set, after BUG-0403: a
+  new module imported `fuzzlab.ml` directly; the import-based list of affected test files
+  never contained the path-scanning guard that judges it.
+  1. **A change that adds or edits a module under `fuzzlab/` is verified against every
+     path-scanning guard test** (tests that discover code by walking `fuzzlab/`/`tests/`:
+     `grep -rlE --include="*.py" "rglob|ast.parse\(.*read_text" tests/`), not only the files that import the
+     changed modules. An import-based list cannot find a guard that judges a *new* module.
+  2. **When the full suite is the backstop, it runs before the push of the commit it
+     certifies**, on the clean committed tree. (from BUG-0403)
+

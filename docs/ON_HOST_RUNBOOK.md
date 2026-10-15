@@ -192,6 +192,26 @@ Nothing runs against the target until you ask it to (no auto-run, D11).
 > like `lab/ground-truth`, which resolve from the repo root; from inside `lab/` you
 > would instead pass `ground-truth`. When in doubt, an absolute path always works.
 
+**Store and command names (2026-10-15, FR-CORE-400 / FR-FUZZ-400).** The commands below
+pass `--store` explicitly, and they all still work. `--store` is optional in `report`,
+`mutate-run`, `reveal-holdout`, `flow-anomaly`, `train …` and `proxy --record`. Without it,
+a command uses `$FUZZLAB_STORE`, else `$FUZZLAB_STORE_PATH`, else `./fuzzlab.db`; the web UI
+follows the same rule. Every summary prints the store it used. `auto` and `greybox-run`
+still require `--store`; that changes in Phase 2 of `docs/CLI_WORKING_VS_TRAINING_DESIGN.md`.
+
+The training and benchmark commands also have new names. The old names still work:
+
+| Old name | New name |
+| --- | --- |
+| `mutate-run` | `fuzzlab train mutate` |
+| `reveal-holdout` | `fuzzlab train reveal-holdout` |
+| `flow-anomaly` | `fuzzlab train flow-anomaly` |
+
+`fuzzlab train run <url> …` takes `auto`'s flags, needs at least one training or
+benchmark choice such as `--ground-truth` or `--score`, and needs `--authorized`. Its
+parsing and store handling were executed offline (0 requests); the lab-backed parts
+below remain as each part is tagged.
+
 ## Part C — Phase 1: authenticated per-identity run
 
 The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.

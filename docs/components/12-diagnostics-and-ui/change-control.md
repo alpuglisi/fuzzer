@@ -3,6 +3,79 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0402 — `report` shows an unknown `trained_on` as `unknown`; the UI hand-off no longer asks for a reveal in the launcher (2026-10-15)
+- Change:
+  - **`report/report.py` `_training`:** a malformed `trained_on` reads `unknown`. Before,
+    it silently read `run`.
+  - **UI `requirements.md` §8 corrected:** add `train models`, but **not** `train
+    reveal-holdout`. FR-FUZZ-36 keeps the counted reveal out of the launcher (reviewer B
+    round 2). Design §9 has the same correction.
+- Impact (other components / project): the UI session's to-do list.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `report/report.py`, UI §8, design §9 — done
+- Effectiveness (assessed 2026-10-15): `tests/test_report.py` is green, and the
+  malformed case is tested. Effective.
+
+### CC-UI-0401 — `report` reads provenance through `core/modelinfo`; the UI lane's open items recorded (2026-10-15)
+- Change:
+  - **`report/report.py`:** `_training` reads `core.modelinfo.trained_on`, the one
+    function `train models` also uses. The output is unchanged.
+  - **`requirements.md` §8 records what this lane hands to the UI session:**
+    - BUG-0400 (open, owned here; pinned by strict xfails);
+    - the UI-visible behaviour changes: `--store` optional in the `report`,
+      `mutate-run` and `flow-anomaly` forms; the proxy `--record` checkbox;
+      `load_config` honouring `FUZZLAB_STORE`, expanding `~` and treating empty as
+      unset, which applies to `web --with-proxy` recording too;
+    - the follow-ups: commandspec moves, `introspect` skipping `SUPPRESS`, `cli_dryrun`
+      specs, `model_registry_timeline` alignment, the per-user store decision.
+- Impact (other components / project): the UI session. **This entry extends
+  CC-UI-0400's Impact, which named only the `report` form.**
+- Risk (level; mitigation or accepted-risk justification): low; the output is unchanged
+  (`tests/test_report.py`).
+- Deliverables:
+  - [x] `report/report.py`, UI `requirements.md` §8 — done
+  - [ ] BUG-0400 fix and the follow-ups — todo, the UI session's
+- Effectiveness (assessed 2026-10-15): `tests/test_report.py` is unchanged and green.
+  Effective for this lane's part.
+
+### CC-UI-0400 — Grouped `fuzzlab --help`; `report`'s store is optional and never created (FR-UI-400, FR-UI-401) (2026-10-15)
+- Change:
+  - **`fuzzlab/cli.py`:**
+    - The help is printed from `cli_taxonomy.COMMANDS` in groups: working runs
+      (lab-only), training and benchmark, lab, other. It is wrapped at 100 columns and
+      lists the older names and the store rule.
+    - It dispatches `fuzzlab train`.
+    - The older names (`mutate-run`, `reveal-holdout`, `flow-anomaly`) print one stderr
+      note.
+  - **`report/cli.py`:**
+    - `--store` is optional (`core.storepath`).
+    - The store is named on **stderr**, so stdout (and `--json`) stays the report.
+    - A missing store is refused (exit 2), where it used to be silently created at a
+      mistyped path.
+    - `main(argv, *, prog=)`.
+- Impact (other components / project):
+  - The web launcher's `report` form now shows `--store` as optional: a blank field
+    resolves like the UI itself.
+  - Two launcher tests now pin their child's `FUZZLAB_STORE` to an absent store, so
+    they never read a host store (`tests/test_web_runner.py`,
+    `tests/test_web_launcher_browser.py`).
+  - No `fuzzlab/web/` file changed.
+- Risk (level; mitigation or accepted-risk justification): low.
+  - Refusing a missing store is the safe direction.
+  - A test pins every command being listed once, in one group.
+- Deliverables:
+  - [x] `fuzzlab/cli.py`, `fuzzlab/report/cli.py` — done
+  - [x] tests: `tests/test_cli_taxonomy.py` (help counting from `cli.py`'s AST, grouping,
+    width, no unbuilt `scan`), `tests/test_cli_default_store.py` (report default / env /
+    flag / missing / JSON purity; launcher-spec compatibility pins) — done
+  - [x] FR-UI-400, FR-UI-401 — done
+- Effectiveness (assessed 2026-10-15):
+  - Removing `report`'s readable check fails
+    `test_report_refuses_a_missing_store_and_creates_none`.
+  - The browser launcher test passes with `FUZZLAB_REQUIRE_BROWSER=1`.
+  - Effective.
+
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)
 - Change: `web/results.inconclusive_by` and `templates/run.html` list inconclusive
   candidates by mechanism (a cost-capped check, or `unplaceable`: no mechanism could

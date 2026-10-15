@@ -19,6 +19,62 @@ Newest first.
   `tests/test_requirements_traceability.py` passes; enforcement awaits the operator's
   decision.
 
+### CC-ML-0402 — FR-ML-400 and `list_models` state how `trained_on` is read (documentation) (2026-10-15)
+- Change: FR-ML-400 and `list_models`' docstring say that `trained_on` comes from
+  `core.modelinfo.trained_on`: absent is `run`, and an unknown value is `None`.
+  CC-CORE-0402 makes the unknown case explicit (reviewer B round 2).
+- Impact (other components / project): none.
+- Risk (level; mitigation or accepted-risk justification): none.
+- Deliverables:
+  - [x] FR-ML-400, docstring — done
+- Effectiveness (assessed 2026-10-15): the text matches `core/modelinfo.py`. Effective.
+
+### CC-ML-0401 — `list_models` reads provenance through `core.modelinfo.trained_on` (2026-10-15)
+- Change:
+  - **`ml/model_registry.py`:** `list_models`' `trained_on` comes from
+    `core.modelinfo.trained_on`. A run-mode row, which never records the key, now shows
+    `run` like `report` does, where before it showed `-`.
+- Impact (other components / project): FUZZ `train models` output; shared with UI
+  `report`.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_train_cli.py::test_models_shows_run_earlier_and_saved_provenance_from_real_producers`
+    (real run, earlier and saved trainers), `::test_list_models_reads_no_metric_key`
+    — done
+- Effectiveness (assessed 2026-10-15): all three provenances are listed from real
+  producers, matching `trained_on`. Effective.
+
+### CC-ML-0400 — `model_registry.list_models`: a label-free listing for `fuzzlab train models` (FR-ML-400) (2026-10-15)
+- Change:
+  - **`ml/model_registry.py`:** `list_models(store)` returns every `model` row, oldest
+    first (a listing, never a "current row" selection).
+    - Returned fields: id, name, version, feature version, created, whether params are
+      saved.
+    - From `calibration` it takes only `LISTING_KEYS` (`trained_on`, `run_id` → scope,
+      `source_model_id`, `scored_run_ids` → a count).
+    - It never reads `params`, a metric, `holdout.*` (whose `rows` equals a sealed
+      number) or a sealed table.
+    - A calibration that does not parse is reported `unreadable`, never filled with
+      defaults (PA-0108).
+- Impact (other components / project):
+  - FUZZ: `fuzzlab train models` prints it.
+  - It is a new reader of `model` that selects nothing. It passes the PA-0063 guard
+    (`test_no_module_reads_model_as_newest_row_of_any_family`).
+- Risk (level; mitigation or accepted-risk justification): low.
+  - A sealed-number leak is the risk. It is guarded by planting distinctive values in a
+    real producer's calibration metrics, its `holdout.rows` and `holdout_metric`, and
+    asserting none appears.
+- Deliverables:
+  - [x] `ml/model_registry.py` — done
+  - [x] tests: `tests/test_train_cli.py::test_models_lists_only_label_free_facts`,
+    `::test_models_never_names_a_sealed_table_or_a_metric_key`,
+    `::test_models_reports_an_unreadable_calibration_as_unreadable`,
+    `::test_models_refuses_a_missing_store_and_creates_none` — done
+  - [x] FR-ML-400 — done
+- Effectiveness (assessed 2026-10-15): leaking the whole calibration into a row (a
+  mutation) fails `test_models_lists_only_label_free_facts`. Effective.
+
 ### CC-ML-0030 — Note: the `loc_body` feature counts `json` points as body (forms phase 3; documentation) (2026-10-14)
 - Change: FR-ML-5 gains a dated note: the candidate feature `loc_body`
   (`core/features.extract_candidate_v1`) is 1 for location `json` (one leaf of a JSON

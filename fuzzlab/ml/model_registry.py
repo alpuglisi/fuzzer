@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 from typing import Sequence
 
+from fuzzlab.core.modelinfo import trained_on
+
 _ABSENT = object()
 
 
@@ -174,3 +176,48 @@ def saved_source(store, names: Sequence[str], run_id: int, earlier_runs, *,
     if best is None:
         return None, None, "no saved model from an earlier run against this target"
     return best[1], best[2], None
+
+
+#: The `calibration` keys `list_models` may read — label-free provenance only. Everything
+#: else in that JSON (metrics, thresholds, `holdout.*` whose `rows` equals a sealed number)
+#: is never read for a listing (FR-ML-400, PA-0092).
+LISTING_KEYS = ("trained_on", "run_id", "source_model_id", "scored_run_ids")
+
+
+def list_models(store) -> list[dict]:
+    """Every saved model row, oldest first, with label-free facts only (`fuzzlab train
+    models`). A listing, not a selection: it never picks a "current" row (that is
+    `select_latest`'s job). A calibration that does not parse is reported as unreadable,
+    never filled with defaults (PA-0108); an absent `trained_on` is `run` (run-mode and
+    legacy rows never record it) and an unknown value is `None`
+    (`core.modelinfo.trained_on`)."""
+    out: list[dict] = []
+    for row in store.conn.execute(
+            "SELECT id, name, version, feature_version, created_at, calibration, "
+            "params IS NOT NULL AS has_params FROM model ORDER BY id ASC").fetchall():
+        item = {"id": int(row["id"]), "name": row["name"], "version": int(row["version"]),
+                "feature_version": row["feature_version"], "created_at": row["created_at"],
+                "has_params": bool(row["has_params"]), "unreadable": False,
+                "trained_on": None, "scope": "unknown", "source_model_id": None,
+                "scored_runs": None}
+        try:
+            calibration = json.loads(row["calibration"] or "{}")
+        except (ValueError, TypeError):
+            calibration = None
+        if not isinstance(calibration, dict):
+            item["unreadable"] = True
+            out.append(item)
+            continue
+        picked = {k: calibration[k] for k in LISTING_KEYS if k in calibration}
+        item["trained_on"] = trained_on(picked)
+        if "run_id" in picked:
+            scope = _int_scope(picked)
+            item["scope"] = "all runs" if picked["run_id"] is None else (
+                f"run {scope}" if scope is not None else "unknown")
+        source = picked.get("source_model_id")
+        item["source_model_id"] = source if isinstance(source, int) and \
+            not isinstance(source, bool) else None
+        scored = picked.get("scored_run_ids")
+        item["scored_runs"] = len(scored) if isinstance(scored, list) else None
+        out.append(item)
+    return out

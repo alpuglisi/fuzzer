@@ -332,6 +332,7 @@ budget where a vulnerability is plausible.
   logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
   `fuzzlab/cli_dryrun.py` helper.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_audit_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_audit_dry_run_reports_plan_and_sends_nothing`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
 
 ## 5. Interfaces and data contracts
 Reads `page`, `endpoint`, `parameter` (and, for crawl points, `form` sibling entries;

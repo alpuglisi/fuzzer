@@ -1106,7 +1106,8 @@ rewards) derives from it.
     calibrated.
   - Each appears in a stage's recorded config only when set, so a run without them
     records exactly the config it always did.
-  - **`fuzzlab reveal-holdout --store S --run N`** prints a run's sealed holdout
+  - **`fuzzlab reveal-holdout [--store S] --run N`** (also `fuzzlab train
+    reveal-holdout`; `--store` optional since FR-FUZZ-400) prints a run's sealed holdout
     metrics and the store-wide reveal count for that membership version (core only, no
     traffic, no ML package needed); "nothing to reveal" records no reveal. Not in the
     web launcher, so a reveal is always a deliberate command.
@@ -1118,7 +1119,7 @@ rewards) derives from it.
   - **`--anomaly-method {ecod,iforest}`** (FR-ML-22) needs `--anomaly`; the summary line
     reads `anomaly (iforest): …` (unchanged for ECOD).
   - Both appear in a stage's config only when not the default.
-  - **`fuzzlab flow-anomaly --store S --run N [--method] [--contamination] [--seed]`**
+  - **`fuzzlab flow-anomaly [--store S] --run N [--method] [--contamination] [--seed]`**
     (FR-ML-23) writes the run's flow anomaly columns (no traffic, no `--authorized`),
     prints per-host counts and the top flagged flows, and says contamination is a
     forced per-host fraction. Reached through `import_ml`: without ML it exits 2 with
@@ -1398,6 +1399,61 @@ rewards) derives from it.
     `tests/test_sender_conformance.py::test_every_wrapper_forwards_every_protocol_argument`,
     `tests/test_sender_conformance.py::test_every_wrapper_reports_its_inner_senders_prg_capability`,
     `tests/test_sender_conformance.py::test_every_sender_that_declares_prg_makes_the_follow_up`
+- **FR-FUZZ-400** *(training and benchmark group; `CC-FUZZ-0400`, 2026-10-15).*
+  `fuzzlab train <sub>` holds the training/benchmark runs (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).
+  - **`train run <url>`** is the `auto` engine with every one of its flags.
+    - The target is the first argument, or `--base-url`; exactly one of them.
+    - `--store` is optional (FR-CORE-400).
+    - It refuses (exit 2, before anything is created) a run with no training or
+      benchmark choice **that takes effect**, detected by presence on the command line
+      (`training_choices`):
+      - `--ground-truth`, `--points ground-truth`, `--mode manual`, `--holdout`,
+        `--hybrid`;
+      - `--score`/`--rank`, unless `--train-on saved`;
+      - `--calibrate` other than `none`;
+      - `--rank-objective` other than `pointwise`;
+      - with `--confirm-budget`: `--budget-seed`, or a non-`score` `--budget-method`.
+
+      `--train-on` alone and the working defaults never count (review A1).
+    - The checks run in this order: an empty `--store` or empty target; then D-9; then
+      `--dry-run`; then `--authorized`.
+    - It refuses a run without `--authorized`.
+    - The user's argv is forwarded to the engine verbatim, except that the resolved store
+      goes last (BUG-0401). No usage error leaves a store file or a run row.
+    - It prints the store, and for `--holdout` a store-qualified `train reveal-holdout`
+      hint.
+  - **`train models`** lists saved models (FR-ML-400).
+  - **`train reveal-holdout`, `train flow-anomaly`, `train mutate`** are the commands
+    formerly named `reveal-holdout`, `flow-anomaly` and `mutate-run`. The old names
+    still work, with a one-line stderr note.
+  - `reveal-holdout` and `flow-anomaly` take an optional `--store` and refuse a missing
+    one. The reveal names its store before the reveal is counted, and the header names
+    the run.
+- **FR-FUZZ-401** *(command taxonomy; `CC-FUZZ-0400`, 2026-10-15).* `fuzzlab/cli_taxonomy.py`
+  classifies every command into a group (working, lab-only / training and benchmark /
+  lab / other). It classifies every flag of every command's parser:
+  - **B:** both.
+  - **T:** training. Ground truth, `--mode`, `--points`, training data, fit choices,
+    modulators, holdouts, experiment seeds.
+  - **W\*:** narrowed in working runs. `--score`/`--rank` apply a saved model there,
+    and `--budget-method` is `score` only.
+  - **L:** needs our instrumented lab.
+
+  `copy_parser` copies actions, never re-types them. It refuses (`CopyError`) any
+  source shape it cannot carry faithfully: mutually exclusive groups, `set_defaults`,
+  `argument_default`, `allow_abbrev=False`, other prefix characters, fromfile prefixes,
+  subcommands, or a restricted non-single-value option. A discovered round trip over
+  every action of every parser proves each copy parses exactly like its source
+  (PA-0400). A working namespace is completed by `working_namespace`: `--train-on` is
+  `saved` when `--score`/`--rank` is given (a working run applies a saved model) and the
+  engine's own `run` otherwise, so every working namespace passes the engine's rules. A working command built with `working_parser` refuses every T
+  and L flag by name
+  (exit 2, the value consumed, naming `fuzzlab train run`; ground truth "is never part
+  of a working run"). It restricts W\* values. The classification guard fails on an
+  unclassified, stale or arrived-pending dest.
+  *Phase 2 (gated on BUG-0138):* `fuzzlab scan <url>`. It crawls into a private temp
+  directory, then runs the engine in automatic mode (so D15 stays in `resolve_run`) with
+  the default store. It requires `--authorized` before the crawl.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -1419,6 +1475,7 @@ rewards) derives from it.
   - Enforced by (destructive payloads off by default, greybox): `tests/test_destructive_send_gate.py::test_greybox_never_sends_a_destructive_probe`
   - Enforced by (oracle SQLi probes are AND-only, quote-balanced and non-destructive; CC-FUZZ-0065): `tests/test_oracle_sqli_string.py::test_every_new_sqli_probe_matches_its_closed_template_exactly`, `tests/test_oracle_sqli_string.py::test_the_grammar_pair_compiles_and_fails_as_designed`
   - Enforced by (scope set): `tests/test_core_foundations.py::test_http_scope_enforced`
+  - Enforced by (the `--authorized` lab-only gate through `fuzzlab train run`; CC-FUZZ-0400): `tests/test_train_cli.py::test_train_run_without_authorized_sends_nothing`, `tests/test_train_cli.py::test_no_usage_error_leaves_a_store_or_a_run_row`
   - Enforced by (the M6 browser stays on its observe and store origins; CC-FUZZ-0066, BUG-0123): `PlaywrightBrowserExecutor.run` scoped launch, context guard, scope-checked plant with `max_redirects=0` — `tests/test_browser_scope.py::test_the_m6_browser_is_launched_scoped_and_plants_without_redirects`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
   - Enforced by (forms phase 2, CC-FUZZ-0063): header names checked at the CLI and at every sender's header branch, the header breaker, siblings never carrying the app's own host or an identifier, settings pickers never fuzzed — `tests/test_forms_phase2.py::test_header_point_names_are_validated`, `tests/test_forms_phase2.py::test_every_sender_refuses_a_denied_header_unless_explicit`, `tests/test_forms_phase2.py::test_every_header_branch_calls_the_header_gate`, `tests/test_forms_phase2.py::test_a_session_bound_to_user_agent_trips_the_breaker_after_one_relogin`, `tests/test_forms_phase2.py::test_a_crawled_hostname_is_never_sent`, `tests/test_forms_phase2.py::test_neutral_value_errs_toward_loopback`, `tests/test_forms_phase2.py::test_a_header_point_url_never_carries_the_apps_own_host`, `tests/test_forms_phase2.py::test_identifier_like_link_values_are_blanked_and_never_stored`, `tests/test_forms_phase2.py::test_link_sets_with_a_credential_or_destructive_entry_are_not_bound`, `tests/test_forms_phase2.py::test_settings_named_post_selectors_are_skipped`, `tests/test_forms_phase2.py::test_a_picker_seen_setting_a_cookie_is_not_fuzzed`
   - Enforced by (forms phase 3, captured JSON requests; CC-AUD-0035 / CC-FUZZ-0068): DELETE, unflagged PUT/PATCH, destructive, transaction, cross-origin, credential-change and settings requests never imported (`store_adapter.captured_request`); a JSON login body probed only on an isolated or anonymous session, its password never a point and sent empty; siblings redacted and neutral; a DELETE refused again at every sender; a crawled fragment payload never sent over HTTP; greybox never sent a JSON point — `tests/test_json_points.py::test_each_refusal_is_never_imported`, `tests/test_json_points.py::test_put_and_patch_import_only_with_the_flag_and_a_safe_url`, `tests/test_json_points.py::test_malformed_unsupported_and_cross_origin_requests_are_refused`, `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms`, `tests/test_json_points.py::test_a_password_leaf_on_any_segment_is_isolated_sent_empty_and_never_a_point`, `tests/test_json_points.py::test_the_password_gate_holds_without_the_sensitive_name_pin`, `tests/test_json_points.py::test_object_selectors_sensitive_and_identifier_leaves_are_pinned`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only`, `tests/test_json_points.py::test_a_json_login_sqli_is_confirmed_anonymously_by_the_plain_sender`, `tests/test_json_points.py::test_json_siblings_are_redacted_and_neutral_when_a_third_leaf_is_probed`, `tests/test_json_points.py::test_every_sender_refuses_a_crawl_sourced_delete_at_send_time`, `tests/test_json_points.py::test_a_crawled_fragment_payload_never_reaches_the_server`, `tests/test_json_points.py::test_a_destructive_spa_route_is_never_a_point`, `tests/test_json_points.py::test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection`, `tests/test_json_points.py::test_a_destructive_route_behind_a_second_hash_is_never_a_point`, `tests/test_json_points.py::test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store`, `tests/test_sender_conformance.py::test_every_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_sender_conformance.py::test_the_form_bound_sender_places_a_json_leaf_in_the_rebuilt_body`, `tests/test_json_points.py::test_a_leaf_absent_from_a_captured_body_is_refused_never_appended`, `tests/test_json_points.py::test_server_side_rules_never_fire_on_a_fragment_point`, `tests/test_json_points.py::test_no_strategy_masks_an_unplaceable_send`, `tests/test_json_points.py::test_the_masking_guard_catches_a_synthetic_offender`, `tests/test_json_points.py::test_a_fragment_point_no_mechanism_can_place_is_inconclusive_never_a_negative`
@@ -1447,6 +1504,8 @@ rewards) derives from it.
   C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
   C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_fuzz_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_auto_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_greybox_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_fuzz_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_auto_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_greybox_run_dry_run_reports_plan_and_sends_nothing`
+  - Enforced by (through `fuzzlab train run`; CC-FUZZ-0400): `tests/test_train_cli.py::test_train_run_dry_run_sends_nothing`, `tests/test_train_cli.py::test_a_dry_run_creates_nothing_and_names_the_store`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
 - **NFR-FUZZ-response-fidelity** *(`CC-FUZZ-0043`, `BUG-0044`/`PA-0046`)*
   Every sender that builds a `Probe` (or a timing measurement) a
   `ConfirmationStrategy`/timing oracle inspects as "the real target's

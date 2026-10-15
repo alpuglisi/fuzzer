@@ -442,6 +442,17 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
   - **Plugins and ML stages:** each attached plugin with its config and status
     (unknown / attached — run did not finish / FAILED: error / ok).
   - **Safety:** every value renders as text.
+- **FR-UI-400** *(grouped help; `CC-UI-0400`, 2026-10-15).* `fuzzlab --help` is printed
+  from `cli_taxonomy.COMMANDS`.
+  - **Groups:** working runs (lab-only), training and benchmark, lab, other.
+  - **Coverage:** every dispatchable command appears exactly once.
+  - **Also listed:** the older names, and the store rule.
+  - **Format:** lines are at most 100 columns.
+  - **Unbuilt commands:** a command that is not built yet is never listed.
+- **FR-UI-401** *(report store; `CC-UI-0400`, 2026-10-15).* `fuzzlab report`'s `--store` is
+  optional (FR-CORE-400).
+  - The resolved store is named on stderr, so stdout and `--json` stay the report.
+  - A missing store is refused (exit 2) and never created.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
@@ -530,6 +541,29 @@ their own results.
   carries the CSP and related security headers.
 
 ## 8. Open questions
+- *(For the UI session, from the CLI-simplification lane, 2026-10-15; see
+  `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §9.)*
+  - **BUG-0400 (open, owned here).** `runner.build_flags` mis-serialises `nargs='*'`
+    lists, bare `const=""` flags and dash-leading values, in both the launcher's real
+    argv and every `--dry-run` display. It is pinned by strict xfails in
+    `tests/test_cli_argv_roundtrip.py`.
+  - **Behaviour that changed under the UI:**
+    - `--store` is now optional in the `report`, `mutate-run` and `flow-anomaly` forms;
+      a blank field resolves like the UI itself.
+    - The proxy form gains `--record`.
+    - `load_config` now also honours `FUZZLAB_STORE`, expands `~`, and treats an empty
+      variable as unset. This also applies to `web --with-proxy` recording.
+  - **To do:**
+    - Move the commandspec entries: `auto` to `scan` (Phase 2) and `train run`;
+      `mutate-run` to `train mutate`; `flow-anomaly` to `train flow-anomaly`.
+    - Add `train models`. Do not add `train reveal-holdout`: FR-FUZZ-36 keeps the
+      counted reveal out of the launcher, so it is always a deliberate command.
+    - Group the launcher by `cli_taxonomy.COMMANDS`.
+    - Make `introspect` skip `SUPPRESS` options.
+    - Add `cli_dryrun` specs for the new names.
+    - Align `diagnostics.model_registry_timeline` with `list_models`' allowlist and
+      `core.modelinfo.trained_on`.
+    - Decide the per-user default store with the owner (design §4.8).
 - Web stack (e.g. FastAPI or Flask + a light frontend; Datasette embedded vs
   linked) — to confirm during build.
 - Metric set and refresh cadence for live views.

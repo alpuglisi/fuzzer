@@ -276,9 +276,12 @@ def test_launch_unknown_command_400():
     assert r.status_code == 400
 
 
-def test_launch_readonly_tool_returns_token():
+def test_launch_readonly_tool_returns_token(tmp_path, monkeypatch):
     # `report` sends no traffic and needs no authorization, so it launches without the
     # gate; the endpoint spawns the child and returns its token + argv immediately.
+    # With no --store the child resolves the default (FR-CORE-400); it inherits
+    # FUZZLAB_STORE, pinned to an absent store, so it never reads a host store.
+    monkeypatch.setenv("FUZZLAB_STORE", str(tmp_path / "absent.db"))
     # (Streaming correctness is covered by test_runner_streams_output_and_exit_code;
     # reading an SSE body synchronously through TestClient is intentionally avoided.)
     with _client(authorized=False) as client:

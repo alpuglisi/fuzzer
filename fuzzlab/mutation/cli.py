@@ -3,7 +3,9 @@
 Sends a base payload at a WAF-protected parameter, searches for a semantics-preserving
 variant that the live filter lets through, and records bypasses to `payload_variant`.
 With `--cov-dir` (the Part E side channel) it also measures the coverage the variant
-reaches. Lab-only: requires `--authorized`.
+reaches. Lab-only: requires `--authorized`. ``--store`` is optional (`core.storepath`,
+FR-CORE-400; the store is created on first use) and the resolved store is named in the
+summary. Reached as `fuzzlab train mutate` (training group) or its older name.
 """
 
 from __future__ import annotations
@@ -11,17 +13,19 @@ from __future__ import annotations
 import argparse
 from urllib.parse import urlparse
 
+from fuzzlab.core import storepath
 from fuzzlab.core.store import Store
 from fuzzlab.mutation import run as mrun
 from fuzzlab.tools.probesender import make_probe_sender
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="fuzzlab mutate-run")
+def build_parser(prog: str = "fuzzlab mutate-run") -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog=prog)
     p.add_argument("--url", required=True,
                    help="Full endpoint URL, e.g. http://127.0.0.1:8080/search.php")
     p.add_argument("--param", required=True, help="Parameter to inject into")
-    p.add_argument("--store", required=True, help="Store (SQLite) to record variants in")
+    p.add_argument("--store", default=None,
+                   help=storepath.store_help("Store (SQLite) to record variants in"))
     p.add_argument("--vuln-class", default="sql-injection",
                    choices=["sql-injection", "xss"])
     p.add_argument("--method", default="GET")
@@ -43,17 +47,26 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str]) -> int:
-    p = build_parser()
+def main(argv: list[str], *, prog: str = "fuzzlab mutate-run") -> int:
+    p = build_parser(prog)
     args = p.parse_args(argv)
+    try:
+        resolved = storepath.resolve(args.store)
+    except storepath.StorePathError as exc:
+        p.error(str(exc))
 
     if args.dry_run:
         from fuzzlab.cli_dryrun import report
         report("mutate-run", args)
+        print(f"  {storepath.describe(resolved)}")
         return 0
 
     if not args.authorized:
         p.error("refusing to send payloads without --authorized (lab-only)")
+    try:
+        storepath.check_writable(resolved)
+    except storepath.StorePathError as exc:
+        p.error(str(exc))
 
     bases = args.base or mrun.DEFAULT_BASES.get(args.vuln_class, [])
     if not bases:
@@ -66,18 +79,18 @@ def main(argv: list[str]) -> int:
             args.url, args.param, cov_dir=args.cov_dir, app_root=args.app_root,
             method=args.method, location=args.location)
 
-    with Store(args.store) as store:
+    with Store(resolved.path) as store:
         run_id = store.start_run("mutate", urlparse(args.url).hostname or args.url)
         summary = mrun.run_mutation(
             url=args.url, param=args.param, store=store, run_id=run_id, sender=sender,
             bases=bases, vuln_class=args.vuln_class, method=args.method,
             location=args.location, coverage_fn=coverage_fn, seed=args.seed,
             budget=args.budget, allow_destructive=args.allow_destructive)
-        _print_summary(args, summary, run_id)
+        _print_summary(args, summary, run_id, resolved)
     return 0
 
 
-def _print_summary(args, summary, run_id) -> None:
+def _print_summary(args, summary, run_id, resolved) -> None:
     print(f"\nmutate-run ({args.vuln_class}; {args.url} [{args.param}]; run_id={run_id})")
     print(f"  bases: {summary['bases']}   blocked by WAF: {summary['blocked']}   "
           f"bypasses found: {summary['bypasses']}   recorded: {summary['recorded']}")
@@ -94,9 +107,10 @@ def _print_summary(args, summary, run_id) -> None:
         print(f"           variant={r['variant']!r} via {r['operators']}"
               f"  evaded={r['evaded']} semantics_ok={r['semantics_ok']}{cov}")
     if summary["recorded"]:
-        print(f'\n  recorded variants:  sqlite3 {args.store} "SELECT base_payload, variant, '
+        print(f'\n  recorded variants:  sqlite3 {resolved.path} "SELECT base_payload, variant, '
               f'operators, bypassed_rule, coverage_gain FROM payload_variant '
               f'WHERE run_id={run_id};"')
+    print(f"  {storepath.describe(resolved)}")
 
 
 if __name__ == "__main__":
