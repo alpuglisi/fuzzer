@@ -6,7 +6,9 @@ reached for its input (same path, method-insensitive, same parameter name):
 
     reached    the input exists in the run's points (endpoint + parameter)
     candidate  an audit rule made it a candidate of the case's category
-    probed     the oracle sent at least one attempt for such a candidate
+    probed     the oracle ran such a candidate: its `candidate.oracle_status` is
+               `checked` or `inconclusive` (`core.oracle_status`), or an attempt row
+               exists (greybox and fuzz-CSV runs write those; `auto` never does)
     confirmed  a finding exists for the input
 
 and, beside it (DISC-CAPTURE §9, FR-FUZZ-52), the discovery and admission stages:
@@ -17,7 +19,9 @@ and, beside it (DISC-CAPTURE §9, FR-FUZZ-52), the discovery and admission stage
     buildable   `harness.auto`'s point builder makes a non-skipped point for it
     refused     the builder skipped it, with the builder's reason (a policy: a
                 destructive URL, a credential, a login form without isolation, a
-                captured write opted out with --no-probe-captured-writes, ...)
+                captured write opted out with --no-probe-captured-writes, ...), or
+                the oracle never ran its candidate (``oracle: <status>``: a budget,
+                no confirmer, pending)
 
 A change is judged by which stage count it moves (discovery reach first). Offline:
 reads the store only.
@@ -98,17 +102,24 @@ def funnel(store: str, gt_dir: str | None, run_id: int | None = None, *,
     discovered_op = {(k, m, o, n) for k, m, o, n in endpoints}
     built, refused = _admission(db, run_id, probe_captured_writes, browser)
     points = {(k, n) for k, _m, _o, n in endpoints}
+    from fuzzlab.core import oracle_status as status
+    ran = {status.CHECKED, status.INCONCLUSIVE}
     cands: dict[tuple, set] = {}
     probed: set[tuple] = set()
-    for r in db.execute("SELECT c.id, c.evidence, (SELECT count(*) FROM attempt a "
-                        "WHERE a.candidate_id = c.id) n FROM candidate c "
+    unprobed: dict[tuple, str] = {}
+    for r in db.execute("SELECT c.id, c.evidence, c.oracle_status, (SELECT count(*) "
+                        "FROM attempt a WHERE a.candidate_id = c.id) n FROM candidate c "
                         "WHERE c.run_id = ?", (run_id,)):
         e = json.loads(r["evidence"] or "{}")
         k = (_key(e.get("url", "")), e.get("param"))
         cands.setdefault(k, set()).add(e.get("category"))
         points.add(k)                       # a candidate's point was reached
-        if r["n"]:
+        # the oracle ran it (auto writes oracle_status, never attempt rows; an earlier
+        # reading counted attempts only, so no auto run could show "probed")
+        if r["n"] or r["oracle_status"] in ran:
             probed.add((k, e.get("category")))
+        elif r["oracle_status"]:
+            unprobed.setdefault((k, e.get("category")), f"oracle: {r['oracle_status']}")
     findings = {(_key(r["url"]), r["param"], r["vuln_class"]) for r in db.execute(
         "SELECT url, param, vuln_class FROM finding WHERE run_id = ?", (run_id,))}
     rows = []
@@ -129,11 +140,14 @@ def funnel(store: str, gt_dir: str | None, run_id: int | None = None, *,
         if (k[0], k[1], case.vuln_class) in findings:  # the case's own class only
             stage = "confirmed"
         pkey = (k[0], method, k[1])
+        why = None if pkey in built else refused.get(pkey)
+        if why is None and stage == "candidate":
+            why = next((unprobed[(k, c)] for c in sorted(want) if (k, c) in unprobed),
+                       None)
         rows.append({"case": case.case_id, "class": case.vuln_class, "path": k[0],
                      "param": k[1], "stage": stage or "not reached",
                      "method": method, "discovered": found,
-                     "buildable": pkey in built,
-                     "refused": None if pkey in built else refused.get(pkey)})
+                     "buildable": pkey in built, "refused": why})
     return rows
 
 

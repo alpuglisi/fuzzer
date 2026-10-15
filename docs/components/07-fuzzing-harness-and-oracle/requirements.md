@@ -1489,7 +1489,9 @@ rewards) derives from it.
   (PA-0076: one URL, many operations). `scripts/funnel_report.py` adds the stages
   **discovered** (any source, method-aware, path key + op key), **buildable** (the one
   point builder makes a non-skipped point) and **refused** (with the builder's reason),
-  beside the existing reached / candidate / probed / confirmed.
+  beside the existing reached / candidate / probed / confirmed; `probed` reads the
+  candidate's `oracle_status` (`checked`, `inconclusive`) as well as attempt rows, and a
+  candidate the oracle never ran is refused with `oracle: <status>`.
   - **Stated limit:** downstream of the builder a point carries no op key, so two
     operations' points with the same URL, method and name are told apart by their
     sibling entries only.

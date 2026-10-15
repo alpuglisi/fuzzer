@@ -62,3 +62,29 @@ def test_the_text_report_keeps_its_stage_lines_and_adds_the_new_ones(tmp_path, c
     for stage in ("discovered", "buildable", "refused", "reached", "candidate", "probed",
                   "confirmed"):
         assert f"{stage:>10}: " in out, stage
+
+
+def test_a_checked_candidate_with_no_attempt_row_reads_probed(tmp_path):
+    """`auto` writes `candidate.oracle_status`, never attempt rows: a candidate the
+    oracle checked is probed; one it never ran is refused with the oracle's status."""
+    from fuzzlab.core import oracle_status
+    from fuzzlab.labels.contract import Case
+
+    def case(cid, param):
+        return Case(case_id=cid, url="/api/items", method="POST", param=param,
+                    location="body", vuln_class="sqli", sink_context="sql",
+                    expected_vulnerable=True, rendering="server")
+    with Store(tmp_path / "u.db") as store:
+        run = store.start_run("auto", "h")
+        for param, st in (("q", oracle_status.CHECKED), ("r", oracle_status.SKIPPED_BUDGET)):
+            store.conn.execute(
+                "INSERT INTO candidate (run_id, rule, evidence, oracle_status) "
+                "VALUES (?,?,?,?)", (run, "R-SQLI-PARAM", json.dumps(
+                    {"url": "http://h/api/items", "param": param,
+                     "category": "sql-injection"}), st))
+        store.conn.commit()
+    rows = {r["case"]: r for r in _funnel()(str(tmp_path / "u.db"), None,
+                                             cases=[case("A", "q"), case("B", "r")])}
+    assert rows["A"]["stage"] == "probed"
+    assert rows["B"]["stage"] == "candidate"
+    assert rows["B"]["refused"] == f"oracle: {oracle_status.SKIPPED_BUDGET}"

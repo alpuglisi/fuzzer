@@ -11,6 +11,13 @@ Newest first.
   `cli_taxonomy.FLAG_CLASSES`). `scripts/funnel_report.py`: `discovered`, `buildable`,
   `refused` per case (the existing `stage` column unchanged), `funnel(cases=)` for
   synthetic cases, `--no-probe-captured-writes` / `--browser` to judge as a run did.
+  **Correction of an earlier wrong reading of the metric:** the `probed` stage counted
+  `attempt` rows only, which `harness/auto` never writes (only greybox and the fuzz-CSV
+  import do), so no `auto` run could ever show "probed". A candidate now counts as
+  probed when its `oracle_status` is `checked` or `inconclusive` (`core.oracle_status`)
+  or an attempt row exists; a candidate the oracle never ran (`skipped_budget`,
+  `no_confirmer`, `pending`) is reported refused with `oracle: <status>`. Earlier funnel
+  numbers that showed few or no "probed" cases from `auto` runs under-read the stage.
 - Impact (other components / project): the default follows D67 (owner, 2026-10-15),
   which replaced the lane brief's original "skip by default" (DISC-CAPTURE §6's pending
   LAB-WRITES). Consumers of `injection_points_from_store` (searched): `run_auto`,
@@ -23,7 +30,8 @@ Newest first.
   - [x] real-server test: crawl sends no write; `auto` probes the captured write by
     default and sends it nothing with the opt-out — done
 - Effectiveness (assessed 2026-10-15): `tests/test_capture_egress.py::test_a_captured_write_is_probed_by_default_and_never_with_the_opt_out`
-  passes both ways; `tests/test_funnel_report.py` and the funnel test in
+  passes both ways; `tests/test_funnel_report.py` (including
+  `test_a_checked_candidate_with_no_attempt_row_reads_probed`) and the funnel test in
   `tests/test_capture.py` pass.
 
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
