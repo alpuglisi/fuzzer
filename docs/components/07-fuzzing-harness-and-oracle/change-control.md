@@ -112,6 +112,10 @@ note of the same date.
       test, the query-point test and the last-try test fail (5);
     - **V3** (a plain `break`): the last-try test and the BUG-0137 stop test fail.
   - Effectiveness: the related run on the committed tree is recorded below.
+  - Effectiveness, the related run on 982c4f6 (it covers bfbf176's Go-template form too;
+    FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_NETNS=1): every test file importing
+    `oracle/strategies.py` or the `fuzzlab.oracle` package, plus the M6 and SSTI test
+    files and the traceability guard. 58 files: 1345 passed, 0 failed, 0 skipped.
 
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
