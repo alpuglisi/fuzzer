@@ -54,6 +54,23 @@ Newest first.
   Playwright-fake suites (`test_browser_scope`, `test_destructive_urls`,
   `test_json_points`, `test_m6_navigation_failures`, `test_navigation_aborts`): 316
   passed. The full related run on the committed tree is recorded below.
+- Effectiveness, the related run (2026-10-15): every test file importing
+  `tools/navguard.py`, `tools/spider.py`, `tools/fetcher.py`, `session/browserlogin.py`
+  or `tools/browserexec.py`, the SPA, query and login fixtures' users, and the
+  traceability guard. 30 files, run on the committed tree (00b9545) with
+  FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_NETNS=1: 1486 passed, 11 skipped, 6 xfailed,
+  7 failed.
+  - The 7 failures were all in `test_spa_query.py`: its `_FakePage` lacked the `on`
+    and `wait_for_load_state` that `navigate` uses. f0b1109 gives the double that
+    surface (test-only).
+  - `test_spa_query.py` rerun on that committed tree: 103 passed.
+  - In all: 1493 passed, 0 failed, 6 xfailed, 11 skipped. The skips are 7 for the
+    optional fastapi extra (PA-0005) and 4 labgen live-boot reproductions.
+  - Mutation checks, the old `goto(wait_until="domcontentloaded")` restored per
+    caller:
+    - the spider: the crawl and query tests and the AST guard fail;
+    - the fetcher: the auditor test and the guard fail;
+    - the browser login: the login test and the guard fail.
 
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
