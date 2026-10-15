@@ -3,6 +3,27 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0023 — A captured session records the origins it was seen on (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change: `proxy/session_capture.py` records the canonical origin of every URL passed to
+  `observe_request` / `observe_response` on the capture's host (loopback aliases one
+  host) and sets `SessionState.origins`; `SessionManager.adopt` refuses a capture with
+  none (O7).
+- Impact: a captured session is sent only to the origins it was observed on; a capture
+  fed without URLs can no longer be adopted (loud refusal).
+- Risk: low (narrows). The proxy's own callers do not adopt yet (SessionCapture is used
+  by tests and the planned FR-SESS-11 flow).
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_session_origin_scope.py`: recorded origins, refusal with none,
+    an adopted capture never sent to another port; `test_proxy_session_capture.py` and
+    `test_session_transport_binding.py` pass URLs) — done
+  - [x] FR-PROXY-9 amended in place — done
+- Effectiveness (assessed 2026-10-14): the capture tests pass; the prepare mutation
+  (CC-SESS-0023) also fails the adopted-capture test.
+- Review round 1 (2026-10-14; R5, A-N2): `SessionManager.adopt` unions the manager's
+  `auth_origins` into an adopted capture's origins
+  (`tests/test_session_origin_scope.py::test_adopt_adds_the_operators_auth_origins`).
+
 ### CC-PROXY-0022 — Safety-NFR traceability lines (PA-0112, BUG-0111/0112 sweep; documentation only) (2026-10-13)
 - Change: `requirements.md` gains `Enforced by:` / `Not yet enforced:` lines under
   NFR-PROXY-safe, NFR-PROXY-dry-run, naming the enforcing code and the test functions that fail without it

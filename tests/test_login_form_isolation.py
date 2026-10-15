@@ -620,6 +620,13 @@ def test_a_copy_refuses_any_identity_but_its_label():
     req = Request("GET", BASE + "x.php", identity="admin#isolated:1")
     copy.prepare(req, "admin#isolated:1")                  # its own label: logged in
     assert _sid_of(req.headers["Cookie"]) == app.issued[-1] != app.issued[0]
+    # FR-SESS-20 (O11, A8/B4): the copy's session has the run's origins, and is never
+    # applied on another port of the host
+    assert copy._state[("localhost", "admin")].origins == \
+        main._state[("localhost", "admin")].origins == frozenset({"http://127.0.0.1:80"})
+    other = Request("GET", "http://localhost:8090/x.php", identity="admin#isolated:1")
+    copy.prepare(other, "admin#isolated:1")
+    assert "Cookie" not in other.headers and copy.out_of_origin_sends == 1
 
 
 def test_a_logout_seen_by_a_copy_is_not_passed_to_the_main_listener():
@@ -779,19 +786,22 @@ def test_the_listener_is_registered_early_once_and_inert_until_a_copy_is_live():
     _probe_form(sender)
     # registered once (the header breaker's own listener is registered too, FR-FUZZ-43)
     assert mgr._logout_listeners.count(sender._on_main_logout) == 1
-    sender._on_main_logout("localhost", "admin")               # no live copy: inert
+    sender._on_main_logout("http://127.0.0.1:80", "admin")     # no live copy: inert
     assert sender.isolation_report()["breaker"] is None
 
 
-def test_the_listener_trips_only_for_the_runs_host_and_identity():
+def test_the_listener_trips_only_for_the_runs_origin_and_identity():
+    """FR-SESS-20 (O9): compared by canonical origin, never host: a logout on another
+    port of the run's host is another app's."""
     app = FakeApp()
     _mgr, _client, sender = _seam(app)
     sender.isolate([BASE + "sqli_3.php"])
     _probe_form(sender)                                        # a live copy
-    sender._on_main_logout("other.host", "admin")
-    sender._on_main_logout("localhost", "user")
+    sender._on_main_logout("http://other.host:80", "admin")
+    sender._on_main_logout("http://127.0.0.1:8090", "admin")   # same host, other port
+    sender._on_main_logout("http://127.0.0.1:80", "user")
     assert sender.isolation_report()["breaker"] is None
-    sender._on_main_logout("localhost", "admin")
+    sender._on_main_logout("http://127.0.0.1:80", "admin")      # localhost, canonical
     assert sender.isolation_report()["breaker"]["trip"] == "single-session"
 
 
@@ -905,7 +915,7 @@ def test_make_probe_sender_wires_an_isolated_client_on_the_runs_budget(monkeypat
         pass
     budget = RequestBudget(7)
     monkeypatch.setattr(authhttp, "_build_parts",
-                        lambda url, timeout, store_path=None: (
+                        lambda url, timeout, store_path=None, auth_origins=(): (
                             FakeMgr(), "client", budget, ["localhost"]))
     sender = probesender.make_probe_sender(BASE, "admin")
     copy_client = sender._isolated_client(FakeMgr())

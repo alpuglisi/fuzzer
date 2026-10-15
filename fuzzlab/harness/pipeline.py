@@ -250,6 +250,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                         unsure.evidence.get("families_not_started", []))}
             if unsure.mechanism == UNPLACEABLE:          # FR-FUZZ-47: why, no values
                 item["reason"] = str(unsure.evidence.get("reason", ""))[:200]
+            elif "not_observed" in unsure.evidence:      # BUG-0137: M6 saw no page
+                item["reason"] = str(unsure.evidence["not_observed"])[:200]
             inconclusive_detail.append(item)
 
     def _checked(key) -> str:

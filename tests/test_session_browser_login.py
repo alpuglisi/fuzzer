@@ -415,6 +415,55 @@ def test_the_password_never_leaves_to_another_port(spa, variant):
         other.close()
 
 
+@pytest.mark.parametrize("variant", ["other", "users"])
+def test_a_refused_submission_leaves_no_password_in_the_page(spa, monkeypatch, variant):
+    """BUG-0136 review (X3, FR-SESS-19): a refused submission keeps the login page
+    alive (ERR_ABORTED, or a refused fetch), so the password field is cleared before
+    the context is torn down. Only whether a password field still holds a value is
+    recorded here, never the value."""
+    from fuzzlab.tools import navguard
+    real_release = navguard.release
+    filled = []
+
+    def release(context):
+        for page in list(getattr(context, "pages", []) or []):
+            filled.append(page.evaluate(
+                "() => [...document.querySelectorAll('input[type=password]')]"
+                ".some(e => e.value !== '')"))
+        return real_release(context)
+    monkeypatch.setattr(navguard, "release", release)
+    other = Recorder()
+    try:
+        pw = _password()
+        lab = spa(pw, variant=variant, other_port=other.server.server_address[1])
+        with pytest.raises(SessionAuthError, match="in the login window|account endpoint"):
+            _login(_manager(lab, pw), lab)
+        assert filled == [False]                       # the page was alive; cleared
+        assert other.requests == [] and lab.seen("POST") == []
+    finally:
+        other.close()
+
+
+def test_clearing_a_password_field_the_app_removed_costs_nothing(spa):
+    """BUG-0137 review (Z5): the X3 clear never waits for the field. An app that takes
+    its login form away after the refused submission must not hold the teardown for the
+    login's `timeout_ms` (10 s) waiting for a field that is gone."""
+    import time
+    other = Recorder()
+    try:
+        pw = _password()
+        lab = spa(pw, variant="other", other_port=other.server.server_address[1],
+                  remove_form=True)
+        started = time.monotonic()
+        with pytest.raises(SessionAuthError, match="in the login window"):
+            _login(_manager(lab, pw), lab)
+        took = time.monotonic() - started
+        assert other.requests == [] and lab.seen("POST") == []
+    finally:
+        other.close()
+    assert took < 8.0, f"{took:.1f}s: the clear waited for a removed field"
+
+
 def test_register_and_change_password_forms_on_the_login_route_are_never_used(spa):
     pw = _password()
     lab = spa(pw, variant="mixed")
@@ -641,8 +690,8 @@ class _FakeRoute:
         self.fetched.append(self.request.url)
         return self.site.get(self.request.url, _Resp())
 
-    def abort(self):
-        self.outcome = "abort"
+    def abort(self, code=None):
+        self.outcome, self.code = "abort", code
 
     def fulfill(self, response=None, status=None, headers=None):
         self.outcome = "fulfill"

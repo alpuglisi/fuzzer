@@ -25,8 +25,24 @@ requests bypass ``page.route``. WebSockets are routed with ``route_web_socket``.
 
 A session's headers (a bearer) are added **by the route only**, to a request that passed
 the scope predicate and the caller's header scope, and to each fetched redirect hop
-that does -- never ``set_extra_http_headers`` (FR-CRAWL-14). A ``request_refusal`` hook
-sees a request's body before it is sent (FR-SESS-19's login window).
+that does -- never ``set_extra_http_headers`` (FR-CRAWL-14).
+
+In an authenticated context (the caller's ``cookie_scope``, FR-SESS-20, BUG-0134) the
+session never reaches an in-scope origin outside the session's: browser cookies are
+port-agnostic, so the context's jar and its pages' ``document.cookie`` /
+``localStorage`` would otherwise reach another app on another port of the host.
+* **Documents** (a navigation, top-level or frame, and a redirect landing there) and
+  **WebSockets** on such an origin are aborted (never connected): a document loaded
+  there would run that app's script with the context's port-agnostic cookies.
+* **Subresources** there (an image, a script, an XHR), the request and every redirect
+  hop, are fetched through one dedicated cookie-less request context per guard
+  (``isolated_request()``, a ``playwright.request.new_context()`` with no storage),
+  each fetch with an explicit empty ``Cookie`` header so that context's own jar is
+  never sent (review round 3, V1), never ``route.fetch`` or the context's request client, which would send the jar and
+  write that origin's ``Set-Cookie`` into it; the answer is fulfilled with its
+  ``Set-Cookie`` removed (review round 1, A-M1/A-M2: both seen live).
+A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's login
+window).
 
 The crawler's **reveal window** (FR-CRAWL-15/16, W1-W3) uses two hooks: ``window`` on
 the route (asked for every request after the scope and destructive checks, and for
@@ -59,7 +75,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        | None = None,
                        headers: dict[str, str] | None = None,
                        header_scope: Callable[[str], bool] | None = None,
-                       window: Callable[[str, str, bool], str | None] | None = None):
+                       window: Callable[[str, str, bool], str | None] | None = None,
+                       cookie_scope: Callable[[str], bool] | None = None,
+                       on_session_withheld: Callable[[str, str, str], None] | None = None,
+                       isolated_request: Callable[[], object] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -87,6 +106,23 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     ``header_scope`` (default ``in_scope``) -- never ``set_extra_http_headers``, which
     would hand them to whatever the browser sends.
 
+    ``cookie_scope`` (an authenticated context, FR-SESS-20): for an in-scope URL it
+    refuses (another origin than the session's), a document request (a navigation, or
+    a redirect hop of one) is aborted with ``"aborted"`` (``ERR_ABORTED``, as the reveal
+    window does: the page stays where it is; ``"blockedbyclient"`` would commit
+    Chromium's error page in its place, review round 2 T1), and
+    ``on_session_withheld(url, kind, source)`` is told: ``kind`` is ``"document"`` for
+    a page navigation's own target, ``"landing"`` for its redirect landing, ``"frame"``
+    for a child frame's, and ``source`` the URL the request chain started at (the
+    navigation's target). Any other request, and each such redirect hop, is fetched
+    through the guard's one cookie-less request context (``isolated_request()``,
+    called once when the handler is built and kept for the guard's life; kind
+    ``"request"``), with an empty
+    ``Cookie`` header and without the session's headers, and fulfilled with
+    ``Set-Cookie`` removed. Without
+    ``isolated_request`` such a request is aborted (fail closed). None: nothing is
+    withheld (an unauthenticated context has no session to withhold).
+
     ``window(method, url, navigation)`` (the crawler's reveal window, FR-CRAWL-15/16):
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
@@ -111,10 +147,39 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     def session_headers(url: str) -> dict[str, str]:
         """The session's headers for ``url``: only after ``in_scope`` (the caller has
         already refused anything else) and ``header_scope`` pass (FR-CRAWL-14)."""
-        if not headers or not in_scope(url) or \
-                not (header_scope or in_scope)(url):
+        if not headers or not in_scope(url) or not (header_scope or in_scope)(url):
             return {}
         return dict(headers)
+
+    def withheld(url: str) -> bool:
+        """An authenticated context's request to an in-scope origin outside the
+        session's (FR-SESS-20): the session must not reach it."""
+        return cookie_scope is not None and in_scope(url) and not cookie_scope(url)
+
+    def tell_withheld(url: str, kind: str, source: str) -> None:
+        logging.info(f"sent no session to {urlsplit(url).hostname or '?'!r} "
+                     f"({kind}: another origin than the session's, FR-SESS-20)")
+        if on_session_withheld is not None:
+            on_session_withheld(url, kind, source)
+
+    # the guard's one cookie-less request context (R2, V1), made once, here, when the
+    # guard is built: route handlers run concurrently, so a lazy "make it if missing"
+    # in the handler made several (seen live)
+    isolated = {"ctx": isolated_request() if isolated_request is not None else None}
+
+    def isolated_fetch(url: str, method: str, data, req_headers):
+        """One fetch through the guard's one cookie-less request context (R2), kept for
+        the guard's life and disposed by its creator at teardown (the spider's
+        ``_stop_browser``). Every fetch -- the request and every hop -- carries an
+        explicit empty ``Cookie`` header, so whatever that context's own jar stored
+        from an earlier answer is never sent: concurrent withheld fetches cannot carry
+        one another's cookies (review round 3, V1: retiring a context once it held a
+        cookie raced with fetches already in flight; seen live)."""
+        sent = {k: v for k, v in (req_headers or {}).items()
+                if k.lower() not in ("cookie", "authorization")}
+        sent["cookie"] = ""                       # the jar is never sent (V1)
+        return isolated["ctx"].fetch(url, method=method, max_redirects=0, data=data,
+                                     headers=sent)
 
     def body_refused(method: str, url: str, req_headers, body) -> bool:
         why = request_refusal(method, url, req_headers, body) if request_refusal else None
@@ -140,15 +205,24 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if url.lower().startswith(_LOCAL_SCHEMES):
             route.continue_()
             return
+        # BUG-0136 (PA-0136): every abort of a document request -- a navigation,
+        # top-level or frame, and each of its redirect hops -- uses "aborted"
+        # (ERR_ABORTED), whatever the reason: the current document survives (the
+        # default code commits Chromium's error page in its place) and `goto` of that
+        # target still raises. A subresource keeps the default code.
+        document = _is_document(req)
+
+        def abort() -> None:
+            route.abort(_abort_code(document)) if document else route.abort()
+
         if refused(url):
-            route.abort()
+            abort()
             return
-        navigation = bool(req.is_navigation_request()) if window is not None else False
+        navigation = document if window is not None else False
         if window is not None:
             if window_refused(req.method.upper(), url, navigation):
-                # a navigation aborted as ERR_ABORTED leaves the page where it is (no
-                # error page is committed); its target was kept by the caller
-                route.abort("aborted") if navigation else route.abort()
+                # its target was kept by the caller
+                abort()
                 return
         why = method_refusal(req.method.upper(), url) if method_refusal else None
         if why is not None:
@@ -156,15 +230,28 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                          f"({why})")
             if on_abort is not None:
                 on_abort(url, why)
-            route.abort()
+            abort()
             return
         if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
-            route.abort()
+            abort()
             return
+        doc_kind = "frame" if document and _is_subframe(req) else "document"
+        if withheld(url) and (document or isolated_request is None):
+            tell_withheld(url, doc_kind if document else "request", url)
+            abort()                              # FR-SESS-20 (R1): never loaded (T1)
+            return
+        stripped = False                         # an answer from the isolated context
         try:
-            extra = session_headers(url)
-            first = route.fetch(max_redirects=0, headers=_merged(req.headers, extra)) \
-                if extra else route.fetch(max_redirects=0)
+            if withheld(url):
+                tell_withheld(url, "request", url)
+                first = isolated_fetch(url, req.method.upper(), req.post_data_buffer,
+                                       req.headers)
+                stripped = True
+            else:
+                extra = session_headers(url)
+                first = route.fetch(max_redirects=0,
+                                    headers=_merged(req.headers, extra)) \
+                    if extra else route.fetch(max_redirects=0)
             final, final_url, method = first, url, req.method.upper()
             for _ in range(MAX_REDIRECTS + 1):
                 location = final.headers.get("location")
@@ -172,35 +259,49 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     break
                 nxt = urljoin(final_url, location)
                 if api is None or refused(nxt):
-                    route.abort()
+                    abort()
                     return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
                 # a navigation's redirect hop is still a navigation (review A-S2)
                 if window is not None and window_refused(method, nxt, navigation):
-                    route.abort()
+                    abort()
                     return
                 keep_body = method not in ("GET", "HEAD")
                 if keep_body and body_refused(method, nxt, req.headers or {},
                                               req.post_data_buffer):
-                    route.abort()
+                    abort()
                     return
                 hop = {"content-type": req.headers.get("content-type", "")} \
                     if keep_body else {}
-                hop.update(session_headers(nxt))            # in scope: checked above
-                final = api.fetch(nxt, method=method, max_redirects=0,
-                                  data=req.post_data_buffer if keep_body else None,
-                                  headers=hop or None)
+                if withheld(nxt):
+                    # a landing there of a document is aborted; any other hop goes
+                    # through the cookie-less context (FR-SESS-20, R1/R2)
+                    if document or isolated_request is None:
+                        landing = "frame" if doc_kind == "frame" else "landing"
+                        tell_withheld(nxt, landing if document else "request", url)
+                        abort()
+                        return
+                    tell_withheld(nxt, "request", url)
+                    final = isolated_fetch(nxt, method,
+                                           req.post_data_buffer if keep_body else None,
+                                           hop)
+                    stripped = True
+                else:
+                    hop.update(session_headers(nxt))        # in scope: checked above
+                    final = api.fetch(nxt, method=method, max_redirects=0,
+                                      data=req.post_data_buffer if keep_body else None,
+                                      headers=hop or None)
                 final_url = nxt
             else:
                 logging.info(f"blocked a browser redirect chain over {MAX_REDIRECTS} "
                              f"hops from {url.split('?', 1)[0]}")
-                route.abort()
+                abort()
                 return
         except Exception as exc:  # noqa: BLE001 - an unfetchable request is aborted
             logging.info(f"browser request {url.split('?', 1)[0]} failed "
                          f"({str(exc).splitlines()[0][:80]})")
-            route.abort()
+            abort()
             return
         if observe is not None:
             try:
@@ -208,11 +309,16 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             except Exception as exc:  # noqa: BLE001 - an observer never breaks a request
                 logging.info(f"request observer failed on {url.split('?', 1)[0]} "
                              f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})")
-        if final is first:
+        if stripped:
+            # an isolated answer never writes the context's jar (FR-SESS-20, R2)
+            route.fulfill(response=final, headers=_without_set_cookie(final.headers))
+        elif final is first:
             route.fulfill(response=first)
         elif req.is_navigation_request() and method in ("GET", "HEAD"):
             # the browser re-requests the (checked) landing URL itself, so page.url and
-            # relative links are right; a GET or HEAD only, never a body (reviewers)
+            # relative links are right; a GET or HEAD only, never a body (reviewers).
+            # In an authenticated context a landing outside the session's origins was
+            # aborted above (FR-SESS-20, R1), so this re-request stays on them
             status = 303 if req.method.upper() not in ("GET", "HEAD") else 302
             route.fulfill(status=status, headers={"location": final_url})
         else:
@@ -220,6 +326,43 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             # the answer (a navigation's page.url stays the first URL)
             route.fulfill(response=final)
     return handler
+
+
+def _is_document(req) -> bool:
+    """A document request: a navigation (top-level or a frame's) or a ``document``
+    resource (FR-SESS-20, R1)."""
+    try:
+        if req.is_navigation_request():
+            return True
+    except Exception:  # noqa: BLE001 - a request that cannot say counts by its type
+        pass
+    return getattr(req, "resource_type", None) == "document"
+
+
+#: The abort code of a document request (BUG-0136, PA-0136): ERR_ABORTED leaves the
+#: current document where it is; any other code commits Chromium's error page.
+DOCUMENT_ABORT = "aborted"
+
+
+def _abort_code(document: bool) -> str | None:
+    """The code a guard aborts a request with: `DOCUMENT_ABORT` for a document
+    request (a navigation, top-level or frame, and its redirect hops), else None (the
+    default), whatever the reason (PA-0136: one rule, one place)."""
+    return DOCUMENT_ABORT if document else None
+
+
+def _is_subframe(req) -> bool:
+    """A document request of a child frame (an iframe), not the page's own."""
+    try:
+        frame = req.frame
+        return frame is not None and frame.parent_frame is not None
+    except Exception:  # noqa: BLE001 - no frame (a service worker's): not a subframe
+        return False
+
+
+def _without_set_cookie(headers) -> dict[str, str]:
+    """``headers`` without ``Set-Cookie`` (FR-SESS-20, R2)."""
+    return {k: v for k, v in (headers or {}).items() if k.lower() != "set-cookie"}
 
 
 def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
@@ -257,7 +400,9 @@ def release(target) -> None:
 def make_ws_handler(in_scope: Callable[[str], bool],
                     on_out_of_scope: Callable[[str], None] | None = None, *,
                     hold: Callable[[], bool] | None = None,
-                    on_drop: Callable[[str], None] | None = None):
+                    on_drop: Callable[[str], None] | None = None,
+                    cookie_scope: Callable[[str], bool] | None = None,
+                    on_session_withheld: Callable[[str, str, str], None] | None = None):
     """WebSockets are routed separately from HTTP: an in-scope socket is connected
     through; an out-of-scope one is **never connected** -- Playwright then serves it as
     a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
@@ -268,8 +413,19 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     forwarded (``send``, a no-reply call that is safe in a sync handler) only while
     ``hold()`` is false; while it is true the message is dropped and ``on_drop(url)``
     told. Server-to-page messages and closes are forwarded as Playwright does by
-    default."""
+    default.
+
+    ``cookie_scope`` (an authenticated context, FR-SESS-20, R1): an in-scope socket on
+    another origin than the session's is never connected either (the browser would open
+    it with the context's port-agnostic jar); ``on_session_withheld(url,
+    "websocket", url)`` is told."""
     def handler(ws) -> None:
+        if in_scope(ws.url) and cookie_scope is not None and not cookie_scope(ws.url):
+            logging.info(f"blocked a WebSocket to {urlsplit(ws.url).hostname or '?'!r}: "
+                         f"another origin than the session's (FR-SESS-20)")
+            if on_session_withheld is not None:
+                on_session_withheld(ws.url, "websocket", ws.url)
+            return
         if in_scope(ws.url):
             server = ws.connect_to_server()
             if hold is not None:
@@ -305,11 +461,17 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                header_scope: Callable[[str], bool] | None = None,
                window: Callable[[str, str, bool], str | None] | None = None,
                ws_hold: Callable[[], bool] | None = None,
-               on_ws_drop: Callable[[str], None] | None = None) -> None:
+               on_ws_drop: Callable[[str], None] | None = None,
+               cookie_scope: Callable[[str], bool] | None = None,
+               on_session_withheld: Callable[[str, str, str], None] | None = None,
+               isolated_request: Callable[[], object] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
-    (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window`` and the
-    session ``headers`` (with ``header_scope``): see `make_route_handler`; ``ws_hold`` /
+    (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
+    session ``headers`` (with ``header_scope``) and ``cookie_scope`` /
+    ``on_session_withheld`` / ``isolated_request`` (FR-SESS-20): see
+    `make_route_handler` (a WebSocket off the session's origins is never connected,
+    `make_ws_handler`); ``ws_hold`` /
     ``on_ws_drop``: see `make_ws_handler`. Session headers are applied by the route only
     (FR-CRAWL-14)."""
     api = getattr(target, "request", None)
@@ -319,14 +481,17 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             observe=observe,
                                             request_refusal=request_refusal,
                                             headers=headers, header_scope=header_scope,
-                                            window=window))
+                                            window=window, cookie_scope=cookie_scope,
+                                            on_session_withheld=on_session_withheld,
+                                            isolated_request=isolated_request))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "
                         "of browser_launch_args still confine them (BUG-0123)")
         return
     route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope, hold=ws_hold,
-                                     on_drop=on_ws_drop))
+                                     on_drop=on_ws_drop, cookie_scope=cookie_scope,
+                                     on_session_withheld=on_session_withheld))
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")

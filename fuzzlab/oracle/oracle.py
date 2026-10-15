@@ -172,6 +172,58 @@ class _PrgRun:
         return probe
 
 
+#: The `Sender.send` keyword defaults: `_SessionNotes` forwards only what differs, so
+#: an inner sender is called exactly as a strategy would call it directly.
+_SEND_DEFAULTS = (("timing", False), ("method", "GET"), ("location", "query"),
+                  ("content_type", None), ("entries", None), ("prg", False))
+
+
+class _SessionNotes:
+    """Watches one strategy run's probes for a session note (FR-SESS-20, O2): a probe
+    the sender sent without the run's session because its origin is not one of the
+    session's (``Probe.session``). The oracle stamps it on the verdict's
+    ``evidence["session"]``, so a confirmation (or an inconclusive result) made without
+    the session says so."""
+
+    def __init__(self, inner: Sender):
+        self._inner = inner
+        self.notes: set[str] = set()
+
+    @property
+    def prg_capable(self) -> bool:
+        return accepts_prg(self._inner)
+
+    def __getattr__(self, name):
+        """Transparent for the rest of the sender's surface (a strategy probes it with
+        ``getattr``); a correlated send (M10) is watched for the note too."""
+        if name == "_inner":
+            raise AttributeError(name)
+        attr = getattr(self._inner, name)
+        if name != "send_correlated" or not callable(attr):
+            return attr
+
+        def send_correlated(*args, **kwargs):
+            probe, request_id = attr(*args, **kwargs)
+            self._note(probe)
+            return probe, request_id
+        return send_correlated
+
+    def _note(self, probe) -> None:
+        note = getattr(probe, "session", None)
+        if isinstance(note, str) and note:
+            self.notes.add(note)
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None, entries=None, prg: bool = False):
+        given = dict(timing=timing, method=method, location=location,
+                     content_type=content_type, entries=entries, prg=prg)
+        kwargs = {k: given[k] for k, default in _SEND_DEFAULTS if given[k] != default}
+        probe = self._inner.send(url, param, value, **kwargs)
+        self._note(probe)
+        return probe
+
+
 def _restore_value(candidate: Candidate) -> str:
     """The benign value a PRG restore sends (P9): the form's own default for the field
     when it is a string, else the importer's text filler."""
@@ -283,18 +335,22 @@ class Oracle:
             # whole run, set here once, never per send by the strategy
             opted = getattr(strategy, "prg", False) is True   # a plugin may lack it
             run = _PrgRun(sender, counts) if opted and prg_ok else sender
+            notes = _SessionNotes(run)                   # FR-SESS-20 (O2)
             try:
                 if self.scheduler is not None:
-                    probe = _CostCounter(run)            # measure this mechanism's cost
+                    probe = _CostCounter(notes)          # measure this mechanism's cost
                     verdict = strategy.confirm(candidate, probe)
                 else:
-                    verdict = strategy.confirm(candidate, run)
+                    verdict = strategy.confirm(candidate, notes)
             except UnplaceableLocation as exc:
                 # this mechanism cannot place the point (PA-0115): no verdict from it,
                 # and no reward or cost for its arm; the others still run
                 unplaceable = unplaceable or str(exc)
                 continue
             placed = True
+            if verdict is not None and notes.notes:
+                # the probes went without the run's session (FR-SESS-20, O2)
+                verdict.evidence["session"] = "; ".join(sorted(notes.notes))
             confirmed = verdict is not None and verdict.confirmed
             if (not confirmed and verdict is not None and verdict.inconclusive
                     and inconclusive is None):

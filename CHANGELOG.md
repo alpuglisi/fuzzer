@@ -4,10 +4,60 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-14 (BUG-0137, review of 1702c29: the not-observed reason never carries a URL)
+- **Why:** Playwright's "navigation interrupted" message quotes the payload-carrying URL
+  with no `" at "`, so it reached the stored reason. Reviewer B also asked for the
+  reason in the run's inconclusive detail, an inconclusive result for a late launch
+  failure, and oracle-level pins.
+- **What:** the reason drops every quoted string and `scheme://` token; the pipeline's
+  inconclusive detail carries it; a launch failure after an unobserved payload stays
+  inconclusive; oracle-order tests. CC-FUZZ-0083 amendment.
+
+## 2026-10-14 (BUG-0137 final review: an unobserved M6 probe ends only that probe; such candidates are inconclusive)
+- **Why:** reviewers found that one unobserved payload ended the browser strategy's
+  payload loop (a later hit was never tried), and that a candidate whose page could
+  not be observed could end CHECKED, a negative in the ML data. They also found the
+  driver's stop uncontained, a slow page's sink missed after a late `load`, and the
+  login's password clear able to wait 10 s.
+- **What:** per-probe `NotObserved`, with the strategy going on to its next payload
+  (at most 2 unobserved in a row). No hit with anything unobserved is an inconclusive
+  verdict (D54). The driver stop is contained. The settle is a full `SETTLE_MS` from
+  `load`. The password clear never waits. CC-FUZZ-0083 and CC-SESS-0023 amendments.
+
+## 2026-10-14 (BUG-0137: a page the M6 browser could not load no longer ends the run; the auditor's failed load ends the previous page)
+- **Why:** an exception from the M6 executor (a timeout, a refused own redirect, a page
+  whose load a refused navigation superseded) escaped the oracle and the pipeline and
+  ended confirmation for every remaining candidate. The auditor's fetcher had the same
+  left-alive-page leak as the crawler's X1.
+- **What:** the executor waits for the commit and a bounded `load`. A Playwright
+  failure, or a page that never loaded, with no hit is no verdict
+  (`UnplaceableLocation`); a hit counts whenever it lands. The auditor sends its page
+  to `about:blank` before the static fallback. CC-FUZZ-0083 (BUG-0137, PA-0137) and
+  CC-AUD-0042.
+
+## 2026-10-14 (BUG-0136 review: a failed load ends the previous page; M6 shift recorded)
+- **Why:** with refused navigations aborted as ERR_ABORTED (BUG-0136) the previous page
+  stays alive. After a failed load its fetches ran on under the next crawled URLs, and a
+  refused login submission left the filled password field in a live page. Reviewers
+  also asked for the M6 verdict shift to be measured and pinned.
+- **What:** the crawl sends the page to `about:blank` after a failed load; the browser
+  login clears the password field after a refused submission; real-Chromium pins for
+  a refused own redirect, POST form submission and iframe; the M6 shift is recorded
+  (one open pre-`load` case flagged). CC-CRAWL-0028 and CC-SESS-0023 amendments,
+  CC-FUZZ-0082.
+
 ## 2026-10-14 (Reveal window: a refused POST navigation is a write, never a page)
 - A reveal that auto-submits a POST form no longer gets its action queued and crawled as a
   GET: both windows now treat a refused non-GET navigation as a blocked write
   (CC-CRAWL-0029, FR-CRAWL-16; review A3-N1).
+
+## 2026-10-14 (FR-SESS-20 review fix: the oracle's form-binding pin walks the sender chain)
+- **Why:** the oracle's `_SessionNotes` wrapper (CC-FUZZ-0080) became the outermost
+  sender, which broke a test that checked the outermost sender's type. The binding
+  itself was unaffected.
+- **What:** the test now walks the wrappers' `_inner` to look for `_FormBoundSender`,
+  and a new pin fixes the wrapper order with and without a scheduler. Tests only.
+  CC-FUZZ-0080 amendment.
 
 ## 2026-10-14 (FR-CRAWL-17 review round 3: a request whose redirect hop was refused stays blocked)
 - While a SPA query load's window is open, every request that fails is blocked for it, so
@@ -25,6 +75,33 @@ changed, and the reason. Reference the commit hash where useful.
   BUG-0135 complexity oracle and its wall-clock guard were tightened (CC-CRAWL-0027
   U1-U10 amendment).
 
+## 2026-10-14 (BUG-0136: a refused navigation keeps the crawled page)
+- **Why:** the browser guard aborted a refused navigation (out of scope, destructive,
+  refused method or body) with the default error code, so Chromium replaced the page
+  with its error page and the crawl lost the page's content and links.
+- **What:** every abort of a document request uses `"aborted"` (ERR_ABORTED), whatever
+  the reason; subresources keep the default; pinned per reason. CC-CRAWL-0028; BUG-0136,
+  PA-0136.
+
+## 2026-10-14 (BUG-0134 review round 3: the isolated request context never sends a cookie)
+- **Why:** reviewer A saw concurrent withheld fetches carry a cookie another other-origin
+  answer had stored in the isolated context (a race with its retirement).
+- **What:** every isolated fetch sends an explicit empty Cookie, and the context is made
+  once per guard; only an in-scope off-origin commit counts as FR-SESS-20's (an
+  out-of-scope one is BUG-0123's scope abort). CC-CRAWL-0026, CC-SESS-0023 amendments.
+
+## 2026-10-14 (BUG-0134 review round 2: the crawled page stays when a script navigates away; `Request.session_decision`)
+- **Why:** reviewer A showed live that aborting another origin's document with
+  `blockedbyclient` put Chromium's error page in place of the crawled page, so a page that
+  script-navigated to another port was lost; the reviewers also asked for a narrower
+  "carries the session" match, pinned guard allowances, a declared request field and a
+  canonical `--auth-origin` scope check.
+- **What:** ERR_ABORTED for withheld documents, and the crawl discards a page only when
+  its own navigation met the other origin; `_carries` contains only secret-looking
+  values; guard allowances pin their counts; `core.http.Request.session_decision`
+  (CC-CORE-0054); `--auth-origin` accepts `localhost` for a `127.0.0.1` scope.
+  CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080 amendments.
+
 ## 2026-10-14 (FR-CRAWL-17 review: write-safe seeds, no stored marker, op-count complexity tests)
 - Review round 1 of FR-CRAWL-17 (reviewers A and B): a seed whose load blocked a write is
   kept as a page but never imported as a point, so M6 never replays the write, and a name
@@ -36,6 +113,18 @@ changed, and the reason. Reference the commit hash where useful.
   scanners' linearity tests asserted a wall-clock ratio and failed under load; they now
   assert operation counts, enforced by an AST guard (PA-0135).
 
+## 2026-10-14 (BUG-0134 review round 1: no other-origin document in an authenticated browser; `--auth-origin`)
+- **Why:** reviewer A showed live that a redirected landing on another origin ran that
+  app's script with the session's cookies and localStorage, and that `route.fetch` let
+  the other origin write the shared cookie jar; the login handshake still accepted any
+  port of an in-scope host.
+- **What:** in an authenticated browser context other-origin documents and WebSockets
+  are aborted and subresources fetched through a cookie-less request context; the login
+  is anchored to the base origin, its same-host https upgrade and the new repeatable
+  `--auth-origin` flag (crawl, auto, session print, greybox-run); `prepare` records its
+  decision on the request; the host-compare guard sees through case calls, aliases and
+  membership. CC-SESS-0023, CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023 amendments.
+
 ## 2026-10-14 (FR-CRAWL-17: SPA route query parameters are crawled, so `#/track-result?id=` is a point)
 - The crawler now reads query-parameter names from the scripts it already scans and crawls
   each paired route with them (`#/track-result?id=fuzzlab`), so Juice Shop's
@@ -43,6 +132,17 @@ changed, and the reason. Reference the commit hash where useful.
   read without a route are attached only when an observation probe (fresh markers,
   nothing recorded) sees them. Every such load runs inside the reveal window
   (CC-CRAWL-0027, the reviewed `spa-query` draft, Revision 2).
+
+## 2026-10-14 (BUG-0134: a session is sent only to its own origins, FR-SESS-20)
+- **Why:** a session keyed by host went to every port of it, so on the loopback lab one
+  app's cookie and bearer reached another app (and could log in there); BUG-0132's review
+  (reviewer A S2) found it, PA-0123's "stated exception" had kept it.
+- **What:** `SessionState.origins` (O1-O13 of the reconciled design); `prepare`,
+  `ensure`, `authorize`, `observe`, `verify_live`/the probe differential, greybox, proxy
+  capture, the browser route (jar withheld from another origin), the breakers' listeners,
+  auth endpoints and `session print` all decide by origin; out-of-origin sends are
+  anonymous, counted (`session_out_of_origin`) and stamped on verdicts. CC-SESS-0023,
+  CC-CRAWL-0026, CC-FUZZ-0080, CC-PROXY-0023; BUG-0134, PA-0134.
 
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never

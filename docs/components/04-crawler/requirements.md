@@ -191,9 +191,35 @@ fuzzer.
     the session's own cookies (`add_cookies`, origin root).
   - **Headers.** The session's headers (a bearer) are added by the crawl context's
     guarded route only: `route.fetch(headers=)` after `in_scope` passes, and on each
-    fetched redirect hop only when that hop is in scope; only to the session's own host
-    (loopback aliases one host), and over https when the session is https-only
-    (`browserauth.header_scope_for`). Never `set_extra_http_headers` or a browser
+    fetched redirect hop only when that hop is in scope; only to the session's own
+    origins *(CC-CRAWL-0026, FR-SESS-20, BUG-0134; before: its own host)* (loopback
+    aliases one origin, another port another app), and over https when the session is
+    https-only (`browserauth.header_scope_for`).
+  - **Cookies withheld from another origin** *(CC-CRAWL-0026, FR-SESS-20).* Browser
+    cookies are port-agnostic (RFC 6265 §8.5), and an external crawl's scope is its
+    host on every port (BUG-0050). In the crawl's authenticated context
+    (`BrowserSession.cookie_scope`, the header-scope predicate), for an in-scope origin
+    outside the session's *(review round 1, R1/R2, CC-CRAWL-0026 amendment)*:
+    - every **document** (a navigation, top-level or frame, and a redirect landing
+      there) is aborted with ERR_ABORTED (`"aborted"`: the page stays, no error page;
+      review round 2 T1) and every **WebSocket** is never connected: such a page is
+      recorded as skipped (`skipped_other_origin`, its reason naming the kind: "crawl that
+      origin separately, or --auth-origin"). A page navigation whose own target or
+      redirect landing was withheld, or whose main frame committed on an **in-scope**
+      origin outside the session's, extracts nothing and has no static fallback (an
+      out-of-scope commit is BUG-0123's scope abort, counted in `skipped_out_of_scope`;
+      review round 3, V2); a script-initiated
+      navigation away leaves the page extracted normally;
+    - every other request there, and every hop, is fetched through one cookie-less
+      request context per guard (`navguard.guard_page(isolated_request=)`, the spider's
+      `pw.request.new_context()`, made once when the guard is built and disposed at the
+      end), each fetch with an explicit empty `Cookie` (that context's own jar is never
+      sent; review round 3, V1), and fulfilled with `Set-Cookie` removed, so that origin
+      neither receives nor writes a cookie;
+    - the selector-form API client drops the jar's cookies for such an action.
+    Each is counted (`session_out_of_origin`) and summarised at the end of the crawl.
+    `fuzzlab crawl --auth-origin ORIGIN` (repeatable; a bare, in-scope origin, else a
+    usage error) makes an origin one of the session's (FR-SESS-20). Never `set_extra_http_headers` or a browser
     context's `extra_http_headers` (an AST guard over `fuzzlab/`). An unauthenticated
     submission context gets none. The selector-form API client sends them only when the
     action passes the same header scope. The auditor's browser (CC-AUD-0038) and the M6
@@ -529,6 +555,22 @@ fuzzer.
   the queue; static redirects (by hand); the browser (a context-wide route that walks
   redirect chains hop by hop, WebSockets routed, plus launch arguments that resolve
   nothing outside scope); and the API-request client (scope-checked, no redirects).
+  *(CC-CRAWL-0028, BUG-0136:)* **how** a request is refused is one rule: every abort
+  of a document request (a navigation, top-level or frame, and each of its redirect
+  hops), whatever the reason -- scope, destructive, refused method or body, the reveal
+  window, a withheld session, too many hops, an unfetchable request -- uses `"aborted"`
+  (ERR_ABORTED: the current document survives, so a page whose script navigates to a
+  refused URL keeps its content and links; `goto` of a refused target still raises);
+  a subresource keeps the default code (`navguard._abort_code`). A refused navigation
+  therefore looks to the page as if the click or script did nothing; it is visible
+  only through the crawl's `skipped_*` records and its summary (review A-N1). *(BUG-0136
+  review, X1:)* when the crawl's **own** `goto` fails (a refused target or redirect
+  landing, a timeout, anything), `_fetch_rendered` first sends the page to
+  `about:blank`, so the previous document, which ERR_ABORTED left alive, stops: its
+  timers and fetches are never sent or captured under the URLs crawled next. Then the
+  withheld check, `SessionWithheld` or the static fallback run as before.
+  - Enforced by (the abort code, per reason; BUG-0136): `navguard.make_route_handler` (`abort()`, `_abort_code`) — `tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation`, `tests/test_navigation_aborts.py::test_a_script_navigation_out_of_scope_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_script_navigation_to_a_destructive_url_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_goto_of_a_refused_target_still_raises_and_the_page_stays`, `tests/test_navigation_aborts.py::test_the_crawls_own_target_redirected_to_a_refused_url_raises_and_falls_back`, `tests/test_navigation_aborts.py::test_a_refused_post_form_submission_keeps_the_page_crawled`, `tests/test_navigation_aborts.py::test_a_refused_iframe_keeps_its_parent_crawled`
+  - Enforced by (a failed load ends the previous document; BUG-0136 review X1): `LocalSpider._fetch_rendered` (`about:blank` before the fallback) — `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
   *(CC-CRAWL-0016/0017, forms phase 3:)* **a crawl never deletes**: a browser-initiated
   DELETE is aborted unless it comes from a submission on an operator-named route

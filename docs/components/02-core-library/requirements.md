@@ -32,7 +32,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   *(Amended CC-CORE-0036, BUG-0099.)* It records flows **redacted**, through the
   `core.redaction` storage boundary (URL query and both bodies; the content type is
   matched case-insensitively). The wire request stays exact. This resolves the former
-  conflict between "records raw bytes" and NFR-CORE-secrets.
+  conflict between "records raw bytes" and NFR-CORE-secrets. *(CC-CORE-0054,
+  FR-SESS-20:)* `Request.session_decision: str | None = None` is a declared field: the
+  session addon's `prepare` sets it (`"anonymous (out of origin)"` when it withheld the
+  identity's session) and the sender that built the request reads it after the send.
+  The seam itself never reads or changes it.
 - **FR-CORE-7** Provide a plugin registry (entry points plus hooks).
 - **FR-CORE-8** Provide a generic cross-run scalar time-series sink,
   `metric_series(run_id, source, key, step, ts, value)`, for per-step

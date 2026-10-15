@@ -118,10 +118,12 @@ def test_a_fetcher_that_cannot_refuse_redirects_fails_closed():
 
 def test_the_destination_anchor_is_the_base_url_not_the_page():
     m = _mgr(_Web({}))
-    # same origin as the base, in scope, an upgrade: allowed
+    # same origin as the base, an upgrade: allowed
     assert m._credential_destination_ok("https://lab.example/x", "https://lab.example/")
-    assert m._credential_destination_ok("https://lab.example:9/x", "https://lab.example/")
     assert m._credential_destination_ok("https://lab.example/x", "http://lab.example/")
+    # another port of an in-scope host: refused since FR-SESS-20 (R3, BUG-0134)
+    assert not m._credential_destination_ok("https://lab.example:9/x",
+                                            "https://lab.example/")
     # an off-scope origin is never allowed, whatever page it came from
     assert not m._credential_destination_ok("https://attacker.example/c",
                                             "https://lab.example/")
@@ -135,11 +137,14 @@ class _Req:
 
 
 def _with_state(secure_only=None, login_url="https://lab.example/login"):
+    # an http base whose login was upgraded to https: both origins are the session's
+    # (FR-SESS-20), so the transport floor is what refuses plain http
     m = SessionManager(None, scope_hosts=["lab.example"], fetch_factory=lambda: None)
     m._state[("lab.example", "user")] = SessionState(
         "lab.example", "user", kind="cookie", cookies={"s": "SECRET"},
         headers={"Authorization": "Bearer SECRET"}, login_url=login_url, valid=True,
-        secure_only=secure_only)
+        secure_only=secure_only,
+        origins=frozenset({"http://lab.example:80", "https://lab.example:443"}))
     return m
 
 
@@ -152,12 +157,13 @@ def test_an_https_session_is_never_applied_over_http():
     assert req.headers == {}
 
 
-def test_another_port_over_https_is_allowed_by_design():
-    """Sessions are keyed per host (D12, FR-SESS-13): another https port is allowed."""
+def test_another_port_over_https_gets_no_session():
+    """Superseded by FR-SESS-20 (BUG-0134): sessions are keyed per host (D12) but sent
+    per origin. Another https port of the same host is another app: no session."""
     m = _with_state()
     req = _Req("https://lab.example:9999/x")
     m.prepare(req, "user")
-    assert "SECRET" in req.headers["Cookie"]
+    assert req.headers == {} and m.out_of_origin_sends == 1
 
 
 def test_an_http_session_on_http_is_allowed():
@@ -246,6 +252,8 @@ def test_greybox_never_sends_an_https_cookie_over_http():
             raise AssertionError("must not be reached")
 
     s = RequestsCorrelatingSender(cookie="s=SECRET", cookie_secure_only=True,
+                                  cookie_origins=frozenset({"http://lab.example:80",
+                                                            "https://lab.example:443"}),
                                   session=Session(), id_factory=lambda: "id")
     with pytest.raises(SessionAuthError, match="plain http"):
         s.send_correlated("http://lab.example/q", "q", "v")

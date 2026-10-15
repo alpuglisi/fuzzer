@@ -22,6 +22,217 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
+- Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
+  - **(a)** The observe `goto` uses `wait_until="commit"`, then
+    `wait_for_load_state("load", timeout=min(LOAD_WAIT_MS, timeout_ms))` (3 s,
+    Playwright errors suppressed), then the sentinel wait as before.
+  - **(b)** A `playwright.sync_api.Error` (a timeout included) of the context set-up,
+    the plant or the observe navigation becomes `UnplaceableLocation` (no verdict) when
+    no hit was recorded. So does a page that never reached `load` by the end of the
+    sentinel wait (`_loaded`). The reason (`_failure_reason`) is the error's class and
+    its text up to the URL; it never includes the URL, which carries the payload. A hit
+    at any point is executed=True. No other exception is caught (PA-0106).
+  - `browser.close()` suppresses a Playwright error, so a dead browser cannot replace
+    the no-verdict.
+  - **(c)** Launch failures are unchanged (BUG-0126).
+  - The M6 semantics recorded in CC-FUZZ-0082 change for two rows: a before-`load`
+    script navigation to a refused URL and a refused own redirect are now no verdict.
+    X2's pin `test_m6_a_target_whose_own_redirect_is_refused_raises` is renamed
+    `..._is_no_verdict`. FR-FUZZ-48 is edited in place.
+- Impact (other components / project):
+  - The oracle and the pipeline are unchanged. A candidate whose page could not be
+    observed is decided by its other mechanisms, as for a missing browser (BUG-0126):
+    with none it is inconclusive (`unplaceable`), with others their verdict stands.
+  - Later candidates are now reached.
+  - A page that never loads costs `LOAD_WAIT_MS` + `SETTLE_MS` per payload instead of
+    `timeout_ms` and a raise.
+  - Test fakes of `playwright.sync_api` gain `Error` and `wait_for_load_state`.
+- Risk: low. A page that loads in over 3 s is still observed (its sink is seen during
+  the sentinel wait, and a late `load` makes a no-hit run a negative). Residuals are in
+  BUG-0137: the plant still waits for `load`, and the driver stop is not contained.
+- Deliverables:
+  - [x] code (`tools/browserexec.py`) — done
+  - [x] tests (`tests/test_m6_navigation_failures.py`; `test_navigation_aborts.py` M6
+    pins; fakes in `test_browser_scope.py`, `test_destructive_urls.py`,
+    `test_json_points.py`) — done
+  - [x] BUG-0137, PA-0137, ERROR_LOG, CHANGELOG; FR-FUZZ-48 edited in place — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-14): `tests/test_m6_navigation_failures.py` 5 passed. The before-`load` case takes 4.7 s;
+  it was 8 s and a raise. The related files (every test file importing `tools/browserexec.py` or `tools/fetcher.py`, the changed test files, the traceability guard, plus `test_oracle_browser.py` and `test_auto.py`; 16 files, FUZZLAB_REQUIRE_BROWSER=1): 866 passed, 2 xfailed, 0 skipped, 0 failed. Mutation checks:
+  - without the `except PlaywrightError` block, the two-candidate pipeline test fails
+    (the raise ends the run), as do the URL-free reason test and the renamed pin (c);
+  - with `wait_until="load"` restored, the timing test fails (8.8 s, not under 6.5 s).
+- Amendment, final review of c196bf9 / 7e8a4b6 / 3b29669 (2026-10-14; reviewers A and
+  B AGREE-with-changes; D54, Z1–Z4 and Z6; Z5 in CC-SESS-0023):
+  - **Z1 (A-M1 = B-S1):** one unobserved payload ended the strategy's payload loop, so
+    a later payload's hit was never tried. The executor's per-probe failures now raise
+    `NotObserved` (a subclass of `UnplaceableLocation`, `oracle/browser.py`); a launch
+    failure or an unavailable browser stays the plain `UnplaceableLocation` and stops at
+    once. `_BrowserXssStrategy.confirm` catches `NotObserved` per payload and goes on;
+    it stops after `MAX_NOT_OBSERVED` (2) in a row, the cost bound stated in FR-FUZZ-48.
+  - **Z4 (B-S3; decision D54, inconclusive):** no hit with at least one payload not
+    observed returns `Verdict(False, ..., inconclusive=True, evidence {"not_observed":
+    reason})`. The FR-FUZZ-45 path then reports the candidate INCONCLUSIVE (not
+    CHECKED), so it never enters the ML negatives. All payloads observed, no hit:
+    `None`, as before. Placement refusals (BUG-0115) and "browser unavailable"
+    (BUG-0126 / CC-FUZZ-0070) are unchanged.
+  - **Z2 (A-M2):** the driver's stop (`manager.__exit__`) is contained by
+    `_stop_driver`: a Playwright error is logged, and the probe's result or no-verdict
+    stands. Without a result the probe has already raised its own no-verdict, so
+    nothing is invented. After `MAX_LAUNCH_FAILURES` (2) failed stops in a row the
+    browser is unavailable for the run.
+  - **Z3 (A-S1 = B-S2):** `page.once("load")` records when `load` fires. The sentinel
+    wait then lasts a full `SETTLE_MS` from it, capped at `timeout_ms` + `SETTLE_MS`
+    after the commit. A slow page (load at about 5 s, sink 2.5 s later) is seen;
+    before, the wait ended 7 s after the commit.
+  - **Z6:**
+    - `_wait_for_token`'s `except` is narrowed to the Playwright error (A-N1);
+    - before reading hits in the failure branch, one suppressed 100 ms pump delivers
+      pending sentinel calls (A-N2);
+    - hits are read again after the load check (B-N1);
+    - the plant navigation uses the commit and a bounded load too (A-N3).
+  - Tests (`tests/test_m6_navigation_failures.py`, 14 tests):
+    - per-payload continuation (an unobserved payload, then a hit on payload 2, or on
+      payload 3 after a miss);
+    - two unobserved payloads stop the strategy and give an inconclusive verdict; a
+      partly observed candidate is inconclusive; an all-observed one is a plain
+      negative; a launch failure stops at once;
+    - a failed driver stop keeps the result (two-candidate pipeline), and repeated
+      failures make the browser unavailable;
+    - the slow-load sink (real Chromium);
+    - the pipeline test pins `/redir` INCONCLUSIVE, with `oracle_inconclusive` = 1,
+      `oracle_inconclusive_browser-execution` = 1 and `oracle_rejected` = 0.
+    The `test_navigation_aborts.py` pin (c) expects `NotObserved`. The fakes gain
+    `once`.
+  - Mutation checks (each reverted):
+    - Z1, the per-payload catch removed: 5 fail (the pipeline test, both continuation
+      cases, the stop-after-two test and the partly-observed test);
+    - Z2, a plain `manager.__exit__`: both driver-stop tests fail;
+    - Z3, the settle not extended after a late load: the slow-load test fails;
+    - Z4, `None` in place of the inconclusive verdict: the pipeline test and both
+      inconclusive tests fail.
+  - Effectiveness: every test file importing `oracle/browser.py`, `oracle/strategies.py`, the
+    `fuzzlab.oracle` package, `tools/browserexec.py`, `session/browserlogin.py` or the
+    login fixture, plus the changed test files and the traceability guard (60 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1597 passed, 2 xfailed, 0 skipped, 0 failed.
+- Amendment, review of 1702c29 (2026-10-14; reviewers A and B AGREE; four small
+  fixes):
+  - **A, the reason:** `_failure_reason` kept the text up to `" at "`. Playwright's
+    `Page.goto: Navigation to "<url>" is interrupted by another navigation to "<url>"`
+    has no `" at "`, so a payload-carrying URL reached `evidence["not_observed"]`. Now
+    every quoted string and every `scheme://` token is removed, then the text is
+    capped at 120 characters. Pinned on five message shapes: interrupted, ERR_ABORTED
+    at, a timeout's call log, a quoted raw payload, an unquoted URL. Mutation (the old
+    rule): 3 of 5 fail.
+  - **B-N1:** `harness/pipeline._confirm` puts a not-observed reason in the run's
+    inconclusive detail (`item["reason"]`), pinned in the two-candidate pipeline test.
+    Mutation: that test fails.
+  - **B-N2:** a plain `UnplaceableLocation` (a launch failure) after an unobserved
+    payload gives the inconclusive verdict instead of propagating. Unit test; mutation:
+    it fails.
+  - **B-N3:** oracle-level tests: M6's inconclusive verdict ordered first does not hide
+    a later confirmation, and a cost-capped strategy's earlier inconclusive is kept
+    over M6's. These pin existing behavior, so there is no mutation.
+  - Effectiveness: `tests/test_m6_navigation_failures.py` 22 passed. Every test file importing
+    `tools/browserexec.py`, `oracle/strategies.py`, `harness/pipeline.py` or the
+    `fuzzlab.oracle` package, plus the traceability guard (59 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1351 passed, 2 xfailed, 0 skipped, 0 failed.
+
+### CC-FUZZ-0082 — The M6 executor under one abort rule: what a refused navigation now does to a verdict (BUG-0136) (2026-10-14)
+- Change: no M6 code change. BUG-0136 (CC-CRAWL-0028) made the browser guard abort
+  every refused navigation with ERR_ABORTED, and `PlaywrightBrowserExecutor` runs under
+  that guard. This entry records the effect on M6 verdicts (review B-S1, X2), measured
+  on a real browser for a page that navigates by script to /logout.php, and pins it with
+  tests:
+  - **sink fires, then navigates:** executed=True (unchanged);
+  - **after `load`, no sink:** executed=False (unchanged), no exception;
+  - **after `load`, sink fires later:** executed=True; it was executed=False, a false
+    negative, because the error page replaced the page;
+  - **the target's own redirect is refused:** the run raises (`net::ERR_ABORTED`; it
+    was `net::ERR_FAILED`), as before;
+  - **during parsing or at `DOMContentLoaded`, before `load` (not pinned, flagged):**
+    `goto` now waits out `timeout_ms` (8 s) and raises `TimeoutError`; it was
+    executed=False.
+  FR-FUZZ-48 amended in place.
+- Impact (other components / project): some DOM-XSS candidates move from a negative to
+  a confirmation (the after-`load` case). Pre-`load` navigations move from a negative
+  to a raise. Today a raise from the executor ends the pipeline's confirmation loop: it
+  is contained by neither the oracle nor `harness/pipeline._confirm`, which is already
+  true for a refused own redirect and for any `goto` timeout. That containment, or a
+  `goto` that tolerates a superseded load, is an M6 design change, **flagged and not
+  built here**.
+- Risk: low for the pinned cases; the pre-`load` case is a known open risk (above).
+- Deliverables:
+  - [x] tests (`tests/test_navigation_aborts.py`: the four `test_m6_*` pins) — done
+  - [x] FR-FUZZ-48 amended in place; BUG-0136 "M6 semantic shift" (added in review) —
+    done
+  - [x] mutation check — done (below)
+- Effectiveness (assessed 2026-10-14): the four M6 pins pass. With `_abort_code`
+  returning the default code, (d) (`..._after_a_refused_navigation_is_executed`) and
+  (c) (`..._own_redirect_is_refused_raises`, by its error) fail. (a) and (b) pass
+  either way, because they pin unchanged behavior. A scratch probe (not a test)
+  measured the pre-`load` rows of the table on both codes.
+
+### CC-FUZZ-0080 — Senders and the oracle respect origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change:
+  - **`greybox/run.py`:** `RequestsCorrelatingSender(cookie_origins=)`: the cookie is
+    attached only to a probe on one of the session's canonical origins; otherwise the
+    probe goes without it, `Probe.session = "anonymous (out of origin)"`, counted
+    (`session_out_of_origin`). A cookie without origins is refused at construction.
+    `run_greybox` records `features["session"]`, `summary["session_out_of_origin"]` and
+    the `greybox_session_out_of_origin` metric (when non-zero).
+  - **`greybox/greybox_cli.py`:** `_cookie_for` also returns the session's origins and
+    hands them to the sender; the summary prints the count.
+  - **`oracle/probe.py`:** `Probe.session`.
+  - **`oracle/oracle.py`:** `_SessionNotes`, around every strategy run (forwarding only
+    non-default arguments; transparent `__getattr__`, `send_correlated` watched too),
+    stamps a probe's note on the verdict's `evidence["session"]`.
+  - **`tools/probesender.py`:** `SeamProbeSender` stamps `Probe.session` from the
+    manager's `session_note` (the copy's for an isolated send) and reports
+    `session_out_of_origin`; lane A `_on_logout` and lane B `_on_main_logout` take the
+    logout's origin and compare it with the run's session's origins
+    (`session_origins_for`), never a host.
+  - **`harness/auto.py` / `auto_cli.py`:** `metrics["session_out_of_origin"]`, printed.
+- Impact: greybox and auto runs report probes sent without the session; a finding made
+  without it says so in its evidence. `tests/test_sender_conformance.py` lists the new
+  wrapper.
+- Risk: low. Mitigated: the conformance guard (signature, forwarding, PRG capability)
+  covers `_SessionNotes`; greybox's gate is mutation-checked.
+- Deliverables:
+  - [x] code — done
+  - [x] tests (`tests/test_session_origin_scope.py`; updated
+    `test_forms_phase2.py`, `test_login_form_isolation.py`, `test_destructive_urls.py`,
+    `test_session_transport_binding.py`, `test_sender_conformance.py`) — done
+  - [x] FR-FUZZ-8 and FR-FUZZ-44 amended in place — done
+- Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (the greybox gate mutation
+  fails its test); the oracle, greybox, sender-conformance, PRG and lane A/B suites pass.
+- Review round 1 of 0046b77 (2026-10-14; R5, R6):
+  - **R6:** `SeamProbeSender` copies `Probe.session` from the decision `prepare`
+    recorded on the request (`SESSION_DECISION`), never recomputed after the send.
+  - **R5:** `fuzzlab auto --auth-origin` and `greybox-run --auth-origin` (repeatable;
+    bare, in-scope origins; a usage error before any side effect); `make_probe_sender`
+    and greybox's `_cookie_for` take `auth_origins` (auto passes it only when given).
+- Review round 2 of 97101a9 (2026-10-14; T4): `SeamProbeSender._session_note` reads the
+  declared `Request.session_decision` (CC-CORE-0054) in place of round 1's
+  `SESSION_DECISION` dynamic attribute.
+- Review fix of c69e6fb (2026-10-14): this entry's `_SessionNotes` (O2) became the
+  outermost sender a strategy is handed, which broke the pin
+  `tests/test_forms_phase1.py::test_the_oracle_binds_a_form_candidate_and_only_then`.
+  That test asserted the type of the outermost sender (`_FormBoundSender`) and now saw
+  `_SessionNotes`. The binding itself was unaffected (still one layer in), and no
+  production code reads a sender's type. The test was missed because neither related set
+  included `test_forms_phase1.py`. Fix (tests only): the test walks the wrappers'
+  `_inner` and checks that a form candidate's chain contains `_FormBoundSender` and a
+  non-form candidate's does not. A new pin,
+  `test_the_oracle_wraps_the_sender_in_a_fixed_order`, fixes the intended order:
+  `_SessionNotes(_FormBoundSender(...))` without a scheduler, and
+  `_CostCounter(_SessionNotes(_FormBoundSender(...)))` with one. Mutation checks:
+  dropping the oracle's `_FormBoundSender` wrap fails all 3 (1 binding + 2 order); swapping
+  `_CostCounter` and `_SessionNotes` fails the scheduler order pin. Every test file
+  that imports a module changed on this branch since cdde39f (104 files): 2350 passed,
+  4 skipped (labgen live-boot reproductions), 6 xfailed, 0 failed.
+
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
   literal sat in the edit field (`<input value="#{728*889}">`) and its rule was

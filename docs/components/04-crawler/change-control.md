@@ -33,6 +33,65 @@ Newest first.
   (the spring-boot navigability file's own reproduction skips), 4 xfailed (strict pins).
   This tree also carries the CC-CRAWL-0027 round-3 (Y1-Y4) amendment.
 
+### CC-CRAWL-0028 — A refused navigation keeps the current document: one abort rule (BUG-0136) (2026-10-14)
+- Change: `tools/navguard.py` `make_route_handler` decides a request's kind once
+  (`document = _is_document(req)`) and refuses it through one `abort()`:
+  `_abort_code(document)` gives `DOCUMENT_ABORT = "aborted"` for a document request (a
+  navigation, top-level or frame, and its redirect hops) and the default code for a
+  subresource. This holds for every reason: scope, destructive, refused method or body,
+  the reveal window, a withheld session, too many hops, an unfetchable request. Before,
+  only the reveal window and the withheld branch (BUG-0134 T1) used `"aborted"`; the
+  rest used the default, which makes Chromium commit its error page in the page's
+  place.
+- Impact (other components / project): the crawler, the auditor's browser (CC-AUD), the
+  M6 executor (FUZZ) and the browser login (SESS) all install this guard; none aborts a
+  route itself, and none reads the abort code. `goto` of a refused target still raises
+  (`net::ERR_ABORTED` instead of `ERR_FAILED`), so the crawl's own-target fallbacks and
+  `SessionWithheld` behave as before. All bookkeeping callbacks are unchanged. No
+  contract change.
+- Risk: low (a refusal stays a refusal; only the browser's response to it changes).
+  Mitigated by real-Chromium tests of both common reasons, a per-reason pin, and the
+  existing scope, browser-login, SPA and reveal suites passing.
+- Deliverables:
+  - [x] code (`tools/navguard.py`) — done
+  - [x] tests (`tests/test_navigation_aborts.py`; fake routes in
+    `test_browser_scope.py` and `test_session_browser_login.py` record the code) — done
+  - [x] BUG-0136 (RCA, recurrence review, prior-PA analysis, PA-0002 sweep), PA-0136,
+    ERROR_LOG, CHANGELOG, NFR-CRAWL-safe edited in place and traced — done
+  - [x] mutation checks — done
+- Effectiveness (assessed 2026-10-14): `tests/test_navigation_aborts.py` 26 passed (22 per-reason pins, the code pin, 3 real-Chromium tests); the related suites (22 files, FUZZLAB_REQUIRE_BROWSER=1) 1272 passed, 2 xfailed, 0 failed; the traceability guard 3 passed. Mutation checks: the first request's scope/destructive abort reverted to `route.abort()` fails 5 (both real crawl tests, the `goto` test, and the out-of-scope and destructive navigation pins), 20 pass; `_abort_code` returning the default for a document fails 14 (the 3 real tests and all 11 navigation pins), 12 pass. Effective.
+- Amendment, review of c69e6fb (2026-10-14; reviewer A AGREE, reviewer B
+  AGREE-with-changes; D50 X1, X4, X5; X2 in CC-FUZZ-0082, X3 in CC-SESS-0023):
+  - **X1 (B-M1):** an ERR_ABORTED abort keeps the previous document alive, timers and
+    all, so after a failed `goto` its fetches ran on and were sent and captured under
+    the URLs crawled next. `LocalSpider._fetch_rendered`'s `except` now first sends the
+    page to `about:blank` (Playwright errors suppressed), then runs the withheld check,
+    `SessionWithheld` or the static fallback as before. As a result
+    `_navigation_withheld` decides there by the withheld targets alone (its committed-URL
+    half sees `about:blank`); its docstring is updated (A-N2, B-N2).
+  - **X4 (A-S1, A-S2):** real-Chromium pins: the crawl's own target whose 302 lands out
+    of scope or on /logout.php raises ERR_ABORTED with the page kept, and /go is
+    recorded through the static fallback (status 302). A script-submitted POST form to
+    a refused URL keeps the page and posts nothing. A refused iframe keeps its parent.
+  - **X5:** the unit table adds an iframe navigation and a `document` request whose
+    `is_navigation_request` raises (B-N1). NFR-CRAWL-safe notes that a refused
+    navigation looks as if nothing happened and is visible only through `skipped_*`
+    and the summary (A-N1). B-N3 is accepted as is.
+  - Effectiveness: `tests/test_navigation_aborts.py` has 59 tests (44 per-reason pins over 4 request
+    kinds, the code pin, 14 real-Chromium tests), all passing. The X1 test passed 25 of
+    25 repeated runs. The files that import `tools/spider.py`, `session/browserlogin.py`
+    or `tools/navguard.py`, plus the traceability guard (23 files,
+    FUZZLAB_REQUIRE_BROWSER=1): 1295 passed, 4 skipped (labgen live-boot reproductions),
+    4 xfailed, 0 failed. Mutation checks:
+    - dropping the `about:blank` line fails the X1 test 3 of 3 times. With its
+      `about:blank` assertion moved last, the server-side assertion fails on its own:
+      a burst of ticks after the fallback;
+    - `_abort_code` returning the default fails 43 and passes 16. The iframe pins and
+      M6 (a)/(b) pass either way, because they pin behavior that did not change.
+  - Sweep note (2026-10-14): the X1 twin in the auditor's `ContentFetcher.fetch` is
+    fixed under CC-AUD-0042. The M6 executor's failed or superseded loads are no
+    verdict under BUG-0137 / CC-FUZZ-0083.
+
 ### CC-CRAWL-0027 — SPA route query-parameter discovery: scan, seeds, the observation probe (FR-CRAWL-17, forms phase 5) (2026-10-14)
 - Change (the agreed design `spa-query-draft.md`, **Revision 2**: reviewer B's
   Revision 1 and reviewer A's points reconciled into Q1-Q7; that review was this
@@ -310,6 +369,105 @@ Newest first.
     the hop test and the M6 test fail (the server got `GET /api/order/confirm?via=go`
     twice); Y3 (no re-check on the failure path) -> its unit test fails. The every-file
     run is recorded with CC-CRAWL-0029.
+
+### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
+- Change:
+  - **`tools/browserauth.py`:** `header_scope_for(state, base_url, in_scope)` admits an
+    in-scope URL whose canonical origin is one of `state.origins` (a state without
+    origins: the base URL's origin only), with the https floor; it was
+    `canonical_host(url) == host`. `BrowserSession.cookie_scope` (default: the same
+    predicate, PA-0003).
+  - **`tools/navguard.py`:** `make_route_handler` / `guard_page` take `cookie_scope` and
+    `on_session_withheld`. In an authenticated context an in-scope request or redirect
+    hop on another origin is fetched with an explicit empty `Cookie` header (Playwright's
+    API client adds the context's port-agnostic jar only when no `Cookie` header is
+    given; checked in its source and live) and without the session's headers; a
+    redirected navigation landing there is answered with the landing response, not a
+    redirect: Chromium's own re-request of the landing URL is never routed and carried
+    the jar (found by the real-browser test, fixed, then mutation-checked).
+  - **`tools/spider.py`:** the crawl's authenticated context passes `cookie_scope` and
+    counts withheld requests (`session_out_of_origin`, summarised at the end of the
+    crawl); `_isolated_submit` drops the jar's cookies for an action on another origin.
+- Impact: an external (any-port) crawl visits another port of its host anonymously; a
+  loopback crawl is unchanged (its scope is already the exact origin). The auditor's
+  browser (CC-AUD-0038) gets the origin-based header scope through `browserauth` with no
+  code change. On such a landing, `page.url` stays the first URL (relative links on that
+  page resolve against it; in scope either way).
+- Risk: low-medium (browser path). Mitigated: unit tests of the route (request, hop,
+  landing) and a real-Chromium crawl whose second server records every request.
+  Residual: an in-scope WebSocket on another origin is connected by the browser itself.
+- Deliverables:
+  - [x] code (`tools/browserauth.py`, `tools/navguard.py`, `tools/spider.py`) — done
+  - [x] tests (`tests/test_session_origin_scope.py`: header scope, the route's
+    withholding, `_isolated_submit`, the real-Chromium external crawl) — done
+  - [x] FR-CRAWL-14 amended in place — done
+- Effectiveness (assessed 2026-10-14): see CC-SESS-0023 (mutation checks of
+  `header_scope_for`, the cookie strip and its landing rule each fail their tests);
+  the browser scope / browser login / SPA / forms phase 4 suites pass.
+- Review round 1 of 0046b77 (2026-10-14; R1, R2, R5 of the reconciled fix list):
+  - **R1 (A-M1, seen live: the landing ran B's script under A's URL and read A's
+    cookie and localStorage):** the landing-response branch is removed. In an
+    authenticated context every document (navigation, top-level or frame; a redirect
+    landing) and every WebSocket on an in-scope origin outside `cookie_scope` is aborted
+    and reported (`on_session_withheld(url, kind)`, kind `document` / `frame` /
+    `websocket` / `request`). The spider records it in `skipped_other_origin`, skips such
+    a queued URL without navigating, and raises `SessionWithheld` (no static fallback,
+    nothing extracted) when a page navigation landed there.
+  - **R2 (A-M2, seen live: `route.fetch` wrote B's `Set-Cookie` into the shared jar):**
+    the empty-`Cookie` trick is replaced: withheld requests and hops go through one
+    cookie-less `playwright.request.new_context()` per guard
+    (`guard_page(isolated_request=)`; retired once it holds a cookie and disposed at the
+    next fetch, since its answer is still being fulfilled; the spider disposes all at the
+    end), fulfilled with `Set-Cookie` removed.
+  - **R5:** `fuzzlab crawl --auth-origin ORIGIN` (validated in `parse_args`).
+  - Mutation checks: R1a (documents loaded through the isolated context), R1b (a
+    redirect landing loaded), R1c (a WebSocket connected) and R2 (back to `route.fetch`
+    with an empty Cookie) each fail the route unit test and/or the real-Chromium crawl
+    (`test_an_authenticated_crawl_never_hands_the_session_to_another_port`, now with a
+    frame, a WebSocket, a beaconing landing and a cookie-setting image of B).
+- Review round 2 of 97101a9 (2026-10-14; T1, T6 of the reconciled list):
+  - **T1 (A2-M1, B2-S2; seen live):** a withheld document, frame or redirect landing is
+    aborted with `"aborted"` (ERR_ABORTED, as the reveal window), not `"blockedbyclient"`,
+    which committed Chromium's error page in the page's place. `on_session_withheld` now
+    gets `(url, kind, source)`: `document` (the navigation's own target), `landing` (its
+    redirect landing), `frame`, `websocket`, `request`, and the chain's first URL. The
+    spider raises `SessionWithheld` only when the navigation's own target or its
+    landing was withheld, or the main frame committed off the session's origins
+    (`_navigation_withheld`); a script-initiated navigation away leaves the page
+    extracted normally, its target recorded as skipped.
+  - **T6:** `skipped_other_origin` reasons name the kind; `isolated_contexts_created`
+    counts the cookie-less request contexts (logged at the end); `isolated_fetch`'s
+    docstring names both disposals kept (at the next fetch, and the creator's at
+    teardown).
+  - Mutation checks: `"blockedbyclient"` restored fails
+    `test_a_script_navigation_to_another_origin_leaves_the_page_crawled` and the route
+    unit test; attributing every withheld document to the current navigation fails the
+    former.
+- Review round 3 of 9f417ae (2026-10-14; reviewer A, D47; V1, V2):
+  - **V1 (A3-M1, seen live in 3 of 4 runs):** concurrent withheld fetches went out with a
+    cookie another B answer had stored in the isolated context (a retired context was
+    still in use by fetches in flight). Every isolated fetch, request and hop, now
+    carries an explicit empty `Cookie` header; retirement and the deferred disposal are
+    dropped. The context is made once, when the guard is built: a lazy creation in the
+    handler made up to 12 contexts for 12 concurrent images (route handlers run
+    concurrently; seen live while testing). The creator still disposes it at teardown.
+  - **V2 (A3-N1):** `_navigation_withheld` counts a committed URL only when it is
+    in scope and off the session's origins (`_other_origin`); an out-of-scope commit,
+    or the error page the scope guard's abort leaves, is BUG-0123's scope abort (already
+    counted in `skipped_out_of_scope`), never `SessionWithheld`.
+  - Tests: `test_concurrent_withheld_fetches_never_carry_a_cookie` (real Chromium,
+    reviewer A's 12-image probe, 5 repetitions), the route unit test (an empty Cookie on
+    request and hop, one context, never disposed by the guard),
+    `test_an_out_of_scope_script_navigation_is_a_scope_abort_not_fr_sess_20`.
+  - Mutation checks: without the empty header the 12-image test failed in **15 of 15**
+    repetitions (3 runs of 5; 6–11 of the 12 B requests carried a cookie each time), and
+    the unit test failed; restoring the old committed-URL rule fails the V2 test (A's
+    row stored as `SessionWithheld`, status 0).
+  - Observation (not changed here, flagged): the scope guard aborts an out-of-scope
+    navigation with the default error code, so a script navigation off scope still
+    commits Chromium's error page and the page's links are lost to the crawl (a
+    BUG-0123 coverage effect, not a leak).
+  - Effectiveness (review round 3): the related suites (as in round 2) with `FUZZLAB_REQUIRE_BROWSER=1`: **1492 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 76 tests; the traceability guard passes. The full suite is the coordinator's run.
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

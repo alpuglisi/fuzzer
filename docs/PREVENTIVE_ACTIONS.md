@@ -1701,6 +1701,41 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
 
+- **PA-0134** — Strengthens `PA-0123` (scope is an origin), `PA-0099` (a floor binds every
+  credential-bearing artefact at every send point) and `PA-0132` (a session handed between
+  clients), after BUG-0134: a session was sent to every port of its host (Juice Shop's
+  cookie and bearer to bWAPP on another loopback port), and a request there could log in
+  there. PA-0123 governed request scope only, and the host-level session rule survived it
+  as a "stated exception" no test pinned.
+  1. **Every secret-bearing artefact carries the origins it belongs to from creation**
+     (a session's cookies, tokens and Basic header, a browser's jar and storage state, a
+     captured session), and every send path checks membership through one predicate
+     (`SessionState.origins`; `prepare`, `authorize`, `_navigate(session_origins=)`,
+     `header_scope_for` / `cookie_scope`, greybox's `cookie_origins`). A storage key such
+     as `(host, identity)` indexes; it never authorises a send. An artefact with no
+     origins goes nowhere (fail closed).
+  2. **A stated exception to where a secret may go is pinned by a test of its exact
+     extent, and is re-reviewed in the same change whenever a PA narrows the same class**
+     (as PA-0123 narrowed scope to an origin). A security exception is never deferred in
+     prose only (`PA-0054(3)`, `PA-0056(3)`).
+  3. **Enforced by an AST guard** over the session-carrying modules: no `==`/`!=` with a
+     hostname (`.hostname`, `canonical_host(...)`) decides a send, except listed, reasoned
+     allowances; proven on BUG-0134's own shapes (PA-0034(2))
+     (`tests/test_session_origin_scope.py::test_no_session_send_decision_compares_hosts`).
+     The guard is a lint: the real-server tests (B receives nothing) are the proof.
+     *(Review round 1:)* it sees through `.lower()` / `.casefold()` / `str()`, follows
+     names and `self.` attributes assigned from a host, and flags `in` / `not in`.
+  4. *(Review round 1.)* **A browser context that holds a session never loads another
+     origin's document or socket, and no other origin's response may read or write its
+     jar**: in such a context a document or WebSocket off the session's origins is
+     aborted, and any other request there goes through a separate cookie-less client
+     whose `Set-Cookie` is dropped. Withholding a header is not enough when the client
+     shares state (a cookie jar, `document.cookie`, `localStorage`) with the session.
+     *(Review round 3:)* that separate client sends an explicit empty `Cookie` on every
+     request, since its own jar fills from the answers it fetches, and it is made once
+     per guard (concurrent handlers race on any lazy or retiring lifecycle).
+  (from BUG-0134)
+
 - **PA-0135** — Strengthens `PA-0095(2)` and replaces its scope, after BUG-0135: a
   `scan_routes` linearity test asserted `t_large < 3.5 * t_small` and failed under
   load on linear code, and the FR-CRAWL-17 scan test repeated the shape. PA-0095 named
@@ -1717,3 +1752,42 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      two clock measurements scaled against each other, or their ratio. It is proven on
      BUG-0135's own lines. A timing property measured by the system under test (a
      side-channel test) is not a complexity claim and is out of scope. (from BUG-0135)
+
+- **PA-0136** — Strengthens `PA-0003` / `PA-0087` (one policy decision, one place) for
+  the browser guard, and generalises BUG-0134 T1 and the reveal window's choice, after
+  BUG-0136: a refused navigation was aborted with Playwright's default code, so Chromium
+  replaced the crawled page with its error page; only two branches used `"aborted"`.
+  1. **How a request is refused is decided once, by the kind of request, never per
+     reason:** every abort of a document request -- a navigation, top-level or frame,
+     and each of its redirect hops -- uses `"aborted"` (ERR_ABORTED: the current
+     document survives, and `goto` of that target still raises); a subresource keeps
+     the default. One helper (`navguard._abort_code`), one `abort()` in the handler.
+  2. **A browser guard's tests record what the browser is told, not only that it was
+     refused:** fake routes keep the abort code, and the code is pinned per reason
+     (`tests/test_navigation_aborts.py::test_every_abort_reason_keeps_the_document_for_a_navigation`).
+  3. **A fix of one branch of a shared mechanism sweeps every sibling branch in the
+     same change** (here, every abort site), whatever feature the first fix was filed
+     under. (from BUG-0136)
+
+
+- **PA-0137** — Strengthens `PA-0126(3)` (a browser that cannot start is no verdict) and
+  generalises FR-FUZZ-45/47's "never a silent negative" to a mechanism's external
+  failures, after BUG-0137: a page the M6 executor could not load raised out of the
+  oracle and the pipeline, which ended confirmation for every remaining candidate.
+  1. **A confirmation mechanism maps every expected failure of the external work it
+     depends on to "no verdict" at its own boundary,** not only the failure first seen.
+     For a browser this covers the start, the context, each navigation and the
+     observation (a page that never loaded and showed nothing). It uses the oracle's
+     no-verdict path (`UnplaceableLocation`, with a reason that carries no payload or
+     URL), and only for the named error class (PA-0106); a defect still propagates.
+     Evidence already gathered (a hit) still counts.
+  2. **A wait is never for an event a refused action can cancel:** wait for what is
+     certain (the commit), then bound the rest.
+  3. **Enforced by a run, not only a unit:** a multi-candidate run in which an early
+     candidate's mechanism fails and a later one must still be confirmed, plus one test
+     per failure point that mutation-checks the mapping. (from BUG-0137)
+  4. *(Review, D54.)* **The unit of "not observed" is the probe, not the mechanism or
+     the candidate:** a probe that could not be observed ends only that probe; the
+     mechanism goes on to its next probe within a stated bound. With no evidence and
+     anything unobserved, the result is inconclusive, never a negative, so it never
+     becomes a training negative.

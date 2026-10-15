@@ -13,6 +13,15 @@ credentials); this formats the resulting session for a headless browser:
   ``browser.new_context(storage_state=...)``, filtered to in-scope origins first
   (reviewer A7).
 
+Browser cookies are port-agnostic (RFC 6265 §8.5: a cookie for ``127.0.0.1`` goes to
+every port), so the context's jar alone would hand the session to another app on
+another port of the host. The session is **origin-scoped** (FR-SESS-20, BUG-0134):
+`header_scope_for` admits only the session's origins, and the guarded route uses the
+same predicate (``BrowserSession.cookie_scope``) for any other in-scope origin: its
+documents and WebSockets are never loaded, and its other requests go through a
+cookie-less request context with ``Set-Cookie`` removed
+(``navguard.guard_page(cookie_scope=..., isolated_request=...)``).
+
 Playwright itself is not imported here — this only shapes the data and applies it
 to whatever context object it is given — so it stays unit-testable without a
 browser.
@@ -52,15 +61,17 @@ def playwright_auth(manager, identity: str, base_url: str):
 
 def header_scope_for(state, base_url: str,
                      in_scope: Callable[[str], bool]) -> Callable[[str], bool]:
-    """Where the session's headers may go: an in-scope URL on the session's own host
-    (loopback aliases one host), over https when the session is https-only (FR-SESS-13,
-    BUG-0098)."""
-    from fuzzlab.session.browserlogin import canonical_host
-    host = canonical_host(base_url)
+    """Where the session may go (its headers, and its cookies through
+    ``cookie_scope``): an in-scope URL whose canonical origin is one of the session's
+    origins (``state.origins``, FR-SESS-20; loopback aliases one origin, another port
+    another app), over https when the session is https-only (FR-SESS-13, BUG-0098). A
+    state without origins falls back to ``base_url``'s origin only (fail closed)."""
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    origins = frozenset(getattr(state, "origins", None) or ()) or origin_scope(base_url)
     secure_only = bool(getattr(state, "secure_only", False))
 
     def scope(url: str) -> bool:
-        if not in_scope(url) or canonical_host(url) != host:
+        if not in_scope(url) or not in_origin_scope(url, origins):
             return False
         return not secure_only or urlparse(url).scheme.lower() == "https"
     return scope
@@ -85,6 +96,14 @@ class BrowserSession:
     #: those (a new identifier-like value is re-adopted, `spider._storage_rotated`);
     #: a login-response cookie must keep its value
     rotating_cookies: frozenset = field(default_factory=frozenset, repr=False)
+    #: where the context's cookies may go: the same predicate as ``header_scope``
+    #: (`header_scope_for`, PA-0003). The guarded route withholds the jar from an
+    #: in-scope request it refuses (FR-SESS-20; None: the header scope)
+    cookie_scope: Callable[[str], bool] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.cookie_scope is None:
+            self.cookie_scope = self.header_scope
 
 
 def browser_session(manager, identity: str, base_url: str, *,

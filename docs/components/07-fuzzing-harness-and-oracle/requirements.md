@@ -77,7 +77,16 @@ rewards) derives from it.
   probe, base or variant, is checked by `refuse_destructive` **before it is sent**;
   refusals are counted as `destructive_refused`) — the harness's own consumer of
   Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
-  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
+  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring). *(CC-FUZZ-0080, FR-SESS-20, BUG-0134:)*
+  an authenticated grey-box run hands `RequestsCorrelatingSender` the session's
+  canonical origins with its cookie (`cookie_origins`, from `greybox_cli._cookie_for`):
+  the cookie is attached only to a probe on one of them (a cookie without origins is
+  refused at construction); a probe on another origin goes without it, its
+  `Probe.session` is `"anonymous (out of origin)"`, the attempt's features carry
+  `session`, and the run counts it (`summary["session_out_of_origin"]`, the
+  `greybox_session_out_of_origin` metric when non-zero, the CLI summary).
+  `greybox-run --auth-origin ORIGIN` (repeatable; bare, in scope) hands the session
+  manager the operator's auth origins (FR-SESS-20, R5).
 - **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
   to `core/store.py`'s `metric_series` table (component #2, CORE) once per
   attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
@@ -1199,6 +1208,63 @@ rewards) derives from it.
   and B). Without a browser the DOM and stored XSS strategies give no verdict at **any**
   location, and an unplaceable DOM location or a stored candidate with no store URL is
   no verdict too (CC-FUZZ-0073).
+  *(CC-FUZZ-0082, BUG-0136:)* the executor's guard aborts a refused navigation (out
+  of scope, destructive) with ERR_ABORTED, which keeps the page; before, Chromium's
+  error page replaced it. Measured on a real browser, for a page that navigates by
+  script to a refused URL:
+  - after `load`, with a sink firing later: now executed=True; before, executed=False
+    (a false negative);
+  - after `load`, with no sink: executed=False, as before;
+  - a sink that fires and then navigates: executed=True, as before;
+  - **during parsing or at `DOMContentLoaded` (before `load`):** the page never loads;
+    with no hit it is not observed, and the candidate is inconclusive (BUG-0137,
+    below). Before BUG-0136 the error page loaded and the run reported executed=False.
+  - **the target's own redirect refused:** not observed, so inconclusive (BUG-0137);
+    it was a raise.
+  *(CC-FUZZ-0083, BUG-0137, with its review fixes D54:)* **a page the executor could
+  not observe is inconclusive, never a negative and never the end of the run.**
+  - **Navigation.** The plant and the observe navigation each wait for the commit
+    (`wait_until="commit"`), then for `load` for at most `LOAD_WAIT_MS` (3 s,
+    suppressed). A load that a refused navigation superseded is not waited out: before,
+    it cost `timeout_ms` (8 s) and then a raise.
+  - **Settle.** The sentinel wait lasts `SETTLE_MS` from the end of that load wait.
+    Once `load` fires (recorded by `page.once("load")`), it lasts a full `SETTLE_MS`
+    from `load`, capped at `timeout_ms` + `SETTLE_MS` after the commit, so a slow
+    page's sink is still seen. Only a Playwright error ends the wait early.
+  - **Per probe.** A Playwright error or timeout of the context set-up, the plant or
+    the observe navigation raises `NotObserved` (a subclass of `UnplaceableLocation`,
+    in `oracle/browser.py`). So does a page that never reached `load` by the end of the
+    sentinel wait.
+    - Both apply only with no hit. Pending sentinel calls are pumped before deciding,
+      and hits are read again after the load check; a hit recorded at any point is
+      executed=True.
+    - The reason is the error's class and the first line of its text with every
+      quoted string and every `scheme://` token removed, capped at 120 characters. It
+      never includes a URL, which carries the payload, whatever the message's shape
+      (`Navigation to "<url>" is interrupted ...`, `net::ERR_ABORTED at <url>`, a
+      timeout's call log). The run's inconclusive detail (`PipelineResult.inconclusive`)
+      carries it as `reason`.
+  - **Per candidate.** `_BrowserXssStrategy` tries its next payload after a
+    `NotObserved`, and stops after `MAX_NOT_OBSERVED` (2) in a row; that is the cost
+    bound: an unobservable page costs at most 2 browser loads, each up to
+    `LOAD_WAIT_MS` + `SETTLE_MS`.
+    - A hit from any payload confirms.
+    - No hit, with at least one payload not observed: `Verdict(False, ...,
+      inconclusive=True, evidence {"not_observed": reason})`. The FR-FUZZ-45 path
+      reports it inconclusive when nothing confirms, for query and fragment points
+      alike, so it never enters the ML negatives.
+    - Every payload observed, no hit: `None`, a negative, as before.
+    - A browser that cannot start, after a payload went unobserved: still the
+      inconclusive verdict, not a propagated "no verdict".
+  - **What still stops at once.** A browser that cannot start, or one marked
+    unavailable, is the plain `UnplaceableLocation` (BUG-0126). So are the strategies'
+    placement refusals (BUG-0115).
+  - **The driver's stop.** A Playwright error from stopping the driver is logged and
+    contained; it never replaces a result or a no-verdict. After
+    `MAX_LAUNCH_FAILURES` (2) failed stops in a row, the browser is unavailable for the
+    run.
+  - **Errors.** Only Playwright errors are caught (PA-0106); any other exception
+    propagates. `browser.close()` failing on a dead browser is suppressed.
   - Enforced by: `tests/test_browser_scope.py::test_the_m6_executor_uses_the_configured_chromium`,
     `tests/test_browser_scope.py::test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative`,
     `tests/test_browser_scope.py::test_the_m6_executor_sees_a_sink_that_fires_after_load`,
@@ -1207,6 +1273,10 @@ rewards) derives from it.
     `tests/test_browser_scope.py::test_browser_xss_that_cannot_place_its_probe_is_no_verdict`,
     `tests/test_browser_scope.py::test_a_hit_before_the_page_navigates_is_kept`,
     `tests/test_browser_scope.py::test_an_apps_own_dialog_is_never_a_hit`
+  - Enforced by (a refused navigation keeps the page; CC-FUZZ-0082, BUG-0136): `navguard.make_route_handler` (`_abort_code`) under `PlaywrightBrowserExecutor.run` — `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative`, `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed`, `tests/test_navigation_aborts.py::test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict`
+  - Enforced by (a page the executor could not observe is no verdict, never the end of the run; CC-FUZZ-0083, BUG-0137): `PlaywrightBrowserExecutor.run` (`wait_until="commit"`, `LOAD_WAIT_MS`, `except PlaywrightError`) — `tests/test_m6_navigation_failures.py::test_a_before_load_navigation_is_no_verdict_well_under_the_timeout`, `tests/test_m6_navigation_failures.py::test_a_hit_after_a_before_load_navigation_counts`, `tests/test_m6_navigation_failures.py::test_a_page_that_cannot_load_never_ends_the_pipeline`, `tests/test_m6_navigation_failures.py::test_a_playwright_error_is_no_verdict_and_names_no_url`, `tests/test_m6_navigation_failures.py::test_any_other_error_is_not_swallowed`
+  - Enforced by (per payload, inconclusive, the driver's stop, a slow page's settle; BUG-0137 review D54): `_BrowserXssStrategy.confirm` (`NotObserved`, `MAX_NOT_OBSERVED`), `PlaywrightBrowserExecutor._stop_driver` / `_wait_for_token` — `tests/test_m6_navigation_failures.py::test_a_later_payload_is_tried_after_an_unobserved_one`, `tests/test_m6_navigation_failures.py::test_two_unobserved_payloads_in_a_row_stop_and_are_inconclusive`, `tests/test_m6_navigation_failures.py::test_a_partly_observed_candidate_without_a_hit_is_inconclusive`, `tests/test_m6_navigation_failures.py::test_every_payload_observed_without_a_hit_is_a_plain_negative`, `tests/test_m6_navigation_failures.py::test_a_browser_that_cannot_start_stops_at_once`, `tests/test_m6_navigation_failures.py::test_a_failed_driver_stop_keeps_the_result`, `tests/test_m6_navigation_failures.py::test_a_driver_that_never_stops_cleanly_makes_the_browser_unavailable`, `tests/test_m6_navigation_failures.py::test_a_sink_that_fires_after_a_slow_load_is_seen`
+  - Enforced by (the reason carries no URL; a late launch failure; M6's inconclusive in the oracle's order; review of 1702c29): `browserexec._failure_reason`, `_BrowserXssStrategy.confirm`, `pipeline._confirm` — `tests/test_m6_navigation_failures.py::test_the_reason_never_carries_a_url_or_the_payload`, `tests/test_m6_navigation_failures.py::test_a_launch_failure_after_an_unobserved_payload_is_still_inconclusive`, `tests/test_m6_navigation_failures.py::test_an_m6_inconclusive_first_never_hides_a_later_confirmation`, `tests/test_m6_navigation_failures.py::test_the_first_inconclusive_is_kept_before_an_m6_one`
 - **FR-FUZZ-49** *(post/redirect/get observation; `CC-FUZZ-0078`, 2026-10-14).* A
   server-side confirmer whose signal is on the page a POST redirects to (Juice Shop:
   `POST /profile username=#{11*13}` → `302 /profile` without `143`; `GET /profile`
@@ -1714,8 +1784,10 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   - **Breakers (run-wide):**
     - *single-session:* the run's session fails `verify_live` after the run's first copy
       login or any copy re-login, or the run's manager reports a logout of the run's
-      identity on the run's host while a copy is live (a logout listener registered,
-      once, before the first copy login). Copies are dropped; every isolated path goes
+      identity on one of the run's session's origins while a copy is live (a logout
+      listener registered, once, before the first copy login; *CC-FUZZ-0080,
+      FR-SESS-20:* compared by canonical origin, never host, so another app's logout
+      on another port of the host never trips it; lane A's header breaker likewise). Copies are dropped; every isolated path goes
       anonymous; the run's session re-logs in once.
     - *failed-logins:* after 2 failed copy logins, no new copies.
   - **Budget and records.** Isolated sends spend the run's `RequestBudget`; copy logins,
@@ -1724,6 +1796,17 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
     and per-path reasons — fixed texts, never a failure message, URL or credential
     value; `fuzzlab auto` prints it.
     `isolated_copy_logins()` is public (lane A's header breaker reads it).
+  - **Out-of-origin sends** *(CC-FUZZ-0080, FR-SESS-20, BUG-0134).* A send the session
+    manager made without the session because its origin is not one of the session's
+    comes back with `Probe.session = "anonymous (out of origin)"`, copied from the
+    decision `prepare` recorded on the request (the declared field
+    `Request.session_decision`, CC-CORE-0054; review rounds 1-2, R6/T4; never
+    recomputed); the oracle (`oracle._SessionNotes`, around every strategy run) stamps any
+    such note on the verdict's `evidence["session"]` (confirming or inconclusive);
+    `SeamProbeSender.session_out_of_origin` (the run's manager and every copy) becomes
+    `metrics["session_out_of_origin"]`, which `fuzzlab auto` prints. `fuzzlab auto
+    --auth-origin ORIGIN` (repeatable; bare, in scope; a usage error before any side
+    effect) goes to the run's session manager (FR-SESS-20, R5).
   - **Accepted false positives** (a real login form excluded: a missed finding, never a
     safety risk): Rails `/sessions/new`, Devise `/users/sign_in`, `/admin/login`,
     `/account/login`, `/my-account`, a login button valued `Save`, and bWAPP's

@@ -41,6 +41,11 @@ class Probe:
     followed: Probe | None = field(default=None, repr=False)
     prg: str | None = None
     url: str | None = None                     # set on a follow-up: the URL it fetched
+    #: How this probe's session differed from the run's, when it did (FR-SESS-20, O2):
+    #: ``"anonymous (out of origin)"`` -- the sender sent it without the session because
+    #: its origin is not one of the session's. The oracle carries it into the verdict's
+    #: ``evidence["session"]``; greybox into the attempt's features.
+    session: str | None = None
 
     @property
     def follow_up_sends(self) -> int:
