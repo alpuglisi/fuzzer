@@ -4,6 +4,31 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (test suite: measured, then cut from about 68 min; BUG-0142, BUG-0143, BUG-0144)
+- **Why:** the full suite took about 68 min (parallel 7 min + serial 61 min) and gated
+  every push. It was measured instead of assumed. One Laravel live boot took 52 s, of
+  which 51.6 s was `composer install` of the same locked dependencies. Django rebuilt a
+  pinned venv on every boot. Collecting the live-boot files took 121 s of repeated
+  network probes. The serial pass existed because live-boot tests failed under
+  concurrency, and that failure was a real defect: a boot accepted any process on its
+  port as its own server (BUG-0143).
+- **What:**
+  - **Pinned dependencies once per host** (Laravel `vendor/`, Django venv; locked,
+    atomic, keyed), with per-process availability checks (CC-LAB-0256, FR-LAB-173).
+  - **A boot completes only when the server owns its port**, and a taken port is
+    retried (`procutil.start_server_on_free_port`; CC-CORE-0057, CC-LAB-0257,
+    FR-CORE-41, FR-LAB-174). It covers 16 sites and has an AST guard. The BUG-0130
+    loopback guards now also see the new launcher.
+  - **A racy group-kill test** now uses its documented setup (BUG-0144).
+  - **`scripts/verify_change.py` runs every file in one parallel pass**; a file is
+    serial only with a recorded, measured reason.
+  - New rules PA-0148..PA-0150; shared primitives SP-31..SP-33.
+- **Measured:**
+  - former serial pass: 61 min 28 s serially, then 38 min 45 s with the caches, then
+    about 14 min 20 s in parallel (two consecutive runs, 1716 passed, 0 failed);
+  - warm Laravel boot: 3.05 s (was 27–52 s);
+  - Laravel collection: 10 s (was 121 s).
+
 ## 2026-10-15 (process: progress governance for autonomous orchestration, BUG-0141)
 - **Why:** an orchestrating session ran about 15 hours (2026-10-14 17:57 → 10-15 09:01 UTC) on
   review rounds, self-opened follow-ups and a fix chain. Confirmed Juice Shop findings per

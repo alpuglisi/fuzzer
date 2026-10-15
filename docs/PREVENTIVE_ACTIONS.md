@@ -2069,3 +2069,45 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      progress with the goal before the next dispatch; the SessionStart hook prints the
      report for this. (from BUG-0141)
   - Enforced by: tests/test_orchestration_guard.py::test_after_a_compaction_the_session_is_shown_the_goal
+
+- **PA-0148** — **Measure a slow step before you call it inherent; do invariant setup once.**
+  1. **Install or probe invariant setup once and reuse it.** This covers anything
+     derived only from a pinned input (a locked dependency install, a pinned
+     environment, a capability probe). Reuse it under a lock, publish it atomically
+     with a completion marker, and key it by everything it depends on. Never repeat it
+     per test, per boot or per module.
+  2. **Break a step that takes more than a few seconds down by phase** (one real boot,
+     timed per subprocess) before anyone accepts it or plans around it. "Live boots are
+     slow" was accepted for days; one measurement showed 51.6 s of a 52 s boot was a
+     reinstall.
+  3. **Keep a cache layer away from the logic its own tests drive.** BUG-0142's first
+     attempt cached the probes and broke their tests: cache the availability check,
+     not the probe.
+
+  (from BUG-0142)
+  - Enforced by: tests/test_live_boot_vendor_cache.py::test_the_harness_never_runs_a_per_boot_install, tests/test_live_boot_vendor_cache.py::test_the_django_harness_never_builds_a_per_boot_environment, tests/test_live_boot_vendor_cache.py::test_each_toolchain_check_runs_once_per_process_and_its_probe_stays_testable, tests/test_live_boot_vendor_cache.py::test_an_interrupted_build_is_rebuilt_not_trusted
+
+- **PA-0149** — **A server is ready only when its own process listens on its port.**
+  1. **Prove ownership.** Start servers through `procutil.start_server_on_free_port`,
+     or wait with `procutil.wait_until_listening`. A bare connect is never a boot check:
+     it also succeeds against another process that holds the port.
+  2. **Reproduce a concurrency-only failure before setting it aside.** A failure seen
+     only under concurrency or load is either reproduced deterministically, or tied to
+     a specific shared resource (a port, a file, a process group). A WATCH note is not
+     an outcome, and neither is a re-run.
+  3. **"Start and wait for a server" is a shared primitive** (SP-31): one owner, one
+     guard.
+
+  This strengthens PA-0130, which checked a server's sockets but accepted their
+  absence, and PA-0135. (from BUG-0143)
+  - Enforced by: tests/test_server_port_ownership.py::test_every_started_server_is_checked_for_owning_its_port, tests/test_server_port_ownership.py::test_the_guard_catches_a_bare_connect_boot, tests/test_server_port_ownership.py::test_a_port_held_by_another_process_is_never_taken_for_the_server, tests/test_server_port_ownership.py::test_the_go_harness_never_boots_against_another_process, tests/test_loopback_listeners.py::test_a_free_port_launch_is_checked_like_any_other
+
+- **PA-0150** — **Assert exact counts or orders only for actions the test alone performs.**
+  When another legitimate actor can act on the same objects (a supervisor, a reaper, a
+  server, the kernel), the test does one of two things:
+  - it removes that actor, by modelling the function's documented use;
+  - or it asserts the outcome (all gone, nothing else touched) instead of the count.
+
+  This strengthens PA-0135 from wall-clock ratios to any scheduling-dependent oracle.
+  (from BUG-0144)
+  - Enforced by: tests/test_procutil.py::test_kill_process_group_kills_exactly_the_recorded_group

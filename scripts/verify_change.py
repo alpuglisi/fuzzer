@@ -27,8 +27,8 @@ What it does (see ``docs/MULTI_AGENT_ORCHESTRATION.md`` section 2 and ``CLAUDE.m
       changed ``conftest.py`` selects the whole suite.
 
 3. Splits the list into a parallel pass (``pytest -n <workers> --dist loadfile``) and a
-   serial pass (live-boot, timing, procutil, multitarget, browser-heavy files: the
-   maintained ``SERIAL_FILES`` list plus any ``*live_boot*`` / ``*multitarget*`` file).
+   serial pass (only files listed in ``SERIAL_FILES`` with a measured reason; empty
+   since BUG-0142/BUG-0143, when every file was shown to pass in parallel).
 4. Runs the passes one pytest process at a time, with ``FUZZLAB_REQUIRE_BROWSER``,
    ``FUZZLAB_REQUIRE_LINT`` and ``FUZZLAB_REQUIRE_NETNS`` set, after waiting for any
    other pytest on the host to finish (concurrent load has produced false failures).
@@ -84,118 +84,19 @@ EXPLICIT_GUARDS: tuple[str, ...] = (
     "tests/test_packaging.py",
 )
 
-# Files that must run in the serial pass: live boots, wall-clock timing, process
-# lifecycle (procutil), multitarget labs, and browser-heavy suites. Carried over from
-# the verification runs of BUG-0125..BUG-0139. Any file whose name contains
-# ``live_boot`` or ``multitarget`` is serial even when not listed.
-SERIAL_FILES: tuple[str, ...] = (
-    "tests/test_corpus_validation_sandbox.py",
-    "tests/test_destructive_send_gate.py",
-    "tests/test_features_golden.py",
-    "tests/test_forms_phase2.py",
-    "tests/test_fuzzer_seam.py",
-    "tests/test_guarded_navigation.py",
-    "tests/test_identifier_predicate.py",
-    "tests/test_lab_cross_app_navigability.py",
-    "tests/test_labgen_conformance_live_boot.py",
-    "tests/test_labgen_conformance_live_boot_mariadb.py",
-    "tests/test_labgen_conformance_live_boot_probe.py",
-    "tests/test_labgen_conformance_tier1.py",
-    "tests/test_labgen_conformance_tier2.py",
-    "tests/test_labgen_django_live_boot_phase_b.py",
-    "tests/test_labgen_django_live_boot_picktrail.py",
-    "tests/test_labgen_django_live_boot_picktrail_comments.py",
-    "tests/test_labgen_django_live_boot_picktrail_explore.py",
-    "tests/test_labgen_django_live_boot_picktrail_inbox.py",
-    "tests/test_labgen_django_live_boot_picktrail_link_preview.py",
-    "tests/test_labgen_django_live_boot_picktrail_settings.py",
-    "tests/test_labgen_django_live_boot_single_shape.py",
-    "tests/test_labgen_django_navigability_live_boot.py",
-    "tests/test_labgen_expedia_trip_restore_live_boot.py",
-    "tests/test_labgen_go_live_boot.py",
-    "tests/test_labgen_go_net_http_navigability_live_boot.py",
-    "tests/test_labgen_header_injection_circlefeed_live_boot.py",
-    "tests/test_labgen_header_injection_live_boot.py",
-    "tests/test_labgen_identifier_sqli_assertion.py",
-    "tests/test_labgen_identifier_sqli_oracle.py",
-    "tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py",
-    "tests/test_labgen_mass_assignment_live_boot.py",
-    "tests/test_labgen_navigability_live_boot.py",
-    "tests/test_labgen_node_bff_app.py",
-    "tests/test_labgen_node_bff_multitarget.py",
-    "tests/test_labgen_node_meadowmart_navigability_live_boot.py",
-    "tests/test_labgen_php_laravel_access_control_live_boot.py",
-    "tests/test_labgen_php_laravel_booking_multitarget.py",
-    "tests/test_labgen_php_laravel_harder_shapes.py",
-    "tests/test_labgen_php_laravel_huddlehub_multitarget.py",
-    "tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py",
-    "tests/test_labgen_redos.py",
-    "tests/test_labgen_ruby_rails_insecure_deserialization_live_boot.py",
-    "tests/test_labgen_ruby_rails_live_boot.py",
-    "tests/test_labgen_ruby_rails_mass_assignment_live_boot.py",
-    "tests/test_labgen_ruby_rails_navigability_live_boot.py",
-    "tests/test_labgen_ruby_rails_webhook_signature_live_boot.py",
-    "tests/test_labgen_ruby_rails_whole_app_live_boot.py",
-    "tests/test_labgen_spel_injection_live_boot.py",
-    "tests/test_labgen_spring_boot_absent_input_live_boot.py",
-    "tests/test_labgen_spring_boot_account_billing_live_boot.py",
-    "tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py",
-    "tests/test_labgen_spring_boot_deserialization_live_boot.py",
-    "tests/test_labgen_spring_boot_deserialization_netflix_profiles_live_boot.py",
-    "tests/test_labgen_spring_boot_expedia_multitarget.py",
-    "tests/test_labgen_spring_boot_live_boot.py",
-    "tests/test_labgen_spring_boot_navigability_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_avatar_upload_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_support_template_preview_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py",
-    "tests/test_labgen_spring_boot_netflix_xxe_live_boot.py",
-    "tests/test_labgen_spring_boot_subscription_price_integrity_live_boot.py",
-    "tests/test_labgen_spring_boot_trackernest_multitarget.py",
-    "tests/test_labgen_spring_boot_xxe_live_boot.py",
-    "tests/test_labgen_ssrf_live_boot.py",
-    "tests/test_labgen_webhook_signature_live_boot.py",
-    "tests/test_live_boot_cleanup.py",
-    "tests/test_loopback_listeners.py",
-    "tests/test_m6_navigation_failures.py",
-    "tests/test_m6_payload_quoting.py",
-    "tests/test_ml_batch4.py",
-    "tests/test_multitarget.py",
-    "tests/test_multitarget_category1_combined.py",
-    "tests/test_multitarget_category3_combined.py",
-    "tests/test_multitarget_category4.py",
-    "tests/test_multitarget_category5_combined.py",
-    "tests/test_multitarget_ruby_rails_forgecart.py",
-    "tests/test_mutation_live.py",
-    "tests/test_navigation_aborts.py",
-    "tests/test_no_ml.py",
-    "tests/test_oracle.py",
-    "tests/test_oracle_oob.py",
-    "tests/test_oracle_redos.py",
-    "tests/test_oracle_scheduler.py",
-    "tests/test_oracle_strategies_price_integrity_live_boot.py",
-    "tests/test_oracle_strategies_unrestricted_file_upload_live_boot.py",
-    "tests/test_oracle_vectors.py",
-    "tests/test_plugins_wiring.py",
-    "tests/test_prg_observation.py",
-    "tests/test_probesender.py",
-    "tests/test_procutil.py",
-    "tests/test_procutil_guard.py",
-    "tests/test_proxy_upstream_and_flush.py",
-    "tests/test_sender_conformance.py",
-    "tests/test_session_browser_login.py",
-    "tests/test_session_origin_scope.py",
-    "tests/test_spa_query.py",
-    "tests/test_spa_routes.py",
-    "tests/test_web_findings.py",
-    "tests/test_web_lab.py",
-    "tests/test_web_launcher_browser.py",
-    "tests/test_web_proxy_history.py",
-    "tests/test_web_runner.py",
-)
-SERIAL_NAME_PARTS: tuple[str, ...] = ("live_boot", "multitarget")
+# Files that must run in the serial pass, each with its reason (BUG-0142/BUG-0143).
+# Empty by measurement: the 105 files once kept serial (live boots, multitarget labs,
+# procutil, browser suites) passed in parallel (-n 3 --dist loadfile) on 6e44a3f, in
+# two consecutive runs: 1716 passed, 0 failed, about 14 min 20 s each (38 min 45 s
+# serially). The two causes of their concurrency failures were defects, now fixed:
+# a live boot could run against another test's server (BUG-0143), and a test's exact
+# count raced the supervisor (BUG-0144).
+#
+# A file goes back on this list only with its reason, and only after a reproduced
+# failure under parallel load that cannot be fixed in the test or the code
+# (PA-0149(2)). "It failed once under load" is not a reason.
+SERIAL_FILES: dict[str, str] = {}
+SERIAL_NAME_PARTS: tuple[str, ...] = ()
 
 REQUIRE_FLAGS = {
     "FUZZLAB_REQUIRE_BROWSER": "1",

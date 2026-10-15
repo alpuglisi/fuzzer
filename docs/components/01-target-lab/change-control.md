@@ -3,6 +3,70 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0257 — Live-boot harnesses accept only their own listener and retry a taken port (BUG-0143) (2026-10-15)
+- Change: the five harnesses (`live_boot.py`, `go_live_boot.py`, `django_live_boot.py`,
+  `rails_live_boot.py`, `live_boot_spring_boot.py`) behave the same way:
+  - `_wait_for_boot` returns only when `procutil.port_owner(...) == "ours"`;
+  - it raises `procutil.PortTaken` when another process answers on the port, or when
+    the server exited while the port is answered;
+  - `build()` retries the port pick, start and wait up to `PORT_ATTEMPTS = 3` times.
+- Impact (other components / project):
+  - CORE (CC-CORE-0057).
+  - Every live-boot test runs against its own app. Before, under parallel runs, a test
+    could run against another test's server.
+  - The suite's former serial live-boot files become safe to run in parallel (measured
+    below).
+  - `close()` is unchanged: a retry stops its server itself.
+- Risk: low. Mitigated by the real-Go reproduction (`tests/test_server_port_ownership.py`)
+  and by every live-boot file passing on the change.
+- Deliverables:
+  - [x] the five harnesses — done
+  - [x] FR-LAB-174 — done
+- Effectiveness (assessed 2026-10-15): `test_multitarget_category4`'s concurrent-load
+  failure (a connection reset from the wrong server) does not occur in the two parallel
+  runs of the former serial list on `6e44a3f`; see the CHANGELOG entry.
+
+### CC-LAB-0256 — Live boots install their pinned dependencies once per host; toolchain checks run once per process (BUG-0142) (2026-10-15)
+- Change:
+  - **Laravel:** `live_boot.cached_vendor()` runs one real
+    `composer install --no-scripts` per key (`composer.json`, `composer.lock`, and the
+    php and composer versions). It works under an exclusive file lock, builds in a
+    scratch directory, and publishes by rename plus a `complete` marker.
+    `materialize_vendor()` hard-links the package files into each app and copies
+    `vendor/composer/` and `autoload.php`. `build()` then runs
+    `composer dump-autoload --optimize`, which also runs the post-autoload-dump scripts
+    as before.
+  - **Django:** `django_live_boot.cached_venv()` builds the pinned venv once per pin and
+    interpreter, at its final path under a lock, and uses it only once `complete`
+    exists.
+  - **Probes:** the five `*_available()` checks are `functools.lru_cache`d; the probes
+    themselves stay uncached.
+  - **Cache location:** `$XDG_CACHE_HOME`, or `~/.cache/fuzzlab/{laravel-vendor,django-venv}`.
+    Overridable with `FUZZLAB_LARAVEL_VENDOR_CACHE` and `FUZZLAB_DJANGO_VENV_CACHE`.
+- Impact (other components / project):
+  - **Callers:** live-boot tests only; no product code calls the harnesses' build.
+  - **Tests that drive the probes** (`test_labgen_conformance_live_boot_probe.py`, found
+    by running the suite after a truncated search had missed it): the first attempt
+    cached the probes and broke two of them. The cache was moved to the availability
+    layer, pinned by a test.
+  - **Disk:** one 409 MB `vendor/` and one venv per key, shared, instead of one per
+    boot (temporary).
+  - **Spring Boot** (`mvn package`, about 4 s, app-specific code) and **Go** (`go build`)
+    are not invariant: unchanged.
+- Risk: low-medium.
+  - A shared cache could be corrupted by one app. Only the files `dump-autoload`
+    rewrites are per app (copied); package files are hard-linked and never written at
+    run time; the venv is only read.
+  - An interrupted build is never trusted (no `complete` marker); this is tested.
+- Deliverables:
+  - [x] caches, tests — done
+  - [x] BUG-0142, PA-0148, ERROR_LOG, FR-LAB-173, SP-32/33 — done
+- Effectiveness (assessed 2026-10-15):
+  - warm Laravel boot: 3.05 s (was 27–52 s);
+  - `test_labgen_django_live_boot_phase_b.py`: 8.7 s (was 57 s);
+  - collecting the Laravel live-boot files: 10 s (was 121 s);
+  - serial pass: 38 min 45 s (was 61 min 28 s), before the parallel split (CHANGELOG).
+
 ### CC-LAB-0255 — Every lab server the harnesses and tests launch binds loopback, checked on its real sockets (BUG-0130) (2026-10-14)
 - Change:
   - **Harnesses:** `live_boot_spring_boot.py` adds `--server.address=127.0.0.1` (Spring

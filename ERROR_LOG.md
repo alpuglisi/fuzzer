@@ -18,6 +18,24 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Test harness: a live boot accepted another process on its port as its own server (fixed, BUG-0143/PA-0149)
+- **Symptom:** run in parallel, `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed with `ConnectionResetError` probing the Twitch clone. It had failed the same way twice on 10-14 and was parked as a WATCH item.
+- **Root cause:** all 5 live-boot harnesses and 11 test-side server starts picked a free port, released it, then accepted any successful connect as "booted". Reproduced deterministically: with a stand-in server on the port, the Go harness booted "successfully" and its URL answered the stand-in.
+- **Remediation:** `procutil.port_owner`, `wait_until_listening` and `start_server_on_free_port` check ownership through the server tree's own sockets and retry a taken port. All 16 sites were converted. An AST guard flags the 16 pre-fix sites; the BUG-0130 loopback guards now also see the new launcher. See `docs/bugs/BUG-0143-a-booted-server-was-never-checked-to-own-its-port.md`.
+- **Status:** Fixed.
+
+## 2026-10-15 — Tests: the group-kill test's exact count raced the supervisor (fixed, BUG-0144/PA-0150)
+- **Symptom:** `test_kill_process_group_kills_exactly_the_recorded_group`: `assert 1 == 3`, 11 of 30 runs under CPU load.
+- **Root cause:** the group ran under the supervisor, which kills the group's remaining members when the leader dies. The function was correct; the count raced.
+- **Remediation:** the test uses a caller-owned group (the documented use) plus a bystander that must survive; 30 of 30 runs under load. See `docs/bugs/BUG-0144-group-kill-test-raced-the-supervisor.md`.
+- **Status:** Fixed.
+
+## 2026-10-15 — Test suite: live boots reinstalled pinned dependencies on every boot (fixed, BUG-0142/PA-0148)
+- **Symptom:** the full suite took about 68 min (serial pass 61 min 28 s).
+- **Root cause:** measured on one boot: `composer install` took 51.6 s of a 52 s Laravel boot; Django built a venv and pip-installed per boot (about 8 s of 10 s). The 5 toolchain network probes re-ran in every importing module (121 s to collect the Laravel files).
+- **Remediation:** a per-host Laravel `vendor/` and Django venv cache (locked, atomic, keyed by the lock file and interpreter), a per-app autoloader, and the availability checks cached per process. Serial pass: 61:28 to 38:45; warm Laravel boot 3.05 s; Django test file 57 s to 8.7 s; collection 121 s to 10 s. A first attempt that cached the probes broke two probe tests; my consumer search had been cut off by `head`. Fixed. See `docs/bugs/BUG-0142-live-boot-tests-reinstall-dependencies-every-boot.md`.
+- **Status:** Fixed.
+
 ## 2026-10-15 — Orchestration: about 15 hours of autonomous work without progress on the goal and without telling the user (fixed, BUG-0141/PA-0141..0147)
 - **Symptom:** from 2026-10-14 17:57 to 2026-10-15 09:01 UTC, the orchestrating session dispatched review rounds, follow-ups and merge fixes:
   - 39 commits, 42 review requests, 82 review-fix items and 6 bug numbers;

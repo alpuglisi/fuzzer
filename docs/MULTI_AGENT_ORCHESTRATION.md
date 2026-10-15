@@ -62,8 +62,10 @@ Before merging any lane's work:
     import-based list misses them;
   - it runs **one pytest process at a time** (it waits for any other pytest on the
     host), with `FUZZLAB_REQUIRE_BROWSER=1`, `FUZZLAB_REQUIRE_LINT=1` and
-    `FUZZLAB_REQUIRE_NETNS=1`, and runs live-boot, timing, procutil, multitarget and
-    browser-heavy files in a **serial pass** after the parallel one;
+    `FUZZLAB_REQUIRE_NETNS=1`, and runs every file in one parallel pass. A file goes to
+    the serial pass only with a recorded reason, after a reproduced failure under
+    parallel load that cannot be fixed (BUG-0143; the former 105 serial files pass in
+    parallel);
   - it prints the file count and passed / failed / skipped, and records and stops
     only its own processes (never kill by name or pattern).
 

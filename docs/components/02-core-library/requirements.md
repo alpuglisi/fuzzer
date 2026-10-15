@@ -388,6 +388,18 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
+- **FR-CORE-41** *(a started server is up only when it owns its port; `CC-CORE-0057`,
+  2026-10-15, BUG-0143).*
+  - `procutil.start_server_on_free_port` picks a loopback port, starts the server, and
+    returns only once the server's own process tree listens on that port
+    (`port_owner(h, port) == "ours"`).
+  - A port another process answers on raises `PortTaken` and is retried on a fresh port
+    (3 attempts). A server that exits first, or misses its timeout, raises
+    `ServerDidNotListen` with its output.
+  - A bare connect is never a boot check: it also reaches another process holding the
+    port.
+  - Enforced by: `tests/test_server_port_ownership.py` (ownership, retry, exit, the
+    real-Go reproduction, and an AST guard over every port-picking server start).
 - **FR-CORE-40** *(which document a URL loads; `CC-CORE-0055`, 2026-10-15, BUG-0138
   review).* `core.urls.document_key(url)` is the canonical origin, path and query of a URL,
   fragment dropped: two URLs load the same document exactly when their keys are equal

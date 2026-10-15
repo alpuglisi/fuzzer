@@ -6268,6 +6268,22 @@ lane) can submit a payload as
   container-naming scheme). The project name is read from `compose.yaml`'s `name:` key
   (`PA-0059`(2)). A service name is validated against a strict identifier pattern
   before it reaches any compose or engine command line. Consumer: `FR-UI-15`.
+- **FR-LAB-173** *(pinned live-boot dependencies are installed once per host;
+  `CC-LAB-0256`, 2026-10-15, BUG-0142).*
+  - The Laravel harness's locked `vendor/` and the Django harness's pinned venv are
+    built by a real install the first time on a host, under an exclusive lock.
+  - They are published only on success (a `complete` marker) and keyed by everything
+    they depend on (the lock file or pins, and the toolchain or interpreter version).
+  - They are reused by every later boot. Each app gets its own optimized autoloader;
+    nothing an app writes reaches the shared copy.
+  - The five toolchain availability checks run their network probe once per process.
+  - Enforced by: `tests/test_live_boot_vendor_cache.py`.
+- **FR-LAB-174** *(a live boot runs against its own server; `CC-LAB-0257`, 2026-10-15,
+  BUG-0143).* Every live-boot harness completes a boot only when its server's own
+  process listens on the chosen port (`procutil.port_owner`), and retries a port taken
+  by another process. Enforced by
+  `tests/test_server_port_ownership.py::test_the_go_harness_never_boots_against_another_process`
+  and the ownership guard.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

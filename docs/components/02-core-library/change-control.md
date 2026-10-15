@@ -3,6 +3,54 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0057 — `procutil`: a started server is up only when its own process listens on its port (BUG-0143) (2026-10-15)
+- Change: `fuzzlab/procutil.py` gains:
+  - `port_owner(h, port)`: `ours`, `taken` or `none`, read from the server tree's own
+    listening sockets (`listeners`, BUG-0130), with one connect to tell `taken` from
+    `none`;
+  - `wait_until_listening(h, port, timeout=)`: raises `PortTaken` or
+    `ServerDidNotListen`, the latter with the server's output;
+  - `free_port()`;
+  - `start_server_on_free_port(argv_for, boot_timeout=, env_for=, attempts=3, **kw)`:
+    pick a port, start, wait for its own listener, and retry a taken port on a fresh
+    one.
+
+  It is the one owner of "start a server and know it is up" (SP-31, PA-0003). There
+  are two new exceptions, both `ProcUtilError`.
+- Impact (other components / project):
+  - **LAB** (CC-LAB-0257): the five live-boot harnesses use `port_owner` and
+    `PortTaken`.
+  - **Tests:** eleven server starts use `start_server_on_free_port`.
+  - **Consumers checked from the code, not from memory** (`grep -rln "start_server("`,
+    all 23 modules, none truncated):
+    - 16 sites converted;
+    - 2 allow-listed in the new guard with reasons (a server that reports its own
+      address; one that prints READY after its bind);
+    - 5 out of scope (`proxy/server.py` and `web/runner.py` use other launchers;
+      `test_procutil.py`'s lifecycle tests and the two guard files pick no port).
+  - **Guards that pin `start_server`:**
+    - `test_loopback_listeners`' two BUG-0130 rules recognise only `start_server` and
+      `astart_server`. Without a change, the 11 converted sites would have left both
+      rules silently. The rules now also take `start_server_on_free_port` (and
+      `env_for=`), with synthetic offenders.
+    - `procutil.py`'s allowlisted unpinned launches: 2 → 3 (the delegating call),
+      with the reason.
+    - `test_procutil_guard`: unchanged here (no new spawn primitive).
+  - No product behaviour change: only harnesses and tests call these.
+- Risk: low-medium.
+  - `port_owner` reads `/proc` socket tables, the same code BUG-0130 relies on at every
+    boot.
+  - A server whose listener sits outside the supervisor's tree would never be "ours".
+    None of the 16 sites has one; all were booted.
+  - Mitigated by: real-server tests (a foreign holder, a retry, an early exit), the
+    real-Go reproduction, and the AST guard (16/16 pre-fix sites flagged).
+- Deliverables:
+  - [x] procutil API, tests, guard — done
+  - [x] BUG-0143, PA-0149, ERROR_LOG, FR-CORE-41, SP-31 — done
+- Effectiveness (assessed 2026-10-15): the deterministic reproduction that booted the Go
+  harness against a stand-in server now retries and boots the real app. Parallel
+  stability runs of the former serial list are recorded in CC-LAB-0257.
+
 ### CC-CORE-0055 — `core.urls.document_key`: which document a URL loads (origin, path and query) (BUG-0138 review) (2026-10-15)
 - Change: `fuzzlab/core/urls.py` gains `document_key(url)`: the canonical origin, path
   and query of a URL, the fragment dropped. Unlike `url_key` (origin and path only), it

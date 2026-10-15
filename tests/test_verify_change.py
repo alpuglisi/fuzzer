@@ -176,18 +176,27 @@ def test_guard_detection_kinds(synth, tmp_path):
     assert vc.guard_kind(p) is None
 
 
-def test_split_uses_the_maintained_list_and_the_name_rule():
-    files = ["tests/test_procutil.py", "tests/test_x_live_boot.py", "tests/test_y_multitarget.py",
-             "tests/test_lint.py"]
+def test_split_uses_the_maintained_list_and_the_name_rule(monkeypatch):
+    files = ["tests/test_procutil.py", "tests/test_x_live_boot.py", "tests/test_lint.py"]
+    monkeypatch.setattr(vc, "SERIAL_FILES", {"tests/test_procutil.py": "a measured reason"})
+    monkeypatch.setattr(vc, "SERIAL_NAME_PARTS", ("live_boot",))
     parallel, serial = vc.split_passes(files)
     assert parallel == ["tests/test_lint.py"]
-    assert serial == files[:3]
+    assert serial == files[:2]
+
+
+def test_everything_runs_in_parallel_unless_a_reason_is_recorded():
+    """BUG-0142/0143: the former serial files were measured passing in parallel (two runs,
+    0 failures). A file returns to the serial pass only with a stated reason."""
+    files = ["tests/test_procutil.py", "tests/test_x_live_boot.py", "tests/test_y_multitarget.py"]
+    assert vc.split_passes(files) == (files, [])
+    for rel, reason in vc.SERIAL_FILES.items():
+        assert len(reason.strip()) >= 20, f"{rel}: a serial file needs its measured reason"
 
 
 def test_the_maintained_lists_name_real_files():
-    for rel in vc.SERIAL_FILES + vc.EXPLICIT_GUARDS:
+    for rel in list(vc.SERIAL_FILES) + list(vc.EXPLICIT_GUARDS):
         assert (ROOT / rel).is_file(), f"{rel} is listed in scripts/verify_change.py but does not exist"
-    assert len(set(vc.SERIAL_FILES)) == len(vc.SERIAL_FILES)
 
 
 def test_the_real_repository_guards_are_detected():

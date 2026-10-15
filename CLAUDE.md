@@ -32,8 +32,8 @@ that gets forgotten; treat it as part of the change, done in the same commit —
    never a hand-picked list of "relevant" tests. It checks the committed HEAD in a
    detached worktree (refusing a dirty tree), selects every test file that imports a
    changed `fuzzlab` module plus every whole-package guard and every changed test, and
-   runs one pytest at a time with `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`, live-boot and
-   timing files in a serial pass. Keep it green; state its file count and pass/fail/skip
+   runs one pytest at a time with `FUZZLAB_REQUIRE_BROWSER/LINT/NETNS=1`, every file in
+   one parallel pass (a file is serial only with a measured, recorded reason; BUG-0143). Keep it green; state its file count and pass/fail/skip
    counts where you report the change. A failing test is root-caused, never called
    "flaky".
 3. **CHANGELOG.md** — add one dated, high-level line: *what changed and why* (reference the
