@@ -27,16 +27,7 @@ CLASSES = {"B", "T", "W*", "L"}
 
 @pytest.mark.parametrize("key", sorted(tx.PARSERS))
 def test_every_dest_of_every_parser_is_classified_and_no_entry_is_stale(key):
-    dests = set(tx.parser_dests(tx.PARSERS[key]()))
-    classified = set(tx.FLAG_CLASSES[key])
-    pending = set(tx.PENDING.get(key, {}))
-    assert not dests - classified - pending, f"{key}: unclassified {dests - classified}"
-    assert not classified - dests, f"{key}: stale entries {classified - dests}"
-    arrived = pending & dests
-    assert not arrived, (f"{key}: {arrived} now exist — move them from PENDING into "
-                         f"FLAG_CLASSES")
-    assert set(tx.FLAG_CLASSES[key].values()) <= CLASSES
-    assert set(tx.PENDING.get(key, {}).values()) <= CLASSES
+    assert tx.classification_problems(key, tx.PARSERS[key]()) == []
 
 
 def test_every_command_with_flags_has_a_parser_and_every_other_says_why():
@@ -48,12 +39,17 @@ def test_every_command_with_flags_has_a_parser_and_every_other_says_why():
     assert set(tx.PARSERS) == set(tx.FLAG_CLASSES)
 
 
-def test_the_guard_catches_an_unclassified_and_a_stale_dest():
-    """PA-0034(2): the coverage rule is proven on synthetic offenders."""
+def test_the_guard_catches_an_unclassified_a_stale_and_an_arrived_pending_dest():
+    """PA-0034(2): the guard itself is proven on synthetic offenders."""
     p = argparse.ArgumentParser()
-    p.add_argument("--new-flag")
-    assert "new_flag" in set(tx.parser_dests(p)) - set(tx.FLAG_CLASSES["report"])
-    assert set(tx.FLAG_CLASSES["report"]) - set(tx.parser_dests(p))   # stale direction
+    p.add_argument("--store")
+    p.add_argument("--run")
+    p.add_argument("--new-flag")                       # unclassified; `json` is stale
+    problems = tx.classification_problems("report", p)
+    assert "unclassified: new_flag" in problems and "stale: json" in problems
+    crawl = tx.PARSERS["crawl"]()
+    crawl.add_argument("--auth-origin")                # BUG-0138's dest arrives
+    assert "pending but present: auth_origin" in tx.classification_problems("crawl", crawl)
 
 
 def test_session_subcommands_are_walked():
@@ -116,7 +112,8 @@ def test_help_is_grouped_working_training_lab_and_wrapped():
     assert order == sorted(order)
     assert out.index("train run <url>") > out.index(tx.TRAINING) > out.index("  report ")
     assert all(len(ln) <= 100 for ln in out.splitlines())
-    assert "Lab-only" in out and "./fuzzlab.db" in out
+    from fuzzlab.core.storepath import DEFAULT_RULE
+    assert "Lab-only" in out and DEFAULT_RULE.split(", else ")[-1] in out
     assert "scan" not in out.split()          # Phase 2: never advertise an unbuilt command
     assert main(["help"]) == 0
 
@@ -128,6 +125,85 @@ def test_an_unknown_command_still_exits_2_with_the_help(capsys):
 
 
 # --- copy_parser ----------------------------------------------------------------------
+
+def action_variants(parser, *, skip=()):
+    """``(action, argv)`` samples for every option of ``parser``: each nargs shape, a
+    ``--flag=value`` form, and a dash-leading value where one can be given (PA-0400(1)).
+    Required options are filled in. Shared with `tests/test_train_cli.py`."""
+    def sample(a):
+        if a.choices:
+            return str(list(a.choices)[-1])
+        return "7" if a.type in (int, float) else "v"
+
+    def required(but):
+        out = []
+        for a in parser._actions:
+            if a.required and a.option_strings and a is not but and a.dest not in skip:
+                out += [a.option_strings[-1], sample(a)]
+        return out
+
+    for a in parser._actions:
+        if (not a.option_strings or isinstance(a, argparse._HelpAction)
+                or a.dest in skip):
+            continue
+        flag, base = a.option_strings[-1], required(a)
+        if a.nargs == 0:
+            shapes = [[flag]]
+        elif isinstance(a, argparse._AppendAction):
+            shapes = [[flag, sample(a), flag, sample(a)], [f"{flag}=-x"]]
+        elif a.nargs == "?":
+            shapes = [[flag], [flag, sample(a)], [f"{flag}=-x"]]
+        elif a.nargs in ("*", "+"):
+            shapes = [[flag, "a", "b"]] + ([[flag]] if a.nargs == "*" else [])
+        else:
+            shapes = [[flag, sample(a)]]
+            if not a.choices and a.type not in (int, float):
+                shapes.append([f"{flag}=-x"])
+        for extra in shapes:
+            yield a, base + extra
+
+
+@pytest.mark.parametrize("key", sorted(k for k in tx.PARSERS if k != "session"))
+def test_a_copy_parses_every_action_exactly_like_its_source(key):
+    """PA-0400(1): copy vs source, over every action of every parser (discovered)."""
+    src = tx.PARSERS[key]()
+    copy = tx.copy_parser(tx.PARSERS[key](), prog="x")
+    n = 0
+    for action, argv in action_variants(src):
+        assert vars(copy.parse_args(argv)) == vars(src.parse_args(argv)), (action.dest,
+                                                                           argv)
+        n += 1
+    assert n >= len([a for a in src._actions if a.option_strings]) - 1
+
+
+@pytest.mark.parametrize("make, problem", [
+    (lambda p: p.add_mutually_exclusive_group().add_argument("--a"), "mutually exclusive"),
+    (lambda p: p.set_defaults(x=1), "set_defaults"),
+    (lambda p: p.add_subparsers().add_parser("s"), "subcommands"),
+])
+def test_a_shape_copy_parser_cannot_carry_is_refused(make, problem):
+    """PA-0400(2): fail closed, never a parser that parses differently."""
+    p = argparse.ArgumentParser(prog="src")
+    make(p)
+    with pytest.raises(tx.CopyError, match=problem):
+        tx.copy_parser(p, prog="x")
+    for kwargs, problem in (({"allow_abbrev": False}, "allow_abbrev"),
+                            ({"prefix_chars": "+"}, "prefix_chars"),
+                            ({"fromfile_prefix_chars": "@"}, "fromfile"),
+                            ({"argument_default": 0}, "argument_default")):
+        with pytest.raises(tx.CopyError, match=problem):
+            tx.copy_parser(argparse.ArgumentParser(**kwargs), prog="x")
+
+
+def test_only_a_single_value_option_can_be_restricted():
+    p = argparse.ArgumentParser()
+    p.add_argument("--opt", nargs="?", const="c")
+    with pytest.raises(tx.CopyError, match="single-value"):
+        tx.copy_parser(p, prog="x", restrict={"opt": ("c",)})
+    q = argparse.ArgumentParser()
+    q.add_argument("--n", type=int, default=1)
+    r = tx.copy_parser(q, prog="x", restrict={"n": (2,)})
+    assert r.parse_args(["--n", "2"]).n == 2          # the source's `type` is kept
 
 def _auto():
     return tx.PARSERS["auto"]()
@@ -202,6 +278,33 @@ def test_the_working_view_allows_only_the_score_budget_order(method, capsys):
     assert f"--budget-method {method} is a training choice" in capsys.readouterr().err
     ns = p.parse_args(["http://x", "--confirm-budget", "5", "--budget-method", "score"])
     assert ns.budget_method == "score" and ns.confirm_budget == 5
+
+
+def test_score_and_rank_in_the_working_view_apply_a_saved_model():
+    """FR-FUZZ-401 (review A4): `--train-on` is refused there, so it is fixed to saved,
+    and `--model-id` (which the engine allows only with saved) is accepted."""
+    from fuzzlab.harness.auto_cli import build_parser
+    p = tx.working_parser("auto", prog="fuzzlab scan")
+    ns = p.parse_args(["http://x", "--score", "--rank", "--model-id", "3"])
+    assert ns.train_on == "saved" and ns.score and ns.model_id == 3
+    assert build_parser().get_default("train_on") == "run"     # the source is untouched
+
+
+def test_store_default_matches_each_commands_parser():
+    """A command flagged `store_default` has an optional --store resolved by storepath;
+    a command whose parser requires --store is never flagged (review A5)."""
+    from fuzzlab.train_cli import build_run_parser
+    effective = {"train run": build_run_parser}
+    for c in tx.COMMANDS:
+        if c.flags is None:
+            continue
+        parser = effective.get(c.name, tx.PARSERS[c.flags])()
+        store = next((a for a in parser._actions if a.dest == "store"), None)
+        if c.store_default:
+            assert store is not None and not store.required, c.name
+        if store is not None and store.required:
+            assert not c.store_default, c.name
+    assert tx.command("train run").store_default
 
 
 def test_the_working_view_keeps_every_working_flag():

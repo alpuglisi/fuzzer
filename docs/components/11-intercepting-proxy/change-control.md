@@ -3,6 +3,25 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0401 — `--export-ca` before any store resolution; `--store ""` is a usage error (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:** store resolution (`_recording`) runs in the dry-run branch, and
+    otherwise after `--export-ca`. `fuzzlab proxy --export-ca --store ""` exports the CA
+    as before.
+  - An explicit `--store ""` without `--export-ca` is now a usage error (PA-0105). It
+    used to mean "do not record", because it was falsy. **This was not recorded in
+    CC-PROXY-0400.**
+  - The `--record` help comes from `storepath.DEFAULT_RULE`.
+  - NFR-PROXY-dry-run gains a "Not yet enforced (BUG-0400)" line.
+- Impact (other components / project): none beyond the proxy CLI.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `proxy/cli.py`; FR-PROXY-400 updated — done
+  - [x] tests: `tests/test_cli_default_store.py::test_proxy_export_ca_comes_before_any_store_resolution`,
+    `::test_proxy_explicit_empty_store_is_a_usage_error` — done
+- Effectiveness (assessed 2026-10-15): resolving before `--export-ca` (a mutation)
+  fails the test. Effective.
+
 ### CC-PROXY-0400 — `proxy --record`: record flow history into the default store (FR-PROXY-400) (2026-10-15)
 - Change:
   - **`proxy/cli.py`:**

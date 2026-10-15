@@ -158,29 +158,72 @@ def test_load_config_never_raises_because_of_the_store():
 
 # --- the suite's own isolation (tests/_store_guard.py) -------------------------------
 
-def test_tests_run_with_the_store_variables_cleared():
+@pytest.fixture(scope="module")
+def env_seen_by_a_module_fixture():
+    """What a module-scoped fixture (set up before any function-scoped one) sees."""
+    return {n: os.environ.get(n) for n in storepath.ENV_NAMES}
+
+
+def test_tests_run_with_the_store_variables_cleared(env_seen_by_a_module_fixture):
+    """Cleared per test, and already at session start (review A9: module- and
+    session-scoped fixtures and their child processes never see a host value)."""
     assert not any(os.environ.get(n) for n in storepath.ENV_NAMES)
+    assert not any(env_seen_by_a_module_fixture.values())
 
 
 def test_the_store_guard_sees_a_new_store_and_a_write_to_an_existing_one(tmp_path):
     from tests._store_guard import store_files
-    assert store_files([tmp_path]) == {}
+    assert store_files(tmp_path) == {}
     deep = tmp_path / "a" / "b"
     deep.mkdir(parents=True)
     (deep / DEFAULT_STORE).write_bytes(b"x")
-    first = store_files([tmp_path])
+    first = store_files(tmp_path)
     assert list(first) == [str(deep / DEFAULT_STORE)]
     (deep / DEFAULT_STORE).write_bytes(b"xy")
     (deep / (DEFAULT_STORE + "-wal")).write_bytes(b"")
-    second = store_files([tmp_path])
+    second = store_files(tmp_path)
     assert second[str(deep / DEFAULT_STORE)] != first[str(deep / DEFAULT_STORE)]
     assert str(deep / (DEFAULT_STORE + "-wal")) in second
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / DEFAULT_STORE).write_bytes(b"")
-    assert str(tmp_path / ".git" / DEFAULT_STORE) not in store_files([tmp_path])
+    assert str(tmp_path / ".git" / DEFAULT_STORE) not in store_files(tmp_path)
+
+
+def test_the_store_guard_never_walks_pytests_temp_base_nor_an_outside_cwd(tmp_path):
+    """BUG-0402: pytest's own temp base (inside the tree) is excluded, and a cwd outside
+    the repository is checked for its own store files only, never walked."""
+    from tests._store_guard import store_files
+    repo, base, outside = tmp_path / "repo", tmp_path / "repo" / "tmpbase", tmp_path / "home"
+    (base / "test_x0").mkdir(parents=True)
+    (outside / "otherproj").mkdir(parents=True)
+    (base / "test_x0" / DEFAULT_STORE).write_bytes(b"")          # a test's own tmp store
+    (outside / "otherproj" / DEFAULT_STORE).write_bytes(b"")     # someone else's store
+    (outside / DEFAULT_STORE).write_bytes(b"")                   # the cwd's own store
+    found = store_files(repo, exclude=[str(base)], cwd=str(outside))
+    assert list(found) == [str(outside / DEFAULT_STORE)]
+
+
+def test_the_default_stays_the_shared_project_store():
+    """The literal the UI has always used (pinned: a move is the owner's decision, §4.8)."""
+    assert DEFAULT_STORE == "fuzzlab.db"
+    assert storepath.DEFAULT_RULE.endswith(f"./{DEFAULT_STORE}")
+
+
+def test_check_writable_refuses_a_fifo(tmp_path):
+    fifo = tmp_path / "pipe.db"
+    os.mkfifo(fifo)
+    with pytest.raises(StorePathError, match="not a store file"):
+        check_writable(resolve(str(fifo), environ={}))
 
 
 def test_gitignore_ignores_a_default_store_at_any_depth():
+    import shutil
+    import subprocess
     root = Path(__file__).resolve().parents[1]
-    lines = (root / ".gitignore").read_text().splitlines()
-    assert DEFAULT_STORE in lines            # no leading slash: every directory
+    if shutil.which("git") is None or not (root / ".git").exists():
+        pytest.skip("needs a git checkout")
+    paths = [DEFAULT_STORE + s for s in ("", "-journal", "-wal", "-shm")]
+    paths += [f"lab/{DEFAULT_STORE}", f"docs/sub/{DEFAULT_STORE}-journal"]
+    r = subprocess.run(["git", "check-ignore", "--no-index", *paths], cwd=root,
+                       capture_output=True, text=True)
+    assert sorted(r.stdout.split()) == sorted(paths)

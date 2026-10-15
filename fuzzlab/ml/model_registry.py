@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 from typing import Sequence
 
+from fuzzlab.core.modelinfo import trained_on
+
 _ABSENT = object()
 
 
@@ -205,8 +207,7 @@ def list_models(store) -> list[dict]:
             out.append(item)
             continue
         picked = {k: calibration[k] for k in LISTING_KEYS if k in calibration}
-        trained_on = picked.get("trained_on")
-        item["trained_on"] = trained_on if isinstance(trained_on, str) else None
+        item["trained_on"] = trained_on(picked)
         if "run_id" in picked:
             scope = _int_scope(picked)
             item["scope"] = "all runs" if picked["run_id"] is None else (

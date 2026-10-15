@@ -1086,7 +1086,8 @@ rewards) derives from it.
     calibrated.
   - Each appears in a stage's recorded config only when set, so a run without them
     records exactly the config it always did.
-  - **`fuzzlab reveal-holdout --store S --run N`** prints a run's sealed holdout
+  - **`fuzzlab reveal-holdout [--store S] --run N`** (also `fuzzlab train
+    reveal-holdout`; `--store` optional since FR-FUZZ-400) prints a run's sealed holdout
     metrics and the store-wide reveal count for that membership version (core only, no
     traffic, no ML package needed); "nothing to reveal" records no reveal. Not in the
     web launcher, so a reveal is always a deliberate command.
@@ -1301,16 +1302,21 @@ rewards) derives from it.
     - The target is the first argument, or `--base-url`; exactly one of them.
     - `--store` is optional (FR-CORE-400).
     - It refuses (exit 2, before anything is created) a run with no training or
-      benchmark choice, detected by presence on the command line:
-      - `--ground-truth`, `--holdout`, `--calibrate`, `--hybrid`, `--rank-objective`,
-        `--budget-seed`;
-      - a non-`score` `--budget-method`;
-      - `--mode manual`, `--points ground-truth`;
-      - `--train-on run|earlier`;
-      - `--score`/`--rank`, unless `--train-on saved`.
+      benchmark choice **that takes effect**, detected by presence on the command line
+      (`training_choices`):
+      - `--ground-truth`, `--points ground-truth`, `--mode manual`, `--holdout`,
+        `--hybrid`;
+      - `--score`/`--rank`, unless `--train-on saved`;
+      - `--calibrate` other than `none`;
+      - `--rank-objective` other than `pointwise`;
+      - with `--confirm-budget`: `--budget-seed`, or a non-`score` `--budget-method`.
+
+      `--train-on` alone and the working defaults never count (review A1).
+    - The checks run in this order: an empty `--store` or empty target; then D-9; then
+      `--dry-run`; then `--authorized`.
     - It refuses a run without `--authorized`.
-    - The user's argv is forwarded to the engine verbatim. No usage error leaves a store
-      file or a run row.
+    - The user's argv is forwarded to the engine verbatim, except that the resolved store
+      goes last (BUG-0401). No usage error leaves a store file or a run row.
     - It prints the store, and for `--holdout` a store-qualified `train reveal-holdout`
       hint.
   - **`train models`** lists saved models (FR-ML-400).
@@ -1330,7 +1336,14 @@ rewards) derives from it.
     and `--budget-method` is `score` only.
   - **L:** needs our instrumented lab.
 
-  A working command built with `working_parser` refuses every T and L flag by name
+  `copy_parser` copies actions, never re-types them. It refuses (`CopyError`) any
+  source shape it cannot carry faithfully: mutually exclusive groups, `set_defaults`,
+  `argument_default`, `allow_abbrev=False`, other prefix characters, fromfile prefixes,
+  subcommands, or a restricted non-single-value option. A discovered round trip over
+  every action of every parser proves each copy parses exactly like its source
+  (PA-0400). In the working view, `--train-on` is fixed to `saved`, so `--score`/`--rank`
+  apply a saved model. A working command built with `working_parser` refuses every T
+  and L flag by name
   (exit 2, the value consumed, naming `fuzzlab train run`; ground truth "is never part
   of a working run"). It restricts W\* values. The classification guard fails on an
   unclassified, stale or arrived-pending dest.
@@ -1387,6 +1400,7 @@ rewards) derives from it.
   C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_fuzz_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_auto_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_greybox_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_fuzz_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_auto_dry_run_reports_plan_and_sends_nothing`, `tests/test_cli_dry_run.py::test_greybox_run_dry_run_reports_plan_and_sends_nothing`
   - Enforced by (through `fuzzlab train run`; CC-FUZZ-0400): `tests/test_train_cli.py::test_train_run_dry_run_sends_nothing`, `tests/test_train_cli.py::test_a_dry_run_creates_nothing_and_names_the_store`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
 - **NFR-FUZZ-response-fidelity** *(`CC-FUZZ-0043`, `BUG-0044`/`PA-0046`)*
   Every sender that builds a `Probe` (or a timing measurement) a
   `ConfirmationStrategy`/timing oracle inspects as "the real target's

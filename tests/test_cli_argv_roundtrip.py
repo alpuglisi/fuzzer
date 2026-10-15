@@ -73,7 +73,7 @@ def _sample(action) -> str:
     if action.choices:
         return str(list(action.choices)[-1])
     if action.type in (int, float):
-        return "3"
+        return "7"                   # never a parser default here (review B11: fuzz --sigma 3)
     return _URL if "url" in action.dest or action.dest == "start" else "v"
 
 

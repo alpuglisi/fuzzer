@@ -3,6 +3,17 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0400 — Note: NFR-CRAWL-dry-run's exact-argv promise is not yet enforced (BUG-0400; documentation only) (2026-10-15)
+- Change: NFR-CRAWL-dry-run gains a "Not yet enforced" line. The shared dry-run display
+  (`web/runner.build_flags`) prints `--submit-spa-forms` lists as a Python repr and drops
+  a bare `--follow-selector-forms` (BUG-0400, open, the UI lane's fix). Pinned by strict
+  xfails in `tests/test_cli_argv_roundtrip.py`.
+- Impact (other components / project): none; no code changed.
+- Risk (level; mitigation or accepted-risk justification): none.
+- Deliverables:
+  - [x] NFR line — done
+- Effectiveness (assessed 2026-10-15): n/a (documentation).
+
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the
   session's cookies minus those a browser login took from the app's own jar

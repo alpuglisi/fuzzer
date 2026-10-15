@@ -105,7 +105,8 @@ The owner's request (2026-10-15): the CLI is too complicated. They want:
 - **D-4.** `flow-anomaly` becomes `train flow-anomaly`.
 - **D-5.** `train models` lists saved models. It is label-free and uses an explicit
   allowlist (§6.4).
-- **D-9.** `train run` must carry at least one training or benchmark choice. Otherwise
+- **D-9.** `train run` must carry at least one training or benchmark choice **that
+  takes effect** (amended after the code review, Appendix F, F1). Otherwise
   it exits 2 before any side effect and names `fuzzlab auto` (Phase 2: `fuzzlab
   scan`). Choices are detected by **presence on the command line**, never by comparing
   values with defaults (copied training dests get a sentinel default). A choice is one
@@ -819,3 +820,33 @@ session brief's "proposed as".
 - N6: mechanism name (applied with A-R3-6).
 - N7: a default store is created with the umask's mode, as any explicit path today (no regression);
   stated in FR-CORE-400 and tied to the §4.8 per-user follow-up (private mode at creation).
+
+## Appendix F: post-code review (reviewers A and B), reconciled fix list
+
+Both reviewers concluded "approve with fixes" with no blocking findings. Every fix below
+is built and tested (CC-*-0401).
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| F1 | A1, B12 | **D-9 amended:** only choices that **take effect** count. `--train-on` alone, `--calibrate none` and `--rank-objective pointwise` do not. The budget seed or order counts only with `--confirm-budget` (§2.1 D-9 is superseded on this point). |
+| F2 | A2, B1 | The store guard walks only the repository, minus pytest's basetemp. An outside cwd has only its own files checked (BUG-0402). |
+| F3 | A3, B3 | `copy_parser` fails closed (`CopyError`). Discovered copy-vs-source and forwarding round trips run over every action. |
+| F4 | A4 | The working view fixes `train_on=saved`, so `--score`/`--rank` apply a saved model. |
+| F5 | A5 | `train run` is `store_default`, with a consistency test. |
+| F6 | A6 | An empty `<url>` or `--base-url` is a usage error. |
+| F7 | A7, B12 | Ordering. In `train run`, an empty `--store` fails first. In the proxy, `--export-ca` comes before store resolution. The FR, CC and design texts are aligned. |
+| F8 | A8, B12 | `train run --help` shows `<url>` first, the store help, and the own-store advice. |
+| F9 | A9 | The store variables are cleared in `pytest_configure`, which a module-fixture test proves. |
+| F10 | A10 | The reveal hint is shell-quoted and printed only on success. |
+| F11 | A11 | `.gitignore` covers `fuzzlab.db-journal`; checked with `git check-ignore`. |
+| F12 | A12, B7 | The suite counts are recorded in CC-FUZZ-0401. |
+| F13 | B2 | The resolved store is always forwarded last (BUG-0401). |
+| F14 | B4 | Tests that D-9 runs before `--authorized` and before `--dry-run`. |
+| F15 | B5 | The "never required" claims are scoped to the commands that resolve the store. |
+| F16 | B6 | UI-lane visibility: the UI requirements §8 lists BUG-0400 and the follow-ups. NFR "Not yet enforced (BUG-0400)" lines are added to the CRAWL, AUD, FUZZ, MUT and PROXY dry-run NFRs. |
+| F17 | B8 | BUG-0400 gains the PA-0036 failure analysis. |
+| F18 | B9 | Help strings come from `DEFAULT_STORE` (`DEFAULT_RULE`). The default literal is pinned. |
+| F19 | B10 | `core/modelinfo.trained_on` is shared by `report` and `list_models`, and tested with real run, earlier and saved producers. |
+| F20 | B11 | The guard is tested via `classification_problems` on synthetic offenders. Also: a FIFO `check_writable` test, `git check-ignore`, and a non-default numeric sample. |
+| F21 | B12 | Wording fixed: four shapes in BUG-0400, four help groups in the README, and the MUT, PROXY and FR-FUZZ-36 texts. |
+| — | the clean-tree suite | **BUG-0403:** `train models` now goes through `import_ml`. PA-0403 puts the path-scanning guards in every verification set. |

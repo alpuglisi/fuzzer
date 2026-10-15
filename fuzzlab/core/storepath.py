@@ -38,6 +38,14 @@ ENV_NAMES = ("FUZZLAB_STORE", "FUZZLAB_STORE_PATH")
 #: The source label of the default.
 DEFAULT_SOURCE = "default"
 
+#: How the default is stated in help text (built from :data:`DEFAULT_STORE`, never restated).
+DEFAULT_RULE = f"$FUZZLAB_STORE, else $FUZZLAB_STORE_PATH, else ./{DEFAULT_STORE}"
+
+
+def store_help(what: str) -> str:
+    """``--store`` help for a command: ``what`` plus the default rule."""
+    return f"{what} (default: {DEFAULT_RULE})"
+
 
 class StorePathError(ValueError):
     """A store path that cannot be used, said in a sentence a CLI prints as a usage error."""

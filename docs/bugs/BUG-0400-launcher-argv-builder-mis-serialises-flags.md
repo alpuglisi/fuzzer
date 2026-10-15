@@ -11,14 +11,15 @@
 dest, back into command-line flags. It handles three action shapes: bool, `append`, and
 single value. It mis-serialises the others that this project's parsers use:
 
-1. **`nargs='*'`/`'+'` lists.** A list value is emitted as one argument, its Python
-   repr. A bare `--submit-spa-forms` becomes `--submit-spa-forms []`, an SPA route
-   literally named `[]`. `--submit-spa-forms login search` becomes one argument,
-   `['login', 'search']`. The discovery test found the second case; the design review
-   found the first.
-2. **An optional value whose `const` is `""`.** For example, a bare
+1. **`nargs='*'` with no items.** A bare `--submit-spa-forms` is emitted as
+   `--submit-spa-forms []`, which creates an SPA route literally named `[]`. Found by
+   the design review.
+2. **`nargs='*'`/`'+'` with items.** The list is emitted as one argument, its Python
+   repr: `--submit-spa-forms login search` becomes `['login', 'search']`. Found by the
+   discovery test.
+3. **An optional value whose `const` is `""`.** For example, a bare
    `--follow-selector-forms` is dropped, because an empty value counts as "unset".
-3. **A value starting with `-`.** For example, `--identity=-bob` is emitted as
+4. **A value starting with `-`.** For example, `--identity=-bob` is emitted as
    `--identity -bob`, which argparse then rejects ("expected one argument").
 
 ## Where encountered
@@ -134,6 +135,22 @@ PA-0026 (from BUG-0024) failed to prevent this for three reasons:
   automatic introspection. A rule applied when the adapter was written cannot cover
   shapes added to its inputs later. Only a standing test over the live set of parsers
   can.
+
+PA-0036 (from BUG-0034) also failed to prevent this:
+
+- **Its trigger was scoped to code generation.** PA-0036 says never to assume a name
+  and its derived inverse round-trip without running the real converter. It was worded
+  around a generated file path and the target framework's inflector. A launcher
+  inverting argparse is the same instinct ("two conversions assumed to be inverses,
+  never executed together"), but in a different subsystem. The rule's wording did not
+  reach it, and it was never applied outside the lab generator.
+- **It is not enforced by discovery.** PA-0036 asks for a one-off execution against
+  "hard" inputs at the time of writing. That cannot catch inputs (action shapes) added
+  later by other lanes.
+
+PA-0400 therefore generalises PA-0036's round-trip demand from generated names to any
+conversion between argv and parsed values. It enforces it over the live set of parsers,
+not once.
 
 ## Preventive action
 

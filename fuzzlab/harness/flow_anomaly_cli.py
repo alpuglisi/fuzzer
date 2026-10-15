@@ -25,8 +25,7 @@ def build_parser(prog: str = "fuzzlab flow-anomaly") -> argparse.ArgumentParser:
         description="Score a run's in-scope flows per host with an anomaly detector and "
                     "store flow.anomaly_score / anomaly_flag (writes the store; no traffic).")
     p.add_argument("--store", default=None,
-                   help="Unified store (SQLite) to read and write (default: $FUZZLAB_STORE, "
-                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db)")
+                   help=storepath.store_help("Unified store (SQLite) to read and write"))
     p.add_argument("--run", type=int, required=True, help="Run id whose flows to score")
     p.add_argument("--method", choices=["ecod", "iforest"], default="ecod",
                    help="Detector: ecod (parameter-free, default) or iforest (seeded)")

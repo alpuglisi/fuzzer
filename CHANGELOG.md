@@ -4,14 +4,36 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (CLI Phase 1 code review: three bugs fixed, D-9 tightened)
+- **Why:** two independent code reviewers (A, B) and the clean-tree suite found three
+  defects in this lane's own code, plus gaps against the agreed design.
+- **The three bugs:**
+  - **BUG-0401:** `train run` printed one store and the engine opened another (`~`).
+  - **BUG-0402:** the test store guard walked directories it does not own.
+  - **BUG-0403:** `train models` imported ML outside the optional-ML seam.
+- **What changed:**
+  - D-9 counts only training choices that take effect.
+  - The working view applies a saved model for `--score`/`--rank`.
+  - `copy_parser` fails closed on parser shapes it cannot copy, proven by a discovered
+    round trip over every parser (PA-0400).
+  - An empty target is refused.
+  - `proxy --export-ca` comes before any store work again.
+  - Help texts come from the one default constant.
+  - `train models` reads provenance the way `report` does (`core/modelinfo.py`).
+  - BUG-0400 and the UI follow-ups are recorded where the UI lane looks.
+- **Records:** PA-0401, PA-0402, PA-0403. CC-CORE-0401, CC-FUZZ-0401, CC-UI-0401,
+  CC-PROXY-0401, CC-ML-0401, CC-MUT-0401, CC-CRAWL-0400, CC-AUD-0400.
+
 ## 2026-10-15 (CLI simplification, Phase 1: a default store; working runs vs training runs)
 - **Why:** the owner found the CLI too complicated. `--store` was required by six commands,
   and training and benchmark options (ground truth, model training, holdouts, calibration)
   were mixed into the working tool.
 - **What:**
-  - **`--store` is never required.** One resolution in `core/storepath.py` (`--store`,
-    then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then `./fuzzlab.db`) is shared by
-    every CLI and the web UI's config. Its default is unchanged.
+  - **`--store` is no longer required** by `report`, `train …`, `mutate-run`,
+    `reveal-holdout`, `flow-anomaly` and `proxy --record`. One resolution in
+    `core/storepath.py` (`--store`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`,
+    then `./fuzzlab.db`) is shared by those commands and the web UI's config, and its
+    default is unchanged. `auto` and `greybox-run` follow in Phase 2.
   - **Read-only commands no longer create stores.** `report`, `reveal-holdout`,
     `flow-anomaly` and `train models` refuse a missing store instead of creating one.
   - **New `fuzzlab train` group:** `train run <url>` (it needs a training or benchmark

@@ -3,6 +3,28 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0401 — `report` reads provenance through `core/modelinfo`; the UI lane's open items recorded (2026-10-15)
+- Change:
+  - **`report/report.py`:** `_training` reads `core.modelinfo.trained_on`, the one
+    function `train models` also uses. The output is unchanged.
+  - **`requirements.md` §8 records what this lane hands to the UI session:**
+    - BUG-0400 (open, owned here; pinned by strict xfails);
+    - the UI-visible behaviour changes: `--store` optional in the `report`,
+      `mutate-run` and `flow-anomaly` forms; the proxy `--record` checkbox;
+      `load_config` honouring `FUZZLAB_STORE`, expanding `~` and treating empty as
+      unset, which applies to `web --with-proxy` recording too;
+    - the follow-ups: commandspec moves, `introspect` skipping `SUPPRESS`, `cli_dryrun`
+      specs, `model_registry_timeline` alignment, the per-user store decision.
+- Impact (other components / project): the UI session. **This entry extends
+  CC-UI-0400's Impact, which named only the `report` form.**
+- Risk (level; mitigation or accepted-risk justification): low; the output is unchanged
+  (`tests/test_report.py`).
+- Deliverables:
+  - [x] `report/report.py`, UI `requirements.md` §8 — done
+  - [ ] BUG-0400 fix and the follow-ups — todo, the UI session's
+- Effectiveness (assessed 2026-10-15): `tests/test_report.py` is unchanged and green.
+  Effective for this lane's part.
+
 ### CC-UI-0400 — Grouped `fuzzlab --help`; `report`'s store is optional and never created (FR-UI-400, FR-UI-401) (2026-10-15)
 - Change:
   - **`fuzzlab/cli.py`:**

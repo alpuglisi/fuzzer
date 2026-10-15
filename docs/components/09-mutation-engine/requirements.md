@@ -47,8 +47,10 @@ feedback and the scheduler.
 - **FR-MUT-400** *(default store; `CC-MUT-0400`, 2026-10-15).* `fuzzlab mutate-run`, also
   reached as `fuzzlab train mutate`, takes an optional `--store` (FR-CORE-400).
   - The store is created on first use and reused.
-  - An empty `--store` or a missing directory is a usage error, checked after
-    `--authorized` and before any sender or store.
+  - An explicit empty `--store` is a usage error right after parsing (before
+    `--dry-run`).
+  - A missing directory is a usage error after `--authorized`, before any sender or
+    store.
   - The summary and the dry run name the resolved store.
 
 ## 4. Non-functional requirements
@@ -72,6 +74,7 @@ feedback and the scheduler.
   `fuzzlab/cli_dryrun.py` helper.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_mutate_run_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_mutate_run_dry_run_reports_plan_and_sends_nothing`
   - Enforced by (through `fuzzlab train mutate`; CC-MUT-0400): `tests/test_train_cli.py::test_train_mutate_dry_run_sends_nothing`, `tests/test_cli_default_store.py::test_mutate_dry_run_creates_nothing_and_names_the_store`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
 
 - **FR-MUT-8** `MutationSearch` optionally emits its per-step reward and novelty
   signal into `metric_series` (`source="mutation"`, `key="reward"`/`"novelty"`,

@@ -18,6 +18,24 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — CLI: `train models` imported `fuzzlab.ml` outside the optional-ML seam (fixed, BUG-0403/PA-0403)
+- **Symptom:** the clean-tree suite of `31b5013` failed `tests/test_ml_import_guard.py` on `fuzzlab/train_cli.py`; a no-ML build would crash on `fuzzlab train models`.
+- **Root cause:** a direct `from fuzzlab.ml.model_registry import …` in a new non-ML module; the pre-push verification set was derived from imports only, which never lists the repository's path-scanning guard tests, and the push preceded the full run.
+- **Remediation:** `import_ml("fuzzlab.ml.model_registry")` with the standard exit-2 message; a no-ML exit test. PA-0403: path-scanning guards are always in the verification set, and the full suite runs before the push it certifies. CC-FUZZ-0401. `docs/bugs/BUG-0403-train-models-imported-ml-outside-the-seam.md`.
+- **Status:** Fixed
+
+## 2026-10-15 — CLI: `train run` printed and checked one store, the engine opened another (fixed, BUG-0401/PA-0401)
+- **Symptom:** `fuzzlab train run URL --store=~/x.db --score --authorized` printed `store: <HOME>/x.db` but the engine opened `./~/x.db` (an sqlite error, or a file under a directory named `~`).
+- **Root cause:** the wrapper resolved the store (expanding `~`) for its check and its printed line, but forwarded the user's raw `--store` verbatim (PA-0400(3)); the engine derives the path itself without expansion -- two derivations of one value.
+- **Remediation:** `train_cli.forward()` always appends the resolved `--store` last (argparse keeps the last); tested by parsing the forwarded argv with the engine's own parser for 9 spellings, plus a forwarding round trip over every engine action. CC-FUZZ-0401. `docs/bugs/BUG-0401-train-run-printed-one-store-and-opened-another.md`.
+- **Status:** Fixed
+
+## 2026-10-15 — Tests: the store guard walked directories it does not own (fixed, BUG-0402/PA-0402)
+- **Symptom:** run from outside the repository, `tests/_store_guard.py` walked the whole cwd (all of `$HOME`, or `/`), and reported every test's own `tmp_path/fuzzlab.db` as a leaked default store when pytest's temp base lay under that cwd.
+- **Root cause:** the cwd was treated as a recursive walk root like the repository, and pytest's basetemp was not excluded; the guard's tests never ran from a cwd outside the repository.
+- **Remediation:** walk only the repository (minus the basetemp); stat only the outside cwd's own `fuzzlab.db*`; clear the store variables in `pytest_configure`. CC-CORE-0401. `docs/bugs/BUG-0402-store-guard-walked-beyond-its-roots.md`.
+- **Status:** Fixed
+
 ## 2026-10-15 — Web launcher / CLI dry-run: argv builder mis-serialises four argparse shapes (open, BUG-0400/PA-0400)
 - **Symptom:** `cli_dryrun.report('crawl', …)` printed `--submit-spa-forms []` and dropped a bare `--follow-selector-forms`; `--identity=-bob` was shown as `--identity -bob`, which argparse rejects. The same `web/runner.build_flags` builds the web launcher's real child argv.
 - **Root cause:** `build_flags` inverts argparse from `OptionSpec.type`/`multiple` only (`nargs`/`const` are not introspected) and was never tested as a round trip over every action of every registered parser; new shapes arrived later via other lanes' parsers.

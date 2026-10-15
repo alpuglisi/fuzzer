@@ -36,6 +36,7 @@ dist/
 .pytest_cache/
 # local run store (the shared SQLite project store)
 fuzzlab.db
+fuzzlab.db-journal
 *.db-wal
 *.db-shm
 # grey-box DB snapshots (lab-only, regenerated on demand — T3.5)

@@ -3,6 +3,23 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0401 — `--store` help from the one constant; FR-MUT-400 states the real check order (2026-10-15)
+- Change:
+  - **`mutation/cli.py`:** the `--store` help comes from `storepath.store_help`.
+  - **FR-MUT-400 corrected:** an explicit empty `--store` is refused right after
+    parsing, before `--dry-run`. A missing directory is refused after `--authorized`.
+    CC-MUT-0400 said "after `--authorized`" for both; the code was right and the text
+    was wrong.
+  - NFR-MUT-dry-run gains a "Not yet enforced (BUG-0400)" line.
+- Impact (other components / project): none.
+- Risk (level; mitigation or accepted-risk justification): none (help text and
+  documentation).
+- Deliverables:
+  - [x] help, FR-MUT-400, NFR line — done
+- Effectiveness (assessed 2026-10-15): the text matches the code
+  (`tests/test_cli_default_store.py::test_mutate_usage_errors_create_nothing`).
+  Effective.
+
 ### CC-MUT-0400 — `mutate-run` / `fuzzlab train mutate`: default store (FR-MUT-400) (2026-10-15)
 - Change:
   - **`mutation/cli.py`:**

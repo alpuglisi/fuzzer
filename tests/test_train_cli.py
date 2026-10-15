@@ -50,6 +50,10 @@ def _exit_code(argv) -> int:
     ["--score", "--train-on", "saved"], ["--rank", "--train-on", "saved"],
     ["--mode", "automatic"], ["--points", "crawl"], ["--budget-method", "score",
                                                      "--confirm-budget", "3"],
+    # choices the engine would ignore, or equal to the working default (review A1)
+    ["--train-on", "run"], ["--train-on", "earlier"], ["--calibrate", "none"],
+    ["--rank-objective", "pointwise"], ["--budget-seed", "3"],
+    ["--budget-method", "random"],
 ])
 def test_a_working_run_under_a_training_name_is_refused(extra, cwd, forwarded, capsys):
     assert _exit_code([URL, *extra, "--authorized"]) == 2
@@ -60,7 +64,8 @@ def test_a_working_run_under_a_training_name_is_refused(extra, cwd, forwarded, c
 @pytest.mark.parametrize("extra", [
     ["--ground-truth", "gt"], ["--score"], ["--rank"], ["--holdout"],
     ["--calibrate", "platt"], ["--hybrid"], ["--rank-objective", "pairwise"],
-    ["--train-on", "earlier"], ["--budget-seed", "0"], ["--budget-method", "random"],
+    ["--score", "--train-on", "earlier"], ["--confirm-budget", "3", "--budget-seed", "0"],
+    ["--confirm-budget", "3", "--budget-method", "random"],
     ["--mode", "manual"], ["--points", "ground-truth"],
 ])
 def test_each_training_or_benchmark_choice_qualifies(extra, cwd, forwarded):
@@ -70,10 +75,29 @@ def test_each_training_or_benchmark_choice_qualifies(extra, cwd, forwarded):
 
 def test_choices_are_detected_by_presence_not_by_value():
     p = train_cli.build_run_parser()
-    ns = p.parse_args([URL, "--budget-seed", "0", "--train-on", "run"])
-    assert "--budget-seed" in train_cli.training_choices(ns)      # equals its default
-    assert "--train-on run" in train_cli.training_choices(ns)
+    ns = p.parse_args([URL, "--confirm-budget", "2", "--budget-seed", "0"])
+    assert train_cli.training_choices(ns) == ["--budget-seed"]   # equals its default
+    assert train_cli.training_choices(p.parse_args([URL, "--score"])) == ["--score"]
     assert train_cli.training_choices(p.parse_args([URL])) == []
+
+
+@pytest.mark.parametrize("argv", [[URL], [URL, "--dry-run"], [URL, "--authorized"]])
+def test_d9_runs_before_the_dry_run_and_before_the_gate(argv, cwd, forwarded, capsys):
+    """Design §4.2 / N3 (review B4): a working run is refused whatever else is given."""
+    assert _exit_code(argv) == 2
+    assert "no training or benchmark choice" in capsys.readouterr().err
+    assert forwarded == [] and list(cwd.iterdir()) == []
+
+
+def test_an_explicit_empty_store_fails_first(cwd, capsys):
+    assert _exit_code([URL, "--store", ""]) == 2         # no choice, no --authorized either
+    assert "--store: empty path" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["", "--score"], ["--base-url", " ", "--score"]])
+def test_an_empty_target_is_a_usage_error(argv, cwd, forwarded, capsys):
+    assert _exit_code([*argv, "--authorized"]) == 2
+    assert "empty target" in capsys.readouterr().err and forwarded == []
 
 
 # --- the target: first argument, or the --base-url alias ------------------------------
@@ -100,6 +124,11 @@ def test_a_url_swallowed_by_an_optional_value_flag_is_explained(cwd, capsys):
 
 # --- forwarding: verbatim, with the resolved store ------------------------------------
 
+def _engine_store(argv):
+    from fuzzlab.harness.auto_cli import build_parser
+    return build_parser().parse_args(argv).store
+
+
 def test_the_users_argv_is_forwarded_verbatim_plus_the_resolved_store(cwd, forwarded):
     argv = [URL, "--identity=-bob", "--score", "--categories", "xss", "--authorized"]
     assert train_cli.run_main(argv) == 0
@@ -113,9 +142,19 @@ def test_the_alias_form_is_forwarded_unchanged(cwd, forwarded):
     assert forwarded[0][:len(argv)] == argv
 
 
-def test_an_explicit_store_is_not_added_twice_even_abbreviated(cwd, forwarded):
-    assert train_cli.run_main([URL, "--sto", "mine.db", "--score", "--authorized"]) == 0
-    assert forwarded[0].count("--store") == 0 and "--sto" in forwarded[0]
+@pytest.mark.parametrize("store", ["mine.db", "~/x.db", "./a/../mine.db"])
+@pytest.mark.parametrize("form", ["--store={}", "--sto {}", "--store {}"])
+def test_the_engine_opens_exactly_the_store_resolved_and_printed(store, form, cwd,
+                                                                  forwarded, capsys):
+    """BUG-0401: the printed and checked store is the one the engine opens -- whatever
+    spelling the user gave (``~``, ``..``, an abbreviation, ``=``)."""
+    from fuzzlab.core.storepath import resolve
+    (cwd / "a").mkdir()
+    flag = form.format(store).split(" ")
+    assert train_cli.run_main([URL, *flag, "--score", "--authorized"]) == 0
+    expected = resolve(store, environ={}).path
+    assert _engine_store(forwarded[0]) == str(expected)
+    assert f"store: {expected} (--store)" in capsys.readouterr().out
 
 
 def test_fuzzlab_store_is_honoured(cwd, forwarded, monkeypatch):
@@ -165,10 +204,21 @@ def test_the_default_store_is_created_then_reused_and_the_store_wins(cwd, capsys
 
 
 def test_a_holdout_run_prints_a_store_qualified_reveal_hint(cwd, capsys):
+    import shlex
+    spaced = cwd / "my dir"
+    spaced.mkdir()
+    store = spaced / "s.db"
     assert train_cli.run_main([URL, "--score", "--holdout", "--categories", "xss",
-                               "--authorized"]) == 0
-    assert (f"fuzzlab train reveal-holdout --store {cwd / DEFAULT_STORE}"
-            in capsys.readouterr().out)
+                               "--store", str(store), "--authorized"]) == 0
+    out = capsys.readouterr().out
+    assert f"fuzzlab train reveal-holdout --store {shlex.quote(str(store))}" in out
+
+
+def test_no_reveal_hint_when_the_run_failed(cwd, monkeypatch, capsys):
+    from fuzzlab.harness import auto_cli
+    monkeypatch.setattr(auto_cli, "main", lambda argv: 1)
+    assert train_cli.run_main([URL, "--score", "--holdout", "--authorized"]) == 1
+    assert "reveal the sealed holdout" not in capsys.readouterr().out
 
 
 # --- the group --------------------------------------------------------------------------
@@ -181,13 +231,38 @@ def test_the_group_without_a_subcommand_exits_2_and_help_exits_0(capsys):
     assert "Training and benchmark" in capsys.readouterr().out
 
 
-def test_train_run_help_shows_the_url_and_hides_the_alias(capsys):
+def test_train_run_help_shows_the_url_first_and_hides_the_alias(capsys):
     with pytest.raises(SystemExit) as exc:
         train_cli.run_main(["--help"])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "fuzzlab train run" in out and "url" in out and "--base-url" not in out
-    assert "--ground-truth" in out and "--calibrate" in out
+    assert out.startswith("usage: fuzzlab train run <url> [options]")
+    assert "--base-url" not in out and "--ground-truth" in out and "--calibrate" in out
+    assert "own --store" in " ".join(out.split()) and "FUZZLAB_STORE" in out
+
+
+# --- PA-0400(1): forwarding round-trips over every action of the engine's parser ------
+
+def test_forwarding_round_trips_every_action_of_the_engine(tmp_path, monkeypatch):
+    """The namespace `auto` parses from the forwarded argv equals the one `train run`
+    validated -- for every action, discovered from the engine's parser (not a list)."""
+    from fuzzlab.core.storepath import resolve
+    from fuzzlab.harness.auto_cli import build_parser
+    from tests.test_cli_taxonomy import action_variants
+    monkeypatch.chdir(tmp_path)
+    engine = build_parser()
+    copy = train_cli.build_run_parser()
+    checked = 0
+    for action, extra in action_variants(engine, skip={"base_url", "store"}):
+        argv = [URL, *extra]
+        ns = copy.parse_args(argv)
+        fwd = train_cli.forward(argv, ns, URL, resolve(ns.store, environ={}))
+        got = vars(engine.parse_args(fwd))
+        want = vars(build_parser().parse_args(["--base-url", URL, *extra,
+                                               "--store", str(tmp_path / DEFAULT_STORE)]))
+        assert got == want, (action.dest, extra)
+        checked += 1
+    assert checked > 30
 
 
 @pytest.mark.parametrize("sub, old, prog", [
@@ -333,3 +408,52 @@ def test_train_mutate_keeps_the_destructive_gate_off_by_default(cwd, monkeypatch
     with pytest.raises(SystemExit):
         fuzzlab_main(["train", "mutate", "--url", URL + "/x", "--param", "id"])
     assert seen == {}
+
+
+def test_models_shows_run_earlier_and_saved_provenance_from_real_producers(cwd):
+    """Review B10: rows written by the real trainers -- own run, earlier runs, a saved
+    model applied -- are listed with the provenance `report` reads (one function)."""
+    from fuzzlab.core.modelinfo import trained_on
+    from fuzzlab.ml.model_registry import list_models
+    from fuzzlab.ml.train import train_and_score
+    from tests.test_ml_holdout_calibration import _seed
+    with Store(cwd / DEFAULT_STORE) as store:
+        r1 = _seed(store, seed=1)
+        train_and_score(store, r1, model_kind="logistic")
+        r2 = _seed(store, seed=2)
+        train_and_score(store, r2, model_kind="logistic", train_on="earlier")
+        r3 = _seed(store, seed=3)
+        train_and_score(store, r3, train_on="saved")
+        rows = list_models(store)
+        cals = [json.loads(r["calibration"] or "{}") for r in store.conn.execute(
+            "SELECT calibration FROM model ORDER BY id ASC")]
+    assert [r["trained_on"] for r in rows] == [trained_on(c) for c in cals]
+    kinds = [r["trained_on"] for r in rows]
+    assert {"run", "earlier", "saved"} <= set(kinds)
+    saved = next(r for r in rows if r["trained_on"] == "saved")
+    assert saved["source_model_id"] in [r["id"] for r in rows]
+    assert all(r["scope"].startswith("run ") for r in rows)
+
+
+def test_list_models_reads_no_metric_key():
+    """The listing's source names only allowlisted calibration keys (PA-0092)."""
+    from fuzzlab.ml import model_registry
+    import re
+    src = inspect.getsource(model_registry.list_models)
+    for forbidden in ("oof", "brier", "ece", "pr_auc", "holdout", "t_lo", "t_hi", "metric"):
+        assert forbidden not in src, forbidden
+    sql = " ".join(n.value for n in ast.walk(ast.parse(src))
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                   and ("SELECT" in n.value or "FROM" in n.value))
+    assert re.findall(r"\bparams\b(?! IS NOT NULL)", sql) == []   # never the params blob
+
+
+def test_models_without_the_ml_package_exits_2_with_the_standard_message(cwd, monkeypatch,
+                                                                         capsys):
+    """BUG-0403: `train models` reaches `fuzzlab.ml` only through `import_ml` (FR-ML-6)."""
+    from fuzzlab.plugins import optional
+    with Store(cwd / DEFAULT_STORE):
+        pass
+    monkeypatch.setattr(optional, "import_ml", lambda module: None)
+    assert fuzzlab_main(["train", "models"]) == 2
+    assert optional.ML_UNAVAILABLE in capsys.readouterr().err

@@ -22,6 +22,69 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0401 — CLI Phase 1 code-review fixes: D-9 counts only effective choices; the engine opens the store printed (BUG-0401); `train models` via `import_ml` (BUG-0403) (2026-10-15)
+- Change (reviewers A and B, the clean-tree suite; `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` Appendix F):
+  - **`fuzzlab/train_cli.py`:**
+    - `training_choices` counts only choices that take effect. `--train-on` alone,
+      `--calibrate none`, `--rank-objective pointwise`, and a budget seed or order
+      without `--confirm-budget` no longer qualify (D-9 amended).
+    - `forward()` always appends the resolved `--store` last (BUG-0401).
+    - An empty `<url>` or `--base-url` is a usage error.
+    - An explicit empty `--store` fails first.
+    - `--help` shows `<url>` first and the own-store advice.
+    - The reveal hint is shell-quoted and printed only when the run succeeds.
+    - `train models` reaches the registry through `import_ml` (exit 2 with
+      `ML_UNAVAILABLE`; BUG-0403).
+  - **`fuzzlab/cli_taxonomy.py`:**
+    - `copy_parser` refuses (`CopyError`) a shape it cannot carry: mutually exclusive
+      groups, `set_defaults`, `argument_default`, `allow_abbrev=False`, prefix or
+      fromfile chars, subcommands, a restricted non-single-value option.
+    - `_Restrict` keeps the source's `type` and `required`.
+    - `working_parser` fixes `train_on=saved` (`WORKING_DEFAULTS`), so `--score`/`--rank`
+      apply a saved model.
+    - `train run` is `store_default`.
+    - `classification_problems()` is the guard's one function.
+    - The help's store line comes from `storepath.DEFAULT_RULE`.
+- Impact (other components / project):
+  - CORE: `core/modelinfo.py`, the store help phrase, BUG-0402 (CC-CORE-0401).
+  - UI: `report` uses `modelinfo` (CC-UI-0401).
+  - ML (CC-ML-0401), PROXY (CC-PROXY-0401), MUT (CC-MUT-0401).
+  - Nothing outside this lane's files.
+- Risk (level; mitigation or accepted-risk justification): low. Every fix has a named
+  test, and each new mechanism was mutation-checked (below).
+- Deliverables:
+  - [x] the code above — done
+  - [x] tests: `tests/test_train_cli.py`:
+    - the D-9 refusal and qualifying lists;
+    - `::test_d9_runs_before_the_dry_run_and_before_the_gate`;
+    - `::test_an_explicit_empty_store_fails_first`;
+    - `::test_an_empty_target_is_a_usage_error`;
+    - `::test_the_engine_opens_exactly_the_store_resolved_and_printed` (9 spellings);
+    - `::test_forwarding_round_trips_every_action_of_the_engine`;
+    - `::test_no_reveal_hint_when_the_run_failed`;
+    - `::test_models_shows_run_earlier_and_saved_provenance_from_real_producers`;
+    - `::test_list_models_reads_no_metric_key`;
+    - `::test_models_without_the_ml_package_exits_2_with_the_standard_message`.
+
+    `tests/test_cli_taxonomy.py`:
+    - `::test_a_copy_parses_every_action_exactly_like_its_source` (every parser);
+    - `::test_a_shape_copy_parser_cannot_carry_is_refused`;
+    - `::test_only_a_single_value_option_can_be_restricted`;
+    - `::test_score_and_rank_in_the_working_view_apply_a_saved_model`;
+    - `::test_store_default_matches_each_commands_parser`;
+    - `::test_the_guard_catches_an_unclassified_a_stale_and_an_arrived_pending_dest`
+    — done
+  - [x] BUG-0401, BUG-0403 (ERROR_LOG, bug reports, PA-0401, PA-0403) — done
+  - [x] FR-FUZZ-400/401 updated in place; FR-FUZZ-36 (`--store` optional);
+    NFR-FUZZ-dry-run "Not yet enforced (BUG-0400)" — done
+- Effectiveness (assessed 2026-10-15):
+  - **Mutation checks, 11 of 11 killed:** the resolved store last, the guard's basetemp
+    exclusion, the guard's no-walk of the cwd, D-9 budget, D-9 `--calibrate none`, the
+    working saved default, fail-closed copy, `store_default`, the empty target, the proxy
+    `--export-ca` order, the session environment clear.
+  - The 10 Phase 1 mutation checks still hold.
+  - Clean-tree suite: COUNTS_PENDING.
+
 ### CC-FUZZ-0400 — `fuzzlab train` (training/benchmark group) and the CLI taxonomy; default store for `reveal-holdout` / `flow-anomaly` (FR-FUZZ-400, FR-FUZZ-401) (2026-10-15)
 - Change:
   - **New `fuzzlab/cli_taxonomy.py`:**
@@ -82,7 +145,7 @@ note of the same date.
   - An executed offline run (`fuzzlab train run http://127.0.0.1:9 --score --categories
     sql-injection --authorized`, no crawl DB, so 0 requests) created `./fuzzlab.db`, a
     second run reused it (run #2), and `report` and `train models` read it.
-  - Full-suite counts: pending the clean-tree run.
+  - Full-suite counts: recorded in CC-FUZZ-0401.
 
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's

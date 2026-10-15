@@ -3,6 +3,43 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0401 — Store help from the one constant; `core/modelinfo.py`; the store guard is bounded (BUG-0402) (2026-10-15)
+- Change:
+  - **`core/storepath.py`:** `DEFAULT_RULE` and `store_help()` state the default rule
+    from `DEFAULT_STORE`. Every `--store` help and the grouped help use them (no
+    restated `./fuzzlab.db`).
+  - **New `core/modelinfo.py`:** `trained_on(calibration)` is the one reading of a model
+    row's provenance (`earlier` / `saved` / `run`). It lives in core because `report`
+    must work in a no-ML build.
+  - **`tests/_store_guard.py`:** walks only the repository tree, minus pytest's basetemp.
+    A cwd outside the repository has only its own `fuzzlab.db*` stat-checked, never
+    walked (BUG-0402). `pytest_configure` clears the store variables before any fixture.
+  - **`.gitignore`:** adds `fuzzlab.db-journal`.
+- Impact (other components / project):
+  - FUZZ, UI, MUT, PROXY help texts.
+  - UI `report` and ML `list_models` share `trained_on`.
+  - The suite's guard no longer false-fails when pytest runs from outside the
+    repository.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] the code above — done
+  - [x] tests (`tests/test_storepath.py`):
+    - `::test_the_store_guard_never_walks_pytests_temp_base_nor_an_outside_cwd`;
+    - `::test_the_default_stays_the_shared_project_store` (pins the literal; a move is
+      the owner's decision);
+    - `::test_check_writable_refuses_a_fifo`;
+    - `::test_tests_run_with_the_store_variables_cleared` (now also via a module-scoped
+      fixture);
+    - `::test_gitignore_ignores_a_default_store_at_any_depth` (`git check-ignore`)
+    — done
+  - [x] BUG-0402 (ERROR_LOG, bug report, PA-0402); FR-CORE-400 scoped and updated in
+    place — done
+- Effectiveness (assessed 2026-10-15):
+  - Re-adding the basetemp walk, or walking the cwd, fails the guard test.
+  - Removing the `pytest_configure` clear fails `test_tests_run_with_the_store_variables_cleared`
+    under a host `FUZZLAB_STORE`.
+  - Effective.
+
 ### CC-CORE-0400 — One store resolution for every CLI and the web UI; `--store` never required (FR-CORE-400) (2026-10-15)
 - Change:
   - **New `core/storepath.py`:** `resolve(value)` → `ResolvedStore(path, source)`.

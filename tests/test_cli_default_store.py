@@ -236,3 +236,21 @@ def test_launcher_pins_store_optional_and_record_offered():
                for o in commandspec.spec("proxy").options)
     auto = next(o for o in commandspec.spec("auto").options if o.dest == "store")
     assert auto.required is True                     # auto is Phase 2 (locked file)
+
+
+def test_proxy_export_ca_comes_before_any_store_resolution(cwd, capsys):
+    """Review A7: `--export-ca` records nothing, so a store flag never stops it."""
+    pytest.importorskip("cryptography")
+    from fuzzlab.proxy.cli import main as proxy_main
+    assert proxy_main(["--export-ca", "--store", "", "--ca-dir", str(cwd / "ca")]) == 0
+    assert "CA certificate" in capsys.readouterr().out
+    assert not (cwd / DEFAULT_STORE).exists()
+
+
+def test_proxy_explicit_empty_store_is_a_usage_error(cwd, capsys):
+    """`--store ""` used to mean "do not record" (falsy); it is now refused, like every
+    other command's (PA-0105) -- recording is asked for with --record or a real path."""
+    from fuzzlab.proxy.cli import main as proxy_main
+    with pytest.raises(SystemExit) as exc:
+        proxy_main(["--store", "", "--authorized"])
+    assert exc.value.code == 2 and "empty path" in capsys.readouterr().err

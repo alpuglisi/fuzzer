@@ -19,8 +19,7 @@ from fuzzlab.report.report import build_report, format_json, format_text
 def build_parser(prog: str = "fuzzlab report") -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog)
     p.add_argument("--store", default=None,
-                   help="Unified store (SQLite) to read (default: $FUZZLAB_STORE, "
-                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db)")
+                   help=storepath.store_help("Unified store (SQLite) to read"))
     p.add_argument("--run", default="latest",
                    help="Run id to report on, or 'latest' (default)")
     p.add_argument("--json", action="store_true", help="Emit canonical JSON")

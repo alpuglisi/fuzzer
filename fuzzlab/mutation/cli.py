@@ -25,8 +25,7 @@ def build_parser(prog: str = "fuzzlab mutate-run") -> argparse.ArgumentParser:
                    help="Full endpoint URL, e.g. http://127.0.0.1:8080/search.php")
     p.add_argument("--param", required=True, help="Parameter to inject into")
     p.add_argument("--store", default=None,
-                   help="Store (SQLite) to record variants in (default: $FUZZLAB_STORE, "
-                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db)")
+                   help=storepath.store_help("Store (SQLite) to record variants in"))
     p.add_argument("--vuln-class", default="sql-injection",
                    choices=["sql-injection", "xss"])
     p.add_argument("--method", default="GET")

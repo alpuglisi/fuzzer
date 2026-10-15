@@ -8,4 +8,5 @@ FR-CORE-400: no test reads or writes a default store outside ``tmp_path`` (see
 """
 
 from tests._leak_guard import pytest_sessionfinish, pytest_terminal_summary  # noqa: F401
-from tests._store_guard import default_store_untouched, isolate_store_env  # noqa: F401
+from tests._store_guard import (default_store_untouched, isolate_store_env,  # noqa: F401
+                                pytest_configure)

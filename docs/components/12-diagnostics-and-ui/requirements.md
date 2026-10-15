@@ -541,6 +541,28 @@ their own results.
   carries the CSP and related security headers.
 
 ## 8. Open questions
+- *(For the UI session, from the CLI-simplification lane, 2026-10-15; see
+  `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §9.)*
+  - **BUG-0400 (open, owned here).** `runner.build_flags` mis-serialises `nargs='*'`
+    lists, bare `const=""` flags and dash-leading values, in both the launcher's real
+    argv and every `--dry-run` display. It is pinned by strict xfails in
+    `tests/test_cli_argv_roundtrip.py`.
+  - **Behaviour that changed under the UI:**
+    - `--store` is now optional in the `report`, `mutate-run` and `flow-anomaly` forms;
+      a blank field resolves like the UI itself.
+    - The proxy form gains `--record`.
+    - `load_config` now also honours `FUZZLAB_STORE`, expands `~`, and treats an empty
+      variable as unset. This also applies to `web --with-proxy` recording.
+  - **To do:**
+    - Move the commandspec entries: `auto` to `scan` (Phase 2) and `train run`;
+      `mutate-run` to `train mutate`; `flow-anomaly` to `train flow-anomaly`.
+    - Add `train models` and `train reveal-holdout`.
+    - Group the launcher by `cli_taxonomy.COMMANDS`.
+    - Make `introspect` skip `SUPPRESS` options.
+    - Add `cli_dryrun` specs for the new names.
+    - Align `diagnostics.model_registry_timeline` with `list_models`' allowlist and
+      `core.modelinfo.trained_on`.
+    - Decide the per-user default store with the owner (design §4.8).
 - Web stack (e.g. FastAPI or Flask + a light frontend; Datasette embedded vs
   linked) — to confirm during build.
 - Metric set and refresh cadence for live views.

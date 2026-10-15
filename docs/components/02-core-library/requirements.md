@@ -449,9 +449,16 @@ plugin registry. It is the layer that makes the store the integration bus.
     (a container's, joined with nsenter) would not count as exposed, even though that
     namespace may be bridged with published ports. Nothing launches servers that way
     today.
-- **FR-CORE-400** *(store resolution; `CC-CORE-0400`, 2026-10-15).* `--store` is never
-  required. `core/storepath.resolve` is the one resolution that every command taking
-  `--store`, and the web UI's `load_config()["store_path"]`, go through (PA-0003).
+- **FR-CORE-400** *(store resolution; `CC-CORE-0400`, 2026-10-15).* `--store` is not required
+  by the commands that resolve it (`report`, `train run`,
+  `train models`, `train reveal-holdout`/`reveal-holdout`, `train flow-anomaly`/
+  `flow-anomaly`, `train mutate`/`mutate-run`, and `proxy --record`). For those
+  commands, and for the web UI's `load_config()["store_path"]`,
+  `core/storepath.resolve` is the one resolution (PA-0003).
+  - **Exceptions in Phase 1:** `auto` and `greybox-run` still require `--store` (their
+    files were locked). They gain the default in Phase 2.
+  - **Opt-in only:** `crawl`, `audit` and `fuzz` keep `--store` as opt-in
+    consolidation, with no default.
   - **Order:** `--store PATH`, then `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then
     `DEFAULT_STORE` (`fuzzlab.db` in the current directory, the shared project store).
   - **Environment values:** an empty variable is unset, and `~` is expanded.
@@ -467,12 +474,20 @@ plugin registry. It is the layer that makes the store the integration bus.
   - **Typed refusals:** a missing directory, or a path that is a directory or another
     non-regular file, is refused with the typed `StorePathError` (a `ValueError`), which
     each CLI prints as a usage error.
-  - **The printed line:** every run summary and read-only command names the resolved
-    store and its source (`describe`).
+  - **The printed line:** these commands' run summaries and read-only output name the
+    resolved store and its source (`describe`). A wrapper that forwards to an engine
+    passes the resolved store, so what it prints is what is opened (BUG-0401, PA-0401).
+  - **Help text:** the default rule is stated from `DEFAULT_STORE` (`DEFAULT_RULE`,
+    `store_help`), never restated.
   - **Config hash:** with neither variable set, the config value and its hash are
     unchanged.
-  - **Test isolation:** tests run with both variables cleared, and the session fails on
-    any new or written `fuzzlab.db` in the tree (`tests/_store_guard.py`).
+  - **Test isolation:** tests run with both variables cleared (from `pytest_configure`).
+    The session fails on any new or written `fuzzlab.db` in the repository tree (minus
+    pytest's temp base) or in an outside cwd's own files (`tests/_store_guard.py`, never
+    walking an unowned directory: BUG-0402, PA-0402).
+  - **Shared model facts:** `core/modelinfo.trained_on` is the one reading of what a
+    model row was trained on. `report` and `train models` both use it, and it works in a
+    no-ML build.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

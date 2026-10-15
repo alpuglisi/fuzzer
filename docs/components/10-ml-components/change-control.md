@@ -3,6 +3,22 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0401 — `list_models` reads provenance through `core.modelinfo.trained_on` (2026-10-15)
+- Change:
+  - **`ml/model_registry.py`:** `list_models`' `trained_on` comes from
+    `core.modelinfo.trained_on`. A run-mode row, which never records the key, now shows
+    `run` like `report` does, where before it showed `-`.
+- Impact (other components / project): FUZZ `train models` output; shared with UI
+  `report`.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] code — done
+  - [x] tests: `tests/test_train_cli.py::test_models_shows_run_earlier_and_saved_provenance_from_real_producers`
+    (real run, earlier and saved trainers), `::test_list_models_reads_no_metric_key`
+    — done
+- Effectiveness (assessed 2026-10-15): all three provenances are listed from real
+  producers, matching `trained_on`. Effective.
+
 ### CC-ML-0400 — `model_registry.list_models`: a label-free listing for `fuzzlab train models` (FR-ML-400) (2026-10-15)
 - Change:
   - **`ml/model_registry.py`:** `list_models(store)` returns every `model` row, oldest

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core.modelinfo import trained_on
+
 
 def _one(store, sql, args=()):
     row = store.conn.execute(sql, args).fetchone()
@@ -31,9 +33,10 @@ def _training(calibration: dict) -> dict:
     """What a model was trained on (CC-UI-0040, CC-UI-0042): ``earlier`` runs (listed),
     a ``saved`` earlier model applied as is (its original row and training runs), or
     this ``run``'s own labels — the default for a legacy or run-mode row."""
-    if calibration.get("trained_on") == "earlier":
+    kind = trained_on(calibration)
+    if kind == "earlier":
         return {"trained_on": "earlier", "train_run_ids": calibration.get("train_run_ids")}
-    if calibration.get("trained_on") == "saved":
+    if kind == "saved":
         return {"trained_on": "saved", "train_run_ids": calibration.get("train_run_ids"),
                 "source_model_id": calibration.get("source_model_id")}
     return {"trained_on": "run", "train_run_ids": None}

@@ -103,6 +103,8 @@ that shares the store, never a mandatory pipeline (D5).
   - `--record` records into the resolved store (FR-CORE-400).
   - `--store PATH` records there, as before; with both, `--store` wins.
   - The `--authorized` and loopback gates run before any store work.
+  - `--export-ca` comes before any store resolution.
+  - An explicit `--store ""` is now a usage error. It used to mean "do not record".
 
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
@@ -121,6 +123,7 @@ that shares the store, never a mandatory pipeline (D5).
   launcher's dry-run plan/report logic (`fuzzlab/web/commandspec.py` +
   `fuzzlab/web/runner.py`) via the shared `fuzzlab/cli_dryrun.py` helper.
   - Enforced by: `cli_dryrun` — `tests/test_cli_dry_run.py::test_proxy_has_dry_run_flag`, `tests/test_cli_dry_run.py::test_proxy_dry_run_reports_plan_and_sends_nothing`
+  - Not yet enforced (exact argv display; BUG-0400, open, the UI lane's fix): the shared display `web/runner.build_flags` mis-serialises `nargs='*'` lists, a bare `const=""` flag and dash-leading values, so for those the printed plan is not the exact argv. Pinned by strict xfails in `tests/test_cli_argv_roundtrip.py`.
   - Not yet enforced: `--dry-run` taking priority over `--export-ca` holds by branch order but is untested. (BUG-0111 sweep.)
 
 ## 5. Interfaces and data contracts

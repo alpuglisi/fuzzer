@@ -3,6 +3,16 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0400 — Note: NFR-AUD-dry-run's exact-argv promise is not yet enforced (BUG-0400; documentation only) (2026-10-15)
+- Change: NFR-AUD-dry-run gains a "Not yet enforced" line. A dash-leading value is
+  displayed space-separated by the shared dry-run display (BUG-0400, open, the UI lane's
+  fix).
+- Impact (other components / project): none; no code changed.
+- Risk (level; mitigation or accepted-risk justification): none.
+- Deliverables:
+  - [x] NFR line — done
+- Effectiveness (assessed 2026-10-15): n/a (documentation).
+
 ### CC-AUD-0040 — The auditor's browser adopts a browser login's localStorage (BUG-0132 sweep) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher._start_browser` creates its context with
   `browserauth.context_options(session)`, the one adoption helper the crawl uses now too

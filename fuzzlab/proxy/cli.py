@@ -42,9 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Local CA directory (holds fuzzlab-ca.crt / .key)")
     p.add_argument("--store", default=None, help="Store (SQLite) to record flow history")
     p.add_argument("--record", action="store_true",
-                   help="Record flow history into the default store ($FUZZLAB_STORE, "
-                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db); --store PATH records there "
-                        "instead. Off by default: nothing is recorded unless asked.")
+                   help=f"Record flow history into the default store "
+                        f"({storepath.DEFAULT_RULE}); --store PATH records there "
+                        f"instead. Off by default: nothing is recorded unless asked.")
     p.add_argument("--identity", default=None, help="Tag recorded flows with this identity")
     p.add_argument("--max-response-bytes", type=int, default=None,
                    help="Cap on one upstream response body (default 64 MiB; FR-PROXY-12)")
@@ -68,16 +68,10 @@ def main(argv: list[str]) -> int:
     p = build_parser()
     args = p.parse_args(argv)
 
-    recording = None
-    if args.store is not None or args.record:
-        try:
-            recording = storepath.resolve(args.store)
-        except storepath.StorePathError as exc:
-            p.error(str(exc))
-
     if args.dry_run:
         from fuzzlab.cli_dryrun import report
         report("proxy", args)
+        recording = _recording(p, args)
         if recording is not None:
             print(f"  {storepath.describe(recording)}")
         return 0
@@ -94,6 +88,7 @@ def main(argv: list[str]) -> int:
         print(f"The CA private key stays on this host (0600): {ca.ca_key_path}")
         return 0
 
+    recording = _recording(p, args)          # after --export-ca, which records nothing
     if not args.authorized:
         p.error("refusing to run the proxy without --authorized (lab-only)")
     from fuzzlab.core.net import require_loopback
@@ -156,6 +151,17 @@ def main(argv: list[str]) -> int:
         if store is not None:
             store.close()
     return 0
+
+
+def _recording(p, args):
+    """The store flow history goes to, or None when nothing is recorded (opt-in:
+    ``--store PATH`` or ``--record``; FR-PROXY-400)."""
+    if args.store is None and not args.record:
+        return None
+    try:
+        return storepath.resolve(args.store)
+    except storepath.StorePathError as exc:
+        p.error(str(exc))
 
 
 def scope_hosts(scope: Scope) -> set[str]:

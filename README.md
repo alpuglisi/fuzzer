@@ -90,7 +90,10 @@ fuzzlab fuzz  --url http://127.0.0.1:8080/product.php --param id --authorized --
 
 Each tool is also runnable as `python -m fuzzlab.tools.<name>`.
 
-`--store` is optional. A command uses the first of these that is set:
+`--store` is optional in `report`, `train …`, `mutate-run`, `reveal-holdout`,
+`flow-anomaly` and `proxy --record`. (`auto` and `greybox-run` still take it explicitly
+for now; for `crawl`, `audit` and `fuzz` it is opt-in consolidation.) A command uses the
+first of these that is set:
 1. `--store PATH`;
 2. `$FUZZLAB_STORE`;
 3. `$FUZZLAB_STORE_PATH`;
@@ -103,15 +106,16 @@ fuzzlab report                 # the latest run in ./fuzzlab.db  (stderr: store:
 fuzzlab train models           # the saved models, label-free (the model registry)
 ```
 
-`fuzzlab --help` groups the commands into three groups:
+`fuzzlab --help` groups the commands into four groups:
 - **working runs:** fuzzlab used as a tool against a lab target;
 - **training and benchmark** (`fuzzlab train …`): ground truth, scored runs, model
   training, holdouts, calibration, the model registry;
-- **lab.**
+- **lab;**
+- **other.**
 
 A training or benchmark run is `fuzzlab train run <url>`. It takes the same flags as
-`auto`, and needs `--authorized` plus at least one training or benchmark choice, for
-example:
+`auto`, and needs `--authorized` plus at least one training or benchmark choice that
+takes effect, for example:
 
 ```bash
 # [design] -- the command's parsing and store handling are tested; not yet run here against the lab

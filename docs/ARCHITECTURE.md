@@ -1957,7 +1957,10 @@ replays and edits, including a raw byte path for malformed-traffic study.
   reproducibility.
 - **Configuration:** layered (defaults → file → env → CLI), validated, hashed
   onto the `run` row; one config shared by all tools; secrets by reference only.
-- **The store's location (FR-CORE-400):** `--store` is never required.
+- **The store's location (FR-CORE-400):** `--store` is not required by the commands that
+  resolve it: `report`, `train …`, `mutate-run`, `reveal-holdout`, `flow-anomaly`, `proxy
+  --record`. `auto` and `greybox-run` gain the default in Phase 2. `crawl`, `audit` and
+  `fuzz` keep `--store` as opt-in consolidation.
   - `core/storepath.resolve` is the one resolution. Its order is `--store`, then
     `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then `./fuzzlab.db`.
   - Every CLI and the web UI's config go through it, so a command launched from the UI

@@ -27,8 +27,7 @@ def build_parser(prog: str = "fuzzlab reveal-holdout") -> argparse.ArgumentParse
         prog=prog,
         description="Print a run's sealed holdout metrics and count the reveal.")
     p.add_argument("--store", default=None,
-                   help="Unified store (SQLite) to read (default: $FUZZLAB_STORE, "
-                        "$FUZZLAB_STORE_PATH, else ./fuzzlab.db)")
+                   help=storepath.store_help("Unified store (SQLite) to read"))
     p.add_argument("--run", type=int, required=True, help="Run id")
     return p
 

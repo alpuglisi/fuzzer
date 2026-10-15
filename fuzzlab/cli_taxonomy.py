@@ -73,7 +73,7 @@ COMMANDS: tuple[Command, ...] = (
             "the intercepting proxy in-process, needs --authorized)"),
     Command("train run", TRAINING, "train run <url> [args]",
             "a run scored against ground truth and/or that trains models "
-            "(requires --authorized)", flags="auto"),
+            "(requires --authorized)", flags="auto", store_default=True),
     Command("train models", TRAINING, "train models [args]",
             "list saved models (the model registry; read-only)", flags="train models",
             store_default=True),
@@ -125,12 +125,12 @@ def render_help() -> str:
                 lines += [" " * (2 + width) + more for more in body[1:]]
     lines += [""] + textwrap.wrap("Older names (still work): " + ", ".join(
         f"{old} (= {new})" for old, new in OLD_NAMES.items()), _HELP_COLUMNS)
-    lines += ["",
-              "Store: --store PATH, else $FUZZLAB_STORE, else $FUZZLAB_STORE_PATH, else "
-              "./fuzzlab.db in the",
-              "       current directory (the web UI uses the same rule). auto and "
-              "greybox-run still need --store.",
-              "Lab-only. Nothing runs against a target until you ask it to (no auto-run)."]
+    from fuzzlab.core.storepath import DEFAULT_RULE
+    lines += [""] + textwrap.wrap(
+        f"Store: --store PATH, else {DEFAULT_RULE} in the current directory (the web UI "
+        "uses the same rule). auto and greybox-run still need --store.", _HELP_COLUMNS,
+        subsequent_indent="       ")
+    lines += ["Lab-only. Nothing runs against a target until you ask it to (no auto-run)."]
     return "\n".join(lines) + "\n"
 
 
@@ -233,6 +233,13 @@ WORKING_RESTRICT: dict[str, dict[str, tuple[str, ...]]] = {
     "auto": {"budget_method": ("score",)},
 }
 
+#: What a working command fixes for a refused dest: in a working run ``--score`` and
+#: ``--rank`` *apply* a saved model (FR-FUZZ-401), so the refused ``--train-on`` is
+#: ``saved``.
+WORKING_DEFAULTS: dict[str, dict[str, object]] = {
+    "auto": {"train_on": "saved"},
+}
+
 
 def parser_dests(parser: argparse.ArgumentParser) -> list[str]:
     """Every option dest of ``parser``; a subcommand's as ``"<sub>:<dest>"``."""
@@ -245,6 +252,21 @@ def parser_dests(parser: argparse.ArgumentParser) -> list[str]:
                 out += [f"{sub}:{d}" for d in parser_dests(sp)]
             continue
         out.append(a.dest)
+    return out
+
+
+def classification_problems(key: str, parser: argparse.ArgumentParser) -> list[str]:
+    """Why ``parser``'s dests and ``FLAG_CLASSES[key]`` disagree (empty: they agree): an
+    unclassified dest, a stale entry, a pending dest that has arrived, an unknown class.
+    The guard `tests/test_cli_taxonomy.py` runs over every parser (FR-FUZZ-401)."""
+    dests = set(parser_dests(parser))
+    classified = FLAG_CLASSES.get(key, {})
+    pending = PENDING.get(key, {})
+    out = [f"unclassified: {d}" for d in sorted(dests - set(classified) - set(pending))]
+    out += [f"stale: {d}" for d in sorted(set(classified) - dests)]
+    out += [f"pending but present: {d}" for d in sorted(set(pending) & dests)]
+    out += [f"unknown class {c!r} for {d}" for d, c in {**classified, **pending}.items()
+            if c not in ("B", "T", "W*", "L")]
     return out
 
 
@@ -278,7 +300,8 @@ class _Refuse(argparse.Action):
 
 
 class _Restrict(argparse.Action):
-    """A W* flag: only the listed values pass."""
+    """A W* flag: only the listed values pass. Built only over a single-value action
+    (``nargs=None``); `copy_parser` refuses any other shape (PA-0400(2))."""
 
     def __init__(self, option_strings, dest, *, allowed, target, **kwargs):
         self.allowed = allowed
@@ -296,13 +319,40 @@ class _Restrict(argparse.Action):
 ABSENT = argparse.SUPPRESS
 
 
+class CopyError(ValueError):
+    """A parser shape `copy_parser` cannot carry over faithfully (PA-0400(2): fail closed,
+    never a parser that silently parses differently from its source)."""
+
+
+def _require_copyable(source: argparse.ArgumentParser) -> None:
+    """Refuse a source parser whose behaviour lives outside its copied actions."""
+    problems = []
+    if source._mutually_exclusive_groups:
+        problems.append("mutually exclusive groups")
+    if source._defaults:
+        problems.append("set_defaults()")
+    if source.argument_default is not None:
+        problems.append("argument_default")
+    if not source.allow_abbrev:
+        problems.append("allow_abbrev=False")
+    if source.prefix_chars != "-":
+        problems.append("prefix_chars")
+    if source.fromfile_prefix_chars is not None:
+        problems.append("fromfile_prefix_chars")
+    if any(isinstance(a, argparse._SubParsersAction) for a in source._actions):
+        problems.append("subcommands")
+    if problems:
+        raise CopyError(f"cannot copy parser {source.prog!r}: {', '.join(problems)}")
+
+
 def copy_parser(source: argparse.ArgumentParser, *, prog: str,
                 url_positional: bool = False,
                 refuse: Mapping[str, str] | None = None,
                 restrict: Mapping[str, tuple[str, ...]] | None = None,
                 refuse_to: str = "fuzzlab train run",
                 presence: Iterable[str] | None = None,
-                description: str | None = None) -> argparse.ArgumentParser:
+                description: str | None = None,
+                usage: str | None = None) -> argparse.ArgumentParser:
     """A new parser carrying a *copy* of each of ``source``'s actions (never re-typed,
     and ``source`` is never mutated).
 
@@ -315,7 +365,8 @@ def copy_parser(source: argparse.ArgumentParser, *, prog: str,
     refuse = dict(refuse or {})
     restrict = dict(restrict or {})
     presence = set(presence or ())
-    new = argparse.ArgumentParser(prog=prog,
+    _require_copyable(source)
+    new = argparse.ArgumentParser(prog=prog, usage=usage,
                                   description=description or source.description,
                                   formatter_class=source.formatter_class)
     for action in source._actions:
@@ -330,15 +381,21 @@ def copy_parser(source: argparse.ArgumentParser, *, prog: str,
                 message=_message(refuse_to, flag, refuse[action.dest])))
             continue
         if action.dest in restrict:
+            if action.nargs is not None or not action.option_strings:
+                raise CopyError(f"cannot restrict {action.dest!r}: only a single-value "
+                                f"option can be restricted (nargs={action.nargs!r})")
             new._add_action(_Restrict(
-                action.option_strings, action.dest, nargs=action.nargs,
-                default=action.default, choices=action.choices, help=action.help,
-                metavar=action.metavar, allowed=restrict[action.dest], target=refuse_to))
+                action.option_strings, action.dest, default=action.default,
+                type=action.type, choices=action.choices, required=action.required,
+                help=action.help, metavar=action.metavar,
+                allowed=restrict[action.dest], target=refuse_to))
             continue
         a = copy.copy(action)
         if a.dest == "store":
+            from fuzzlab.core.storepath import store_help
             a.required = False
             a.default = None
+            a.help = store_help("Unified store (SQLite) to write to")
         if url_positional and a.dest == "base_url":
             a.required = False
             a.help = argparse.SUPPRESS
@@ -354,6 +411,8 @@ def copy_parser(source: argparse.ArgumentParser, *, prog: str,
 def working_parser(key: str, *, prog: str) -> argparse.ArgumentParser:
     """The working view of parser ``key``: T and L flags refused, W* flags restricted,
     the URL positional — the parser `fuzzlab scan` (Phase 2) is built from."""
-    return copy_parser(PARSERS[key](), prog=prog, url_positional=True,
-                       refuse={d: FLAG_CLASSES[key][d] for d in refused_dests(key)},
-                       restrict=WORKING_RESTRICT.get(key))
+    p = copy_parser(PARSERS[key](), prog=prog, url_positional=True,
+                    refuse={d: FLAG_CLASSES[key][d] for d in refused_dests(key)},
+                    restrict=WORKING_RESTRICT.get(key))
+    p.set_defaults(**WORKING_DEFAULTS.get(key, {}))
+    return p
