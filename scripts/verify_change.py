@@ -22,7 +22,11 @@ What it does (see ``docs/MULTI_AGENT_ORCHESTRATION.md`` section 2 and ``CLAUDE.m
    b. every whole-package guard (lint, traceability, AST scans). They import nothing
       they check, so an import-based list misses them. Detected by the
       ``package_guard`` marker, by an AST scan for ``ast.parse`` / ``pyflakes`` /
-      globbing ``*.py`` files, and by the maintained ``EXPLICIT_GUARDS`` list;
+      globbing ``*.py`` files, and by the maintained ``EXPLICIT_GUARDS`` list. A file
+      found only by the AST scan contributes just its guard *tests* -- the tests that
+      reach the source-reading call through local helpers, fixtures or module
+      constants -- not its behavioural tests (PA-0403 corrected, docs/QUALITY_POLICY.md
+      section 3); ``--whole-guard-files`` restores whole files;
    c. every changed test file; a changed helper adds the tests that import it, and a
       changed ``conftest.py`` selects the whole suite.
 
@@ -33,7 +37,12 @@ What it does (see ``docs/MULTI_AGENT_ORCHESTRATION.md`` section 2 and ``CLAUDE.m
    ``FUZZLAB_REQUIRE_LINT`` and ``FUZZLAB_REQUIRE_NETNS`` set, after waiting for any
    other pytest on the host to finish (concurrent load has produced false failures).
 5. Prints the file count and passed / failed / skipped / xfailed per pass and in total;
-   exits non-zero on any failure.
+   exits non-zero on any failure. Writes ``manifest.json``: an evidence key (commit
+   tree, dependency-file hashes, interpreter, installed distributions, flags, the
+   selected test targets) and the per-file results from this run's JUnit output, so no
+   second pytest run is needed to show that a file ran (PA-0038 corrected). A passing
+   manifest is cached; ``--reuse`` reports it instead of re-running only when every part
+   of the key is identical.
 6. Never kills by name or pattern: it records the pid of every pytest it starts (each
    in its own session), stops only those process groups, and removes only its own
    worktree.
@@ -47,8 +56,10 @@ from __future__ import annotations
 import argparse
 import ast
 import fcntl
+import hashlib
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -282,9 +293,22 @@ class Selection:
     reasons: dict[str, set[str]]
     full: bool = False
     notes: list[str] = field(default_factory=list)
+    # file -> the test nodes to run from it, for a mixed guard file selected only as a
+    # guard; a file not listed here runs whole.
+    nodes: dict[str, list[str]] = field(default_factory=dict)
 
     def add(self, rel: str, reason: str) -> None:
         self.reasons.setdefault(rel, set()).add(reason)
+
+    def targets(self, files: list[str]) -> list[str]:
+        """pytest arguments for ``files``: whole files, or ``file::node`` ids."""
+        out: list[str] = []
+        for rel in files:
+            if rel in self.nodes:
+                out += [f"{rel}::{n}" for n in self.nodes[rel]]
+            else:
+                out.append(rel)
+        return out
 
 
 def all_test_files(root: Path) -> list[str]:
@@ -406,6 +430,126 @@ def _has_guard_marker(tree: ast.AST) -> bool:
     return False
 
 
+AUTO_GUARD_KINDS = ("pyflakes", "ast.parse", "glob *.py", "os.walk")
+
+
+def _pyflakes_names(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {(a.asname or a.name).split(".")[0] for a in node.names
+                      if a.name.split(".")[0] == "pyflakes"}
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "pyflakes":
+            names |= {a.asname or a.name for a in node.names}
+    return names
+
+
+def _reads_source(node: ast.AST, pyflakes_names: set[str]) -> bool:
+    """Whether ``node``'s subtree itself makes a source-reading call: ``ast.parse``,
+    a ``*.py`` glob, ``os.walk``, or anything bound by a pyflakes import."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id in pyflakes_names:
+            return True
+        if not isinstance(sub, ast.Call):
+            continue
+        f = sub.func
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+            if f.attr == "parse" and f.value.id == "ast":
+                return True
+            if f.attr == "walk" and f.value.id == "os":
+                return True
+        if isinstance(f, ast.Attribute) and f.attr in ("glob", "rglob", "iglob"):
+            if any(isinstance(a, ast.Constant) and isinstance(a.value, str)
+                   and a.value.endswith(".py") for a in sub.args):
+                return True
+    return False
+
+
+def _names_used(node: ast.AST) -> set[str]:
+    """Names a definition refers to: loaded names, ``self.<attr>`` members and the
+    parameters (pytest fixtures are requested by parameter name)."""
+    out: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            out.add(sub.id)
+        elif isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) \
+                and sub.value.id in ("self", "cls"):
+            out.add(sub.attr)
+        elif isinstance(sub, ast.arg):
+            out.add(sub.arg)
+    return out
+
+
+def guard_nodes(path: Path) -> list[str] | None:
+    """The tests of an auto-detected guard file that reach its source-reading call.
+
+    Follows module-level helpers, fixtures (by parameter name), module constants and,
+    inside a test class, sibling members. Returns None -- run the whole file -- when the
+    call sits in module-level code that is not a plain definition, when no test or
+    every test reaches it, or when the file cannot be parsed. Conservative by design:
+    a test that reaches a guard through something this cannot see is a selector miss,
+    caught by the ``--full`` backstop.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return None
+    pyf = _pyflakes_names(tree)
+    defs: dict[str, ast.AST] = {}
+    tests: list[tuple[str, ast.AST, dict[str, ast.AST]]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs[node.name] = node
+            if node.name.startswith("test"):
+                tests.append((node.name, node, {}))
+        elif isinstance(node, ast.ClassDef):
+            defs[node.name] = node
+            members = {m.name: m for m in node.body
+                       if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            for m in node.body:
+                if isinstance(m, (ast.Assign, ast.AnnAssign)):
+                    for t in (m.targets if isinstance(m, ast.Assign) else [m.target]):
+                        if isinstance(t, ast.Name):
+                            members[t.id] = m
+            if node.name.startswith("Test"):
+                for name, m in members.items():
+                    if name.startswith("test") and isinstance(m, (ast.FunctionDef,
+                                                                 ast.AsyncFunctionDef)):
+                        tests.append((f"{node.name}::{name}", m, members))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                if isinstance(t, ast.Name):
+                    defs[t.id] = node
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        elif _reads_source(node, pyf):
+            return None  # e.g. a module-level loop: cannot attribute it to tests
+
+    memo: dict[int, bool] = {}
+
+    def reaches(node: ast.AST, scope: dict[str, ast.AST], seen: set[int]) -> bool:
+        key = id(node)
+        if key in memo:
+            return memo[key]
+        if key in seen:
+            return False
+        seen = seen | {key}
+        result = _reads_source(node, pyf)
+        if not result:
+            for name in _names_used(node):
+                target = scope.get(name) or defs.get(name)
+                if target is not None and target is not node and reaches(target, scope, seen):
+                    result = True
+                    break
+        memo[key] = result
+        return result
+
+    hits = [name for name, node, scope in tests if reaches(node, scope, set())]
+    if not hits or len(hits) == len(tests):
+        return None
+    return hits
+
+
 def guard_kind(path: Path) -> str | None:
     """Why ``path`` is a whole-package guard, or None.
 
@@ -455,6 +599,7 @@ def select_tests(
     changed_test_paths: list[str],
     *,
     transitive: bool = False,
+    whole_guard_files: bool = False,
 ) -> Selection:
     """The test files a change must run (relative paths, existing at ``root``)."""
     sel = Selection(files=[], reasons={})
@@ -484,7 +629,8 @@ def select_tests(
             if hits:
                 sel.add(rel, "imports " + ", ".join(hits[:3]) + (" ..." if len(hits) > 3 else ""))
 
-    for rel, kind in package_guards(root).items():
+    guards = package_guards(root)
+    for rel, kind in guards.items():
         sel.add(rel, f"package guard ({kind})")
 
     for rel in changed_test_paths:
@@ -495,6 +641,15 @@ def select_tests(
                 sel.add(user, f"imports changed helper {rel}")
 
     sel.files = sorted(r for r in sel.reasons if r in existing)
+    if not whole_guard_files:
+        for rel in sel.files:
+            only_guard = all(r.startswith("package guard") for r in sel.reasons[rel])
+            # A listed or marked guard is declared whole; only a file the AST scan found
+            # is split.
+            if only_guard and guards.get(rel) in AUTO_GUARD_KINDS and rel not in EXPLICIT_GUARDS:
+                nodes = guard_nodes(root / rel)
+                if nodes:
+                    sel.nodes[rel] = nodes
     return sel
 
 
@@ -539,23 +694,93 @@ class Counts:
         return self.failed == 0 and self.errors == 0
 
 
+def _outcome(case: ET.Element) -> str:
+    kids = {child.tag: child for child in case}
+    if "failure" in kids:
+        return "failed"
+    if "error" in kids:
+        return "errors"
+    if "skipped" in kids:
+        return "xfailed" if (kids["skipped"].get("type") or "") == "pytest.xfail" else "skipped"
+    return "passed"
+
+
 def parse_junit(xml_path: Path) -> Counts:
     c = Counts()
     root = ET.parse(xml_path).getroot()
     for case in root.iter("testcase"):
-        kids = {child.tag: child for child in case}
-        if "failure" in kids:
-            c.failed += 1
-        elif "error" in kids:
-            c.errors += 1
-        elif "skipped" in kids:
-            if (kids["skipped"].get("type") or "") == "pytest.xfail":
-                c.xfailed += 1
-            else:
-                c.skipped += 1
-        else:
-            c.passed += 1
+        outcome = _outcome(case)
+        setattr(c, outcome, getattr(c, outcome) + 1)
     return c
+
+
+def junit_by_file(xml_path: Path, files: list[str]) -> dict[str, Counts]:
+    """Per-file outcome counts from one run's JUnit XML (a testcase's ``classname`` is
+    its module path, plus its class). An unattributable case is under ``"?"``."""
+    modules = sorted(((module_name_of_test_file(f), f) for f in files),
+                     key=lambda pair: -len(pair[0]))
+    out: dict[str, Counts] = {}
+    root = ET.parse(xml_path).getroot()
+    for case in root.iter("testcase"):
+        cls = case.get("classname") or ""
+        rel = next((f for m, f in modules if cls == m or cls.startswith(m + ".")), "?")
+        c = out.setdefault(rel, Counts())
+        outcome = _outcome(case)
+        setattr(c, outcome, getattr(c, outcome) + 1)
+    return out
+
+
+# ------------------------------------------------------------------ evidence
+
+
+EVIDENCE_ENV = ("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "PYTHONHASHSEED")
+DEPENDENCY_FILES = ("pyproject.toml", "requirements*.txt", "*.lock", "setup.cfg", "setup.py")
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def installed_distributions() -> list[str]:
+    from importlib import metadata
+
+    return sorted({f"{d.metadata['Name']}=={d.version}" for d in metadata.distributions()
+                   if d.metadata["Name"]})
+
+
+def evidence_key(wt: Path, sha: str, targets: list[str], *, full: bool, workers: int,
+                 env: dict) -> dict:
+    """Everything the result depends on. Reuse is allowed only on an identical key."""
+    deps = {}
+    for pattern in DEPENDENCY_FILES:
+        for p in sorted(wt.glob(pattern)):
+            deps[p.name] = _sha256(p.read_bytes())
+    flags = {k: env.get(k, "") for k in sorted(REQUIRE_FLAGS)}
+    flags.update({k: env.get(k, "") for k in EVIDENCE_ENV})
+    flags.update({k: v for k, v in sorted(env.items()) if k.startswith("FUZZLAB_")})
+    return {
+        "tree": git(wt, "rev-parse", f"{sha}^{{tree}}").strip(),
+        "dependency_files": deps,
+        "python": sys.version,
+        "platform": platform.platform(),
+        "installed": _sha256("\n".join(installed_distributions()).encode()),
+        "flags": flags,
+        "full": full,
+        "workers": workers,
+        "targets": sorted(targets),
+    }
+
+
+def key_hash(key: dict) -> str:
+    return _sha256(json.dumps(key, sort_keys=True).encode())
+
+
+def evidence_cache_dir() -> Path:
+    base = os.environ.get("FUZZLAB_VERIFY_CACHE")
+    if base:
+        return Path(base)
+    xdg = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(xdg) / "fuzzlab-verify"
 
 
 # ------------------------------------------------------------------ processes
@@ -772,6 +997,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="seconds to wait for other pytest processes / harness runs (default 1800)")
     ap.add_argument("--out", help="directory for logs and the summary (default: a new temp dir)")
     ap.add_argument("--keep-worktree", action="store_true", help="leave the detached worktree in place")
+    ap.add_argument("--whole-guard-files", action="store_true",
+                    help="run auto-detected guard files whole, not only their guard tests")
+    ap.add_argument("--reuse", action="store_true",
+                    help="report a cached passing manifest with an identical evidence key "
+                         "instead of re-running (never reuses a failure)")
     ap.add_argument("--allow-concurrent", action="store_true",
                     help="skip the host lock and the wait for other pytest processes (only for "
                          "this script's own tests; never for a verification you report)")
@@ -820,7 +1050,8 @@ def main(argv: list[str] | None = None) -> int:
             other = [p for p in changed_paths(repo, base_sha, sha)
                      if not p.startswith((PACKAGE + "/", TESTS_DIR + "/", "docs/"))
                      and not p.endswith(".md")]
-            sel = select_tests(wt, pkg, tst, transitive=args.transitive)
+            sel = select_tests(wt, pkg, tst, transitive=args.transitive,
+                               whole_guard_files=args.whole_guard_files)
             print(f"base {base_sha[:12]}: {len(pkg)} changed package file(s), {len(tst)} changed test file(s)")
             for p in pkg:
                 print(f"  changed: {p} -> {module_for_path(wt, p)}")
@@ -831,14 +1062,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"note: {n}")
 
         parallel, serial = split_passes(sel.files)
-        print(f"selected {len(sel.files)} test file(s): {len(parallel)} parallel, {len(serial)} serial")
+        print(f"selected {len(sel.files)} test file(s): {len(parallel)} parallel, {len(serial)} serial"
+              + (f"; {len(sel.nodes)} guard file(s) contribute only their guard tests"
+                 if sel.nodes else ""))
         (out / "selection.json").write_text(json.dumps(
             {"head": sha, "base": base_sha, "full": sel.full, "parallel": parallel, "serial": serial,
+             "nodes": sel.nodes,
              "reasons": {k: sorted(v) for k, v in sel.reasons.items()}}, indent=1))
         if args.list_only:
             for f in sel.files:
                 why = "; ".join(sorted(sel.reasons.get(f, ()))) or "full suite"
-                print(f"  {'S' if is_serial(f) else 'P'} {f}  [{why}]")
+                part = f" ({len(sel.nodes[f])} guard test(s))" if f in sel.nodes else ""
+                print(f"  {'S' if is_serial(f) else 'P'} {f}{part}  [{why}]")
             return 0
         if not sel.files:
             print("nothing to run")
@@ -871,14 +1106,30 @@ def main(argv: list[str] | None = None) -> int:
         if parallel and not use_xdist:
             print("note: pytest-xdist is not installed; the parallel pass runs without -n")
 
+        key = evidence_key(wt, sha, sel.targets(sel.files), full=sel.full,
+                           workers=args.workers if use_xdist else 0, env=env)
+        digest = key_hash(key)
+        cached = evidence_cache_dir() / f"{digest}.json"
+        if args.reuse and cached.is_file():
+            prior = json.loads(cached.read_text())
+            if prior.get("result") == "pass" and prior.get("key") == key:
+                (out / "manifest.json").write_text(json.dumps(
+                    dict(prior, reused_from=str(cached)), indent=1))
+                print(f"reused qualified evidence {digest[:12]} for tree {key['tree'][:12]} "
+                      f"(recorded {prior.get('recorded')}): TOTAL {prior['files_count']} file(s): "
+                      f"{Counts(**prior['total']).line()}")
+                print(f"manifest: {out / 'manifest.json'}")
+                return 0
+
         total = Counts()
         results = {}
+        per_file: dict[str, dict] = {}
         for name, files, par in (("parallel", parallel, use_xdist), ("serial", serial, False)):
             if not files:
                 continue
             junit = out / f"{name}.xml"
             log = out / f"{name}.log"
-            cmd = pytest_cmd(files, junit, parallel=par, workers=args.workers)
+            cmd = pytest_cmd(sel.targets(files), junit, parallel=par, workers=args.workers)
             print(f"[{name}] {len(files)} file(s) ... (log: {log})", flush=True)
             t0 = time.monotonic()
             rc = runner.run(cmd, wt, env, log, args.timeout)
@@ -895,11 +1146,27 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  {ln}")
             results[name] = {"files": len(files), "rc": rc, "seconds": round(dt), **counts.__dict__}
             total = total + counts
+            if junit.exists():
+                per_file.update({f: c.__dict__ for f, c in junit_by_file(junit, files).items()})
 
         print(f"TOTAL {len(sel.files)} file(s): {total.line()}")
         (out / "summary.json").write_text(json.dumps(
             {"head": sha, "base": base_sha, "full": sel.full, "files": len(sel.files),
              "passes": results, "total": total.__dict__}, indent=1))
+        manifest = {"key": key, "key_hash": digest, "head": sha, "base": base_sha,
+                    "recorded": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "result": "pass" if total.ok else "fail", "files_count": len(sel.files),
+                    "total": total.__dict__, "per_file": per_file, "nodes": sel.nodes}
+        (out / "manifest.json").write_text(json.dumps(manifest, indent=1))
+        if total.ok:
+            try:
+                cached.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cached.with_suffix(".tmp")
+                tmp.write_text(json.dumps(manifest, indent=1))
+                tmp.replace(cached)
+            except OSError as exc:
+                print(f"note: could not cache the evidence manifest: {exc}")
+        print(f"evidence key {digest[:12]}; manifest: {out / 'manifest.json'}")
         print(f"logs and summary: {out}")
         return 0 if total.ok else 1
     except KeyboardInterrupt as exc:

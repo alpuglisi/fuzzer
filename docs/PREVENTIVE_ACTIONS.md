@@ -1,27 +1,34 @@
 # Preventive actions
 
-The active rules to follow while working on this project. Each is a preventive
-action from a bug investigation (`docs/bugs/`). No background here by design —
-read this list and follow it. Consult it before and during changes.
+**The immutable history of every preventive action (PA) this project has adopted.**
+Since 2026-10-15 (D70) it is no longer read top to bottom before each change. The
+operating policy is `docs/QUALITY_POLICY.md`, organised in twelve control families
+(L01..L12). `docs/quality/pa_control_map.tsv` maps each PA below to one family and records
+its status, enforcement mechanism and the correction from the lean quality review
+(`docs/quality/LEAN_QC_PROPOSAL_REV3.md`). `docs/quality/CONTROL_INDEX.md` (generated)
+lists, per family, the PAs and their **current requirement**.
 
-**Following this list is mandatory, not advisory.** It is one step in the full
-change process; see `CLAUDE.md` (the session-start checklist) for how it fits with the
-changelog, change-control, error-log, and bug-report requirements.
+Read a PA through its family. Where the map marks a PA **rewritten** or **replaced**, the
+map's correction wins over the wording below. **archived** entries are history only. IDs
+never change, and entries are never deleted or renumbered.
 
-Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
+A new PA is added only for a mechanism no existing control covers (QUALITY_POLICY §4); a
+failed control is corrected in place through its map row instead. A new entry:
 
-Every entry ends with exactly one enforcement line, checked by
-`tests/test_pa_enforcement.py` (each named test must exist; resolved by AST):
+- uses the format `PA-NNNN — <rule>. (from BUG-NNNN)`;
+- ends with exactly one enforcement line, checked by `tests/test_pa_enforcement.py`
+  (each named test must exist; resolved by AST):
+  - `- Enforced by: tests/<file>.py::<test>[, tests/<file>.py::<test> …]` — tests that
+    fail when the rule is broken, or
+  - `- Enforced by: none — <reason>`;
+- gets a row in `pa_control_map.tsv`; `tests/test_quality_controls.py` fails on an
+  unmapped PA.
 
-- `- Enforced by: tests/<file>.py::<test>[, tests/<file>.py::<test> …]` — the tests
-  that fail when the rule is broken, or
-- `- Enforced by: none — <reason>` — why no test enforces it (a process or conduct
-  rule, on-host only, not yet built).
-
-A new PA names its enforcement when it is written. Prefer a mechanical guard (an AST or
-whole-package check proven on a synthetic offender, PA-0034(2)) to prose: the
-retrospective of BUG-0110..BUG-0139 found every one of those 25 bugs happened while a
-prose PA already applied. The test prints the share of PAs enforced by `none`.
+A named test is reference linkage, not proof that the whole PA is enforced. The map's
+`mechanism` / `control_status` columns separate a test, a hook, a fixture, an on-host
+check, review and a genuine gap, and `designed` / `implemented` / `qualified` /
+`operating-effective`. Prefer a mechanical guard, proven on a synthetic offender *and* a
+legitimate case, to prose (L10).
 
 - **PA-0001** — In tests, do not hardcode a value that a source-of-truth constant
   or registry in the code already defines (schema head version, `FEATURE_VERSION`,
@@ -2012,7 +2019,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      item of kind process or measurement opened after the stall began. The Stop hook
      refuses to end a turn with a checkpoint overdue or a stall unreported.
      (from BUG-0141)
-  - Enforced by: tests/test_orchestration_guard.py::test_a_stalled_metric_denies_dispatch_until_the_user_writes, tests/test_orchestration_guard.py::test_during_a_stall_only_work_on_the_stall_itself_is_dispatched, tests/test_orchestration_guard.py::test_a_stall_needs_a_push_notification_before_the_turn_ends, tests/test_orchestration_guard.py::test_a_checkpoint_falls_due_after_three_unattended_hours, tests/test_orchestration_guard.py::test_dispatching_without_a_ledger_is_caught_at_the_stop, tests/test_orchestration_guard.py::test_replay_of_the_2026_10_14_incident_stops_six_hours_in
+  - Enforced by: tests/test_orchestration_guard.py::test_a_stalled_metric_denies_dispatch_until_the_user_decides, tests/test_orchestration_guard.py::test_during_a_stall_only_work_on_the_stall_itself_is_dispatched, tests/test_orchestration_guard.py::test_a_stall_needs_a_push_notification_before_the_turn_ends, tests/test_orchestration_guard.py::test_a_checkpoint_falls_due_after_three_unattended_hours, tests/test_orchestration_guard.py::test_dispatching_without_a_ledger_is_caught_at_the_stop, tests/test_orchestration_guard.py::test_replay_of_the_2026_10_14_incident_stops_six_hours_in
 
 - **PA-0142** — **Review rounds are capped.**
   1. **At most 3 review requests per work item** between user contacts. A request is any
@@ -2040,7 +2047,7 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      §7), write down a redesign, and take it to the user before the next fix. This
      extends the retrospective's chain C1 (7 bugs in the navigation guard) into a
      trigger. (from BUG-0141)
-  - Enforced by: tests/test_orchestration_guard.py::test_a_fix_that_keeps_spawning_bugs_forces_a_stop
+  - Enforced by: tests/test_orchestration_guard.py::test_a_fix_that_keeps_spawning_bugs_forces_a_disposition
 
 - **PA-0145** — **Every dispatched item has a time budget.** The default is 4 hours of
   wall clock; set it with `--budget-hours` when you know better. Past the budget,

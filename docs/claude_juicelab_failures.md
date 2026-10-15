@@ -742,3 +742,31 @@ Juice Shop lab is complete.
 - **Status:** pushed to `ccr-27885270-9ahcdd` and `main` without a test run, on the
   owner's instruction. Rule from now on: documentation-only commits are pushed directly.
   Verification applies to code and test changes.
+
+### F-059 — The controls I built to stop runaway work measured proxies, and I accepted the gap as a residual
+- **What:** I built three controls, and each checked a proxy instead of the property it
+  governs:
+  - the progress guard (BUG-0141) let any user message clear every hold and restart
+    every clock, and counted each reviewer request as a round. I wrote "any user message
+    clears an escalation" into BUG-0141's residuals and relied on a prose rule (PA-0147)
+    to cover it;
+  - the bookkeeping Stop hook blocked on words such as "timeout", and was satisfied by
+    any edit to `ERROR_LOG.md`;
+  - the corpus hook enforced a two-unique-CWE quota that rewarded doubtful labels.
+
+  None was tested on a legitimate case.
+- **Evidence:**
+  - BUG-0141 "Residuals";
+  - the lean QC review (`docs/quality/LEAN_QC_PROPOSAL_REV3.md`, Revision 2 P0 and the
+    hook negative control);
+  - the 2026-10-15 reproduction of the old hook's exit 2 (BUG-0157);
+  - BUG-0156.
+- **Impact:**
+  - the guard could show no holds while the work ran past its limits, so its
+    protection against another 15-hour loop was weaker than reported;
+  - routine documentation was blocked;
+  - corpus labels may be inaccurate.
+- **Status:** fixed in the controls (BUG-0156, BUG-0157); effectiveness provisional.
+  Re-mapping the corpus labels assigned under the quota is open, for the owner to
+  schedule.
+

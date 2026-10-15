@@ -4,6 +4,18 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (lean quality policy adopted as a bounded pilot, D70)
+- **What:** the owner adopted the lean quality-control review, Revision 3 (`docs/quality/LEAN_QC_PROPOSAL_REV3.md`). The changes:
+  - **New policy.** `docs/QUALITY_POLICY.md` is the operating policy: a risk-based review and verification route; ordinary defects vs formal CAPA; R1 (systemic-diagnosis trigger), R2 (evidence for design-critical assumptions) and R3 (capability-transfer acceptance); twelve control families.
+  - **The PA register.** `docs/PREVENTIVE_ACTIONS.md` becomes immutable history. Every one of its 163 PAs is mapped in `docs/quality/pa_control_map.tsv`, with the review's disposition and correction plus the enforcement mechanism and state; PA-0153 was mapped here because the review predates it. `scripts/quality_index.py` renders `docs/quality/CONTROL_INDEX.md`, and `tests/test_quality_controls.py` fails on an unmapped PA or a stale index.
+  - **Process documents.** `CLAUDE.md`, `README.md`, `docs/components/README.md`, `docs/bugs/README.md` and `docs/MULTI_AGENT_ORCHESTRATION.md` §8 are rewritten to match. The 3/3 two-reviewer gate gives way to risk-based review. A new PA is no longer required for every defect. The change-control template gains goal, acceptance, hypothesis, verification, review, rollback and control status.
+  - **Failed controls corrected.**
+    - The orchestration guard no longer treats contact as a decision (BUG-0156).
+    - The keyword Stop hook gives way to declared `Change-Type:`/`Risk:` commit trailers, and the two-unique-CWE quota is removed (BUG-0157).
+    - `scripts/verify_change.py` takes only the guard tests of an auto-detected guard file. With no package change, the guard floor drops from 2,281 to 623 collected tests (same 50 files; 30 split; listed and marked guards stay whole).
+    - `verify_change.py` writes `manifest.json`: an evidence key plus per-file JUnit results, so a second pytest run is no longer needed as proof (PA-0038). `--reuse` reports a cached passing manifest only when the key is identical.
+- **Why:** the 2,371-line register had become a mandatory work instruction made of accumulated incident history. The review found that it, the unscaled review gate and the proxy controls cost delivery time without demonstrated quality gain, and that some of its rules were counterproductive. It also found that the progress guard could be cleared by any status question. Safety controls are unchanged (QUALITY_POLICY §9). The first recovery slice, a qualified baseline on the held-out labs, is not done: those labs are not in this container.
+
 ## 2026-10-15 (session handoff document)
 - **What:** `docs/HANDOFF-2026-10-15.md` (new): the goal in the owner's words, the held-out metric and its current values, the owner's decisions D67-D69, the unmerged lane branches and their state, the integration items, the work queue in order, the labs, and the working rules. `docs/claude_juicelab_failures.md` gains F-057 (a lane worked around a blocked command and changed the host).
 - **Why:** the owner asked for a handoff to a fresh session.

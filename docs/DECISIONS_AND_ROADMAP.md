@@ -457,6 +457,31 @@ request."
 - The caller's own headers always win. That includes a header point's value, and an
   app's captured `Accept`.
 
+### D70 — The lean quality policy replaces the incident register as the work instruction (owner, 2026-10-15)
+
+**The owner's decision:** "There is a proposal attached. Implement the proposal." The
+proposal is the lean quality-control review, Revision 3
+(`docs/quality/LEAN_QC_PROPOSAL_REV3.md`). It is adopted as a **bounded pilot**:
+- `docs/QUALITY_POLICY.md` is the operating policy: the risk route, ordinary defects vs
+  formal CAPA, the three Revision-3 requirements (R1 systemic-diagnosis trigger, R2
+  evidence for design-critical assumptions, R3 capability-transfer acceptance), and
+  twelve control families.
+- `docs/PREVENTIVE_ACTIONS.md` becomes immutable history. Every PA is mapped to a family
+  in `docs/quality/pa_control_map.tsv`, and the review's corrections win for rewritten
+  and replaced PAs.
+- The 2026-09-22 two-reviewer, 3/3-unanimity design gate is replaced by risk-based
+  review. The earlier owner rules still stand: one combined review per change, and the
+  full suite and the coordinator's diff read before every merge.
+- A new PA is no longer required for every defect.
+- The controls named as defective are corrected:
+  - the orchestration guard's contact resets (BUG-0156);
+  - the keyword Stop hook and the two-unique-CWE quota (BUG-0157);
+  - whole-file guard selection and the second pytest run as evidence.
+- Safety controls are not relaxed (QUALITY_POLICY §9).
+- Adoption does not declare the incident resolved. The controls stay `implemented`, not
+  `qualified`, until the effectiveness evidence in QUALITY_POLICY §8 exists. The first
+  recovery slice (a qualified baseline on the held-out labs) is still to do.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

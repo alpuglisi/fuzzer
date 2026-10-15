@@ -21,19 +21,21 @@ not optional cleanup.** Start with **[`CLAUDE.md`](CLAUDE.md)** — the mandator
 session-start checklist that every contributor (human or AI agent) follows. In short,
 every change:
 
-- complies with the rules in **`docs/PREVENTIVE_ACTIONS.md`** (read and follow them —
-  they are authoritative, each derived from a past bug);
-- adds a line to **`CHANGELOG.md`** and a full entry to each affected component's
+- follows **`docs/QUALITY_POLICY.md`**. It states the outcome, classifies the risk, and
+  takes the review and verification for that class. It applies the affected control
+  families; `docs/quality/CONTROL_INDEX.md` lists the historical
+  `docs/PREVENTIVE_ACTIONS.md` rules under each family, with their current requirement;
+- adds a line to **`CHANGELOG.md`** and a controlled entry to the primary component's
   **`docs/components/<n>-*/change-control.md`** (append-only);
 - keeps the **living specs** current: the affected component's
   **`docs/components/<n>-*/requirements.md`** (edited in place) and, when structure or
   contracts change, **`docs/ARCHITECTURE.md`**;
-- and, if it fixes a code defect, gets the full bug protocol: an **`ERROR_LOG.md`** line,
-  a **`docs/bugs/BUG-NNNN-*.md`** root-cause analysis, and one or more new
-  **`docs/PREVENTIVE_ACTIONS.md`** rules (plus the PA-0002 sweep for other instances).
+- and, if it fixes a defect, records it in **`ERROR_LOG.md`**. A significant, recurring
+  or systemic defect, a security event or a failed control is formal CAPA: a
+  **`docs/bugs/BUG-NNNN-*.md`** investigation that corrects the existing control.
 
-The canonical detail lives in `CLAUDE.md`, `docs/components/README.md`, and
-`docs/bugs/README.md`.
+The canonical detail lives in `CLAUDE.md`, `docs/QUALITY_POLICY.md`,
+`docs/components/README.md`, and `docs/bugs/README.md`.
 
 ## Layout
 
@@ -161,8 +163,10 @@ pytest        # 30 tests: store/migrations, config, budget, features, labels,
 - `docs/PHASE_0_PLAN.md` — the foundations plan and current status.
 - `docs/components/` — a requirement spec and an append-only change-control log
   per component.
-- `docs/bugs/` — bug investigation documents (root-cause analysis per bug).
-- `docs/PREVENTIVE_ACTIONS.md` — the context-free rule list to follow while
-  working (every rule derives from a bug investigation).
+- `docs/QUALITY_POLICY.md` — the operating quality policy (risk route, defects vs CAPA,
+  twelve control families); `docs/quality/` — the PA-to-family map and its generated index.
+- `docs/bugs/` — formal CAPA investigation documents (root-cause analysis).
+- `docs/PREVENTIVE_ACTIONS.md` — the immutable history of preventive actions, read through
+  the control families.
 - `lab/VULNERABILITIES.md` — the lab's vulnerability map, **generated** from
   `lab/ground-truth/labels.json` (`python3 -m fuzzlab.labgen.vuln_map`) — do not hand-edit.

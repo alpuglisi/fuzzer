@@ -1,28 +1,30 @@
-# Bug investigations
+# Bug investigations (formal CAPA)
 
-Every time a bug is discovered in the code, we generate a **bug investigation
-document** here and add its preventive action to `docs/PREVENTIVE_ACTIONS.md`.
-This is a required process for the project. See `CLAUDE.md` for how it fits the full
-change process (the error-log line, the bug report, and the preventive-action rules
-together — not just one of them).
+A bug investigation document here is the **formal corrective and preventive action
+(CAPA)** record. Since 2026-10-15 (`docs/QUALITY_POLICY.md` §4, D70) it is written only
+for:
+- a significant escape;
+- a recurring or systemic defect;
+- a security or data-integrity event;
+- a **failed control** (a guard, hook or rule that let the defect through, or that
+  blocked the wrong thing).
 
-## When
-
-Any defect discovered in the code — a failing test, a wrong result, a crash, a
-regression, a security-relevant flaw. If it caused something to fail (or would
-have), it gets an investigation document.
+An ordinary defect gets an `ERROR_LOG.md` entry (reproduction, correction, regression
+check, scope) and its regression test, and nothing more. The earlier rule, "every defect
+gets a document and a new PA", produced 158 documents and 163 PAs with heavy overlap.
+The lean quality review (`docs/quality/LEAN_QC_PROPOSAL_REV3.md`) found that this cost
+delivery time without showing better quality.
 
 ## How this relates to the other logs
 
-- `ERROR_LOG.md` (repo root) stays the **lightweight running log** of errors and
-  their remediation — a quick, chronological record.
-- A **bug investigation document** here is the **rigorous per-bug record**: a
-  structured root-cause analysis with a corrective and a preventive action.
-- `docs/PREVENTIVE_ACTIONS.md` is the **distilled rule list** — every preventive
-  action, with no background, meant to be read and followed while working.
-
-A single bug produces one `ERROR_LOG.md` line, one investigation document here,
-and one (or more) preventive-action entries in `PREVENTIVE_ACTIONS.md`.
+- `ERROR_LOG.md` (repo root) is the **running log of every defect** and its remediation.
+- A **bug investigation document** here is the **rigorous CAPA record**: a structured
+  root-cause analysis, a corrective and a systemic action, an owner, a due date and an
+  effectiveness plan.
+- The **controls** live in `docs/QUALITY_POLICY.md` (families L01..L12) and their history
+  in `docs/PREVENTIVE_ACTIONS.md`, joined by `docs/quality/pa_control_map.tsv`. A CAPA
+  **corrects the existing control** (its map row and its mechanism). It adds a new PA
+  only for a mechanism no control covers.
 
 ## Required contents of every investigation
 
@@ -44,19 +46,24 @@ and one (or more) preventive-action entries in `PREVENTIVE_ACTIONS.md`.
    layer, was not actually followed, or was not enforced/verifiable). Name the prior
    `BUG-NNNN` and `PA-NNNN`. Do **not** proceed to a new preventive action until this is
    written.
-9. **Preventive action** — a change, derived from the root cause, that prevents
-   recurrence of this *class* of bug. On a recurrence it must also address the failure
-   mode found in step 8 — **strengthen or supersede** the prior PA (cross-reference it),
-   not merely restate it. Also recorded in `PREVENTIVE_ACTIONS.md`.
+9. **Systemic action** — the change, derived from the verified cause, that prevents
+   recurrence of this *class* of defect. Prefer correcting the existing control (its map
+   row and its mechanism) to a new PA. On a recurrence it must fix the failure mode found
+   in step 8, not restate the prior rule.
+10. **Owner, due date and effectiveness plan** — who owns the systemic action, by when,
+    and the **predeclared criterion** that closes it: what will be observed, over which
+    opportunities. Until then the CAPA status is `provisional`. A green regression test
+    alone does not close a CAPA.
 
-This is distinct from PA-0002 (sweep the *codebase* for other instances of the bug and
-remediate them): step 7 sweeps the *bug history* for the same failure repeating despite a
-prior rule, and step 8 asks why prevention did not hold. Both apply.
+Step 7 sweeps the *bug history* for the same failure repeating despite a prior control.
+The sweep of the *affected surface* for other instances (PA-0002, as rewritten) is
+bounded by the mechanism and the risk; serious unrelated findings become separate items.
 
 ## File naming
 
-`BUG-NNNN-short-slug.md`, numbered in order of discovery, newest numbers highest.
-Preventive actions are `PA-NNNN` in `PREVENTIVE_ACTIONS.md` and reference their
+`BUG-NNNN-short-slug.md`, numbered in order of discovery, newest numbers highest. When two
+branches used one number, keep both and record an alias in the later one; never renumber
+history. Preventive actions are `PA-NNNN` in `PREVENTIVE_ACTIONS.md` and reference their
 originating `BUG-NNNN`.
 
 ## Template
@@ -89,7 +96,12 @@ or the same root cause; result — the matching BUG-NNNN/PA-NNNN, or "none found
 too narrow / wrong layer / not followed / not enforced — naming the prior BUG-NNNN + PA-NNNN.
 Omit this section when no recurrence was found.>
 
-## Preventive action
-<derived from the root cause; on a recurrence, also fixes the step-8 failure mode and
-strengthens/supersedes the prior PA. Also added to PREVENTIVE_ACTIONS.md as PA-NNNN>
+## Systemic action
+<derived from the verified cause; the control corrected (map row / mechanism), or the new
+PA-NNNN for an uncovered mechanism; on a recurrence, also fixes the step-8 failure mode>
+
+## Owner, due date and effectiveness
+- Owner: <role>  - Due: <date>
+- Effectiveness criterion: <what will be observed, over which opportunities>
+- Status: provisional | effective | failed (reopen the control)
 ```

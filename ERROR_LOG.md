@@ -5,9 +5,11 @@ A record of identified errors (bugs, deployment failures, environment issues) an
 something breaks and is fixed, so the same problem is easy to recognize and
 resolve next time.
 
-A **code** defect also needs a full bug report (`docs/bugs/BUG-NNNN-*.md`) and one or
-more preventive-action rules (`docs/PREVENTIVE_ACTIONS.md`) — this log alone is not
-enough. See `CLAUDE.md` for the full change process.
+For an ordinary defect this entry is the record: the reproduction, the correction, the
+regression check and the scope. A significant, recurring or systemic defect, a security
+or data-integrity event, or a failed control is formal CAPA. It also needs a
+`docs/bugs/BUG-NNNN-*.md` report, and its control is corrected through
+`docs/quality/pa_control_map.tsv` (`docs/QUALITY_POLICY.md` §4, `CLAUDE.md`).
 
 Format per entry:
 - **Date / component**
@@ -17,6 +19,28 @@ Format per entry:
 - **Status:** Fixed / Open / Environment (fixed outside the repo)
 
 ---
+
+## 2026-10-15 — Process controls: the progress guard and two Stop hooks enforced proxies (fixed, BUG-0156, BUG-0157)
+- **Symptom:** three failures, all reproduced:
+  - Any user message, "status?" included, cleared every progress-guard hold. It restarted the stall and budget clocks and zeroed the review-round count. Two parallel reviewers counted as two rounds (lean QC review, synthetic replay).
+  - The bookkeeping Stop hook exited 2 on the README line "The timeout setting is 15 seconds." (reproduced in a throwaway repository).
+  - The corpus hook rejected independent examples that share one accurate CWE, and passed silently when `python3` lacked PyYAML.
+- **Root cause:** each control checked a proxy instead of the property it governs:
+  - contact instead of a decision scoped to one hold;
+  - a word in the diff instead of a declared defect;
+  - a count of unique labels instead of an accurate mapping.
+
+  None had been qualified on a legitimate case.
+- **Remediation:**
+  - `scripts/orchestration_guard.py`:
+    - `decide`, which quotes the user and names one hold; allowances add up and nothing resets;
+    - cumulative spend across reopen and rename (`--continues`);
+    - a round = the requests between two work dispatches;
+    - `item disposition` for the bug chain and for exhausted experiments (R1).
+  - `.claude/hooks/check_bookkeeping.py` replaces the keyword hook: `Change-Type:`/`Risk:` trailers, and a structural `ERROR_LOG.md` check.
+  - The CWE hook drops the uniqueness quota, keeps the owner's pairs floor, and fails visibly without PyYAML.
+  - Tests: `tests/test_orchestration_guard.py`, `tests/test_stop_hooks.py`.
+- **Status:** Fixed. CAPA effectiveness is provisional.
 
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).

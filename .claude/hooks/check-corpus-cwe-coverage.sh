@@ -1,11 +1,10 @@
 #!/bin/bash
-# Stop hook: mechanically catch the BUG-0030 failure mode (a corpus
-# manifest.yaml entry given only a recalled CWE or two, or CWEs merely
-# copy-pasted across sibling entries) instead of relying on remembering
-# PA-0033. Every entry needs >= 2 CWEs in `cwe_unique:` that are not
-# claimed as unique by any other entry this hook checks (a CWE relevant to
-# more than one entry belongs in `cwe_shared:` instead and does not count
-# toward the floor). See docs/bugs/BUG-0030-*.md.
+# Stop hook for the vulnerability corpus (BUG-0030; PA-0033 replaced by BUG-0157).
+# Every touched docs/research/corpus-examples/*/manifest.yaml entry needs at least
+# one well-formed CWE mapping, and every touched cell keeps the owner-requested
+# floor of >= 5 vulnerable and >= 5 idiomatic entries, with real pairs. The former
+# ">= 2 CWEs unique to each entry" quota is removed: it measured label uniqueness,
+# not mapping accuracy (docs/quality/LEAN_QC_PROPOSAL_REV3.md, PA-0033).
 
 input=$(cat)
 
@@ -59,23 +58,30 @@ changed_manifests=$(
 
 [[ -n "$changed_manifests" ]] || exit 0
 
-python3 - "$changed_manifests" <<'PYEOF' 2>/tmp/check-corpus-cwe-coverage.err
+python3 - "$changed_manifests" <<'PYEOF' 2>"${TMPDIR:-/tmp}/check-corpus-cwe-coverage.$$.err"
 import sys
 
 try:
     import yaml
 except ImportError:
-    sys.exit(0)
+    # Not a silent pass (L10: no vacuous guard): manifests changed and cannot be read.
+    print("PyYAML is not importable by `python3`, so the touched corpus manifests could "
+          "not be checked. Install it (pip install PyYAML) or run the check by hand.",
+          file=sys.stderr)
+    sys.exit(1)
 
 manifests = sys.argv[1].split("\n") if len(sys.argv) > 1 else []
 problems = []
 
-# Track which entry first claimed each CWE as "unique" so a repeat across
-# entries (even across different manifest files) is caught, not just
-# within one file.
-unique_claims = {}  # cwe_id -> (path, file)
+# BUG-0157 / PA-0033 (replaced): an entry needs at least one well-formed CWE
+# mapping, across `cwe_unique:`, `cwe_shared:` and the legacy `cwe:`. There is no
+# per-entry quota of CWEs unique to it: independent examples may correctly share one
+# root weakness (MITRE CWE root-cause mapping guidance), and a uniqueness quota made
+# acceptance depend on which other files were touched. Accuracy of the mapping is a
+# review question; the hook checks only what it can: presence and form.
+import re
 
-all_entries = []  # (path, file, cwe_unique, cwe_shared)
+CWE_ID = re.compile(r"^CWE-[1-9][0-9]*$")
 
 for path in manifests:
     path = path.strip()
@@ -92,54 +98,27 @@ for path in manifests:
         if not isinstance(entry, dict):
             continue
         fname = entry.get("file", "<unnamed>")
-        cwe_unique = entry.get("cwe_unique")
-        cwe_shared = entry.get("cwe_shared") or []
-        legacy_cwe = entry.get("cwe")
-
-        if cwe_unique is None:
-            if legacy_cwe is not None:
-                # Pre-migration entry using the old flat `cwe:` field.
-                problems.append(
-                    f"{path}: {fname} still uses the old flat `cwe:` field -- "
-                    f"migrate to `cwe_unique:`/`cwe_shared:` per PA-0033's "
-                    f"updated standard (>= 2 CWEs unique to this entry, not "
-                    f"shared with any other touched entry)."
-                )
-            else:
-                # Neither the new nor the old field is present at all -- the
-                # exact BUG-0030 failure mode this hook exists to catch (an
-                # under-annotated entry slipping through unflagged). Do not
-                # silently drop it from `problems` just because it predates
-                # even the legacy `cwe:` field.
-                problems.append(
-                    f"{path}: {fname} has no `cwe_unique:` (or legacy `cwe:`) "
-                    f"field at all -- needs >= 2 CWEs unique to this entry per "
-                    f"PA-0033's standard."
-                )
-            continue
-
-        all_entries.append((path, fname, cwe_unique, cwe_shared))
-
-        if len(cwe_unique) < 2:
+        cwes = []
+        for key in ("cwe_unique", "cwe_shared", "cwe"):
+            value = entry.get(key) or []
+            if isinstance(value, str):
+                value = [value]
+            if not isinstance(value, list):
+                problems.append(f"{path}: {fname}: `{key}:` is not a list")
+                continue
+            listed = [str(v).strip() for v in value]
+            dupes = sorted({c for c in listed if listed.count(c) > 1})
+            if dupes:
+                problems.append(f"{path}: {fname}: `{key}:` lists {dupes} twice")
+            cwes += listed
+        if not cwes:
             problems.append(
-                f"{path}: {fname} has only {len(cwe_unique)} cwe_unique "
-                f"entr{'y' if len(cwe_unique) == 1 else 'ies'} (need >= 2). "
-                f"CWEs shared with other entries go in cwe_shared instead "
-                f"and do not count toward this floor."
+                f"{path}: {fname} has no CWE mapping (`cwe_unique:`, `cwe_shared:` or "
+                f"`cwe:`) -- map the precise underlying weakness."
             )
-
-        for cwe_id in cwe_unique:
-            if cwe_id in unique_claims:
-                other_path, other_fname = unique_claims[cwe_id]
-                if (other_path, other_fname) != (path, fname):
-                    problems.append(
-                        f"{cwe_id} is claimed as cwe_unique by both "
-                        f"{other_path}:{other_fname} and {path}:{fname} -- "
-                        f"a CWE relevant to more than one entry belongs in "
-                        f"cwe_shared on both, not cwe_unique on either."
-                    )
-            else:
-                unique_claims[cwe_id] = (path, fname)
+        bad = [c for c in cwes if not CWE_ID.match(c)]
+        if bad:
+            problems.append(f"{path}: {fname}: malformed CWE id(s) {bad} (expected CWE-<n>)")
 
 import os
 import glob
@@ -216,17 +195,16 @@ for cell_dir in sorted(touched_cells):
 if problems:
     print(
         "docs/research/corpus-examples/*/manifest.yaml entries touched by this "
-        "turn don't meet the >= 2 unique CWEs per entry standard and/or the "
-        ">= 5 pairs per class standard:",
+        "turn lack a well-formed CWE mapping and/or the >= 5 pairs per class floor:",
         file=sys.stderr,
     )
     for p in problems:
         print(f"  - {p}", file=sys.stderr)
     print(
-        "Research the MITRE CWE index (https://cwe.mitre.org/data/index.html) for "
-        "CWEs genuinely specific to each entry's own code, per PA-0033 / "
-        "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6. For the "
-        "pairs-per-class floor, add more vulnerable/idiomatic pairs to the cell.",
+        "Map each entry to the precise underlying weakness in the MITRE CWE index "
+        "(https://cwe.mitre.org/data/index.html); more substantiated CWEs are better "
+        "(docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6), and entries "
+        "may share one. For the pairs-per-class floor, add vulnerable/idiomatic pairs.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -235,9 +213,12 @@ sys.exit(0)
 PYEOF
 status=$?
 
+err_file="${TMPDIR:-/tmp}/check-corpus-cwe-coverage.$$.err"
 if [[ $status -eq 1 ]]; then
-  cat /tmp/check-corpus-cwe-coverage.err >&2
+  cat "$err_file" >&2
+  rm -f "$err_file"
   exit 2
 fi
+rm -f "$err_file"
 
 exit 0

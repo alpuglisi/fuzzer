@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/check-error-log-bookkeeping.sh\""
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/check_bookkeeping.py\""
           },
           {
             "type": "command",

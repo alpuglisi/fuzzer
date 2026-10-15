@@ -4,9 +4,11 @@ Its selection logic is exercised on synthetic repositories: a module change sele
 exactly the tests that import it (directly, through a helper, from a function body, or
 by a string module name), every whole-package guard is always added, changed tests and
 helpers are added, a changed conftest selects everything, and files split into the
-parallel and serial passes by the maintained list. One small end-to-end run proves the
-harness refuses a dirty tree, verifies the committed HEAD in a detached worktree,
-counts outcomes, and removes its own worktree. The whole suite is never run here.
+parallel and serial passes by the maintained list. A mixed guard file contributes only
+its guard tests (PA-0403 corrected). One small end-to-end run proves the harness refuses
+a dirty tree, verifies the committed HEAD in a detached worktree, counts outcomes,
+writes per-file evidence in ``manifest.json`` and reuses it only for an identical key
+(PA-0038 corrected), and removes its own worktree. The whole suite is never run here.
 """
 
 from __future__ import annotations
@@ -76,15 +78,71 @@ def synth(tmp_path):
            "def test_g():\n    for p in Path('fuzzlab').rglob('*.py'):\n        ast.parse(p.read_text())\n")
     _write(r, "tests/test_marked_guard.py",
            "import pytest\npytestmark = pytest.mark.package_guard\ndef test_m():\n    assert True\n")
+    _write(r, "tests/test_mixed_guard.py", MIXED_GUARD)
     _write(r, "tests/test_live_boot_thing.py", "def test_lb():\n    assert True\n")
     return r
+
+
+# A guard file that also holds behavioural tests. Its guard tests reach the
+# source-reading call directly, through a helper, a module constant, a fixture and a
+# class sibling; the behavioural ones do not, and fail if they are ever run as a guard.
+MIXED_GUARD = """\
+import ast
+from pathlib import Path
+
+import pytest
+
+SOURCES = sorted(Path("fuzzlab").rglob("*.py"))
+
+
+def _trees():
+    return [ast.parse(p.read_text()) for p in SOURCES]
+
+
+@pytest.fixture
+def parsed():
+    return [ast.parse(p.read_text()) for p in Path("fuzzlab").glob("*.py")]
+
+
+def test_direct():
+    assert ast.parse("x = 1")
+
+
+def test_through_a_helper():
+    assert isinstance(_trees(), list)
+
+
+def test_through_a_constant():
+    assert isinstance(SOURCES, list)
+
+
+def test_through_a_fixture(parsed):
+    assert isinstance(parsed, list)
+
+
+def test_behaviour():
+    assert False, "a behavioural test ran as a guard"
+
+
+class TestGuards:
+    def _helper(self):
+        return ast.parse("y = 2")
+
+    def test_through_a_sibling(self):
+        assert self._helper()
+
+    def test_plain(self):
+        assert False, "a behavioural method ran as a guard"
+"""
+MIXED_NODES = ["test_direct", "test_through_a_helper", "test_through_a_constant",
+               "test_through_a_fixture", "TestGuards::test_through_a_sibling"]
 
 
 def _sel(root, pkg=(), tst=(), **kw):
     return vc.select_tests(root, list(pkg), list(tst), **kw)
 
 
-GUARDS = {"tests/test_ast_guard.py", "tests/test_marked_guard.py"}
+GUARDS = {"tests/test_ast_guard.py", "tests/test_marked_guard.py", "tests/test_mixed_guard.py"}
 
 
 def test_module_for_path(synth):
@@ -143,6 +201,34 @@ def test_a_package_init_or_data_change_selects_everything_below_it(synth):
 
 def test_guards_are_always_selected_even_for_no_package_change(synth):
     assert set(_sel(synth).files) == GUARDS
+
+
+def test_a_mixed_guard_file_contributes_only_its_guard_tests(synth):
+    sel = _sel(synth, ["fuzzlab/a.py"])
+    assert sel.nodes == {"tests/test_mixed_guard.py": MIXED_NODES}
+    assert "tests/test_mixed_guard.py::test_behaviour" not in sel.targets(sel.files)
+    # a single-purpose guard file and a marked guard still run whole
+    assert "tests/test_ast_guard.py" in sel.targets(sel.files)
+    assert "tests/test_marked_guard.py" in sel.targets(sel.files)
+    # a changed guard file runs whole, and the opt-out restores whole files
+    assert "tests/test_mixed_guard.py" not in _sel(synth, tst=["tests/test_mixed_guard.py"]).nodes
+    assert _sel(synth, ["fuzzlab/a.py"], whole_guard_files=True).nodes == {}
+
+
+def test_a_listed_guard_file_is_never_split(synth, monkeypatch):
+    monkeypatch.setattr(vc, "EXPLICIT_GUARDS", ("tests/test_mixed_guard.py",))
+    assert _sel(synth, ["fuzzlab/a.py"]).nodes == {}
+
+
+def test_guard_nodes_falls_back_to_the_whole_file_when_unsure(tmp_path):
+    p = tmp_path / "test_g.py"
+    p.write_text("import ast\nfor x in [1]:\n    ast.parse('x')\n"
+                 "def test_a():\n    pass\ndef test_b():\n    ast.parse('y')\n")
+    assert vc.guard_nodes(p) is None  # module-level code reads source
+    p.write_text("import ast\ndef test_a():\n    ast.parse('x')\n")
+    assert vc.guard_nodes(p) is None  # every test is a guard
+    p.write_text("def test_a(:\n")
+    assert vc.guard_nodes(p) is None  # unparseable
 
 
 def test_changed_tests_and_helpers_are_selected(synth):
@@ -262,15 +348,62 @@ def test_end_to_end_on_a_synthetic_repo(synth, tmp_path, capsys):
         "tests/test_direct.py", "tests/test_via_helper.py", "tests/test_relative_helper.py",
         "tests/test_path_ref.py", *GUARDS,
     }
-    assert summary["files"] == 6
-    assert summary["total"]["failed"] == 1
-    assert summary["total"]["passed"] == 6
-    assert "TOTAL 6 file(s)" in printed
+    assert summary["files"] == 7
+    assert summary["total"]["failed"] == 1  # the mixed file's behavioural tests did not run
+    assert summary["total"]["passed"] == 11
+    assert "TOTAL 7 file(s)" in printed
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["result"] == "fail"
+    assert manifest["per_file"]["tests/test_direct.py"]["failed"] == 1
+    assert manifest["per_file"]["tests/test_mixed_guard.py"]["passed"] == 5
+    assert set(manifest["key"]) >= {"tree", "dependency_files", "python", "installed",
+                                    "flags", "targets"}
     # its own worktree is gone, and git no longer lists it
     assert not (out / "worktree").exists()
     assert str(out / "worktree") not in _git(synth, "worktree", "list")
     # every pid it started was recorded
     assert (out / "pids.txt").read_text().split()
+
+
+def test_passing_evidence_is_reused_only_for_an_identical_key(synth, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("FUZZLAB_VERIFY_CACHE", str(tmp_path / "cache"))
+    base = _commit_repo(synth)
+    _write(synth, "fuzzlab/a.py", "X = 2\n")
+    _git(synth, "commit", "-qam", "change a")
+    argv = ["--repo", str(synth), "--base", base, "--allow-concurrent", "--workers", "1",
+            "--wait-other", "0"]
+    assert vc.main(argv + ["--out", str(tmp_path / "o1")]) == 0
+    first = json.loads((tmp_path / "o1" / "manifest.json").read_text())
+    assert first["result"] == "pass"
+    capsys.readouterr()
+    # same tree, same environment: the recorded evidence is reported, nothing re-runs
+    assert vc.main(argv + ["--out", str(tmp_path / "o2"), "--reuse"]) == 0
+    assert "reused qualified evidence" in capsys.readouterr().out
+    assert not (tmp_path / "o2" / "parallel.xml").exists()
+    # any change to the key (here a flag in the environment) runs again
+    monkeypatch.setenv("FUZZLAB_EXTRA_FLAG", "1")
+    assert vc.main(argv + ["--out", str(tmp_path / "o3"), "--reuse"]) == 0
+    assert "reused" not in capsys.readouterr().out
+    assert (tmp_path / "o3" / "parallel.xml").exists()
+    # a failure is never cached for reuse
+    _write(synth, "tests/test_direct.py", "def test_f():\n    assert False\n")
+    _git(synth, "commit", "-qam", "break")
+    assert vc.main(argv + ["--out", str(tmp_path / "o4"), "--reuse"]) == 1
+    assert vc.main(argv + ["--out", str(tmp_path / "o5"), "--reuse"]) == 1
+
+
+def test_junit_results_are_attributed_to_their_files(tmp_path):
+    xml = tmp_path / "j.xml"
+    xml.write_text(
+        '<testsuites><testsuite>'
+        '<testcase classname="tests.test_a" name="t1"/>'
+        '<testcase classname="tests.test_a.TestK" name="t2"><failure/></testcase>'
+        '<testcase classname="tests.test_ab" name="t3"><skipped/></testcase>'
+        '<testcase classname="other" name="t4"/>'
+        '</testsuite></testsuites>')
+    got = {k: (c.passed, c.failed, c.skipped) for k, c in
+           vc.junit_by_file(xml, ["tests/test_a.py", "tests/test_ab.py"]).items()}
+    assert got == {"tests/test_a.py": (1, 1, 0), "tests/test_ab.py": (0, 0, 1), "?": (1, 0, 0)}
 
 
 def _alive(pid: int) -> bool:

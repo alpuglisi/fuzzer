@@ -117,7 +117,8 @@ trivial interleaving conflict (two lanes' bullets landing at the same line
 of `CHANGELOG.md`, resolved by keeping both) — never an actual number
 collision. This is codified as `PA-0031` in `docs/PREVENTIVE_ACTIONS.md`
 because it is a rule about repository content (IDs must not collide), not
-only a scheduling habit.
+only a scheduling habit. (The lean QC review rewrote it as a migration measure:
+the end state is immutable IDs with aliases on collision, `docs/QUALITY_POLICY.md` §4.)
 
 **Why per-lane verification wasn't also batched to save time.** A related
 temptation is to also batch *test verification* — merge a whole wave's code
@@ -231,14 +232,26 @@ the real data path or from browser behaviour that was assumed rather than
 measured (classes T1 and T2), and the most productive review technique was a
 reviewer measuring in real Chromium.
 
-## 8. Progress governance: the goal ledger and its triggers (BUG-0141)
+## 8. Progress governance: the goal ledger and its triggers (BUG-0141, BUG-0156)
 
 An orchestrating session once ran about 15 hours on review rounds, self-opened
 follow-ups and a fix chain. Its goal metric moved by one finding. It saw the stall,
 did not investigate or fix it, and never told the user until they intervened. Busy
 is not building. These rules are therefore enforced by `scripts/orchestration_guard.py` through Claude Code hooks
-(`.claude/settings.json`). The hooks read the session transcript, so only a real
-user message (or an answer to a question) clears an escalation.
+(`.claude/settings.json`). The hooks read the session transcript.
+
+**Contact is not a decision (BUG-0156).** The first guard let any later user message,
+a status question included, clear every hold and restart every clock. Now a hold is
+lifted only by a recorded **decision**:
+
+    scripts/orchestration_guard.py decide --hold stall|budget|review|scope [--item <ID>] \
+        --quote "<the user's own words>" [--hours H | --rounds N]
+
+- A decision counts only while a real user message after the hold began contains the
+  quote. The `report` shows each decision with its verification state.
+- It lifts only the hold it names.
+- `--hours` and `--rounds` add to the allowance; the spend and the stall clock are
+  never reset.
 
 **Before the first dispatch, open the goal ledger:**
 
@@ -250,8 +263,16 @@ user message (or an answer to a question) clears an escalation.
 Register each work item before dispatching it, and tag every dispatch with it:
 
     scripts/orchestration_guard.py item add <ID> --title "..." --kind feature|bug|safety|process|measurement \
-        --origin user|self [--blocks <active item>] [--spawned-by <item>] \
+        --origin user|self [--hypothesis "<prediction; effort ceiling; exit decision>"] \
+        [--blocks <active item>] [--spawned-by <item>] [--continues <old item>] \
         [--files a.py,dir/] [--branch b --base ref] [--after <item>] [--budget-hours H]
+
+- A feature item must state its `--hypothesis`: the outcome it is expected to move
+  (QUALITY_POLICY L11).
+- `--continues` renames an item and keeps its opened time, spend, origin, rounds and
+  holds.
+- `item done|drop|reopen` keep the cumulative spend, and `goal close|reopen` keep
+  everything. A new `goal open` archives the old goal in `history`.
 
 Every Agent, SendMessage, Workflow or remote-session dispatch carries `[item: <ID>]`.
 A review request also carries `[review]`, unless it goes to a registered reviewer.
@@ -260,17 +281,28 @@ Read-only agents (Explore, Plan) and messages that start with `STOP` are exempt.
 | Trigger | Default | Effect | Cleared by |
 |---|---|---|---|
 | Checkpoint due (PA-0141) | 3 h since the last checkpoint or user message | Stop hook refuses to end the turn | `checkpoint --value N [--evidence …]` and a PushNotification with the `report` |
-| Stall (PA-0141) | metric not improved for 6 h, no user message | only a process/measurement item opened after the stall (investigating and fixing why) may be dispatched; Stop needs a PushNotification | an improvement or a user message |
-| Review cap (PA-0142) | 3 review requests for an item since the user last wrote | further review of that item denied | a user message |
-| Self-opened scope (PA-0143) | item `--origin self`, not a blocking defect | dispatch for it denied | a user message after it was opened |
-| Bug chain (PA-0144) | 2 bugs `--spawned-by` one item | dispatch for the item and its bugs denied | a user message (after a measured redesign is proposed) |
-| Budget (PA-0145) | 4 h per active item | dispatch for it denied | a user message (restarts the budget) |
+| Stall (PA-0141) | metric not improved for 6 h (contact does not restart it) | only a process/measurement item opened after the stall (investigating and fixing why) may be dispatched; Stop needs a PushNotification | an improvement, or `decide --hold stall --hours H` for H hours |
+| Review cap (PA-0142) | 3 rounds per item; a round is the requests between two work dispatches (two reviewers in parallel = one round), at most 4 requests | further review of that item denied | `decide --hold review --item … --rounds N` |
+| Self-opened scope (PA-0143) | item `--origin self`, not a blocking defect | dispatch for it denied | `decide --hold scope --item …` |
+| Bug chain (PA-0144, R1) | 2 bugs `--spawned-by` one item since its last disposition | dispatch for the item and its bugs denied | `item disposition <ID> --class … --evidence … --next …` (delivery owner) |
+| Budget (PA-0145) | 4 h cumulative active time per item | dispatch for it denied | `decide --hold budget --item … --hours H` (adds H) |
+| Exhausted experiment (R1) | an item with `--hypothesis` past its base budget | dispatch for it denied | `item disposition` (plus a budget decision to continue) |
 | WIP / overlap (PA-0146) | 3 active items; shared files | `item add` refused; Stop blocks on real branch overlap | finish, drop, or `--after` |
 | No ledger | 2 dispatches in 2 h with no goal | Stop blocks | `goal open` |
 
+**Disposition classes (QUALITY_POLICY R1):**
+- `isolated-defect` (with evidence);
+- `missing-shared-contract`;
+- `capability-gap`;
+- `unresolved-hypothesis`.
+
+The evidence is store rows, a log line or a reproduction, never a plausible story. The
+next action carries a fresh prediction and budget.
+
 **Reporting (PA-0147).**
 - Answer every status question, and every checkpoint, with
-  `scripts/orchestration_guard.py report` first.
+  `scripts/orchestration_guard.py report` first. It leads with the metric and its
+  unchanged-since time, then the holds.
 - After a compaction, the SessionStart hook prints that report. Compare progress with
   the goal before the next dispatch; the summary's task list is not authorisation.
 
@@ -280,5 +312,5 @@ to the lane; follow-ups become `--origin self` ledger items for the user to choo
 
 **Defaults** live in the ledger's `config` and can be changed per goal (edit
 `.claude/orchestration/ledger.json`, which is git-ignored local state). Loosening a
-default is itself a decision for the user.
-
+default is itself a decision for the user. The ledger does not survive a new
+container: export the `report` into the handoff document.
