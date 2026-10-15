@@ -3,6 +3,31 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0044 — The importer reads captured requests: source, op key, GraphQL pinning, precedence (DISC-CAPTURE §5) (2026-10-15)
+- Change: `tools/store_adapter.py`: `_upsert_endpoint` keys on `(run, url, method,
+  op_key)` and writes `op_key`; `request_source`, `leaves_pinned`, `_captured_signatures`
+  and `_form_signature`; `captured_request` decides multipart, bodiless and captured-GET
+  rows (`KIND_MULTIPART`, `KIND_NO_BODY`, `KIND_QUERY`); `_store_request` carries
+  `source` / `op_key` and never makes a pinned leaf a point; `_import_forms` skips a form
+  a recorded request supersedes; transport rows are skipped. New counts:
+  `request_captured`, `request_transport`, `request_multipart`, `request_no_body`,
+  `request_query`, `form_superseded_by_capture`.
+- Impact (other components / project): the store's `endpoint.source` may read
+  `captured-aborted` and `endpoint.op_key` is set (CC-CORE-0060). PA-0152 consumers of
+  the endpoint identity (searched `FROM endpoint` / `JOIN endpoint` across `fuzzlab/`):
+  `harness/auto.py` (point builder: keys on the op key now, reads the source;
+  `_login_form_paths` path-level, unchanged), `core/forms.py` (`first_link_set`:
+  GET link sets, op key always `''`, unchanged), `web/sitetree.py` (reads url/method;
+  two endpoints of one URL and method show as two rows, unchanged code),
+  `report/report.py` (counts), `scripts/funnel_report.py` (now op-aware).
+- Risk: low-medium. A legacy spider DB still imports (its sources read as sent). The
+  precedence drops a form only on an exact signature match.
+- Deliverables:
+  - [x] importer changes and counts — done
+  - [x] tests (`tests/test_capture.py` import section) — done
+- Effectiveness (assessed 2026-10-15): the import tests pass (GraphQL variables only,
+  one endpoint per operation, precedence, multipart/transport/bodiless/legacy rows).
+
 ### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch` navigates through
   `navguard.navigate` (commit, then a bounded load cut short after a refused navigation;

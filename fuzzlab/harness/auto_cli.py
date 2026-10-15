@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Also import captured PUT/PATCH requests as JSON points (forms "
                         "phase 3). Off by default: each probe updates the row the request "
                         "targets. DELETE is never imported.")
+    p.add_argument("--no-probe-captured-writes", action="store_true",
+                   help="Do not probe the write requests the crawl recorded and never sent "
+                        "(capture-and-abort, FR-CRAWL-18); their points are listed as "
+                        "skipped. By default they are probed, through every send gate "
+                        "(D67).")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     from fuzzlab.cli_dryrun import add_dry_run_flag
@@ -319,7 +324,9 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
                           scheduler=scheduler, plugins=plugins,
                           confirm_budget=args.confirm_budget,
-                          header_names=args.header_names)
+                          header_names=args.header_names,
+                          probe_captured_writes=not getattr(
+                              args, "no_probe_captured_writes", False))
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:
@@ -557,7 +564,7 @@ def _print_summary(args, counts, result, plugins=None) -> int:
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
         print(f"  not fuzzed ({len(skipped)} crawl point(s): destructive URL, credential, "
-              f"or stopped by a breaker; NFR-FUZZ-safe):")
+              f"captured write opted out, or stopped by a breaker; NFR-FUZZ-safe):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
     elif skipped:

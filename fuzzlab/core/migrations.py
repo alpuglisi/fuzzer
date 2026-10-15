@@ -555,6 +555,34 @@ ALTER TABLE project ADD COLUMN copy_kind TEXT;
 """
 
 
+#: Migration 24 (capture-and-abort, CC-CORE-0060, FR-CORE-43): an endpoint's identity
+#: carries ``op_key`` -- the operation a request body names on one URL (a GraphQL
+#: ``operationName`` or document hash, a JSON-RPC ``method``; ``''`` for every other
+#: endpoint, legacy rows included) -- so one URL with many operations is many endpoints.
+#: SQLite cannot change a table constraint in place, so the table is rebuilt (SQLite's
+#: documented procedure: new table, copy with the same ids, drop, rename, re-index) in
+#: the migration's one transaction with foreign-key enforcement off for it
+#: (`FOREIGN_KEYS_OFF`), and `PRAGMA foreign_key_check` must find nothing before the
+#: commit. Its ``source`` may now also read ``captured-aborted`` (a request the crawl
+#: recorded and never sent, FR-AUD-23).
+_M0024 = """
+CREATE TABLE endpoint_v24 (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id  INTEGER NOT NULL REFERENCES run(id),
+    url     TEXT NOT NULL,
+    method  TEXT NOT NULL DEFAULT 'GET',
+    source  TEXT,
+    op_key  TEXT NOT NULL DEFAULT '',
+    UNIQUE(run_id, url, method, op_key)
+);
+INSERT INTO endpoint_v24 (id, run_id, url, method, source)
+    SELECT id, run_id, url, method, source FROM endpoint;
+DROP TABLE endpoint;
+ALTER TABLE endpoint_v24 RENAME TO endpoint;
+CREATE INDEX idx_endpoint_run ON endpoint(run_id);
+"""
+
+
 def _backfill_project_uuid(conn: sqlite3.Connection) -> None:
     """Migration 23's post-step: give an existing project row its ``uuid``."""
     import secrets as _secrets
@@ -618,6 +646,12 @@ def _backfill_holdout_seal(conn: sqlite3.Connection) -> None:
 POST_STEPS = {19: _backfill_holdout_seal, 22: _mark_application_id,
               23: _backfill_project_uuid}
 
+#: Migrations that rebuild a table other tables reference: they run with foreign-key
+#: enforcement off for their transaction (a ``PRAGMA`` is a no-op inside one, so it is
+#: set before ``BEGIN``), and ``PRAGMA foreign_key_check`` must be empty before the
+#: commit; enforcement is restored afterwards whatever happens.
+FOREIGN_KEYS_OFF = frozenset({24})
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -643,6 +677,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (21, _M0021),
     (22, _M0022),
     (23, _M0023),
+    (24, _M0024),
 ]
 
 
@@ -718,21 +753,32 @@ def migrate(conn: sqlite3.Connection) -> int:
         for version, sql in sorted(MIGRATIONS):
             if version <= current_version(conn):
                 continue
-            conn.execute("BEGIN IMMEDIATE")
+            fk_off = version in FOREIGN_KEYS_OFF
+            fk_was = conn.execute("PRAGMA foreign_keys").fetchone()[0] if fk_off else None
+            if fk_off:
+                conn.execute("PRAGMA foreign_keys=OFF")    # outside the transaction
             try:
-                if version <= current_version(conn):   # applied while we waited
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    if version <= current_version(conn):   # applied while we waited
+                        conn.execute("COMMIT")
+                        continue
+                    for stmt in split_statements(sql):
+                        conn.execute(stmt)
+                    if version in POST_STEPS:              # same transaction (BUG-0104)
+                        POST_STEPS[version](conn)
+                    if fk_off and conn.execute("PRAGMA foreign_key_check").fetchall():
+                        raise sqlite3.IntegrityError(
+                            f"migration {version} left a dangling foreign key")
+                    conn.execute("INSERT INTO schema_version (version) VALUES (?)",
+                                 (version,))
                     conn.execute("COMMIT")
-                    continue
-                for stmt in split_statements(sql):
-                    conn.execute(stmt)
-                if version in POST_STEPS:              # same transaction (BUG-0104)
-                    POST_STEPS[version](conn)
-                conn.execute("INSERT INTO schema_version (version) VALUES (?)",
-                             (version,))
-                conn.execute("COMMIT")
-            except BaseException:
-                conn.execute("ROLLBACK")
-                raise
+                except BaseException:
+                    conn.execute("ROLLBACK")
+                    raise
+            finally:
+                if fk_off:
+                    conn.execute(f"PRAGMA foreign_keys={'ON' if fk_was else 'OFF'}")
     finally:
         conn.isolation_level = saved
     return current_version(conn)

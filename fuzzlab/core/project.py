@@ -189,9 +189,10 @@ def _foreign_objects(conn: sqlite3.Connection, version: int) -> list[str]:
     ``trusted_schema=OFF`` stops application-defined functions only, so a generated
     column, ``CHECK`` or ``DEFAULT`` added to an allowed table would otherwise run
     SQLite's own functions — without bound — on every read. Matching every definition
-    is safe for legitimate stores because migrations only ``CREATE`` and
-    ``ALTER … ADD COLUMN``, whose stored text is deterministic (every past version of
-    the migrations was checked to build the same schema). Missing objects are fine."""
+    is safe for legitimate stores because migrations only ``CREATE``, ``ALTER … ADD
+    COLUMN`` and (migration 24) rebuild a table through ``ALTER … RENAME TO``, whose
+    stored text SQLite derives deterministically (every past version of the migrations
+    was checked to build the same schema). Missing objects are fine."""
     ref = reference_schema(version)
     out = []
     for t, n, tb, q in conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master"):

@@ -122,6 +122,9 @@ fuzzer.
     gap).
 
 - **FR-CRAWL-13 (request capture and SPA form submission, CC-CRAWL-0017, forms phase 3)**
+  *(Superseded in part by FR-CRAWL-18, CC-CRAWL-0032: a submission's request is
+  recorded and aborted, never sent; capture records every request that is not a read,
+  not only fetch/XHR bodies.)*
   - **Passive capture (default on, Playwright engine).** Every fetch/XHR request the
     page itself makes through the guarded route with a body (not GET/HEAD/OPTIONS) that
     is JSON or form-encoded is recorded in the spider table `discovered_requests`
@@ -603,9 +606,67 @@ fuzzer.
     makes the app shell's start-up writes once more, for real (outside the window): on
     Juice Shop, one socket.io handshake per seed and per probe.
 
+- **FR-CRAWL-18 (capture-and-abort, CC-CRAWL-0032, DISC-CAPTURE phase A)** In the
+  Playwright engine every context the crawl opens (the crawl's own and an
+  unauthenticated submission context; never the session manager's browser-login
+  context, which must send its login) lets reads go out and **records, then aborts,
+  everything else**: the crawl discovers what the app does without sending a write.
+  - **The predicate** (`tools/capture.py::capture_refusal`, one owner, SP-37), asked by
+    `navguard.make_route_handler(capture_refusal=, capture=)` after the scope check (an
+    out-of-scope request is never recorded) and the window, for the request and every
+    redirect hop: a GET/HEAD navigation passes (the scope and destructive rules judge
+    it, as before); any other GET/HEAD passes unless the reveal window's GET word rules
+    refuse it, crawl-wide (destructive, transaction, credential token, account action;
+    counted `get_refused_by_rule`); any other known method is aborted, unless it is the
+    session's own refresh endpoint (`refresh_endpoints` the session learned at login;
+    today's session manager learns none, so the set is empty) or a **GraphQL read** (a
+    JSON `query` whose operations are queries only under the published grammar, a
+    bounded lexer: `graphql_tokens`, `graphql_operations`, `graphql_read_only`;
+    persisted queries and anything unparseable are aborted). An unrecognised method, a
+    body over 64 KiB and a body the driver cannot show (`post_data_buffer` None: a
+    stream; counted `body_unavailable`) are aborted. Classification is wrapped: an
+    error aborts (`capture_failed`); a failing recorder still aborts.
+  - **Recording** (`LocalSpider._capture`): `discovered_requests` with `source`
+    `captured-aborted`, `trigger` (`passive`, `submit`, `beacon`), `op_key` and
+    `header_names` (FR-CRAWL-18's columns below). A body that cannot be kept is dropped
+    and the request kept (`captured_body_omitted`); a multipart body keeps part names
+    and content types only (`multipart_recorded`); a refused GET's URL is never queued.
+    A probe load (FR-CRAWL-17) records nothing. A DELETE is counted `deletes_blocked`.
+  - **Redaction** (PA-0100, the one boundary): the existing capture redactors plus,
+    by value, the run's own session secrets (cookie values, header values such as the
+    bearer, adopted localStorage values; `core.redaction.scrub_secrets`) wherever they
+    appear; header names with values for `content-type`, `accept` and
+    `x-requested-with` only; a row in which a known secret survives is not stored.
+  - **Egress the route never sees** (measured in Chromium; BUG-0149): the capture init
+    script (`capture.CAPTURE_INIT_JS`, `navguard.install_capture_script`) makes
+    `sendBeacon` a recorder (it returns true, sends nothing; the beacon is recorded
+    through a binding, `beacons_recorded`), strips `keepalive` from `fetch` and makes
+    `fetchLater` throw. Page-to-server **WebSocket** messages are held for the whole
+    crawl and recorded (`ws_dropped`: size, opcode, the first 256 bytes of the redacted
+    text). Service workers stay blocked; a dedicated worker's fetch is routed
+    (measured). **Stated limits:** a **SharedWorker**'s fetch is not routed and reaches
+    the server (measured; pinned by a strict xfail, reported); browser-generated POSTs
+    (CSP reports, Reporting API, NEL) are outside the "zero app writes" claim; stacks
+    whose whole UI runs over one socket stop rendering once their messages are held.
+  - **Retired by it:** the reveal window's lift (its vetted final click no longer lets
+    a write through) and the named-route DELETE allowance. `--submit-spa-forms ROUTE...`
+    only narrows which routes are filled and clicked: it never causes a send.
+  - **Admitted reads that were sent** (a GraphQL query) are recorded by the passive
+    observer as `source = 'observed'`.
+- **FR-CRAWL-19 (long-poll transports, CC-CRAWL-0032, DISC-CAPTURE §7)** A request of a
+  long-poll or socket transport is recognised by its protocol's **published** markers
+  (`capture.transport_protocol`: socket.io / engine.io, SockJS, SignalR, Phoenix,
+  ActionCable's WebSocket subprotocol) and recorded as `source = 'transport'`, at most
+  one row per (protocol, URL key); the aborted poller's reconnect churn is counted
+  (`transport_seen`, `transport_recorded`, `transport_churn`). The importer never
+  imports a transport row.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
-  to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
+  to not clicking them. *(Capture-and-abort, CC-CRAWL-0032, FR-CRAWL-18:)* the browser
+  crawl sends no write at all: every request that is not a read is recorded and aborted.
+  - Enforced by (capture-and-abort, every egress shape, FR-CRAWL-18): `capture.capture_refusal`, `navguard.make_route_handler(capture_refusal=, capture=)`, `navguard.install_capture_script`, `LocalSpider._capture` / `_ws_hold` — `tests/test_capture_egress.py::test_no_write_reaches_the_server_from_any_egress_shape`, `tests/test_capture_egress.py::test_a_captured_write_is_probed_by_default_and_never_with_the_opt_out`, `tests/test_capture.py::test_capture_fails_closed`, `tests/test_capture.py::test_an_out_of_scope_request_is_never_recorded`, `tests/test_spa_capture.py::test_bare_submission_in_an_anonymous_crawl`
+  - Not yet enforced (a SharedWorker's fetch, BUG-0149, open): it is never routed and reaches the server; pinned by `tests/test_capture_egress.py::test_a_shared_workers_write_never_reaches_the_server` (strict xfail). *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
   `core.urls.destructive_reason` (FR-CORE-28). A destructive URL is never queued,
   never reached through a redirect (the static engine follows redirects by hand, each
   hop checked), and never requested by the browser (`navguard.guard_page` aborts
@@ -680,7 +741,8 @@ fuzzer.
   reveal click or the first constraint-aware interaction until after the close, the
   reload and a quiet period, the route aborts every write and every navigation (its
   target queued through the normal gates) and side-effect GETs, and page-to-server
-  WebSocket messages are dropped; only a named-route form's vetted final click lifts it;
+  WebSocket messages are dropped; only a named-route form's vetted final click lifts it (retired
+  under capture, FR-CRAWL-18: the lift no longer lets anything through);
   a revealed menu item, card or option whose label fails the gate is never clicked, a
   card with an interactive descendant is not one target, a dialog's own buttons are
   never clicked, and after a reveal in an authenticated crawl the session is checked
@@ -733,13 +795,25 @@ for a later opt-in (`page_url` redacted by `redact_url_identifiers`; never value
 and, since FR-CRAWL-13,
 **`discovered_requests`** — the contract
 the importer reads (lane J, forms phase 3):
-`(id, page_url, method, url, content_type, body_json TEXT, source TEXT ('passive' |
-'submit'), signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a
-JSON body's parsed value; a form-encoded body as an object of name → value, last wins);
-`url` and `page_url` are redacted (`core.redaction.redact_url_identifiers`);
-`content_type` is the media type only; `signature` = JSON `[method,
-url_key(url), sorted top-level keys]` (dedupe). No header and no cookie is stored.
-An old spider DB has no such table (the importer treats it as none).
+`(id, page_url, method, url, content_type, body_json TEXT, source TEXT, signature TEXT
+UNIQUE, trigger TEXT, op_key TEXT NOT NULL DEFAULT '', header_names TEXT)`. Since
+FR-CRAWL-18 `source` is `observed` (sent), `captured-aborted` (recorded, never sent) or
+`transport` (FR-CRAWL-19, never imported); an older DB's `passive` / `submit` rows were
+sent (read as observed), and its missing columns are added on open. `trigger` is what
+caused it (`passive`, `submit`, `beacon`). `body_json` is the redacted body as JSON text
+(a JSON body's parsed value; a form-encoded body as an object of name → value, last
+wins; a multipart body's `[{"name", "content_type"}]`; NULL when the request had no body
+or it could not be kept); `url` and `page_url` are redacted
+(`core.redaction.redact_url_identifiers`, then the run's own session secrets by value);
+`content_type` is the media type only; `op_key` names the operation a body carries
+(`capture.op_key`: `gql:<operationName>`, `gql#<hash>`, `rpc:<method>`); `header_names`
+is a JSON list of `[name, value or null]` (a value only for `content-type`, `accept`,
+`x-requested-with`); `signature` = JSON `[method, url_key(url), op_key, sorted top-level
+keys]` (dedupe). No other header value and no cookie is stored. Since FR-CRAWL-18,
+**`ws_dropped`** `(id, page_url, url, opcode, size, head)`: each held page-to-server
+WebSocket message, its head the first 256 bytes of the redacted text
+(`redact_ws_message`). An old spider DB has no such table (the importer treats it as
+none).
 
 ## 6. Dependencies (components)
 `core/`, session manager, target lab.

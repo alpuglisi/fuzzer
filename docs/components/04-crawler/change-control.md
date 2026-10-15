@@ -3,6 +3,64 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0032 — Capture-and-abort: the browser crawl records every write and sends none (DISC-CAPTURE phase A, BUG-0149) (2026-10-15)
+- Change:
+  - **`tools/capture.py` (new):** `capture_refusal` (the crawl-wide predicate, SP-37):
+    navigations as before; other GETs by the reveal window's word rules; any other
+    method aborted unless a GraphQL read (a bounded lexer over the published grammar:
+    `graphql_tokens`, `graphql_operations`, `graphql_read_only`) or the session's own
+    refresh endpoint; a body over 64 KiB, an unreadable body and an unrecognised method
+    aborted. `op_key`, `pinned_top_keys`, `transport_protocol` (published markers), and
+    `CAPTURE_INIT_JS`.
+  - **`tools/navguard.py`:** `make_route_handler(capture_refusal=, capture=)`, asked
+    after the scope check and the window, for the request and each redirect hop;
+    classification wrapped (an error aborts); a failing recorder still aborts; a write
+    the window refused and a `method_refusal` abort are recorded too.
+    `install_capture_script` (the init script and its beacon binding);
+    `guard_page(capture_refusal=, capture=, on_beacon=)`.
+  - **`tools/spider.py`:** `discovered_requests` gains `trigger`, `op_key`,
+    `header_names` (added on open to an older DB), `source` becomes `observed` /
+    `captured-aborted` / `transport`; `ws_dropped` table; `record_request` (multipart
+    shape, body omission, value-based secret scrub, header names, op key in the
+    signature, fail closed on a surviving secret) and `record_ws_drop`; `_capture`,
+    `_on_beacon`, `_session_secrets`, `_capture_refusal`; the WebSocket hold for the
+    whole crawl (its held messages join the P1(b) baseline); the reveal window's lift
+    and the named-route DELETE allowance retired; a refused GET is never queued; the
+    summary's capture and transport lines and their `crawl_stats` counts.
+- Impact (other components / project):
+  - **AUD** (CC-AUD-0044): the importer reads the new columns, imports captured
+    requests with `source = 'captured-aborted'` and the op key, never a transport row.
+  - **FUZZ** (CC-FUZZ-0089): captured points are probed by default (D67).
+  - **CORE** (CC-CORE-0060): the capture redaction helpers.
+  - The crawl itself sends no write: `--submit-spa-forms` and reveals now discover the
+    request an app builds without changing lab state. Tests that asserted a write
+    reached the lab now assert it was recorded and never sent (`test_spa_capture`,
+    `test_forms_phase4`, `test_session_browser_login`, `test_spa_query`,
+    `test_spa_routes`, `test_navigation_aborts`). One coverage change: a submission can
+    no longer make a server revoke the session (`test_the_crawls_session_check_catches_a_revoked_token`
+    now asserts the session holds).
+  - PA-0152 consumers of `discovered_requests` (searched across `fuzzlab/`):
+    `tools/spider.py` (writer), `tools/store_adapter.py` (`_import_requests`,
+    `_captured_signatures`). Of `ws_dropped`: none outside the spider.
+  - SESS: no session file changed; `refresh_endpoints` is read from the browser session
+    with `getattr` (none is learned today).
+- Risk (level; mitigation or accepted-risk justification): **medium**. A behaviour
+  change of a hot shared file (`navguard.py`, `spider.py`). Mitigated: the hook runs
+  after the unchanged scope check and only in the crawl's contexts; fail closed on
+  every error; egress measured shape by shape at a real server; the browser-login
+  context unchanged. Accepted and stated: SharedWorker egress (open), apps that read
+  over POST other than GraphQL lose those reads (aborted, recorded), apps whose UI
+  runs over one socket stop rendering.
+- Deliverables:
+  - [x] predicate, route hook, init script, crawl-wide WebSocket hold — done
+  - [x] recording, redaction, transport rows, counts and summary — done
+  - [x] `tests/test_capture_egress.py`, `tests/test_capture.py`, updated live tests — done
+  - [x] BUG-0149 / PA-0155, SP-37, FR-CRAWL-18/19, NFR-CRAWL-safe trace — done
+  - [ ] `scripts/capture_delta.py` (design §3's capture vs live comparison) — todo (not in this lane's brief)
+- Effectiveness (assessed 2026-10-15): the egress test shows zero non-GET requests at
+  the server for 15 shapes, one shape (SharedWorker) pinned open; verification counts
+  are in the lane report. The held-out measurement (design §9) is pending.
+
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
 - Change:
   - **`tools/navguard.py`:** the one way a guarded page is navigated (PA-0138):

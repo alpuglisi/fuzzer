@@ -609,6 +609,23 @@ plugin registry. It is the layer that makes the store the integration bus.
     method normalisation for joins (PA-0076(2)), moved from `ml.dataset` (which
     re-exports it) so the web UI shares it without the ML package.
 
+- **FR-CORE-43** *(the endpoint's op key, migration 24; capture records'
+  redaction; `CC-CORE-0060`, 2026-10-15, DISC-CAPTURE §5).*
+  - **Migration 24:** `endpoint` gains `op_key TEXT NOT NULL DEFAULT ''` and its
+    identity becomes `UNIQUE(run_id, url, method, op_key)`. SQLite cannot change a
+    table constraint in place, so the table is rebuilt (new table, copy with the same
+    ids, drop, rename, re-index) in the migration's one transaction, with foreign-key
+    enforcement off for it (`migrations.FOREIGN_KEYS_OFF`, set before `BEGIN`) and
+    `PRAGMA foreign_key_check` empty before the commit; enforcement is restored
+    afterwards whatever happens. Legacy rows read `op_key = ''`.
+  - **Redaction helpers** (`core.redaction`, the one boundary, PA-0100):
+    `known_secrets` / `scrub_secrets` / `scrub_secrets_text` / `carries_secret` (the
+    run's own session secrets by value, every spelling: raw, percent- and
+    form-encoded, JSON-escaped; at least 8 characters), `redact_header_names` (names,
+    with values for an allowlist only), `redact_multipart_shape` (part names and
+    content types, never values or filenames) and `redact_ws_message` (redacted before
+    it is cut to 256 bytes, PA-0455; a binary message keeps no head).
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

@@ -459,14 +459,18 @@ def test_a_browser_initiated_delete_is_aborted_and_counted(hash_lab, tmp_path):
     assert any("DELETE" in ln for ln in sp.spa_summary())
 
 
-def test_a_delete_is_sent_only_from_a_named_routes_submission(hash_lab, tmp_path):
+def test_a_delete_is_never_sent_even_from_a_named_routes_submission(hash_lab, tmp_path):
+    """Capture-and-abort (FR-CRAWL-18) retired the named-route DELETE allowance: the
+    click's DELETE is recorded and aborted like every write, never sent."""
     lab, _other = hash_lab
     _crawl(lab, tmp_path, submit_spa_forms=[])           # bare: archive not named
     assert lab.seen("DELETE") == []
     lab.requests.clear()
-    sp, _db = _crawl(lab, tmp_path, submit_spa_forms=["archive"])
-    assert [r[1] for r in lab.seen("DELETE")] == ["/api/Notes/3"]   # the click, once
-    assert sp.spa_counts["deletes_blocked"] >= 1          # the items route's load: still
+    sp, db = _crawl(lab, tmp_path, submit_spa_forms=["archive"])
+    assert lab.seen("DELETE") == []
+    assert ("submit",) in db_rows(db, "SELECT trigger FROM discovered_requests WHERE "
+                                      "method = 'DELETE' AND url LIKE '%/api/Notes/3'")
+    assert sp.spa_counts["deletes_blocked"] >= 2          # the click and the items load
 
 
 def test_history_mode_routes_are_paths_under_the_base(monkeypatch, tmp_path):

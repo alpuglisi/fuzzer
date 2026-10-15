@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Crawler: browser egress the route never sees broke the windows' "only safe GETs" claim (fixed for three shapes, one open; BUG-0149, PA-0155)
+- **Symptom:** measured in real Chromium before capture-and-abort relied on the context route: a `sendBeacon` and a `keepalive` fetch made on `pagehide`, `fetchLater`, and a SharedWorker's fetch reached a loopback server although the route aborted every non-GET it saw.
+- **Root cause:** the reveal and query windows' safety claim was enforced per mechanism the route sees, never as a server-side count over every egress shape a page can use (PA-0123 listed paths, not the property).
+- **Remediation:** the capture init script in every crawl context (`sendBeacon` recorded, never sent; `keepalive` stripped; `fetchLater` throws), the crawl-wide WebSocket hold, and `tests/test_capture_egress.py` counting each shape at the server (CC-CRAWL-0032). A SharedWorker's fetch is still not closed: pinned by a strict xfail with the measured reason and reported.
+- **Status:** Fixed (three shapes); Open (SharedWorker).
+
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
 - **Root cause:**

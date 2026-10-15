@@ -439,11 +439,11 @@ def run_crawl(spider):
         skip_or_fail(f"chromium could not launch: {exc}")
 
 
-def db_rows(path, sql: str) -> list:
+def db_rows(path, sql: str, params=()) -> list:
     import sqlite3
     con = sqlite3.connect(path)
     try:
-        return con.execute(sql).fetchall()
+        return con.execute(sql, params).fetchall()
     finally:
         con.close()
 

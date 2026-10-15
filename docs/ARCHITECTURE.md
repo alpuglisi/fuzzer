@@ -1379,6 +1379,19 @@ tracked in the requirements files, not here.
   every host — the Puppy Fort Factory and the external validation labs (D10).
 
 ### 4. Crawler / spider `[built; to harden]`
+- **Capture-and-abort (FR-CRAWL-18/19, CC-CRAWL-0032, DISC-CAPTURE phase A):** the
+  browser crawl sends no write. Every context it opens asks `tools/capture.py`'s
+  predicate (SP-37) through `navguard.make_route_handler(capture_refusal=, capture=)`
+  after the scope check: reads go out (navigations, GETs passing the window's word
+  rules, GraphQL query-only POSTs, the session's own refresh endpoint); everything else
+  is recorded in `discovered_requests` (`source = 'captured-aborted'`, op key, header
+  names; redacted, the run's own session secrets removed by value) and aborted. An init
+  script closes the egress the route never sees (`sendBeacon`, `keepalive`,
+  `fetchLater`; measured), WebSocket messages are held for the whole crawl
+  (`ws_dropped`), and long-poll transports are recorded apart and never imported. Open:
+  a SharedWorker's fetch (BUG-0149). The importer carries the source and op key to the
+  store's endpoints, and `auto` probes captured writes by default (D67;
+  `--no-probe-captured-writes` opts out).
 - **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
@@ -1394,7 +1407,8 @@ tracked in the requirements files, not here.
   period, the guarded route lets only safe GETs through (`spa.window_request_refusal`
   through `navguard.guard_page(window=)`), aborts navigations and queues their targets,
   and the WebSocket forwarding handler (`guard_page(ws_hold=)`) drops page-to-server
-  messages; only a named-route form's vetted final click lifts it. Inside it:
+  messages; only a named-route form's vetted final click lifts it (retired by
+  capture-and-abort, below). Inside it:
   **constraint-aware filling** on named routes (a bounded ladder of filler values
   until Angular-style validators pass; FR-CRAWL-15) and **reveal navigation** (menus,
   dialogs, drawers and interactive cards opened, their links, routes and forms
@@ -1943,6 +1957,12 @@ tracked in the requirements files, not here.
 
 ## The store as the contract
 
+**Schema head v24** (CC-CORE-0060): `endpoint` is identified by `(run, url, method,
+op_key)`; `op_key` names the operation a request body carries on its URL (GraphQL,
+JSON-RPC; `''` otherwise), and `endpoint.source` may read `captured-aborted` (a request
+the crawl recorded and never sent). Migration 24 rebuilt the table with foreign keys off
+for its transaction and checked before the commit (`migrations.FOREIGN_KEYS_OFF`).
+
 **A store is a project file** (CC-CORE-0450 / CC-UI-0450, migrations 22 and 23): the web UI opens
 one store at a time as its project (`<name>.fuzzlab`, SQLite `application_id` "FzLb",
 0600) and pins every command it launches to it (`--store <project>`, intermediates in
@@ -1964,7 +1984,7 @@ detail):
 | `project` (one metadata row: name, created / opened times, notes, targets, the fuzzlab versions that created / last opened it, the schema version it was created at; migration 22; display-only `uuid` and copy lineage `origin_uuid` / `copied_at` / `copy_kind`, migration 23) | `core.project` only (`ensure_metadata` on the first UI open, `set_meta`, `add_target`, `rename`; values via `redaction.redact_for_record`) | web UI (`/project`, the topbar) |
 | `launch` (a job the UI started: random `token`, command, redacted argv, target, start / finish, status `running`/`succeeded`/`failed`/`stopped`/`unknown`, exit code; migration 22) | `core.project.insert_launch` / `finish_launch` (called by `web.projects`); `ensure_metadata` marks orphaned `running` rows `unknown` | web UI run history (`core.project.run_history`) |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
-| `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor | auditor, ranker, fuzzer |
+| `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36; `endpoint.op_key` and `endpoint.source` `captured-aborted`, migration 24, FR-CORE-43) | crawler, auditor | auditor, ranker, fuzzer, `scripts/funnel_report.py` |
 | `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader) |
 | `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
 | `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18; `identity` is `<identity>#isolated:<n>` for an isolated copy's sends, FR-SESS-17) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |

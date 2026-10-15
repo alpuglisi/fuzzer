@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (capture-and-abort: the browser crawl records every write and sends none; DISC-CAPTURE phase A)
+- **What:** the crawl's browser lets reads go out and records, then aborts, every other request (`tools/capture.py`, `navguard` route hook, an init script for beacons / keepalive / `fetchLater`, a crawl-wide WebSocket hold); `discovered_requests` gains `source` (`observed` / `captured-aborted` / `transport`), `trigger`, `op_key` and `header_names`; store migration 24 makes the op key part of an endpoint's identity; GraphQL `variables` are the only points of a GraphQL body; `auto` probes captured writes by default (D67) with `--no-probe-captured-writes` to opt out; the funnel report adds discovered / buildable / refused stages. CC-CRAWL-0032, CC-AUD-0044, CC-FUZZ-0089, CC-CORE-0060; BUG-0149 / PA-0155 (a SharedWorker's fetch is still not closed: pinned and reported).
+- **Why:** discovery that transfers across technologies observes what an app does at the protocol level, never what its code says, and the crawl must not change lab state while it discovers.
+
 ## 2026-10-15 (D67: the owner decides write requests are probed by default in the lab)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D67 (LAB-WRITES): write requests the crawler records without sending are probed by `auto` by default; `--no-probe-captured-writes` opts out. `docs/claude_juicelab_failures.md` gains F-049 (building to the lab's source to chase a metric, and failing even at that) and F-050 (the agent's own choices recorded as numbered decisions outside the repo's decision record).
 - **Why:** the owner's answer to the LAB-WRITES question. The failure entries were requested by the owner or found while recording the decision.

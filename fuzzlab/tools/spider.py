@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from fuzzlab.core import get_logger
 from fuzzlab.core.urls import (canonical_origin, document_key, in_origin_scope, origin_scope,
                                url_key)
-from fuzzlab.tools import navguard, spa
+from fuzzlab.tools import capture, navguard, spa
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -78,10 +78,17 @@ class StorageManager:
                 verdict TEXT
             )
         ''')
-        # The app's own fetch/XHR requests with a JSON or form body (forms phase 3,
-        # FR-CRAWL-13), the contract lane J imports: body_json is the redacted body as
-        # JSON text; source is 'passive' or 'submit'; signature = method + canonical URL
-        # path + sorted top-level keys. Request headers and cookies are never stored.
+        # The app's own requests (forms phase 3, FR-CRAWL-13; capture-and-abort,
+        # FR-CRAWL-18), the contract the importer reads: body_json is the redacted body
+        # as JSON text (NULL when it could not be kept; a multipart body's part names
+        # and content types only); source is 'observed' (sent), 'captured-aborted'
+        # (recorded, never sent) or 'transport' (a long-poll transport, never imported);
+        # trigger is 'passive', 'submit' or 'beacon'; op_key names the operation a body
+        # carries on its URL (GraphQL, JSON-RPC); header_names is a JSON list of
+        # [name, value or null] (values only for an allowlist); signature = method +
+        # canonical URL path + op key + sorted top-level keys. No header value outside
+        # the allowlist and no cookie is ever stored. Older DBs: source 'passive' /
+        # 'submit' (sent), no trigger, op key or header names.
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS discovered_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +98,22 @@ class StorageManager:
                 content_type TEXT,
                 body_json TEXT,
                 source TEXT,
-                signature TEXT UNIQUE
+                signature TEXT UNIQUE,
+                trigger TEXT,
+                op_key TEXT NOT NULL DEFAULT '',
+                header_names TEXT
+            )
+        ''')
+        # Page-to-server WebSocket messages the crawl dropped (DISC-CAPTURE §2): size,
+        # opcode and the first bytes of the redacted text (`redact_ws_message`).
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ws_dropped (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_url TEXT,
+                url TEXT,
+                opcode INTEGER,
+                size INTEGER,
+                head TEXT
             )
         ''')
         # What the crawl's SPA features did (FR-CRAWL-12/13): `LocalSpider.spa_counts`
@@ -117,10 +139,17 @@ class StorageManager:
             )
         ''')
         # Add columns that older result databases won't have.
-        for col, decl in (("title", "TEXT"), ("content", "TEXT"),
-                          ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
+        for table, col, decl in (
+                ("discovered_pages", "title", "TEXT"),
+                ("discovered_pages", "content", "TEXT"),
+                ("discovered_pages", "rendered", "INTEGER DEFAULT 0"),
+                ("discovered_pages", "source", "TEXT DEFAULT 'link'"),
+                # capture-and-abort (FR-CRAWL-18)
+                ("discovered_requests", "trigger", "TEXT"),
+                ("discovered_requests", "op_key", "TEXT NOT NULL DEFAULT ''"),
+                ("discovered_requests", "header_names", "TEXT")):
             try:
-                self.cursor.execute(f"ALTER TABLE discovered_pages ADD COLUMN {col} {decl}")
+                self.cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already exists
         self.conn.commit()
@@ -135,6 +164,7 @@ class StorageManager:
         self.cursor.execute('DELETE FROM discovered_forms')
         self.cursor.execute('DELETE FROM selector_verdicts')
         self.cursor.execute('DELETE FROM discovered_requests')
+        self.cursor.execute('DELETE FROM ws_dropped')
         self.cursor.execute('DELETE FROM crawl_stats')
         self.cursor.execute('DELETE FROM revealed_forms')
         self.conn.commit()
@@ -149,38 +179,96 @@ class StorageManager:
             [(str(k), int(v)) for k, v in counts.items()])
         self.conn.commit()
 
-    def record_request(self, page_url, method, url, content_type, body, source):
-        """Store one request the page made (FR-CRAWL-13), redacted here, at the write
-        site, by the one boundary (PA-0100): both URLs by
+    def record_request(self, page_url, method, url, content_type, body, trigger, *,
+                       source=capture.SOURCE_OBSERVED, headers=None, secrets=frozenset(),
+                       keep_without_body=False):
+        """Store one request the page made (FR-CRAWL-13; FR-CRAWL-18), redacted here, at
+        the write site, by the one boundary (PA-0100): both URLs by
         `core.redaction.redact_url_identifiers`, the body by
-        `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed). Only the
-        media type of the request's own Content-Type is kept; no other header and no
-        cookie is ever taken. Returns None when stored, else why not (``duplicate`` for
-        a signature already stored)."""
+        `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed) -- a
+        multipart body by `redact_multipart_shape` (part names and content types only)
+        -- and everything by `scrub_secrets` (the run's own session ``secrets`` by
+        value, wherever they appear, DISC-CAPTURE §5). Headers are kept as names, with
+        values for an allowlist only (`redact_header_names`). ``source`` is
+        `capture.SOURCE_OBSERVED` (sent), `capture.SOURCE_CAPTURED` (aborted) or
+        `capture.SOURCE_TRANSPORT`; ``trigger`` what caused it (``passive``, ``submit``,
+        ``beacon``). A request with no body (a GET) is kept with none; with
+        ``keep_without_body`` a body that cannot be kept is dropped and the request
+        kept (``last_omitted`` says why). The op key (`capture.op_key`) joins the
+        signature. A row in which a known secret survives is never stored (fail
+        closed). Returns None when stored, else why not (``duplicate`` for a signature
+        already stored)."""
         import json
 
-        from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
-        doc, why = redact_captured_body(body, content_type)
-        if why is not None:
-            return why
-        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4)
-        doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
-        safe_url = spa.scrub_markers(redact_url_identifiers(url))
+        from fuzzlab.core.redaction import (carries_secret, redact_captured_body,
+                                            redact_header_names, redact_multipart_shape,
+                                            redact_url_identifiers, scrub_secrets,
+                                            scrub_secrets_text)
+        self.last_omitted = None
         method = (method or "").upper()
-        keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
-        sig = json.dumps([method, url_key(safe_url), keys])
         media = (content_type or "").split(";", 1)[0].strip().lower()
+        if not body:
+            if not keep_without_body:
+                return "empty body"
+            doc, why = None, None                   # a bodiless request (a GET, a DELETE)
+        elif media.startswith("multipart/"):
+            doc, why = redact_multipart_shape(body, content_type)
+        else:
+            doc, why = redact_captured_body(body, content_type)
+        if why is not None:
+            if not keep_without_body:
+                return why
+            self.last_omitted, doc = why, None
+        # a probe marker an app replays never reaches a row (FR-CRAWL-17, A-S4)
+        if doc is not None:
+            doc = json.loads(spa.scrub_markers(json.dumps(scrub_secrets(doc, secrets),
+                                                          ensure_ascii=False)))
+        safe_url = spa.scrub_markers(scrub_secrets_text(redact_url_identifiers(url),
+                                                        secrets))
+        safe_page = spa.scrub_markers(scrub_secrets_text(redact_url_identifiers(page_url),
+                                                         secrets))
+        names = json.dumps(redact_header_names(headers, secrets)) \
+            if headers is not None else None
+        op = capture.op_key(doc) if isinstance(doc, (dict, list)) and \
+            not media.startswith("multipart/") else ""
+        if media.startswith("multipart/"):
+            keys = sorted(str(p.get("name")) for p in doc or [])
+        else:
+            keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
+        sig = json.dumps([method, url_key(safe_url), op, keys])
+        body_json = json.dumps(doc, ensure_ascii=False) if doc is not None else None
+        row = (safe_page, method, safe_url, media, body_json, source, sig, trigger, op,
+               names)
+        if carries_secret(json.dumps(row, ensure_ascii=False), secrets):
+            return "a session secret survived redaction"
         try:
             self.cursor.execute('''
                 INSERT INTO discovered_requests
-                    (page_url, method, url, content_type, body_json, source, signature)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
-                  json.dumps(doc, ensure_ascii=False), source, sig))
+                    (page_url, method, url, content_type, body_json, source, signature,
+                     trigger, op_key, header_names)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', row)
             self.conn.commit()
             return None
         except sqlite3.IntegrityError:
             return "duplicate"
+
+    def record_ws_drop(self, page_url, url, message, secrets=frozenset()):
+        """Store one page-to-server WebSocket message the crawl dropped (DISC-CAPTURE
+        §2): its opcode, size and the first bytes of its **redacted** text
+        (`core.redaction.redact_ws_message`, which redacts before it cuts); both URLs
+        by `redact_url_identifiers` and `scrub_secrets_text`."""
+        from fuzzlab.core.redaction import (redact_url_identifiers, redact_ws_message,
+                                            scrub_secrets_text)
+        opcode, size, head = redact_ws_message(message, secrets)
+        self.cursor.execute(
+            "INSERT INTO ws_dropped (page_url, url, opcode, size, head) VALUES (?,?,?,?,?)",
+            (spa.scrub_markers(scrub_secrets_text(redact_url_identifiers(page_url or ""),
+                                                  secrets)),
+             spa.scrub_markers(scrub_secrets_text(redact_url_identifiers(url or ""),
+                                                  secrets)),
+             opcode, size, spa.scrub_markers(head)))
+        self.conn.commit()
 
     def record_revealed_form(self, page_url, route, signature, submitted=False):
         """File a form a reveal made visible (FR-CRAWL-16, G2e): its route and signature;
@@ -518,7 +606,24 @@ class LocalSpider:
             "spa_query_marker_in_path", "spa_query_step_cap", "spa_query_seeded",
             "spa_query_seeded_fragment", "spa_query_write_seeds",
             "spa_query_session_losses", "spa_query_unclean_windows",
-            "spa_query_baseline_writes"), 0)
+            "spa_query_baseline_writes",
+            # capture-and-abort (FR-CRAWL-18/19; persisted in crawl_stats, PA-0110)
+            "capture_aborted", "capture_failed", "body_unavailable",
+            "get_refused_by_rule", "captured_recorded", "captured_body_omitted",
+            "captured_not_recorded", "multipart_recorded", "transport_seen",
+            "transport_recorded", "transport_churn", "ws_dropped", "ws_dropped_recorded",
+            "beacons_recorded"), 0)
+        # --- capture-and-abort (FR-CRAWL-18, DISC-CAPTURE) ---
+        #: Every crawl context records and aborts what is not a read (the browser engine
+        #: only: the static engine sends GETs alone). The browser-login context is the
+        #: session manager's own, never this guard: it must send its login.
+        self._capture_on = self.engine == "playwright"
+        #: URLs of GETs the capture refused: never queued (they would be fetched later)
+        self._capture_refused_urls: set = set()
+        #: (protocol, url_key) -> transport requests seen (the reconnect churn cap, §7)
+        self._transport_seen: dict = {}
+        #: the session's own refresh endpoints, ``(METHOD, url_key)`` (DISC-CAPTURE §3)
+        self._refresh_endpoints: frozenset = frozenset()
         # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
         #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
         self._query_on = self._spa_on and bool(spa_query)
@@ -633,6 +738,11 @@ class LocalSpider:
             # adopted, never a rotated one
             self._browser_session = session
             self._adopted_original = copy.deepcopy(session.local_storage)
+            # the session's own token refresh passes (DISC-CAPTURE §3): only an endpoint
+            # the session learned at login, never one inferred here
+            self._refresh_endpoints = frozenset(
+                (str(m).upper(), url_key(u))
+                for m, u in (getattr(session, "refresh_endpoints", None) or ()))
         # service workers would fetch outside page.route (BUG-0111)
         from fuzzlab.tools import browserauth
         context = self._browser.new_context(service_workers="block",
@@ -686,7 +796,11 @@ class LocalSpider:
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
-                   on_ws_drop=self._note_ws_drop, on_ws_send=self._note_ws_send)
+                   on_ws_drop=self._note_ws_drop, on_ws_send=self._note_ws_send,
+                   # capture-and-abort (FR-CRAWL-18): every context this crawl opens
+                   capture_refusal=self._capture_refusal if self._capture_on else None,
+                   capture=self._capture if self._capture_on else None,
+                   on_beacon=self._on_beacon if self._capture_on else None)
 
     def _note_guard_abort(self, url, reason):
         """The guard aborted ``url`` (destructive, a refused method or body): recorded;
@@ -754,13 +868,32 @@ class LocalSpider:
         return why
 
     def _ws_hold(self, context):
-        """W3: hold (drop) a page-to-server WebSocket message while the window is open,
-        unless the window was lifted for ``context``'s vetted submission."""
+        """Hold (drop) a page-to-server WebSocket message: for the whole crawl under
+        capture (DISC-CAPTURE §2), else while the window is open (W3), unless the window
+        was lifted for ``context``'s vetted submission (never under capture)."""
+        if self._capture_on:
+            return True
         win = self._win
         return win is not None and not (win["lifted_for"] is not None
                                         and context is win["lifted_for"])
 
     def _note_ws_drop(self, url, message=None):
+        if self._capture_on:
+            self.spa_counts["ws_dropped"] += 1
+            if self._probe is None:              # a probe load records nothing
+                try:
+                    self.storage.record_ws_drop(self._capture_page or self._current_url,
+                                                url, message, self._session_secrets())
+                    self.spa_counts["ws_dropped_recorded"] += 1
+                except Exception as exc:  # noqa: BLE001 - never breaks the forwarder
+                    logging.info(f"a dropped WebSocket message was not recorded "
+                                 f"({type(exc).__name__})")
+            if self._win is None and self._recording:
+                # P1(b): what a bare route's own load writes joins its baseline, sent or
+                # (under capture) held
+                self._load_writes.add(_write_key("WS", url))
+        if self._win is None:
+            return
         self.spa_counts["reveal_ws_dropped"] += 1
         if self._win is not None:
             self._win["aborted"] += 1
@@ -961,11 +1094,12 @@ class LocalSpider:
             self._settle(page)
 
     def _lift_for(self, context):
-        """``click_vetted``'s ``before_click``: lift the window for ``context``'s one
-        vetted final submission (W1)."""
+        """``click_vetted``'s ``before_click``: notes that the vetted final click was
+        attempted (B-M1). Under capture the window is never lifted (DISC-CAPTURE §1,
+        the lift retired): the click's write is recorded and aborted, never sent."""
         def lift():
             self._click_attempted = True
-            if self._win is not None:
+            if self._win is not None and not self._capture_on:
                 self._win["lifted_for"] = context
         return lift
 
@@ -992,6 +1126,101 @@ class LocalSpider:
         while time.monotonic() < deadline and quiet < 3:
             page.wait_for_timeout(100)
             quiet = quiet + 1 if self._inflight.get(id(page), 0) == 0 else 0
+
+    # ----- capture-and-abort (FR-CRAWL-18/19, DISC-CAPTURE) -----
+    def _capture_refusal(self, method, url, navigation, body):
+        """The crawl-wide capture predicate (`capture.capture_refusal`), with the
+        session's own refresh endpoints."""
+        return capture.capture_refusal(method, url, navigation, body,
+                                       refresh=self._refresh_endpoints)
+
+    def _session_secrets(self):
+        """The run's own known session secrets (cookie values, header values such as a
+        bearer, adopted localStorage values), scrubbed by value from every capture
+        record (DISC-CAPTURE §5)."""
+        from fuzzlab.core.redaction import known_secrets
+        values = [v for _n, v in self._injected_cookies]
+        values += list(self._auth_headers.values())
+        sess = self._browser_session
+        if sess is not None:
+            values += [c.get("value") for c in getattr(sess, "cookies", None) or []
+                       if isinstance(c, dict)]
+            values += list((getattr(sess, "headers", None) or {}).values())
+        for store in (self._adopted_storage, self._adopted_original):
+            for entries in (store or {}).values():
+                values += list((entries or {}).values())
+        return known_secrets(values)
+
+    def _capture(self, request, why):
+        """Record a request the route aborted (FR-CRAWL-18): counted by reason, then
+        stored as `capture.SOURCE_CAPTURED` (a long-poll transport as
+        `capture.SOURCE_TRANSPORT`, at most `capture.MAX_TRANSPORT_ROWS_PER_URL` per
+        URL, the rest counted), redacted by `StorageManager.record_request`. A probe
+        load records nothing (FR-CRAWL-17). A refused GET's URL is never queued."""
+        c = self.spa_counts
+        c["capture_aborted"] += 1
+        for prefix, key in ((capture.WHY_FAILED, "capture_failed"),
+                            (capture.WHY_BODY_UNAVAILABLE, "body_unavailable"),
+                            (capture.WHY_GET_RULE, "get_refused_by_rule")):
+            if why.startswith(prefix):
+                c[key] += 1
+        method = (request.method or "").upper()
+        url = request.url
+        if method == "DELETE":
+            c["deletes_blocked"] += 1           # the crawl never deletes (FR-CRAWL-12)
+        if method in ("GET", "HEAD"):
+            self._capture_refused_urls.add(url)
+        if self._probe is not None:
+            return
+        try:
+            body = request.post_data_buffer
+        except Exception:  # noqa: BLE001 - unreadable: recorded without it
+            body = None
+        headers = request.headers or {}
+        content_type = headers.get("content-type", "")
+        source = capture.SOURCE_CAPTURED
+        protocol = capture.transport_protocol(url)
+        if protocol is not None:
+            c["transport_seen"] += 1
+            key = (protocol, url_key(url))
+            seen = self._transport_seen[key] = self._transport_seen.get(key, 0) + 1
+            if seen > capture.MAX_TRANSPORT_ROWS_PER_URL:
+                c["transport_churn"] += 1
+                return
+            source = capture.SOURCE_TRANSPORT
+        result = self.storage.record_request(
+            self._capture_page or self._current_url, method, url, content_type, body,
+            self._capture_source, source=source, headers=headers,
+            secrets=self._session_secrets(), keep_without_body=True)
+        if result is None:
+            if source == capture.SOURCE_TRANSPORT:
+                c["transport_recorded"] += 1
+            else:
+                c["captured_recorded"] += 1
+                if (content_type or "").lower().startswith("multipart/"):
+                    c["multipart_recorded"] += 1
+            if self.storage.last_omitted:
+                c["captured_body_omitted"] += 1
+        elif result != "duplicate":
+            c["captured_not_recorded"] += 1
+            logging.info(f"captured request {method} {url.split('?', 1)[0]} not recorded "
+                         f"({result})")
+
+    def _on_beacon(self, url, body, page_url):
+        """A ``sendBeacon`` the init script withheld (DISC-CAPTURE §2): recorded as a
+        captured POST (trigger ``beacon``), never sent. An out-of-scope beacon is not
+        recorded (confinement first)."""
+        target = urljoin(page_url or self._current_url, url or "")
+        if self._probe is not None or not self._in_scope(target):
+            return
+        self.spa_counts["capture_aborted"] += 1
+        result = self.storage.record_request(
+            page_url or self._current_url, "POST", target, "text/plain",
+            (body or "").encode("utf-8", "replace"), "beacon",
+            source=capture.SOURCE_CAPTURED, headers=None,
+            secrets=self._session_secrets(), keep_without_body=True)
+        if result is None:
+            self.spa_counts["beacons_recorded"] += 1
 
     def _method_refusal(self, method, url, context=None):
         """FR-CRAWL-12 (reviewer A6): the crawl never deletes. A browser-initiated DELETE
@@ -1087,17 +1316,21 @@ class LocalSpider:
         method = request.method.upper()
         if method in ("GET", "HEAD", "OPTIONS"):
             return
-        if spa.is_transport_url(request.url):
+        if spa.is_transport_url(request.url) or \
+                capture.transport_protocol(request.url) is not None:
             self.spa_counts["transport_urls_skipped"] += 1
             return
         body = request.post_data_buffer
         if not body:
             return
-        # the request's own Content-Type is the one header read; none is stored
+        # the Content-Type is read; header names are kept, values only for an allowlist
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(self._capture_page or self._current_url, method,
                                           request.url, content_type, body,
-                                          self._capture_source)
+                                          self._capture_source,
+                                          source=capture.SOURCE_OBSERVED,
+                                          headers=request.headers or {},
+                                          secrets=self._session_secrets())
         if why is None:
             self.spa_counts["requests_captured"] += 1
         elif why != "duplicate":
@@ -1828,7 +2061,8 @@ class LocalSpider:
             self.spa_counts["forms_not_submittable"] += 1
             return False
         self._capture_source, self._capture_page = "submit", page_url
-        self._delete_ok_for = context if explicit else None
+        # under capture nothing a click causes is sent: no DELETE allowance either
+        self._delete_ok_for = context if explicit and not self._capture_on else None
         try:
             how = self._click_vetted(page, selector, [
                 form.get("button") or "", form.get("button_aria") or "",
@@ -2530,6 +2764,22 @@ class LocalSpider:
                          f"cleanly.")
         if self.spa_query_stopped:
             lines.append(f"SPA query loads stopped: {self.spa_query_stopped}.")
+        if c["capture_aborted"] or c["ws_dropped"]:
+            lines.append(
+                f"Capture-and-abort (FR-CRAWL-18): {c['capture_aborted']} request(s) "
+                f"recorded and never sent ({c['captured_recorded']} recorded, "
+                f"{c['captured_body_omitted']} without their body, "
+                f"{c['multipart_recorded']} multipart, {c['beacons_recorded']} beacon(s), "
+                f"{c['captured_not_recorded']} not recorded); "
+                f"{c['get_refused_by_rule']} GET(s) refused by rule, "
+                f"{c['body_unavailable']} body unavailable, {c['capture_failed']} "
+                f"classification failure(s); {c['ws_dropped']} WebSocket message(s) "
+                f"dropped ({c['ws_dropped_recorded']} recorded).")
+        if c["transport_seen"]:
+            lines.append(f"Long-poll transports (FR-CRAWL-19): {c['transport_seen']} "
+                         f"request(s) aborted, {c['transport_recorded']} recorded, "
+                         f"{c['transport_churn']} reconnect(s) over the per-URL cap; "
+                         f"never imported.")
         return lines
 
     def crawl(self):
@@ -2673,6 +2923,9 @@ class LocalSpider:
                                                     or href in win.get("inflight", ())):
                                 continue          # FR-CRAWL-17: blocked (or still in
                                 #                   flight, M8) in the window
+                            if href in self._capture_refused_urls:
+                                continue          # FR-CRAWL-18: a GET the capture
+                                #                   refused is never fetched later
                             absolute_link = self._queue_xhr(current_url, href)
                             if absolute_link and (self._in_scope(absolute_link)
                                     and not self._destructive(absolute_link)
@@ -2798,13 +3051,14 @@ def build_parser():
                         "Playwright engine: it is navigation, like link following "
                         "(FR-CRAWL-12).")
     p.add_argument("--submit-spa-forms", nargs="*", default=None, metavar="ROUTE",
-                   help="Fill and submit SPA forms once each, with filler values, so the "
-                        "app sends its real requests (captured, redacted). Alone: every "
-                        "eligible route (in an authenticated crawl, only in a fresh "
-                        "unauthenticated context). With routes (e.g. 'login search'): "
-                        "only those. Off by default: a submission changes lab state. "
-                        "Destructive, settings, transaction, credential-change, 2FA and "
-                        "file-upload forms are never submitted (FR-CRAWL-13).")
+                   help="Fill and click SPA forms once each, with filler values, so the "
+                        "app builds its real requests; each is recorded (redacted) and "
+                        "aborted, never sent (FR-CRAWL-18). Alone: every eligible route "
+                        "(in an authenticated crawl, only in a fresh unauthenticated "
+                        "context). With routes (e.g. 'login search'): only those. Off "
+                        "by default. Destructive, settings, transaction, "
+                        "credential-change, 2FA and file-upload forms are never "
+                        "clicked (FR-CRAWL-13).")
     p.add_argument("--no-reveal", action="store_true",
                    help="Do not open menus, dialogs and drawers to find the links and "
                         "forms behind them. On by default in the Playwright engine: "

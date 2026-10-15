@@ -2389,3 +2389,19 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A hand-written HTTP response that closes its connection says
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
+
+- **PA-0155** — Strengthens `PA-0123` (every outbound path is checked where it is made),
+  after BUG-0149: a `pagehide` beacon or keepalive fetch, `fetchLater` and a
+  SharedWorker's fetch reached the server past a route that aborted every write it saw.
+  PA-0123 listed the paths it knew and tested scope, not whether a write could leave.
+  1. **A browser send-side safety claim** ("no write", "only safe GETs", "nothing
+     reaches X") **is enforced as a server-side count over every egress shape the
+     platform offers**, in real Chromium, failing (never skipping) under
+     `FUZZLAB_REQUIRE_BROWSER=1`: fetch, XHR, form navigations (self, `_blank`, an
+     iframe), beacons and keepalive on `pagehide`, `fetchLater`, WebSocket messages,
+     dedicated and shared workers, EventSource, redirects that keep a body.
+  2. **A shape the mechanism cannot close is pinned** by a strict xfail with its
+     measured reason and a non-vacuity twin that shows it still sends; never omitted.
+  3. **A new egress shape found anywhere joins that list** in the same change. (from
+     BUG-0149)
+  - Enforced by: tests/test_capture_egress.py::test_no_write_reaches_the_server_from_any_egress_shape, tests/test_capture_egress.py::test_the_shared_worker_page_is_measured_to_send

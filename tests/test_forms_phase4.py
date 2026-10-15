@@ -520,10 +520,14 @@ def test_a_refused_post_navigation_in_a_reveal_is_a_write_never_a_page(monkeypat
 
 
 def test_w3_a_websocket_message_in_the_window_is_dropped(revealed):
-    lab, sp, _db, _logs = revealed
-    assert "hello" in lab.ws_messages                    # forwarded outside the window
-    assert "reveal-msg" not in lab.ws_messages
+    """W3, widened by capture-and-abort (DISC-CAPTURE §2): every page-to-server message
+    is held for the whole crawl, inside the window and out, and recorded redacted."""
+    lab, sp, db, _logs = revealed
+    assert lab.ws_messages == []                         # never forwarded (FR-CRAWL-18)
+    heads = [h for (h,) in db_rows(db, "SELECT head FROM ws_dropped")]
+    assert "hello" in heads and "reveal-msg" in heads
     assert sp.spa_counts["reveal_ws_dropped"] >= 1
+    assert sp.spa_counts["ws_dropped"] >= 2
 
 
 def test_w1_a_debounced_post_after_close_never_arrives(revealed):
@@ -601,7 +605,10 @@ def test_a_revealed_form_is_submitted_only_on_a_named_route(monkeypatch, tmp_pat
         sp, db, _logs = _crawl(lab, tmp_path, submit_spa_forms=["cards"])
     finally:
         lab.close()
-    assert _paths(lab, "POST").count("/api/review") == 1        # once per signature
+    # clicked once per signature; the write is recorded and never sent (FR-CRAWL-18)
+    assert "/api/review" not in _paths(lab, "POST")
+    assert db_rows(db, "SELECT trigger, source FROM discovered_requests WHERE url LIKE "
+                       "'%/api/review'") == [("submit", "captured-aborted")]
     assert db_rows(db, "SELECT route, submitted FROM revealed_forms") == [("cards", 1)]
     assert "/api/after-close" not in _paths(lab)
 
@@ -651,10 +658,12 @@ def test_g1_an_angular_like_form_is_made_valid_and_submitted_once(g1):
     until moved), a required checkbox and a mat-select: every value is a ladder value
     or a filler (`is_filler`)."""
     from fuzzlab.tools.store_adapter import is_filler
-    lab, sp, _db, _logs = g1
-    posts = [r for r in lab.requests if r[:2] == ("POST", "/api/g1-submit")]
-    assert len(posts) == 1
-    body = json.loads(posts[0][4])
+    lab, sp, db, _logs = g1
+    # the submission is recorded (the window is no longer lifted) and never sent
+    assert [r for r in lab.requests if r[:2] == ("POST", "/api/g1-submit")] == []
+    (posts,) = db_rows(db, "SELECT body_json FROM discovered_requests WHERE url LIKE "
+                           "'%/api/g1-submit' AND source = 'captured-aborted'")
+    body = json.loads(posts[0])
     assert body == {"qty": "11", "zip": "11111", "nationality": "BE", "rating": "1",
                     "terms": True, "size": "Small"}
     assert all(is_filler(body[k]) for k in ("qty", "zip", "rating"))

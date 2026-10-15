@@ -3,6 +3,31 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0060 — Migration 24 (endpoint op key, a foreign-key-safe rebuild) and the capture records' redaction helpers (DISC-CAPTURE §5) (2026-10-15)
+- Change: `core/migrations.py`: `_M0024` (the `endpoint` rebuild) and
+  `FOREIGN_KEYS_OFF` with the runner's handling (foreign keys off before `BEGIN`,
+  `foreign_key_check` before the commit, restored in `finally`). `core/project.py`:
+  the allowlist docstring states the rebuild (its definitions are derived by running the
+  migrations, so the rebuilt table's stored text is in the reference). `core/redaction.py`:
+  `known_secrets`, `scrub_secrets`, `scrub_secrets_text`, `carries_secret`,
+  `redact_header_names`, `redact_multipart_shape`, `redact_ws_message`.
+  `tests/_downgrade.py` undoes migration 24 by the exact original text.
+- Impact (other components / project): every store opened by this build migrates to v24
+  (a project file from an older build is offered the migration with a backup, as
+  before). Readers of `endpoint` are listed in CC-AUD-0044. A v24 store is refused by an
+  older build (`SchemaTooNew`).
+- Risk: medium (the first table rebuild among the migrations). Mitigated: one
+  transaction, ids kept, foreign keys checked before the commit, an injected failure
+  test, the project allowlist re-derived and tested on legacy stores.
+- Deliverables:
+  - [x] migration 24 and the runner's foreign-key handling — done
+  - [x] redaction helpers — done
+  - [x] tests (`tests/test_capture.py`: migration and redaction sections;
+    `tests/test_core_project.py` on legacy stores) — done
+- Effectiveness (assessed 2026-10-15): a v23 store with foreign-keyed rows migrates with
+  its ids and enforcement kept; an injected failure leaves v23 and enforcement on; the
+  project allowlist accepts every legacy store shape.
+
 ### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
 - Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
   subquery. It reads `runtarget.run_target_rows()` once per listing, the one reader the

@@ -36,7 +36,29 @@ def test_each_case_reports_the_furthest_stage_and_confirmation_is_class_aware(tm
         c.execute("INSERT INTO finding (run_id, vuln_class, label, url, method, param) "
                   "VALUES (?,?,?,?,?,?)", (run, "ssti", 1, "/profile", "POST", "username"))
         c.commit()
-    rows = {r["case"]: r["stage"] for r in _funnel()(str(tmp_path / "u.db"), str(GT))}
+    full = {r["case"]: r for r in _funnel()(str(tmp_path / "u.db"), str(GT))}
+    rows = {k: r["stage"] for k, r in full.items()}
     assert rows["JUICE-0006"] == "confirmed"          # ssti on /profile username
     assert rows["JUICE-0008"] == "reached"            # same input, stored XSS: not confirmed
     assert rows["JUICE-0009"] == "not reached"
+    # DISC-CAPTURE §9: the existing columns hold, and every row also carries the
+    # discovery and admission stages (method-aware; see tests/test_capture.py)
+    assert {"case", "class", "path", "param", "stage", "method", "discovered",
+            "buildable", "refused"} <= set(full["JUICE-0006"])
+    assert full["JUICE-0006"]["discovered"] is (full["JUICE-0006"]["method"] == "POST")
+    assert full["JUICE-0009"]["discovered"] is False
+
+
+def test_the_text_report_keeps_its_stage_lines_and_adds_the_new_ones(tmp_path, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("funnel_report",
+                                                  ROOT / "scripts" / "funnel_report.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with Store(tmp_path / "u.db") as store:
+        store.start_run("auto", "h")
+    assert mod.main(["--store", str(tmp_path / "u.db"), "--ground-truth", str(GT)]) == 0
+    out = capsys.readouterr().out
+    for stage in ("discovered", "buildable", "refused", "reached", "candidate", "probed",
+                  "confirmed"):
+        assert f"{stage:>10}: " in out, stage

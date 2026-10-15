@@ -1477,6 +1477,23 @@ rewards) derives from it.
   directory, then runs the engine in automatic mode (so D15 stays in `resolve_run`) with
   the default store. It requires `--authorized` before the crawl.
 
+- **FR-FUZZ-52** *(captured writes: admission; `CC-FUZZ-0089`, 2026-10-15, D67,
+  DISC-CAPTURE §6).* A crawl point of an endpoint the crawl recorded and never sent
+  (`endpoint.source = 'captured-aborted'`, FR-CRAWL-18) is built and probed **by
+  default** through every existing send gate (transaction, destructive, credential;
+  the PUT/PATCH import gate `--fuzz-json-writes` unchanged): the owner's decision D67.
+  `fuzzlab auto --no-probe-captured-writes` (`run_auto(probe_captured_writes=False)`)
+  builds none of them and reports each as skipped with the reason
+  `captured write, not sent: --no-probe-captured-writes` (a policy refusal, shown as
+  such in the funnel). The point builder tells endpoints apart by their op key too
+  (PA-0076: one URL, many operations). `scripts/funnel_report.py` adds the stages
+  **discovered** (any source, method-aware, path key + op key), **buildable** (the one
+  point builder makes a non-skipped point) and **refused** (with the builder's reason),
+  beside the existing reached / candidate / probed / confirmed.
+  - **Stated limit:** downstream of the builder a point carries no op key, so two
+    operations' points with the same URL, method and name are told apart by their
+    sibling entries only.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

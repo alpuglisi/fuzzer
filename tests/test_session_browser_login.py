@@ -606,20 +606,36 @@ def test_an_authenticated_crawl_sees_the_protected_route(spa, tmp_path):
     assert len(lab.seen("POST", "/rest/user/login")) == 1
 
 
+def _recorded_not_sent(lab, tmp_path, path):
+    """FR-CRAWL-18: a submission's write is recorded (captured-aborted) and never sent."""
+    import sqlite3
+    con = sqlite3.connect(str(tmp_path / "s.db"))
+    try:
+        rows = con.execute("SELECT source FROM discovered_requests WHERE url LIKE ?",
+                           ("%" + path,)).fetchall()
+    finally:
+        con.close()
+    assert rows == [("captured-aborted",)], (path, rows)
+    assert lab.seen("POST", path) == []
+
+
 def test_the_crawls_session_check_catches_a_revoked_token(spa, tmp_path):
-    """Item 4: a named submission makes the server revoke the token; the crawl's session
-    check (`verify_live` on the protected probe) sees it and stops submitting."""
+    """Item 4, under capture-and-abort (FR-CRAWL-18): a named submission whose request
+    would make the server revoke the token is recorded and never sent, so the server
+    never revokes it; the crawl's session check (`verify_live` on the protected probe)
+    still runs after each submission, finds the session live, and submitting goes on.
+    (Before capture the POST was sent, the token revoked and submitting stopped.)"""
     from fuzzlab.tools.spider import LocalSpider
     pw = _password()
-    lab = spa(pw, revoke_on_feedback=True)
+    mgr = _manager(lab := spa(pw, revoke_on_feedback=True), pw)
     sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
                      engine="playwright", timeout_ms=10000,
-                     session_manager=_manager(lab, pw), identity="user",
+                     session_manager=mgr, identity="user",
                      submit_spa_forms=["feedback", "contact"])
     run_crawl(sp)
-    assert len(lab.seen("POST", "/api/feedback")) == 1
-    assert sp.spa_submit_stopped and "no longer accepts" in sp.spa_submit_stopped
-    assert lab.seen("POST", "/api/contact") == []
+    _recorded_not_sent(lab, tmp_path, "/api/feedback")
+    _recorded_not_sent(lab, tmp_path, "/api/contact")
+    assert sp.spa_submit_stopped is None
 
 
 def test_a_submission_that_clears_local_storage_stops_submitting(spa, tmp_path):
@@ -634,7 +650,7 @@ def test_a_submission_that_clears_local_storage_stops_submitting(spa, tmp_path):
                      session_manager=_manager(lab, pw), identity="user",
                      submit_spa_forms=["notes", "contact"])
     run_crawl(sp)
-    assert len(lab.seen("POST", "/api/notes")) == 1
+    _recorded_not_sent(lab, tmp_path, "/api/notes")              # FR-CRAWL-18
     assert sp.spa_submit_stopped and "localStorage entry 'token'" in sp.spa_submit_stopped
     assert lab.seen("POST", "/api/contact") == []
 
@@ -933,8 +949,8 @@ def test_a_rotated_token_keeps_the_crawl_submitting(spa, tmp_path):
                      engine="playwright", timeout_ms=10000, session_manager=mgr,
                      identity="user", submit_spa_forms=["notes", "contact"])
     run_crawl(sp)
-    assert len(lab.seen("POST", "/api/notes")) == 1
-    assert len(lab.seen("POST", "/api/contact")) == 1
+    _recorded_not_sent(lab, tmp_path, "/api/notes")              # FR-CRAWL-18
+    _recorded_not_sent(lab, tmp_path, "/api/contact")
     assert sp.spa_submit_stopped is None
     token = mgr._state[(HOST, "user")].headers["Authorization"][len("Bearer "):]
     (entries,) = sp._adopted_storage.values()
@@ -950,7 +966,7 @@ def test_a_cleared_token_still_stops_the_crawl_with_rotation_on(spa, tmp_path):
                      session_manager=_manager(lab, pw), identity="user",
                      submit_spa_forms=["notes", "contact"])
     run_crawl(sp)
-    assert len(lab.seen("POST", "/api/notes")) == 1
+    _recorded_not_sent(lab, tmp_path, "/api/notes")              # FR-CRAWL-18
     assert sp.spa_submit_stopped and "localStorage entry 'token'" in sp.spa_submit_stopped
     assert lab.seen("POST", "/api/contact") == []
 
@@ -1239,7 +1255,7 @@ def test_a_crawl_stops_when_only_the_token_cookie_is_deleted(spa, tmp_path):
                      session_manager=_manager(lab, pw), identity="user",
                      submit_spa_forms=["notes", "contact"])
     run_crawl(sp)
-    assert len(lab.seen("POST", "/api/notes")) == 1
+    _recorded_not_sent(lab, tmp_path, "/api/notes")              # FR-CRAWL-18
     assert sp.spa_submit_stopped and "cookie 'token'" in sp.spa_submit_stopped
     assert lab.seen("POST", "/api/contact") == []
 

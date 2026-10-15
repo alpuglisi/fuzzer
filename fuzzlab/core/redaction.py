@@ -628,3 +628,177 @@ def _redact_piece(piece: str) -> str:
         elif "=" in fragment:
             fragment = redact_query(fragment)
     return base + hashmark + fragment
+
+
+# --- capture-and-abort records (DISC-CAPTURE, FR-CRAWL-18, CC-CORE-0060) -------------
+
+#: A known session secret shorter than this is never scrubbed by value (it would remove
+#: ordinary text); such a secret is still caught by the name and identifier rules.
+MIN_SECRET_LEN = 8
+#: What a known session secret becomes wherever it appears (no sensitive name in it, so
+#: a scrubbed text is not then refused for naming one).
+SECRET_PLACEHOLDER = "__REMOVED_VALUE__"
+
+
+def known_secrets(values) -> frozenset[str]:
+    """The run's own session secrets worth scrubbing by value: each value at least
+    `MIN_SECRET_LEN` long, and for a header value such as ``Bearer <jwt>`` its last
+    word as well. Total."""
+    out = set()
+    for value in values or ():
+        if not isinstance(value, str):
+            continue
+        for v in {value.strip(), value.strip().split(" ")[-1]}:
+            if len(v) >= MIN_SECRET_LEN:
+                out.add(v)
+    return frozenset(out)
+
+
+def _secret_forms(secret: str) -> list[str]:
+    """The spellings of a secret a record may carry: raw, percent-encoded, form-encoded
+    and JSON-escaped."""
+    from urllib.parse import quote, quote_plus
+    forms = {secret, quote(secret, safe=""), quote_plus(secret, safe=""),
+             json.dumps(secret)[1:-1]}
+    return sorted(forms, key=len, reverse=True)
+
+
+def scrub_secrets_text(text, secrets) -> str:
+    """``text`` with every spelling (`_secret_forms`) of each of the run's known session
+    secrets replaced by `SECRET_PLACEHOLDER`. Total: a non-string is returned as is."""
+    if not isinstance(text, str) or not secrets:
+        return text
+    for secret in sorted(secrets, key=len, reverse=True):
+        for form in _secret_forms(secret):
+            if form and form in text:
+                text = text.replace(form, SECRET_PLACEHOLDER)
+    return text
+
+
+def scrub_secrets(value, secrets):
+    """A JSON value with the run's known session secrets removed **by value**, wherever
+    they appear (``{"t": "<jwt>"}``, a list, a key): a string carrying one is replaced
+    by `scrub_secrets_text` (DISC-CAPTURE §5). Applied after the name and identifier
+    rules, before anything is stored. Total."""
+    if not secrets:
+        return value
+    if isinstance(value, dict):
+        return {scrub_secrets_text(str(k), secrets): scrub_secrets(v, secrets)
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub_secrets(v, secrets) for v in value]
+    if isinstance(value, str):
+        return scrub_secrets_text(value, secrets)
+    return value
+
+
+def carries_secret(text, secrets) -> bool:
+    """Does ``text`` still carry a spelling of a known session secret (the fail-closed
+    check after scrubbing)?"""
+    if not isinstance(text, str) or not secrets:
+        return False
+    return any(form and form in text for s in secrets for form in _secret_forms(s))
+
+
+#: Request header values a capture record keeps; every other header is a name only.
+HEADER_VALUE_ALLOWLIST = frozenset({"content-type", "accept", "x-requested-with"})
+#: At most this many header names, each at most `MAX_HEADER_NAME` characters, are kept.
+MAX_HEADERS = 64
+MAX_HEADER_NAME = 64
+MAX_HEADER_VALUE = 256
+
+
+def redact_header_names(headers, secrets=frozenset()) -> list[list]:
+    """A request's headers as a capture record keeps them (DISC-CAPTURE §5): sorted
+    lower-cased names, each with its value only when the name is in
+    `HEADER_VALUE_ALLOWLIST` (scrubbed of known secrets, capped), else None. Never a
+    cookie, an authorization or any other value. Total."""
+    out = {}
+    try:
+        for name, value in dict(headers or {}).items():
+            key = str(name).strip().lower()[:MAX_HEADER_NAME]
+            if not key or len(out) >= MAX_HEADERS:
+                continue
+            kept = None
+            if key in HEADER_VALUE_ALLOWLIST and isinstance(value, str):
+                kept = scrub_secrets_text(value, secrets)[:MAX_HEADER_VALUE]
+            out[key] = kept
+    except Exception:  # noqa: BLE001 - total: unreadable headers record nothing
+        return []
+    return [[k, out[k]] for k in sorted(out)]
+
+
+#: A multipart body larger than this is not parsed for its shape (recorded without it).
+MULTIPART_SHAPE_MAX_BYTES = 1024 * 1024
+#: At most this many parts are listed.
+MULTIPART_MAX_PARTS = 64
+
+
+def redact_multipart_shape(body, content_type: str):
+    """A multipart/form-data body as a capture record keeps it, or why not:
+    ``([{"name": ..., "content_type": ...}, ...], None)`` or ``(None, reason)``
+    (DISC-CAPTURE §5). Only each part's **name** and declared content type are kept --
+    never a value, never a filename. A name that is sensitive is kept (a name says what
+    the field is; its value never leaves). Bounded; total."""
+    try:
+        if not body:
+            return None, "empty body"
+        if len(body) > MULTIPART_SHAPE_MAX_BYTES:
+            return None, "body too large"
+        m = re.search(r'boundary="?([^";]+)"?', content_type or "", re.I)
+        if not m:
+            return None, "no multipart boundary"
+        delim = b"--" + m.group(1).strip().encode("latin-1")
+        shape = []
+        for part in bytes(body).split(delim)[1:]:
+            if part.startswith(b"--") or len(shape) >= MULTIPART_MAX_PARTS:
+                break
+            head, sep, _data = part.lstrip(b"\r\n").partition(b"\r\n\r\n")
+            if not sep:
+                continue
+            name = re.search(rb'(?i)content-disposition:[^\r\n]*?\bname="([^"]{0,128})"',
+                             head)
+            ctype = re.search(rb"(?i)^content-type:\s*([^\r\n;]{0,128})", head, re.M)
+            shape.append({"name": name.group(1).decode("utf-8", "replace") if name
+                          else None,
+                          "content_type": (ctype.group(1).decode("latin-1").strip().lower()
+                                           if ctype else None)})
+        return (shape, None) if shape else (None, "no parts")
+    except Exception:  # noqa: BLE001 - total: never raises, never stores a value
+        return None, "redaction failed"
+
+
+#: At most this much of a dropped WebSocket message is kept, cut **after** redaction.
+WS_HEAD_BYTES = 256
+
+
+def redact_ws_message(message, secrets=frozenset()):
+    """A page-to-server WebSocket message the crawl dropped, as its record keeps it
+    (DISC-CAPTURE §2): ``(opcode, size, head)``. ``opcode`` 1 for text, 2 for binary;
+    ``size`` in bytes; ``head`` the first `WS_HEAD_BYTES` of the **redacted** text, or
+    None. The whole message is redacted before it is cut (PA-0455): known session
+    secrets by value; a JSON payload (also behind a socket.io-style digit prefix) by
+    the captured-body rules; any other text is kept only when no sensitive name appears
+    in it. A binary message keeps no head (fail closed). Total."""
+    try:
+        if isinstance(message, (bytes, bytearray)):
+            return 2, len(message), None
+        text = str(message if message is not None else "")
+        size = len(text.encode("utf-8", "replace"))
+        text = scrub_secrets_text(text, secrets)
+        prefix = text[:len(text) - len(text.lstrip("0123456789"))]
+        rest = text[len(prefix):]
+        if rest[:1] in ("{", "["):
+            doc, why = redact_captured_body(rest.encode("utf-8", "replace"),
+                                            "application/json")
+            if why is not None:
+                return 1, size, None
+            text = prefix + json.dumps(scrub_secrets(doc, secrets), ensure_ascii=False)
+        elif mentions_sensitive_name(text.encode("utf-8", "replace")):
+            return 1, size, None
+        if carries_secret(text, secrets):
+            return 1, size, None
+        head = text.encode("utf-8", "replace")[:WS_HEAD_BYTES].decode("utf-8", "ignore")
+        return 1, size, head
+    except Exception:  # noqa: BLE001 - total: nothing of the message is kept
+        return 1, 0, None

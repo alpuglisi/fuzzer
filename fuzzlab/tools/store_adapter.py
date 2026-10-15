@@ -30,16 +30,19 @@ from fuzzlab.core.urls import to_path
 
 
 def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
-                     source: str | None) -> int:
+                     source: str | None, op_key: str = "") -> int:
+    """The endpoint ``(run, url, method, op key)`` -- its identity since store v24
+    (FR-CORE-43): one URL with many operations (GraphQL, JSON-RPC) is many endpoints.
+    The first writer's ``source`` stands."""
     row = store.conn.execute(
-        "SELECT id FROM endpoint WHERE run_id=? AND url=? AND method=?",
-        (run_id, url_path, method),
+        "SELECT id FROM endpoint WHERE run_id=? AND url=? AND method=? AND op_key=?",
+        (run_id, url_path, method, op_key or ""),
     ).fetchone()
     if row:
         return int(row["id"])
     cur = store.conn.execute(
-        "INSERT INTO endpoint (run_id, url, method, source) VALUES (?,?,?,?)",
-        (run_id, url_path, method, source),
+        "INSERT INTO endpoint (run_id, url, method, source, op_key) VALUES (?,?,?,?,?)",
+        (run_id, url_path, method, source, op_key or ""),
     )
     return int(cur.lastrowid)
 
@@ -99,7 +102,12 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     as ``fragment`` parameters, and the app's own captured requests (forms phase 3,
     FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``). A SPA query seed that blocked
     a write (``source = 'spa-query-writes'``, FR-CRAWL-17) is a page only: no endpoint,
-    parameter or link set comes from it (counted ``write_seed_skipped``)."""
+    parameter or link set comes from it (counted ``write_seed_skipped``).
+
+    Capture-and-abort (FR-AUD-23): a captured request and a crawled form with the same
+    signature (method, path, sorted names) are one request, and the captured one wins
+    (it is the exact shape the app builds): the form is not imported (counted
+    ``form_superseded_by_capture``) and stays in the spider DB as provenance."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
     counts = {"page": 0, "endpoint": 0, "parameter": 0}
@@ -144,7 +152,7 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
                     counts["parameter"] += 1
             link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
         _import_route_query(store, run_id, raw, source, counts)
-    _import_forms(src, store, run_id, counts)
+    _import_forms(src, store, run_id, counts, superseded=_captured_signatures(src))
     _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes)
     _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
@@ -407,10 +415,41 @@ def form_skip_reason(form: dict) -> str | None:
     return entries_refusal(form["entries"])
 
 
-def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
+def _form_signature(method: str, url: str, names) -> tuple:
+    """A request's identity for the capture-over-form precedence (FR-AUD-23): its
+    method, its path (`to_path`) and its sorted top-level names."""
+    return ((method or "GET").upper(), to_path(url or ""), tuple(sorted(set(names))))
+
+
+def _captured_signatures(src) -> set:
+    """`_form_signature` of every recorded request with a body of named fields (not a
+    transport): a crawled form with one of these is superseded (FR-AUD-23)."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.tools.capture import SOURCE_TRANSPORT
+    out = set()
+    try:
+        rows = src.execute("SELECT * FROM discovered_requests").fetchall()
+    except sqlite3.Error:
+        return out
+    for row in rows:
+        row = dict(row)
+        if row.get("source") == SOURCE_TRANSPORT or not row.get("body_json"):
+            continue
+        try:
+            doc = jsonbody.loads(row["body_json"])
+        except (ValueError, TypeError, RecursionError):
+            continue
+        if isinstance(doc, dict) and doc:
+            out.add(_form_signature(row.get("method"), row.get("url"), map(str, doc)))
+    return out
+
+
+def _import_forms(src, store: Store, run_id: int, counts: dict, *,
+                  superseded: set = frozenset()) -> None:
     """Crawled forms -> endpoint, `form` row (its default entry list) and one parameter
     per fuzzable field (FR-FUZZ-42). GET forms drop the action's query (a browser
-    replaces it); POST forms keep it on the endpoint URL (reviewer A4)."""
+    replaces it); POST forms keep it on the endpoint URL (reviewer A4). A form a
+    recorded request supersedes (``superseded``, FR-AUD-23) is not imported."""
     try:
         rows = src.execute("SELECT action_url, method, enctype, entries, controls, "
                            "selector, options FROM discovered_forms ORDER BY rowid").fetchall()
@@ -425,6 +464,7 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
     counts.setdefault("form", 0)
     counts.setdefault("form_skipped", 0)
     counts.setdefault("form_duplicate_selector", 0)
+    counts.setdefault("form_superseded_by_capture", 0)
     seen_selectors: set[tuple] = set()
     for row in rows:
         form = {"action_url": row["action_url"], "method": row["method"] or "GET",
@@ -435,6 +475,11 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
                 "options": json.loads(row["options"] or "[]")}
         if form["selector"]:
             form["verdict"] = verdicts.get(signature_key(form))
+        if superseded and _form_signature(
+                form["method"], form["action_url"],
+                (n for n, _k in form["controls"] if n)) in superseded:
+            counts["form_superseded_by_capture"] += 1   # the captured request wins
+            continue
         if form_skip_reason(form):
             counts["form_skipped"] += 1
             continue
@@ -610,33 +655,90 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
     identifier-like leaf (blanked, `redact_leaf`), and an object selector
     (`_object_selector` on the last key; sent as captured). Refused requests are counted
     (``request_refused``), never stored. An older spider DB has no such table."""
+    from fuzzlab.tools.capture import SOURCE_TRANSPORT
     try:
         rows = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
     except sqlite3.Error:
         return                                   # a spider DB from before FR-CRAWL-13
-    for key in ("request", "request_json", "request_form", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_refused",
+                "request_captured", "request_transport", "request_multipart",
+                "request_no_body", "request_query"):
         counts.setdefault(key, 0)
     for row in rows:
+        row = dict(row)
+        if row.get("source") == SOURCE_TRANSPORT:
+            counts["request_transport"] += 1     # a long-poll transport (FR-CRAWL-19)
+            continue
         counts["request"] += 1
-        reason, kind, leaves = captured_request(dict(row), fuzz_json_writes=fuzz_json_writes)
+        reason, kind, leaves = captured_request(row, fuzz_json_writes=fuzz_json_writes)
         if reason is not None:
             counts["request_refused"] += 1
             continue
+        source = request_source(row)
+        if source == _captured_source():
+            counts["request_captured"] += 1
         _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
-                       leaves)
+                       leaves, source=source, op_key=str(row.get("op_key") or ""),
+                       pinned=leaves_pinned(row))
+
+
+def _captured_source() -> str:
+    from fuzzlab.tools.capture import SOURCE_CAPTURED      # the one definition (PA-0003)
+    return SOURCE_CAPTURED
+
+
+def request_source(row: dict) -> str:
+    """The store ``endpoint.source`` of a recorded request (FR-AUD-23):
+    ``captured-aborted`` for a request the crawl recorded and never sent, else
+    ``request`` (sent and observed; legacy rows ``passive`` / ``submit`` were sent)."""
+    return _captured_source() if row.get("source") == _captured_source() else "request"
+
+
+def leaves_pinned(row: dict) -> frozenset:
+    """The top-level keys of a recorded body that are never points (DISC-CAPTURE §5):
+    GraphQL's ``query`` / ``operationName`` / ``extensions`` (only ``variables`` leaves
+    are points) and JSON-RPC's envelope (`capture.pinned_top_keys`)."""
+    from fuzzlab.core import jsonbody
+    from fuzzlab.tools.capture import pinned_top_keys
+    try:
+        return pinned_top_keys(jsonbody.loads(row.get("body_json") or ""))
+    except (ValueError, TypeError, RecursionError):
+        return frozenset()
+
+
+#: Body kinds recorded without points (DISC-CAPTURE §5): a multipart body (its part
+#: names only; a separate change sends multipart), a body the crawl could not keep, and
+#: a bodiless GET (its query is its points).
+KIND_MULTIPART = "multipart"
+KIND_NO_BODY = "none"
+KIND_QUERY = "query"
 
 
 def captured_request(row: dict, *, fuzz_json_writes: bool = False):
     """``(refusal or None, body kind, leaves)`` for one ``discovered_requests`` row: the
-    whole import decision, pure (FR-AUD-22). ``leaves`` is ``[(name, key segments,
-    path or None, value)]`` when the request is accepted."""
+    whole import decision, pure (FR-AUD-22, FR-AUD-23). ``leaves`` is ``[(name, key
+    segments, path or None, value)]`` when the request is accepted; empty for a
+    multipart body (`KIND_MULTIPART`: an endpoint with no points, "multipart: not yet
+    supported") and for a body the crawl could not keep (`KIND_NO_BODY`); a bodiless GET
+    (`KIND_QUERY`) has its URL query's pairs."""
     from fuzzlab.core import jsonbody
     url = row.get("url") or ""
+    method = (row.get("method") or "").upper()
+    media = (row.get("content_type") or "").split(";", 1)[0].strip().lower()
     kind = _body_kind(row.get("content_type"))
     reason = request_refusal(row.get("method") or "", url,
                              fuzz_json_writes=fuzz_json_writes,
                              page_url=row.get("page_url"))
-    if reason is None and kind is None:
+    if reason is not None:
+        return reason, kind, None
+    if row.get("body_json") is None and row.get("source") == _captured_source():
+        if method in ("GET", "HEAD"):
+            pairs = parse_qsl(urlparse(url).query, keep_blank_values=True)
+            return None, KIND_QUERY, [(n, [n], None, v) for n, v in pairs]
+        return None, KIND_NO_BODY, []
+    if media.startswith("multipart/"):
+        return None, KIND_MULTIPART, []
+    if kind is None:
         reason = f"unsupported content type {row.get('content_type')!r}"
     if reason is not None:
         return reason, kind, None
@@ -651,11 +753,36 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
     return body_refusal(url, leaves), kind, leaves
 
 
-def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
+def _store_request(store, run_id, counts, kind, method, url, leaves, *,
+                   source: str = "request", op_key: str = "",
+                   pinned: frozenset = frozenset()) -> None:
     """Write one accepted captured request (`_import_requests`): every value passes
-    `redact_leaf` before it is stored (PA-0100)."""
+    `redact_leaf` before it is stored (PA-0100). The endpoint carries the request's
+    ``source`` and ``op_key`` (FR-AUD-23). A leaf under a ``pinned`` top-level key is
+    sent as captured and never a point (GraphQL ``query``/``operationName``)."""
     from fuzzlab.core import jsonbody
     from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
+    if kind in (KIND_MULTIPART, KIND_NO_BODY):
+        # an endpoint with no points (DISC-CAPTURE §5): discovered, not yet buildable
+        _upsert_endpoint(store, run_id, to_path(url) + (
+            "?" + urlparse(url).query if urlparse(url).query else ""), method, source,
+            op_key)
+        counts["request_multipart" if kind == KIND_MULTIPART else "request_no_body"] += 1
+        return
+    if kind == KIND_QUERY:
+        endpoint_id = _upsert_endpoint(store, run_id, to_path(url), method, source, op_key)
+        counts["request_query"] += 1
+        for name, _segs, _path, value in leaves:
+            if is_sensitive_name(name) or _get_parameter(store, run_id, endpoint_id,
+                                                         name) is not None:
+                continue
+            from fuzzlab.core.redaction import looks_like_identifier
+            store.conn.execute(
+                "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
+                "VALUES (?,?,?,?,?)", (run_id, endpoint_id, name, "query",
+                                       "" if looks_like_identifier(value) else value))
+            counts["parameter"] += 1
+        return
     passwords, entries, points = [], [], []
     for name, segs, path, value in leaves:
         if any(is_credential_name(s) for s in segs):
@@ -664,13 +791,14 @@ def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
         else:
             stored = redact_leaf(segs, value)
         entries.append((path if kind == "json" else name, stored))
-        pinned = (stored != value or any(is_sensitive_name(s) for s in segs)
-                  or _object_selector(segs[-1] if segs else name))
-        if name not in passwords and not pinned and jsonbody.is_point_value(value):
+        kept = (stored != value or any(is_sensitive_name(s) for s in segs)
+                or _object_selector(segs[-1] if segs else name)
+                or (path is not None and bool(path) and path[0] in pinned))
+        if name not in passwords and not kept and jsonbody.is_point_value(value):
             points.append((name, value))
     parts = urlparse(url)
     endpoint_url = to_path(url) + ("?" + parts.query if parts.query else "")
-    endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, "request")
+    endpoint_id = _upsert_endpoint(store, run_id, endpoint_url, method, source, op_key)
     enctype = jsonbody.ENCTYPE if kind == "json" else FORM_URLENCODED
     cur = store.conn.execute(
         "INSERT INTO form (run_id, endpoint_id, enctype, entries, password_fields) "

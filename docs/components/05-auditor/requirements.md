@@ -306,6 +306,29 @@ budget where a vulnerability is plausible.
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
 
+- **FR-AUD-23** *(captured requests and the endpoint's op key; `CC-AUD-0044`,
+  2026-10-15, DISC-CAPTURE §5).* `store_adapter.import_spider` reads FR-CRAWL-18's
+  columns:
+  - a row's `source` reaches the endpoint: `captured-aborted` for a request the crawl
+    recorded and never sent, `request` for one that was sent (`observed`, and an older
+    DB's `passive` / `submit`); a `transport` row is never imported
+    (`request_transport`);
+  - the endpoint's identity is `(run, url, method, op_key)` (FR-CORE-43): one URL with
+    many operations is many endpoints;
+  - **GraphQL:** `query`, `operationName` and `extensions` are pinned (sent as captured,
+    never points); only `variables` leaves are points (location `json`, name
+    `variables.<...>`); JSON-RPC's `jsonrpc`, `method` and `id` likewise
+    (`capture.pinned_top_keys`);
+  - **precedence:** a recorded request and a crawled form with the same signature
+    (method, path, sorted names) are one request; the recorded one wins and the form
+    is not imported (`form_superseded_by_capture`); it stays in the spider DB;
+  - **no points yet:** a multipart request (part names only: "multipart: not yet
+    supported", `request_multipart`) and a request whose body the crawl could not keep
+    (`request_no_body`) are endpoints with no points; a captured bodiless GET (one the
+    word rules refused) has its query's pairs as `query` points (`request_query`).
+  - **Stated limit:** a recorded CSRF token is blanked (PA-0100), so a replay needs a
+    fresh token; there is no token refresh in the harness.
+
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
   produced it; a candidate with no evidence is a bug.

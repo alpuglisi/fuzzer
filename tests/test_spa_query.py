@@ -699,10 +699,13 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
         assert counts["write_seed_skipped"] >= 1
         assert not any(u in ("/#/poster", "/#/beacon", "/#/autopost", "/#/wsping",
                              "/#/txn") for u, _n, _l in params)
+        # the seeds and M6 are what this test is about: the writes the crawl recorded
+        # (capture-and-abort) are probed by default (D67) and are opted out here, so
+        # every POST below could only come from a seed or M6
         run_auto(base_url=lab.base, store=store, run_id=run,
                  sender=RequestsProbeSender(session=session), mode="manual",
                  selected_categories=["xss"], points_source="crawl",
-                 browser=PlaywrightBrowserExecutor())
+                 browser=PlaywrightBrowserExecutor(), probe_captured_writes=False)
         found = {(r["url"], r["param"]) for r in store.conn.execute(
             "SELECT url, param FROM finding WHERE run_id=?", (run,))}
     assert ("/#/track", "id") in found                      # M6 did run
@@ -1481,8 +1484,11 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     assert not [r for r in requests if r[1].startswith("/api/order/confirm")]
     assert not [u for u in sources if "/api/order/confirm" in u]
     # P1(b): the shell's writes were made on every load, blocked in each seed's window,
-    # and matched the bare route's baseline
-    assert [r for r in requests if r[0] == "POST" and r[1].startswith("/socket.io/")]
+    # and matched the bare route's baseline. Under capture (FR-CRAWL-18/19) none is ever
+    # sent: outside a window the socket.io POST is recorded as a transport and aborted
+    assert not [r for r in requests if r[0] == "POST" and r[1].startswith("/socket.io/")]
+    assert db_rows(db, "SELECT url FROM discovered_requests WHERE source = 'transport' "
+                       "AND url LIKE '%/socket.io/%'")
     nxt = windows[base + "next1?y=fuzzlab"]
     assert {("POST", "/socket.io/"), ("WS", "/socket.io/")} <= nxt["baseline"]
     assert [u for u in nxt["blocked"] if "/socket.io/" in u]
@@ -1537,11 +1543,16 @@ def test_a_shell_that_writes_on_every_load_still_gives_hash_points(query_crawl):
     a write."""
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     first = query_crawl["first_requests"]
-    assert [r for r in first if r[0] == "POST" and r[1].startswith("/socket.io/")]
-    assert "3" in lab.ws_messages                       # the shell really pinged
+    # under capture (FR-CRAWL-18/19) the shell's writes are made, recorded and never
+    # sent: the start-up POST as a transport row, the pings as dropped messages
+    assert not [r for r in first if r[0] == "POST" and r[1].startswith("/socket.io/")]
+    assert db_rows(db, "SELECT url FROM discovered_requests WHERE source = 'transport' "
+                       "AND url LIKE '%/socket.io/%'")
+    assert ("3",) in db_rows(db, "SELECT head FROM ws_dropped")   # the shell pinged
+    assert lab.ws_messages == []
     windows = {w["url"]: w for w in query_crawl["windows"]}
     track = windows[lab.base + "#/track?id=fuzzlab"]
-    # (a): the start-up POST went out before the window, never blocked in it
+    # (a): the start-up POST was made before the window, never blocked in it
     assert not [u for u in track["blocked"] if "/socket.io/" in u]
     assert track["writes"] == 0 and track["visited"]
     assert {("POST", "/socket.io/"), ("WS", "/socket.io/")} <= track["baseline"]
@@ -1701,10 +1712,14 @@ def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_
     db, base = str(tmp_path / "s.db"), lab.base
     pages = _pages(db)
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
-    # the query links were crawled first, outside any window: their POSTs were sent
+    # the query links were crawled first, outside any window: their POSTs were made,
+    # recorded and aborted (FR-CRAWL-18), never sent
     assert pages.index(base + "#/poster?msg=hi") < pages.index(base + "#/poster?msg=fuzzlab")
     assert pages.index(base + "#/search?q=foo") < pages.index(base + "#/search?q=fuzzlab")
-    assert lab.seen("POST", "/api/send") and lab.seen("POST", "/api/s")
+    assert lab.seen("POST", "/api/send") == [] and lab.seen("POST", "/api/s") == []
+    captured = {u.rsplit("/", 2)[-2:][-1] for (u,) in db_rows(
+        db, "SELECT url FROM discovered_requests WHERE source = 'captured-aborted'")}
+    assert {"send", "s"} <= captured
     # B1: never a baseline
     assert ("POST", "/api/send") not in sp._write_baseline.get(base + "#/poster", set())
     assert ("POST", "/api/s") not in sp._write_baseline.get(base + "#/search", set())

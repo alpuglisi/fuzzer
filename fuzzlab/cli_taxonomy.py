@@ -191,6 +191,7 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
         "confirm_budget": "B", "budget_method": "W*", "budget_seed": "T",
         "anomaly": "B", "anomaly_contamination": "B", "anomaly_method": "B",
         "plugins": "B", "header_points": "B", "fuzz_json_writes": "B",
+        "no_probe_captured_writes": "B",
         "authorized": "B", "dry_run": "B", "auth_origin": "B",
     },
     "crawl": _all("B", ["start", "max_depth", "db", "engine", "timeout", "resume", "store",

@@ -223,10 +223,15 @@ def _crawl_url_refusal(url: str) -> str | None:
     return reason
 
 
+#: Why a point from a captured write is not built when the operator opts out (D67).
+CAPTURED_WRITE_OPT_OUT = "captured write, not sent: --no-probe-captured-writes"
+
+
 def injection_points_from_store(store, run_id: int, base_url: str,
                                 skipped: list | None = None,
                                 isolated: set | None = None,
-                                browser_available: bool = False) -> list[InjectionPoint]:
+                                browser_available: bool = False,
+                                probe_captured_writes: bool = True) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
 
     A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
@@ -244,6 +249,12 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     other leaves as ``base_entries`` (paths and typed values). A ``fragment`` point (an
     SPA hash route's query) is built only with ``browser_available``; without a browser
     it is reported, as ground truth's DOM points are.
+
+    A point of an endpoint the crawl recorded and never sent (``source``
+    ``captured-aborted``, FR-CRAWL-18) is built and probed through every send gate by
+    default (D67, the owner's decision; FR-FUZZ-52). With ``probe_captured_writes``
+    False (``--no-probe-captured-writes``) it is reported as `CAPTURED_WRITE_OPT_OUT`
+    instead. Endpoints are told apart by their op key too (one URL, many operations).
     """
     from urllib.parse import urlsplit
 
@@ -258,8 +269,10 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     if isolated is not None:
         isolated.update(login_paths)
     from fuzzlab.tools.store_adapter import is_filler
+    from fuzzlab.tools.capture import SOURCE_CAPTURED
     rows = store.conn.execute(
-        "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location, "
+        "SELECT e.url AS path, e.method AS method, e.source AS source, "
+        "e.op_key AS op_key, p.name AS name, p.location AS location, "
         "p.example AS example, f.entries AS entries "
         "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
         "LEFT JOIN form f ON f.id = p.form_id "
@@ -272,14 +285,19 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     for r in rows:
         shapes_by_name.setdefault(r["name"], set()).update(_shapes(r["example"]))
     points: list[InjectionPoint] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for r in rows:
         path = r["path"] if r["path"].startswith("/") else "/" + r["path"]
         method = r["method"] or "GET"
-        key = (path, method, r["name"])
+        # every identity field the endpoint records (PA-0076): the op key included
+        key = (path, method, r["op_key"] or "", r["name"])
         if key in seen:
             continue
         seen.add(key)
+        if r["source"] == SOURCE_CAPTURED and not probe_captured_writes:
+            if skipped is not None:
+                skipped.append((path, method, r["name"], CAPTURED_WRITE_OPT_OUT))
+            continue
         reason = _crawl_url_refusal(base + path)
         if reason is not None:
             if skipped is not None:
@@ -545,7 +563,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              pages_html: dict[str, str] | None = None, browser=None, oob=None,
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
-             prioritizer=None, header_names=None) -> PipelineResult:
+             prioritizer=None, header_names=None,
+             probe_captured_writes: bool = True) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -562,6 +581,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     of blind command injection. ``coverage``/``dbfault`` (a `CoverageSource`/
     `DbFaultSource`) enable M10 grey-box confirmation of sql-injection/xss; both
     default to ``None`` (no-op) same as ``browser``/``oob``.
+    ``probe_captured_writes`` (default True, D67): crawl points of requests the crawl
+    recorded and never sent are probed; False skips and reports them.
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
@@ -580,7 +601,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     else:
         points = injection_points_from_store(store, run_id, base_url, skipped=skipped,
                                              isolated=isolated,
-                                             browser_available=browser is not None)
+                                             browser_available=browser is not None,
+                                             probe_captured_writes=probe_captured_writes)
         if isolated:
             if hasattr(sender, "isolate"):
                 sender.isolate(isolated)       # never the run's session there (FR-FUZZ-44)

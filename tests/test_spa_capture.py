@@ -221,7 +221,7 @@ def test_the_discovered_requests_table_is_exactly_the_contract(tmp_path):
     cols = [r[1] for r in db_rows(str(tmp_path / "s.db"),
                                   "PRAGMA table_info(discovered_requests)")]
     assert cols == ["id", "page_url", "method", "url", "content_type", "body_json",
-                    "source", "signature"]
+                    "source", "signature", "trigger", "op_key", "header_names"]
     (sql,) = db_rows(str(tmp_path / "s.db"), "SELECT sql FROM sqlite_master WHERE "
                      "name='discovered_requests'")[0]
     assert "signature TEXT UNIQUE" in sql
@@ -246,10 +246,12 @@ def test_record_request_redacts_at_the_write_site_and_dedupes_by_signature(tmp_p
         sm.record_request("http://h/", "PUT", "http://h/api/y", JSON, b'[1,2]', "passive")
     finally:
         sm.close()
-    rows = db_rows(db, "SELECT page_url, method, url, content_type, body_json, source, "
-                       "signature FROM discovered_requests")
+    rows = db_rows(db, "SELECT page_url, method, url, content_type, body_json, trigger, "
+                       "source, signature FROM discovered_requests")
+    # FR-CRAWL-18: the trigger is what caused it; source says it was sent (observed);
+    # the signature carries the op key ("" for a body that names no operation)
     assert rows == [("http://h/", "PUT", "http://h/api/y", JSON, "[1, 2]", "passive",
-                     '["PUT", "http://h:80/api/y", []]')]
+                     "observed", '["PUT", "http://h:80/api/y", "", []]')]
 
 
 def test_record_request_stores_no_secret_and_no_identifier(tmp_path):
@@ -295,9 +297,13 @@ def test_passive_capture_takes_only_bodied_non_transport_requests(tmp_path):
                     scripts=True)                                   # no body
     finally:
         sp.storage.close()
-    rows = db_rows(db, "SELECT page_url, url, body_json, source FROM discovered_requests")
+    rows = db_rows(db, "SELECT page_url, url, body_json, trigger, source, header_names "
+                       "FROM discovered_requests")
+    # header names only, a value only for the allowlist (DISC-CAPTURE §5)
     assert rows == [("http://127.0.0.1:8080/#/contact", "http://127.0.0.1:8080/api/f",
-                     '{"comment": "hi"}', "passive")]
+                     '{"comment": "hi"}', "passive", "observed",
+                     '[["authorization", null], ["content-type", "application/json"], '
+                     '["cookie", null]]')]
     assert sp.spa_counts["transport_urls_skipped"] == 1
     text = db_text(db)
     assert not any(s in text for s in ("SECRETBEARER", "SECRETCOOKIE", "SOCKSECRET"))
@@ -500,12 +506,23 @@ def _crawl(spa_lab, tmp_path, **kw):
     return sp, db
 
 
-def _requests(db):
-    return {(m, u.split("/", 3)[-1]): (json.loads(b), s) for m, u, b, s in db_rows(
-        db, "SELECT method, url, body_json, source FROM discovered_requests")}
+def _requests(db, source="captured-aborted"):
+    """``{(method, path): (body, trigger)}`` of the recorded requests of ``source``
+    (FR-CRAWL-18: under capture a write is recorded and aborted, never sent)."""
+    return {(m, u.split("/", 3)[-1]): (None if b is None else json.loads(b), t)
+            for m, u, b, t in db_rows(
+                db, "SELECT method, url, body_json, trigger FROM discovered_requests "
+                    "WHERE source = ?", (source,))}
 
 
-def test_passive_capture_is_on_by_default_and_redacted(lab, tmp_path):
+def _writes(spa_lab):
+    """What the lab received that is not a GET: under capture, nothing ever."""
+    return [r for r in spa_lab.requests if r[0] not in ("GET", "HEAD")]
+
+
+def test_capture_is_on_by_default_and_redacted(lab, tmp_path):
+    """FR-CRAWL-13 + FR-CRAWL-18: the page's own writes are recorded (redacted) and
+    aborted; the lab receives none of them."""
     spa_lab, _other = lab
     sp, db = _crawl(spa_lab, tmp_path)
     got = _requests(db)
@@ -514,9 +531,13 @@ def test_passive_capture_is_on_by_default_and_redacted(lab, tmp_path):
         "authToken": {}, "tokens": [], "ref": "", "count": 3, "pin": None}, "passive")
     assert got[("POST", "api/form")] == ({"name": "alice", "api_key": "", "ref": ""},
                                          "passive")
-    assert not any("socket.io" in u for _m, u in got)            # a transport: excluded
-    assert not any(u in ("rest/big", "rest/deep") for _m, u in got)   # 64 KiB / depth 8
-    assert sp.spa_counts["requests_not_recorded"] == 2
+    assert not any("socket.io" in u for _m, u in got)            # a transport: apart
+    assert any("socket.io" in u for _m, u in _requests(db, "transport"))
+    # over 64 KiB / deeper than 8: recorded without their body (nothing dropped)
+    assert got[("POST", "rest/big")] == (None, "passive")
+    assert got[("POST", "rest/deep")] == (None, "passive")
+    assert sp.spa_counts["captured_body_omitted"] == 2
+    assert _writes(spa_lab) == []
     text = db_text(db)
     assert not [s for s in SECRETS if s in text] and IDENT not in text
 
@@ -546,12 +567,11 @@ def test_bare_submission_in_an_anonymous_crawl(lab, tmp_path, monkeypatch):
                                                "captchaId": "", "UserId": 7}, "submit")
     assert got[("POST", "rest/user/login")] == ({"email": "fuzzlab", "password": ""},
                                                 "submit")
-    # the password filler went out, and is never stored
-    (login,) = spa_lab.seen("POST", "/rest/user/login")
-    assert json.loads(login[4])["password"] == spa.PASSWORD_FILLER
+    # FR-CRAWL-18: --submit-spa-forms never causes a send; the filler is never stored
+    assert _writes(spa_lab) == []
     assert spa.PASSWORD_FILLER not in db_text(db)
     # one submission per signature: the footer form is on every route
-    assert len(spa_lab.seen("POST", "/api/questions")) == 1
+    assert ("POST", "api/questions") in got
     # refused: transaction route, file input, 2FA-only, registration (credential change)
     assert sp.spa_counts["forms_refused"] == 4
     assert spa_lab.seen("POST", "/checkout") == [] and spa_lab.seen("DELETE") == []
@@ -568,13 +588,13 @@ def test_a_password_form_is_submitted_only_in_a_fresh_unauthenticated_context(la
     manager = _Manager()
     sp, db = _crawl(spa_lab, tmp_path, submit_spa_forms=[], session_manager=manager,
                     identity="alice")
-    (login,) = spa_lab.seen("POST", "/rest/user/login")
-    assert TOKEN not in login[2] and login[3] == ""          # no cookie, no bearer
-    assert ("POST", "rest/user/login") in _requests(db)
-    # the crawl's own requests (they carry the bearer) still carry the token afterwards
-    at = next(i for i, r in enumerate(spa_lab.requests) if r is login)
-    after = [r for r in spa_lab.requests[at + 1:] if r[3] == BEARER]
-    assert after and all(f"token={TOKEN}" in r[2] for r in after)
+    # FR-CRAWL-18: the login is recorded, never sent
+    assert spa_lab.seen("POST", "/rest/user/login") == []
+    assert _requests(db)[("POST", "rest/user/login")][1] == "submit"
+    # the crawl's own requests still carry the session throughout
+    own = [r for r in spa_lab.requests if r[3] == BEARER]
+    assert own and all(f"token={TOKEN}" in r[2] for r in own)
+    assert _writes(spa_lab) == []
     assert sp.spa_submit_stopped is None
     text = db_text(db)
     for secret in (TOKEN, "SECRETHEADER", BEARER, spa.PASSWORD_FILLER, *SECRETS):
@@ -587,28 +607,29 @@ def test_a_named_login_route_is_still_submitted_only_unauthenticated(lab, tmp_pa
     fresh context, the crawl's session survives, and the named contact form after it is
     submitted authenticated (the mutation check found this case untested)."""
     spa_lab, _other = lab
-    sp, _db = _crawl(spa_lab, tmp_path, submit_spa_forms=["login", "contact"],
-                     session_manager=_Manager(), identity="alice")
-    (login,) = spa_lab.seen("POST", "/rest/user/login")
-    assert login[3] == "" and TOKEN not in login[2]
-    (post,) = spa_lab.seen("POST", "/api/Feedbacks")
-    assert post[3] == BEARER and f"token={TOKEN}" in post[2]
+    sp, db = _crawl(spa_lab, tmp_path, submit_spa_forms=["login", "contact"],
+                    session_manager=_Manager(), identity="alice")
+    got = _requests(db)
+    assert got[("POST", "rest/user/login")][1] == "submit"
+    assert got[("POST", "api/Feedbacks")][1] == "submit"
     assert sp.spa_submit_stopped is None
-    # the crawl context's background DELETEs (the login view polls) are refused even
-    # while the anonymous context is clicking the named login route (lane S review)
-    assert spa_lab.seen("DELETE", "/api/poll") == []
-    assert sp.spa_counts["deletes_blocked"] >= 1
+    # the crawl context's background DELETEs (the login view polls) are recorded and
+    # aborted, as every write is (FR-CRAWL-18); nothing reaches the lab
+    assert ("DELETE", "api/poll/1") in got
+    assert _writes(spa_lab) == []
 
 
 def test_an_authenticated_bare_flag_never_submits_in_the_crawls_context(lab, tmp_path):
     """Revision 4 (B must-fix 1): profile / contact forms change the operator's account
     without a password control; a bare flag submits them only unauthenticated."""
     spa_lab, _other = lab
-    sp, _db = _crawl(spa_lab, tmp_path, submit_spa_forms=[],
-                     session_manager=_Manager(), identity="alice")
-    submitted = (spa_lab.seen("PATCH", "/api/profile") + spa_lab.seen("POST", "/api/Feedbacks")
-                 + spa_lab.seen("POST", "/api/questions"))
-    assert submitted and all(r[3] == "" and TOKEN not in r[2] for r in submitted)
+    sp, db = _crawl(spa_lab, tmp_path, submit_spa_forms=[],
+                    session_manager=_Manager(), identity="alice")
+    got = _requests(db)
+    # clicked in the unauthenticated context, recorded and never sent (FR-CRAWL-18)
+    assert {("PATCH", "api/profile"), ("POST", "api/Feedbacks"),
+            ("POST", "api/questions")} <= set(got)
+    assert _writes(spa_lab) == []
     assert sp.spa_submit_stopped is None
 
 
@@ -618,11 +639,12 @@ def test_a_named_route_is_submitted_authenticated_and_session_loss_stops_it(lab,
     it, stops submitting (contact, also named, is never submitted) and reports it."""
     spa_lab, _other = lab
     manager = _Manager()
-    sp, _db = _crawl(spa_lab, tmp_path, submit_spa_forms=["profile", "contact"],
-                     session_manager=manager, identity="alice")
-    (patch,) = spa_lab.seen("PATCH", "/api/profile")
-    assert patch[3] == BEARER                                   # the crawl's context
-    assert spa_lab.seen("POST", "/api/Feedbacks") == []
+    sp, db = _crawl(spa_lab, tmp_path, submit_spa_forms=["profile", "contact"],
+                    session_manager=manager, identity="alice")
+    got = _requests(db)
+    assert got[("PATCH", "api/profile")][1] == "submit"        # recorded, never sent
+    assert ("POST", "api/Feedbacks") not in got                 # stopped before it
+    assert _writes(spa_lab) == []
     assert sp.spa_submit_stopped and "token" in sp.spa_submit_stopped
     assert any("stopped" in ln for ln in sp.spa_summary())
 
@@ -630,13 +652,14 @@ def test_a_named_route_is_submitted_authenticated_and_session_loss_stops_it(lab,
 def test_a_named_route_keeps_submitting_while_the_session_holds(lab, tmp_path):
     spa_lab, _other = lab
     manager = _Manager()
-    sp, _db = _crawl(spa_lab, tmp_path, submit_spa_forms=["contact"],
-                     session_manager=manager, identity="alice")
-    (post,) = spa_lab.seen("POST", "/api/Feedbacks")
-    assert post[3] == BEARER and f"token={TOKEN}" in post[2]
+    sp, db = _crawl(spa_lab, tmp_path, submit_spa_forms=["contact"],
+                    session_manager=manager, identity="alice")
+    got = _requests(db)
+    assert got[("POST", "api/Feedbacks")][1] == "submit"
     assert manager.verified >= 1 and sp.spa_submit_stopped is None
-    assert spa_lab.seen("POST", "/rest/user/login") == []      # login: not named
-    assert spa_lab.seen("PATCH", "/api/profile") == []
+    assert ("POST", "rest/user/login") not in got               # login: not named
+    assert ("PATCH", "api/profile") not in got
+    assert _writes(spa_lab) == []
 
 
 def test_icon_text_never_decides_a_button_label(monkeypatch, tmp_path):
@@ -648,11 +671,12 @@ def test_icon_text_never_decides_a_button_label(monkeypatch, tmp_path):
     chromium_or_skip(monkeypatch)
     icons = IconSpa()
     try:
-        sp, _db = _crawl(icons, tmp_path, submit_spa_forms=[])
+        sp, db = _crawl(icons, tmp_path, submit_spa_forms=[])
     finally:
         icons.close()
-    clicked = {r[1] for r in icons.seen("POST", "/api/clicked/")}
-    assert clicked == {"/api/clicked/signin", "/api/clicked/find"}
+    clicked = {u for _m, u in _requests(db) if u.startswith("api/clicked/")}
+    assert clicked == {"api/clicked/signin", "api/clicked/find"}
+    assert _writes(icons) == []                                 # FR-CRAWL-18
     # account, leave, basket, icononly; hidden, hidden2 (aria-hidden text is judged),
     # rowdel (a destructive glyph) -- reviewer B
     assert sp.spa_counts["forms_refused"] == 7
@@ -672,13 +696,23 @@ def test_a_covered_button_is_still_clicked_exactly_once(monkeypatch, tmp_path):
     Escape once, then its own click(); the overlay's buttons are never clicked, and a
     destructive button behind an overlay is still refused (the gate runs first)."""
     from tests._spa_fixture import OverlaySpa
+    from fuzzlab.tools.spider import LocalSpider
     chromium_or_skip(monkeypatch)
+    # every click's request is recorded and aborted (FR-CRAWL-18): count them as the
+    # capture sees them, duplicates included (the table dedupes by signature)
+    seen, real = [], LocalSpider._capture
+
+    def counting(self, request, why):
+        seen.append((request.method, request.url.split("/", 3)[-1]))
+        return real(self, request, why)
+    monkeypatch.setattr(LocalSpider, "_capture", counting)
     lab = OverlaySpa()
     try:
         sp, db = _crawl(lab, tmp_path, submit_spa_forms=[])
     finally:
         lab.close()
-    posts = [r[1] for r in lab.seen("POST")]
+    assert _writes(lab) == []
+    posts = ["/" + u for m, u in seen if m == "POST"]
     assert posts.count("/api/submit/signin") == 1           # Escape cleared the overlay
     assert posts.count("/api/submit/signin-stuck") == 1     # the dispatch path
     assert "/api/submit/danger" not in posts                 # refused before any click

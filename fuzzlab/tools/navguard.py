@@ -44,6 +44,11 @@ port-agnostic, so the context's jar and its pages' ``document.cookie`` /
 A ``request_refusal`` hook sees a request's body before it is sent (FR-SESS-19's login
 window).
 
+The crawler's **capture-and-abort** (FR-CRAWL-18, DISC-CAPTURE) uses ``capture_refusal``
+and ``capture`` on the route (a write is recorded and aborted, never sent), the
+``ws_hold`` below for the whole crawl, and `install_capture_script` for egress the route
+never sees (``sendBeacon``, ``keepalive``, ``fetchLater``).
+
 The crawler's **reveal window** (FR-CRAWL-15/16, W1-W3) uses two hooks: ``window`` on
 the route (asked for every request after the scope and destructive checks, and for
 each redirect hop, with whether it is a navigation) and ``ws_hold`` on WebSockets (an
@@ -89,7 +94,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        window: Callable[[str, str, bool], str | None] | None = None,
                        cookie_scope: Callable[[str], bool] | None = None,
                        on_session_withheld: Callable[[str, str, str], None] | None = None,
-                       isolated_request: Callable[[], object] | None = None):
+                       isolated_request: Callable[[], object] | None = None,
+                       capture_refusal: Callable[[str, str, bool, object], str | None]
+                       | None = None,
+                       capture: Callable[[object, str], None] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -138,7 +146,18 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
     a reason aborts it. The caller keeps its own state (whether the window is open, what it
-    blocked, which navigation targets to enqueue)."""
+    blocked, which navigation targets to enqueue).
+
+    ``capture_refusal(method, url, navigation, body)`` (the crawl's capture-and-abort,
+    FR-CRAWL-18, DISC-CAPTURE): asked after the scope check and the window, for the
+    request and for every redirect hop (a hop that keeps the body is asked with it); a
+    reason aborts the request and ``capture(request, reason)`` records it. The
+    classification is wrapped: an error, an unrecognised method or a body the driver
+    cannot show (``post_data_buffer`` None) aborts, never sends. ``capture`` is also
+    told of every request the ``window`` refused that is not a GET navigation (an
+    aborted write is discovery), and of every ``method_refusal`` abort. An out-of-scope
+    request is never recorded (BUG-0123, BUG-0134: confinement first). ``capture`` is
+    contained: a failing recorder is logged and the request is still aborted."""
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -202,13 +221,40 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             on_abort(url, why)
         return True
 
-    def window_refused(method: str, url: str, navigation: bool) -> bool:
+    def window_refused(method: str, url: str, navigation: bool) -> str | None:
         why = window(method, url, navigation) if window is not None else None
         if why is None:
-            return False
+            return None
         logging.info(f"blocked a browser {method} to {urlsplit(url).hostname or '?'!r} "
                      f"in the reveal window ({why})")              # the host only
-        return True
+        return why
+
+    def classify(method: str, url: str, navigation: bool, body) -> str | None:
+        """`capture_refusal`, wrapped: any error is a refusal (fail closed)."""
+        if capture_refusal is None:
+            return None
+        try:
+            return capture_refusal(method, url, navigation, body)
+        except Exception as exc:  # noqa: BLE001 - classification never sends on error
+            from fuzzlab.tools.capture import WHY_FAILED
+            return f"{WHY_FAILED} ({type(exc).__name__})"
+
+    def tell_capture(req, why: str) -> None:
+        if capture is None:
+            return
+        try:
+            capture(req, why)
+        except Exception as exc:  # noqa: BLE001 - a recorder never sends the request
+            logging.info(_scrubbed(f"capture recorder failed on "
+                                   f"{req.url.split('?', 1)[0]} ({type(exc).__name__})"))
+
+    def request_body(req):
+        """The request's body, or None when the driver cannot show it (a blob or a
+        stream; the capture then refuses a non-GET)."""
+        try:
+            return req.post_data_buffer
+        except Exception:  # noqa: BLE001 - unreadable: treated as unavailable
+            return None
 
     def handler(route, request=None) -> None:
         req = request if request is not None else route.request
@@ -231,8 +277,20 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             return
         navigation = document if window is not None else False
         if window is not None:
-            if window_refused(req.method.upper(), url, navigation):
-                # its target was kept by the caller
+            why = window_refused(req.method.upper(), url, navigation)
+            if why is not None:
+                # its target was kept by the caller; an aborted write is recorded
+                if not (document and req.method.upper() in ("GET", "HEAD")):
+                    from fuzzlab.tools.capture import WHY_WINDOW
+                    tell_capture(req, f"{WHY_WINDOW}: {why}")
+                abort()
+                return
+        if capture_refusal is not None:
+            why = classify(req.method.upper(), url, document, request_body(req))
+            if why is not None:
+                logging.info(_scrubbed(f"captured a browser {req.method.upper()} "
+                                       f"{url.split('?', 1)[0]} ({why})"))
+                tell_capture(req, why)
                 abort()
                 return
         why = method_refusal(req.method.upper(), url) if method_refusal else None
@@ -241,6 +299,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                                    f"{url.split('?', 1)[0]} ({why})"))
             if on_abort is not None:
                 on_abort(url, why)
+            tell_capture(req, why)
             abort()
             return
         if body_refused(req.method.upper(), url, req.headers or {}, req.post_data_buffer):
@@ -279,6 +338,13 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                     abort()
                     return
                 keep_body = method not in ("GET", "HEAD")
+                if capture_refusal is not None:
+                    why = classify(method, nxt, document,
+                                   request_body(req) if keep_body else None)
+                    if why is not None:
+                        tell_capture(req, f"redirect hop: {why}")
+                        abort()
+                        return
                 if keep_body and body_refused(method, nxt, req.headers or {},
                                               req.post_data_buffer):
                     abort()
@@ -718,7 +784,11 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
-               isolated_request: Callable[[], object] | None = None) -> None:
+               isolated_request: Callable[[], object] | None = None,
+               capture_refusal: Callable[[str, str, bool, object], str | None]
+               | None = None,
+               capture: Callable[[object, str], None] | None = None,
+               on_beacon: Callable[[str, str | None, str], None] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
     (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
@@ -727,7 +797,11 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
     ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
-    (FR-CRAWL-14)."""
+    (FR-CRAWL-14).
+
+    ``capture_refusal`` / ``capture`` (FR-CRAWL-18): see `make_route_handler`. With
+    ``on_beacon`` the context also gets the capture init script
+    (`install_capture_script`, DISC-CAPTURE §2)."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
                                             on_out_of_scope=on_out_of_scope, api=api,
@@ -737,7 +811,11 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             headers=headers, header_scope=header_scope,
                                             window=window, cookie_scope=cookie_scope,
                                             on_session_withheld=on_session_withheld,
-                                            isolated_request=isolated_request))
+                                            isolated_request=isolated_request,
+                                            capture_refusal=capture_refusal,
+                                            capture=capture))
+    if on_beacon is not None:
+        install_capture_script(target, on_beacon)
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "
@@ -747,6 +825,28 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                      on_drop=on_ws_drop, cookie_scope=cookie_scope,
                                      on_session_withheld=on_session_withheld,
                                      on_send=on_ws_send))
+
+
+def install_capture_script(target, on_beacon: Callable[[str, str | None, str], None]) -> None:
+    """Add the capture init script (`capture.CAPTURE_INIT_JS`) and its beacon binding to
+    a context (DISC-CAPTURE §2, FR-CRAWL-18): ``sendBeacon`` is recorded through the
+    binding (``on_beacon(url, body text or None, page URL)``) and never sent,
+    ``keepalive`` is stripped from ``fetch`` and ``fetchLater`` throws -- egress made on
+    ``pagehide`` that the route never sees (measured in Chromium). The binding is
+    contained: whatever a page passes it, it never raises into the page and never
+    sends anything."""
+    from fuzzlab.tools.capture import CAPTURE_BINDING, CAPTURE_INIT_JS
+
+    def beacon(source, url=None, body=None) -> None:
+        try:
+            page = source.get("page") if isinstance(source, dict) else None
+            page_url = getattr(page, "url", "") or ""
+            on_beacon(str(url or ""), body if isinstance(body, str) else None,
+                      str(page_url))
+        except Exception as exc:  # noqa: BLE001 - a page cannot break the crawler
+            logging.info(f"beacon recorder failed ({type(exc).__name__})")
+    target.expose_binding(CAPTURE_BINDING, beacon)
+    target.add_init_script(CAPTURE_INIT_JS)
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")

@@ -121,6 +121,15 @@ REASONS = {
                                  "cookie_scope": lambda u: in_origin_scope(u, _SESSION)},
                      {"site": {f"{H}/go": _Resp(302, "http://127.0.0.1:3000/land")}}),
     "too many redirects": (f"{H}/r0", {}, {"site": _LOOP}),
+    # capture-and-abort (FR-CRAWL-18): a captured write, a classification that raised,
+    # and a redirect hop the capture refuses
+    "captured": (f"{H}/api/w", {"capture_refusal": lambda m, u, n, b: "captured, not sent",
+                                "capture": lambda r, w: None}, {"method": "POST"}),
+    "capture failed": (f"{H}/api/w", {"capture_refusal": lambda m, u, n, b: 1 / 0,
+                                      "capture": lambda r, w: None}, {"method": "POST"}),
+    "capture hop": (f"{H}/go", {"capture_refusal": lambda m, u, n, b:
+                                "GET refused by rule" if u.endswith("/x") else None},
+                    {"site": {f"{H}/go": _Resp(302, "/x")}}),
     "unfetchable": (f"{H}/x", {}, {"boom": True}),
 }
 
@@ -432,16 +441,15 @@ def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
                        "WHERE url LIKE '%/tick%'").fetchall()
     assert any(page == a.base for _id, page in ticks)          # the ticker was captured
     assert shown == "about:blank"                              # the failed load ended A
-    # the fallback's own GET /go was sent 400 ms after A ended: no tick after it. A
-    # tick A sent before it ended may still be in flight then (it reaches the server
-    # or is captured just after the mark); every captured tick is one the server got
-    # before the fallback's request, so none was sent by a document left alive
-    fallback = a.log.index(("GET", "/go"), seen)
-    assert ("POST", "/tick") not in a.log[fallback:]
-    assert a.log[seen:fallback].count(("POST", "/tick")) <= 2
+    # FR-CRAWL-18: every tick is recorded and aborted, none reaches the server. The
+    # fallback's own GET /go was sent 400 ms after A ended: a tick A made before it
+    # ended may still be recorded just after the mark, never more, and none is filed
+    # under a URL crawled later (/next): no document was left alive
+    assert ("POST", "/tick") not in a.log
+    a.log.index(("GET", "/go"), seen)                          # the fallback was sent
     late = [i for i, _page in ticks if i > captured]
     assert len(late) <= 2
-    assert len(ticks) <= a.log[:fallback].count(("POST", "/tick"))
+    assert all(page in (a.base, a.base + "go") for _i, page in ticks), ticks
     assert "/next" in a.requests and "/logout.php" not in a.requests
 
 

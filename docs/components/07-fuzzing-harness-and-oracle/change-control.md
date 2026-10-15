@@ -3,6 +3,29 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0089 — Captured writes are probed by default (D67); `--no-probe-captured-writes`; the funnel's discovery stages (DISC-CAPTURE §6/§9) (2026-10-15)
+- Change: `harness/auto.py`: `injection_points_from_store(probe_captured_writes=True)`
+  reads `endpoint.source` / `op_key`, keys its dedup on the op key, and with the opt-out
+  skips captured-aborted points with `CAPTURED_WRITE_OPT_OUT`; `run_auto` passes it.
+  `harness/auto_cli.py`: `--no-probe-captured-writes` (classified `B` in
+  `cli_taxonomy.FLAG_CLASSES`). `scripts/funnel_report.py`: `discovered`, `buildable`,
+  `refused` per case (the existing `stage` column unchanged), `funnel(cases=)` for
+  synthetic cases, `--no-probe-captured-writes` / `--browser` to judge as a run did.
+- Impact (other components / project): the default follows D67 (owner, 2026-10-15),
+  which replaced the lane brief's original "skip by default" (DISC-CAPTURE §6's pending
+  LAB-WRITES). Consumers of `injection_points_from_store` (searched): `run_auto`,
+  `scripts/funnel_report.py`; both pass the flag.
+- Risk: medium (the default sends payloads to recorded write endpoints in the
+  authorized lab, as the owner decided). Mitigated: every send gate still applies; the
+  opt-out is tested to send nothing.
+- Deliverables:
+  - [x] point builder, CLI flag, funnel stages — done
+  - [x] real-server test: crawl sends no write; `auto` probes the captured write by
+    default and sends it nothing with the opt-out — done
+- Effectiveness (assessed 2026-10-15): `tests/test_capture_egress.py::test_a_captured_write_is_probed_by_default_and_never_with_the_opt_out`
+  passes both ways; `tests/test_funnel_report.py` and the funnel test in
+  `tests/test_capture.py` pass.
+
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
 - Change:
   - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no
