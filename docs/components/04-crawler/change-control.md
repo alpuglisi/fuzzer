@@ -140,6 +140,10 @@ Newest first.
   - Tests: `tests/test_guarded_navigation.py` 21 passed. `tests/test_navigation_aborts.py`'s
     `_Site` looks a page up by path and query first.
   - Effectiveness: the related run on the committed tree is recorded below.
+  - Effectiveness, the related run on e7afbb8 (FUZZLAB_REQUIRE_BROWSER=1
+    FUZZLAB_REQUIRE_NETNS=1): the 30 files above plus every test file importing
+    `core.urls` (33 files): 1679 passed, 4 skipped (labgen live-boot reproductions),
+    6 xfailed, 0 failed.
 
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
