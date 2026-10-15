@@ -222,14 +222,27 @@ function initSiteTree() {
     }
   }
 
-  async function loadChildren(container, key, level, gen, after = null) {
-    const got = await fetchPages(key, gen, after, 1);
-    if (got.stale) return false;
-    if (got.gone) { dropNode(key); return false; }
-    if (got.error) { status.textContent = got.error; return false; }
-    for (const child of got.children) container.append(itemFor(child, level));
-    setTail(container, key, level, got.next, got.truncated);
-    return true;
+  // a group's first page is loaded once at a time: an expand and a refresh that both
+  // reach an empty group share one load (code review R3-1)
+  function loadChildren(container, key, level, gen, after = null) {
+    if (after === null && container._loading) return container._loading;
+    const run = (async () => {
+      const got = await fetchPages(key, gen, after, 1);
+      if (got.stale) return false;
+      if (got.gone) { dropNode(key); return false; }
+      if (got.error) { status.textContent = got.error; return false; }
+      const have = new Set([...container.querySelectorAll(":scope > li[role=treeitem]")].map((li) => li.dataset.id));
+      for (const child of got.children) {
+        if (!have.has(identity(child))) container.append(itemFor(child, level));   // never twice
+      }
+      setTail(container, key, level, got.next, got.truncated);
+      return true;
+    })();
+    if (after === null) {
+      container._loading = run;
+      run.finally(() => { if (container._loading === run) container._loading = null; });
+    }
+    return run;
   }
 
   // re-fetch a loaded group (as many items as it shows) and update it in place

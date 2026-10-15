@@ -423,3 +423,52 @@ def test_a_refresh_that_overtakes_an_expand_still_fills_the_node(tab, site):
             s.conn.execute("DELETE FROM endpoint WHERE url='/zz-race'")
             s.conn.commit()
     assert tab.problems() == []
+
+
+def test_an_expand_inside_a_refresh_loads_the_node_once(tab, site):
+    """Code review R3-1: an expand made while a refresh is under way, and that refresh
+    reaching the same still-empty node, share one load -- never two appended copies."""
+    page = tab.page
+    held = {"root": None, "wide": None}
+
+    def hold(route):
+        url = route.request.url
+        if held["root"] is None and "node=" not in url and armed[0]:
+            held["root"] = route                       # the refresh's root fetch
+        elif held["wide"] is None and "wide" in url and armed[0]:
+            held["wide"] = route                       # the expand's own fetch
+        else:
+            route.continue_()
+    armed = [False]
+    page.route("**/api/sitetree/children?*", hold)
+    tab.open(ORIGIN)
+    page.wait_for_timeout(900)                         # the poll has its baseline
+    armed[0] = True
+    with Store(site["path"]) as s:
+        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
+                       "'/zz-r31', 'GET')", (site["a"],))
+        s.conn.commit()
+    try:
+        for _ in range(50):                            # until the next poll's refresh
+            if held["root"] is not None:
+                break
+            page.wait_for_timeout(200)
+        assert held["root"] is not None, "the refresh never started"
+        wide = tab.item("wide").first
+        wide.focus()
+        page.keyboard.press("ArrowRight")              # expand during the refresh
+        page.wait_for_timeout(300)
+        assert held["wide"] is not None, "the expand's fetch was not held"
+        held["root"].continue_()                       # the refresh reaches the node...
+        page.wait_for_timeout(500)
+        held["wide"].continue_()                       # ...then the expand's answer lands
+        group = wide.locator(":scope > ul[role=group] > li[role=treeitem]")
+        expect(group).to_have_count(200)
+        page.wait_for_timeout(500)
+        ids = group.evaluate_all("els => els.map(e => e.dataset.id)")
+        assert len(ids) == len(set(ids)) == 200
+    finally:
+        with Store(site["path"]) as s:
+            s.conn.execute("DELETE FROM endpoint WHERE url='/zz-r31'")
+            s.conn.commit()
+    assert tab.problems() == []

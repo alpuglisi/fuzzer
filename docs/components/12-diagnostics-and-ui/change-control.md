@@ -50,6 +50,12 @@ Newest first.
     nodes too deep to key no longer collide in the refresh (A-N5); a no-op SQL condition
     removed (A-N6); `raises=` on every strict xfail (B, nit); `origin_of`'s docstring says
     the source fix is pending (A-N4).
+  - **Round 3** (re-check of cab3cea; B: AGREE; A: one finding, R3-1, introduced by the
+    round-2 race fix): an expand made during a refresh and the refresh reaching the same
+    empty node could both append its first page. A group's first-page load is now shared
+    (the refresh awaits the expand's), and appends skip an identity already present; a
+    browser test holds both fetches to force the interleaving (a mutant without either
+    protection fails it).
 - Divergences from the agreed design (B8), recorded: G1 -- every node's whole child list
   is read and cached, narrow ones included (the bound is the node's width; simpler, no
   early-stop path); G11 -- the "inject a write" test became a call-order test of the
@@ -63,9 +69,9 @@ Newest first.
 - Deliverables:
   - [x] fixes above — done
   - [x] tests: `tests/test_web_sitetree.py` 103 + 2 strict xfails,
-    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 14,
+    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 15,
     `tests/test_core_runtarget.py` 14 + 3 strict xfails — done
-  - [x] mutation checks: 29 back-end mutants and 10 UI mutants, all killed — done
+  - [x] mutation checks: 29 back-end mutants and 11 UI mutants, all killed — done
   - [x] closes CC-UI-0500's open deliverables (page CC-UI-0502, layout, review, docs) and
     records the no-ML build re-run CC-UI-0501 left open — done
 - Effectiveness (assessed 2026-10-15): verified on the committed tree in a clean detached
