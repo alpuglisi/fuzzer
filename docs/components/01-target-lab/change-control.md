@@ -273,6 +273,44 @@ Component code: **LAB**. Entry format and required fields: see
   - Pending at this entry's first writing: the bWAPP crawl-pass floor, the live test file
     under the flag, the code review and the clean-tree suite run; see "Effectiveness,
     final" in this entry.
+- Effectiveness, final (assessed 2026-10-15): **effective**, with the stated residuals.
+  Code was last changed in 64d69a2; this entry's own commit changes only docs. Each
+  count below is from its own pytest run (PA-0038(b)), on a clean detached worktree at
+  64d69a2 unless noted, under docker in this session's container:
+  - `tests/test_external_labs_static.py` 171 passed; `tests/test_external_labs_extctl.py`
+    50 passed; `tests/test_base_url_subpath_registry.py` 13 passed, 2 xfailed (strict,
+    BUG-0300); `tests/test_destructive_routes_external_labs.py` 83 passed, 4 xfailed
+    (strict, BUG-0301); `tests/test_procutil_guard.py` 30 passed;
+    `tests/test_lab_labctl_profile_parsing.py` 5 passed; `tests/test_external_labs_live.py`
+    4 skipped without the flag.
+  - Live, with `FUZZLAB_LIVE_EXTERNAL_LABS=1 FUZZLAB_REQUIRE_BROWSER=1` (live run 5, a
+    clean detached worktree at 859bcfd, which differs from 64d69a2 only in comments):
+    4 passed in 1476 s. That covers Juice Shop scoring, bWAPP restart plus a killed DB,
+    the wrong-zip-hash build failure, and bWAPP scoring: both floors, no flagged
+    negative, every tagged row checked, and the level log allowlist with both controls.
+    Live runs 1-4 failed and were root-caused (CC entries above; BUG-0311).
+  - Every test file importing a changed module (`fuzzlab/procutil.py`,
+    `fuzzlab/lab_fixtures/`; 22 files from `git diff --name-only cdde39f..64d69a2 --
+    fuzzlab` and grep, slow tests included): 524 passed, 4 skipped (the live file,
+    unflagged).
+  - Full suite `-m "not slow"` with `FUZZLAB_REQUIRE_LINT=1 FUZZLAB_REQUIRE_BROWSER=1`:
+    5691 passed, 15 skipped, 255 deselected, 13 xfailed. A first run failed 14 labgen
+    `--check` tests because the container had no `gitleaks` (identical at the base
+    commit cdde39f; ERROR_LOG, Environment). They passed once gitleaks was installed,
+    and the run above is the rerun. `tests/test_lint.py` with `FUZZLAB_REQUIRE_LINT=1`:
+    1 passed. The glob ground-truth tests (`tests/test_oracle.py`,
+    `tests/test_forms_phase2.py`) are inside the full run.
+  - Mutation check over every new mechanism: 55 killed, 0 survived, and 1 not run as a
+    kill. That one is the static check that each live floor stays inside its pass's
+    reach tags. It runs only on the real floors, which all satisfy it, so removing the
+    subset assertion passes on today's data (no synthetic offender). When first written
+    it caught BWAPP-0029.
+  - Code review: reviewers A and B, four rounds. Both AGREE at round 4 (nits folded in
+    as comments).
+  - Residuals (stated, not fixed here): the podman / podman-compose paths are
+    `[design]` only. JUICE-0005 (SSRF) cannot be confirmed under the bridge network.
+    Container egress is not blocked (NFR-LAB-safety `Not yet enforced`). Lane B's six
+    strict xfails await the lock owner. The `todo` follow-ups are in Deliverables.
 
 ### CC-LAB-0255 — Every lab server the harnesses and tests launch binds loopback, checked on its real sockets (BUG-0130) (2026-10-14)
 - Change:

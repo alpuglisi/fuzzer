@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Cloud container: 14 `lab-generate --check` tests failed because gitleaks was missing (environment)
+- **Symptom:** the clean-tree full-suite run for CC-LAB-0300 (`-m "not slow"`, at
+  64d69a2) failed 14 labgen tests (`test_cli_check_passes_end_to_end*`,
+  `test_lab_generate_check_passes_on_the_clean_example_manifest`,
+  `test_run_checks_generic_weakened_twin_pairing_passes_for_an_arbitrary_cell`), each
+  with `secret scanner: 'gitleaks' executable not found on PATH`.
+- **Root cause:** environment. The session's container has no `gitleaks`, and the
+  `--check` secret-scanner gate correctly fails closed without it
+  (NFR-LAB-no-secret-leak). The same 14 failed identically at the base commit cdde39f,
+  before this change.
+- **Remediation:** `apt-get install gitleaks` (8.16.0) in the session container. The 14
+  then passed at 64d69a2, and the full suite was rerun with it present (CC-LAB-0300
+  "Effectiveness, final").
+- **Status:** Environment (fixed outside the repo)
+
 ## 2026-10-15 — External lab fixtures: an external-lab negative and three live checks rested on premises nobody had observed (fixed, BUG-0311 / PA-0311, CC-LAB-0300)
 - **Symptom:** code review found that BWAPP-0047 (sqli_17 `User-Agent`, reflected XSS)
   was labelled a negative although a quote-breaking value comes back raw in the MySQL

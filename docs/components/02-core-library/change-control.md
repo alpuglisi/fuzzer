@@ -15,7 +15,9 @@ Newest first.
 - Risk: none (comments and a docstring).
 - Deliverables:
   - [x] comment, docstring, PA-0301(1) limit — done
-- Effectiveness (assessed 2026-10-15): TBD-CORE
+- Effectiveness (assessed 2026-10-15): effective (comments only).
+  `tests/test_destructive_routes_external_labs.py`, run alone on a clean worktree at
+  64d69a2: 83 passed, 4 xfailed (strict, BUG-0301). No assertion changed.
 
 ### CC-CORE-0301 — BUG-0301 recorded: the destructive rule misses Juice Shop's GET password change and data erasure (deferred to the `core/urls.py` lock owner); PA-0301's sweep (2026-10-15)
 - Change: documentation and tests only; no production code changes (`fuzzlab/core/urls.py`

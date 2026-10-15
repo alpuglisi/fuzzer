@@ -39,7 +39,11 @@ note of the same date.
 - Deliverables:
   - [x] stricter pattern, offender, docstring limit — done
   - [x] mutation check (the old pattern makes the offender test fail) — done
-- Effectiveness (assessed 2026-10-15): TBD-FUZZ
+- Effectiveness (assessed 2026-10-15): effective.
+  `tests/test_base_url_subpath_registry.py`, run alone on a clean worktree at 64d69a2:
+  13 passed, 2 xfailed (strict, BUG-0300). The mutation check restores the old pattern
+  and the offender test fails. In the same run, every registry pointer passes the
+  stricter pattern.
 
 ### CC-FUZZ-0300 — BUG-0300 recorded: ground-truth points double an operator sub-path (deferred to the `auto.py` lock owner); PA-0300's base-URL registry (2026-10-15)
 - Change: documentation and tests only; no production code changes (`fuzzlab/harness/auto.py`
