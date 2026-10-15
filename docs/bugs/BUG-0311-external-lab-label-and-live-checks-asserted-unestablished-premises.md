@@ -1,7 +1,11 @@
 # BUG-0311 — An external-lab negative and three live checks rested on premises nobody had observed
 
 - Date: 2026-10-15
-- Status: fixed (CC-LAB-0300, commit e74fba8)
+- Status: fixed in code (CC-LAB-0300: e74fba8, revised in 9f4f267 and in the round-3
+  commit); live verification of the revised level check pending (see "Corrective
+  action, second revision")
+- ERROR_LOG: the 2026-10-15 entry "an external-lab negative and three live checks
+  rested on premises nobody had observed". Rule: PA-0311.
 - Severity: medium. The ground truth would have scored a real finding as a false
   alarm, and two live safety-of-labels checks could not fail (one always passed, one
   failed on harmless traffic). No scored result was published from the wrong label.
@@ -114,6 +118,37 @@ This is the same root cause, found by the same rule's own requirement to run the
 live, before merge. PA-0311(2) is sharpened below: the check observes the premise
 itself, not a condition expected to imply it.
 
+## Corrective action, second revision (2026-10-15, code review round 3)
+Both reviewers found the first revision wrong in two ways before it had run live:
+1. **Its control could never pass.** It compared `("1", control)` with
+   `(level, request line)` pairs, but the request line is the whole `%r`
+   (`GET /bWAPP/portal.php?fuzzlab-level-control=… HTTP/1.1`), never the bare marker.
+   Live run 4 (from 9f4f267) could therefore not pass the bWAPP scoring test. A control
+   that cannot pass is the mirror of a check that cannot fail: the predicate over the
+   channel had never been run on a sample of the channel.
+2. **Its predicate was a denylist, and its claim was false.** "Every value but `1`/`2`
+   selects level 0" ignores PHP 5.6's loose `switch`/`==` (`"01"`, `"1.0"`, `" 1"`,
+   `"1e0"`, `"0x1"` select level 1; `hpp-3.php:35` compares with an integer) and PHP's
+   URL-decoding of cookies (`%31`), while Apache logs the raw value. Nothing in today's
+   runs reaches these forms: bWAPP's own `setcookie` writes only 0/1/2 (666 in its
+   evil-bee mode), and no pass injects the cookie. The bullet above that states it is
+   superseded by this one.
+
+Now:
+- The predicate is a pure function, `fuzzlab.lab_fixtures.external.bwapp_level_problems`.
+  It is unit-tested offline on a synthetic `docker logs` sample (a level-0 run with its
+  controls passes; level 2, `01`, 666, a missing control, a control without level 1, an
+  unparsed level line and too few requests each fail) and mutation-checked.
+- It is an allowlist (PA-0310(1)): every request the container served (bootstrap, the
+  crawl, both passes) carried `0` or no cookie.
+- Every `fuzzlab-level` line must parse, so no request drops out silently.
+- There are two level-1 controls, one sent before the passes and one after, so the log
+  is shown to hold both ends of the run. They are polled for up to 10 s, because Apache
+  logs after it responds.
+- The log is read from stdout only (stderr is Apache's error log), decoded with
+  `errors="replace"`. The level check runs before the crawl floor, so a floor failure
+  keeps its evidence.
+
 ## Recurrence review
 Searched `docs/bugs/` and `docs/PREVENTIVE_ACTIONS.md` for the same bug or the same root
 cause:
@@ -156,8 +191,10 @@ Result: a recurrence of PA-0013's root cause, plus a violation of PA-0001, in a 
    with a positive control where one can be sent. An assertion on a channel that cannot
    carry the violation is replaced by one on a channel that can. A stand-in condition
    expected to imply the premise does not count: the first replacement here ("no probe
-   of the level parameters") was such a stand-in, and it was false. The check is run
-   live before it is called done.
+   of the level parameters") was such a stand-in, and it was false. The predicate over
+   the observed channel, control included, is a function unit-tested offline on a
+   synthetic sample of that channel before any live run, and an allowlist where the
+   system's own comparison is loose. The check is run live before it is called done.
 3. **A status or enum filter names the value it means**, imported from the defining
    module (PA-0001), never a list of values to exclude.
 

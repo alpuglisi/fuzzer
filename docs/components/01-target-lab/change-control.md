@@ -156,8 +156,9 @@ Component code: **LAB**. Entry format and required fields: see
   - B N1: the bug protocol above. B N2: lane B's BUG-0301 overstated what its tables
     proved; corrected in that report (appended "Correction") and in CC-CORE-0301's
     Risk field.
-  - B N3/N4: "Effectiveness, final" below quotes each count from its own run, and
-    FR-LAB-304 now states the live assertions as they are.
+  - B N3/N4: an "Effectiveness, final" section is to quote each count from its own run
+    (written at the end, from the clean-tree runs), and FR-LAB-304 now states the live
+    assertions as they are.
   - Live run 3 (from e74fba8) failed only on round 1's B2 replacement. The crawl pass
     probed the login form's `security_level` field through the isolated anonymous
     client. Root cause and revision are in BUG-0311 ("Corrective action, revised"). The
@@ -166,6 +167,28 @@ Component code: **LAB**. Entry format and required fields: see
     spiked first). The live test asserts that no request of either pass carried level
     1 or 2, that the log saw at least 1000 requests, and that a level-1 control request
     appears in it.
+- Code review round 3 (A REVISE, B REVISE):
+  - Both: the revised level check was still wrong (BUG-0311 "Corrective action, second
+    revision"). Its control could never pass (B M1), and its predicate was a denylist
+    resting on a false claim about PHP's loose comparison (A M1, B S1). The predicate is
+    now `external.bwapp_level_problems`: an allowlist (`0` or no cookie), every level line
+    parsed (A6, B S2), two level-1 controls before and after the passes, polled (A7,
+    B S3). It is unit-tested offline on a synthetic log and mutation-checked, and it
+    reads stdout only with `errors="replace"`. The check runs before the crawl floor.
+  - B M2 / A9: BUG-0311, the ERROR_LOG and the deliverables say "live verification
+    pending" until a live run at the final commit passes. PA-0311(2) now also asks for
+    an offline-tested predicate.
+  - A2 / B S4: a CHANGELOG bullet for rounds 2 and 3. B S5: each bug report names its
+    ERROR_LOG entry.
+  - A3: `project_ids` fails on an engine error, the bWAPP build must be visible by its
+    project label after `up`, and podman pods count as leftovers. A4: the shell lint
+    also recognises `"${ENGINE:-docker}"`, `"${eng[@]}"`, `docker compose run` and
+    `docker-compose run`; `$(which docker)` is a stated limit. A5: the `origin` limit's
+    wording. A8 / B nit: FR-LAB-302 says the identity's host is the binding's host.
+  - B nits: BWAPP-0048..0050's notes also cite their `die($link->error)` error paths
+    (regenerated; only those three notes changed). FR-LAB-304 adds Juice Shop's
+    `safetyMode`, the PA-0007 reachability GETs and the JUICE-0005 assertions. The three
+    sweep follow-ups are now `[ ] todo` deliverables.
   - A L1: lane B's PA-0300 pointer check accepted any URL with a path. It now requires
     a directory (`http://h/<dir>/`), with an origin-level offender
     (`test_an_origin_level_page_url_is_not_a_subpath_literal`); every current pointer
@@ -208,13 +231,22 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] fuzzlab/lab_fixtures/external.py — done
   - [x] ground truth (two dirs, .gitignore negations) — done
   - [x] static + hermetic tests, mutation checks — done
-  - [x] live passes executed (exploratory, docker); gated live test file — done
+  - [x] live passes executed (exploratory, docker); gated live test file written — done
+  - [ ] the gated live file passes under the flag at the final commit — in-progress
+    (live run 3 failed on the first level check, live run 4 cannot pass the broken
+    control; the revised check runs in the next live run)
   - [x] CHANGELOG, FR-LAB-300..304, NFR lines, ARCHITECTURE, lab/README, runbook — done
   - [x] PA-0114 Juice table and BUG-0300/0301 protocol — done (lane B: CC-FUZZ-0300,
     CC-CORE-0301, CC-CRAWL-0300; merged on this branch)
   - [ ] tell the lock-owning session about lane B's six strict-xfail markers before this
     branch merges (MULTI_AGENT §6) — todo (relayed through the session report to the
     integrator; this session has no channel to the lock owner)
+  - [ ] follow-up: `lab/labctl.sh`'s `_force_clean`/`down` trusts `podman ps` output on
+    an engine error (PA-0310(2), BUG-0310 sweep) — todo (outside this change's files)
+  - [ ] follow-up: re-sweep the generated labs' negatives for error-path echoes
+    (PA-0311(1), BUG-0311 sweep) — todo
+  - [ ] follow-up: a repo-wide guard for hand-written oracle-status strings
+    (PA-0311(3)); it would also cover locked files — todo
 - Effectiveness (assessed 2026-10-15): partially (interim, 2026-10-15).
   - Live, docker, this session: both fixtures come up through `./labctl.sh up <lab>
     --authorized` (pre-flight, build, exposure check, bootstrap), `status` exits 0, and the

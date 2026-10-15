@@ -1776,7 +1776,10 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      differ if the premise were false, and confirms the observed channel can carry
      it**, with a positive control where one can be sent. An assertion on a channel
      that cannot carry the violation is replaced by one on a channel that can. A
-     stand-in condition expected to imply the premise does not count. The check is run
-     live before it is called done.
+     stand-in condition expected to imply the premise does not count. The predicate
+     over the observed channel, control included, is a function unit-tested offline on
+     a synthetic sample of that channel before any live run, and an allowlist where
+     the system's own comparison is loose. The check is run live before it is called
+     done.
   3. **A status or enum filter names the value it means**, imported from its defining
      module (`PA-0001`), never a list of values to exclude. (from BUG-0311)

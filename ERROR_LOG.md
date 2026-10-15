@@ -32,9 +32,11 @@ Format per entry:
   stated structural reason. The filter uses `CHECKED` (commit e74fba8). That
   replacement was wrong too: live run 3 showed the crawl pass probing the login form's
   `security_level` field through the isolated client. It now reads a per-request log of
-  the level cookie that the fixture writes, with a positive control (round 3). Full RCA
-  in `docs/bugs/BUG-0311-*`, rule PA-0311.
-- **Status:** Fixed
+  the level cookie that the fixture writes, through an allowlist predicate that is
+  unit-tested offline, with level-1 controls before and after the passes (code review
+  rounds 2-3; the first version's control could never pass). Full RCA in
+  `docs/bugs/BUG-0311-*`, rule PA-0311.
+- **Status:** Fixed in code; live verification of the revised level check pending
 
 ## 2026-10-15 — External lab fixtures: the loopback exposure checks failed open (fixed, BUG-0310 / PA-0310, CC-LAB-0300, CC-CORE-0300)
 - **Symptom:** code review found that the pre-flight and post-boot checks passed podman's

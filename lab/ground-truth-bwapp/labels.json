@@ -624,7 +624,7 @@
       "expected_vulnerable": false,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl] [prov: negative] mysqli_real_escape_string before the INSERT at every level (xss_stored_4.php:61)."
+      "notes": "[reach: crawl] [prov: negative] mysqli_real_escape_string before the INSERT at every level (xss_stored_4.php:61); the error path (die($link->error), :68) runs only on an INSERT the escape keeps intact."
     },
     {
       "case_id": "BWAPP-0049",
@@ -637,7 +637,7 @@
       "expected_vulnerable": false,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl] [prov: negative] Escaped for SQL in every case of the level switch (xss_stored_1.php:37-56)."
+      "notes": "[reach: crawl] [prov: negative] Escaped for SQL in every case of the level switch (xss_stored_1.php:37-56); the error path (die($link->error), :88) runs only on an INSERT the escape keeps intact."
     },
     {
       "case_id": "BWAPP-0050",
@@ -650,7 +650,7 @@
       "expected_vulnerable": false,
       "rendering": "server",
       "stack": "php_bwapp",
-      "notes": "[reach: crawl] [prov: negative] Escaped for SQL in every case of the level switch (htmli_stored.php:37-56)."
+      "notes": "[reach: crawl] [prov: negative] Escaped for SQL in every case of the level switch (htmli_stored.php:37-56); the error path (die($link->error), :88) runs only on an INSERT the escape keeps intact."
     },
     {
       "case_id": "BWAPP-0051",

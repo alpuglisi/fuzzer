@@ -488,6 +488,56 @@ def check_exposure(project: str, engine: str, *, runner: Callable[..., Any] | No
                              host_netns=host_netns())
 
 
+# --- bWAPP security-level log (BUG-0311) --------------------------------------------
+
+#: The prefix of the line `lab/external/bwapp/apache-level-log.conf` writes per request.
+LEVEL_LOG_PREFIX = "fuzzlab-level "
+_LEVEL_LINE = re.compile(r'^fuzzlab-level (\S+) "(.*)"$')
+#: The level cookie values a scored bWAPP run may carry: bWAPP's own level 0, or no
+#: cookie (bWAPP redirects such a request to its login or level page). An allowlist
+#: (PA-0310(1)): PHP compares the cookie loosely (``"01"``, ``"1.0"`` select level 1)
+#: and URL-decodes it, so naming the bad values cannot be complete.
+LEVEL_LOG_ALLOWED = frozenset({"0", "-"})
+
+
+def bwapp_level_problems(log_text: str, controls: Iterable[str], *,
+                         min_requests: int = 1000) -> list[str]:
+    """Problems in a bWAPP container's level log (its ``docker logs`` stdout).
+
+    ``controls`` are markers of requests the caller sent with ``security_level=1``. Each
+    must appear with level ``1``, which shows the log carries the violation the check
+    looks for. Every other logged request must carry an allowed level, there must be at
+    least ``min_requests`` of them, and every level line must parse (none is dropped
+    silently)."""
+    controls = list(controls)
+    problems: list[str] = []
+    entries: list[tuple[str, str]] = []
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line.startswith(LEVEL_LOG_PREFIX):
+            continue
+        m = _LEVEL_LINE.match(line)
+        if m is None:
+            problems.append(f"unparsed level line: {line[:200]!r}")
+            continue
+        entries.append((m.group(1), m.group(2)))
+    for marker in controls:
+        seen = [lvl for lvl, req in entries if marker in req]
+        if "1" not in seen:
+            problems.append(f"control {marker!r} not logged with level 1 (seen: {seen})")
+    sent = [(lvl, req) for lvl, req in entries if not any(m in req for m in controls)]
+    if len(sent) < min_requests:
+        problems.append(f"the level log saw only {len(sent)} requests (< {min_requests})")
+    bad = [(lvl, req) for lvl, req in sent if lvl not in LEVEL_LOG_ALLOWED]
+    if bad:
+        counts: dict[str, int] = {}
+        for lvl, _req in bad:
+            counts[lvl] = counts.get(lvl, 0) + 1
+        problems.append(f"{len(bad)} requests carried a level outside "
+                        f"{sorted(LEVEL_LOG_ALLOWED)}: {counts}; e.g. {bad[:3]}")
+    return problems
+
+
 # --- bootstrap HTTP client --------------------------------------------------------------
 
 def _default_session() -> Any:

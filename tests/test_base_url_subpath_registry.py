@@ -23,9 +23,10 @@ an operator base URL:
 Not discovered (stated limits): a request URL (``url``, ``page_url``, ``login_url``)
 is not a base; a base read from CLI arguments or config inside a function is covered
 where that function passes it on, under one of the names above. An ``origin`` /
-``*_origin`` parameter is not discovered: an origin has no path by definition, and the
-one such function today (`fuzzlab.lab_fixtures.external._LabClient`) refuses a URL with
-a path (tested in ``tests/test_external_labs_static.py``).
+``*_origin`` parameter is not discovered: an origin has no path by definition. The one
+function that builds request URLs from one (`fuzzlab.lab_fixtures.external._LabClient`)
+refuses a URL with a path (tested in ``tests/test_external_labs_static.py``); the others
+(e.g. `fuzzlab.ml.holdout`'s ``origin`` / ``run_origin``) use it as a key, not a base.
 
 Each discovered function (``module:Qualified.name``) has exactly one `REGISTRY` entry:
 

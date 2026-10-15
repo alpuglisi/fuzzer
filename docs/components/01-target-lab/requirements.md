@@ -6317,7 +6317,9 @@ lane) can submit a payload as
   session). Juice Shop: require `challenges.safetyMode == "disabled"`, log in or register the
   account through `POST /api/Users`, then verify (`whoami` names it; `/profile` 200 with the
   `token` cookie, not without). Identities `bwapp-bee` (user `bee`) and `juice-user`
-  (`juice-user@fuzzlab.lab`) on host `127.0.0.1`. The credential comes from the keyring,
+  (`juice-user@fuzzlab.lab`) on host `127.0.0.1`: the host of the address the running
+  project publishes, which both compose files bind to `127.0.0.1` (a fixture edited to
+  bind `::1` would store its identity under `::1`). The credential comes from the keyring,
   else the operator's gated `FUZZLAB_CRED_<HOST>_<IDENTITY>` channel (through
   `CredentialStore.open`, so `allow_env_credentials` governs it), else a TTY prompt, else
   (Juice Shop only) a fresh random password; it is stored in the keyring **only after** a
@@ -6356,18 +6358,27 @@ lane) can submit a payload as
   - no flagged negative in any pass;
   - a candidate the oracle `CHECKED` (`fuzzlab.core.oracle_status`) for every positive
     tagged for that pass.
+  Before each in-process gt pass, the test checks that the run's own session reaches an
+  authenticated page (PA-0007).
   For bWAPP it also asserts, from the fixture's per-request log of the
-  `security_level` cookie (`apache-level-log.conf`), that no request of either pass
-  carried level 1 or 2. Those are the only values that leave bWAPP's level-0 code, on
-  which the labels rest. The log must have seen at least 1000 requests, and a control
-  request with level 1 must appear in it (BUG-0311).
-  Juice Shop's SSRF (`JUICE-0005`) is pinned as a documented miss. The bridge network
-  cannot reach the loopback-only OOB listener, so the test asserts that OOB callbacks
-  were sent in `/profile/image/url`'s `imageUrl` (tied to their sends) and that none
+  `security_level` cookie (`apache-level-log.conf`), that every request the container
+  served (bootstrap, crawl, both passes) carried level `0` or no cookie. That is an
+  allowlist: PHP compares the cookie loosely and URL-decodes it, and bWAPP itself writes
+  only 0/1/2 (666 in evil-bee mode). Every level line must parse, the log must have seen
+  at least 1000 requests, and two level-1 control requests, sent before and after the
+  passes, must appear in it. The predicate is
+  `fuzzlab.lab_fixtures.external.bwapp_level_problems`, unit-tested offline (BUG-0311).
+  The built image must be visible by its project label.
+  For Juice Shop it also asserts `challenges.safetyMode == "disabled"`. Its SSRF
+  (`JUICE-0005`) is pinned as a documented miss: the bridge network cannot reach the
+  loopback-only OOB listener, so the test asserts that `JUICE-0005` is in the report's
+  misses, that the SSRF candidate for `/profile/image/url` `imageUrl` was `CHECKED`, that
+  OOB callbacks were sent in that parameter (tied to their sends), and that none
   arrived.
   The in-process passes run under a deadline. Teardown is exception-safe and removes
   the project's containers, pods, networks, volumes and built images, and asserts that
-  none of them is left. bWAPP additionally survives a restart and a killed DB, and its
+  none of them is left; an engine error while listing them is a failure, never
+  "nothing left". bWAPP additionally survives a restart and a killed DB, and its
   build fails on a wrong zip hash.
 
 ## 4. Non-functional requirements

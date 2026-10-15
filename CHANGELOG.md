@@ -28,6 +28,15 @@ changed, and the reason. Reference the commit hash where useful.
   filter were wrong and are replaced. Bug protocol: BUG-0310/PA-0310 (safety checks over
   an engine's state are allowlists, and "no answer" is a failure) and BUG-0311/PA-0311
   (negatives proven on every output path; live checks shown able to fail).
+- **Code review (rounds 2 and 3):**
+  - The bWAPP fixture logs each request's `security_level` cookie. The live test checks
+    that log with an allowlist predicate (`bwapp_level_problems`, unit-tested offline)
+    and level-1 controls before and after the passes. Both earlier level checks were
+    wrong, live run 3 failed on the first, and the record is BUG-0311's two revisions.
+  - `fetch_bwapp` holds a lock on its cache. `published_port` fails closed and keeps the
+    binding's host. The shell lint covers more forms.
+  - Lane B's PA-0300 pointer check requires a directory-form sub-path URL (CC-FUZZ-0301),
+    and PA-0301's short-stem limit is stated (CC-CORE-0302).
 
 ## 2026-10-15 (Lane B: BUG-0300 and BUG-0301 recorded and pinned; PA-0300 base-URL registry, PA-0301 destructive-spelling sweep)
 - **Why:** adopting bWAPP (served under `/bWAPP/`) and Juice Shop as permanent fixtures

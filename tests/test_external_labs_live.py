@@ -111,12 +111,14 @@ class Lab:
                            env=self.env, cwd=str(self.tmp))
 
     def project_ids(self, kind: str = "ps") -> list[str]:
+        """The project's resources by its exact label; an engine error fails (PA-0310(2):
+        it never reads as "nothing left")."""
         label = f"label=com.docker.compose.project={self.project}"
         argv = ([self.engine, "ps", "-a", "-q", "--filter", label] if kind == "ps"
                 else [self.engine, kind, "ls", "-q", "--filter", label])
-        if kind == "image":           # images compose built for this project
-            argv = [self.engine, "image", "ls", "-q", "--filter", label]
-        return run_bounded(argv, timeout=60).stdout.split()
+        res = run_bounded(argv, timeout=60)
+        assert res.returncode == 0, (argv, res.stderr[-500:])
+        return res.stdout.split()
 
     def teardown(self) -> list[str]:
         """Every step runs whatever the one before did; errors are collected, not raised
@@ -137,8 +139,12 @@ class Lab:
                     run_bounded([self.engine, *rm, *ids], timeout=300)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{kind}: {exc!r}")
-        left = [i for kind in ("ps", "volume", "network", "image")
-                for i in self.project_ids(kind)]
+        kinds_left = ["ps", "volume", "network", "image"] + (
+            ["pod"] if self.engine == "podman" else [])
+        try:
+            left = [i for kind in kinds_left for i in self.project_ids(kind)]
+        except AssertionError as exc:
+            return errors + [f"cannot list what is left of {self.project}: {exc}"]
         return errors + [f"{self.project} left {left}"] if left else errors
 
     def store_credential(self, username: str, password: str) -> None:
@@ -238,20 +244,32 @@ def _checked_candidates(store, run_id: int) -> set[tuple[str, str, str, str]]:
     return out
 
 
-_LEVEL_LINE = re.compile(r'^fuzzlab-level (\S+) "(.*)"$')
+def _send_level_control(lab: Lab) -> str:
+    """A request carrying ``security_level=1`` that the level log must show (the
+    check's positive control); returns its marker."""
+    marker = f"fuzzlab-level-control={secrets.token_hex(4)}"
+    _get(f"{lab.base}/bWAPP/portal.php?{marker}", {"Cookie": "security_level=1"})
+    return marker
 
 
-def _level_log(lab: Lab) -> list[tuple[str, str]]:
-    """``(security_level cookie, request line)`` of every request the bWAPP web container
-    served, from the fixture's own level log (``-``: no cookie)."""
-    ids = run_bounded([lab.engine, "ps", "-q", "--filter",
+def _level_log_text(lab: Lab, markers: list[str], wait: float = 10.0) -> str:
+    """The bWAPP web container's stdout, where the access and level logs go (stderr is
+    Apache's error log). Apache logs after responding and the engine copies output
+    asynchronously, so this waits, bounded, until every control marker is in it."""
+    import time
+    res = run_bounded([lab.engine, "ps", "-q", "--filter",
                        f"label=com.docker.compose.project={lab.project}", "--filter",
-                       "label=com.docker.compose.service=web"], timeout=60).stdout.split()
-    assert len(ids) == 1, ids
-    res = run_bounded([lab.engine, "logs", ids[0]], timeout=300)
-    assert res.returncode == 0, res.stderr[-2000:]
-    return [(m.group(1), m.group(2)) for line in (res.stdout + res.stderr).splitlines()
-            if (m := _LEVEL_LINE.match(line.strip()))]
+                       "label=com.docker.compose.service=web"], timeout=60)
+    ids = res.stdout.split()
+    assert res.returncode == 0 and len(ids) == 1, (res.returncode, ids)
+    end = time.monotonic() + wait
+    while True:
+        res = run_bounded([lab.engine, "logs", ids[0]], timeout=300, text=False)
+        assert res.returncode == 0, res.stderr[-2000:]
+        text = res.stdout.decode("utf-8", errors="replace")
+        if all(m in text for m in markers) or time.monotonic() > end:
+            return text
+        time.sleep(0.5)
 
 
 def _run_auto_bounded(deadline: float = 3600, **kw) -> None:
@@ -414,7 +432,9 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     lab = lab_factory("bwapp")
     lab.store_credential("bee", "bug")
     _up(lab)
+    assert lab.project_ids("image"), "the bWAPP build is not visible by its project label"
     gt_dir = REPO / "lab" / "ground-truth-bwapp"
+    controls = [_send_level_control(lab)]           # before both passes (review S3)
 
     # gt pass, in-process (origin base: BUG-0300), reading the run's own session afterwards
     for k, v in lab.keyring_env().items():
@@ -446,17 +466,14 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
                       "--identity", lab.meta.identity, "--browser",
                       "--header-points", "User-Agent,Referer,bWAPP", "--authorized")
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-3000:]
+    # The labels rest on bWAPP's security level 0, which bWAPP keeps only in the
+    # `security_level` cookie. The fixture logs each request's cookie
+    # (apache-level-log.conf). Every request the container served -- bootstrap, both
+    # passes, the crawl -- must have carried 0 or no cookie (an allowlist), and both
+    # level-1 controls, one sent before the passes and one after, must be logged
+    # (BUG-0311). Checked before the floor, so a floor failure keeps this evidence.
+    from fuzzlab.lab_fixtures.external import bwapp_level_problems
+    controls.append(_send_level_control(lab))
+    assert bwapp_level_problems(_level_log_text(lab, controls), controls) == []
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_CRAWL_FLOOR, "crawl")
-    # The labels rest on bWAPP's level-0 code, which every `security_level` cookie value
-    # but "1" and "2" selects (the level switch's default, e.g. sqli_1.php:28-47). The
-    # fixture logs each request's cookie (apache-level-log.conf); no request of either
-    # pass may have carried level 1 or 2 (BUG-0311). The control shows the log carries
-    # the violation the check looks for.
-    control = f"fuzzlab-level-control={secrets.token_hex(4)}"
-    _get(f"{lab.base}/bWAPP/portal.php?{control}", {"Cookie": "security_level=1"})
-    levels = _level_log(lab)
-    assert ("1", control) in [(lvl, line) for lvl, line in levels if control in line]
-    sent = [(lvl, line) for lvl, line in levels if control not in line]
-    assert len(sent) >= 1000, f"the level log saw only {len(sent)} requests"
-    assert not [x for x in sent if x[0] in ("1", "2")][:5]

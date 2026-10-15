@@ -2,6 +2,8 @@
 
 - Date: 2026-10-15
 - Status: fixed (CC-LAB-0300, commit e74fba8; CC-CORE-0300)
+- ERROR_LOG: the 2026-10-15 entry "the loopback exposure checks failed open". Rule:
+  PA-0310.
 - Severity: high for safety. A compose file or engine state that put a deliberately
   vulnerable app in the host's network namespace would have been reported "loopback
   only" by the pre-flight, the post-boot check and `status`. No run was affected: both

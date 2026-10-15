@@ -107,8 +107,12 @@ def test_the_compose_lint_passes_loopback_bindings(ports):
 
 # --- 2. shell publish lint (lab/ and scripts/) --------------------------------------------
 
-# The engine is a literal name or any shell variable (``$ENGINE``, ``"${eng}"``).
-_RUN_LINE = re.compile(r"(?:\b(?:docker|podman)\b|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\"?)\s+"
+# The engine is a literal name, its compose front end (``docker compose``,
+# ``docker-compose``), or a shell variable (``$ENGINE``, ``"${eng}"``, ``"${ENGINE:-docker}"``,
+# ``"${DC[@]}"``). Stated limit: an engine from a command substitution
+# (``$(which docker) run``) is not recognised.
+_RUN_LINE = re.compile(r"(?:\b(?:docker|podman)(?:-compose\b|\b(?:\s+compose\b)?)"
+                       r"|\$\{?[A-Za-z_][A-Za-z0-9_]*(?:\[@\]|:-[^}]*)?\}?\"?)\s+"
                        r"(?:container\s+|pod\s+)?(?:run|create)\b")
 # ``-p`` alone or ending a cluster of short flags (``-dp 80:80``), or ``--publish``.
 _PUBLISH = re.compile(r"(?:^|\s)(?:-[A-Za-z]*p\s*|--publish(?:\s+|=))(\S+)")
@@ -165,6 +169,10 @@ def test_no_shell_script_publishes_beyond_loopback():
     "docker run -itp8080:80 img\n",
     "docker run -dP img\n",
     '"$eng" run -p 80:80 img\n',
+    '"${ENGINE:-docker}" run -p 80:80 img\n',
+    '"${eng[@]}" run -p 80:80 img\n',
+    "docker compose run -p 80:80 svc\n",
+    "docker-compose run -p 80:80 svc\n",
 ])
 def test_the_shell_lint_flags_synthetic_offenders(src):
     assert shell_publish_problems(src), src
@@ -498,6 +506,42 @@ def test_the_bwapp_image_logs_each_requests_level_cookie():
     dockerfile = (EXTERNAL / "bwapp/Dockerfile").read_text("utf-8")
     assert re.search(r"^COPY apache-level-log\.conf /etc/apache2/conf-enabled/\S+\.conf\n"
                      r"RUN apache2ctl -t$", dockerfile, re.M)
+
+
+_LEVEL_SAMPLE = """\
+172.18.0.1 - - [15/Oct/2026:04:00:00 +0000] "GET /bWAPP/login.php HTTP/1.1" 200 4000 "-" "x"
+fuzzlab-level - "GET /bWAPP/login.php HTTP/1.1"
+fuzzlab-level 1 "GET /bWAPP/portal.php?fuzzlab-level-control=aaaa HTTP/1.1"
+fuzzlab-level 0 "GET /bWAPP/sqli_1.php?title=x%27 HTTP/1.1"
+fuzzlab-level 0 "POST /bWAPP/sqli_6.php HTTP/1.1"
+fuzzlab-level 1 "GET /bWAPP/portal.php?fuzzlab-level-control=bbbb HTTP/1.1"
+"""
+_CONTROLS = ["fuzzlab-level-control=aaaa", "fuzzlab-level-control=bbbb"]
+
+
+def test_the_level_log_check_passes_a_level_0_run_with_its_controls():
+    assert ext.bwapp_level_problems(_LEVEL_SAMPLE, _CONTROLS, min_requests=3) == []
+
+
+@pytest.mark.parametrize("sample,controls,why", [
+    (_LEVEL_SAMPLE + 'fuzzlab-level 2 "GET /bWAPP/xss_get.php HTTP/1.1"\n', _CONTROLS,
+     "level 2"),
+    (_LEVEL_SAMPLE + 'fuzzlab-level 01 "GET /bWAPP/xss_get.php HTTP/1.1"\n', _CONTROLS,
+     "PHP reads 01 as level 1: an allowlist, not a denylist"),
+    (_LEVEL_SAMPLE + 'fuzzlab-level 666 "GET /bWAPP/xss_get.php HTTP/1.1"\n', _CONTROLS,
+     "a level bWAPP did not set for this run"),
+    (_LEVEL_SAMPLE, _CONTROLS + ["fuzzlab-level-control=cccc"], "a control not logged"),
+    (_LEVEL_SAMPLE.replace("fuzzlab-level 1 \"GET /bWAPP/portal.php?fuzzlab-level-control=bbbb",
+                           "fuzzlab-level 0 \"GET /bWAPP/portal.php?fuzzlab-level-control=bbbb"),
+     _CONTROLS, "a control logged without its level"),
+    (_LEVEL_SAMPLE + 'fuzzlab-level 0 x "GET /bWAPP/a.php HTTP/1.1"\n', _CONTROLS,
+     "an unparsed level line"),
+    (_LEVEL_SAMPLE.replace("fuzzlab-level 0", "nothing"), _CONTROLS, "too few requests"),
+])
+def test_the_level_log_check_flags_synthetic_offenders(sample, controls, why):
+    """BUG-0311 / PA-0311(2): the predicate over the observed channel is proven offline
+    before any live run."""
+    assert ext.bwapp_level_problems(sample, controls, min_requests=3), why
 
 
 def test_every_external_service_drops_capabilities():
