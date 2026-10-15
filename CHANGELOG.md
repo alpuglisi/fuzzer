@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (D67: the owner decides write requests are probed by default in the lab)
+- **What:** `docs/DECISIONS_AND_ROADMAP.md` records D67 (LAB-WRITES): write requests the crawler records without sending are probed by `auto` by default; `--no-probe-captured-writes` opts out. `docs/claude_juicelab_failures.md` gains F-049 (building to the lab's source to chase a metric, and failing even at that) and F-050 (the agent's own choices recorded as numbered decisions outside the repo's decision record).
+- **Why:** the owner's answer to the LAB-WRITES question. The failure entries were requested by the owner or found while recording the decision.
+
 ## 2026-10-15 (the dev branch's suite green again: /dataerasure disposition)
 - **What:** `tests/test_destructive_routes_external_labs.py` gives the answer key's path-only `/dataerasure` row (JUICE-0017, CC-LAB-0261) the same BUG-0301 disposition as its full URL.
 - **Why:** commit 8e45899 was pushed after only the static lab tests and turned the compound-word guard red (claude_juicelab_failures F-025). The BUG-0118 branch that also carries this line is held for the owner's decision on its gate (F-017), so the line is ported alone.

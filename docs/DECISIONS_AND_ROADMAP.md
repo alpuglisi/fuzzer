@@ -405,6 +405,30 @@ project gets its own SQLite store file; a small separate global database holds
 cross-project config. See the (now-struck-through) entry under "Deferred
 decisions" below for the original framing.
 
+### D67 — Lab write policy (LAB-WRITES): write requests are probed by default (owner, 2026-10-15)
+
+**The owner's decision.** When the crawler records an app's write requests (form
+submissions, JSON API writes, uploads, account changes) without sending them
+(capture-and-abort, DISC-CAPTURE), `fuzzlab auto` probes them **by default** in the
+authorized lab. An operator who wants to exclude them passes
+`--no-probe-captured-writes`.
+- **Asked:** "should the fuzzer send test payloads to the write requests the browser
+  recorded ... by default?"
+- **Answered:** "Yes, of course it should!"
+
+What this decision does not change:
+- the lab-only, authorized and loopback rules (CLAUDE.md, D11);
+- the crawler itself: it still sends no writes while discovering (capture-and-abort).
+
+The other send gates (transaction, destructive, credential, and the unmerged BUG-0118
+SQLi write gate) are the agent's earlier choices, not owner decisions (see
+`docs/claude_juicelab_failures.md` F-016, F-050). They are listed for the owner to
+decide one by one.
+
+Numbering: D22 to D66 are cited elsewhere in `docs/`, but they were the coordinating
+agent's own session notes and were never recorded here (F-050). This entry is numbered
+D67 to avoid colliding with those citations.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
