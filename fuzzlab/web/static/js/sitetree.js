@@ -88,7 +88,9 @@ function initSiteTree() {
 
   // --- tree items -----------------------------------------------------------------
   function identity(child) {
-    return child.key || `${child.kind}:${child.id}`;
+    if (child.key) return child.key;
+    if (child.id !== undefined) return `${child.kind}:${child.id}`;
+    return `${child.kind}:label:${child.label}`;     // a node too deep to key
   }
 
   function itemFor(child, level) {
@@ -206,9 +208,15 @@ function initSiteTree() {
         text: `Show more (${container.querySelectorAll(":scope > li[role=treeitem]").length} loaded)` });
       const li = el("li", { role: "none", class: "st-more-item" }, btn);
       btn.addEventListener("click", async () => {
+        const hadFocus = document.activeElement === btn;   // before disabling blurs it
         btn.disabled = true;                       // one page per click, never twice
+        const before = container.querySelectorAll(":scope > li[role=treeitem]").length;
         const ok = await loadChildren(container, key, level, state.generation, next);
-        if (!ok) btn.disabled = false;
+        if (!ok) { btn.disabled = false; return; }
+        if (hadFocus) {                            // keep the keyboard user in the tree
+          const first = container.querySelectorAll(":scope > li[role=treeitem]")[before];
+          if (first) focusItem(first);
+        }
       });
       container.append(li);
     }
@@ -241,9 +249,10 @@ function initSiteTree() {
       li.replaceChild(rowFor(child, li), li.querySelector(":scope > .st-row"));
       return li;
     });
+    let lostFocus = false;
     for (const li of existing.values()) {
       if (li.dataset.key) state.expanded.delete(li.dataset.key);
-      if (li.contains(document.activeElement)) focusItem(container.closest("li[role=treeitem]") || null);
+      if (li.contains(document.activeElement)) lostFocus = true;
       li.remove();
     }
     let ref = container.firstElementChild;
@@ -252,6 +261,7 @@ function initSiteTree() {
       else container.insertBefore(li, ref);
     }
     setTail(container, key, level, got.next, got.truncated);
+    if (lostFocus) focusItem(container.closest("li[role=treeitem]") || visibleItems()[0]);
     return true;
   }
 
@@ -266,7 +276,12 @@ function initSiteTree() {
     g.hidden = false;
     if (!g.dataset.loaded) {
       g.dataset.loaded = "1";
-      if (!await loadChildren(g, key, level, state.generation)) delete g.dataset.loaded;  // retry next time
+      const filled = () => g.querySelector(":scope > li[role=treeitem]") !== null;
+      // a refresh that overtook this load fills the group itself; a failed or stale
+      // load of a still-empty group is retried on the next expand or refresh
+      if (!filled() && !await loadChildren(g, key, level, state.generation) && !filled()) {
+        delete g.dataset.loaded;
+      }
     } else if (g.dataset.version !== String(state.version)) {
       await refreshGroup(g, key, level, state.generation);  // changed while collapsed
     }
@@ -367,6 +382,7 @@ function initSiteTree() {
     none.hidden = true;
     box.hidden = false;
     renderNode(summary.body);
+    document.getElementById("st-node-truncated").hidden = !summary.body.truncated;
     renderChildren(kids.status === 200 && kids.body ? kids.body : { children: [] });
     state.issuesNext = summary.body.next;
     renderIssues(summary.body.findings, false);
@@ -476,10 +492,16 @@ function initSiteTree() {
     for (const li of [...tree.querySelectorAll("li[role=treeitem][aria-expanded=true]")]) {
       if (gen !== state.generation) return;
       if (!li.isConnected) continue;
-      const g = li.querySelector(":scope > ul[role=group]");
-      if (!g || !g.dataset.loaded) continue;
-      await refreshGroup(g, li.dataset.key, parseInt(li.getAttribute("aria-level"), 10) + 1, gen);
-      g.dataset.version = String(state.version);
+      const g = groupOf(li);
+      const level = parseInt(li.getAttribute("aria-level"), 10) + 1;
+      // an expand still loading (or whose load was overtaken) is loaded here
+      const ok = g.querySelector(":scope > li[role=treeitem]")
+        ? await refreshGroup(g, li.dataset.key, level, gen)
+        : await loadChildren(g, li.dataset.key, level, gen);
+      if (ok) {
+        g.dataset.loaded = "1";
+        g.dataset.version = String(state.version);
+      }
     }
     if (gen !== state.generation) return;
     empty.hidden = tree.querySelector("li[role=treeitem]") !== null;

@@ -55,7 +55,8 @@ def origin_of(base_url) -> str | None:
     """A stored ``base_url``'s canonical origin, or ``None`` -- total (BUG-0500):
     `canonical_origin` documents ``None`` for an unusable URL but raises ``ValueError``
     on a malformed authority (``http://[::1``, an NFKC-invalid host), so one bad stored
-    row used to take every origin reader down. Its own fix is in `core/urls.py`."""
+    row used to take every origin reader down. Its own fix in `core/urls.py` is pending
+    (that file is locked by another session; pinned by a strict xfail)."""
     if not isinstance(base_url, str):
         return None
     try:

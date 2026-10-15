@@ -463,7 +463,7 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
     location among the same run's candidates at that path, method, parameter and
     category (`to_category(vuln_class)`), else among its candidates and parameter rows
     without the category (parameter rows carry none), else "location not recorded"
-    (`sitetree.resolve_location`). A finding with no method matches any method.
+    (`sitetree._Locations`, indexed once per request). A finding with no method matches any method.
   - **items** -- findings (link `/findings/{id}`) and candidates.
   - Candidates are placed by shape: FK (`parameter` -> `endpoint`), pipeline
     (`core.evidence.parse_evidence`, path by `oracle.finding_url`); a parameter whose

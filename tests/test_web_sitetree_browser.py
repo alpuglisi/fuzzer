@@ -356,3 +356,70 @@ def test_a_refresh_keeps_focus_selection_and_loaded_pages(tab, site):
             s.conn.execute("DELETE FROM endpoint WHERE url='/wide/w999'")
             s.conn.commit()
     assert tab.problems() == []
+
+
+def test_show_more_from_the_keyboard_keeps_focus_in_the_tree(tab):
+    page = tab.page
+    group = _wide(tab)
+    group.locator(":scope > li.st-more-item button").focus()
+    page.keyboard.press("Enter")
+    expect(group.locator(":scope > li[role=treeitem]")).to_have_count(250)
+    expect(group.locator(":scope > li[role=treeitem]").nth(200)).to_be_focused()
+    assert tab.problems() == []
+
+
+def test_a_truncated_endpoint_says_so_in_the_tree_and_the_contents(tab, monkeypatch):
+    """Code review re-check (B-N3, PA-0065(3)): a partial endpoint list is shown as
+    partial in the real page, never silently."""
+    monkeypatch.setattr(sitetree, "GROUP_CAP", 0)          # the server runs in-process
+    sitetree.child_cache.clear()
+    try:
+        page = tab.page
+        tab.open(ORIGIN, "shop", "item.php")
+        ep = tab.item("GET /shop/item.php").first
+        ep.locator(":scope > .st-row .st-label").click()   # select + expand
+        expect(ep.locator(":scope > ul > li.st-trunc-item")).to_be_visible()
+        expect(page.locator("#st-node-truncated")).to_be_visible()
+        assert tab.problems() == []
+    finally:
+        sitetree.child_cache.clear()
+
+
+def test_a_refresh_that_overtakes_an_expand_still_fills_the_node(tab, site):
+    """Code review re-check (A-N1): an expand in flight when a refresh starts is loaded
+    by the refresh, never left expanded and empty."""
+    page = tab.page
+    held = []
+
+    def hold_first_shop_load(route):
+        if not held and "shop" in route.request.url:
+            held.append(route)                              # answered after the refresh
+        else:
+            route.continue_()
+    page.route("**/api/sitetree/children?*", hold_first_shop_load)
+    tab.open(ORIGIN)
+    page.wait_for_timeout(900)                              # the poll has its baseline
+    shop = tab.item("shop").first
+    shop.focus()
+    page.keyboard.press("ArrowRight")                       # expand only: its load is held
+    expect(shop).to_have_attribute("aria-expanded", "true")
+    page.wait_for_timeout(300)
+    assert held, "the expand's own load was not held"
+    expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(0)
+    with Store(site["path"]) as s:                          # a write: the next poll refreshes
+        s.conn.execute("INSERT INTO endpoint (run_id, url, method) VALUES (?, "
+                       "'/zz-race', 'GET')", (site["a"],))
+        s.conn.commit()
+    try:
+        expect(tab.item("zz-race").first).to_be_attached(timeout=10000)
+        expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(2)
+        assert held, "the expand's own load was not held"
+        held[0].continue_()                                 # the stale answer arrives last
+        page.wait_for_timeout(500)
+        expect(shop.locator(":scope > ul > li[role=treeitem]")).to_have_count(2)
+        assert shop.get_attribute("aria-expanded") == "true"
+    finally:
+        with Store(site["path"]) as s:
+            s.conn.execute("DELETE FROM endpoint WHERE url='/zz-race'")
+            s.conn.commit()
+    assert tab.problems() == []

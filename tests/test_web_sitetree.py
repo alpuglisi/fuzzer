@@ -919,6 +919,14 @@ def test_endpoint_truncation_is_reported(seed, monkeypatch):
     assert page["truncated"] is True and len(page["children"]) == 3
     s = st.summary(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}), st.Filters())
     assert s["truncated"] is True
+    monkeypatch.setattr(st, "GROUP_CAP", 0)            # nothing read: still said
+    st.child_cache.clear()
+    page = st.children(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}), st.Filters(),
+                       version="v-zero")
+    assert page == {"children": [], "next": None, "truncated": True}
+    again = st.children(seed.conn, node({"o": ORIGIN, "s": ["p"], "m": "GET"}),
+                        st.Filters(), version="v-zero")              # from the cache
+    assert again["truncated"] is True
 
 
 def test_the_child_list_cache_is_bounded(seed, monkeypatch):
@@ -926,11 +934,11 @@ def test_the_child_list_cache_is_bounded(seed, monkeypatch):
     monkeypatch.setattr(st, "CACHE_ENTRY_MAX", 3)
     monkeypatch.setattr(st, "CACHE_TOTAL_MAX", 4)
     cache = st._ChildCache()
-    cache.put(("a", (), "v"), [{}] * 4)                 # over the entry bound: not kept
+    cache.put(("a", (), "v"), {"children": [{}] * 4, "truncated": False})  # over the bound
     assert cache.get(("a", (), "v")) is None
-    cache.put(("b", (), "v"), [{}] * 2)
-    cache.put(("c", (), "v"), [{}] * 2)
-    cache.put(("d", (), "v"), [{}] * 1)                 # evicts b (count and total)
+    cache.put(("b", (), "v"), {"children": [{}] * 2, "truncated": False})
+    cache.put(("c", (), "v"), {"children": [{}] * 2, "truncated": False})
+    cache.put(("d", (), "v"), {"children": [{}] * 1, "truncated": False})  # evicts b
     assert cache.get(("b", (), "v")) is None
     assert cache.get(("c", (), "v")) is not None and cache.get(("d", (), "v")) is not None
     assert cache._total <= 4 and len(cache._data) <= 2
@@ -1031,7 +1039,7 @@ def test_planted_queries_on_finding_and_page_urls_never_show(seed):
 
 # --- known defects outside this lane, pinned (PA-0054(3)) ------------------------------
 
-@pytest.mark.xfail(strict=True, reason="ML lane follow-up: ml/dataset.endpoint_key uses "
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="ML lane follow-up: ml/dataset.endpoint_key uses "
                    "to_path, dropping a fragment point's SPA route, while the oracle records "
                    "the finding at finding_url (/#/route); see CC-ML-0500")
 def test_a_confirmed_dom_xss_finding_labels_its_fragment_candidate(seed):
@@ -1043,7 +1051,7 @@ def test_a_confirmed_dom_xss_finding_labels_its_fragment_candidate(seed):
     assert list(ds.y) == [1]
 
 
-@pytest.mark.xfail(strict=True, reason="UI follow-up: findingsview.derive_severity and "
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="UI follow-up: findingsview.derive_severity and "
                    "results.severity_of disagree (e.g. ssti: info vs critical); the site tree "
                    "uses the finding page's band (CC-UI-0500)")
 def test_the_two_severity_bands_agree_for_every_oracle_class():
@@ -1053,3 +1061,19 @@ def test_the_two_severity_bands_agree_for_every_oracle_class():
                if isinstance(getattr(c, "vuln_class", None), str) and c.vuln_class}
     assert {vc: derive_severity(vc) for vc in classes} == {
         vc: severity_of(vc) for vc in classes}
+
+
+def test_a_lone_surrogate_in_stored_evidence_is_unreadable_not_a_500(seed):
+    """Code review re-check (A-N2, B-N1; PA-0500(2)): JSON may escape a lone surrogate,
+    which SQLite cannot hold; the row is unreadable and counted, the tree still loads."""
+    rid = seed.run()
+    seed.cand(rid, "/ok.php", "id")
+    seed.raw_cand(rid, '{"rule_id":"R","category":"xss","url":"http://h/a\\ud800b",'
+                       '"param":"q","method":"GET","location":"query"}')
+    seed.raw_cand(rid, '{"rule_id":"R","category":"xss","url":"http://h/p",'
+                       '"param":"a\\udfff","method":"GET","location":"query"}')
+    (host,) = kids(seed.conn)
+    assert host["rollup"]["problems"]["unreadable"] == 2
+    assert labels(seed.conn, node(host["key"])) == ["ok.php"]
+    client = _client(seed.path)
+    assert client.get("/api/sitetree/node", params={"node": host["key"]}).status_code == 200

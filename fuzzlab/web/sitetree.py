@@ -410,12 +410,26 @@ def _unpack(packed: str, i: int):
 
 # --- registered SQL functions (G2: total by construction, named swallow list) -------
 
+def _encodable(value) -> bool:
+    if not isinstance(value, str):
+        return True
+    try:
+        value.encode("utf-8")
+        return True
+    except UnicodeEncodeError:            # a lone surrogate (a JSON ``\udXXX`` escape)
+        return False
+
+
 def _sql_cproj(evidence, parameter_id, pa_name, pa_loc, ep_url, ep_method):
     try:
-        return _pack(project_candidate(evidence, parameter_id, pa_name, pa_loc, ep_url,
-                                       ep_method))
+        out = project_candidate(evidence, parameter_id, pa_name, pa_loc, ep_url, ep_method)
     except SWALLOWED:
         return _pack(("error", None, None, None, None, None))
+    if not all(_encodable(f) for f in out):
+        # SQLite cannot hold such a string: one stored row must not take the reader down
+        # (PA-0500(2), code review re-check) -- it is unreadable, and counted
+        return _pack(("unreadable", None, None, None, None, None))
+    return _pack(out)
 
 
 def _sql_pf(packed, i):
@@ -788,19 +802,21 @@ class _ChildCache:
                 self._data.move_to_end(key)
             return hit
 
-    def put(self, key, children: list) -> None:
-        if not self.enabled or key[-1] is None or len(children) > CACHE_ENTRY_MAX:
+    def put(self, key, entry: dict) -> None:
+        """Keep ``{"children": [...], "truncated": bool}`` for ``key``."""
+        size = len(entry["children"])
+        if not self.enabled or key[-1] is None or size > CACHE_ENTRY_MAX:
             return
         with self._lock:
             old = self._data.pop(key, None)
             if old is not None:
-                self._total -= len(old)
-            self._data[key] = children
-            self._total += len(children)
+                self._total -= len(old["children"])
+            self._data[key] = entry
+            self._total += size
             while self._data and (len(self._data) > CACHE_ENTRIES
                                   or self._total > CACHE_TOTAL_MAX):
                 _k, gone = self._data.popitem(last=False)
-                self._total -= len(gone)
+                self._total -= len(gone["children"])
 
     def clear(self) -> None:
         with self._lock:
@@ -860,10 +876,11 @@ def _check_limit(limit, default: int, maximum: int) -> int:
     return limit
 
 
-def _page(items: list, after: str | None, limit: int, sort_key: str = "sort") -> dict:
+def _page(items: list, after: str | None, limit: int, sort_key: str = "sort",
+          truncated: bool = False) -> dict:
     """One page of a whole child list. ``truncated``: an endpoint's groups reached
-    `GROUP_CAP`, so the list is partial -- said, never silent (code review)."""
-    truncated = any(c.get("truncated") for c in items)
+    `GROUP_CAP`, so the list is partial -- said, never silent (code review), even when
+    no group was read at all."""
     if after:
         items = [c for c in items if c[sort_key] > after]
     page = items[:limit]
@@ -887,21 +904,23 @@ def children(conn, key: NodeKey, filters: Filters, *, after: str | None = None,
     ck = (key.dump(), filters.cache_key(), version)
     cached = child_cache.get(ck)
     if cached is not None:
-        return _page([dict(c) for c in cached], after, limit)
+        return _page([dict(c) for c in cached["children"]], after, limit,
+                     truncated=cached["truncated"])
 
     def build():
         register(conn, key.segs or ())
         runs = _load_runs(conn, filters)
         if key.level == "root":
-            return _host_children(conn, runs, filters)
+            return _host_children(conn, runs, filters), False
         host_runs = _host_runs(runs, key)
         if key.level == "endpoint":
-            return _endpoint_children(conn, key, host_runs, filters)
-        return _dir_children(conn, key, host_runs, filters, after)
-    built = _read(conn, build)
+            data = _endpoint_rows(conn, key, host_runs, any_method=(key.method == ""))
+            return _endpoint_groups(key, data, filters), data["truncated"]
+        return _dir_children(conn, key, host_runs, filters, after), False
+    built, truncated = _read(conn, build)
     if not after:
-        child_cache.put(ck, [dict(c) for c in built])
-    return _page(built, after, limit)
+        child_cache.put(ck, {"children": [dict(c) for c in built], "truncated": truncated})
+    return _page(built, after, limit, truncated=truncated)
 
 
 def _item_cursor(text: str | None) -> tuple[int, str] | None:
@@ -1058,8 +1077,7 @@ def _endpoint_rows(conn, key: NodeKey, runs: list[int], any_method: bool) -> dic
             sargs += ra + [path, path + "?", path + "@"]
         row = next(iter(_fetch(conn.execute(
             f"SELECT COUNT(*), MAX(run_id) FROM ({' UNION ALL '.join(parts)}) "
-            f"WHERE fl_method(method, 0) = ? AND fl_path(?) IS NOT NULL",
-            sargs + [method, path]))))
+            f"WHERE fl_method(method, 0) = ?", sargs + [method]))))
         structure = (int(row[0]), row[1])
 
     # every method's rows feed location resolution; only this endpoint's method makes
@@ -1086,7 +1104,7 @@ class _Locations:
             loc = p[3] if isinstance(p[3], str) else None
             self.params.setdefault((p[0], p[2] or ""), []).append((p[1], loc))
         self._memo: dict[tuple, str | None] = {}
-        self.steps = 0               # the scale test's operation count
+        self.steps = len(cands) + len(params)   # the scale test's operation count
 
     def resolve(self, run_id: int, param: str, vuln_class, method: str) -> str | None:
         """The unique location among the run's candidates at this path with the
@@ -1110,12 +1128,6 @@ class _Locations:
             out = next(iter(second)) if len(second) == 1 else None
         self._memo[key] = out
         return out
-
-
-def resolve_location(run_id: int, param: str, vuln_class, method: str,
-                     cands, params) -> str | None:
-    """`_Locations.resolve` for one finding (a convenience for callers and tests)."""
-    return _Locations(cands, params).resolve(run_id, param, vuln_class, method)
 
 
 def _endpoint_children(conn, key: NodeKey, runs: list[int], filters: Filters) -> list:
@@ -1157,8 +1169,6 @@ def _endpoint_groups(key: NodeKey, data: dict, filters: Filters) -> list:
         loc = data["locations"].resolve(rid, prm, vc, m)
         _add(group(prm, loc)["rollup"], "f", CONFIRMED, sev, cat, n, last)
     out = sorted(groups.values(), key=lambda g: g["sort"])
-    for g in out:
-        g["truncated"] = data["truncated"]
     return out
 
 
@@ -1401,5 +1411,5 @@ def _known_categories() -> list[str]:
 
 __all__ = ["NodeKey", "Filters", "SiteTreeError", "NodeGone", "parse_key", "parse_filters",
            "children", "items", "summary", "facets", "store_version", "path_key",
-           "segments", "project_candidate", "resolve_location", "child_cache", "Counters",
+           "segments", "project_candidate", "child_cache", "Counters",
            "counting", "ROOT", "STATUSES"]

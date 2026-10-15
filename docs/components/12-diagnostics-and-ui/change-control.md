@@ -38,6 +38,18 @@ Newest first.
     disagreeing severity bands (`findingsview.derive_severity` vs
     `results.severity_of`).
   - **The page states its scope limits** (F16).
+  - **Round 2** (the reviewers' re-check of 1d02cd0, both AGREE-WITH-FIXES, all applied):
+    a candidate whose evidence JSON escapes a lone surrogate is *unreadable*, not a 500
+    (A-N2, B-N1; PA-0500(2)); `_Locations.steps` counts index construction, so a
+    revert to one index per finding fails the linearity test, and the public
+    per-finding resolver is removed (B-N2); a truncated endpoint with no group read
+    still says `truncated` (the flag travels with the list and its cache entry), and
+    the Contents pane shows it, browser-verified (B-N3); an expand overtaken by a
+    refresh is loaded by the refresh (A-N1); keyboard "Show more" keeps focus in the
+    tree, and removing a focused top-level node focuses the first item (A-N3, A-N5);
+    nodes too deep to key no longer collide in the refresh (A-N5); a no-op SQL condition
+    removed (A-N6); `raises=` on every strict xfail (B, nit); `origin_of`'s docstring says
+    the source fix is pending (A-N4).
 - Divergences from the agreed design (B8), recorded: G1 -- every node's whole child list
   is read and cached, narrow ones included (the bound is the node's width; simpler, no
   early-stop path); G11 -- the "inject a write" test became a call-order test of the
@@ -50,13 +62,22 @@ Newest first.
 - Risk: low.
 - Deliverables:
   - [x] fixes above — done
-  - [x] tests: `tests/test_web_sitetree.py` 102 + 2 strict xfails,
-    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 11 — done
-  - [x] mutation checks: 27 back-end mutants and 7 UI mutants, all killed — done
+  - [x] tests: `tests/test_web_sitetree.py` 103 + 2 strict xfails,
+    `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 14,
+    `tests/test_core_runtarget.py` 14 + 3 strict xfails — done
+  - [x] mutation checks: 29 back-end mutants and 10 UI mutants, all killed — done
   - [x] closes CC-UI-0500's open deliverables (page CC-UI-0502, layout, review, docs) and
     records the no-ML build re-run CC-UI-0501 left open — done
-- Effectiveness (assessed 2026-10-15): see the verification run quoted in the CHANGELOG
-  line of this date and below.
+- Effectiveness (assessed 2026-10-15): verified on the committed tree in a clean detached
+  worktree, with `FUZZLAB_REQUIRE_BROWSER=1`, over every test file that imports a module
+  this lane changed (68 files, a superset including indirect ML / web / report importers)
+  plus `test_requirements_traceability.py`, `test_no_ml.py`, `test_packaging.py` and
+  `test_contract_writers.py`: round 1 (1d02cd0) 1712 passed, 2 skipped, 5 xfailed; the
+  final run is quoted below. The 2 skips are `test_packaging.py:179` (the host's Debian
+  setuptools cannot build a wheel -- environment, pre-existing); the xfails are the five
+  strict pins. Browser tests: `test_web_sitetree_browser.py` 14 and
+  `test_web_pages_browser.py` 9 passed, 0 skipped. `tests/test_no_ml.py` 10 passed (the
+  re-run CC-UI-0501 left open).
 
 ### CC-UI-0502 — Site map page: the UI-research three-pane layout (2026-10-15)
 - Change: the site tree's page (CC-UI-0500's open deliverables): `templates/sections/

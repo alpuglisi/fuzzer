@@ -123,7 +123,7 @@ def test_method_key_is_upper_case_with_the_get_default():
     assert method_key("") == "GET" and method_key(None) == "GET" and method_key(3) == "GET"
 
 
-@pytest.mark.xfail(strict=True, reason="BUG-0500 follow-up: core/urls.py (locked by another "
+@pytest.mark.xfail(strict=True, raises=ValueError, reason="BUG-0500 follow-up: core/urls.py (locked by another "
                    "session) -- canonical_origin must return None for a malformed authority "
                    "instead of raising; readers go through core.runtarget.origin_of meanwhile")
 @pytest.mark.parametrize("url", ["http://[::1", "http://a\uff03b", "http://[zz]:80"])
