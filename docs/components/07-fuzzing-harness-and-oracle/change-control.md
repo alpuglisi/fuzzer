@@ -56,6 +56,10 @@ note of the same date.
     test and the shape pin fail.
   - The related run on the committed tree is recorded below. The live Juice Shop
     re-run is the coordinator's.
+  - The related run on f552ca9 (FUZZLAB_REQUIRE_BROWSER=1 FUZZLAB_REQUIRE_NETNS=1):
+    every test file importing `oracle/strategies.py` or the `fuzzlab.oracle` package,
+    plus the M6 test files and the traceability guard. 56 files: 1219 passed, 0
+    failed, 0 skipped.
 
 ### CC-FUZZ-0083 — A page the M6 executor could not observe is no verdict, never the end of the run (BUG-0137) (2026-10-14)
 - Change (`tools/browserexec.py`, `PlaywrightBrowserExecutor.run` only):
