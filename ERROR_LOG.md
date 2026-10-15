@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Web launcher / CLI dry-run: argv builder mis-serialises four argparse shapes (open, BUG-0400/PA-0400)
+- **Symptom:** `cli_dryrun.report('crawl', …)` printed `--submit-spa-forms []` and dropped a bare `--follow-selector-forms`; `--identity=-bob` was shown as `--identity -bob`, which argparse rejects. The same `web/runner.build_flags` builds the web launcher's real child argv.
+- **Root cause:** `build_flags` inverts argparse from `OptionSpec.type`/`multiple` only (`nargs`/`const` are not introspected) and was never tested as a round trip over every action of every registered parser; new shapes arrived later via other lanes' parsers.
+- **Remediation:** pinned with strict xfails (`tests/test_cli_argv_roundtrip.py`); this lane's `train run` forwards argv verbatim (no new instance). The fix is the UI lane's (`fuzzlab/web/` is out of this lane's scope). `docs/bugs/BUG-0400-launcher-argv-builder-mis-serialises-flags.md`.
+- **Status:** Open (pinned; handed to the UI session)
+
 ## 2026-10-14 — Oracle M4: an edit form's echo of the input hid an evaluated SSTI (fixed, BUG-0133/PA-0133)
 - **Symptom:** on the live Juice Shop check of FR-FUZZ-49, `POST /profile username=#{728*889}` → 302 → `GET /profile` showed `647192`, yet `SstiStrategy` returned None.
 - **Root cause:** M4's "evaluated, not just reflected" rule (`expr in text`) judged the probe's literal as a raw substring anywhere; the profile's edit field (`<input value="#{728*889}">`) echoes it. No fixture showed the input back in an edit form; the confirmer PAs covered only false positives.

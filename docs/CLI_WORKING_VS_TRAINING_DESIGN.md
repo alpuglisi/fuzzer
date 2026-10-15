@@ -1,6 +1,7 @@
 # CLI simplification: a default store, working runs vs training runs
 
-Status: **design revision 3.** Two reviewers (A, B) reviewed rounds 1 and 2; both said
+Status: **AGREED (design gate 3/3 after round 3, 2026-10-15)** — revision 3 with the round-3 fixes
+(Appendix D) folded in; both reviewers stated no further round is needed. Two reviewers (A, B) reviewed rounds 1 and 2; both said
 "agree with fixes". Appendix B maps round 1's findings to resolutions, Appendix C maps
 round 2's.
 
@@ -53,7 +54,7 @@ The owner's request (2026-10-15): the CLI is too complicated. They want:
 - **The web UI does not inject `--store`.** The launcher form comes from each parser.
   A blank field is dropped by `web/runner.build_flags`. Once a parser's `--store` is
   optional, a blank UI field means "the CLI's default". UI-launched jobs inherit the
-  UI's cwd and environment (`create_subprocess_exec`, no `cwd=`).
+  UI's cwd and environment (`procutil.astart_server`, no `cwd`).
 - **The existing shared store setting.** `core/config.DEFAULTS["store_path"] =
   "fuzzlab.db"`, relative to the cwd, can be overridden through `FUZZLAB_STORE_PATH`
   (generic `_from_env`). The web UI reads it for every page, for saved views, for the
@@ -111,7 +112,8 @@ The owner's request (2026-10-15): the CLI is too complicated. They want:
   of:
   - `--ground-truth`, `--holdout`, `--calibrate`, `--hybrid`, `--rank-objective`;
   - `--budget-seed`, or a `--budget-method` other than `score`;
-  - `--mode`, `--points`;
+  - `--mode manual`, `--points ground-truth` (an explicit `--mode automatic` or
+    `--points crawl` is a working choice and does not count);
   - `--score` or `--rank`, **unless** `--train-on saved` is also given, since applying
     a saved model is working use;
   - `--train-on run` or `--train-on earlier`.
@@ -152,7 +154,7 @@ Other
 Older names (still work): mutate-run, reveal-holdout, flow-anomaly
 
 Store: --store PATH, else $FUZZLAB_STORE, else $FUZZLAB_STORE_PATH, else ./fuzzlab.db
-       (the same store the web UI uses). auto and greybox-run still need --store until
+       in the current directory (the web UI uses the same rule). auto and greybox-run still need --store until
        Phase 2.
 Lab-only. Nothing runs against a target until you ask it to (no auto-run).
 ```
@@ -295,7 +297,8 @@ explicit path's missing parent is a usage error, as before but now typed.
 
 Writers follow this order:
 
-1. Parse the arguments.
+1. Parse the arguments, and (for `train run`) apply D-9, which is pure, so a dry run never plans
+   a command that would be refused.
 2. Handle `--dry-run`: print the plan, which includes the store line (§4.4), and exit.
 3. Run the usage checks that need no store, in this order:
    1. explicit `--store ""` (it fails the argparse parse);
@@ -350,6 +353,7 @@ Phase 2 adds it whenever the store is not the default.
 - **The proxy banner.**
 - **Dry runs.** Only commands with `COMMANDS[...].store_default` print a store line.
   `crawl`, `audit` and `fuzz` do not, because they write no store without `--store`.
+  `proxy` prints one only when `--record` or `--store` is given.
 
 ### 4.5 Proxy
 
@@ -358,7 +362,7 @@ PATH` alone records there; given both, `--store` wins.
 
 The order is:
 1. `--dry-run`, `--export-ca`;
-2. `require_loopback`, then `--authorized`;
+2. `--authorized`, then `require_loopback` (the existing order, unchanged);
 3. `resolve`, then `check_writable`;
 4. `Store`.
 
@@ -392,7 +396,7 @@ us to remove, and `scan --score` would then miss models trained under `train run
 
 ### 4.8 Open decision for the owner: move the default to a per-user location?
 
-The owner proposed `$XDG_DATA_HOME/fuzzlab/default.db`. Round 2 showed that doing it
+The session brief proposed `$XDG_DATA_HOME/fuzzlab/default.db` ("proposed as"). Round 2 showed that doing it
 safely needs changes across lanes:
 
 | Required change | Why |
@@ -468,7 +472,8 @@ optional-value flag (`--header-points`) holds a URL-shaped value, the error give
 same hint.
 
 **No `to_argv` in Phase 1.** `train run` forwards the user's argv **verbatim**:
-`["--base-url", url, *argv[1:]]`, plus `["--store", path]` only when
+`["--base-url", url, *argv[1:]]` for the positional form (the `--base-url` alias form
+is forwarded unchanged), plus `["--store", path]` only when
 `namespace.store is None`. That check reads the namespace, so an abbreviation like
 `--sto` counts as giving the flag.
 
@@ -542,7 +547,9 @@ of their values appears. A control proves the check is live.
      amendment.
    - `--score`/`--rank`: a pre-crawl check, `check_readable` and then `saved_source`
      over this target's runs, refuses with no model. Opening an existing store runs its
-     migrations, which is stated.
+     migrations, which is stated. This already holds in Phase 1 for every non-creating
+     command (`report`, `train models`, `reveal-holdout`, `flow-anomaly`): they never
+     create a store, but they do migrate an older one when they open it.
    - Temp crawl directory (§4.6).
    - Loopback end-to-end tests. These cases must send zero requests (counted):
      `--categories ""`, `" , "`, no `--categories`, each T/L flag, `--ground-truth`.
@@ -552,8 +559,12 @@ of their values appears. A control proves the check is live.
 
 **Isolation (`tests/conftest.py`).** An autouse fixture deletes `FUZZLAB_STORE` and
 `FUZZLAB_STORE_PATH`. `HOME` is not touched, because Playwright's cache lives there.
-A session-scoped guard fails the run if a `fuzzlab.db` appears in the repository root
-(or the pytest invocation cwd) during the run and was not there at start. Tests that
+`.gitignore` ignores `fuzzlab.db` at **any depth** (a writer run from a subdirectory must never
+leave a committable store). A session-scoped guard also fails on a new `fuzzlab.db` anywhere in
+the tree, and snapshots `(exists, size, mtime_ns, inode)` of `fuzzlab.db` and its
+`-wal`/`-shm` sidecars in the repository root and the pytest invocation cwd at session
+start, and fails the run on **any** change: a new file or a write to a developer's
+existing store. Tests that
 exercise the default `chdir` into `tmp_path`.
 
 **`storepath`.**
@@ -784,3 +795,26 @@ Unchanged from revision 2, except where Appendix C supersedes a resolution.
 - **R2-9.** FR-FUZZ-402 is withdrawn along with the refusal.
 - **R2-10.** §4.2 states the order.
 - **R2-11.** Phase 2: `check_readable` first; migrations stated.
+
+## Appendix D — round-3 resolutions (reviewer A)
+
+A-R3-1 guard snapshots size/mtime/inode (any write fails); A-R3-2 existing proxy order kept;
+A-R3-3 alias-form forwarding stated; A-R3-4 D-9 counts `--mode manual`/`--points ground-truth`
+only; A-R3-5 proxy store line depends on `--record`/`--store`; A-R3-6 help wording + mechanism
+name; A-R3-7 non-creating commands migrate an existing store (stated); A-R3-8 attribution is the
+session brief's "proposed as".
+
+## Appendix E — round-3 resolutions (reviewer B)
+
+- N1: `.gitignore` → `fuzzlab.db` at any depth; the guard checks the whole tree for a new one; Phase 2's
+  scan temp dir gets the fixed prefix `.fuzzlab-scan-` and is ignored too.
+- N2: when `--holdout` is given, `train run` prints a store-qualified hint after the engine summary
+  (`fuzzlab train reveal-holdout --store <path> --run <id>`); the reveal header names the run's
+  tool, host and start time, so a wrong-store reveal is obvious.
+- N3: D-9 runs before the dry-run branch (§4.2 step 1).
+- N4: help wording (applied with A-R3-6).
+- N5: the unchanged-hash test asserts `load_config(environ={}).hash() == Config(values=dict(DEFAULTS)).hash()`
+  — derived from the source of truth, no frozen literal (PA-0001).
+- N6: mechanism name (applied with A-R3-6).
+- N7: a default store is created with the umask's mode, as any explicit path today (no regression);
+  stated in FR-CORE-400 and tied to the §4.8 per-user follow-up (private mode at creation).

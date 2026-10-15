@@ -1700,3 +1700,15 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   3. **A disqualifier change is mutation-checked in both directions:** dropping it lets a
      reflection confirm; widening it refuses the edit form. (from BUG-0133)
 
+- **PA-0400** — Strengthens `PA-0026` (enumerate an adapter's input shapes) and `PA-0036`
+  (never assume a round trip without checking), after BUG-0400: the launcher's argv builder
+  inverted argparse for the shapes it had when written and mis-serialised `nargs='*'`,
+  `const=""` and dash-leading values that other lanes' parsers added later.
+  1. **Code that maps between argv and argparse values for the project's parsers**
+     (introspection, serialisation, copying, forwarding) **states its contract as a round
+     trip** — parse, build, parse, compare values — **tested over every action of every
+     registered parser** (discovered, not listed), so a shape another lane adds later fails it.
+  2. **A shape it cannot express fails closed (raises)**; it never emits a different argv.
+  3. **Prefer forwarding the user's own argv verbatim** over re-serialising a parsed namespace.
+  (from BUG-0400)
+
