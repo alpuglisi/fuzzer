@@ -55,7 +55,12 @@ Newest first.
     empty node could both append its first page. A group's first-page load is now shared
     (the refresh awaits the expand's), and appends skip an identity already present; a
     browser test holds both fetches to force the interleaving (a mutant without either
-    protection fails it).
+    protection fails it). The first version of that fix shared a load across
+    generations, so a filter change or a refresh got an older, stale load back and
+    rendered nothing; the clean-worktree run caught it before push (2 browser tests
+    failed), and a load is now shared only within one generation (mutant without the
+    guard fails both tests). Lesson applied: after every page-script change the whole
+    browser file is run, not only the new test.
 - Divergences from the agreed design (B8), recorded: G1 -- every node's whole child list
   is read and cached, narrow ones included (the bound is the node's width; simpler, no
   early-stop path); G11 -- the "inject a write" test became a call-order test of the
@@ -71,7 +76,7 @@ Newest first.
   - [x] tests: `tests/test_web_sitetree.py` 103 + 2 strict xfails,
     `tests/test_web_sitetree_scale.py` 5, `tests/test_web_sitetree_browser.py` 15,
     `tests/test_core_runtarget.py` 14 + 3 strict xfails — done
-  - [x] mutation checks: 29 back-end mutants and 11 UI mutants, all killed — done
+  - [x] mutation checks: 29 back-end mutants and 13 UI mutants, all killed — done
   - [x] closes CC-UI-0500's open deliverables (page CC-UI-0502, layout, review, docs) and
     records the no-ML build re-run CC-UI-0501 left open — done
 - Effectiveness (assessed 2026-10-15): verified on the committed tree in a clean detached

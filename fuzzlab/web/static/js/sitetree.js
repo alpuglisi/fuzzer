@@ -222,10 +222,12 @@ function initSiteTree() {
     }
   }
 
-  // a group's first page is loaded once at a time: an expand and a refresh that both
-  // reach an empty group share one load (code review R3-1)
+  // a group's first page is loaded once per generation: an expand and a refresh that
+  // both reach an empty group share one load (code review R3-1). A load of an older
+  // generation is never reused -- it drops its own (stale) result.
   function loadChildren(container, key, level, gen, after = null) {
-    if (after === null && container._loading) return container._loading;
+    const pending = container._loading;
+    if (after === null && pending && pending.gen === gen) return pending.run;
     const run = (async () => {
       const got = await fetchPages(key, gen, after, 1);
       if (got.stale) return false;
@@ -239,8 +241,9 @@ function initSiteTree() {
       return true;
     })();
     if (after === null) {
-      container._loading = run;
-      run.finally(() => { if (container._loading === run) container._loading = null; });
+      const entry = { gen, run };
+      container._loading = entry;
+      run.finally(() => { if (container._loading === entry) container._loading = null; });
     }
     return run;
   }
