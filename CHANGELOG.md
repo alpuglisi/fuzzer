@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (D68: the owner drops the BUG-0118 SQLi send gate)
+- **What:** `docs/DECISIONS_AND_ROADMAP.md` records D68: the SQLi send gate (branch `bug-0118-v3`) is not merged. `docs/claude_juicelab_failures.md` gains F-051 (a ledger re-registration that tripped the progress guard's bug-chain trigger).
+- **Why:** the owner's decision. The gate refused Juice Shop's login SQLi (F-017).
+
 ## 2026-10-15 (D67: the owner decides write requests are probed by default in the lab)
 - **What:** `docs/DECISIONS_AND_ROADMAP.md` records D67 (LAB-WRITES): write requests the crawler records without sending are probed by `auto` by default; `--no-probe-captured-writes` opts out. `docs/claude_juicelab_failures.md` gains F-049 (building to the lab's source to chase a metric, and failing even at that) and F-050 (the agent's own choices recorded as numbered decisions outside the repo's decision record).
 - **Why:** the owner's answer to the LAB-WRITES question. The failure entries were requested by the owner or found while recording the decision.

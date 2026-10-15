@@ -608,3 +608,14 @@ Juice Shop lab is complete.
   `docs/DECISIONS_AND_ROADMAP.md`, starting with LAB-WRITES. My own choices are
   labelled as mine and are not numbered as decisions.
 
+### F-051 — A ledger bookkeeping mistake tripped my own progress guard
+- **What:** To record the owner's approval of BUG-0148, I dropped it and re-added it
+  under a new ID with `--spawned-by HOLDOUT-SPA`. The guard counted that as a second
+  bug spawned by HOLDOUT-SPA's fixes and raised the bug-chain trigger (PA-0144), which
+  stops that item.
+- **Evidence:** `scripts/orchestration_guard.py report`, 2026-10-15 18:36.
+- **Impact:** a false stop on the measurement item; the ledger now shows BUG-0148,
+  BUG-0148b and BUG-0148-owner for one bug.
+- **Status:** open. The trigger is reported to the owner and was not worked around.
+  BUG-0148 proceeds under `BUG-0148-owner`, which the owner approved.
+

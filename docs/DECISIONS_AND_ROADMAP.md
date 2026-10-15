@@ -429,6 +429,21 @@ Numbering: D22 to D66 are cited elsewhere in `docs/`, but they were the coordina
 agent's own session notes and were never recorded here (F-050). This entry is numbered
 D67 to avoid colliding with those citations.
 
+### D68 — The BUG-0118 SQLi send gate is dropped (owner, 2026-10-15)
+
+**The owner's decision:** "Drop it."
+- The SQLi send gate (refusing executing SQLi payloads at write-method points, plus a GET
+  lexical predicate) is not merged.
+- Its branch, `bug-0118-v3`, stays unmerged as a record. Its last commit, f04250d, was
+  full-suite green.
+- In the 2026-10-15 Juice Shop baseline the gate refused the login SQLi
+  (`docs/claude_juicelab_failures.md` F-017).
+
+The same branch also carries BUG-0119 (every seam send carries the browser header set),
+which the owner approved separately earlier ("Apply PA-0062"). It is not landed by this
+drop. Whether BUG-0119 lands on its own is listed for the owner. Its navigation header
+set on JSON sends is a known defect (F-043).
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
