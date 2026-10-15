@@ -258,7 +258,8 @@ fuzzer.
     route the operator **named** with `--submit-spa-forms ROUTE …`, in the crawl's own
     context or the fresh unauthenticated one. Entirely inside the reveal window
     (FR-CRAWL-16, W1): the existing fill, every G1 interaction and the checks run with
-    its write block on; only `spa.click_vetted`'s final vetted click lifts it, for that
+    its write block on; only `spa.click_vetted`'s final vetted click lifts it (*retired
+    under capture, FR-CRAWL-18: the click's request is recorded and aborted*), for that
     click and its settle only (`before_click`; the lift is cleared when the submission
     ends, a click that raised included -- review B-M1), and the route is then closed and
     reloaded inside the window.
@@ -320,7 +321,7 @@ fuzzer.
     own context and that URL only; a dialog's timers die with it) and a final quiet
     period (`_quiesce`: `_settle` — nothing in flight, three quiet 100 ms polls — then
     a driver round trip that flushes pending events). Only `click_vetted`'s final vetted
-    submission of a named-route form lifts it, for that click and its settle; the lift
+    submission of a named-route form lifts it (*retired under capture, FR-CRAWL-18*), for that click and its settle; the lift
     is cleared when that submission ends, even if its click raised (review B-M1). The
     own-reload exemption matches the exact URL (scheme, host, port, path and query,
     `spider._nav_key`), never the path alone, and a redirect hop of a navigation is a
