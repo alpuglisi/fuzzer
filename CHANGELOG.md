@@ -4,6 +4,15 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (FR-CRAWL-17 merged with origin-scoped sessions: M0-M10)
+- spa-query merged p3-int (89268f7: FR-SESS-20 / BUG-0134, BUG-0136, BUG-0137); then a
+  URL withheld from the session during a probe is that probe's blocked evidence only, a
+  probe route on another origin is never loaded, a withheld or failed seed stays a write
+  seed and is never re-sent statically, a load that did not commit is session-checked
+  by cookies and the server, each query load starts from a fresh page, in-flight
+  requests are not queued, and probe failure logs carry no marker (CC-CRAWL-0027 merge
+  amendment).
+
 ## 2026-10-14 (BUG-0137, review of 1702c29: the not-observed reason never carries a URL)
 - **Why:** Playwright's "navigation interrupted" message quotes the payload-carrying URL
   with no `" at "`, so it reached the stored reason. Reviewer B also asked for the

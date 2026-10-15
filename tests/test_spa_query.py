@@ -482,8 +482,11 @@ def query_crawl(tmp_path_factory):
         tmp = tmp_path_factory.mktemp("spaq")
         try:
             sp = _crawl(lab, tmp / "s.db")
+            # M10: this crawl's own requests, before any other test crawls the lab
+            first = list(lab.requests)
             store, run, counts = _import(tmp / "s.db", tmp / "u.db")
             yield {"lab": lab, "other": other, "sp": sp, "db": str(tmp / "s.db"),
+                   "first_requests": first,
                    "store": store, "run": run, "counts": counts,
                    "store_path": str(tmp / "u.db")}
             store.close()
@@ -522,11 +525,12 @@ def test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again(query_c
     """Y1 (review A3-S1 / B3-S1): ``#/hopper?x=`` fetches ``/api/go``, which redirects
     to a transaction GET the window refuses: the request fails, so it is blocked for the
     window -- never queued from the load's request list, never fetched again outside
-    the window (where its hop would run), never stored. Runs before any other crawl of
-    this lab."""
+    the window (where its hop would run), never stored. Reads the first crawl's own
+    requests (M10), whatever other test crawled the lab since."""
     lab, db = query_crawl["lab"], query_crawl["db"]
-    assert lab.seen("GET", "/api/order/confirm") == []
-    assert len(lab.seen("GET", "/api/go")) == 1             # the window's own fetch only
+    first = query_crawl["first_requests"]
+    assert not any(r[1].startswith("/api/order/confirm") for r in first)
+    assert len([r for r in first if r[0] == "GET" and r[1] == "/api/go"]) == 1
     assert not any("/api/go" in u for u in _pages(db))
     assert lab.base + "#/hopper?x=fuzzlab" in _pages(db)
 
@@ -940,6 +944,7 @@ def test_a_cookie_cleared_while_the_page_leaves_is_a_loss(tmp_path):
     try:
         page = _FakePage("http://127.0.0.1:9/#/x?a=fuzzlab",
                          on_wait=lambda: setattr(ctx, "jar", []))
+        sp._doc_url = page.url                    # the load committed (M6)
         with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
             pass
         assert win["session"][0] is False and "sid" in win["session"][1]
@@ -963,6 +968,7 @@ def test_the_session_is_rechecked_when_leaving_the_page_fails(tmp_path):
             self.url = url
     try:
         page = Page("http://127.0.0.1:9/#/x?a=fuzzlab")
+        sp._doc_url = page.url                    # the load committed (M6)
         with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
             pass
         assert not win.get("closed")
@@ -977,10 +983,12 @@ def test_verify_live_runs_after_a_window_that_blocked_a_write(tmp_path, live):
     blocked a write, and its "no" is a loss."""
     sp, ctx, manager = _session_spider(tmp_path, live=live)
     try:
+        sp._doc_url = "http://127.0.0.1:9/#/x?a=1"   # each load committed (M6)
         with sp._window(_FakePage("http://127.0.0.1:9/#/x?a=1"), ctx, "http://127.0.0.1:9/#/x?a=1",
                         query=spa.SEED_SOURCE) as win:
             pass
         assert manager.verified == 0 and win["session"] == (True, None)
+        sp._doc_url = "http://127.0.0.1:9/#/y?a=1"
         with sp._window(_FakePage("http://127.0.0.1:9/#/y?a=1"), ctx, "http://127.0.0.1:9/#/y?a=1",
                         query=spa.SEED_SOURCE) as win:
             win["writes"] = 1
@@ -1001,6 +1009,24 @@ def test_the_cli_flags_reach_the_spider_through_one_builder():
     assert on["spa_query"] is True and off["spa_query"] is False
     params = set(inspect.signature(LocalSpider.__init__).parameters) - {"self", "start_url"}
     assert set(on) == params
+
+
+def test_auth_origin_reaches_the_session_manager_through_the_builder(monkeypatch):
+    """M0 (merge review): ``--auth-origin`` reaches `make_session_manager` through
+    `session_manager_for`, the one builder ``__main__`` uses; no ``--identity``, no
+    manager."""
+    from fuzzlab.tools import authhttp
+    from fuzzlab.tools.spider import parse_args, session_manager_for
+    calls = []
+    monkeypatch.setattr(authhttp, "make_session_manager",
+                        lambda start, **kw: calls.append((start, kw)) or "MGR")
+    assert session_manager_for(parse_args(["--start", "http://127.0.0.1:3000"])) is None
+    args = parse_args(["--start", "http://127.0.0.1:3000", "--identity", "user",
+                       "--store", "x.db", "--auth-origin", "http://127.0.0.1:3001"])
+    assert session_manager_for(args) == "MGR"
+    assert calls == [("http://127.0.0.1:3000",
+                      {"store_path": "x.db", "auth_origins": args.auth_origin})]
+    assert "http://127.0.0.1:3001" in str(args.auth_origin)
 
 
 def test_a_revealed_forms_route_and_signature_are_scrubbed(tmp_path):
@@ -1161,3 +1187,295 @@ def test_a_slow_response_that_expires_the_session_cookie_is_a_loss(monkeypatch, 
     assert "/rest/marker/chill-query" in gets and "/rest/marker/after2-query" not in gets
     assert sp.spa_counts["spa_query_session_losses"] == 1
     assert sp.spa_query_stopped and "cookie 'sid'" in sp.spa_query_stopped
+
+
+# =====================================================================================
+# Merge with origin-scoped sessions (M1-M8, CC-CRAWL-0027 merge amendment)
+# =====================================================================================
+def test_a_withheld_url_while_a_probe_is_open_is_that_probes_blocked_evidence(
+        tmp_path, caplog):
+    """M1 (review B2-S3a, B4): an other-origin URL withheld while a probe is open
+    carries its markers: it goes to that probe's blocked set only, never to
+    ``skipped_other_origin``, the withheld targets or the log; outside a probe it is
+    recorded as before."""
+    import logging
+    caplog.set_level(logging.INFO)
+    sp = _requests_spider(tmp_path)
+    try:
+        marked = "http://127.0.0.1:8/x?t=fzqaaabcdefgh"
+        sp._probe = {"blocked": set()}
+        sp._note_session_withheld(marked, "document", marked)
+        assert sp._probe["blocked"] == {marked}
+        assert sp.skipped_other_origin == {} and not sp._withheld_targets
+        assert "fzq" not in caplog.text
+        assert sp.session_out_of_origin == 1
+        sp._probe = None
+        sp._note_session_withheld("http://127.0.0.1:8/land", "document")
+        assert list(sp.skipped_other_origin) == ["http://127.0.0.1:8/land"]
+    finally:
+        sp.storage.close()
+
+
+def test_a_probe_route_on_another_origin_is_never_minted_nor_loaded(monkeypatch, tmp_path):
+    """M2 (review B2-S3b): the origin check runs on the probe's route before its
+    markers are minted: the route is recorded under its own URL, no marker exists.
+    (127.0.0.2 is host-scoped: its other ports are in scope, another origin.)"""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.2:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    other = "http://127.0.0.2:8/#/r"
+    planned = [[(other, 1, spa.PROBE_SOURCE)]]
+    minted = []
+    sp._query_on = True
+    sp._cookie_scope = lambda u: u.startswith("http://127.0.0.2:9/")
+    assert sp._other_origin(other)
+    monkeypatch.setattr(sp, "_plan_probes", lambda: planned.pop() if planned else [])
+    monkeypatch.setattr(sp, "_mint_probe", lambda url: minted.append(url))
+    monkeypatch.setattr(sp, "_fetch_static", lambda url: (_ for _ in ()).throw(
+        OSError("no lab")))
+    sp.crawl()
+    assert minted == []
+    assert list(sp.skipped_other_origin) == [other]
+
+
+def _probe_spy(monkeypatch):
+    """Every probe the crawl minted (the dicts themselves: their ``blocked`` sets fill
+    as the loads run)."""
+    from fuzzlab.tools.spider import LocalSpider
+    seen = []
+    real = LocalSpider._mint_probe
+
+    def spy(self, route_url):
+        probe = real(self, route_url)
+        if probe is not None:
+            seen.append(probe)
+        return probe
+    monkeypatch.setattr(LocalSpider, "_mint_probe", spy)
+    return seen
+
+
+def test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothing(
+        monkeypatch, tmp_path, caplog):
+    """M3 + M5 (review B2-S3c, B-M1, B4), real Chromium, a cookie session on
+    127.0.0.2:A, B on another port of 127.0.0.2. ``/goaway`` redirects to B, and its
+    ``x`` seed with it: the seed is withheld (FR-SESS-20) and filed as a write seed,
+    never a point. ``/browse``'s probe sends ``location.href`` to B with this load's
+    marker: B receives nothing, no row or seed comes of it, the URL is that probe's
+    blocked evidence, and no marker reaches ``skipped_other_origin`` or the log."""
+    import logging
+
+    from fuzzlab.tools.spider import LocalSpider
+    from tests.test_session_origin_scope import _App, _mgr
+    chromium_or_skip(monkeypatch)
+    caplog.set_level(logging.INFO)
+    b = _App("127.0.0.2")
+    a = _App("127.0.0.2")
+    shell = (b"<!doctype html><html><head><title>a</title><base href='/'>"
+             b"<script src='/app.js'></script></head><body><p>shell</p></body></html>")
+    script = ("function declare() { return new VueRouter({mode: 'history', routes: [\n"
+              "  { path: '/goaway', component: G },\n"
+              "  { path: '/browse', component: Br },\n]}); }\n"
+              "class Nav{go(t){this.router.navigate([`/goaway`],{queryParams:{x:t}})}}\n"
+              "function read(){ return this.route.snapshot.queryParams.term; }\n"
+              "const m = /[?&]term=([^&]*)/.exec(location.search);\n"
+              f"if (m) addEventListener('load', () => setTimeout(() =>\n"
+              f"  location.href = '{b.base}x?t=' + m[1], 50));\n")
+    a.pages["/"] = a.pages["/browse"] = (200, shell, [])
+    a.pages["/app.js"] = (200, script.encode(), [])
+    a.redirects["/goaway"] = b.base + "land"
+    seen = _probe_spy(monkeypatch)
+    try:
+        sp = LocalSpider(a.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=8000, session_manager=_mgr(
+                             host="127.0.0.2"), identity="user")
+        run_crawl(sp)
+    finally:
+        a.close()
+        b.close()
+    db = str(tmp_path / "s.db")
+    assert b.requests == []                                  # nothing at B, no cookie
+    # M3: the seed went to B: withheld, filed as a write seed
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    assert sources[a.base + "goaway?x=fuzzlab"] == spa.WRITE_SEED_SOURCE
+    # M5: the probe of /browse sent its document to B: blocked evidence of that probe
+    browse = [p for p in seen if p["route_url"] == a.base + "browse"]
+    assert len(browse) == 1
+    assert [u for u in browse[0]["blocked"] if u.startswith(b.base + "x?t=fzq")]
+    assert sp.spa_counts["spa_query_probe_loads"] >= 1
+    assert sp.spa_counts["spa_query_kept"] == 0
+    assert not [u for u in sources if "term=" in u]          # nothing queued
+    assert "fzq" not in db_text(db)                          # no row
+    assert not [u for u in sp.skipped_other_origin if "fzq" in u]
+    assert b.base + "land" in sp.skipped_other_origin        # the seed's, no marker
+    assert "fzq" not in caplog.text
+
+
+def test_a_seeds_leave_reads_the_page_only_when_its_load_committed(tmp_path):
+    """M6 (BUG-0136 review B-S3): a seed whose load never committed (the page still
+    shows an earlier document) queues nothing from ``page.url``; one that committed
+    queues its same-document navigation."""
+    sp = _requests_spider(tmp_path)
+    try:
+        seed = "http://127.0.0.1:9/#/x?a=fuzzlab"
+        sp._doc_url = "http://127.0.0.1:9/#/earlier"            # this load's never came
+        page = _FakePage("http://127.0.0.1:9/#/earlier")
+        with sp._window(page, None, seed, query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["navs"] == []
+        sp._doc_url = seed                                       # committed, then moved
+        page = _FakePage("http://127.0.0.1:9/#/moved")
+        with sp._window(page, None, seed, query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["navs"] == ["http://127.0.0.1:9/#/moved"]
+    finally:
+        sp.storage.close()
+
+
+def test_a_failed_seed_load_checks_the_cookies_and_the_server_not_local_storage(tmp_path):
+    """M7 (D54 B): after a failed seed load the page is ``about:blank`` (X1), which has
+    no localStorage of the app: the window's check is the cookie half and the server's
+    verdict, never the client-side check."""
+    sp, ctx, manager = _session_spider(tmp_path, live=True)
+    try:
+        def no_client_check():
+            raise AssertionError("the localStorage half ran on about:blank")
+        sp._client_session_intact = no_client_check
+        seed = "http://127.0.0.1:9/goaway?x=fuzzlab"
+        sp._doc_url = seed
+        with sp._window(_FakePage("about:blank"), ctx, seed,
+                        query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["session"] == (True, None) and manager.verified == 1
+        ctx.jar = []                                             # and a lost cookie is a loss
+        with sp._window(_FakePage("about:blank"), ctx, seed,
+                        query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["session"][0] is False
+    finally:
+        sp.storage.close()
+
+
+def test_a_query_loads_request_in_flight_is_tracked_until_it_ends(tmp_path):
+    """M8 (review A4-N1): a query load's XHR is in flight from its request until it
+    finishes or fails; outside a query window nothing is tracked."""
+    sp = _requests_spider(tmp_path)
+    try:
+        req = type("R", (), {"url": "http://127.0.0.1:9/rest/late", "resource_type": "xhr",
+                             "method": "GET", "is_navigation_request": lambda s: False,
+                             "failure": None})()
+        sp._win = {"query": spa.SEED_SOURCE, "aborted": 0}
+        sp._on_request(req)
+        sp._on_request(req)
+        assert sp._win["inflight"] == {req.url: 2}
+        sp._on_request_finished(req)
+        sp._on_request_failed(req)
+        assert sp._win["inflight"] == {}
+        sp._win = {"query": None, "aborted": 0}
+        sp._on_request(req)
+        assert "inflight" not in sp._win
+    finally:
+        sp.storage.close()
+
+
+def _window_spy(monkeypatch):
+    from fuzzlab.tools.spider import LocalSpider
+    seen = []
+    real = LocalSpider._after_query_window
+
+    def spy(self, win, url, visited=True):
+        seen.append({"url": url, "writes": win.get("writes", 0),
+                     "blocked": set(win.get("blocked", ())), "visited": visited,
+                     "xhr": list(self._xhr_urls), "session": win.get("session")})
+        return real(self, win, url, visited)
+    monkeypatch.setattr(LocalSpider, "_after_query_window", spy)
+    return seen
+
+
+def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
+        monkeypatch, tmp_path):
+    """M4, M7, M8, real Chromium, an authenticated crawl whose session is in
+    localStorage. ``/goaway?x=`` redirects to a transaction GET its window refuses:
+    the seed's load fails, is never re-sent as a static request and stays a write
+    seed (M4); the page is then ``about:blank``, so the session check reads the cookies
+    and the server, no loss, and the next seed still loads (M7). Each seed load starts
+    from a fresh document, so the previous page's interval POSTs are never its write
+    nor its XHR (M7). ``/late1?z=``'s slow GET is still in flight when the load is
+    read: never queued, never fetched again (M8)."""
+    from fuzzlab.tools.spider import LocalSpider
+    from tests._spa_query_fixture import RedirectSeedSpa
+    from tests.test_forms_phase4 import _LsManager
+    chromium_or_skip(monkeypatch)
+    seen = _window_spy(monkeypatch)
+    lab = RedirectSeedSpa()
+    try:
+        manager = _LsManager(lab.base)
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=3000, session_manager=manager,
+                         identity="user")
+        run_crawl(sp)
+        requests = list(lab.requests)
+    finally:
+        lab.close()
+    db, base = str(tmp_path / "s.db"), lab.base
+    gets = [r[1] for r in requests if r[0] == "GET"]
+    # M4: one load of the seed, in its window; never a static re-send
+    assert gets.count("/goaway?x=fuzzlab") == 1
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    assert sources[base + "goaway?x=fuzzlab"] == spa.WRITE_SEED_SOURCE
+    # M7: no loss, the next seeds loaded and were promoted
+    assert sp.spa_counts["spa_query_session_losses"] == 0 and not sp.spa_query_stopped
+    assert "/rest/marker/_next1-query" in gets
+    assert sources[base + "next1?y=fuzzlab"] == spa.SEED_SOURCE
+    store, run, _counts = _import(db, tmp_path / "u.db")
+    try:
+        params = _params(store, run)
+    finally:
+        store.close()
+    assert not [p for p in params if p[1] == "x"]
+    assert ("/next1", "y", "query") in params
+    # M7: no seed window saw the previous page's POSTs (a write) or requests (an XHR)
+    windows = {w["url"]: w for w in seen}
+    for url in (base + "goaway?x=fuzzlab", base + "next1?y=fuzzlab",
+                base + "late1?z=fuzzlab"):
+        assert windows[url]["writes"] == 0, url
+        assert not [u for u in windows[url]["blocked"] | set(windows[url]["xhr"])
+                    if "/api/tick" in u or u.endswith(("/rest/marker/_", "_goaway",
+                                                       "_next1", "_late1"))], url
+    assert windows[base + "goaway?x=fuzzlab"]["visited"] is False
+    # M8: the late GET was in flight when /late1's seed was read: one fetch only
+    assert gets.count("/rest/late") == 1
+    assert not [u for u in sources if "/rest/late" in u]
+
+
+def test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing(
+        monkeypatch, tmp_path):
+    """M3 (review B2-S3c): a query load whose own document was withheld (another
+    origin, FR-SESS-20) is visited and extracts nothing, as any page -- but a seed is
+    filed as a write seed (never a point) and a probe records nothing. Driven through
+    the crawl loop with a fake page: in a real crawl the query window refuses such a
+    navigation first, so this branch is the fail-closed backstop."""
+    from fuzzlab.tools.spider import SessionWithheld
+    sp = _requests_spider(tmp_path)
+    seed = "http://127.0.0.1:9/goaway?x=fuzzlab"
+    route = "http://127.0.0.1:9/browse"
+    planned = [[(route, 1, spa.PROBE_SOURCE)], [(seed, 1, spa.SEED_SOURCE)]]
+    loads = []
+
+    def withheld(url, fallback=True):
+        loads.append((url, fallback))
+        raise SessionWithheld(url)
+    sp.engine, sp._query_on = "playwright", True
+    sp._page, sp._context = _FakePage("about:blank"), _FakeCtx()
+    sp._query_unpaired = {"term": None}
+    monkeypatch.setattr(sp, "_start_browser", lambda: None)
+    monkeypatch.setattr(sp, "_stop_browser", lambda: None)
+    monkeypatch.setattr(sp, "_plan_probes", lambda: planned.pop() if planned else [])
+    monkeypatch.setattr(sp, "_fetch_rendered", withheld)
+    monkeypatch.setattr(sp, "_goto_and_parse", lambda url: withheld(url))
+    sp.crawl()
+    rows = dict(db_rows(str(tmp_path / "s.db"), "SELECT url, source FROM discovered_pages"))
+    assert (seed, False) in loads                       # M4: a seed never falls back
+    assert rows[seed] == spa.WRITE_SEED_SOURCE
+    probes = [u for u, _f in loads if u.startswith(route + "?term=")]
+    assert len(probes) == 1 and probes[0] not in rows   # the probe recorded nothing
+    assert not [u for u in rows if "term=" in u]

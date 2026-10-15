@@ -598,6 +598,7 @@ class LocalSpider:
         # as <a href> anywhere, so link-following alone can never reach them.
         self._page.on("request", self._on_request)
         self._page.on("requestfailed", self._on_request_failed)      # FR-CRAWL-17, Y1
+        self._page.on("requestfinished", self._on_request_finished)  # FR-CRAWL-17, M8
 
     def _guard(self, context, *, scripts, session=False):
         """The one guard every context this crawl opens gets (BUG-0123, FR-CRAWL-12/13):
@@ -741,8 +742,10 @@ class LocalSpider:
                     self._recheck_query_session(win)
                     win["closed"] = True             # U2: the window closed cleanly
             except PlaywrightError as exc:
-                logging.info(f"the reveal window could not close {page_url} cleanly "
-                             f"({str(exc).splitlines()[0][:80]}); leaving the page")
+                # M5: a probe's URL carries its markers, never logged (scrubbed)
+                logging.info(spa.scrub_markers(
+                    f"the reveal window could not close {page_url} cleanly "
+                    f"({str(exc).splitlines()[0][:80]}); leaving the page"))
                 # every page the window opened is closed, and the route's page left,
                 # before the window is lifted: their timers die with them (review A-S1)
                 self._close_window_pages(win, page)
@@ -783,18 +786,28 @@ class LocalSpider:
         the lift. What the window aborted while leaving is counted with the rest
         (``spa_query_writes_blocked``)."""
         win["own_nav"] = frozenset()
+        url = page.url or ""
+        # M6 (BUG-0136 review B-S3): the page shows this load only when its navigation
+        # was this load's (`_doc_url`) and it is a document of the app -- not
+        # ``about:blank`` after a failed load (X1), nor an error page
+        committed = self._doc_url == page_url and \
+            url.lower().startswith(("http://", "https://"))
         if self._authenticated:
             # S10 (review B-S4): the client-side session check (no network), on the
             # load's own page, before it leaves; a loss stops seed and probe loads. Any
-            # failure of the check itself is a loss (U3); the page still leaves.
+            # failure of the check itself is a loss (U3); the page still leaves. M7: a
+            # load that did not commit left no page of the app to read localStorage
+            # from, so the cookie half and the server's verdict decide instead.
             try:
-                win["session"] = self._client_session_intact()
+                if committed:
+                    win["session"] = self._client_session_intact()
+                else:
+                    ok, why = self._cookies_intact()
+                    win["session"] = self._live_session_intact() if ok else (ok, why)
             except Exception as exc:  # noqa: BLE001 - fail closed: recorded as a loss
                 win["session"] = (False, f"the session check failed "
                                          f"({type(exc).__name__})")
-        url = page.url or ""
-        if win.get("query") == spa.SEED_SOURCE and \
-                url.lower().startswith(("http://", "https://")) and \
+        if win.get("query") == spa.SEED_SOURCE and committed and \
                 spa.visit_key(url) != spa.visit_key(page_url):
             win["navs"].append(url)
         self._close_window_pages(win, page)
@@ -897,6 +910,22 @@ class LocalSpider:
                 return                         # blocked ones are marked at the read
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
+                win = self._win
+                if win is not None and win.get("query"):
+                    # M8: in flight until it finishes or fails (Y1's late-failure race)
+                    flight = win.setdefault("inflight", {})
+                    flight[request.url] = flight.get(request.url, 0) + 1
+        except Exception:
+            pass  # never let instrumentation break a crawl
+
+    def _on_request_finished(self, request):
+        """M8: a query load's request is no longer in flight."""
+        try:
+            flight = (self._win or {}).get("inflight")
+            if flight and flight.get(request.url):
+                flight[request.url] -= 1
+                if not flight[request.url]:
+                    del flight[request.url]
         except Exception:
             pass  # never let instrumentation break a crawl
 
@@ -912,6 +941,7 @@ class LocalSpider:
                 win.setdefault("blocked", set()).add(request.url)
                 if self._probe is not None:
                     self._probe["blocked"].add(request.url)
+            self._on_request_finished(request)
         except Exception:
             pass  # never let instrumentation break a crawl
 
@@ -1056,6 +1086,11 @@ class LocalSpider:
         a script-initiated navigation away, aborted with ERR_ABORTED, leaves the page
         where it was, and it is extracted normally."""
         self.session_out_of_origin += 1
+        if self._probe is not None:
+            # FR-CRAWL-17 (M1): a probe's URL carries markers: blocked evidence of that
+            # probe only, never recorded as skipped nor logged
+            self._probe["blocked"].add(url)
+            return
         if kind in ("document", "landing", "frame", "websocket"):
             if kind in ("document", "landing"):
                 self._withheld_targets.add(url_key(source or url))
@@ -1095,7 +1130,7 @@ class LocalSpider:
             links = [a['href'] for a in soup.find_all('a', href=True)]
         return resp.status_code, ct, title, text, links, []
 
-    def _fetch_rendered(self, url):
+    def _fetch_rendered(self, url, fallback=True):
         """Renders with headless Chromium, then reads links and text from the live DOM.
 
         Chromium refuses to navigate to some responses (downloads,
@@ -1119,6 +1154,10 @@ class LocalSpider:
                 # origin than the session's (R1, T1): nothing is extracted, and no
                 # static fallback (it would file that origin's page under this URL)
                 raise SessionWithheld(url) from None
+            if not fallback:
+                # FR-CRAWL-17 (M4): a seed's load failed inside its window; a static
+                # request would send it again outside the window, so it fails instead
+                raise
             logging.info(f"Browser could not render {url} ({str(e).splitlines()[0][:80]}); "
                          f"falling back to a static request")
             return self._fetch_static(url)
@@ -2298,7 +2337,8 @@ class LocalSpider:
                 c["spa_query_unclean_windows"]:
             lines.append(f"SPA query loads: {c['spa_query_writes_blocked']} request(s) "
                          f"blocked by their window; {c['spa_query_write_seeds']} seed(s) "
-                         f"that blocked a write kept as pages, never points; "
+                         f"kept as pages, never points (a write, an unclean close or a "
+                         f"failed visit); "
                          f"{c['spa_query_marker_in_path']} marker(s) or filler(s) seen in "
                          f"a request path (no point); the step budget stopped "
                          f"{c['spa_query_step_cap']} script scan(s); "
@@ -2329,6 +2369,11 @@ class LocalSpider:
                     self._refuse_query("session lost")     # S10: no more query loads
                     continue
                 if source == spa.PROBE_SOURCE:
+                    if self._other_origin(current_url):
+                        # M2: the route itself is off the session's origins: never
+                        # loaded, recorded under the route's own URL (no markers)
+                        self._note_session_withheld(current_url, "document")
+                        continue
                     # fresh markers for this load only (B2, PA-0090)
                     probe = self._mint_probe(current_url)
                     if probe is None:
@@ -2348,6 +2393,12 @@ class LocalSpider:
                 try:
                     self._current_url = current_url
                     if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE):
+                        # a query load starts from a fresh document (M7): the page
+                        # before it is left first, outside the window, as any crawl
+                        # navigation leaves it, so none of its timers or requests is
+                        # counted as the load's own (a write, an XHR)
+                        with contextlib.suppress(PlaywrightError):
+                            self._page.goto("about:blank", timeout=self.timeout_ms)
                         win = window.enter_context(self._window(
                             self._page, self._context, current_url, query=source))
                         self._probe = probe
@@ -2357,7 +2408,8 @@ class LocalSpider:
                         status, ct, title, text, raw_links, xhr_links = \
                             self._goto_and_parse(current_url)
                     elif self.engine == "playwright":
-                        status, ct, title, text, raw_links, xhr_links = self._fetch_rendered(current_url)
+                        status, ct, title, text, raw_links, xhr_links = self._fetch_rendered(
+                            current_url, fallback=source != spa.SEED_SOURCE)
                     else:
                         status, ct, title, text, raw_links, xhr_links = self._fetch_static(current_url)
                     if probe is not None:
@@ -2408,8 +2460,10 @@ class LocalSpider:
                         # content type, so JSON APIs behind rendered pages land
                         # in the map and get audited like any other URL.
                         for href in xhr_links:
-                            if win is not None and href in win.get("blocked", ()):
-                                continue          # FR-CRAWL-17: blocked in the window
+                            if win is not None and (href in win.get("blocked", ())
+                                                    or href in win.get("inflight", ())):
+                                continue          # FR-CRAWL-17: blocked (or still in
+                                #                   flight, M8) in the window
                             absolute_link = self._queue_xhr(current_url, href)
                             if absolute_link and (self._in_scope(absolute_link)
                                     and not self._destructive(absolute_link)
@@ -2418,10 +2472,18 @@ class LocalSpider:
 
                 except SessionWithheld:
                     # landed on another origin than the session's (FR-SESS-20, R1):
-                    # visited, nothing extracted
-                    self.storage.mark_visited(current_url, 0, depth, source=source)
+                    # visited, nothing extracted. A probe records nothing; a seed is
+                    # filed as a write seed, never a point (M3)
+                    if probe is None:
+                        self.storage.mark_visited(
+                            current_url, 0, depth,
+                            source=(spa.WRITE_SEED_SOURCE if source == spa.SEED_SOURCE
+                                    else source))
+                    visited = False
                 except Exception as e:
-                    logging.error(f"Failed to process {current_url}: {e}")
+                    # M5: a probe's URL (and the error quoting it) carries its
+                    # markers: scrubbed before it is logged
+                    logging.error(spa.scrub_markers(f"Failed to process {current_url}: {e}"))
                     if probe is None:                    # a probe records nothing
                         self.storage.mark_visited(
                             current_url, 0, depth,
@@ -2576,6 +2638,16 @@ def spider_kwargs(args, session_manager=None) -> dict:
     )
 
 
+def session_manager_for(args):
+    """The CLI's session manager, or None without ``--identity``: one place, so
+    ``--auth-origin`` provably reaches it (merge review)."""
+    if not args.identity:
+        return None
+    from fuzzlab.tools.authhttp import make_session_manager
+    return make_session_manager(args.start, store_path=args.store,
+                                auth_origins=args.auth_origin)
+
+
 def parse_args(argv=None):
     p = build_parser()
     args = p.parse_args(argv)
@@ -2599,12 +2671,7 @@ if __name__ == "__main__":
     get_logger("crawler").info("crawler starting",
                                extra={"start": args.start, "engine": args.engine,
                                       "identity": args.identity})
-    session_manager = None
-    if args.identity:
-        from fuzzlab.tools.authhttp import make_session_manager
-        session_manager = make_session_manager(args.start, store_path=args.store,
-                                               auth_origins=args.auth_origin)
-    spider = LocalSpider(args.start, **spider_kwargs(args, session_manager))
+    spider = LocalSpider(args.start, **spider_kwargs(args, session_manager_for(args)))
     spider.crawl()
     if args.store:
         from fuzzlab.core.config import load_config

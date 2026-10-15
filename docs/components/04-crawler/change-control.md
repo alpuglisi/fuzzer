@@ -369,6 +369,59 @@ Newest first.
     the hop test and the M6 test fail (the server got `GET /api/order/confirm?via=go`
     twice); Y3 (no re-check on the failure path) -> its unit test fails. The every-file
     run is recorded with CC-CRAWL-0029.
+- **Merge amendment (2026-10-15; p3-int @ 89268f7 -- origin-scoped sessions, FR-SESS-20 /
+  BUG-0134, BUG-0136, BUG-0137 -- merged into spa-query as f68a077; the consolidated list
+  M0-M10, D55).** Appended. The merge commit carries the conflict resolutions only (the
+  spider CLI tail; the newest-on-top logs, both sides kept). Then:
+  - **M0:** `spider.session_manager_for(args)` is the one builder of the CLI's session
+    manager (`make_session_manager(args.start, store_path=args.store,
+    auth_origins=args.auth_origin)`, None without `--identity`); `__main__` calls
+    `LocalSpider(args.start, **spider_kwargs(args, session_manager_for(args)))` after
+    origin-scope's `parse_args(argv)` validates `--auth-origin`.
+  - **M1:** `_note_session_withheld` diverts to `probe["blocked"]` while a probe is open:
+    a marker URL never reaches `skipped_other_origin`, the withheld targets or the log.
+  - **M2:** a probe route on another origin is recorded under its own URL before
+    `_mint_probe`: never minted, never loaded.
+  - **M3:** the loop's `except SessionWithheld` records nothing for a probe and files a
+    seed as `spa-query-writes`.
+  - **M4:** `_fetch_rendered(url, fallback=True)`: a seed's failed load re-raises
+    instead of falling back to a static request (which would re-send it outside the
+    window); the seed takes the failure path and stays a write seed.
+  - **M5:** a failed probe's log line (and the window's could-not-close line) is passed
+    through `spa.scrub_markers`: the Playwright error quotes the probe URL. (Found by
+    M5's merged test; in this lane's own unmerged code.)
+  - **M6:** `_leave` reads `page.url` as a seed's same-document navigation only when
+    the load committed (`self._doc_url == page_url` and the page is an `http(s)`
+    document, not `about:blank` / an error page).
+  - **M7:** for a load that did not commit, `_leave`'s session check is
+    `_cookies_intact` then `_live_session_intact` (the page is `about:blank` after X1:
+    no localStorage of the app). Mechanism choice, flagged: every seed and probe load
+    first goes to `about:blank` **outside** its window, so the previous page's interval
+    POSTs and requests are never the load's write or XHR (the failed seed's own goto
+    left that page running for the whole window otherwise).
+  - **M8:** a query window tracks its non-probe XHR/fetch URLs in flight
+    (`request` -> `requestfinished` / `requestfailed`); the seed's XHR loop skips them
+    as it skips blocked ones.
+  - **M9:** FR-CRAWL-17's residuals say ordinary failures also block; the summary reads
+    "seed(s) kept as pages, never points (a write, an unclean close or a failed visit)".
+  - **M10:** the `query_crawl` fixture snapshots `lab.requests` after its crawl; the hop
+    test reads the snapshot.
+  - Residuals, stated: a seed's refused GET redirect hop is a navigation target, queued
+    through the normal gates (W2), so it may be crawled later as a page.
+    No session code changed (no CC-SESS cross-reference).
+  - Tests: `tests/test_spa_query.py` (+9: the `--auth-origin` builder test, M1, M2,
+    M3, M5 (with M3's real-browser path, A and B on 127.0.0.2), M6, M7 unit, M8 unit, and
+    the real-browser M4/M7/M8 crawl of `RedirectSeedSpa`); `tests/_spa_query_fixture.py`
+    (`RedirectSeedSpa`).
+  - Effectiveness (M0-M10, assessed 2026-10-15): `tests/test_spa_query.py` 103 passed, 0
+    skipped (real Chromium). Mutations, each reverted: M1 (no divert) -> the M1 test
+    fails; M2 (no origin check) -> the M2 test fails (the route was minted); M6 (no
+    `_doc_url` check) -> the M6 test fails; M7 (localStorage check always) -> the M7
+    unit test and the real crawl fail (`spa_query_session_losses` 1); M7 (no
+    `about:blank` before the window) -> the real crawl fails (`/api/tick` in the seed's
+    window); also M3 (seed filed as `spa-query`), M4 (static fallback: the seed sent
+    twice), M8 (no in-flight skip: `/rest/late` fetched 3 times) and the M5 log scrub
+    each make their test fail.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:

@@ -217,3 +217,59 @@ class SessionCookieSpa(_Lab):
     index = _HASH_INDEX.replace("/main.js", "/sc.js").replace("#/about", "#/after2")
     script = ("/sc.js", _COOKIE_QUERY_JS)
     responders = {"/rest/expire": _expire}
+
+
+_REDIRECT_SEED_JS = r"""
+// the declarations are read by the scan, never run (no VueRouter on the page)
+function declare() { return new VueRouter({mode: 'history', routes: [
+  { path: '/goaway', component: Goaway },
+  { path: '/next1', component: Next1 },
+  { path: '/late1', component: Late1 },
+]}); }
+class Nav{go(t){this.router.navigate([`/goaway`],{queryParams:{x:t}});
+this.router.navigate([`/next1`],{queryParams:{y:t}});
+this.router.navigate([`/late1`],{queryParams:{z:t}})}}
+const q = location.search;
+fetch('/rest/marker/' + location.pathname.replace(/\//g, '_') + (q ? '-query' : ''))
+  .catch(() => {});
+// a page without a query keeps POSTing (M7: never the next query load's write)
+if (!q) setInterval(() => fetch('/api/tick', {method: 'POST', body: 't'})
+  .catch(() => {}), 50);
+// a slow GET still in flight when the load is read (M8)
+if (location.pathname === '/late1' && q) fetch('/rest/late').catch(() => {});
+"""
+
+_REDIRECT_SEED_INDEX = ("<!doctype html><html><head><title>redir</title><base href='/'>"
+                        "<script src='/redir.js'></script></head><body><p>shell</p>"
+                        "</body></html>")
+
+
+def _goaway(handler):
+    """``/goaway?x=``: the seed's own document redirects to a transaction GET, a hop
+    the window refuses (M4, M7); a bare ``/goaway`` is the app shell."""
+    if "x=" in handler.path:
+        handler.send_response(302)
+        handler.send_header("Location", "/api/order/confirm?via=seed")
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+        return
+    body = _REDIRECT_SEED_INDEX.encode()
+    handler._send(200, "text/html", body)
+
+
+def _late(handler):
+    """``/rest/late``: answers after 6 s (M8: still in flight when a 3 s-timeout load
+    is read)."""
+    import time
+    time.sleep(6.0)
+    handler._send(200, "application/json", b'{"late":true}')
+
+
+class RedirectSeedSpa(_Lab):
+    """A history-mode app whose ``/goaway`` seed's own document redirect is refused by
+    its window (M4, M7), then ``/next1`` and ``/late1`` seeds; pages without a query
+    POST on an interval; the ``/late1`` seed's GET answers late (M8)."""
+    index = _REDIRECT_SEED_INDEX
+    script = ("/redir.js", _REDIRECT_SEED_JS)
+    history = True
+    responders = {"/goaway": _goaway, "/rest/late": _late}
