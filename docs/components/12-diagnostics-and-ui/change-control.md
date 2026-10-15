@@ -159,6 +159,9 @@ Newest first.
   regular files of this user) are removed with it, anything else in `backups/` left and
   reported (`_remove_own_backups`; also the security reviewer's item 2). Security — 1
   blocking (BUG-0456, CORE; see CC-CORE-0450).
+- Code review round 5 (on 4f6c46b): correctness **APPROVE**, security **APPROVE** — the
+  review gate is closed (both agree). One CORE note applied and one CORE follow-up
+  recorded (CC-CORE-0450).
 - Effectiveness (assessed pending): pending.
 
 ### CC-UI-0054 — The run page names why a check was inconclusive (forms phase 3, lane J) (2026-10-14)

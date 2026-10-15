@@ -165,10 +165,9 @@ def reference_schema(version: int) -> dict[tuple[str, str, str], str]:
     memory, so the allowlist is derived from the one source of truth (PA-0001)."""
     conn = sqlite3.connect(":memory:")
     try:
-        conn.execute("CREATE TABLE IF NOT EXISTS schema_version ("
-                     "  version INTEGER PRIMARY KEY,"
-                     "  applied_at TEXT NOT NULL DEFAULT (datetime('now'))"
-                     ")")
+        # The migrations' own bootstrap: with byte-exact comparison a second copy of
+        # this text would refuse every store the moment either drifted (PA-0001).
+        migrations._ensure_version_table(conn)
         for v, sql in sorted(migrations.MIGRATIONS):
             if v > version:
                 break

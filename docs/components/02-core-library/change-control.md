@@ -105,6 +105,17 @@ Newest first.
   PA-0002 sweep: the only other `" ".join(….split())` in `fuzzlab/` is `core/forms.py`'s
   option-label text (HTML, collapsed as a browser does; not a safety comparison).
   `BACKUPS_DIRNAME` is now the one name for the backups directory (PA-0001).
+- Code review round 5 (on 4f6c46b): both reviewers **APPROVE**. Applied the correctness
+  reviewer's note: `reference_schema` bootstraps `schema_version` with the migrations' own
+  `_ensure_version_table` instead of a second copy of its text (with byte-exact
+  comparison, a drift in either copy would refuse every store; PA-0001). Verified: the
+  reference equals a fresh store's `sqlite_master` exactly. The security reviewer's
+  bypass attempts (NULL vs `''` sql, BLOB sql, NUL/invalid UTF-8, case and `tbl_name`
+  variants, a repointed rootpage — refused by `quick_check`, and above its 512 MiB cap only
+  wrong-but-typed rows) all failed. **Follow-up (not built; cross-component):**
+  `SQLITE_DBCONFIG_DEFENSIVE` on `open_store` and the inspect/summary connections
+  (Python ≥ 3.12 `setconfig`) as defence in depth for FTS5 shadow data `quick_check`
+  does not validate — a change to every tool's connection, for its own CC entry.
 - Effectiveness (assessed pending): pending.
 
 ### CC-CORE-0052 — `text_destructive_reason`: texts are never judged through a URL (BUG-0131); card security codes are sensitive (2026-10-14)
