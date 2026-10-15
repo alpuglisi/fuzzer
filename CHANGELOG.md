@@ -4,6 +4,13 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (UI research: competitive UI and information-architecture analysis)
+- Added `docs/research/ui-ia-competitive-analysis.md`. It is research only, with no code
+  changes, and serves as the evidence base for the project-file, URL-tree and
+  working/benchmark redesign sessions. It surveys Burp, ZAP, Nessus, Greenbone, Huntress,
+  NinjaOne and Aikido from cited public sources, maps fuzzlab's current UI and CLI pain
+  points, and gives ranked recommendations with wireframes.
+
 ## 2026-10-14 (BUG-0133 review: a coincidental number beside the echo is pinned)
 - Reviewers A and B agreed; their nits: tests pin that an evaluation marker never
   confirms on a number shown anyway beside an edit-form echo (the second sample decides),
