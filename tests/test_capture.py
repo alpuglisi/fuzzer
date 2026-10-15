@@ -638,3 +638,42 @@ def test_the_funnel_reports_discovered_buildable_and_refused(tmp_path):
     assert out["C1"]["buildable"] is False
     assert out["C1"]["refused"] == "captured write, not sent: --no-probe-captured-writes"
     assert out["C3"]["buildable"] is True and out["C3"]["refused"] is None
+
+
+# =====================================================================================
+# The spider's recorder (LocalSpider._capture / _note_ws_drop), offline
+# =====================================================================================
+def _spider(tmp_path):
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider(H + "/", db_name=str(tmp_path / "s.db"), engine="requests")
+    sp._capture_on = True
+    return sp
+
+
+def test_the_recorder_counts_by_reason_caps_transport_churn_and_ws_rows(tmp_path,
+                                                                       monkeypatch):
+    sp = _spider(tmp_path)
+    monkeypatch.setattr(capture, "MAX_WS_RECORDS", 3)
+    try:
+        poll = _Req(f"{H}/socket.io/?EIO=4&transport=polling&t=a", body=b"2")
+        for _ in range(4):                                  # an aborted poller retrying
+            sp._capture(poll, "captured, not sent: a POST request")
+        sp._capture(_Req(f"{H}/api/items/1", method="DELETE", body=b""),
+                    "captured, not sent: a DELETE request")
+        sp._capture(_Req(f"{H}/api/x/delete", method="GET", body=None),
+                    capture.WHY_GET_RULE + ": a destructive GET")
+        for i in range(5):
+            sp._note_ws_drop(f"ws://127.0.0.1:8080/ws", f"ping {i}")
+        sp._probe = {"blocked": set()}                       # a probe records nothing
+        sp._capture(_Req(f"{H}/api/probe-only"), "captured, not sent: a POST request")
+    finally:
+        sp.storage.close()
+    c = sp.spa_counts
+    assert (c["transport_seen"], c["transport_recorded"], c["transport_churn"]) == (4, 1, 3)
+    assert c["deletes_blocked"] == 1 and c["get_refused_by_rule"] == 1
+    assert (c["ws_dropped"], c["ws_dropped_recorded"]) == (5, 3)
+    assert f"{H}/api/x/delete" in sp._capture_refused_urls      # never queued
+    rows = _rows(tmp_path, "SELECT url, source FROM discovered_requests")
+    assert not [u for u, _s in rows if u.endswith("probe-only")]
+    assert [s for u, s in rows if "socket.io" in u] == ["transport"]
+    assert len(_rows(tmp_path, "SELECT * FROM ws_dropped")) == 3

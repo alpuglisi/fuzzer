@@ -342,6 +342,9 @@ def transport_protocol(url: str, protocols=()) -> str | None:
 #: Transport rows recorded per (protocol, URL key): the rest of an aborted poller's
 #: reconnect churn is counted only (DISC-CAPTURE §7).
 MAX_TRANSPORT_ROWS_PER_URL = 1
+#: Dropped WebSocket messages recorded per crawl (a held socket's pings would grow the
+#: table without bound); the rest are counted (``ws_dropped``) only.
+MAX_WS_RECORDS = 500
 
 
 # --- egress the route never sees (DISC-CAPTURE §2) ----------------------------------------

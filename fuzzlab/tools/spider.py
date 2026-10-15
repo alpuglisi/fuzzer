@@ -880,7 +880,9 @@ class LocalSpider:
     def _note_ws_drop(self, url, message=None):
         if self._capture_on:
             self.spa_counts["ws_dropped"] += 1
-            if self._probe is None:              # a probe load records nothing
+            if self._probe is None and \
+                    self.spa_counts["ws_dropped_recorded"] < capture.MAX_WS_RECORDS:
+                # a probe load records nothing; a held socket's pings are bounded
                 try:
                     self.storage.record_ws_drop(self._capture_page or self._current_url,
                                                 url, message, self._session_secrets())
