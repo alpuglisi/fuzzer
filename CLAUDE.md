@@ -136,7 +136,7 @@ ERROR_LOG line — that is the exact corner that has been cut before.
 
 If you are an orchestrating session dispatching concurrent build lanes/sub-agents against
 this repo: read `docs/MULTI_AGENT_ORCHESTRATION.md` before dispatching anything. In brief —
-run independent lanes in parallel and never let an eligible one sit idle, but never two
+run independent lanes in parallel and never let an eligible one sit idle (eligible = within the progress triggers below), but never two
 lanes on the same file without a planned merge order; always independently verify a
 lane's work yourself before merging (`scripts/verify_change.py` on the committed tree,
 read the diff, check bookkeeping — never trust a self-report alone); restrict to offline-buildable work
@@ -148,6 +148,22 @@ merge friction across concurrent lanes; and when your own instructions to a sub-
 specify *how* a task must be done (not just what it must produce), require that sub-agent
 to confirm which mechanism it actually used, and to stop and flag rather than silently
 substitute if the specified one is unavailable.
+
+**Progress governance (mandatory, hook-enforced; `PA-0141`..`PA-0147`, §8 of that doc).**
+- Before the first dispatch, open a goal ledger with
+  `scripts/orchestration_guard.py goal open`, using the user's own success metric,
+  measured. Register every work item, and tag every dispatch with `[item: <ID>]`.
+- Checkpoint the metric every 3 h of unattended work, and push the `report` to the user.
+- When the goal stalls (6 h without improvement), stop dispatching, report and wait for
+  the user. "Keep going" instructions do not cover a stall.
+- The other triggers that stop an item until the user writes:
+  - a third review round;
+  - work the session opened itself;
+  - a second bug spawned by one item's fixes;
+  - an item over its 4 h budget;
+  - a fourth concurrent item, or two items on one file.
+- Status answers lead with the `report`. After a context compaction, compare progress
+  with the goal before dispatching; a summary's task list is not authorisation.
 
 ## Canonical policy docs (the detail behind this summary)
 

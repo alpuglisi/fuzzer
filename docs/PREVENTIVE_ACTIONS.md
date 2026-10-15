@@ -332,8 +332,10 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   cover. This is a session-conduct rule, not a fix for a fuzzlab code defect — a
   different root cause from PA-0019's bookkeeping-recall gap (that one is about
   recalling *what to record*; this one is about recalling *what was already
-  authorized*). (from BUG-0029)
-  - Enforced by: none — a session-conduct rule
+  authorized*). (from BUG-0029) *(Amended by BUG-0141.)* This rule never applies to a
+  stall, an overrun or a cap: PA-0141..PA-0146 define those as check-in triggers that
+  standing "keep going" instructions do not cover.
+  - Enforced by: none — a session-conduct rule; its exceptions are enforced by PA-0141..PA-0146
 - **PA-0033** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
   PA-0033 reuses as-is): PA-0020 established that a bug whose root cause is "my own
   missed or inconsistent self-check" needs mechanical enforcement, not a clearer written
@@ -1992,3 +1994,77 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   *(Review.)* Go-template SSTI now carries a second, raw-string form, so PA-0139(2)'s
   stated single-shape confirmers are XXE (`"`) and CRLF (raw `\r\n`).
   - Enforced by: tests/test_m6_payload_quoting.py::test_the_sentinel_call_comes_in_three_quoting_shapes, tests/test_m6_payload_quoting.py::test_a_sink_behind_a_single_quoted_evaluation_is_confirmed
+
+- **PA-0141** — Supersedes `PA-0032` for one case: **progress, not activity, is what
+  authorises continued autonomous work.**
+  1. **Open a goal before dispatching.** Any session that dispatches agents opens a goal
+     ledger first: `scripts/orchestration_guard.py goal open --text … --metric …
+     --baseline N --evidence <run output>`. The metric is the user's own measure of
+     success (e.g. confirmed findings per live run), measured, not estimated.
+  2. **Checkpoint every 3 hours of unattended work.** Run a real measurement, record it
+     with `checkpoint`, and send the user the `report` with PushNotification.
+  3. **A stall is a check-in trigger.** If the metric has not improved for 6 hours and
+     the user has not written, that is a stall. Stop dispatching, report and wait for the
+     user. Standing "keep going" or "don't wait for me" instructions do not cover a
+     stall. PA-0032 still forbids asking at a natural stopping point the instructions
+     cover; it never forbids reporting a stall.
+  4. **The hooks enforce this.** The dispatch gate denies dispatch during a stall, and the
+     Stop hook refuses to end a turn with a checkpoint overdue or a stall unreported.
+     (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_a_stalled_metric_denies_dispatch_until_the_user_writes, tests/test_orchestration_guard.py::test_a_stall_needs_a_push_notification_before_the_turn_ends, tests/test_orchestration_guard.py::test_a_checkpoint_falls_due_after_three_unattended_hours, tests/test_orchestration_guard.py::test_dispatching_without_a_ledger_is_caught_at_the_stop, tests/test_orchestration_guard.py::test_replay_of_the_2026_10_14_incident_stops_six_hours_in
+
+- **PA-0142** — **Review rounds are capped.**
+  1. **At most 3 review requests per work item** between user contacts. A request is any
+     dispatch to a registered reviewer, or one tagged `[review]`.
+  2. **After the third round, ask the user.** Do not open a fourth. Report what the
+     rounds keep finding and propose one of: ship with stated residuals, narrow the
+     scope, or redesign.
+  3. **Reviewers sort their findings** into must-fix (correctness, safety, the goal) and
+     follow-up. Only must-fix items enter the next round. Follow-ups go to the ledger as
+     self-originated items (PA-0143). (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_review_rounds_are_capped_and_counted_from_real_dispatches
+
+- **PA-0143** — **Work the session opens itself waits for the user.** This covers a
+  reviewer's suggestion, a hardening, a follow-up feature, or a known gap filed as a
+  bug. Record it with `item add … --origin self`; it is not dispatched until the user
+  has written after it was opened. List every such item in the next report. The one
+  exception is a defect that blocks an active item (`--kind bug --blocks <item>`): fix
+  it under the bug protocol. (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_work_the_session_opened_itself_waits_for_the_user
+
+- **PA-0144** — **A fix that keeps spawning bugs is stopped, not fixed forward.**
+  1. **Two bugs spawned by one item stop it.** When one item's fixes have spawned 2 bugs
+     (`item add … --spawned-by <item>`), dispatch for that item and its bugs stops.
+  2. **Measure, then redesign.** Measure the shared mechanism's real behaviour (`MULTI_AGENT_ORCHESTRATION.md`
+     §7), write down a redesign, and take it to the user before the next fix. This
+     extends the retrospective's chain C1 (7 bugs in the navigation guard) into a
+     trigger. (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_a_fix_that_keeps_spawning_bugs_forces_a_stop
+
+- **PA-0145** — **Every dispatched item has a time budget.** The default is 4 hours of
+  wall clock; set it with `--budget-hours` when you know better. Past the budget,
+  dispatch for that item stops until the user has seen the overrun and chosen:
+  continue, cut scope, or drop it. A user message restarts the budget. (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_an_item_over_budget_is_held_and_others_are_not
+
+- **PA-0146** — **Limit concurrent work and keep it apart.**
+  1. **At most 3 active items** at a time.
+  2. **No two active items change the same file** unless one is declared to follow the
+     other (`--after`).
+  3. **Checked at both ends.** Declared files are checked at `item add`. The active
+     items' real branch diffs (`--branch`/`--base`) are compared at every Stop.
+
+  This makes the harness lane's "no two lanes on one file without a planned merge order"
+  (MULTI_AGENT_ORCHESTRATION §1) mechanical. (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_wip_limit_and_declared_file_overlap, tests/test_orchestration_guard.py::test_audit_finds_two_active_branches_changing_one_file
+
+- **PA-0147** — **Report from the ledger, and re-ground after every compaction.**
+  1. **Lead status answers with the report.** Every answer to a status or progress
+     question, and every checkpoint notice, starts with the guard's `report`: metric
+     history, last improvement, items, rounds, spawned bugs, triggers. Only then does it
+     narrate.
+  2. **A summary's pending list is not authorisation.** After a context compaction or
+     resume, the "pending tasks / next step" list is a record, not authorisation. Compare
+     progress with the goal before the next dispatch; the SessionStart hook prints the
+     report for this. (from BUG-0141)
+  - Enforced by: tests/test_orchestration_guard.py::test_after_a_compaction_the_session_is_shown_the_goal

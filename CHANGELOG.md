@@ -4,6 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (process: progress governance for autonomous orchestration, BUG-0141)
+- **Why:** an orchestrating session ran about 15 hours (2026-10-14 17:57 → 10-15 09:01 UTC) on
+  review rounds, self-opened follow-ups and a fix chain. Confirmed Juice Shop findings per
+  run stayed at 6, and the user was not told until they intervened. Its written rules
+  pushed away from checking in, and nothing measured progress.
+- **What:**
+  - `scripts/orchestration_guard.py` plus three Claude Code hooks: a PreToolUse dispatch
+    gate, a Stop check, and a SessionStart report after compaction. They keep a goal
+    ledger with a measured metric and enforce: checkpoints every 3 h; a 6 h stall stops
+    dispatch until the user writes; 3 review rounds per item; self-opened work waits for
+    the user; 2 spawned bugs stop an item; a 4 h item budget; a WIP limit of 3 and no
+    file overlap.
+  - `tests/test_orchestration_guard.py` (22 tests, including a replay of the incident).
+  - PA-0141..PA-0147; PA-0032 amended; the overnight plan's "never stop building"
+    amended; MULTI_AGENT_ORCHESTRATION §1 qualified and §8 added; CLAUDE.md
+    orchestration summary updated.
+  - Process tooling, so no component change-control entry (CLAUDE.md, governance docs).
+
 ## 2026-10-15 (process: a verification harness, enforced PAs and a shared-primitive table)
 - **Why:** the retrospective of BUG-0110..BUG-0139 found every one of the 25 bugs
   happened while a prose PA already applied, while the AST guards held inside their

@@ -59,3 +59,5 @@ docs/research/corpus-validation-audit.jsonl
 # custom-named run via OUT_FILE=...) -- a per-run artifact against a live
 # lab, never a tracked deliverable, same reasoning as the audit log above.
 on_host_results*.txt
+# BUG-0141 / PA-0141: the orchestration ledger is local session state, never committed
+.claude/orchestration/

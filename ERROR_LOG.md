@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-15 — Orchestration: about 15 hours of autonomous work without progress on the goal and without telling the user (fixed, BUG-0141/PA-0141..0147)
+- **Symptom:** from 2026-10-14 17:57 to 2026-10-15 09:01 UTC, the orchestrating session dispatched review rounds, follow-ups and merge fixes:
+  - 39 commits, 42 review requests, 82 review-fix items and 6 bug numbers;
+  - confirmed Juice Shop findings per run stayed at 6 (7 distinct);
+  - no progress report or notification reached the user until they asked.
+- **Root cause:** the loop had no mechanical progress governance: no goal metric, checkpoint, stall trigger, review-round cap, scope gate, fix-chain trigger or time budget. The project's written rules discouraged checking in (PA-0032, the overnight plan's "never stop building", "never let a lane sit idle").
+- **Remediation:**
+  - `scripts/orchestration_guard.py` with PreToolUse, Stop and SessionStart hooks: a goal ledger; checkpoints every 3 h; a 6 h stall stops dispatch until the user writes; at most 3 review rounds per item; self-opened work waits for the user; 2 spawned bugs stop an item; a 4 h item budget; a WIP limit of 3 and no file overlap.
+  - PA-0141..0147; PA-0032 and the overnight plan amended; MULTI_AGENT_ORCHESTRATION §8.
+  - See `docs/bugs/BUG-0141-orchestration-ran-without-progress-or-escalation.md`.
+- **Status:** Fixed (hooks take effect when a session loads them; residuals in the bug doc).
+
 ## 2026-10-15 — Oracle/M6: a DOM XSS behind a quote-sensitive data path was never confirmed (fixed, BUG-0139/PA-0139)
 - **Symptom:** live on Juice Shop, the crawl seeded `#/track-result?id=` and M6 loaded it with every payload, but the candidate was "checked", never confirmed. A true-positive DOM XSS was missed.
 - **Root cause:** every M6 payload called `__fzlbHit('TOKEN')` with single quotes. `GET /rest/track-order/:id` evaluates the id inside a single-quoted server-side string, so a `'` answers 500 and nothing is echoed or rendered: a guaranteed miss for that sink. The confirmer had one quoting shape and no stated limit (PA-0124(2) was applied to the open redirect only).

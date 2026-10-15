@@ -17,6 +17,10 @@ this doc's numbering-collision fix; see below).
 - The moment an agent completes its lane successfully, reassign it (or
   dispatch a fresh one) to the next unblocked backlog item. Never let an
   eligible, dependency-satisfied lane sit idle while agent capacity is free.
+  *Eligible* means within §8's limits. An item held by a trigger (a stall, the
+  review-round cap, an overrun budget, a bug chain, or self-opened scope awaiting
+  the user) is **not** eligible. Idle lanes are the correct state while the user
+  decides (BUG-0141).
 - Scope to offline-buildable work. Nothing that sends real traffic to a
   target, touches production infrastructure, or otherwise carries genuine
   cross-component/downstream risk gets built or skipped silently — it gets
@@ -166,6 +170,10 @@ For these, do the safe/verifiable parts, then stop and present the specific
 open question with your recommendation — rather than either quietly forcing
 a decision through or refusing to make any progress at all.
 
+§8's triggers are a fourth case, and they are mechanical: when one fires, stop
+dispatching and report, whatever the standing instructions say about decision
+points.
+
 ## 6. Shared strict-xfail sentinels across concurrent lanes
 
 A cross-emitter (or otherwise cross-lane) offline check sometimes pins a
@@ -221,3 +229,56 @@ Why: in BUG-0110..BUG-0139, 15 of 25 bugs came from a fixture that did not model
 the real data path or from browser behaviour that was assumed rather than
 measured (classes T1 and T2), and the most productive review technique was a
 reviewer measuring in real Chromium.
+
+## 8. Progress governance: the goal ledger and its triggers (BUG-0141)
+
+An orchestrating session once ran about 15 hours on review rounds, self-opened
+follow-ups and a fix chain. Its goal metric moved by one finding, and it never told
+the user. Every rule it had was prose, and several (PA-0032, the overnight plan's
+"never stop building", §1's "never idle") pushed it to keep going. These rules are
+therefore enforced by `scripts/orchestration_guard.py` through Claude Code hooks
+(`.claude/settings.json`). The hooks read the session transcript, so only a real
+user message (or an answer to a question) clears an escalation.
+
+**Before the first dispatch, open the goal ledger:**
+
+    scripts/orchestration_guard.py goal open --text "<the user's goal>" \
+        --metric "<the user's measure, e.g. confirmed findings per live run>" \
+        --baseline N --evidence <output of the run that measured N> \
+        --reviewer <reviewer agent id> ...
+
+Register each work item before dispatching it, and tag every dispatch with it:
+
+    scripts/orchestration_guard.py item add <ID> --title "..." --kind feature|bug|safety|process|measurement \
+        --origin user|self [--blocks <active item>] [--spawned-by <item>] \
+        [--files a.py,dir/] [--branch b --base ref] [--after <item>] [--budget-hours H]
+
+Every Agent, SendMessage, Workflow or remote-session dispatch carries `[item: <ID>]`.
+A review request also carries `[review]`, unless it goes to a registered reviewer.
+Read-only agents (Explore, Plan) and messages that start with `STOP` are exempt.
+
+| Trigger | Default | Effect | Cleared by |
+|---|---|---|---|
+| Checkpoint due (PA-0141) | 3 h since the last checkpoint or user message | Stop hook refuses to end the turn | `checkpoint --value N [--evidence …]` and a PushNotification with the `report` |
+| Stall (PA-0141) | metric not improved for 6 h, no user message | all dispatch denied; Stop needs a PushNotification | a user message |
+| Review cap (PA-0142) | 3 review requests for an item since the user last wrote | further review of that item denied | a user message |
+| Self-opened scope (PA-0143) | item `--origin self`, not a blocking defect | dispatch for it denied | a user message after it was opened |
+| Bug chain (PA-0144) | 2 bugs `--spawned-by` one item | dispatch for the item and its bugs denied | a user message (after a measured redesign is proposed) |
+| Budget (PA-0145) | 4 h per active item | dispatch for it denied | a user message (restarts the budget) |
+| WIP / overlap (PA-0146) | 3 active items; shared files | `item add` refused; Stop blocks on real branch overlap | finish, drop, or `--after` |
+| No ledger | 2 dispatches in 2 h with no goal | Stop blocks | `goal open` |
+
+**Reporting (PA-0147).**
+- Answer every status question, and every checkpoint, with
+  `scripts/orchestration_guard.py report` first.
+- After a compaction, the SessionStart hook prints that report. Compare progress with
+  the goal before the next dispatch; the summary's task list is not authorisation.
+
+**Reviewers (PA-0142).** Each review request asks the reviewer to sort findings into
+*must-fix* (correctness, safety, the goal) and *follow-up*. Only must-fix items go back
+to the lane; follow-ups become `--origin self` ledger items for the user to choose from.
+
+**Defaults** live in the ledger's `config` and can be changed per goal (edit
+`.claude/orchestration/ledger.json`, which is git-ignored local state). Loosening a
+default is itself a decision for the user.
+
