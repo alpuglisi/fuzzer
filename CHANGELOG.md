@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (Juice Shop answer key reviewed against every challenge)
+- **What:** the Juice Shop ground truth was reviewed against all 116 challenges: 24 are injection-class, 18 were already covered, and 5 new positive cases are added (JUICE-0014..0018; 18 cases, 15 positive). The 92 exclusions and their reasons are in CC-LAB-0261.
+- **Why:** measure detection against what Juice Shop actually contains, not only what earlier runs happened to reach. The 5 new cases are unreachable today, and the score now shows that.
+
 ## 2026-10-15 (goal metric: a per-stage funnel for answer-key runs)
 - **What:** `scripts/funnel_report.py` reports, for each positive answer-key case, the furthest stage a run reached (reached, candidate, probed, confirmed; confirmation must match the case's class), with per-stage counts. Juice Shop baseline: reached 8/15, candidate 8, probed 6, confirmed 6.
 - **Why:** two days of per-miss fixes left the dominant loss (discovery: 7/15 never reached) unmeasured. The progress goal had been opened on a proxy metric (suite failures), which let the BUG-0141 stall guard watch the work queue instead of the user's goal; the goal now tracks discovery reach.

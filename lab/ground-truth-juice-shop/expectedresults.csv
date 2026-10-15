@@ -15,3 +15,8 @@ JUICE-0010,/file-upload,POST,file,body,xxe,true,/file-upload,sink,,direct
 JUICE-0011,/rest/products/search,GET,q,query,xss-reflected,false,/rest/products/search,sink,,direct
 JUICE-0012,/profile/image/url,POST,imageUrl,body,open_redirect,false,/profile/image/url,sink,,direct
 JUICE-0013,/rest/user/login,POST,email,body,xss-reflected,false,/rest/user/login,sink,,direct
+JUICE-0014,/api/Products,POST,description,body,xss-stored,true,/api/Products,sink,,direct
+JUICE-0015,/api/Users,POST,email,body,xss-stored,true,/api/Users,sink,,direct
+JUICE-0016,/rest/saveLoginIp,GET,True-Client-IP,header,xss-stored,true,/rest/saveLoginIp,sink,,direct
+JUICE-0017,/dataerasure,POST,layout,body,path_traversal,true,/dataerasure,sink,,direct
+JUICE-0018,/b2b/v2/orders,POST,orderLinesData,body,insecure_deserialization,true,/b2b/v2/orders,sink,,direct

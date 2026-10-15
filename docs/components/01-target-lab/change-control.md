@@ -3,6 +3,54 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0261 — The Juice Shop ground truth reviewed against all 116 challenges: 5 new positives (2026-10-15)
+- Change: `lab/ground-truth-juice-shop/` (labels.json, expectedresults.csv) gains
+  JUICE-0014..0018, all `expected_vulnerable: true`, each with a `[reach: none - ...]`
+  note, a `[prov: <challenge key>]` and source citations. The contract now has 18 cases
+  (15 positive, 3 negative). `injection-points.json` is unchanged: no point is added
+  (each would send traffic the project's own gates refuse, or could never be
+  confirmed).
+  - JUICE-0014: restfulXss, stored XSS via `POST /api/Products` `description`.
+  - JUICE-0015: persistedXssUser, stored XSS via `POST /api/Users` `email`.
+  - JUICE-0016: httpHeaderXss, stored XSS via `GET /rest/saveLoginIp`
+    `True-Client-IP` (header).
+  - JUICE-0017: lfr, path traversal via `POST /dataerasure` `layout`.
+  - JUICE-0018: rce and rceOccupy, code evaluation via `POST /b2b/v2/orders`
+    `orderLinesData`; keyed `insecure_deserialization`, Juice Shop's own category.
+- Review of the 116 challenges in `data/static/challenges.yml`:
+  - 24 are injection-class. 18 were already covered by JUICE-0001..0010 (same input
+    and class); 6 are new and give the 5 cases above.
+  - 92 are excluded (FR-LAB-303 asks for the reasons here):
+    - Injection, 6: noSqlCommand, noSqlOrders and noSqlReviews (no NoSQL class; a
+      path parameter or PATCH, which the contract cannot express); three chatbot
+      prompt injections (no class).
+    - XSS, 1: videoXss (zip-slip upload).
+    - Insecure deserialization, 1: yamlBomb (an upload, and a DoS). JUICE-0010 is
+      an upload too, so this is a judgement call.
+    - Not injection: Broken Access Control 11, Sensitive Data Exposure 17 (emailLeak's
+      JSONP callback is sanitised by Express), Improper Input Validation 12 (nullByte
+      is an extension bypass inside /ftp, not traversal), Vulnerable Components 8,
+      Broken Authentication 9, Miscellaneous 6, Security Misconfiguration 5
+      (svgInjection executes no script), Cryptographic Issues 5, Observability
+      Failures 4, Broken Anti Automation 4, Security through Obscurity 3.
+  - The non-injection classes fuzzlab does have (access control, mass assignment,
+    JWT, price integrity, file upload) were left out: this pass is scoped to injection.
+- Impact (other components / project):
+  - Scored runs against Juice Shop now count 15 positives, not 10. The 5 new ones are
+    misses in both passes until the crawler and the gates reach them; that is the
+    gap this records.
+  - The run's selected categories gain path traversal and insecure deserialization
+    (from the new positives). Checked offline that no rule for those categories fires
+    on the six existing ground-truth points.
+  - `tests/test_external_labs_static.py` pins no case count; 171 passed.
+- Risk: low; data only. The case classes are judgement calls from the source, as
+  stated above.
+- Deliverables:
+  - [x] contract cases, loads and cross-checks (18 cases) — done
+  - [x] `tests/test_external_labs_static.py` 171 passed — done
+  - [ ] live scoring of the expanded key (Juice Shop baseline) — in-progress
+- Effectiveness (assessed pending):
+
 ### CC-LAB-0259 — The Go response-splitting twin says `Connection: close` (BUG-0147) (2026-10-15)
 - Change: `fuzzlab/labgen/emitters/go_net_http/templates/sinks/raw_socket_response_write.go.j2`
   adds `Connection: close` as the last header of its hand-written `HTTP/1.1 302`,

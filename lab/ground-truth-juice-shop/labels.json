@@ -170,6 +170,71 @@
       "rendering": "server-json",
       "stack": "node_juice_shop",
       "notes": "[reach: gt] [prov: negative] routes/login.ts:50 answers a fixed 'Invalid email or password.' text; SQL errors are rendered escaped by errorhandler. Ground-truth pass only: the crawl captures login as a json point, which the reflected-XSS rule does not select."
+    },
+    {
+      "case_id": "JUICE-0014",
+      "url": "/api/Products",
+      "method": "POST",
+      "param": "description",
+      "location": "body",
+      "vuln_class": "xss-stored",
+      "sink_context": "dom",
+      "expected_vulnerable": true,
+      "rendering": "js",
+      "stack": "node_juice_shop",
+      "notes": "[reach: none - the stored payload runs only in the product-details dialog, which opens on a click (product.component.ts:212-219), never on the page load the stored-XSS observer makes; the SPA never sends POST /api/Products, so the crawler records no point; no point] [prov: restfulXssChallenge] models/product.ts:51-60 stores description unsanitized when safetyMode is disabled (sanitizeSecure only otherwise); frontend search-result.component.ts:111-115 trusts every description (bypassSecurityTrustHtml), bound with [innerHTML] at product-details.component.html:18. Store route POST /api/Products, server.ts:397 (isAuthorized: a Bearer token, lib/insecurity.ts:52); the unauthenticated PUT /api/Products/:id (server.ts:398 commented out) is outside this contract's methods. Source-derived, not verified live."
+    },
+    {
+      "case_id": "JUICE-0015",
+      "url": "/api/Users",
+      "method": "POST",
+      "param": "email",
+      "location": "body",
+      "vuln_class": "xss-stored",
+      "sink_context": "dom",
+      "expected_vulnerable": true,
+      "rendering": "js",
+      "stack": "node_juice_shop",
+      "notes": "[reach: none - POST /api/Users registers an account: the send gate refuses its captured body (tests/test_destructive_routes_external_labs.py, 'registers an account'), and a ground-truth point is exempt from that gate, so none is added; the render page /#/administration is admin-only (app.routing.ts:79-81, AdminGuard) and the fuzz identity is a customer] [prov: persistedXssUserChallenge] models/user.ts:56-68 stores email unsanitized when safetyMode is disabled (the protection is the SPA's client-side form validation only); frontend administration.component.ts:74 wraps it in bypassSecurityTrustHtml, bound with [innerHTML] at administration.component.html:26. Source-derived, not verified live."
+    },
+    {
+      "case_id": "JUICE-0016",
+      "url": "/rest/saveLoginIp",
+      "method": "GET",
+      "param": "True-Client-IP",
+      "location": "header",
+      "vuln_class": "xss-stored",
+      "sink_context": "dom",
+      "expected_vulnerable": true,
+      "rendering": "js",
+      "stack": "node_juice_shop",
+      "notes": "[reach: none - R-XSS-HEADER fires on crawl-origin header points only (default_rules.json), so a ground-truth header point gets no xss candidate; the SPA sends this GET only on logout (navbar.component.ts:240-242), without the header; the stored-XSS observer plants by a POST body only (oracle/probe.py store_method/store_location), and the value renders only from a JWT issued at a later login; no point] [prov: httpHeaderXssChallenge] routes/saveLoginIp.ts:18-32 stores the raw True-Client-IP header as lastLoginIp when safetyMode is disabled (sanitizeSecure only otherwise, :25); route server.ts:647. Frontend last-login-ip.component.ts:40 wraps the token's lastLoginIp in bypassSecurityTrustHtml, bound with [innerHTML] at last-login-ip.component.html:10 (/#/privacy-security/last-login-ip). Source-derived, not verified live."
+    },
+    {
+      "case_id": "JUICE-0017",
+      "url": "/dataerasure",
+      "method": "POST",
+      "param": "layout",
+      "location": "body",
+      "vuln_class": "path_traversal",
+      "sink_context": "fs_path_read",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "node_juice_shop",
+      "notes": "[reach: none - POST /dataerasure files a data-erasure request and clears the token cookie (routes/dataErasure.ts:83-88); it is a destructive route the URL gate misses today (BUG-0301, strict xfails in tests/test_destructive_routes_external_labs.py), and a ground-truth point is exempt from the send gate, so none is added] [prov: lfrChallenge] routes/dataErasure.ts:103-118 passes path.resolve(req.body.layout) to res.render as the hbs layout, refusing only paths containing ftp, ctf.key or encryptionkeys, and returns the first 100 characters; route server.ts:684; needs the token cookie (:76-80). Stated detection limit: hbs appends .hbs to a layout path with no extension (node_modules/hbs/lib/hbs.js:160-165), so the /etc/passwd marker the path-traversal strategies look for cannot appear; a file with an extension is read (Juice Shop's own test uses ../package.json, test/api/erasure-request.test.ts:105-111). Source-derived, not verified live."
+    },
+    {
+      "case_id": "JUICE-0018",
+      "url": "/b2b/v2/orders",
+      "method": "POST",
+      "param": "orderLinesData",
+      "location": "body",
+      "vuln_class": "insecure_deserialization",
+      "sink_context": "deserialization",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "node_juice_shop",
+      "notes": "[reach: none - transaction_reason flags `order` in the URL (fuzzlab.core.urls), and the destructive-routes test lists it ('places a B2B order'); the SPA has no UI for it (Swagger /api-docs only); the value is a JSON leaf, while fuzzlab's insecure-deserialization strategy probes Jackson type ids on a whole-JSON-body point only; no point] [prov: rceChallenge, rceOccupyChallenge] routes/b2bOrder.ts:18-34 evaluates orderLinesData with notevil's safeEval inside vm.runInContext (2 s timeout) when the RCE challenges are enabled (safetyMode disabled); routes server.ts:676 and :452 (isAuthorized: a Bearer token). Juice Shop files it under Insecure Deserialization; the sink is JavaScript evaluation. One case covers both challenges (one input). Source-derived, not verified live."
     }
   ]
 }
