@@ -184,3 +184,33 @@ and PA-0002 for rules about a shared primitive), in `docs/PREVENTIVE_ACTIONS.md`
   navigation's wait would cut that wait to 300 ms. The page is then read from its
   response's HTML, so content is not lost. A failed load already leaves for
   `about:blank` (BUG-0136 X1), and a query load starts there; this has not been seen.
+
+## Review of the fix (added in review)
+Reviewer A agreed, after verifying live that reading the response HTML cannot hang.
+Reviewer B agreed with changes (D58). Q1, Q2 and Q4 are done here. Q3, a hash seed
+whose bare-route load did not reach, waits for the SPA lane's merge.
+- **Q1, which failures count.** The first cut counted every main-frame navigation
+  failure from the start of `goto`. A previous page's pending navigation, cancelled by
+  this one and reported before its commit, could cut a normal load to 300 ms. Now only
+  failures reported at or after the commit count: the helper arms itself when
+  `goto(commit)` returns. In 40 of 40 real-Chromium runs a head script's refusal was
+  reported after that return.
+- **Q2, which content.** The first cut read every not-completed load from the
+  response. That lost a slow page's JS-rendered text, and when an allowed script
+  navigation had committed another document it mixed that document's title, links and
+  URL into this URL's row. Now there are three cases: superseded (the received HTML
+  with the DOM's links), merely slow (the live DOM), and another document (this URL's
+  received HTML alone).
+  - **Found while building it:** Chromium drops the replaced document's response body
+    before `goto(commit)` returns, so `response.text()` is already gone. The body
+    therefore comes from the guard, which fetched and fulfilled it
+    (`_note_received`).
+- **Q4:**
+  - the reveal restore leaves for `about:blank` when its reload did not complete;
+  - the AST guard also forbids `set_content`, `wait_for_event` and `expect_event`.
+
+Residual added in review (A-N2): **a script that starts a download while the page is
+parsed** was not measured. The download's navigation may or may not be reported as a
+failed main-frame navigation. Either way the wait is bounded by the caller's timeout,
+and the page is read from what it has: superseded, its received HTML; otherwise, its
+live DOM.

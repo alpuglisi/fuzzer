@@ -781,7 +781,12 @@ class LocalSpider:
         try:
             if spa.visit_key(page.url) != spa.visit_key(page_url):
                 navguard.navigate(page, page_url, timeout_ms=self.timeout_ms)
-            navguard.reload(page, timeout_ms=self.timeout_ms)
+            if not navguard.reload(page, timeout_ms=self.timeout_ms).reached:
+                # the route's reload did not complete (a refused script navigation
+                # stopped it): the page leaves, so nothing of that stopped document
+                # runs on (BUG-0138 review B-N1)
+                navguard.navigate(page, "about:blank", timeout_ms=self.timeout_ms,
+                                  wait_until="load")
             self._settle(page)
         finally:
             win["own_nav"] = frozenset()
@@ -1221,33 +1226,51 @@ class LocalSpider:
                 self._settle(self._page)
             if self._win is not None and self._win.get("query"):
                 self._win["own_nav"] = frozenset()   # the load's own navigation only (Q4)
-            title = self._page.title()
-            self._last_final_url = self._page.url
-            self._last_html = self._page.content()
-            if self._spa_on:
-                self._last_base = self._page.evaluate(
-                    "() => document.querySelector('base') ? document.baseURI : null")
-            # Links and text come from the RENDERED DOM, so JS-injected nav links
-            # and JS-built content are included.
-            links = self._page.eval_on_selector_all('a[href]', 'els => els.map(e => e.href)')
-            try:
-                # read, never waited for: a document whose loading stopped in its head
-                # has no body, and `inner_text('body')` would wait 30 s for one
-                text = self._page.evaluate(
-                    "() => document.body ? document.body.innerText : null")
-            except Exception:
-                text = None
+            # BUG-0138 review (Q2): a load that did not complete either stopped (a
+            # refused script navigation superseded it), merely outlasted the wait, or
+            # was replaced by another document a script navigation committed
+            own = nav.reached or navguard.shows_own_document(self._page, url, response)
+            if own:
+                title = self._page.title()
+                self._last_final_url = self._page.url
+                self._last_html = self._page.content()
+                if self._spa_on:
+                    self._last_base = self._page.evaluate(
+                        "() => document.querySelector('base') ? document.baseURI : null")
+                # Links and text come from the RENDERED DOM, so JS-injected nav links
+                # and JS-built content are included.
+                links = self._page.eval_on_selector_all('a[href]',
+                                                        'els => els.map(e => e.href)')
+                try:
+                    # read, never waited for: a document whose loading stopped in its
+                    # head has no body, and `inner_text('body')` would wait 30 s for one
+                    text = self._page.evaluate(
+                        "() => document.body ? document.body.innerText : null")
+                except Exception:
+                    text = None
             if not nav.reached and response is not None:
-                # BUG-0138: the document's loading stopped before it was parsed (a
-                # refused script navigation superseded it) or outlasted the wait: what
-                # the browser received for this navigation is read as the static
-                # engine reads a page -- never a second request
-                html = navguard.response_html(response)
+                # BUG-0138: what the browser received for this navigation, read as the
+                # static engine reads a page -- never a second request
+                html = nav.html
                 if html is not None:
                     got_title, got_text, got_links = _parse_html(html)
-                    title, text = title or got_title, got_text
-                    links = list(dict.fromkeys(list(links) + got_links))
-                    self._last_html = html
+                    if not own:
+                        # another document replaced this one: this URL's own response
+                        # alone, never the other document's title, links or URL
+                        title, text, links = got_title, got_text, got_links
+                        self._last_final_url, self._last_html = url, html
+                    elif nav.superseded:
+                        # its parsing stopped: the response holds the document; the
+                        # DOM's links (JS-built ones) are kept with it
+                        title, text = title or got_title, got_text
+                        links = list(dict.fromkeys(list(links) + got_links))
+                        self._last_html = html
+                    elif not text:
+                        # merely slow: the DOM stands (JS-rendered text included); the
+                        # response fills an empty text only
+                        text = got_text
+            elif not own:
+                self._last_final_url = url              # nothing of the other document
             # the browser shows this page, fully loaded (reveals)
             self._rendered_ok = nav.reached
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))

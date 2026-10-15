@@ -71,6 +71,46 @@ Newest first.
     - the spider: the crawl and query tests and the AST guard fail;
     - the fetcher: the auditor test and the guard fail;
     - the browser login: the login test and the guard fail.
+- Amendment, review of 98325e5 (2026-10-15; reviewer A AGREE, reviewer B
+  AGREE-with-changes; D58 Q1, Q2, Q4; Q3 waits for the SPA lane's merge):
+  - **Q1 (A-S1 = B-S1):** `_NavigationFailures` counts a main-frame failure only once
+    armed, at this navigation's commit (when `goto(commit)` returns). A previous page's
+    pending navigation that this one cancels, reported before the commit, no longer
+    cuts the wait. On real Chromium a head script's refusal was reported after the
+    return in 40 of 40 runs.
+  - **Q2 (B-S2 + A-S2):** the not-reached branch of `_goto_and_parse` tells the cases
+    apart with `navguard.shows_own_document` (the page's URL against the requested and
+    final URL):
+    - **superseded**, same document: the received HTML, with the DOM's links merged
+      (as before);
+    - **merely slow**, same document: the live DOM (JS-rendered text kept), with the
+      received HTML filling an empty text only;
+    - **another document** (an allowed script navigation committed): this URL's
+      received HTML alone, and `_last_final_url` stays this URL.
+
+    A replaced document's body is dropped by the browser before `goto(commit)` even
+    returns, so the received HTML comes from the guard. `make_route_handler` keeps the
+    body of the main-frame document it fulfils, per page (`_note_received`, a weak map).
+    `navigate` / `reload` clear it before their own navigation and return it as
+    `Navigation.html`.
+  - **Q4:**
+    - `_restore` leaves for `about:blank` when its reload did not complete (B-N1);
+    - the AST guard also forbids `set_content`, `wait_for_event` and `expect_event`
+      outside navguard, with three more synthetic offenders (A-N1, B-N2);
+    - the download-navigation residual is in BUG-0138 (A-N2).
+  - Tests (`tests/test_guarded_navigation.py`, now 20):
+    - a page double whose failure is reported before the commit, with `load` at
+      500 ms: reached;
+    - real Chromium, a previous page's slow navigation pending when the next URL
+      loads: its `domcontentloaded` (about 1 s, a slow script) is reached;
+    - a merely slow page keeps its JS-rendered text;
+    - A's head script to an allowed, slow B: A's row holds A's title, text and links
+      only, and B's link is never crawled.
+  - Mutation checks:
+    - **Q1**, failures counted before the commit: both Q1 tests fail;
+    - **Q2**, the old branch (`own = True`, always the response): both Q2 tests fail.
+  - Effectiveness: the 20 tests of `tests/test_guarded_navigation.py` pass; the related
+    run on the committed tree is recorded below.
 
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's

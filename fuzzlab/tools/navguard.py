@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import logging
 import time
+import weakref
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
@@ -311,6 +312,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             except Exception as exc:  # noqa: BLE001 - an observer never breaks a request
                 logging.info(f"request observer failed on {url.split('?', 1)[0]} "
                              f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})")
+        if document and doc_kind == "document" and \
+                (stripped or final is first or not req.is_navigation_request()
+                 or method not in ("GET", "HEAD")):
+            _note_received(req, url, final)       # the body this page is given (Q2)
         if stripped:
             # an isolated answer never writes the context's jar (FR-SESS-20, R2)
             route.fulfill(response=final, headers=_without_set_cookie(final.headers))
@@ -351,6 +356,50 @@ def _abort_code(document: bool) -> str | None:
     request (a navigation, top-level or frame, and its redirect hops), else None (the
     default), whatever the reason (PA-0136: one rule, one place)."""
     return DOCUMENT_ABORT if document else None
+
+
+#: page -> (url_key, HTML) of the last main-frame document its guard fulfilled (BUG-0138
+#: review Q2): the bytes the browser received, still there when a script navigation
+#: has replaced that document and the browser has dropped its body.
+_RECEIVED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _note_received(req, url: str, answer) -> None:
+    """Keep the HTML of a main-frame document the guard is about to fulfil, for its
+    page's `navigate` (never anything else: no subresource, no frame)."""
+    from playwright.sync_api import Error
+    try:
+        page = getattr(req.frame, "page", None)
+        if page is None or "text/html" not in (answer.headers or {}).get(
+                "content-type", ""):
+            return
+        _RECEIVED[page] = (url_key(url), answer.text())
+    except (Error, TypeError):     # no frame (a service worker's); a page not weakref-able
+        return
+
+
+def _received_html(page, url: str, response) -> str | None:
+    """The HTML the guard fulfilled for this navigation of ``url`` (or its final URL),
+    else the response's own body, else None."""
+    from playwright.sync_api import Error
+    got = _RECEIVED.get(page) if _is_weakref_able(page) else None
+    keys = {url_key(url)}
+    if response is not None:
+        try:
+            keys.add(url_key(response.url))
+        except (AttributeError, Error):    # a response double without a URL
+            pass
+    if got is not None and got[0] in keys:
+        return got[1]
+    return response_html(response) if response is not None else None
+
+
+def _is_weakref_able(obj) -> bool:
+    try:
+        weakref.ref(obj)
+        return True
+    except TypeError:
+        return False
 
 
 def _is_subframe(req) -> bool:
@@ -412,19 +461,28 @@ class Navigation:
     """What a guarded navigation got: the main resource's ``response`` (None for a
     same-document navigation), whether the awaited load state was ``reached``, and
     whether the load was ``superseded`` (a main-frame navigation failed meanwhile);
-    ``committed_at`` is the `time.monotonic()` of the commit."""
+    ``committed_at`` is the `time.monotonic()` of the commit; ``html`` is the HTML body
+    the navigation received, taken at the commit (BUG-0138 review Q2: once a script
+    navigation commits another document, the replaced one's body is gone)."""
     response: object
     reached: bool
     superseded: bool
     committed_at: float = 0.0
+    html: str | None = None
 
 
 class _NavigationFailures:
-    """Notes each failed main-frame navigation request of ``page`` while it is open."""
+    """Notes each failed main-frame navigation request of ``page`` reported once it is
+    ``armed``: at or after this navigation's commit (BUG-0138 review Q1). A failure
+    reported earlier -- the previous page's pending navigation, cancelled by this one
+    -- says nothing about this document's load. (A refusal of this document's own
+    script navigation is reported after ``goto(wait_until="commit")`` returns: 40 of 40
+    real-Chromium runs.)"""
 
-    def __init__(self, page):
+    def __init__(self, page, *, armed: bool = False):
         from playwright.sync_api import Error
         self._page, self._error, self.failed = page, Error, []
+        self.armed = armed
         page.on("requestfailed", self._on_failed)
 
     def _on_failed(self, request) -> None:
@@ -433,7 +491,7 @@ class _NavigationFailures:
             navigation = request.is_navigation_request()
         except self._error:        # a request with no frame (a service worker's)
             return
-        if main and navigation:
+        if main and navigation and self.armed:
             self.failed.append(time.monotonic())
 
     def close(self) -> None:
@@ -481,12 +539,15 @@ def navigate(page, url: str, *, timeout_ms: float, wait_until: str = "domcontent
     waited out. The caller reads the page as it is, or ``response``, when not
     ``reached``."""
     failures = _NavigationFailures(page)
+    if _is_weakref_able(page):
+        _RECEIVED.pop(page, None)          # only this navigation's document counts
     try:
         response = page.goto(url, wait_until="commit", timeout=timeout_ms)
-        committed = time.monotonic()
+        committed, failures.armed = time.monotonic(), True
+        html = _received_html(page, url, response)
         reached = _await_state(page, wait_until,
                                timeout_ms if wait_ms is None else wait_ms, failures)
-        return Navigation(response, reached, bool(failures.failed), committed)
+        return Navigation(response, reached, bool(failures.failed), committed, html)
     finally:
         failures.close()
 
@@ -495,12 +556,15 @@ def reload(page, *, timeout_ms: float, wait_until: str = "domcontentloaded",
            wait_ms: float | None = None) -> Navigation:
     """`navigate`'s rule for a reload (BUG-0138)."""
     failures = _NavigationFailures(page)
+    if _is_weakref_able(page):
+        _RECEIVED.pop(page, None)
     try:
         response = page.reload(wait_until="commit", timeout=timeout_ms)
-        committed = time.monotonic()
+        committed, failures.armed = time.monotonic(), True
+        html = _received_html(page, page.url, response)
         reached = _await_state(page, wait_until,
                                timeout_ms if wait_ms is None else wait_ms, failures)
-        return Navigation(response, reached, bool(failures.failed), committed)
+        return Navigation(response, reached, bool(failures.failed), committed, html)
     finally:
         failures.close()
 
@@ -509,7 +573,7 @@ def wait_for_state(page, state: str, timeout_ms: float) -> bool:
     """Wait for a load state of the current document (``networkidle`` after a load) by
     `navigate`'s rule: bounded, suppressed, and cut short when a main-frame navigation
     fails meanwhile. Whether it was reached."""
-    failures = _NavigationFailures(page)
+    failures = _NavigationFailures(page, armed=True)       # the document is committed
     try:
         return _await_state(page, state, timeout_ms, failures)
     finally:
@@ -527,10 +591,27 @@ def load_state_reached(page, state: str = "load") -> bool:
         return False
 
 
+def shows_own_document(page, url: str, response) -> bool:
+    """Does ``page`` still show the document this navigation of ``url`` loaded
+    (BUG-0138 review Q2)? Not when a script navigation it allowed has committed another
+    document since: then nothing live (title, links, final URL) is this URL's."""
+    from playwright.sync_api import Error
+    keys = {url_key(url)}
+    if response is not None:
+        try:
+            keys.add(url_key(response.url))
+        except Error:
+            pass
+    try:
+        return url_key(page.url) in keys
+    except Error:
+        return False
+
+
 def response_html(response) -> str | None:
     """The HTML body a navigation's ``response`` carried, or None (BUG-0138): what the
-    browser already received, read when its document's loading stopped before it was
-    parsed -- never fetched again."""
+    browser already received, never fetched again. `navigate` reads it at the commit
+    (`Navigation.html`)."""
     from playwright.sync_api import Error
     try:
         if "text/html" not in (response.headers or {}).get("content-type", ""):

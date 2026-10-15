@@ -437,12 +437,19 @@ class ContentFetcher:
                     navguard.wait_for_state(self._page, "networkidle", self.timeout_ms)
                     html = self._page.content()
                 else:
-                    # the document's loading stopped before it was parsed (or outlasted
-                    # the wait): the HTML the browser received for this navigation, as
-                    # the static engine would read it -- never a second request
-                    html = navguard.response_html(response) if response is not None else None
-                    if html is None:
+                    # BUG-0138 (review Q2): the load did not complete. Its parsing
+                    # stopped (superseded), or another document a script navigation
+                    # committed replaced it: the HTML the browser received for this
+                    # navigation, never a second request. Merely slow: the DOM stands
+                    # (JS-rendered content included)
+                    own = navguard.shows_own_document(self._page, url, response)
+                    html = None
+                    if nav.superseded or not own:
+                        html = nav.html                # taken at the commit
+                    if html is None and own:
                         html = self._page.content()
+                    if html is None:
+                        html = ""                      # nothing of the other document
                 return status, ct, html, list(dict.fromkeys(self._xhr_urls))
             except Exception as e:
                 # BUG-0136 review (X1's twin, CC-AUD-0042): a failed load ends the

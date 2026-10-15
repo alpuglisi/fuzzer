@@ -174,10 +174,10 @@ budget where a vulnerability is plausible.
   before the static fallback. The page shown before, which ERR_ABORTED leaves alive,
   stops, and its requests are never listed under a later URL. *(CC-AUD-0043,
   BUG-0138:)* the rendered fetch navigates through `navguard.navigate` and waits for
-  `networkidle` only after a completed load. A page whose load did not complete (its
-  script navigated to a refused URL while it was parsed) is returned as the HTML the
-  browser received for it, without waiting out the timeout and without a second
-  request.
+  `networkidle` only after a completed load. A page whose load did not complete is
+  returned without waiting out the timeout and without a second request (review Q2):
+  - superseded, or replaced by another document, the HTML the browser received for it;
+  - merely slow, its live DOM.
   - Enforced by (a failed load ends the previous document; CC-AUD-0042): `ContentFetcher.fetch` — `tests/test_navigation_aborts.py::test_the_auditors_failed_load_ends_the_previous_document`
   - Enforced by (no wait for a load a refused navigation cancelled; CC-AUD-0043, BUG-0138): `ContentFetcher.fetch` → `navguard.navigate` — `tests/test_guarded_navigation.py::test_the_auditor_reads_the_page_without_waiting_it_out`
 

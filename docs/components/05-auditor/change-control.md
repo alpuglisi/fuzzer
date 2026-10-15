@@ -24,6 +24,13 @@ Newest first.
   - [x] FR-AUD-18 edited in place; BUG-0138; CHANGELOG — done
 - Effectiveness (assessed 2026-10-15): the test passes; the related run is recorded in
   CC-CRAWL-0030.
+- Amendment, review of 98325e5 (2026-10-15; D58 Q1, Q2): the fetcher's navigation
+  gets Q1 through the shared helper.
+  - Q2: a load that did not complete returns the received HTML (`Navigation.html`,
+    taken by the guard) when it was superseded or another document replaced it.
+  - When it was merely slow, the live DOM is returned (JS-rendered content included).
+  - It never returns another document's HTML.
+  - The tests and run are in CC-CRAWL-0030's amendment.
 
 ### CC-AUD-0042 — A failed load in the auditor's browser ends the previous page (BUG-0136 review, X1's twin) (2026-10-14)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch`. When the rendered fetch of a URL

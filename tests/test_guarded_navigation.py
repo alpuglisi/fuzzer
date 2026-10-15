@@ -232,7 +232,9 @@ def test_a_login_page_that_navigates_away_fails_loudly_and_fast(monkeypatch):
 #: `navguard`'s helpers make them.
 NAVIGATION_CALLS = frozenset({"goto", "reload", "go_back", "go_forward",
                               "wait_for_navigation", "expect_navigation",
-                              "wait_for_load_state", "wait_for_url"})
+                              "wait_for_load_state", "wait_for_url",
+                              # a document set or an event awaited (review A-N1, B-N2)
+                              "set_content", "wait_for_event", "expect_event"})
 HELPER_MODULE = "navguard"
 
 
@@ -271,9 +273,157 @@ def test_every_guarded_navigation_goes_through_the_one_helper():
     "with page.expect_navigation():\n    pass",
     "page.main_frame.goto(url)",
     "page.go_back()",
+    "page.set_content('<p>x</p>', wait_until='load')",
+    "page.wait_for_event('load')",
+    "with page.expect_event('framenavigated'):\n    pass",
 ])
 def test_the_navigation_guard_catches_synthetic_offenders(source):
     """PA-0034(2): the guard is proven on what it must catch, and lets the helper by."""
     assert navigation_offenders(source)
     assert not navigation_offenders("navguard.navigate(page, url, timeout_ms=1)\n"
                                     "navguard.reload(page, timeout_ms=1)")
+
+
+# --- review of BUG-0138 (D58) -------------------------------------------------------
+class _Request:
+    def __init__(self, frame):
+        self.frame = frame
+
+    def is_navigation_request(self):
+        return True
+
+
+class _EarlyFailurePage:
+    """A page double: the previous page's pending navigation is reported failed while
+    ``goto`` is still running (before the commit), and ``load`` comes 500 ms later."""
+
+    def __init__(self):
+        self.main_frame, self._handlers, self._loaded_at = object(), [], None
+
+    def on(self, event, fn):
+        self._handlers.append(fn)
+
+    def remove_listener(self, event, fn):
+        self._handlers.remove(fn)
+
+    def goto(self, url, **kw):
+        for fn in list(self._handlers):          # before goto returns: before the commit
+            fn(_Request(self.main_frame))
+        self._loaded_at = time.monotonic() + 0.5
+        return None
+
+    def wait_for_load_state(self, state, timeout=None):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+        if time.monotonic() < self._loaded_at:
+            time.sleep(min(timeout or 0, 100) / 1000)
+            raise PlaywrightTimeout("not yet")
+
+
+def test_a_failure_reported_before_the_commit_never_cuts_the_wait():
+    """Q1 (A-S1 = B-S1): only main-frame failures reported at or after this
+    navigation's commit count; an earlier one (the previous page's pending navigation,
+    cancelled by this one) must not cut a load that comes 500 ms later."""
+    from fuzzlab.tools import navguard
+    nav = navguard.navigate(_EarlyFailurePage(), "http://127.0.0.1:9/b", timeout_ms=4000)
+    assert nav.reached and not nav.superseded
+
+
+def test_a_previous_pages_pending_navigation_never_cuts_the_next_load(monkeypatch):
+    """Q1, real Chromium: the previous page has a slow navigation pending (its server
+    answers in 3 s) when the next URL is loaded; Chromium cancels it, and the next
+    page's ``domcontentloaded`` (about 1 s after its commit, a slow script) is still
+    waited for."""
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import launch_browser_or_skip
+    from fuzzlab.core.urls import in_origin_scope, origin_scope
+    from fuzzlab.tools import navguard
+    _chromium_or_skip(monkeypatch)
+    a = _Site()
+    a.pages["/"] = ("<html><body><p>A</p><script>window.addEventListener('load', "
+                    "() => setTimeout(() => location.href = '/pending', 50))</script>"
+                    "</body></html>")
+    a.delays["/pending"] = 3.0
+    a.pages["/b"] = ("<html><head><title>B</title><script src='/b.js'></script></head>"
+                     "<body><p>B-CONTENT</p></body></html>")
+    a.pages["/b.js"] = "window.b = 1;"
+    a.delays["/b.js"] = 1.0
+    origins = origin_scope(a.base)
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            try:
+                ctx = browser.new_context(service_workers="block")
+                navguard.guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                page = ctx.new_page()
+                navguard.navigate(page, a.base, timeout_ms=8000, wait_until="load")
+                page.wait_for_timeout(300)                # /pending is now in flight
+                nav = navguard.navigate(page, a.base + "b", timeout_ms=8000)
+                content = page.content()
+                navguard.release(ctx)
+                ctx.close()
+            finally:
+                browser.close()
+    finally:
+        a.close()
+    assert "/pending" in a.requests                       # it really was pending
+    assert nav.reached and not nav.superseded
+    assert "B-CONTENT" in content
+
+
+def _crawl_rows(tmp_path, monkeypatch, pages, delays, timeout_ms=3000):
+    """Crawl a site of ``pages`` (path -> HTML; ``delays`` path -> s) to depth 1; return
+    ``(site, {url: (title, content)})``."""
+    import sqlite3
+
+    from tests._browser import skip_or_fail
+    from fuzzlab.tools.spider import LocalSpider
+    _chromium_or_skip(monkeypatch)
+    a = _Site()
+    a.pages.update(pages)
+    a.delays.update(delays)
+    try:
+        sp = LocalSpider(a.base, max_depth=1, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=timeout_ms)
+        if sp.engine != "playwright":
+            skip_or_fail("playwright engine unavailable")
+        try:
+            sp.crawl()
+        except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+            skip_or_fail(f"chromium could not launch: {exc}")
+    finally:
+        a.close()
+    rows = {u: (t, c) for u, t, c in sqlite3.connect(str(tmp_path / "s.db")).execute(
+        "SELECT url, title, content FROM discovered_pages").fetchall()}
+    return a, rows
+
+
+def test_a_merely_slow_page_keeps_its_rendered_text(monkeypatch, tmp_path):
+    """Q2 (B-S2): a page whose load outlasts the wait (a 5 s script, a 3 s timeout) but
+    was not superseded keeps its DOM: the text its own script rendered is stored, not
+    only the response's."""
+    a, rows = _crawl_rows(tmp_path, monkeypatch, {
+        "/": ("<html><head><title>SLOW</title></head><body><div id='o'></div><script>"
+              "document.getElementById('o').textContent = 'JS-RENDERED-TEXT'</script>"
+              "<script src='/slow.js'></script><p>tail</p></body></html>"),
+        "/slow.js": "window.s = 1;"}, {"/slow.js": 5.0})
+    title, content = rows[a.base]
+    assert "JS-RENDERED-TEXT" in (content or "") and title == "SLOW"
+    assert a.requests.count("/") == 1
+
+
+def test_another_document_never_fills_this_urls_row(monkeypatch, tmp_path):
+    """Q2 (A-S2): A's head script navigates to B, which is allowed but slow to load (a
+    5 s script): B commits, so the page no longer shows A. A's row holds A's own
+    title and links only, from A's response; none of B's title, links or URL."""
+    a, rows = _crawl_rows(tmp_path, monkeypatch, {
+        "/": ("<html><head><title>A-TITLE</title><script>location.href = '/b'</script>"
+              "</head><body><p>A-TEXT</p><a href='/alink'>a</a></body></html>"),
+        "/b": ("<html><head><title>B-TITLE</title></head><body><p>B-TEXT</p>"
+               "<a href='/blink'>b</a><script src='/bslow.js'></script></body></html>"),
+        "/bslow.js": "window.b = 1;"}, {"/bslow.js": 5.0})
+    title, content = rows[a.base]
+    assert title == "A-TITLE" and "A-TEXT" in (content or "")
+    assert "B-TEXT" not in (content or "")
+    assert "/alink" in a.requests and "/blink" not in a.requests
+    assert a.base + "b" not in rows                        # never filed as A's landing

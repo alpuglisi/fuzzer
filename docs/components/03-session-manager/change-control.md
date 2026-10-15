@@ -20,6 +20,10 @@ Newest first.
   - [x] FR-SESS-19 edited in place; BUG-0138; CHANGELOG — done
 - Effectiveness (assessed 2026-10-15): the test passes; the related run is recorded in
   CC-CRAWL-0030.
+- Amendment, review of 98325e5 (2026-10-15; D58 Q1): the login's navigations get Q1
+  through the shared helper. A failure reported before a login page's commit (the
+  previous route's pending navigation) no longer cuts that page's wait. No code
+  change here; the run is in CC-CRAWL-0030's amendment.
 
 ### CC-SESS-0023 — Origin-scoped sessions (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change: built to Revision 2 of `origin-scope-draft.md` (reviewers A and B reconciled;

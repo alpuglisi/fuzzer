@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (BUG-0138 review: which failures cut a wait, and which content a page that did not load keeps)
+- **Why:** reviewers found that the previous page's cancelled navigation could cut a
+  normal load short. They also found that a page that merely loaded slowly lost its
+  JS-rendered text, and that a page replaced by another document took that document's
+  title and links.
+- **What:** only failures reported after this navigation's commit count. A
+  not-completed load is read as superseded (the received HTML, kept by the guard),
+  merely slow (the live DOM) or replaced (this URL's own HTML alone). The reveal
+  restore leaves a stopped page. The AST guard covers `set_content`, `wait_for_event`
+  and `expect_event`. CC-CRAWL-0030, CC-AUD-0043 and CC-SESS-0024 amendments.
+
 ## 2026-10-15 (BUG-0138: no guarded navigation waits for a load a refused navigation cancelled)
 - **Why:** since BUG-0136, a page whose script navigates to a refused URL while it is
   parsed stops loading and never fires `domcontentloaded`. The crawl, its query probes

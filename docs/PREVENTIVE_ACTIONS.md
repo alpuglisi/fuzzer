@@ -1816,3 +1816,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
      behavior change to a shared mechanism (here the abort code) is followed to every
      consumer that waits on what it changed. Each such rule gets a structural guard
      where one is possible. (from BUG-0138)
+  4. *(Review, D58.)* **A cancellation signal counts only from the commit of what it
+     cancels:** an earlier event (the previous page's navigation) never cuts this one's
+     wait. **Content comes from the document the URL loaded:**
+     - its received bytes, kept by the guard that fulfilled them, when its parsing
+       stopped or another document replaced it;
+     - its live DOM when it was merely slow;
+     - never another document's.
+
+     The guard also covers `set_content`, `wait_for_event` and `expect_event`.
