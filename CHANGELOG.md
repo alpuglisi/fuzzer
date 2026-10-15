@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (goal metric: a per-stage funnel for answer-key runs)
+- **What:** `scripts/funnel_report.py` reports, for each positive answer-key case, the furthest stage a run reached (reached, candidate, probed, confirmed; confirmation must match the case's class), with per-stage counts. Juice Shop baseline: reached 8/15, candidate 8, probed 6, confirmed 6.
+- **Why:** two days of per-miss fixes left the dominant loss (discovery: 7/15 never reached) unmeasured. The progress goal had been opened on a proxy metric (suite failures), which let the BUG-0141 stall guard watch the work queue instead of the user's goal; the goal now tracks discovery reach.
+
 ## 2026-10-15 (BUG-0147: a probe with no response no longer ends the run)
 - **What:** a reset, cut-off or undecodable response to a probe is now "not observed" (`ProbeUnobserved`): an idempotent probe is re-sent once, then that mechanism gives no verdict, never a negative, and the run goes on (OOB mechanisms still wait for their callback; a dead target still fails loudly). The Go lab's response-splitting twin and the proxy's 501 now send `Connection: close`.
 - **Why:** the last intermittent failure of the full suite. Root-caused: the twin's keep-alive-looking 302 let the client reuse a closing connection, and one reset then ended confirmation for every target. PA-0137 had covered the browser only (CC-FUZZ-0088, CC-LAB-0259, CC-PROXY-0024, CC-UI-0056; PA-0153).
