@@ -4,10 +4,9 @@
 An orchestrating session once ran for about 15 hours, dispatching review round
 after review round and follow-up after follow-up, while the goal metric
 (confirmed Juice Shop findings) moved by one. It never measured progress against
-the goal, never stopped, and never told the user until they intervened. The
-written rules it had (PA-0032, the overnight plan's "never stop building")
-pushed it *away* from checking in. PA-0020's lesson applies: a rule addressed to
-the same process that failed is not prevention. This script is the mechanical
+the goal. When the stall was visible it did not investigate or fix it, and it
+never told the user until they intervened. PA-0020's lesson applies: a rule
+addressed to the same process that failed is not prevention. This script is the mechanical
 half of PA-0141..PA-0147; Claude Code hooks call it (``.claude/settings.json``).
 
 The **ledger** (``.claude/orchestration/ledger.json`` in the main checkout,
@@ -22,8 +21,11 @@ Triggers (defaults in ``DEFAULT_CONFIG``):
 * **checkpoint due**: more than ``checkpoint_hours`` since the last checkpoint and
   the last user message. The Stop hook blocks until ``checkpoint`` is run.
 * **stall**: the metric has not improved for ``stall_hours`` since the goal
-  opened, the last improvement, or the last user message. Dispatch is denied, and
-  the Stop hook requires a PushNotification, until the user writes.
+  opened, the last improvement, or the last user message. The stall is a defect.
+  Only a process or measurement item opened after the stall (to find out why the
+  metric is not moving and fix that) may be dispatched; everything else is denied.
+  The Stop hook requires a PushNotification. This lasts until the metric improves
+  or the user writes.
 * **review-round cap**: ``review_round_cap`` review requests for one item since the
   last user message. The next review request for it is denied.
 * **item budget**: an item active for more than ``item_budget_hours`` (from its
@@ -92,6 +94,7 @@ READ_ONLY_AGENT_TYPES = {"Explore", "Plan", "claude-code-guide", "statusline-set
 ITEM_TAG = re.compile(r"\[item:\s*([A-Za-z0-9_.\-/]+)\s*\]")
 REVIEW_TAG = "[review]"
 ITEM_KINDS = ("feature", "bug", "safety", "process", "measurement")
+STALL_RESPONSE_KINDS = ("process", "measurement")
 ACTIVE = "active"
 CLOSED_STATES = {"done", "dropped"}
 
@@ -374,11 +377,12 @@ def evaluate(data: dict, facts: TranscriptFacts, now: datetime) -> list[Trigger]
         out.append(Trigger(
             "stall", stall_at,
             f"STALL: the goal metric ({goal['metric']}) has not improved for "
-            f"{hours(now - base):.1f} h (limit {cfg['stall_hours']:g} h) with no word from the "
-            "user. Stop dispatching. Send the user the `report` (metric history, items, "
-            "rounds, what is blocking) with PushNotification and end the turn; wait for "
-            "their decision. Standing 'keep going' instructions do not cover a stall "
-            "(PA-0141).",
+            f"{hours(now - base):.1f} h (limit {cfg['stall_hours']:g} h). Busy is not building: "
+            "stop feeding the stalled work. Treat the stall as a defect: open a process or "
+            "measurement item (`item add <ID> --kind process|measurement`) to find out why "
+            "the metric is not moving and fix that cause (bug protocol). Only such an item "
+            "may be dispatched until the metric improves or the user writes. Send the user "
+            "the `report` with PushNotification (PA-0141).",
             blocks_stop=cfg["push_required"] and not facts.push_after(stall_at)))
 
     for item_id, item in sorted(data["items"].items()):
@@ -406,7 +410,8 @@ def evaluate(data: dict, facts: TranscriptFacts, now: datetime) -> list[Trigger]
                     "start or the user's last message). Report the overrun and ask whether to "
                     "continue, cut scope, or drop it (PA-0145).", items=(item_id,)))
         # Self-originated scope.
-        if item.get("origin") == "self" and not item.get("blocks"):
+        if item.get("origin") == "self" and not item.get("blocks") \
+                and not item.get("stall_response"):
             opened = parse_ts(item["opened"])
             if not facts.user_after(opened):
                 out.append(Trigger(
@@ -529,11 +534,21 @@ def gate_dispatch(data: dict, facts: TranscriptFacts, tool: str, tool_input: dic
         return f"[item: {item_id}] is not in the ledger. Add it with `item add` first."
     if item.get("status") in CLOSED_STATES:
         return f"{item_id} is {item['status']}. Reopen it or add a new item."
-    for trig in evaluate(data, facts, now):
-        if trig.code == "stall":
+    triggers = evaluate(data, facts, now)
+    stall = next((t for t in triggers if t.code == "stall"), None)
+    responding = bool(item.get("stall_response")) or (
+        stall is not None and item.get("kind") in STALL_RESPONSE_KINDS
+        and parse_ts(item["opened"]) >= stall.since)
+    if stall is not None and not responding:
+        return stall.message
+    for trig in triggers:
+        if trig.code == "self-scope" and responding:
+            continue
+        if item_id in trig.items and trig.code not in ("review-cap", "stall") and trig.needs_user:
             return trig.message
-        if item_id in trig.items and trig.code != "review-cap" and trig.needs_user:
-            return trig.message
+    if responding and not item.get("stall_response"):
+        item["stall_response"] = True
+        log_event(data, "stall-response", item_id, now)
     reviewers = set(data["goal"].get("reviewers", []))
     is_review = REVIEW_TAG in text.lower() or (
         tool in ("SendMessage", "mcp__claude-code-remote__send_message")

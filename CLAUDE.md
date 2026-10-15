@@ -154,8 +154,9 @@ substitute if the specified one is unavailable.
   `scripts/orchestration_guard.py goal open`, using the user's own success metric,
   measured. Register every work item, and tag every dispatch with `[item: <ID>]`.
 - Checkpoint the metric every 3 h of unattended work, and push the `report` to the user.
-- When the goal stalls (6 h without improvement), stop dispatching, report and wait for
-  the user. "Keep going" instructions do not cover a stall.
+- When the goal stalls (6 h without improvement), treat it as a defect. Stop feeding the
+  stalled work, investigate why the metric is not moving, fix that cause (the process
+  included), and report to the user unasked. Busy is not building.
 - The other triggers that stop an item until the user writes:
   - a third review round;
   - work the session opened itself;

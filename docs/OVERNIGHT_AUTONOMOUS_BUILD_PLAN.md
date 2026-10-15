@@ -9,11 +9,11 @@ governs *when* work happens and *who* decides at a fork in the road.
 
 ## Standing policy (applies to every session below, at every step)
 
-> **Amended 2026-10-15 (BUG-0141).** "Never stop building" never overrides the
-> progress triggers in `docs/MULTI_AGENT_ORCHESTRATION.md` §8 (PA-0141..PA-0147). A
-> stalled goal metric, a review-round cap, an overrun budget or a fix chain stops
-> dispatch until the user has seen a report and written back. Running out of
-> progress is a reason to stop and ask, just as running out of items is.
+> **Amended 2026-10-15 (BUG-0141).** Building means making progress toward the goal;
+> activity without progress is not building. "Never stop building" therefore always
+> includes noticing when the work has stopped improving, investigating why, and
+> fixing the cause (the process included). See the progress triggers in
+> `docs/MULTI_AGENT_ORCHESTRATION.md` §8 (PA-0141..PA-0147).
 
 - **Never stop building** because a category or task isn't finished. Keep
   working until it is.

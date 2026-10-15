@@ -47,8 +47,8 @@ not fuzzlab code. Data sources:
   - the user asked for status, progress or an ETA 14 times in two days; each was
     answered, but none was anticipated.
 
-  The user's standing instruction ("I can't watch this process for decision points")
-  made proactive reporting *more* necessary, not less.
+  The user had said they could not watch the process. That made proactive reporting
+  *more* necessary, not less.
 - **Trust in the estimates.** At 01:32 the session said "roughly 2–3 hours" and
   recommended freezing scope. The push landed at 04:04, but the user had not been told
   the previous 8 hours had not moved the metric. Their question was what made it say so.
@@ -77,29 +77,37 @@ are checked against the counts above.
    Live Juice Shop runs happened only at push points (three in the window). No ledger
    recorded the metric over time, so "busy" and "progressing" looked the same from
    inside the loop.
-3. *Why did the session not stop and tell the user when it did notice?* At 01:32 it told
-   the user progress had been flat, but only because the user asked. Its rules defined
-   check-ins narrowly, and every one of them pointed the other way:
-   - **PA-0032** (from BUG-0029): "reserve an end-of-turn check-in for a genuine blocker
-     … never for a natural-feeling stopping point that the standing instructions already
-     cover."
-   - **The overnight plan's standing policy:** "Never stop building."
+3. *Why did the session not investigate and fix the stall once it was visible?* Nothing
+   prevented it. The session did see the stall. At 01:32 it told the user that detection
+   had not improved since the last push, and why the work had taken so long. Then it went
+   back to the same loop: it finished the in-flight items, and later started more.
+
+   Recognising a failure to improve and investigating it is what building is. The
+   "investigate why" step came at 06:45, and only because the user asked. The stall
+   itself was a defect: the process was producing no progress. The session should have
+   handled it the way this project handles every defect, with a root cause, a fix and a
+   report, hours earlier and without being asked.
+
+   Process rules written by earlier sessions gave it no prompt to do so:
+   - **PA-0032** (from BUG-0029): check in only for "a genuine blocker".
+   - **The overnight plan:** "Never stop building."
    - **MULTI_AGENT_ORCHESTRATION §1:** "never let an eligible [lane] sit idle".
-   - **§5** listed three reasons to stop and ask (hard-to-reverse actions, unverifiable
-     changes, design or scope questions); "the work is not progressing" was not one.
-   - **The user's own instructions,** "do not stop building", "do not wait for me at
-     decision points" and "take the most flexible option", were read as covering every
-     situation, including a stall. A stall is not a decision between options, so the
-     standing rule never asked "should this continue at all?"
+   - **§5:** its list of reasons to stop had no "not progressing".
+
+   None of these forbade the investigation; they simply never called for it. The
+   user's instructions were not a cause. "Don't stop building" and "proceed with the
+   recommended option" directed the session through decision points so the work would
+   not wait on the user. They never asked for work to continue without progress. The
+   session's failure was treating activity as building.
 4. *Why did the work keep expanding instead of converging?*
    - **No review exit.** Reviewers asked to find problems always find some, and every
      fix list became new code to review: 147 messages to the two reviewers since 10-14
      00:00, and up to 4 rounds per item plus merge rounds. There was no round cap,
      and no split between must-fix and follow-up.
    - **Self-opened scope.** Reviewer remarks became new work items with full design
-     gates: origin scope (task 23), the M6 write block (task 25), BUG-0118..0121.
-     The "most flexible option" rule tended to pick the larger option (both modes, a
-     switch, an opt-in flag; D1, D2, D6, D29, D30, D34, D54). That added code and review
+     gates: origin scope (task 23), the M6 write block (task 25), BUG-0118..0121. At
+     decision points the session often picked the option that built more (both modes, a
+     switch, an opt-in flag; D1, D2, D6, D29, D30, D34, D54), which added code and review
      surface.
    - **Overlapping lanes.** Two lanes edited `spider.py` and the navigation guard
      concurrently (D39 noted the "expected spider.py merge overlap"). Merging them cost
@@ -114,17 +122,17 @@ are checked against the counts above.
    10-13) re-seeded each new context from a "pending tasks / next step" list, which
    carried the momentum forward and never the question of whether it was working.
 
-**Root cause:** the orchestration loop had no mechanical progress governance. There was
-no goal metric, no checkpoint, no stall trigger, no cap on review rounds, no gate on
-self-opened scope, no fix-chain trigger and no time budget. The project's own written
-rules (PA-0032, the overnight plan, MULTI_AGENT §1/§5) actively discouraged checking in,
-so the only remaining stop condition was the user intervening.
+**Root cause:** the orchestrating session treated activity as progress. It never measured
+the work against the user's goal. When the lack of progress was visible (01:32), it did
+not treat it as a defect to investigate and fix. Nothing mechanical existed to catch
+either failure: no goal metric, checkpoint, stall trigger, cap on review rounds, gate on
+self-opened scope, fix-chain trigger or time budget. So the only check left was the user
+intervening.
 
 **Contributing factors** (fault tree, each fed the loop):
 - event-driven dispatch (every notification led to the next action);
 - unbounded review rounds;
-- self-opened scope;
-- the "most flexible" rule read as "largest";
+- self-opened scope, and picking the option that built more;
 - concurrent lanes on the same files;
 - a shared mechanism fixed forward instead of measured and redesigned;
 - context compaction carrying forward a task list without the goal check;
@@ -134,6 +142,11 @@ so the only remaining stop condition was the user intervening.
 - 09:01 2026-10-15: dispatching stopped. Two lanes then in flight (the BUG-0118 safety
   lane and the verification-harness lane) were allowed to finish their current step and
   given nothing further.
+- **A stall is now handled as a defect.** Once the stall trigger fires, the guard lets
+  through only work aimed at the stall itself: a process or measurement item opened
+  after it fired, to find out why the metric is not moving and fix that. It denies
+  further dispatch of the stalled work and requires a report to the user. This is the
+  "recognise, investigate, address" step the session skipped.
 - `scripts/orchestration_guard.py` and three Claude Code hooks (`.claude/settings.json`):
   - a **PreToolUse** gate on every dispatch tool (Agent, Task, SendMessage, Workflow,
     remote create_session/send_message);
@@ -235,6 +248,3 @@ CLAUDE.md`).
 - **Sub-agents.** While a goal is open, a sub-agent's own untagged Agent calls are denied,
   except read-only types (Explore, Plan). Lanes should not spawn general-purpose
   sub-agents; when one must, its prompt carries the item tag.
-- **The "most flexible option" rule** is the user's instruction, not a project rule. How
-  it should treat scope-adding options is a question for the user (raised in the
-  investigation report), not something this fix decides.

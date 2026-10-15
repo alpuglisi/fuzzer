@@ -206,6 +206,30 @@ def test_a_stalled_metric_denies_dispatch_until_the_user_writes(s):
     assert s.dispatch(to="lane", message="[item: FR-CRAWL-17] finish")[0] == 0
 
 
+def test_during_a_stall_only_work_on_the_stall_itself_is_dispatched(s):
+    """Busy is not building: a stall is investigated and fixed, not fed (PA-0141)."""
+    s.cli("goal", "open", "--text", "t", "--metric", "m", "--baseline", "6",
+          "--evidence", s.evidence())
+    s.cli("item", "add", "OLD-PROC", "--kind", "process", "--origin", "self",
+          "--budget-hours", "100")
+    s.cli("item", "add", "FEAT", "--kind", "feature", "--origin", "user",
+          "--budget-hours", "100")
+    s.at("2026-10-15T00:05:00Z")  # stalled since 00:00
+    assert s.dispatch(to="lane", message="[item: FEAT] more")[0] == 2
+    # A process item from before the stall is not a response to it.
+    assert s.dispatch(to="lane", message="[item: OLD-PROC] go")[0] == 2
+    assert s.cli("item", "add", "WHY-STALLED", "--kind", "measurement", "--origin", "self",
+                 "--title", "why is the metric flat?") == 0
+    assert s.dispatch("Agent", prompt="[item: WHY-STALLED] measure where the time went",
+                      subagent_type="general-purpose")[0] == 0
+    assert s.data()["items"]["WHY-STALLED"]["stall_response"] is True
+    s.at("2026-10-15T00:06:00Z")
+    assert s.cli("item", "add", "FIX-LOOP", "--kind", "process", "--origin", "self") == 0
+    assert s.dispatch(to="lane", message="[item: FIX-LOOP] cap the review rounds")[0] == 0
+    assert s.dispatch(to="lane", message="[item: FEAT] more")[0] == 2  # still not fed
+    assert s.hook("stop")[0] == 2  # and the user must be told
+
+
 def test_a_stall_needs_a_push_notification_before_the_turn_ends(s):
     _stalled(s)
     s.at("2026-10-15T00:05:00Z")
@@ -470,5 +494,8 @@ def test_replay_of_the_2026_10_14_incident_stops_six_hours_in(s):
     s.at("2026-10-14T23:57:30Z")
     s.cli("checkpoint", "--value", "6", "--note", "no change")
     code, text = s.dispatch(to="lane", message="[item: FR-CRAWL-17] merge follow-up M0-M10")
-    assert code == 2 and "STALL" in text
+    assert code == 2 and "STALL" in text and "defect" in text
     assert s.hook("stop")[0] == 2  # must notify the user, not carry on silently
+    # What should have happened: investigate why the metric is flat and fix that.
+    s.cli("item", "add", "WHY-FLAT", "--kind", "measurement", "--origin", "self")
+    assert s.dispatch(to="lane", message="[item: WHY-FLAT] where did 6 h go?")[0] == 0

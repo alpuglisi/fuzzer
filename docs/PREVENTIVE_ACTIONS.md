@@ -332,9 +332,8 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   cover. This is a session-conduct rule, not a fix for a fuzzlab code defect — a
   different root cause from PA-0019's bookkeeping-recall gap (that one is about
   recalling *what to record*; this one is about recalling *what was already
-  authorized*). (from BUG-0029) *(Amended by BUG-0141.)* This rule never applies to a
-  stall, an overrun or a cap: PA-0141..PA-0146 define those as check-in triggers that
-  standing "keep going" instructions do not cover.
+  authorized*). (from BUG-0029) *(Amended by BUG-0141.)* Reporting a stall, an
+  overrun or a cap is never the check-in this rule forbids (PA-0141..PA-0146).
   - Enforced by: none — a session-conduct rule; its exceptions are enforced by PA-0141..PA-0146
 - **PA-0033** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
   PA-0033 reuses as-is): PA-0020 established that a bug whose root cause is "my own
@@ -2003,15 +2002,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      success (e.g. confirmed findings per live run), measured, not estimated.
   2. **Checkpoint every 3 hours of unattended work.** Run a real measurement, record it
      with `checkpoint`, and send the user the `report` with PushNotification.
-  3. **A stall is a check-in trigger.** If the metric has not improved for 6 hours and
-     the user has not written, that is a stall. Stop dispatching, report and wait for the
-     user. Standing "keep going" or "don't wait for me" instructions do not cover a
-     stall. PA-0032 still forbids asking at a natural stopping point the instructions
-     cover; it never forbids reporting a stall.
-  4. **The hooks enforce this.** The dispatch gate denies dispatch during a stall, and the
-     Stop hook refuses to end a turn with a checkpoint overdue or a stall unreported.
+  3. **A stall is a defect.** If the metric has not improved for 6 hours and the user has
+     not written, that is a stall: busy is not building. Stop feeding the stalled work.
+     Open a process or measurement item to find out why the metric is not moving, fix
+     that cause under the bug protocol (the process itself included), and report to the
+     user. Don't wait to be asked. Reporting a stall is never the check-in PA-0032
+     forbids.
+  4. **The hooks enforce this.** During a stall, the dispatch gate lets through only an
+     item of kind process or measurement opened after the stall began. The Stop hook
+     refuses to end a turn with a checkpoint overdue or a stall unreported.
      (from BUG-0141)
-  - Enforced by: tests/test_orchestration_guard.py::test_a_stalled_metric_denies_dispatch_until_the_user_writes, tests/test_orchestration_guard.py::test_a_stall_needs_a_push_notification_before_the_turn_ends, tests/test_orchestration_guard.py::test_a_checkpoint_falls_due_after_three_unattended_hours, tests/test_orchestration_guard.py::test_dispatching_without_a_ledger_is_caught_at_the_stop, tests/test_orchestration_guard.py::test_replay_of_the_2026_10_14_incident_stops_six_hours_in
+  - Enforced by: tests/test_orchestration_guard.py::test_a_stalled_metric_denies_dispatch_until_the_user_writes, tests/test_orchestration_guard.py::test_during_a_stall_only_work_on_the_stall_itself_is_dispatched, tests/test_orchestration_guard.py::test_a_stall_needs_a_push_notification_before_the_turn_ends, tests/test_orchestration_guard.py::test_a_checkpoint_falls_due_after_three_unattended_hours, tests/test_orchestration_guard.py::test_dispatching_without_a_ledger_is_caught_at_the_stop, tests/test_orchestration_guard.py::test_replay_of_the_2026_10_14_incident_stops_six_hours_in
 
 - **PA-0142** — **Review rounds are capped.**
   1. **At most 3 review requests per work item** between user contacts. A request is any

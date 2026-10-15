@@ -170,9 +170,8 @@ For these, do the safe/verifiable parts, then stop and present the specific
 open question with your recommendation — rather than either quietly forcing
 a decision through or refusing to make any progress at all.
 
-§8's triggers are a fourth case, and they are mechanical: when one fires, stop
-dispatching and report, whatever the standing instructions say about decision
-points.
+§8's triggers are a fourth case, and they are mechanical. When one fires, stop
+feeding that work, find out why it fired and fix that, and report.
 
 ## 6. Shared strict-xfail sentinels across concurrent lanes
 
@@ -233,10 +232,9 @@ reviewer measuring in real Chromium.
 ## 8. Progress governance: the goal ledger and its triggers (BUG-0141)
 
 An orchestrating session once ran about 15 hours on review rounds, self-opened
-follow-ups and a fix chain. Its goal metric moved by one finding, and it never told
-the user. Every rule it had was prose, and several (PA-0032, the overnight plan's
-"never stop building", §1's "never idle") pushed it to keep going. These rules are
-therefore enforced by `scripts/orchestration_guard.py` through Claude Code hooks
+follow-ups and a fix chain. Its goal metric moved by one finding. It saw the stall,
+did not investigate or fix it, and never told the user until they intervened. Busy
+is not building. These rules are therefore enforced by `scripts/orchestration_guard.py` through Claude Code hooks
 (`.claude/settings.json`). The hooks read the session transcript, so only a real
 user message (or an answer to a question) clears an escalation.
 
@@ -260,7 +258,7 @@ Read-only agents (Explore, Plan) and messages that start with `STOP` are exempt.
 | Trigger | Default | Effect | Cleared by |
 |---|---|---|---|
 | Checkpoint due (PA-0141) | 3 h since the last checkpoint or user message | Stop hook refuses to end the turn | `checkpoint --value N [--evidence …]` and a PushNotification with the `report` |
-| Stall (PA-0141) | metric not improved for 6 h, no user message | all dispatch denied; Stop needs a PushNotification | a user message |
+| Stall (PA-0141) | metric not improved for 6 h, no user message | only a process/measurement item opened after the stall (investigating and fixing why) may be dispatched; Stop needs a PushNotification | an improvement or a user message |
 | Review cap (PA-0142) | 3 review requests for an item since the user last wrote | further review of that item denied | a user message |
 | Self-opened scope (PA-0143) | item `--origin self`, not a blocking defect | dispatch for it denied | a user message after it was opened |
 | Bug chain (PA-0144) | 2 bugs `--spawned-by` one item | dispatch for the item and its bugs denied | a user message (after a measured redesign is proposed) |
