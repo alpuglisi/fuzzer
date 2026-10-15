@@ -1963,10 +1963,10 @@ replays and edits, including a raw byte path for malformed-traffic study.
   `fuzz` keep `--store` as opt-in consolidation.
   - `core/storepath.resolve` is the one resolution. Its order is `--store`, then
     `$FUZZLAB_STORE`, then `$FUZZLAB_STORE_PATH`, then `./fuzzlab.db`.
-  - Every CLI and the web UI's config go through it, so a command launched from the UI
-    and the UI's own pages always open the same store.
+  - Those commands and the web UI's config go through it, so such a command launched
+    from the UI and the UI's own pages always open the same store.
   - Writers create the store; non-creating commands refuse a missing one.
-  - Every summary names the store and its source.
+  - Those commands' summaries name the store and its source.
   - A per-user location is an open owner decision
     (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md` §4.8).
 - **The command taxonomy (FR-FUZZ-401, FR-UI-400):** commands are grouped as working

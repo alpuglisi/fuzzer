@@ -1099,7 +1099,7 @@ rewards) derives from it.
   - **`--anomaly-method {ecod,iforest}`** (FR-ML-22) needs `--anomaly`; the summary line
     reads `anomaly (iforest): …` (unchanged for ECOD).
   - Both appear in a stage's config only when not the default.
-  - **`fuzzlab flow-anomaly --store S --run N [--method] [--contamination] [--seed]`**
+  - **`fuzzlab flow-anomaly [--store S] --run N [--method] [--contamination] [--seed]`**
     (FR-ML-23) writes the run's flow anomaly columns (no traffic, no `--authorized`),
     prints per-host counts and the top flagged flows, and says contamination is a
     forced per-host fraction. Reached through `import_ml`: without ML it exits 2 with
@@ -1341,8 +1341,9 @@ rewards) derives from it.
   `argument_default`, `allow_abbrev=False`, other prefix characters, fromfile prefixes,
   subcommands, or a restricted non-single-value option. A discovered round trip over
   every action of every parser proves each copy parses exactly like its source
-  (PA-0400). In the working view, `--train-on` is fixed to `saved`, so `--score`/`--rank`
-  apply a saved model. A working command built with `working_parser` refuses every T
+  (PA-0400). A working namespace is completed by `working_namespace`: `--train-on` is
+  `saved` when `--score`/`--rank` is given (a working run applies a saved model) and the
+  engine's own `run` otherwise, so every working namespace passes the engine's rules. A working command built with `working_parser` refuses every T
   and L flag by name
   (exit 2, the value consumed, naming `fuzzlab train run`; ground truth "is never part
   of a working run"). It restricts W\* values. The classification guard fails on an

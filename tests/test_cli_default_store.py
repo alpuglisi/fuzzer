@@ -254,3 +254,12 @@ def test_proxy_explicit_empty_store_is_a_usage_error(cwd, capsys):
     with pytest.raises(SystemExit) as exc:
         proxy_main(["--store", "", "--authorized"])
     assert exc.value.code == 2 and "empty path" in capsys.readouterr().err
+
+
+def test_proxy_dry_run_with_an_empty_store_prints_no_plan(cwd, capsys):
+    """Review round 2: a bad --store fails before the dry-run plan is printed."""
+    from fuzzlab.proxy.cli import main as proxy_main
+    with pytest.raises(SystemExit) as exc:
+        proxy_main(["--store", "", "--dry-run"])
+    out, err = capsys.readouterr()
+    assert exc.value.code == 2 and "DRY RUN" not in out and "empty path" in err

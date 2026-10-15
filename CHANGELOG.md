@@ -4,6 +4,20 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (CLI Phase 1 code review, round 2)
+- **The working-view fix of round 1 broke plain working runs.** A fixed
+  `train_on=saved` made every working namespace without `--score`/`--rank` fail the
+  engine's rules. It was latent (Phase 2's `scan`) and caught before push.
+  `cli_taxonomy.working_namespace` now applies `saved` only with `--score`/`--rank`.
+- **Also:**
+  - The forwarding round-trip test is no longer tautological.
+  - The store guard's wiring is tested.
+  - An unknown `trained_on` reads as unknown, never as `run`.
+  - In the proxy dry run, the store is checked before the plan prints.
+  - Help never splits a command name.
+  - The UI hand-off no longer asks for the reveal in the launcher (FR-FUZZ-36).
+- Change controls: CC-FUZZ-0402, CC-CORE-0402, CC-UI-0402, CC-PROXY-0402, CC-ML-0402.
+
 ## 2026-10-15 (CLI Phase 1 code review: three bugs fixed, D-9 tightened)
 - **Why:** two independent code reviewers (A, B) and the clean-tree suite found three
   defects in this lane's own code, plus gaps against the agreed design.
@@ -54,7 +68,8 @@ changed, and the reason. Reference the commit hash where useful.
 - Found during the CLI design review. `web/runner.build_flags` mis-serialises four
   argparse shapes; it builds both the web launcher's real child argv and every
   `--dry-run` display:
-  - `nargs='*'` lists are written as their Python repr;
+  - a bare `nargs='*'` flag is written as `[]`;
+  - `nargs='*'`/`'+'` lists with items are written as their Python repr;
   - a bare `const=""` flag is dropped;
   - a dash-leading value is split off its flag.
 - Pinned by strict xfails from a discovery round-trip test over every action of every

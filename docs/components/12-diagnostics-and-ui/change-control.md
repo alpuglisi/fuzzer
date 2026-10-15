@@ -3,6 +3,20 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0402 — `report` shows an unknown `trained_on` as `unknown`; the UI hand-off no longer asks for a reveal in the launcher (2026-10-15)
+- Change:
+  - **`report/report.py` `_training`:** a malformed `trained_on` reads `unknown`. Before,
+    it silently read `run`.
+  - **UI `requirements.md` §8 corrected:** add `train models`, but **not** `train
+    reveal-holdout`. FR-FUZZ-36 keeps the counted reveal out of the launcher (reviewer B
+    round 2). Design §9 has the same correction.
+- Impact (other components / project): the UI session's to-do list.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `report/report.py`, UI §8, design §9 — done
+- Effectiveness (assessed 2026-10-15): `tests/test_report.py` is green, and the
+  malformed case is tested. Effective.
+
 ### CC-UI-0401 — `report` reads provenance through `core/modelinfo`; the UI lane's open items recorded (2026-10-15)
 - Change:
   - **`report/report.py`:** `_training` reads `core.modelinfo.trained_on`, the one

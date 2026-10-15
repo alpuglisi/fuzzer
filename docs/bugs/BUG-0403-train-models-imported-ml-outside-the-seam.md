@@ -50,7 +50,7 @@ Five Whys:
    catch it, but after the push, not before.
 
 **Root cause:** the pre-push verification set was derived from imports alone. It
-structurally excludes the repository's path-scanning guard tests (25 files today), which
+structurally excludes the repository's path-scanning guard tests (33 `.py` files today), which
 are exactly the tests that judge a **new** module.
 
 ## Corrective action
@@ -95,7 +95,7 @@ about the verification set.
 1. Before a change that adds or edits a module under `fuzzlab/` is pushed, its
    verification includes **every path-scanning guard test**, not only the files that
    import the changed modules. These are the tests that discover code by walking
-   `fuzzlab/` or `tests/` (`grep -lE "rglob|ast.parse\(.*read_text" tests/`). An
+   `fuzzlab/` or `tests/` (`grep -rlE --include="*.py" "rglob|ast.parse\(.*read_text" tests/`). An
    import-based list is necessary but never sufficient: it cannot find a guard that
    judges a *new* module.
 2. When the full suite is the backstop, it runs **before** the push of the commit it

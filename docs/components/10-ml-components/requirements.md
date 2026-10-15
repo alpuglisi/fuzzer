@@ -522,7 +522,9 @@ the oracle owns truth (the oracle/advisory split).
   `fuzzlab train models`. It is a listing, never a selection.
   - **Row fields:** id, name, version, feature version, created, params saved.
   - **From the calibration JSON:** only `LISTING_KEYS` (`trained_on`, the `run_id`
-    scope, `source_model_id`, the count of `scored_run_ids`).
+    scope, `source_model_id`, the count of `scored_run_ids`). `trained_on` is read by
+    `core.modelinfo.trained_on`, shared with `report`: absent = `run` (run-mode and
+    legacy rows never record it); an unknown value is unknown (`None`), never a default.
   - **Never read:** a metric, `holdout.*`, `params`, or a sealed table (PA-0092).
   - **Malformed:** an unparsable calibration is reported `unreadable` (PA-0108).
 

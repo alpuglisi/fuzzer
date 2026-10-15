@@ -3,6 +3,16 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0402 — FR-ML-400 and `list_models` state how `trained_on` is read (documentation) (2026-10-15)
+- Change: FR-ML-400 and `list_models`' docstring say that `trained_on` comes from
+  `core.modelinfo.trained_on`: absent is `run`, and an unknown value is `None`.
+  CC-CORE-0402 makes the unknown case explicit (reviewer B round 2).
+- Impact (other components / project): none.
+- Risk (level; mitigation or accepted-risk justification): none.
+- Deliverables:
+  - [x] FR-ML-400, docstring — done
+- Effectiveness (assessed 2026-10-15): the text matches `core/modelinfo.py`. Effective.
+
 ### CC-ML-0401 — `list_models` reads provenance through `core.modelinfo.trained_on` (2026-10-15)
 - Change:
   - **`ml/model_registry.py`:** `list_models`' `trained_on` comes from

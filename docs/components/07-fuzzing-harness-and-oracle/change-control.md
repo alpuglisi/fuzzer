@@ -22,6 +22,42 @@ DIFFERENTIAL`. Full old-ID -> new-ID mapping table (also covering `FR-LAB`,
 `docs/components/01-target-lab/change-control.md`'s own Bookkeeping-ID
 note of the same date.
 
+### CC-FUZZ-0402 — Code review round 2: a completed working namespace passes the engine's rules; non-tautological forwarding test (2026-10-15)
+- Change (reviewers A and B, round 2; design Appendix G):
+  - **`cli_taxonomy.working_namespace`** replaces the fixed `train_on="saved"` default
+    from CC-FUZZ-0401. That default made every plain working namespace (no
+    `--score`/`--rank`) fail the engine's own rule (`--train-on` other than `run` needs
+    `--score` or `--rank`). Now `saved` applies only with `--score`/`--rank`, and `run`
+    otherwise. It was latent: no Phase 1 command uses the working view. It was caught
+    before push.
+  - The copied `--store` help keeps the source's text and appends the default rule.
+  - The grouped help never breaks a command name across lines (`break_on_hyphens=False`).
+  - Tests:
+    - the forwarding round trip now compares the engine's namespace with the values
+      `train run` validated; the old version parsed the same argv twice;
+    - the metric-key check reads code constants only.
+  - FR-FUZZ-37 shows `flow-anomaly [--store S]`.
+- Impact (other components / project): Phase 2's `scan` completes its namespace with
+  `working_namespace` before the engine's `validate()`. No Phase 1 behaviour changes.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] `fuzzlab/cli_taxonomy.py` — done
+  - [x] tests:
+    - `tests/test_cli_taxonomy.py::test_a_completed_working_namespace_passes_the_engines_rules`
+      (6 namespaces through the real `auto_cli.main` checks);
+    - the raw-text help check;
+    - `tests/test_train_cli.py::test_forwarding_round_trips_every_action_of_the_engine`
+      (rewritten);
+    - `::test_list_models_reads_no_metric_key`
+    — done
+  - [x] FR-FUZZ-401 and FR-FUZZ-37 updated in place — done
+- Effectiveness (assessed 2026-10-15):
+  - Mutation checks, 7 of 7 killed: the old always-saved bug, a `forward` that drops an
+    argument (which the old test could not see), the guard's basetemp exclusion, the
+    session clear, a malformed `trained_on` read as `run`, help hyphen breaks, and the
+    proxy dry-run order.
+  - Clean-tree suite: COUNTS_PENDING.
+
 ### CC-FUZZ-0401 — CLI Phase 1 code-review fixes: D-9 counts only effective choices; the engine opens the store printed (BUG-0401); `train models` via `import_ml` (BUG-0403) (2026-10-15)
 - Change (reviewers A and B, the clean-tree suite; `docs/CLI_WORKING_VS_TRAINING_DESIGN.md` Appendix F):
   - **`fuzzlab/train_cli.py`:**

@@ -556,7 +556,8 @@ their own results.
   - **To do:**
     - Move the commandspec entries: `auto` to `scan` (Phase 2) and `train run`;
       `mutate-run` to `train mutate`; `flow-anomaly` to `train flow-anomaly`.
-    - Add `train models` and `train reveal-holdout`.
+    - Add `train models`. Do not add `train reveal-holdout`: FR-FUZZ-36 keeps the
+      counted reveal out of the launcher, so it is always a deliberate command.
     - Group the launcher by `cli_taxonomy.COMMANDS`.
     - Make `introspect` skip `SUPPRESS` options.
     - Add `cli_dryrun` specs for the new names.

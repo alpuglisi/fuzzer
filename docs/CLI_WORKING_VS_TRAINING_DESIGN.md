@@ -106,18 +106,19 @@ The owner's request (2026-10-15): the CLI is too complicated. They want:
 - **D-5.** `train models` lists saved models. It is label-free and uses an explicit
   allowlist (§6.4).
 - **D-9.** `train run` must carry at least one training or benchmark choice **that
-  takes effect** (amended after the code review, Appendix F, F1). Otherwise
-  it exits 2 before any side effect and names `fuzzlab auto` (Phase 2: `fuzzlab
-  scan`). Choices are detected by **presence on the command line**, never by comparing
-  values with defaults (copied training dests get a sentinel default). A choice is one
-  of:
-  - `--ground-truth`, `--holdout`, `--calibrate`, `--hybrid`, `--rank-objective`;
-  - `--budget-seed`, or a `--budget-method` other than `score`;
-  - `--mode manual`, `--points ground-truth` (an explicit `--mode automatic` or
-    `--points crawl` is a working choice and does not count);
+  takes effect** (amended after the code review, Appendix F, F1). Otherwise it exits 2
+  before any side effect and names `fuzzlab auto` (Phase 2: `fuzzlab scan`). Choices are
+  detected by **presence on the command line**; a value equal to the working default
+  never counts. The one function is `train_cli.training_choices`. A choice is one of:
+  - `--ground-truth`, `--points ground-truth`, `--mode manual`, `--holdout`, `--hybrid`;
   - `--score` or `--rank`, **unless** `--train-on saved` is also given, since applying
     a saved model is working use;
-  - `--train-on run` or `--train-on earlier`.
+  - `--calibrate` other than `none`;
+  - `--rank-objective` other than `pointwise`;
+  - with `--confirm-budget` only: `--budget-seed`, or a `--budget-method` other than
+    `score`.
+
+  `--train-on` alone never counts.
 - **D-10.** `fuzzlab train` with no subcommand prints the group's usage and exits 2.
   `fuzzlab train --help` exits 0.
 
@@ -666,7 +667,7 @@ store or the loopback fixtures; anything else is tagged `[design]`.
   - `auto` → `scan` + `train run`;
   - `mutate-run` → `train mutate`;
   - `flow-anomaly` → `train flow-anomaly`;
-  - add `train models` and `train reveal-holdout`.
+  - add `train models` (not `train reveal-holdout`: FR-FUZZ-36 keeps the counted reveal out of the launcher).
 - Group the launcher by `COMMANDS`.
 - `introspect` should skip `SUPPRESS`.
 - BUG-0400.
@@ -850,3 +851,25 @@ is built and tested (CC-*-0401).
 | F20 | B11 | The guard is tested via `classification_problems` on synthetic offenders. Also: a FIFO `check_writable` test, `git check-ignore`, and a non-default numeric sample. |
 | F21 | B12 | Wording fixed: four shapes in BUG-0400, four help groups in the README, and the MUT, PROXY and FR-FUZZ-36 texts. |
 | — | the clean-tree suite | **BUG-0403:** `train models` now goes through `import_ml`. PA-0403 puts the path-scanning guards in every verification set. |
+
+## Appendix G: code review round 2 (reviewers A and B), reconciled
+
+Both reviewers concluded "approve with fixes", with no blocking findings. Every item
+below is built and tested (CC-*-0402).
+
+| # | Finding | Fix |
+| --- | --- | --- |
+| G1 | A1, B3 | `working_namespace`: `saved` only with `--score`/`--rank`, `run` otherwise. Tested through the real engine rules. This replaces the F4 default, which made a plain working run invalid. |
+| G2 | A2, B6 | Proxy dry run: the store is resolved before the plan prints. |
+| G3 | A3 | §2.1 D-9 is rewritten in place to match `training_choices`. |
+| G4 | A4, B4 | `guard_kwargs` is tested from outside and inside the repository. `pytest_configure` is tested with host values set. |
+| G5 | A5, B7 | `modelinfo.trained_on`: an unknown value is `None`, never a default. `report` shows `unknown`. FR-ML-400 is updated. |
+| G6 | A6 | PA-0403's grep gains `--include="*.py"`; the guard count is 33. |
+| G7 | A7 | The copied `--store` help keeps the source's text. |
+| G8 | A8, B7 | Suite counts are recorded (CC-FUZZ-0402). |
+| G9 | B1 | The forwarding round trip compares against the validated values. |
+| G10 | B2 | The UI to-do no longer asks to put the reveal in the launcher (FR-FUZZ-36). |
+| G11 | B5 | ARCHITECTURE: two sentences scoped. |
+| G12 | B7 | FR-FUZZ-37 `[--store S]`; the CHANGELOG lists BUG-0400's four shapes. |
+| G13 | B8 | The help never breaks a command name (`break_on_hyphens=False`); tested on the raw text. |
+| G14 | B9 | The metric-key check reads code constants only. |

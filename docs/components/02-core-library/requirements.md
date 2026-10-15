@@ -486,8 +486,9 @@ plugin registry. It is the layer that makes the store the integration bus.
     pytest's temp base) or in an outside cwd's own files (`tests/_store_guard.py`, never
     walking an unowned directory: BUG-0402, PA-0402).
   - **Shared model facts:** `core/modelinfo.trained_on` is the one reading of what a
-    model row was trained on. `report` and `train models` both use it, and it works in a
-    no-ML build.
+    model row was trained on (absent = `run`; an unknown value is `None`, PA-0108).
+    `report` (which shows it as `unknown`) and `train models` both use it, and it works
+    in a no-ML build.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

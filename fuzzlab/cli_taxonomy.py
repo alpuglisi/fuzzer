@@ -120,16 +120,18 @@ def render_help() -> str:
         lines += ["", group]
         for c in COMMANDS:
             if c.group == group:
-                body = textwrap.wrap(c.summary, _HELP_COLUMNS - 2 - width) or [""]
+                body = textwrap.wrap(c.summary, _HELP_COLUMNS - 2 - width,
+                                     break_on_hyphens=False) or [""]
                 lines.append(f"  {c.usage.ljust(width)}{body[0]}")
                 lines += [" " * (2 + width) + more for more in body[1:]]
     lines += [""] + textwrap.wrap("Older names (still work): " + ", ".join(
-        f"{old} (= {new})" for old, new in OLD_NAMES.items()), _HELP_COLUMNS)
+        f"{old} (= {new})" for old, new in OLD_NAMES.items()), _HELP_COLUMNS,
+        break_on_hyphens=False)
     from fuzzlab.core.storepath import DEFAULT_RULE
     lines += [""] + textwrap.wrap(
         f"Store: --store PATH, else {DEFAULT_RULE} in the current directory (the web UI "
         "uses the same rule). auto and greybox-run still need --store.", _HELP_COLUMNS,
-        subsequent_indent="       ")
+        subsequent_indent="       ", break_on_hyphens=False)
     lines += ["Lab-only. Nothing runs against a target until you ask it to (no auto-run)."]
     return "\n".join(lines) + "\n"
 
@@ -233,12 +235,17 @@ WORKING_RESTRICT: dict[str, dict[str, tuple[str, ...]]] = {
     "auto": {"budget_method": ("score",)},
 }
 
-#: What a working command fixes for a refused dest: in a working run ``--score`` and
-#: ``--rank`` *apply* a saved model (FR-FUZZ-401), so the refused ``--train-on`` is
-#: ``saved``.
-WORKING_DEFAULTS: dict[str, dict[str, object]] = {
-    "auto": {"train_on": "saved"},
-}
+def working_namespace(key: str, ns: argparse.Namespace) -> argparse.Namespace:
+    """The engine's view of a working-command namespace (FR-FUZZ-401). For ``auto``: the
+    refused ``--train-on`` is ``saved`` when ``--score``/``--rank`` is given -- a working
+    run *applies* a saved model -- and the engine's own default ``run`` otherwise, so a
+    plain run passes the engine's rules (``--train-on`` other than ``run`` needs
+    ``--score``/``--rank``). The one place a working namespace is completed; `scan`
+    (Phase 2) calls it before the engine's validation."""
+    if key == "auto":
+        ns.train_on = "saved" if (getattr(ns, "score", False) or
+                                  getattr(ns, "rank", False)) else "run"
+    return ns
 
 
 def parser_dests(parser: argparse.ArgumentParser) -> list[str]:
@@ -395,7 +402,7 @@ def copy_parser(source: argparse.ArgumentParser, *, prog: str,
             from fuzzlab.core.storepath import store_help
             a.required = False
             a.default = None
-            a.help = store_help("Unified store (SQLite) to write to")
+            a.help = store_help(a.help or "Unified store (SQLite)")
         if url_positional and a.dest == "base_url":
             a.required = False
             a.help = argparse.SUPPRESS
@@ -410,9 +417,8 @@ def copy_parser(source: argparse.ArgumentParser, *, prog: str,
 
 def working_parser(key: str, *, prog: str) -> argparse.ArgumentParser:
     """The working view of parser ``key``: T and L flags refused, W* flags restricted,
-    the URL positional — the parser `fuzzlab scan` (Phase 2) is built from."""
-    p = copy_parser(PARSERS[key](), prog=prog, url_positional=True,
-                    refuse={d: FLAG_CLASSES[key][d] for d in refused_dests(key)},
-                    restrict=WORKING_RESTRICT.get(key))
-    p.set_defaults(**WORKING_DEFAULTS.get(key, {}))
-    return p
+    the URL positional — the parser `fuzzlab scan` (Phase 2) is built from. Complete
+    its namespace with :func:`working_namespace`."""
+    return copy_parser(PARSERS[key](), prog=prog, url_positional=True,
+                       refuse={d: FLAG_CLASSES[key][d] for d in refused_dests(key)},
+                       restrict=WORKING_RESTRICT.get(key))

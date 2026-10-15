@@ -3,6 +3,28 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0402 — `modelinfo.trained_on`: an unknown value is unknown; the guard's wiring is tested (PA-0402(3)) (2026-10-15)
+- Change:
+  - **`core/modelinfo.trained_on`:** absent is `run`, `earlier`/`saved` are themselves,
+    and any other recorded value is `None`. It used to be `run`, a default standing in
+    for malformed data (PA-0108(2), review A round 2).
+  - **`tests/_store_guard.py`:** `guard_kwargs(basetemp)` is the fixture's wiring, now
+    tested from a cwd outside and inside the repository.
+  - `test_pytest_configure_clears_the_store_variables` calls the hook with host values
+    set; the earlier module-fixture check was vacuous without a host value.
+  - PA-0403's grep gains `--include="*.py"`, and the guard count is corrected to 33.
+- Impact (other components / project): UI `report` shows `unknown` for such a row
+  (CC-UI-0402); ML `list_models` shows `-`.
+- Risk (level; mitigation or accepted-risk justification): low; such rows only arise
+  from corrupt data.
+- Deliverables:
+  - [x] code and tests (`tests/test_storepath.py::test_a_malformed_trained_on_is_unknown_never_a_default`,
+    `::test_the_guard_watches_an_outside_cwd_and_excludes_pytests_basetemp`,
+    `::test_pytest_configure_clears_the_store_variables`) — done
+  - [x] FR-CORE-400 updated in place — done
+- Effectiveness (assessed 2026-10-15): each of the three mutations fails its test.
+  Effective.
+
 ### CC-CORE-0401 — Store help from the one constant; `core/modelinfo.py`; the store guard is bounded (BUG-0402) (2026-10-15)
 - Change:
   - **`core/storepath.py`:** `DEFAULT_RULE` and `store_help()` state the default rule

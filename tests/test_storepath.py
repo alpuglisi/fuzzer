@@ -203,6 +203,39 @@ def test_the_store_guard_never_walks_pytests_temp_base_nor_an_outside_cwd(tmp_pa
     assert list(found) == [str(outside / DEFAULT_STORE)]
 
 
+def test_the_guard_watches_an_outside_cwd_and_excludes_pytests_basetemp(tmp_path,
+                                                                        monkeypatch):
+    """PA-0402(3): the fixture's own wiring (`guard_kwargs`), from a cwd outside the
+    repository and from inside it."""
+    from tests._store_guard import ROOT, guard_kwargs
+    monkeypatch.chdir(tmp_path)
+    kwargs = guard_kwargs(tmp_path / "base")
+    assert kwargs == {"exclude": [str(tmp_path / "base")], "cwd": tmp_path.resolve()}
+    monkeypatch.chdir(ROOT / "docs")
+    assert guard_kwargs(tmp_path / "base")["cwd"] is None
+
+
+def test_pytest_configure_clears_the_store_variables(monkeypatch):
+    """The session-wide clear itself (not only the per-test fixture), with a host value."""
+    from tests._store_guard import pytest_configure
+    for name in storepath.ENV_NAMES:
+        monkeypatch.setenv(name, "/host/store.db")
+    pytest_configure(None)
+    assert not any(n in os.environ for n in storepath.ENV_NAMES)
+
+
+def test_a_malformed_trained_on_is_unknown_never_a_default():
+    """PA-0108(2): absent = run (run-mode and legacy rows); an unknown value is None."""
+    from fuzzlab.core.modelinfo import trained_on
+    from fuzzlab.report.report import _training
+    assert trained_on({}) == "run"
+    assert trained_on({"trained_on": "earlier"}) == "earlier"
+    assert trained_on({"trained_on": "saved"}) == "saved"
+    for bad in (5, "bogus", None, ["run"]):
+        assert trained_on({"trained_on": bad}) is None
+        assert _training({"trained_on": bad})["trained_on"] == "unknown"
+
+
 def test_the_default_stays_the_shared_project_store():
     """The literal the UI has always used (pinned: a move is the owner's decision, §4.8)."""
     assert DEFAULT_STORE == "fuzzlab.db"

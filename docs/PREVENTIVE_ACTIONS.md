@@ -1738,7 +1738,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   never contained the path-scanning guard that judges it.
   1. **A change that adds or edits a module under `fuzzlab/` is verified against every
      path-scanning guard test** (tests that discover code by walking `fuzzlab/`/`tests/`:
-     `grep -lE "rglob|ast.parse\(.*read_text" tests/`), not only the files that import the
+     `grep -rlE --include="*.py" "rglob|ast.parse\(.*read_text" tests/`), not only the files that import the
      changed modules. An import-based list cannot find a guard that judges a *new* module.
   2. **When the full suite is the backstop, it runs before the push of the commit it
      certifies**, on the clean committed tree. (from BUG-0403)

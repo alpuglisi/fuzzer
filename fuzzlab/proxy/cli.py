@@ -69,9 +69,9 @@ def main(argv: list[str]) -> int:
     args = p.parse_args(argv)
 
     if args.dry_run:
+        recording = _recording(p, args)      # a bad --store fails before any plan prints
         from fuzzlab.cli_dryrun import report
         report("proxy", args)
-        recording = _recording(p, args)
         if recording is not None:
             print(f"  {storepath.describe(recording)}")
         return 0

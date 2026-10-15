@@ -103,7 +103,8 @@ that shares the store, never a mandatory pipeline (D5).
   - `--record` records into the resolved store (FR-CORE-400).
   - `--store PATH` records there, as before; with both, `--store` wins.
   - The `--authorized` and loopback gates run before any store work.
-  - `--export-ca` comes before any store resolution.
+  - `--export-ca` comes before any store resolution. In a dry run, the store is resolved
+    before the plan is printed, so a bad `--store` prints no plan.
   - An explicit `--store ""` is now a usage error. It used to mean "do not record".
 
 ## 4. Non-functional requirements

@@ -39,7 +39,7 @@ def _training(calibration: dict) -> dict:
     if kind == "saved":
         return {"trained_on": "saved", "train_run_ids": calibration.get("train_run_ids"),
                 "source_model_id": calibration.get("source_model_id")}
-    return {"trained_on": "run", "train_run_ids": None}
+    return {"trained_on": kind or "unknown", "train_run_ids": None}
 
 
 #: Stage metrics that record the candidate / flow feature version a stage read on a run

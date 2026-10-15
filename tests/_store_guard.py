@@ -85,9 +85,15 @@ def isolate_store_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+def guard_kwargs(basetemp) -> dict:
+    """What the session guard watches besides the repository tree: pytest's basetemp is
+    excluded, and an outside cwd's own store files are checked (tested on its own)."""
+    return {"exclude": [str(basetemp)], "cwd": _outside_cwd()}
+
+
 @pytest.fixture(autouse=True, scope="session")
 def default_store_untouched(tmp_path_factory):
-    kwargs = {"exclude": [str(tmp_path_factory.getbasetemp())], "cwd": _outside_cwd()}
+    kwargs = guard_kwargs(tmp_path_factory.getbasetemp())
     before = store_files(ROOT, **kwargs)
     yield
     after = store_files(ROOT, **kwargs)

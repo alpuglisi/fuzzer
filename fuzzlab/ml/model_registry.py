@@ -188,7 +188,9 @@ def list_models(store) -> list[dict]:
     """Every saved model row, oldest first, with label-free facts only (`fuzzlab train
     models`). A listing, not a selection: it never picks a "current" row (that is
     `select_latest`'s job). A calibration that does not parse is reported as unreadable,
-    never filled with defaults (PA-0108)."""
+    never filled with defaults (PA-0108); an absent `trained_on` is `run` (run-mode and
+    legacy rows never record it) and an unknown value is `None`
+    (`core.modelinfo.trained_on`)."""
     out: list[dict] = []
     for row in store.conn.execute(
             "SELECT id, name, version, feature_version, created_at, calibration, "

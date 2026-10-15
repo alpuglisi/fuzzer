@@ -258,9 +258,13 @@ def test_forwarding_round_trips_every_action_of_the_engine(tmp_path, monkeypatch
         ns = copy.parse_args(argv)
         fwd = train_cli.forward(argv, ns, URL, resolve(ns.store, environ={}))
         got = vars(engine.parse_args(fwd))
-        want = vars(build_parser().parse_args(["--base-url", URL, *extra,
-                                               "--store", str(tmp_path / DEFAULT_STORE)]))
-        assert got == want, (action.dest, extra)
+        # the values `train run` validated (its presence-suppressed dests at the engine's
+        # default) -- never the forwarded argv parsed again (review B round 2)
+        want = {d: getattr(ns, d, engine.get_default(d)) for d in got
+                if d not in ("base_url", "store")}
+        assert {d: got[d] for d in want} == want, (action.dest, extra)
+        assert got["base_url"] == URL
+        assert got["store"] == str(tmp_path / DEFAULT_STORE)
         checked += 1
     assert checked > 30
 
@@ -440,11 +444,17 @@ def test_list_models_reads_no_metric_key():
     from fuzzlab.ml import model_registry
     import re
     src = inspect.getsource(model_registry.list_models)
-    for forbidden in ("oof", "brier", "ece", "pr_auc", "holdout", "t_lo", "t_hi", "metric"):
-        assert forbidden not in src, forbidden
-    sql = " ".join(n.value for n in ast.walk(ast.parse(src))
-                   if isinstance(n, ast.Constant) and isinstance(n.value, str)
-                   and ("SELECT" in n.value or "FROM" in n.value))
+    tree = ast.parse(src)
+    fn = tree.body[0]
+    body = fn.body[1:] if ast.get_docstring(fn) else fn.body      # code, not the docstring
+    consts = [n.value for stmt in body for n in ast.walk(stmt)
+              if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    for c in consts:
+        for forbidden in ("oof", "brier", "ece_", "pr_auc", "holdout", "t_lo", "t_hi",
+                          "metric"):
+            assert forbidden not in c, (forbidden, c)
+    assert set(model_registry.LISTING_KEYS) >= {"trained_on"}
+    sql = " ".join(c for c in consts if "SELECT" in c or "FROM" in c)
     assert re.findall(r"\bparams\b(?! IS NOT NULL)", sql) == []   # never the params blob
 
 

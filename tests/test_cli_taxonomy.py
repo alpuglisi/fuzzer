@@ -112,6 +112,12 @@ def test_help_is_grouped_working_training_lab_and_wrapped():
     assert order == sorted(order)
     assert out.index("train run <url>") > out.index(tx.TRAINING) > out.index("  report ")
     assert all(len(ln) <= 100 for ln in out.splitlines())
+    for c in tx.COMMANDS:                     # never a command name split across lines
+        assert c.name in out, c.name
+    block = out[out.index("Older names"):]
+    block = block[:block.index("\n\n")]
+    for old, new in tx.OLD_NAMES.items():      # the raw text: a wrap must not split it
+        assert f"{old} (= {new})" in block, (old, block)
     from fuzzlab.core.storepath import DEFAULT_RULE
     assert "Lab-only" in out and DEFAULT_RULE.split(", else ")[-1] in out
     assert "scan" not in out.split()          # Phase 2: never advertise an unbuilt command
@@ -280,13 +286,51 @@ def test_the_working_view_allows_only_the_score_budget_order(method, capsys):
     assert ns.budget_method == "score" and ns.confirm_budget == 5
 
 
-def test_score_and_rank_in_the_working_view_apply_a_saved_model():
-    """FR-FUZZ-401 (review A4): `--train-on` is refused there, so it is fixed to saved,
-    and `--model-id` (which the engine allows only with saved) is accepted."""
+def _engine_validates(ns, monkeypatch, tmp_path) -> bool:
+    """Run the engine's own usage rules (`auto_cli.main`) on a completed working
+    namespace; True when they all pass (the run then reaches the store, stubbed here)."""
+    from fuzzlab.harness import auto_cli
+
+    class Reached(Exception):
+        pass
+
+    def stop(*a, **k):
+        raise Reached
+    monkeypatch.setattr(auto_cli.Store, "__init__", stop)
+    monkeypatch.setattr(auto_cli, "_build_plugins", lambda p, args: None)
+    argv = ["--base-url", ns.url, "--store", str(tmp_path / "s.db"), "--authorized",
+            "--categories", ns.categories, "--train-on", ns.train_on]
+    argv += [f for f, on in (("--score", ns.score), ("--rank", ns.rank),
+                             ("--anomaly", ns.anomaly)) if on]
+    if ns.confirm_budget is not None:
+        argv += ["--confirm-budget", str(ns.confirm_budget)]
+    if ns.model_id is not None:
+        argv += ["--model-id", str(ns.model_id)]
+    try:
+        auto_cli.main(argv)
+    except Reached:
+        return True
+    except SystemExit:
+        return False
+    return False
+
+
+@pytest.mark.parametrize("extra, train_on", [
+    ([], "run"), (["--anomaly"], "run"), (["--confirm-budget", "3"], "run"),
+    (["--score"], "saved"), (["--rank"], "saved"),
+    (["--score", "--model-id", "3"], "saved"),
+])
+def test_a_completed_working_namespace_passes_the_engines_rules(extra, train_on,
+                                                                monkeypatch, tmp_path):
+    """FR-FUZZ-401 (reviews A4, then round 2): --score/--rank apply a saved model, and a
+    plain working run keeps the engine's own `run` -- so every working namespace passes
+    the engine's validation (`--train-on` other than run needs --score/--rank)."""
     from fuzzlab.harness.auto_cli import build_parser
     p = tx.working_parser("auto", prog="fuzzlab scan")
-    ns = p.parse_args(["http://x", "--score", "--rank", "--model-id", "3"])
-    assert ns.train_on == "saved" and ns.score and ns.model_id == 3
+    ns = tx.working_namespace("auto", p.parse_args(["http://127.0.0.1:9", "--categories",
+                                                    "xss", *extra]))
+    assert ns.train_on == train_on
+    assert _engine_validates(ns, monkeypatch, tmp_path)
     assert build_parser().get_default("train_on") == "run"     # the source is untouched
 
 

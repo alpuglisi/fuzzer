@@ -3,6 +3,19 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0402 — A bad `--store` fails before the dry-run plan is printed (2026-10-15)
+- Change:
+  - **`proxy/cli.py`:** in the dry-run branch, `_recording` runs before `report(...)`.
+    `proxy --dry-run --store ""` used to print the whole plan and then exit 2 (reviews A
+    and B, round 2).
+- Impact (other components / project): none.
+- Risk (level; mitigation or accepted-risk justification): low.
+- Deliverables:
+  - [x] code; FR-PROXY-400; test
+    `tests/test_cli_default_store.py::test_proxy_dry_run_with_an_empty_store_prints_no_plan`
+    — done
+- Effectiveness (assessed 2026-10-15): reverting the order fails the test. Effective.
+
 ### CC-PROXY-0401 — `--export-ca` before any store resolution; `--store ""` is a usage error (2026-10-15)
 - Change:
   - **`proxy/cli.py`:** store resolution (`_recording`) runs in the dry-run branch, and
