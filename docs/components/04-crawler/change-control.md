@@ -145,6 +145,9 @@ Newest first.
     `core.urls` (33 files): 1679 passed, 4 skipped (labgen live-boot reproductions),
     6 xfailed, 0 failed.
 
+- Amendment (2026-10-15, final merge review, reviewer A M1): `core.urls.document_key`
+  (added in e7afbb8) is filed in the core library's log as CC-CORE-0055 / FR-CORE-40.
+
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
   target for the queue only when it is a GET/HEAD navigation. A refused non-GET

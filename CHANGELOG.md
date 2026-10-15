@@ -4,6 +4,12 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (core change control for `core.urls.document_key`)
+- `core.urls.document_key` (origin, path and query: which document a URL loads), added in
+  BUG-0138's review, is now filed in the core library's own log (CC-CORE-0055, FR-CORE-40),
+  and FR-CRAWL-17 states that a hash route whose shell never finishes loading gets no seeds
+  or probes. Documentation only (final merge review, reviewer A).
+
 ## 2026-10-15 (FR-CRAWL-17 merged with BUG-0138's guarded navigation; a seed whose bare route did not load is refused)
 - spa-query merged bug-0138 (e51a3d4). SPA query loads now navigate through
   `navguard.navigate`. A hash seed or probe whose bare route never finished loading (a

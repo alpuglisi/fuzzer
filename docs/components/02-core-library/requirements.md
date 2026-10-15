@@ -388,6 +388,14 @@ plugin registry. It is the layer that makes the store the integration bus.
   - `redact_spa_fragment(url)`: only that fragment step (`#/x?token=…`; a fragment that
     is not a route is left alone), for the crawler's stored route URLs.
 
+- **FR-CORE-40** *(which document a URL loads; `CC-CORE-0055`, 2026-10-15, BUG-0138
+  review).* `core.urls.document_key(url)` is the canonical origin, path and query of a URL,
+  fragment dropped: two URLs load the same document exactly when their keys are equal
+  (`/p?a=1` and `/p?a=2` differ; `url_key`, origin and path only, does not tell them
+  apart). It is the one definition for the crawler's own-reload key (`spider._nav_key`)
+  and for the browser guard's "the page still shows the document I loaded" and received-HTML
+  lookups (`tools.navguard`), PA-0003. Enforced by:
+  `tests/test_guarded_navigation.py` (the `/p?a=1` → `/p?a=2` case).
 - **FR-CORE-39** *(the open-redirect name set; `CC-CORE-0053`, 2026-10-14, FR-CRAWL-17
   review).* `core.urls.REDIRECT_PARAMS` (a frozenset) is the one set of parameter names
   that control the next location. The auditor's redirect rule

@@ -3,6 +3,29 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0055 — `core.urls.document_key`: which document a URL loads (origin, path and query) (BUG-0138 review) (2026-10-15)
+- Change: `fuzzlab/core/urls.py` gains `document_key(url)`: the canonical origin, path
+  and query of a URL, the fragment dropped. Unlike `url_key` (origin and path only), it
+  tells `/p?a=1` from `/p?a=2`. It is the one definition (PA-0003) of "the document this
+  URL loads" for the crawler's `_nav_key` (the reveal and query windows' own-reload
+  exemption) and for navguard's `shows_own_document`, `_received_html` and the
+  per-page `_RECEIVED` note (BUG-0138 review, reviewer A S1). Made in BUG-0138's review
+  commit e7afbb8 and recorded there under CC-CRAWL-0030 / CC-AUD-0043; this entry files
+  it in the core library's own log (final merge review, reviewer A M1). FR-CORE-40.
+- Impact (other components / project): CRAWL (`spider._nav_key`, navguard) and AUD (the
+  fetcher's not-reached cases through navguard) read it. `url_key` is unchanged, so every
+  existing key, store row and finding path is unchanged. No schema change.
+- Risk: low (an additive pure function). Mitigated:
+  `tests/test_guarded_navigation.py` pins the `/p?a=1` → `/p?a=2` case (the old key fails it,
+  mutation-checked in CC-CRAWL-0030), and every test file importing `core.urls` passed.
+- Deliverables:
+  - [x] `core/urls.py` `document_key` — done (e7afbb8)
+  - [x] FR-CORE-40 — done
+  - [x] cross-reference from CC-CRAWL-0030 — done
+- Effectiveness (assessed 2026-10-15): the related run on e7afbb8 (33 files, every test file
+  importing `core.urls` included): 1679 passed, 4 skipped, 6 xfailed, 0 failed; on the
+  merged tree 80d7070, 118 affected files: 2791 passed, 0 failed.
+
 ### CC-CORE-0054 — `Request.session_decision`: the session addon's decision is a declared field (FR-SESS-20, BUG-0134 review round 2) (2026-10-14)
 - Change: `fuzzlab/core/http.py` `Request` gains `session_decision: str | None = None`.
   `SessionManager.prepare` sets it to `"anonymous (out of origin)"` when it withholds the

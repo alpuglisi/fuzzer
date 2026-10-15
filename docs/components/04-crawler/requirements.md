@@ -564,7 +564,9 @@ fuzzer.
     `spa_query_seeded_fragment`, `spa_query_write_seeds`, `spa_query_session_losses`,
     `spa_query_unclean_windows`, `spa_query_baseline_writes`, `spa_query_stopped` (0/1); the summary shows fragment seeds (`--browser` only)
     apart from history-mode ones.
-  - Residuals: a marker or filler in a request's **path** segment gives no point
+  - Residuals: a hash route whose bare shell does not reach its load state within
+    `timeout_ms` gets no seeds and no probes (refused, counted
+    `spa_query_refused[bare route did not load]`; final merge review, reviewer A); a marker or filler in a request's **path** segment gives no point
     (counted `spa_query_marker_in_path`); fragment points need `--browser`; there is
     **no open-redirect coverage for fragment names**; a redirect-ish unpaired name is
     never kept (it carries `/`, no marker); a route whose load writes is a page, not a
