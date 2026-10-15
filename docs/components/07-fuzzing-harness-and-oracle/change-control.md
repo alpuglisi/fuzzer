@@ -41,7 +41,7 @@ note of the same date.
     - AST discovery of every `fuzzlab/` function taking an operator base URL;
     - each discovered function mapped to a sub-path test or a strict xfail;
     - synthetic offenders;
-    - new sub-path tests for the functions that had none (listed in the deliverables).
+    - new sub-path tests for the functions that had none (listed under Effectiveness).
   - Requirements: FR-FUZZ-41 gains a `Not yet enforced:` line for BUG-0300 and an
     `Enforced by:` line for the registry. NFR-FUZZ-safe gains BUG-0301's
     `Not yet enforced:` line (that defect is recorded under CC-CORE-0301; the NFR is
@@ -68,7 +68,8 @@ note of the same date.
   action lands. The guard is effective:
   - `tests/test_base_url_subpath_registry.py` run alone: 12 passed, 2 xfailed;
   - 53 functions discovered and 53 registered (51 `Covered`, 2 `XFail` BUG-0300);
-  - new sub-path tests for the 17 functions that had none: greybox `_cookie_for` and
+  - new sub-path tests for the 17 functions with no sub-path base test (`assert_loopback`'s
+    existing tests pass request URLs such as `/login`, not an app base): greybox `_cookie_for` and
     `run_greybox`, the four identifier-SQLi builders, `assert_loopback`, five `authhttp`
     builders, `session_header(s)`, `browser_session` / `header_scope_for`, and
     `build_finding_raw_request`;
@@ -79,7 +80,14 @@ note of the same date.
     - breaking the name rule (`== "url"` -> `"uri"`), or disabling the bare-`base` use
       rule, fails that test and `test_the_registry_guard_catches_synthetic_offenders`;
     - making the sub-path pointer check vacuous fails the synthetic-offender test.
-  - Run with the other files below: 198 passed, 6 xfailed.
+  - Run together with `tests/test_destructive_routes_external_labs.py`,
+    `tests/test_requirements_traceability.py`, `tests/test_destructive_urls.py` and
+    `tests/test_forms_phase1.py`: 198 passed, 6 xfailed.
+  - Whole suite, `-m "not slow"`: 5372 passed, 43 skipped, 13 xfailed, 37 failed and
+    3 errors. Every failure and error is also present on the base commit, in a run made
+    before this change was added. They come from the environment: no `scipy`, `numpy` or
+    `setuptools` in the venv (labgen fingerprint/CLI, packaging, no-ML). None is in a
+    file this change touches.
 
 ### CC-FUZZ-0079 — Evaluation markers judge their literal's echo by where it is (BUG-0133) (2026-10-14)
 - Change: `SstiStrategy` refused Juice Shop's evaluated `/profile` SSTI because the probe's
