@@ -481,12 +481,14 @@ def query_crawl(tmp_path_factory):
         lab = QuerySpa(other_port=other.server.server_address[1])
         tmp = tmp_path_factory.mktemp("spaq")
         try:
-            sp = _crawl(lab, tmp / "s.db")
+            with pytest.MonkeyPatch.context() as spy:
+                windows = _window_spy(spy)      # P1: what each query window saw
+                sp = _crawl(lab, tmp / "s.db")
             # M10: this crawl's own requests, before any other test crawls the lab
             first = list(lab.requests)
             store, run, counts = _import(tmp / "s.db", tmp / "u.db")
             yield {"lab": lab, "other": other, "sp": sp, "db": str(tmp / "s.db"),
-                   "first_requests": first,
+                   "first_requests": first, "windows": windows,
                    "store": store, "run": run, "counts": counts,
                    "store_path": str(tmp / "u.db")}
             store.close()
@@ -877,6 +879,9 @@ def test_a_held_websocket_message_is_a_write(tmp_path):
     ("POST", "http://127.0.0.1:9/api/x", False, True),
     ("GET", "http://127.0.0.1:9/api/order/confirm", False, True),  # a word rule
     ("GET", "http://127.0.0.1:9/other", True, False),            # a navigation, queued
+    # P2 (review B-S2): a navigation (or redirect hop) to a word-refused GET is a write,
+    # never queued
+    ("GET", "http://127.0.0.1:9/api/order/confirm?via=hop", True, True),
 ])
 def test_what_a_query_window_counts_as_a_write(tmp_path, method, url, navigation, write):
     sp = _requests_spider(tmp_path)
@@ -887,7 +892,8 @@ def test_what_a_query_window_counts_as_a_write(tmp_path, method, url, navigation
         assert sp._window_refusal(method, url, navigation, context=ctx) is not None
         assert bool(sp._win.get("writes")) is write
         # a refused POST navigation is a write, never a page to visit as a GET (A2-M1)
-        assert sp._win["navs"] == ([url] if navigation and method == "GET" else [])
+        assert sp._win["navs"] == ([url] if navigation and method == "GET" and not write
+                                   else [])
         assert url in sp._win["blocked"]          # never queued from the request list
     finally:
         sp.storage.close()
@@ -944,7 +950,7 @@ def test_a_cookie_cleared_while_the_page_leaves_is_a_loss(tmp_path):
     try:
         page = _FakePage("http://127.0.0.1:9/#/x?a=fuzzlab",
                          on_wait=lambda: setattr(ctx, "jar", []))
-        sp._doc_url = page.url                    # the load committed (M6)
+        sp._doc_url, sp._load_committed = page.url, True     # the load committed (M6)
         with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
             pass
         assert win["session"][0] is False and "sid" in win["session"][1]
@@ -968,7 +974,7 @@ def test_the_session_is_rechecked_when_leaving_the_page_fails(tmp_path):
             self.url = url
     try:
         page = Page("http://127.0.0.1:9/#/x?a=fuzzlab")
-        sp._doc_url = page.url                    # the load committed (M6)
+        sp._doc_url, sp._load_committed = page.url, True     # the load committed (M6)
         with sp._window(page, ctx, page.url, query=spa.SEED_SOURCE) as win:
             pass
         assert not win.get("closed")
@@ -984,6 +990,7 @@ def test_verify_live_runs_after_a_window_that_blocked_a_write(tmp_path, live):
     sp, ctx, manager = _session_spider(tmp_path, live=live)
     try:
         sp._doc_url = "http://127.0.0.1:9/#/x?a=1"   # each load committed (M6)
+        sp._load_committed = True
         with sp._window(_FakePage("http://127.0.0.1:9/#/x?a=1"), ctx, "http://127.0.0.1:9/#/x?a=1",
                         query=spa.SEED_SOURCE) as win:
             pass
@@ -1258,10 +1265,13 @@ def test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothin
         monkeypatch, tmp_path, caplog):
     """M3 + M5 (review B2-S3c, B-M1, B4), real Chromium, a cookie session on
     127.0.0.2:A, B on another port of 127.0.0.2. ``/goaway`` redirects to B, and its
-    ``x`` seed with it: the seed is withheld (FR-SESS-20) and filed as a write seed,
-    never a point. ``/browse``'s probe sends ``location.href`` to B with this load's
-    marker: B receives nothing, no row or seed comes of it, the URL is that probe's
-    blocked evidence, and no marker reaches ``skipped_other_origin`` or the log."""
+    ``x`` seed with it: inside the seed's window the landing navigation is refused by
+    the window (before the origin rule is asked), so the load fails and the seed stays a
+    write seed, never a point; the landing is queued and then skipped as another origin
+    (P3: window-refused, not withheld). ``/browse``'s probe opens a WebSocket to B and
+    sends ``location.href`` there, each with this load's marker: B receives nothing, no
+    row or seed comes of it, both URLs are that probe's blocked evidence, and no marker
+    reaches ``skipped_other_origin`` or the log."""
     import logging
 
     from fuzzlab.tools.spider import LocalSpider
@@ -1278,6 +1288,7 @@ def test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothin
               "class Nav{go(t){this.router.navigate([`/goaway`],{queryParams:{x:t}})}}\n"
               "function read(){ return this.route.snapshot.queryParams.term; }\n"
               "const m = /[?&]term=([^&]*)/.exec(location.search);\n"
+              f"if (m) new WebSocket('ws://127.0.0.2:{b.port}/ws?t=' + m[1]);\n"
               f"if (m) addEventListener('load', () => setTimeout(() =>\n"
               f"  location.href = '{b.base}x?t=' + m[1], 50));\n")
     a.pages["/"] = a.pages["/browse"] = (200, shell, [])
@@ -1301,6 +1312,9 @@ def test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothin
     browse = [p for p in seen if p["route_url"] == a.base + "browse"]
     assert len(browse) == 1
     assert [u for u in browse[0]["blocked"] if u.startswith(b.base + "x?t=fzq")]
+    # P3 (review B-S1): the socket to B with the marker: never connected, that probe's
+    assert [u for u in browse[0]["blocked"]
+            if u.startswith(f"ws://127.0.0.2:{b.port}/ws?t=fzq")]
     assert sp.spa_counts["spa_query_probe_loads"] >= 1
     assert sp.spa_counts["spa_query_kept"] == 0
     assert not [u for u in sources if "term=" in u]          # nothing queued
@@ -1311,9 +1325,9 @@ def test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothin
 
 
 def test_a_seeds_leave_reads_the_page_only_when_its_load_committed(tmp_path):
-    """M6 (BUG-0136 review B-S3): a seed whose load never committed (the page still
-    shows an earlier document) queues nothing from ``page.url``; one that committed
-    queues its same-document navigation."""
+    """M6 (BUG-0136 review B-S3), P4 (B-N1): a seed whose load never committed (the page
+    still shows an earlier document, or its goto never returned) queues nothing from
+    ``page.url``; one that committed queues its same-document navigation."""
     sp = _requests_spider(tmp_path)
     try:
         seed = "http://127.0.0.1:9/#/x?a=fuzzlab"
@@ -1322,7 +1336,13 @@ def test_a_seeds_leave_reads_the_page_only_when_its_load_committed(tmp_path):
         with sp._window(page, None, seed, query=spa.SEED_SOURCE) as win:
             pass
         assert win["navs"] == []
-        sp._doc_url = seed                                       # committed, then moved
+        # P4 (review B-N1): this load's own navigation, but it never committed
+        sp._doc_url, sp._load_committed = seed, False
+        page = _FakePage("http://127.0.0.1:9/#/moved")
+        with sp._window(page, None, seed, query=spa.SEED_SOURCE) as win:
+            pass
+        assert win["navs"] == []
+        sp._load_committed = True                                # committed, then moved
         page = _FakePage("http://127.0.0.1:9/#/moved")
         with sp._window(page, None, seed, query=spa.SEED_SOURCE) as win:
             pass
@@ -1385,7 +1405,8 @@ def _window_spy(monkeypatch):
     def spy(self, win, url, visited=True):
         seen.append({"url": url, "writes": win.get("writes", 0),
                      "blocked": set(win.get("blocked", ())), "visited": visited,
-                     "xhr": list(self._xhr_urls), "session": win.get("session")})
+                     "xhr": list(self._xhr_urls), "session": win.get("session"),
+                     "baseline": set(win.get("baseline", ()))})
         return real(self, win, url, visited)
     monkeypatch.setattr(LocalSpider, "_after_query_window", spy)
     return seen
@@ -1400,7 +1421,11 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     and the server, no loss, and the next seed still loads (M7). Each seed load starts
     from a fresh document, so the previous page's interval POSTs are never its write
     nor its XHR (M7). ``/late1?z=``'s slow GET is still in flight when the load is
-    read: never queued, never fetched again (M8)."""
+    read: never queued, never fetched again (M8). P2 (review B-S2): the refused hop's
+    transaction GET is a blocked write, never queued, never requested. P1(b), history
+    mode: every load of the shell POSTs to ``/socket.io/`` and pings a WebSocket; in a
+    seed's window (a full load) both are blocked, but the bare route's own load made the
+    same writes, so they are its baseline and the seed is promoted."""
     from fuzzlab.tools.spider import LocalSpider
     from tests._spa_query_fixture import RedirectSeedSpa
     from tests.test_forms_phase4 import _LsManager
@@ -1437,7 +1462,8 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     windows = {w["url"]: w for w in seen}
     for url in (base + "goaway?x=fuzzlab", base + "next1?y=fuzzlab",
                 base + "late1?z=fuzzlab"):
-        assert windows[url]["writes"] == 0, url
+        # P2: the goaway seed's one write is its refused transaction hop
+        assert windows[url]["writes"] == (1 if "goaway" in url else 0), url
         assert not [u for u in windows[url]["blocked"] | set(windows[url]["xhr"])
                     if "/api/tick" in u or u.endswith(("/rest/marker/_", "_goaway",
                                                        "_next1", "_late1"))], url
@@ -1445,6 +1471,16 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     # M8: the late GET was in flight when /late1's seed was read: one fetch only
     assert gets.count("/rest/late") == 1
     assert not [u for u in sources if "/rest/late" in u]
+    # P2: the hop's word-refused target was never queued, never requested
+    assert not [r for r in requests if r[1].startswith("/api/order/confirm")]
+    assert not [u for u in sources if "/api/order/confirm" in u]
+    # P1(b): the shell's writes were made on every load, blocked in each seed's window,
+    # and matched the bare route's baseline
+    assert [r for r in requests if r[0] == "POST" and r[1].startswith("/socket.io/")]
+    nxt = windows[base + "next1?y=fuzzlab"]
+    assert {("POST", "/socket.io/"), ("WS", "/socket.io/")} <= nxt["baseline"]
+    assert [u for u in nxt["blocked"] if "/socket.io/" in u]
+    assert sp.spa_counts["spa_query_baseline_writes"] >= 1
 
 
 def test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing(
@@ -1479,3 +1515,143 @@ def test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing(
     probes = [u for u, _f in loads if u.startswith(route + "?term=")]
     assert len(probes) == 1 and probes[0] not in rows   # the probe recorded nothing
     assert not [u for u in rows if "term=" in u]
+
+
+# =====================================================================================
+# Post-merge fixes (D57, P1-P4): the shell's own writes, refused hops, logs
+# =====================================================================================
+def test_a_shell_that_writes_on_every_load_still_gives_hash_points(query_crawl):
+    """P1 (review B-M1), on `QuerySpa`, whose shell POSTs a socket.io polling handshake
+    on every load and pings a WebSocket every 100 ms (Juice Shop's shape). (a) A hash
+    seed's bare route is loaded fresh outside its window, so the shell's start-up POST
+    is sent there and never blocked in the seed's window; the seed is the same-document
+    hash change inside it. (b) The pings that land inside the window are blocked but
+    match the bare route's own writes (its baseline), so ``#/track?id=`` is promoted and
+    imported as a fragment point, while ``#/poster?msg=``'s query-caused POST is still
+    a write."""
+    lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
+    first = query_crawl["first_requests"]
+    assert [r for r in first if r[0] == "POST" and r[1].startswith("/socket.io/")]
+    assert "3" in lab.ws_messages                       # the shell really pinged
+    windows = {w["url"]: w for w in query_crawl["windows"]}
+    track = windows[lab.base + "#/track?id=fuzzlab"]
+    # (a): the start-up POST went out before the window, never blocked in it
+    assert not [u for u in track["blocked"] if "/socket.io/" in u]
+    assert track["writes"] == 0 and track["visited"]
+    assert {("POST", "/socket.io/"), ("WS", "/socket.io/")} <= track["baseline"]
+    # (b): pings inside the window matched the baseline (blocked, not a write)
+    assert sp.spa_counts["spa_query_baseline_writes"] >= 1
+    sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
+    assert sources[lab.base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE
+    assert ("/#/track", "id", "fragment") in _params(query_crawl["store"],
+                                                     query_crawl["run"])
+    # the autopost seed's form (its blocked write) is never stored (P1 follow-up)
+    assert not db_rows(db, "SELECT action_url FROM discovered_forms "
+                           "WHERE action_url LIKE '%/api/autopost%'")
+    poster = windows[lab.base + "#/poster?msg=fuzzlab"]
+    assert poster["writes"] >= 1
+    assert sources[lab.base + "#/poster?msg=fuzzlab"] == spa.WRITE_SEED_SOURCE
+
+
+def test_the_baseline_is_what_a_load_outside_a_window_would_have_written(tmp_path):
+    """P1(b), unit: while a load outside any window records (`_recording`), a request
+    the query window would count as a write, and a forwarded WebSocket message, join
+    the load's writes; a GET navigation or a plain GET does not. In a query window a
+    write matching the route's baseline is blocked but not counted; another is."""
+    from fuzzlab.tools.spider import _route_key
+
+    def req(method, url, navigation=False):
+        return type("R", (), {"url": url, "method": method, "resource_type": "fetch",
+                              "is_navigation_request": lambda s: navigation,
+                              "post_data_buffer": None})()
+    sp = _requests_spider(tmp_path)
+    try:
+        sp._recording, sp._load_writes = True, set()
+        sp._on_request(req("POST", "http://127.0.0.1:9/socket.io/?EIO=4&t=1"))
+        sp._on_request(req("GET", "http://127.0.0.1:9/api/order/confirm?x=1"))
+        sp._on_request(req("GET", "http://127.0.0.1:9/rest/products"))
+        sp._on_request(req("GET", "http://127.0.0.1:9/next", navigation=True))
+        sp._note_ws_send("ws://127.0.0.1:9/socket.io/?EIO=4&transport=websocket")
+        assert sp._load_writes == {("POST", "/socket.io/"), ("GET", "/api/order/confirm"),
+                                   ("WS", "/socket.io/")}
+        sp._recording = False
+        sp._note_ws_send("ws://127.0.0.1:9/other")
+        assert ("WS", "/other") not in sp._load_writes
+        assert _route_key("http://h/#/track?id=1") == "http://h/#/track"
+        assert _route_key("http://h/next1?y=1") == "http://h/next1"
+        sp._write_baseline["http://h/#/track"] = {("POST", "/socket.io/"),
+                                                  ("WS", "/socket.io/")}
+        ctx = object()
+        with sp._window(_FakePage("http://h/#/track?id=1"), ctx, "http://h/#/track?id=1",
+                        query=spa.SEED_SOURCE) as win:
+            sp._window_refusal("POST", "http://h/socket.io/?t=2", False, context=ctx)
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket")
+            assert not win.get("writes")
+            sp._window_refusal("POST", "http://h/api/send", False, context=ctx)
+            sp._note_ws_drop("ws://h/ws")
+            assert win["writes"] == 2
+        assert sp.spa_counts["spa_query_baseline_writes"] == 2
+        assert "http://h/socket.io/?t=2" in win["blocked"]       # blocked all the same
+    finally:
+        sp.storage.close()
+
+
+def test_the_websocket_forwarder_reports_each_forwarded_message():
+    """P1(b): a page-to-server message forwarded outside the window is reported to
+    ``on_send`` (the baseline); a held one only to ``on_drop``."""
+    from fuzzlab.tools.navguard import make_ws_handler
+    from tests.test_forms_phase4 import _WS
+    state, sent, dropped = {"on": False}, [], []
+    handler = make_ws_handler(lambda u: True, hold=lambda: state["on"],
+                              on_drop=dropped.append, on_send=sent.append)
+    ws = _WS("ws://h/socket.io/")
+    handler(ws)
+    ws.handler("2probe")
+    state["on"] = True
+    ws.handler("3")
+    assert sent == ["ws://h/socket.io/"] and dropped == ["ws://h/socket.io/"]
+
+
+def test_the_guards_url_log_lines_never_carry_a_probe_marker(caplog):
+    """P4 (review B-N2): the guard's log lines that name a URL path (a destructive or
+    refused request, a failed fetch) are scrubbed of probe markers."""
+    import logging
+
+    from fuzzlab.tools.navguard import make_route_handler
+    from tests.test_forms_phase4 import _Route
+    caplog.set_level(logging.INFO)
+    marker = spa.mint_markers(1)[0]
+    handler = make_route_handler(in_scope=lambda u: True)
+    route = _Route(f"http://h/logout/{marker}")
+    handler(route)
+    assert route.outcome == "abort"
+    handler = make_route_handler(in_scope=lambda u: True,
+                                 method_refusal=lambda m, u: "refused")
+    handler(_Route(f"http://h/api/{marker}", method="POST"))
+    assert "blocked destructive browser request" in caplog.text
+    assert "blocked browser POST" in caplog.text
+    assert spa.MARKER_PREFIX not in caplog.text
+
+
+def test_a_seeds_forms_are_stored_only_when_it_is_promoted(tmp_path):
+    """P1 follow-up: since a hash seed is a same-document change (P1(a)), ``#/autopost``'s
+    query-rendered form survives its refused auto-submit in the DOM; a seed's forms are
+    kept with its window and stored only if the seed is promoted -- a write seed's form
+    (the very write its window blocked) is never stored, so never a point."""
+    from bs4 import BeautifulSoup
+
+    from fuzzlab.core.forms import form_record
+    sp = _requests_spider(tmp_path)
+    try:
+        html = "<form method='post' action='/api/autopost'><input name='v'></form>"
+        form = BeautifulSoup(html, "html.parser").find("form")
+        for url, writes in (("http://127.0.0.1:9/#/a?go2=fuzzlab", 1),
+                            ("http://127.0.0.1:9/#/b?go2=fuzzlab", 0)):
+            sp.storage.mark_visited(url, 200, 1, source=spa.WRITE_SEED_SOURCE)
+            win = {"query": spa.SEED_SOURCE, "closed": True, "writes": writes,
+                   "forms": [form_record(form, url)]}
+            sp._after_query_window(win, url, True)
+        rows = sp.storage.cursor.execute("SELECT page_url FROM discovered_forms").fetchall()
+        assert rows == [("http://127.0.0.1:9/#/b?go2=fuzzlab",)]
+    finally:
+        sp.storage.close()

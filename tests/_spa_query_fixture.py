@@ -16,6 +16,7 @@ crawler's scan; the hash router at its end renders each view from ``location.has
   ``memo`` reflects ``term`` and replays the stash, so its seed after the probe shows a
   stale marker), forward in a GET query under another name (``fetcher``) or the same
   name (``forward``), in a path (``pathy``), or POST it (``beacon``).
+  Its shell writes on every load (a socket.io polling POST and WebSocket pings, P1).
 * ``SessionQuerySpa``: an authenticated crawl (the session in localStorage) whose
   ``fade`` seed clears the token client-side (S10).
 * ``TrackSpa``: Juice Shop's ``#/track-result?id=`` shape alone, for the end-to-end M6
@@ -26,7 +27,28 @@ from __future__ import annotations
 
 from tests._spa_fixture import _HASH_INDEX, _Lab
 
-_QUERY_JS = r"""
+#: The app shell's start-up writes on EVERY document load, as Juice Shop's socket.io
+#: client makes them (FR-CRAWL-17 P1): an engine.io polling POST, then a WebSocket that
+#: pings at once and every 100 ms. Never caused by a query parameter.
+_SHELL_WRITES_JS = r"""
+fetch('/socket.io/?EIO=4&transport=polling&t=' + Date.now(), {method: 'POST', body: '40'})
+  .catch(() => {});
+(() => { const s = new WebSocket('ws://' + location.host +
+  '/socket.io/?EIO=4&transport=websocket');
+  s.onopen = () => { s.send('2probe'); setInterval(() => s.send('3'), 100); }; })();
+"""
+
+
+def _socketio(handler):
+    """``/socket.io/``: the shell's WebSocket (its pings are recorded in
+    ``ws_messages``), else a polling answer."""
+    if (handler.headers.get("Upgrade") or "").lower() == "websocket":
+        handler._websocket()
+        return
+    handler._send(200, "text/plain", b"ok")
+
+
+_QUERY_JS = _SHELL_WRITES_JS + r"""
 const routes = [{path:'track'}, {path:'search'}, {path:'score-board'}, {path:'poster'},
   {path:'hop'}, {path:'away'}, {path:'login'}, {path:'logout'}, {path:'reflect'},
   {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'memo'},
@@ -128,8 +150,9 @@ def _go(handler):
 
 
 class QuerySpa(_Lab):
+    """Its shell writes on every load (`_SHELL_WRITES_JS`, P1)."""
     index = _QUERY_INDEX
-    responders = {"/api/go": _go}
+    responders = {"/api/go": _go, "/socket.io/": _socketio}
     script = ("/q.js", _QUERY_JS)
     pages = {"/plain": ("<!doctype html><html><head><title>plain</title></head>"
                         "<body><p>plain page</p></body></html>")}
@@ -219,7 +242,7 @@ class SessionCookieSpa(_Lab):
     responders = {"/rest/expire": _expire}
 
 
-_REDIRECT_SEED_JS = r"""
+_REDIRECT_SEED_JS = _SHELL_WRITES_JS + r"""
 // the declarations are read by the scan, never run (no VueRouter on the page)
 function declare() { return new VueRouter({mode: 'history', routes: [
   { path: '/goaway', component: Goaway },
@@ -249,7 +272,7 @@ def _goaway(handler):
     the window refuses (M4, M7); a bare ``/goaway`` is the app shell."""
     if "x=" in handler.path:
         handler.send_response(302)
-        handler.send_header("Location", "/api/order/confirm?via=seed")
+        handler.send_header("Location", "/api/order/confirm?via=hop")
         handler.send_header("Content-Length", "0")
         handler.end_headers()
         return
@@ -268,8 +291,9 @@ def _late(handler):
 class RedirectSeedSpa(_Lab):
     """A history-mode app whose ``/goaway`` seed's own document redirect is refused by
     its window (M4, M7), then ``/next1`` and ``/late1`` seeds; pages without a query
-    POST on an interval; the ``/late1`` seed's GET answers late (M8)."""
+    POST on an interval; the ``/late1`` seed's GET answers late (M8). Its shell writes on
+    every load, a history-mode seed's included (P1(b))."""
     index = _REDIRECT_SEED_INDEX
     script = ("/redir.js", _REDIRECT_SEED_JS)
     history = True
-    responders = {"/goaway": _goaway, "/rest/late": _late}
+    responders = {"/goaway": _goaway, "/rest/late": _late, "/socket.io/": _socketio}

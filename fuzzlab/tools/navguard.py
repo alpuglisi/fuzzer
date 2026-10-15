@@ -59,6 +59,13 @@ from urllib.parse import urljoin, urlsplit
 
 from fuzzlab.core.urls import canonical_origin, destructive_reason, url_key
 
+
+def _scrubbed(text: str) -> str:
+    """A log line with any FR-CRAWL-17 probe marker replaced (P4, review B-N2): a probe
+    URL's path, or an error quoting the URL, never carries one into the log."""
+    from fuzzlab.tools.spa import scrub_markers
+    return scrub_markers(text)
+
 #: Not network requests: never scope-checked.
 _LOCAL_SCHEMES = ("data:", "blob:", "about:")
 _REDIRECTS = (301, 302, 303, 307, 308)
@@ -137,8 +144,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
             return True
         reason = destructive_reason(url)
         if reason is not None and url_key(url) not in allow:
-            logging.info(f"blocked destructive browser request {url.split('?', 1)[0]} "
-                         f"({reason!r})")
+            logging.info(_scrubbed(f"blocked destructive browser request "
+                                   f"{url.split('?', 1)[0]} ({reason!r})"))
             if on_abort is not None:
                 on_abort(url, reason)
             return True
@@ -226,8 +233,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 return
         why = method_refusal(req.method.upper(), url) if method_refusal else None
         if why is not None:
-            logging.info(f"blocked browser {req.method.upper()} {url.split('?', 1)[0]} "
-                         f"({why})")
+            logging.info(_scrubbed(f"blocked browser {req.method.upper()} "
+                                   f"{url.split('?', 1)[0]} ({why})"))
             if on_abort is not None:
                 on_abort(url, why)
             abort()
@@ -294,21 +301,22 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                                       headers=hop or None)
                 final_url = nxt
             else:
-                logging.info(f"blocked a browser redirect chain over {MAX_REDIRECTS} "
-                             f"hops from {url.split('?', 1)[0]}")
+                logging.info(_scrubbed(f"blocked a browser redirect chain over "
+                                       f"{MAX_REDIRECTS} hops from {url.split('?', 1)[0]}"))
                 abort()
                 return
         except Exception as exc:  # noqa: BLE001 - an unfetchable request is aborted
-            logging.info(f"browser request {url.split('?', 1)[0]} failed "
-                         f"({str(exc).splitlines()[0][:80]})")
+            logging.info(_scrubbed(f"browser request {url.split('?', 1)[0]} failed "
+                                   f"({str(exc).splitlines()[0][:80]})"))
             abort()
             return
         if observe is not None:
             try:
                 observe(req, final)
             except Exception as exc:  # noqa: BLE001 - an observer never breaks a request
-                logging.info(f"request observer failed on {url.split('?', 1)[0]} "
-                             f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})")
+                logging.info(_scrubbed(
+                    f"request observer failed on {url.split('?', 1)[0]} "
+                    f"({str(exc).splitlines()[0][:80] if str(exc) else exc!r})"))
         if stripped:
             # an isolated answer never writes the context's jar (FR-SESS-20, R2)
             route.fulfill(response=final, headers=_without_set_cookie(final.headers))
@@ -402,7 +410,8 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                     hold: Callable[[], bool] | None = None,
                     on_drop: Callable[[str], None] | None = None,
                     cookie_scope: Callable[[str], bool] | None = None,
-                    on_session_withheld: Callable[[str, str, str], None] | None = None):
+                    on_session_withheld: Callable[[str, str, str], None] | None = None,
+                    on_send: Callable[[str], None] | None = None):
     """WebSockets are routed separately from HTTP: an in-scope socket is connected
     through; an out-of-scope one is **never connected** -- Playwright then serves it as
     a mock with no server connection at all (BUG-0123). Not ``ws.close()``: called in
@@ -412,8 +421,9 @@ def make_ws_handler(in_scope: Callable[[str], bool],
     forwarding handler -- ``connect_to_server()``, then each page-to-server message is
     forwarded (``send``, a no-reply call that is safe in a sync handler) only while
     ``hold()`` is false; while it is true the message is dropped and ``on_drop(url)``
-    told. Server-to-page messages and closes are forwarded as Playwright does by
-    default.
+    told; a forwarded one is reported to ``on_send(url)`` (the crawler's write baseline,
+    FR-CRAWL-17 P1(b)). Server-to-page messages and closes are forwarded as Playwright
+    does by default.
 
     ``cookie_scope`` (an authenticated context, FR-SESS-20, R1): an in-scope socket on
     another origin than the session's is never connected either (the browser would open
@@ -440,6 +450,8 @@ def make_ws_handler(in_scope: Callable[[str], bool],
                             on_drop(url)
                         return
                     server.send(message)
+                    if on_send is not None:
+                        on_send(url)
                 ws.on_message(from_page)
             return
         logging.info(f"blocked out-of-scope WebSocket to "
@@ -462,6 +474,7 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                window: Callable[[str, str, bool], str | None] | None = None,
                ws_hold: Callable[[], bool] | None = None,
                on_ws_drop: Callable[[str], None] | None = None,
+               on_ws_send: Callable[[str], None] | None = None,
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
                isolated_request: Callable[[], object] | None = None) -> None:
@@ -472,7 +485,7 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     ``on_session_withheld`` / ``isolated_request`` (FR-SESS-20): see
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
-    ``on_ws_drop``: see `make_ws_handler`. Session headers are applied by the route only
+    ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
     (FR-CRAWL-14)."""
     api = getattr(target, "request", None)
     target.route("**/*", make_route_handler(allow, on_abort, in_scope=in_scope,
@@ -491,7 +504,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
         return
     route_ws("**/*", make_ws_handler(in_scope, on_out_of_scope, hold=ws_hold,
                                      on_drop=on_ws_drop, cookie_scope=cookie_scope,
-                                     on_session_withheld=on_session_withheld))
+                                     on_session_withheld=on_session_withheld,
+                                     on_send=on_ws_send))
 
 
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")

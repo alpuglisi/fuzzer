@@ -302,6 +302,23 @@ def _nav_key(url):
     return origin + (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
 
 
+def _route_key(url):
+    """The bare route a seed or probe URL is a query of (FR-CRAWL-17, P1): a hash
+    route's URL without its fragment's query (``/#/track?id=x`` -> ``/#/track``), else
+    the URL without its query and fragment (history mode). A loadable URL."""
+    head, sep, _frag = (url or "").partition("#")
+    frag = spa.spa_fragment(url)
+    if sep and frag is not None:
+        return head + "#" + frag.split("?", 1)[0]
+    return head.split("?", 1)[0]
+
+
+def _write_key(method, url):
+    """A write's identity for the baseline (P1(b)): its method (``WS`` for a WebSocket
+    message) and its URL's path."""
+    return ((method or "").upper(), urlparse(url or "").path or "/")
+
+
 #: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).
 _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
@@ -466,7 +483,8 @@ class LocalSpider:
             "spa_query_kept", "spa_query_refused", "spa_query_writes_blocked",
             "spa_query_marker_in_path", "spa_query_step_cap", "spa_query_seeded",
             "spa_query_seeded_fragment", "spa_query_write_seeds",
-            "spa_query_session_losses", "spa_query_unclean_windows"), 0)
+            "spa_query_session_losses", "spa_query_unclean_windows",
+            "spa_query_baseline_writes"), 0)
         # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
         #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
         self._query_on = self._spa_on and bool(spa_query)
@@ -486,6 +504,14 @@ class LocalSpider:
         self._probe = None
         #: navigations a seed's window aborted, queued through the normal gates
         self._query_navs: list = []
+        #: P1(b): bare route (`_route_key`) -> the writes (`_write_key`) its own loads
+        #: made outside any window; a seed's write that is one of them is not counted
+        self._write_baseline: dict = {}
+        #: the writes of the load in progress, while `_goto_and_parse` records them
+        self._load_writes: set = set()
+        self._recording = False
+        #: P4 (B-N1): did the last `_goto_and_parse` navigation commit?
+        self._load_committed = False
         #: why seeds, probes or names were refused, by reason (crawl_stats keys
         #: ``spa_query_refused[<reason>]``)
         self.spa_query_refused: dict = {}
@@ -626,7 +652,7 @@ class LocalSpider:
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
-                   on_ws_drop=self._note_ws_drop)
+                   on_ws_drop=self._note_ws_drop, on_ws_send=self._note_ws_send)
 
     def _note_guard_abort(self, url, reason):
         """The guard aborted ``url`` (destructive, a refused method or body): recorded;
@@ -663,6 +689,13 @@ class LocalSpider:
         if why is None:
             return None
         win["aborted"] += 1
+        # P2 (review B-S2): in a query window a refused GET navigation's target (a
+        # redirect hop included) passes the window's GET word rules before it is
+        # queued; a target they refuse (a transaction or account GET) is a blocked
+        # write, never queued
+        word_nav = bool(win.get("query")) and navigation and \
+            method in ("GET", "HEAD") and \
+            spa.window_request_refusal(method, url, False) is not None
         if win.get("query"):
             # FR-CRAWL-17 (review A-M1): a seed records whether it blocked a write; a
             # probe's blocked requests are never evidence; a blocked URL is never queued
@@ -673,9 +706,9 @@ class LocalSpider:
             # a write (review round 2, U1): every refused non-GET/HEAD, a navigation (an
             # auto-submitted form) included, and every non-navigation GET the window's
             # word rules refused (a transaction or account GET)
-            if method not in ("GET", "HEAD") or not navigation:
-                win["writes"] = win.get("writes", 0) + 1
-        if navigation and method in ("GET", "HEAD"):
+            if method not in ("GET", "HEAD") or not navigation or word_nav:
+                self._count_query_write(win, method, url)
+        if navigation and method in ("GET", "HEAD") and not word_nav:
             win["navs"].append(url)
         else:
             # one rule for both windows (CC-CRAWL-0029): a refused non-GET navigation (an
@@ -693,13 +726,30 @@ class LocalSpider:
         return win is not None and not (win["lifted_for"] is not None
                                         and context is win["lifted_for"])
 
-    def _note_ws_drop(self, _url):
+    def _note_ws_drop(self, url):
         self.spa_counts["reveal_ws_dropped"] += 1
         if self._win is not None:
             self._win["aborted"] += 1
             if self._win.get("query"):
                 # a held page-to-server WebSocket message is a write (U1)
-                self._win["writes"] = self._win.get("writes", 0) + 1
+                self._count_query_write(self._win, "WS", url)
+
+    def _note_ws_send(self, url):
+        """P1(b): a page-to-server WebSocket message forwarded outside any window; one
+        sent while a page loads (`_recording`) joins that route's baseline."""
+        if self._recording:
+            self._load_writes.add(_write_key("WS", url))
+
+    def _count_query_write(self, win, method, url):
+        """A write in a query window (U1), unless the bare route's own loads made the
+        same one outside any window (P1(b): the app shell's start-up or periodic writes,
+        Juice Shop's socket.io polling POST and WebSocket pings): that one is blocked
+        all the same, counted ``spa_query_baseline_writes``, and does not demote the
+        seed."""
+        if _write_key(method, url) in win.get("baseline", ()):
+            self.spa_counts["spa_query_baseline_writes"] += 1
+            return
+        win["writes"] = win.get("writes", 0) + 1
 
     @contextlib.contextmanager
     def _window(self, page, context, page_url, *, query=None):
@@ -724,6 +774,8 @@ class LocalSpider:
                "pages": list(getattr(context, "pages", []) or []), "query": query}
         if query:
             win["own_nav"] = frozenset({_nav_key(page_url)})
+            # P1(b): what the bare route's own loads wrote outside any window
+            win["baseline"] = frozenset(self._write_baseline.get(_route_key(page_url), ()))
             if self._authenticated:
                 # U3 (review B2-M2): a check that never completes is a loss
                 win["session"] = (False, "the session check did not complete")
@@ -790,7 +842,7 @@ class LocalSpider:
         # M6 (BUG-0136 review B-S3): the page shows this load only when its navigation
         # was this load's (`_doc_url`) and it is a document of the app -- not
         # ``about:blank`` after a failed load (X1), nor an error page
-        committed = self._doc_url == page_url and \
+        committed = self._load_committed and self._doc_url == page_url and \
             url.lower().startswith(("http://", "https://"))
         if self._authenticated:
             # S10 (review B-S4): the client-side session check (no network), on the
@@ -901,6 +953,14 @@ class LocalSpider:
 
     def _on_request(self, request):
         try:
+            if self._recording and self._win is None:
+                # P1(b): what this load would have written inside a query window
+                method = (request.method or "").upper()
+                navigation = request.is_navigation_request()
+                if (method not in ("GET", "HEAD") or not navigation) and \
+                        spa.window_request_refusal(method, request.url,
+                                                   navigation) is not None:
+                    self._load_writes.add(_write_key(method, request.url))
             if self._probe is not None:
                 # FR-CRAWL-17 (Q5): a probe load's requests -- aborted ones included,
                 # this event comes before the route -- are correlated in memory only
@@ -1141,7 +1201,7 @@ class LocalSpider:
         self._rendered_ok = False
         self._withheld_targets = set()
         try:
-            result = self._goto_and_parse(url)
+            result = self._goto_recording(url)
         except Exception as e:
             # BUG-0136 review (X1): a failed load ends the previous document. A refused
             # navigation is aborted with ERR_ABORTED, which leaves the page shown before
@@ -1185,8 +1245,21 @@ class LocalSpider:
             return False
         return bool(committed) and self._other_origin(committed)
 
+    def _goto_recording(self, url):
+        """`_goto_and_parse`; outside any window, the writes the load makes (what a
+        query window would have counted) join its bare route's baseline (P1(b))."""
+        self._load_writes, self._recording = set(), self._win is None
+        try:
+            return self._goto_and_parse(url)
+        finally:
+            if self._recording:
+                self._recording = False
+                self._write_baseline.setdefault(_route_key(url), set()).update(
+                    self._load_writes)
+
     def _goto_and_parse(self, url):
         self._last_final_url, self._last_html, self._last_base = url, None, None
+        self._load_committed = False                    # P4 (B-N1): set once it commits
         self._doc_url, self._page_scripts, self._pending_routes = url, 0, []
         response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         same_document = response is None and spa.spa_fragment(url) is not None
@@ -1225,6 +1298,9 @@ class LocalSpider:
             except Exception:
                 text = None
             self._rendered_ok = True          # the browser shows this page (reveals)
+        # P4 (review B-N1): the navigation committed (a document, or a same-document
+        # hash change), recorded after the goto returned, never before it
+        self._load_committed = response is not None or same_document
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
 
     # ----- landing URLs, forms, selector navigation (forms phase 1) -----
@@ -1260,6 +1336,13 @@ class LocalSpider:
         page = final or url
         for form in BeautifulSoup(self._last_html, 'html.parser').find_all('form'):
             record = form_record(form, page)
+            if seed:
+                # FR-CRAWL-17 (P1 follow-up): a seed's forms go with the seed -- stored
+                # only once its window closed cleanly with no write (fail closed: a form
+                # its query rendered and auto-submitted is that blocked write), and never
+                # enumerated (a seed neither reveals nor submits)
+                self._win.setdefault("forms", []).append(record)
+                continue
             self.storage.record_form(record)
             if self._selector_forms is None or not record["selector"] or depth >= self.max_depth:
                 continue
@@ -1493,6 +1576,8 @@ class LocalSpider:
         if win.get("query") == spa.SEED_SOURCE:
             if visited and win.get("closed") and not win.get("writes"):
                 self.storage.set_source(url, spa.SEED_SOURCE)
+                for record in win.get("forms", ()):     # promoted: its forms with it
+                    self.storage.record_form(record)
             else:
                 # a write, an unclean close, or a failed visit (filed by the loop's
                 # failure path): kept as a page, never a point (B3-N2: all counted)
@@ -2399,6 +2484,16 @@ class LocalSpider:
                         # counted as the load's own (a write, an XHR)
                         with contextlib.suppress(PlaywrightError):
                             self._page.goto("about:blank", timeout=self.timeout_ms)
+                        if spa.spa_fragment(current_url) is not None:
+                            # P1(a): a hash route's load is the bare route's, fresh and
+                            # settled OUTSIDE the window (the shell's start-up writes
+                            # are sent there, and recorded as its baseline), then the
+                            # same-document hash change into the seed or probe inside it
+                            # (its captures are filed under the bare route, never the
+                            # seed or the probe)
+                            self._current_url = _route_key(current_url)
+                            self._goto_recording(self._current_url)
+                            self._current_url = current_url
                         win = window.enter_context(self._window(
                             self._page, self._context, current_url, query=source))
                         self._probe = probe
@@ -2498,6 +2593,10 @@ class LocalSpider:
                     queue.extend(self._take_query_navs(depth))
                     if win is not None:
                         self._after_query_window(win, current_url, visited)
+                    elif source == spa.SEED_SOURCE:
+                        # its bare route's load (P1(a)) failed before the window
+                        # opened: a failed visit, kept as a page (B3-N2: counted)
+                        self.spa_counts["spa_query_write_seeds"] += 1
 
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")

@@ -470,8 +470,10 @@ fuzzer.
     only after its window **closed cleanly with no write** (fail closed: a crawl that
     stops in between leaves it a page). A **write** in a query window is every refused
     non-GET/HEAD request, a navigation included (an auto-submitted form: its target is
-    never queued as a GET), every held page-to-server WebSocket message, and every
-    non-navigation GET the window's word rules refused (a transaction or account GET);
+    never queued as a GET), every held page-to-server WebSocket message, every
+    non-navigation GET the window's word rules refused (a transaction or account GET),
+    and every GET navigation (a redirect hop included) to a target those word rules
+    refuse, which is never queued (P2);
     a seed that wrote stays a write seed (`spa_query_write_seeds`): fuzzing it would send
     that write unguarded (review A-M1, round 2 U1). No URL a query window blocked is
     queued from the load's request list (it would be fetched outside the window);
@@ -485,10 +487,22 @@ fuzzer.
     (FR-SESS-20, `SessionWithheld`) is filed as a write seed, and such a probe records
     nothing (merge with origin-scoped sessions, M3/M4). Each seed and probe load starts
     from `about:blank`, outside its window, so the previous page's timers and requests
-    are never counted as the load's writes or XHRs (M7); a request still in flight when
+    are never counted as the load's writes or XHRs (M7). **A hash-route seed or probe**
+    then loads its bare route (`#/r`) fresh and lets it settle, still outside the window,
+    so the app shell's start-up writes are sent there, and makes the same-document hash
+    change into `#/r?a=…` inside the window (P1(a)). **The write baseline (P1(b)):**
+    every page load outside a window records, by (method, path) (`WS` for a WebSocket
+    message), the writes a query window would have counted, under its bare route; in a
+    seed's window a write that is in its route's baseline is blocked all the same but
+    does not demote the seed (`spa_query_baseline_writes`). This covers the shell's
+    periodic writes (Juice Shop's socket.io polling and WebSocket pings) and a
+    history-mode seed, which is a full load inside its window. A seed's forms are stored
+    only when it is promoted, and never enumerated: a form its query rendered and
+    auto-submitted is the write its window blocked. A request still in flight when
     the load is read is not queued from its request list either (M8). `_leave` reads
     `page.url` as the seed's same-document navigation only when **this** load committed
-    (its navigation was this load's and the page is a document of the app, not
+    (its `goto` returned, with a response or as a same-document change, P4; its
+    navigation was this load's and the page is a document of the app, not
     `about:blank` after a failed load nor an error page; M6). Follow-up, its own design gate (a CC-FUZZ
     change): run M6's loads of such a route inside a write-blocking window instead, so
     the route stays fuzzable. **In an authenticated crawl** each seed and probe window
@@ -522,7 +536,8 @@ fuzzer.
     withheld from the session while a probe is open (another origin, FR-SESS-20) is that
     probe's blocked evidence only -- never in `skipped_other_origin` nor the log (M1); a
     probe route itself on another origin is never minted nor loaded (M2); a failed
-    probe's log line is scrubbed of its markers (M5). **No row ever
+    probe's log line, and the browser guard's URL-bearing log lines, are scrubbed of
+    markers (M5, P4). **No row ever
     carries a marker**: the spider's storage boundary (`mark_visited`'s URL, title and
     text; captured requests; forms; revealed forms) replaces any whole-token marker with
     `spa.MARKER_PLACEHOLDER` (`spa.scrub_markers`), so one an app persisted and replays
@@ -537,7 +552,7 @@ fuzzer.
     `spa_query_refused[<reason>]`), `spa_query_writes_blocked`,
     `spa_query_marker_in_path`, `spa_query_step_cap`, `spa_query_seeded`,
     `spa_query_seeded_fragment`, `spa_query_write_seeds`, `spa_query_session_losses`,
-    `spa_query_unclean_windows`, `spa_query_stopped` (0/1); the summary shows fragment seeds (`--browser` only)
+    `spa_query_unclean_windows`, `spa_query_baseline_writes`, `spa_query_stopped` (0/1); the summary shows fragment seeds (`--browser` only)
     apart from history-mode ones.
   - Residuals: a marker or filler in a request's **path** segment gives no point
     (counted `spa_query_marker_in_path`); fragment points need `--browser`; there is
@@ -558,8 +573,15 @@ fuzzer.
     also block**: a seed whose visit failed for any reason (a timeout, a refused
     redirect hop, a network error) stays a page, never a point, like one that wrote
     (`spa_query_write_seeds`), and a failed probe keeps nothing; a seed's refused GET
-    redirect hop is a navigation target, queued through the normal gates (W2) and so
-    possibly crawled later as a page.
+    navigation or redirect hop that the word rules pass is queued through the normal
+    gates (W2) and so possibly crawled later as a page; the write baseline is keyed by
+    (method, path), so a write the query causes to the same path as one the shell makes
+    on every load (another body, another socket message) is not counted, and a
+    history-mode seed's write that the bare route's own loads never made (a start-up
+    write that varies by path, or one the bare load did not reach before it settled)
+    still demotes it. **Cost (P1, B-N3):** a hash-route seed or probe costs an
+    `about:blank`, a full load of its bare route and a same-document hash change (about
+    two loads); a history-mode one, an `about:blank` and its own load.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -624,7 +646,7 @@ fuzzer.
   whose load blocked a write is never a point (so M6 never replays that write outside a
   window), and in an authenticated crawl a session lost in a query load stops them
   (FR-CRAWL-17).
-  - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`, `tests/test_spa_query.py::test_what_a_query_window_counts_as_a_write`, `tests/test_spa_query.py::test_a_held_websocket_message_is_a_write`, `tests/test_spa_query.py::test_a_seed_is_never_importable_until_its_window_closed_cleanly`, `tests/test_spa_query.py::test_a_session_check_that_raises_is_a_loss`, `tests/test_spa_query.py::test_a_slow_response_that_expires_the_session_cookie_is_a_loss`, `tests/test_spa_query.py::test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again`, `tests/test_spa_query.py::test_the_session_is_rechecked_when_leaving_the_page_fails`, `tests/test_spa_query.py::test_a_withheld_url_while_a_probe_is_open_is_that_probes_blocked_evidence`, `tests/test_spa_query.py::test_a_probe_route_on_another_origin_is_never_minted_nor_loaded`, `tests/test_spa_query.py::test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothing`, `tests/test_spa_query.py::test_a_seeds_leave_reads_the_page_only_when_its_load_committed`, `tests/test_spa_query.py::test_a_failed_seed_load_checks_the_cookies_and_the_server_not_local_storage`, `tests/test_spa_query.py::test_a_query_loads_request_in_flight_is_tracked_until_it_ends`, `tests/test_spa_query.py::test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on`, `tests/test_spa_query.py::test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing`
+  - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`, `tests/test_spa_query.py::test_what_a_query_window_counts_as_a_write`, `tests/test_spa_query.py::test_a_held_websocket_message_is_a_write`, `tests/test_spa_query.py::test_a_seed_is_never_importable_until_its_window_closed_cleanly`, `tests/test_spa_query.py::test_a_session_check_that_raises_is_a_loss`, `tests/test_spa_query.py::test_a_slow_response_that_expires_the_session_cookie_is_a_loss`, `tests/test_spa_query.py::test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again`, `tests/test_spa_query.py::test_the_session_is_rechecked_when_leaving_the_page_fails`, `tests/test_spa_query.py::test_a_withheld_url_while_a_probe_is_open_is_that_probes_blocked_evidence`, `tests/test_spa_query.py::test_a_probe_route_on_another_origin_is_never_minted_nor_loaded`, `tests/test_spa_query.py::test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothing`, `tests/test_spa_query.py::test_a_seeds_leave_reads_the_page_only_when_its_load_committed`, `tests/test_spa_query.py::test_a_failed_seed_load_checks_the_cookies_and_the_server_not_local_storage`, `tests/test_spa_query.py::test_a_query_loads_request_in_flight_is_tracked_until_it_ends`, `tests/test_spa_query.py::test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on`, `tests/test_spa_query.py::test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing`, `tests/test_spa_query.py::test_a_shell_that_writes_on_every_load_still_gives_hash_points`, `tests/test_spa_query.py::test_the_baseline_is_what_a_load_outside_a_window_would_have_written`, `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`, `tests/test_spa_query.py::test_the_guards_url_log_lines_never_carry_a_probe_marker`, `tests/test_spa_query.py::test_a_seeds_forms_are_stored_only_when_it_is_promoted`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
   - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
   - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_refused`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`

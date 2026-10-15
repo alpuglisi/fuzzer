@@ -422,6 +422,74 @@ Newest first.
     window); also M3 (seed filed as `spa-query`), M4 (static fallback: the seed sent
     twice), M8 (no in-flight skip: `/rest/late` fetched 3 times) and the M5 log scrub
     each make their test fail.
+- **Post-merge amendment (2026-10-15; review of b5bf8c5: reviewer A AGREE, reviewer B
+  AGREE-with-changes; the fix list P1-P4, D57; P1 decided as both (a) and (b)).**
+  Appended. B's must-fix: since M7's `about:blank` pre-step every seed was a full app
+  load, so an app shell that writes on every load (Juice Shop's socket.io client: an
+  engine.io polling POST, WebSocket pings) would demote every seed to
+  `spa-query-writes`, and `#/track-result?id=` would never become a point.
+  - **P1(a):** a hash-route seed or probe loads its bare route (`_route_key`) fresh
+    and settled **outside** the window (after the `about:blank` pre-step, so the
+    previous page's timers still die; its captures are filed under the bare route),
+    then makes the same-document hash change into the seed or probe inside the window.
+    The shell's start-up writes are sent before the window opens.
+  - **P1(b):** a per-route write baseline. While a page loads outside any window
+    (`_goto_recording`, around `_goto_and_parse`), every request a query window would
+    count as a write, and every forwarded page-to-server WebSocket message (navguard's
+    new `on_ws_send`, CC-CRAWL-0026 amendment), is recorded by (method, path), `WS` for
+    a socket (`_write_key`), under the load's bare route. In a query window a write whose
+    key is in the route's baseline is blocked all the same but not counted
+    (`_count_query_write`; counted `spa_query_baseline_writes`, a new `crawl_stats` key).
+    This covers history-mode seeds (a full load in the window) and periodic shell writes.
+  - **Found while building P1, fixed here (flagged to the coordinator):** with P1(a) a
+    hash seed's load is a same-document change, which completes where the full load
+    used to fail ("navigation interrupted"). `#/autopost?go2=`'s form, rendered by the
+    query and auto-submitted (the write its window blocked), was then still in the DOM
+    and stored as a crawled form, and the S1 test caught M6 POSTing it. Now a seed's
+    forms are kept in its window and stored only when the seed is promoted, and they are
+    never enumerated (`_after_fetch`, `_after_query_window`). A bare route that fails
+    before its seed's window opens is counted as a failed visit
+    (`spa_query_write_seeds`).
+  - **P2 (B-S2):** in a query window, a refused GET navigation's target (a redirect hop
+    included) that the window's GET word rules refuse (a transaction or account GET) is
+    a blocked write and is never queued. This supersedes the merge amendment's stated
+    residual for such hops.
+  - **P3 (B-S1):** the M5 test's probe also opens a WebSocket to B carrying the marker:
+    it is never connected, and it is that probe's blocked evidence. The `/goaway`
+    docstring now says the landing was window-refused, not withheld.
+  - **P4:**
+    - (B-N1) `_load_committed` is set when `_goto_and_parse` completes (`response is
+      not None or same_document`), never before the goto, and `_leave` requires it.
+    - (B-N2) navguard's URL-bearing log lines are scrubbed of markers (CC-CRAWL-0026
+      amendment).
+    - (B-N3) FR-CRAWL-17 states the cost.
+  - Fixtures: `QuerySpa` and `RedirectSeedSpa` shells POST
+    `/socket.io/?EIO=4&transport=polling` on every load and ping a `/socket.io/`
+    WebSocket every 100 ms. RedirectSeedSpa's hop is now `/api/order/confirm?via=hop`:
+    `via=seed` tripped the destructive rule (`seed`), so the guard, not the window,
+    refused it.
+  - Tests (`tests/test_spa_query.py`, +6 and 4 extended): the shell-writes test on the
+    shared crawl, covering (a), (b), `#/track` promoted and imported as a fragment
+    point, `#/poster` still a write seed, and no `/api/autopost` form stored. Also:
+    - the baseline unit test;
+    - navguard's `on_send` unit test;
+    - the guard log-scrub test;
+    - the seed-forms test;
+    - the RedirectSeedSpa crawl, extended for P1(b) in history mode (`/next1?y=`
+      promoted with the shell's writes blocked and baselined) and for P2 (the hop never
+      requested);
+    - the write-classification parametrisation (P2);
+    - the M5 test (P3);
+    - the M6 test (P4 B-N1).
+  - Effectiveness (P1-P4, assessed 2026-10-15): `tests/test_spa_query.py` 109 passed, 0
+    skipped (real Chromium). Mutations, each reverted:
+    - P1(a) off: the shell-writes test fails (the start-up POST blocked in `#/track`'s
+      window).
+    - P1(b) off: the shell-writes test, the RedirectSeedSpa crawl and the unit test fail
+      (`#/track` and `/next1` demoted).
+    - P2 off: the parametrised unit test and the RedirectSeedSpa crawl fail (the goaway
+      seed's write is not counted).
+    - Seed-forms deferral off: the S1 M6 test and the shell-writes test fail.
 
 ### CC-CRAWL-0026 — The browser session is origin-scoped; the jar never reaches another origin (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change:
@@ -521,6 +589,18 @@ Newest first.
     commits Chromium's error page and the page's links are lost to the crawl (a
     BUG-0123 coverage effect, not a leak).
   - Effectiveness (review round 3): the related suites (as in round 2) with `FUZZLAB_REQUIRE_BROWSER=1`: **1492 passed, 2 xfailed, 0 skipped**; `tests/test_session_origin_scope.py` has 76 tests; the traceability guard passes. The full suite is the coordinator's run.
+- Amendment (2026-10-15; FR-CRAWL-17 post-merge fix list D57, recorded in full under
+  CC-CRAWL-0027's post-merge amendment): `tools/navguard.py` only.
+  - `make_ws_handler(on_send=)` / `guard_page(on_ws_send=)`: an additive callback,
+    `on_send(url)`, told of each page-to-server WebSocket message the forwarder sends.
+    The spider records it into a route's write baseline (P1(b)).
+  - Every log line that names a URL path or quotes an error is passed through
+    `spa.scrub_markers` (`_scrubbed`): a blocked destructive or refused request, an
+    over-long redirect chain, a failed fetch, a failed observer (P4, B-N2: an
+    FR-CRAWL-17 probe marker never reaches the log).
+  - The session and origin rules are unchanged.
+  - Tests: `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`,
+    `::test_the_guards_url_log_lines_never_carry_a_probe_marker`.
 
 ### CC-CRAWL-0025 — The crawl's cookie check covers credential cookies only (BUG-0132) (2026-10-14)
 - Change: `tools/browserauth.py` `BrowserSession.checked_cookies`, which is the

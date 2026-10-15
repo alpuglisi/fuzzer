@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-15 (FR-CRAWL-17 post-merge fixes P1-P4: an app shell's own writes no longer demote seeds)
+- A hash-route seed or probe now loads its bare route outside its window and then makes
+  the hash change inside it. A per-route baseline of the bare route's own writes
+  (socket.io polling, WebSocket pings) means those writes no longer demote a seed, so
+  Juice Shop's `#/track-result?id=` can still become a point. Also:
+  - a seed's forms are stored only once it is promoted;
+  - a refused hop to a transaction GET is a write and is never queued;
+  - a load counts as committed only after its `goto` returns;
+  - the browser guard's log lines are scrubbed of probe markers.
+  (CC-CRAWL-0027 post-merge amendment, CC-CRAWL-0026 amendment.)
+
 ## 2026-10-15 (FR-CRAWL-17 merged with origin-scoped sessions: M0-M10)
 - spa-query merged p3-int (89268f7: FR-SESS-20 / BUG-0134, BUG-0136, BUG-0137); then a
   URL withheld from the session during a probe is that probe's blocked evidence only, a
