@@ -89,6 +89,11 @@ Newest first.
   strict pins. Browser tests: `test_web_sitetree_browser.py` 14 and
   `test_web_pages_browser.py` 9 passed, 0 skipped. `tests/test_no_ml.py` 10 passed (the
   re-run CC-UI-0501 left open).
+  **Final run** (9d6c409, clean detached worktree, `FUZZLAB_REQUIRE_BROWSER=1`, the same
+  file set): **1717 passed, 2 skipped, 5 xfailed**; browser files alone
+  (`test_web_sitetree_browser.py` 15 + `test_web_pages_browser.py` 9): **24 passed, 0
+  skipped**. Reviewers A and B: AGREE (rounds 1-3). This assesses CC-UI-0500, CC-UI-0501
+  and CC-UI-0502 as effective.
 
 ### CC-UI-0502 — Site map page: the UI-research three-pane layout (2026-10-15)
 - Change: the site tree's page (CC-UI-0500's open deliverables): `templates/sections/
