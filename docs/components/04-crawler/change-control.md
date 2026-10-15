@@ -111,6 +111,15 @@ Newest first.
     - **Q2**, the old branch (`own = True`, always the response): both Q2 tests fail.
   - Effectiveness: the 20 tests of `tests/test_guarded_navigation.py` pass; the related
     run on the committed tree is recorded below.
+  - Effectiveness, the related run (the same 30 files, FUZZLAB_REQUIRE_BROWSER=1
+    FUZZLAB_REQUIRE_NETNS=1):
+    - On 1a1da68: 1484 passed, 2 failed. Two route-handler tests' request doubles have
+      no `frame`, and `_note_received` raised `AttributeError`; 0d2371b names it.
+    - On 0d2371b: 1485 passed, 1 failed, 4 skipped, 6 xfailed. The failure is
+      `test_labgen_go_net_http_navigability_live_boot.py::test_pa_0053_bare_request_sweep_no_route_answers_5xx`
+      (status 0 for `/channels/redirect`). That test crawls with the `requests` engine,
+      which does not use `navguard.navigate`. It passed on 1a1da68 and in 7 of 7 reruns
+      on 0d2371b: a live-boot flake, not this change.
 
 ### CC-CRAWL-0029 — One rule for both windows: a refused non-GET navigation is a write, never a page (forms phase 4, FR-CRAWL-16) (2026-10-14)
 - Change: `tools/spider.py` `LocalSpider._window_refusal` keeps a refused navigation's
