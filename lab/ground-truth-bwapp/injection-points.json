@@ -295,6 +295,34 @@
       "param": "directory",
       "location": "query",
       "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamUrl",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamWidth",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamHeight",
+      "location": "query",
+      "rendering": "server"
+    },
+    {
+      "url": "/bWAPP/sqli_5.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "rendering": "server"
     }
   ]
 }

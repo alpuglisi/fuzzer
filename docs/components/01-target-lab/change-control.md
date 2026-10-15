@@ -44,7 +44,7 @@ Component code: **LAB**. Entry format and required fields: see
     registry from the directory layout, the pins, `fetch_bwapp`, `config_problems`
     (pre-flight), `exposure_problems`/`check_exposure` (fail closed), the bootstrap client
     and `bootstrap_bwapp`/`bootstrap_juice_shop`, a CLI.
-  - **Ground truth** `lab/ground-truth-bwapp/` (52 cases: 48 positives, 4 negatives) and
+  - **Ground truth** `lab/ground-truth-bwapp/` (56 cases: 52 positives, 4 negatives) and
     `lab/ground-truth-juice-shop/` (13 cases: 10 positives, 3 negatives), with `[reach:]`
     and `[prov:]` tags; `.gitignore` negations (PA-0038) and licence ignores.
   - **Tests** `tests/test_external_labs_static.py`, `tests/test_external_labs_extctl.py`
@@ -67,7 +67,11 @@ Component code: **LAB**. Entry format and required fields: see
     JUICE-0013 is `gt` only; the ssrf negative on `/redirect` was dropped (no candidate
     without a crawled example).
   - The gt pass found two real reflections bWAPP does not list (its MySQL error prints the
-    input raw on `sqli_2`/`sqli_13`): added as BWAPP-0051/0052 after a manual check.
+    input raw on `sqli_2`/`sqli_13`): added as BWAPP-0051/0052 after a manual check. The
+    crawl pass found four bWAPP bugs the first table had excluded, each verified by hand:
+    `iframei.php` ParamUrl/ParamWidth/ParamHeight (structurally reflected XSS in an
+    attribute; BWAPP-0053..0055) and `sqli_5.php` title (SOAP to the container's own
+    localhost works, time-based SQLi; BWAPP-0056).
 - Impact: LAB, plus a read-only use of CORE (`core.net`, `core.http` headers,
   `core.credentials`, the new `procutil.host_listen_sockets`, CC-CORE-0300). Existing
   `labctl.sh` subcommands unchanged (tested). Consumers: `harness.multitarget`,

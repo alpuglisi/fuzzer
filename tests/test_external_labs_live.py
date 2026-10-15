@@ -49,7 +49,16 @@ BWAPP_GT_FLOOR = {"BWAPP-0001", "BWAPP-0002", "BWAPP-0003", "BWAPP-0004", "BWAPP
                   "BWAPP-0011", "BWAPP-0012", "BWAPP-0013", "BWAPP-0014", "BWAPP-0028",
                   "BWAPP-0029", "BWAPP-0030", "BWAPP-0031", "BWAPP-0032", "BWAPP-0042",
                   "BWAPP-0043", "BWAPP-0044", "BWAPP-0045", "BWAPP-0051", "BWAPP-0052"}
-BWAPP_CRAWL_FLOOR: set[str] = set()
+BWAPP_CRAWL_FLOOR = {"BWAPP-0001", "BWAPP-0002", "BWAPP-0003", "BWAPP-0004", "BWAPP-0006",
+                     "BWAPP-0008", "BWAPP-0009", "BWAPP-0011", "BWAPP-0012", "BWAPP-0013",
+                     "BWAPP-0014", "BWAPP-0015", "BWAPP-0016", "BWAPP-0017", "BWAPP-0018",
+                     "BWAPP-0019", "BWAPP-0020", "BWAPP-0021", "BWAPP-0022", "BWAPP-0023",
+                     "BWAPP-0024", "BWAPP-0025", "BWAPP-0026", "BWAPP-0027", "BWAPP-0028",
+                     "BWAPP-0029", "BWAPP-0030", "BWAPP-0031", "BWAPP-0032", "BWAPP-0034",
+                     "BWAPP-0035", "BWAPP-0036", "BWAPP-0037", "BWAPP-0038", "BWAPP-0039",
+                     "BWAPP-0040", "BWAPP-0041", "BWAPP-0042", "BWAPP-0043", "BWAPP-0044",
+                     "BWAPP-0051", "BWAPP-0052", "BWAPP-0053", "BWAPP-0054", "BWAPP-0055",
+                     "BWAPP-0056"}
 
 
 def _engine() -> str:

@@ -677,6 +677,58 @@
       "rendering": "server",
       "stack": "php_bwapp",
       "notes": "[reach: crawl,gt] [prov: unlisted by bWAPP (found by fuzzlab, verified)] The MySQL error for a malformed movie is printed raw (sqli_13.php:188 prints mysql_error(), which quotes the input), so markup in movie renders as an element. Verified live: movie=1'<b>zz</b> renders a b element in the error text."
+    },
+    {
+      "case_id": "BWAPP-0053",
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamUrl",
+      "location": "query",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html-attribute",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl] [prov: iFrame Injection (structurally reflected XSS)] ParamUrl is echoed raw inside a double-quoted iframe attribute (iframei.php:135; xss() is a no-op at level 0), so a quote breaks out (ParamUrl also takes a javascript: URL). The handler needs all three parameters (:24), which crawl points carry. Verified live: a breakout renders an injected element."
+    },
+    {
+      "case_id": "BWAPP-0054",
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamWidth",
+      "location": "query",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html-attribute",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl] [prov: iFrame Injection (structurally reflected XSS)] ParamWidth is echoed raw inside a double-quoted iframe attribute (iframei.php:135; xss() is a no-op at level 0), so a quote breaks out (ParamUrl also takes a javascript: URL). The handler needs all three parameters (:24), which crawl points carry. Verified live: a breakout renders an injected element."
+    },
+    {
+      "case_id": "BWAPP-0055",
+      "url": "/bWAPP/iframei.php",
+      "method": "GET",
+      "param": "ParamHeight",
+      "location": "query",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html-attribute",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl] [prov: iFrame Injection (structurally reflected XSS)] ParamHeight is echoed raw inside a double-quoted iframe attribute (iframei.php:135; xss() is a no-op at level 0), so a quote breaks out (ParamUrl also takes a javascript: URL). The handler needs all three parameters (:24), which crawl points carry. Verified live: a breakout renders an injected element."
+    },
+    {
+      "case_id": "BWAPP-0056",
+      "url": "/bWAPP/sqli_5.php",
+      "method": "GET",
+      "param": "title",
+      "location": "query",
+      "vuln_class": "sqli",
+      "sink_context": "sql",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "php_bwapp",
+      "notes": "[reach: crawl] [prov: SQL Injection - Blind (WS/SOAP)] title is sent over SOAP to ws_soap.php (sqli_5.php:156-159), which concatenates it into a query (ws_soap.php:8); the SOAP call goes to the container's own localhost, which serves the app. Verified live: a SLEEP(3) payload takes 3.0 s against a 0.03 s baseline."
     }
   ]
 }

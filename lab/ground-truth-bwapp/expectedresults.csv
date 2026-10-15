@@ -55,3 +55,7 @@ BWAPP-0049,/bWAPP/xss_stored_1.php,POST,entry,body,sqli,false,/bWAPP/xss_stored_
 BWAPP-0050,/bWAPP/htmli_stored.php,POST,entry,body,sqli,false,/bWAPP/htmli_stored.php,sink,,direct
 BWAPP-0051,/bWAPP/sqli_2.php,GET,movie,query,xss-reflected,true,/bWAPP/sqli_2.php,sink,,direct
 BWAPP-0052,/bWAPP/sqli_13.php,POST,movie,body,xss-reflected,true,/bWAPP/sqli_13.php,sink,,direct
+BWAPP-0053,/bWAPP/iframei.php,GET,ParamUrl,query,xss-reflected,true,/bWAPP/iframei.php,sink,,direct
+BWAPP-0054,/bWAPP/iframei.php,GET,ParamWidth,query,xss-reflected,true,/bWAPP/iframei.php,sink,,direct
+BWAPP-0055,/bWAPP/iframei.php,GET,ParamHeight,query,xss-reflected,true,/bWAPP/iframei.php,sink,,direct
+BWAPP-0056,/bWAPP/sqli_5.php,GET,title,query,sqli,true,/bWAPP/sqli_5.php,sink,,direct

@@ -15,7 +15,7 @@ changed, and the reason. Reference the commit hash where useful.
   {up|down|status|reset|bootstrap} <lab>` through `lab/external/extctl.sh` with a config
   pre-flight and a fail-closed exposure check; an idempotent, `--authorized` bootstrap that
   puts the lab identity in the keyring after a verified login; ground truth
-  `lab/ground-truth-bwapp` (52 cases) and `lab/ground-truth-juice-shop` (13) with per-case
+  `lab/ground-truth-bwapp` (56 cases) and `lab/ground-truth-juice-shop` (13) with per-case
   reach tags; static, hermetic and gated live tests (CC-LAB-0300, CC-LAB-0301,
   CC-CORE-0300, CC-ML-0300; FR-LAB-300..304, FR-CORE-300). Juice Shop runs with its own
   `NODE_ENV=unsafe`; its SSRF row is a documented miss under the bridge network.
