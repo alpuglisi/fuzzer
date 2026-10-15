@@ -29,7 +29,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] template — done
   - [x] guard `tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so` (mutation-checked) — done
   - [x] FR-LAB-175 — done
-- Effectiveness (assessed pending):
+- Effectiveness (assessed 2026-10-15): full suite on 7c1fb91 (`scripts/verify_change.py --full`): 7106 passed, 0 failed, 42 skipped, 28 xfailed. `test_multitarget_category4` (BUG-0147's failure) passed; it had failed in the previous full run of the merged tree (7077 passed, 1 failed). `tests/test_probe_unobserved.py` 26 passed; 16 mutation checks each caught. Round 2 review: both reviewers AGREE.
 
 ### CC-LAB-0258 — Integration: no pipe into an early-exiting reader under pipefail; the base-URL registry covers the merged reducers (BUG-0145) (2026-10-15)
 - Change:

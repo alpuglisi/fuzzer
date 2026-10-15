@@ -15,7 +15,7 @@ Newest first.
 - Deliverables:
   - [x] code — done
   - [x] guard (the same hand-written-response test, mutation-checked) — done
-- Effectiveness (assessed pending):
+- Effectiveness (assessed 2026-10-15): full suite on 7c1fb91 (`scripts/verify_change.py --full`): 7106 passed, 0 failed, 42 skipped, 28 xfailed. `test_multitarget_category4` (BUG-0147's failure) passed; it had failed in the previous full run of the merged tree (7077 passed, 1 failed). `tests/test_probe_unobserved.py` 26 passed; 16 mutation checks each caught. Round 2 review: both reviewers AGREE.
 
 ### CC-PROXY-0023 — A captured session records the origins it was seen on (FR-SESS-20, BUG-0134) (2026-10-14)
 - Change: `proxy/session_capture.py` records the canonical origin of every URL passed to

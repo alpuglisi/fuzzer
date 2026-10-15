@@ -78,7 +78,7 @@ Newest first.
   - [x] BUG-0147, PA-0153, SP-34, ERROR_LOG, CHANGELOG; FR-FUZZ-50 — done
   - [x] re-review: round 2 on 422ebaf, A and B AGREE; their should-fix items are
     addressed in this commit (BUG-0147, Review) — done
-- Effectiveness (assessed pending):
+- Effectiveness (assessed 2026-10-15): full suite on 7c1fb91 (`scripts/verify_change.py --full`): 7106 passed, 0 failed, 42 skipped, 28 xfailed. `test_multitarget_category4` (BUG-0147's failure) passed; it had failed in the previous full run of the merged tree (7077 passed, 1 failed). `tests/test_probe_unobserved.py` 26 passed; 16 mutation checks each caught. Round 2 review: both reviewers AGREE.
 
 ### CC-FUZZ-0087 — Integration: the CLI taxonomy's pending options arrived (2026-10-15)
 - Change: `fuzzlab/cli_taxonomy.py` moves `auth_origin` (auto, crawl, greybox-run) and

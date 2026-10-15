@@ -15,7 +15,7 @@ Newest first.
 - Deliverables:
   - [x] template and docstring — done
   - [x] pinned tests — done
-- Effectiveness (assessed pending):
+- Effectiveness (assessed 2026-10-15): full suite on 7c1fb91 (`scripts/verify_change.py --full`): 7106 passed, 0 failed, 42 skipped, 28 xfailed. `test_multitarget_category4` (BUG-0147's failure) passed; it had failed in the previous full run of the merged tree (7077 passed, 1 failed). `tests/test_probe_unobserved.py` 26 passed; 16 mutation checks each caught. Round 2 review: both reviewers AGREE.
 
 ### CC-UI-0055 — Integration: the site tree reads only the open project; arrived CLI options classified (BUG-0146) (2026-10-15)
 - Change:
