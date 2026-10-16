@@ -88,3 +88,30 @@ def test_a_record_without_method_or_location_matches_only_partially(tmp_path):
         {"url": "http://127.0.0.1:3000/rest/products/search", "param": "q",
          "category": "sql-injection", "method": "POST", "location": "body"}])
     assert rows["JUICE-0002"]["stage"] == "not reached"   # a known method disagrees
+
+
+def test_a_finding_takes_its_location_from_the_one_matching_candidate(tmp_path):
+    """A finding row has no location; the run's candidate of its class for the same
+    input supplies it. Two candidate locations for one input leave it partial."""
+    url = "http://127.0.0.1:3000/rest/products/search"
+
+    def run(locations, sub):
+        d = tmp_path / sub
+        d.mkdir()
+        with Store(d / "s.db") as store:
+            rid = store.start_run("auto", "h")
+            for loc in locations:
+                store.conn.execute("INSERT INTO candidate (run_id, rule, evidence) "
+                                   "VALUES (?,?,?)", (rid, "R", json.dumps(
+                                       {"url": url, "param": "q", "method": "GET",
+                                        "location": loc, "category": "sql-injection"})))
+            store.conn.execute("INSERT INTO finding (run_id, vuln_class, label, url, method, "
+                               "param) VALUES (?,?,?,?,?,?)",
+                               (rid, "sqli", 1, "/rest/products/search", "GET", "q"))
+            store.conn.commit()
+        return {r["case"]: r for r in _funnel()(str(d / "s.db"), str(GT))}["JUICE-0002"]
+
+    one = run(["query"], "one")
+    assert (one["stage"], one["attribution"]) == ("confirmed", "exact")
+    two = run(["query", "header"], "two")
+    assert (two["stage"], two["attribution"]) == ("confirmed", "partial")

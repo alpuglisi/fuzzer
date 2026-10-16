@@ -114,9 +114,23 @@ def funnel(store: str, gt_dir: str, run_id: int | None = None) -> list[dict]:
         points.add(ident)                   # a candidate's point was reached
         if r["n"]:
             probed.setdefault(ident, set()).add(e.get("category"))
-    found = [((_key(r["url"]), _method(r["method"]), None, r["param"]), r["vuln_class"])
-             for r in db.execute("SELECT url, method, param, vuln_class FROM finding "
-                                 "WHERE run_id = ?", (run_id,))]
+    # A finding has no location column. Take it from the candidate its attempt probed,
+    # else from the one location the run's candidates of that class give the same input.
+    found = []
+    for r in db.execute(
+            "SELECT f.url, f.method, f.param, f.vuln_class, c.evidence FROM finding f "
+            "LEFT JOIN attempt a ON f.attempt_id = a.id "
+            "LEFT JOIN candidate c ON a.candidate_id = c.id WHERE f.run_id = ?", (run_id,)):
+        e = json.loads(r["evidence"] or "{}")
+        path, method = _key(r["url"]), _method(r["method"] or e.get("method"))
+        loc = _loc(e.get("location"))
+        if loc is None:
+            want = CATEGORY.get(r["vuln_class"], {r["vuln_class"]})
+            locs = {k[2] for k, cats in cands.items()
+                    if k[0] == path and k[3] == r["param"] and k[1] in (method, None)
+                    and k[2] is not None and cats & want}
+            loc = locs.pop() if len(locs) == 1 else None
+        found.append(((path, method, loc, r["param"]), r["vuln_class"]))
     rows = []
     for case in contract.load(gt_dir).positives():
         ident = (_key(case.url), _method(case.method), _loc(case.location), case.param)
