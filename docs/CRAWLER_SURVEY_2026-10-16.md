@@ -200,3 +200,7 @@ Measured at 49e0768 (generic command line, rules on), against the baseline at f6
   instead of 12, and 23 navigations captured instead of 4. Which click produced the link
   is not traced.
 
+**Repeat (388d073):** Juice Shop confirmed 4/15, and no `#/search?q=` link was crawled
+(42 reveal clicks, against 60). The 5/15 above did not repeat, so no effect on the
+metric is established (F-064).
+

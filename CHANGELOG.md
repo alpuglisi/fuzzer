@@ -5,7 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-16 (the survey options measured; a refused request's skip is counted)
-- **What:** Juice Shop now confirms 5/15 (was 4/15; JUICE-0004 is new). The likely cause is more reveal targets from option 6. bWAPP is unchanged at 0/55.
+- **What:** one Juice Shop run confirmed 5/15 (JUICE-0004 new, likely through option 6's extra reveal targets). The repeat run confirmed 4/15, so no gain is established (F-064). bWAPP is unchanged at 0/55.
   - Option 1 had no effect. The six seeds are demoted by Juice Shop's own `verifyLocalXssChallenge` socket.io event, which carries the query value; rule B2 counts it, as designed (F-063, survey doc corrected).
   - The crawler now counts, by reason, each refused request it does not record (CC-CRAWL-0041).
 - **Why:** to measure the owner's chosen options, and to show why option 3 recorded none of Juice Shop's 171 refused POSTs.

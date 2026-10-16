@@ -20,7 +20,14 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — tools/browserexec.py (M6): under load, a refused navigation after a hit reaches the server (open; formal CAPA required)
+- **Symptom (reproduction):** `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed` failed in `verify_change.py --base 49e0768` and in `--full` on 388d073. The `/fire` page calls the sentinel, then sets `location.href = '/logout.php'` 50 ms later, and the test server received `/logout.php`. It passes alone (5/5). With 4 CPU-bound loops and `-n 8` (the `m6` tests, twice over), it failed in 5 of 6 rounds on 388d073 and in 6 of 6 on 54ced00, the commit before the crawler-survey work.
+- **Root cause:** not established. The escape predates the survey commits (54ced00 reproduces it). In `PlaywrightBrowserExecutor._in_browser`, a hit returns at once, and the `finally` calls `navguard.release` (close the pages, then `unroute_all(behavior="ignoreErrors")`) and then `browser.close()`. A navigation the page starts during that teardown reached the network, past the guard's destructive rule. Which step lets it through is unverified.
+- **Remediation:** none yet. This is a security event (a destructive URL requested by the tool) in an existing control (BUG-0111 / NFR-CRAWL-safe), so it is formal CAPA (QUALITY_POLICY §4). It needs a `docs/bugs/BUG-NNNN` report and the owner's scheduling; it is recorded here, not fixed inside the survey change.
+- **Status:** Open.
+
 ## 2026-10-16 — tests/test_web_ml_context.py: a run switch is judged after a fixed 800 ms (open)
+- **Symptom (second full run, 388d073):** this test failed again, and so did `test_choosing_a_run_fetches_and_shows_that_runs_numbers`. That test read a partly rendered panel 800 ms after the switch, the same fixed wait. It passes alone. The cause is inferred, not timed.
 - **Symptom:** in `verify_change.py --full` on 7dc3b57, `test_switching_runs_never_leaves_a_stale_panel` failed for run 2 (unscored): `(True, False) == (False, True)`, i.e. the previous run's chart was still shown. It passed 3/3 alone, 3/3 with every CPU busy, and the whole file passed twice (15/15).
 - **Root cause (from the code; the latency is inferred, not measured):** `static/js/ml.js` keeps the old panel until the new `/api/ml/data` response arrives. `load()` then `render()` resets each panel, and a superseded response is aborted or dropped (`loadSeq`), so the page has no stale-overwrite race. The test asserts the panel 800 ms after `select_option`, so a response slower than that under the full suite's load fails it. The failure showed exactly the previous run's state.
 - **Remediation (proposed, not done: outside the survey change's scope):** wait for the `/api/ml/data` response (`page.expect_response`), or for the panel's state, instead of a fixed timeout.

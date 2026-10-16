@@ -31,6 +31,17 @@ Newest first.
     pages without submissions);
   - bWAPP: 0/55, unchanged, as expected: its pages are behind the POST pickers (survey
     option 4b, an owner decision).
+  - *Repeat run (388d073, reporting change only): confirmed 4/15, reached 6/15.* No
+    `#/search?q=` link was crawled. Reveal discovery varied: 42 clicks (60 before), 18
+    navigations (23), 76 pages (88). The 5/15 does not repeat, so the measured effect on
+    the metric is **none established** (F-064). In that run, option 3's skips: 114
+    transport, 23 reads, 0 without a body. No refused request was an app write with a
+    body.
+  - `verify_change.py --base 49e0768`: 72 files, 2265 passed, 1 failed (evidence key
+    3335321add02). `--full` with gitleaks: 368 files, 7200 passed, 3 failed (0c4cc48f7ddb).
+    None of the 3 failures is in this change:
+    - the M6 teardown escape, which reproduces on 54ced00 (ERROR_LOG, open, formal CAPA);
+    - the two fixed-800-ms web ML tests (ERROR_LOG, open).
 
 ### CC-CRAWL-0040 — Review fixes to the survey options: Enter never clicks an unjudged button, icons are judged as glyphs, only engine.io control packets are exempt (2026-10-16)
 - Goal / acceptance: the combined independent review of CC-CRAWL-0034..0038 is resolved,

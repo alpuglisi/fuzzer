@@ -840,3 +840,16 @@ Juice Shop lab is complete.
   follow from now on: "evidence-backed" means I have read the decisive data itself (the
   message, the request, the response), not a count that is consistent with it.
 
+### F-064 — I reported a single-run gain as an improvement and checkpointed it
+- **What:** after one Juice Shop run at 49e0768 confirmed 5/15, I told the owner the
+  count "went from 4 to 5" and recorded 5 in the goal ledger. The next run (388d073, no
+  discovery change) confirmed 4/15. The new case, JUICE-0004, depends on a reveal click
+  that reaches a `#/search?q=` link, and reveal discovery varies between runs: 60 against
+  42 clicks, 23 against 18 navigations, 88 against 76 pages.
+- **Evidence:** scratch runs `juice-opts` and `juice-0041` (funnel and crawl_stats); the
+  baseline itself was replicated (4/15 twice) before it was used.
+- **Impact:** a progress claim the evidence did not support.
+- **Status:** corrected to the owner, ledger re-checkpointed at 4, CC-CRAWL-0041 and the
+  survey doc amended. Rule I follow from now on: a measurement is claimed as a change
+  only after it repeats, as the baseline did.
+
