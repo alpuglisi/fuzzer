@@ -516,6 +516,33 @@ some reconciliation process".
     decided yet. One reading is that every refused case is accounted for as "refused
     by rule X", never counted as a miss, and is revisited.
 
+### D72 — The page-visit word rules are removed; the write rules stay (owner, 2026-10-16)
+
+**The owner's decision:** "The rules are ridiculous get rid of all of the rules for the
+crawler. Realistically, there are an ungodly amount of webcrawlere visiting every page
+on the internet every day. A crawler submitting a get request is not going to cause any
+actual damage. There is no reason to avoid these pages". Asked which rules, the owner
+chose **"Page-visit rules"**, and for the importer and fuzzer **"Yes, same change"**.
+
+- **Removed:** every word rule on which pages and links are visited or clicked. That
+  covers destructive words (logout, reset, delete), transaction words (order, pay,
+  wallet), account and credential words, settings words, and destructive glyphs. It
+  applies to a GET or HEAD in the crawler, the auditor, the importer and the fuzzer,
+  and to a reveal click, which the write-blocking window still contains. It supersedes
+  D71's three rules for visits.
+- **Kept:**
+  - the window's block on writes (any method but GET/HEAD, navigations, WebSocket
+    messages) while exploring by clicks or seed loads, and the seed B2 rule;
+  - the form-submission gate (`spa.form_refusal`, `formnav`, G1);
+  - the import and send rules for writes (POST/PUT bodies, POST forms);
+  - DELETE refused;
+  - the login flow's strict rules;
+  - scope, loopback, `--authorized`, redaction (QUALITY_POLICY §9).
+- **Stated consequences:**
+  - bWAPP's `reset.php` (`DROP DATABASE` on GET) and `logout.php` will be visited;
+    reset the lab between crawl and fuzz.
+  - A crawl that visits a logout page continues without its session.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (D72: the page-visit word rules are to be removed)
+- **What:** the owner's decision D72 is recorded in `docs/DECISIONS_AND_ROADMAP.md`. The destructive, transaction, account and settings word rules on what is visited or clicked by GET go, in the crawler, auditor, importer and fuzzer. The write rules, DELETE refusal, the login flow's strict rules and scope stay. The implementation follows an independent design review.
+- **Why:** the owner judged that a GET visit causes no real damage, and the rules cost coverage.
+
 ## 2026-10-16 (stall diagnosis: why confirmed positives stay at 4/15)
 - **What:** `docs/CRAWLER_SURVEY_2026-10-16.md` lists the four measured causes. Three are blocked on owner decisions: the search-page rule, the named-route gate for SPA forms, and bWAPP's pickers. One can be fixed without a decision: reveal discovery varies from run to run.
 - **Why:** the progress guard's stall rule (PA-0141): the metric had not moved for 11 h.
