@@ -35,6 +35,16 @@ Newest first.
 - Rollback / recovery: revert (it restores the early logout).
 - Effectiveness: pending two Juice Shop re-runs (reveals clicked should return towards
   the pre-D72 42).
+- Effectiveness (assessed 2026-10-16, two Juice Shop runs at 1fac294, generic command
+  line):
+  - both runs confirmed 5/15, the same cases (JUICE-0001, 0002, 0004, 0006, 0007);
+  - reveals: 60 clicked (the crawl cap), 18 of them destructive-looking, made last; no
+    reveal or query load stopped by a session loss;
+  - `verify_change.py --base 7cd2fae`: 73 files, 2281 passed, 0 failed (evidence key
+    27be056543f3);
+  - the D72 runs before this fix: 4/15 twice, with 2 reveals;
+  - bWAPP is unchanged at 0/55 (its pages are behind the POST pickers, survey option
+    4b).
 
 ### CC-CRAWL-0043 — D72 review round 2: "destructive last" holds for entries, headers, the confirm budget and a start page's own query; tests that could not fail now can (2026-10-16)
 - Goal / acceptance: the second (final) independent review of CC-CRAWL-0042 found five

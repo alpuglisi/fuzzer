@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-16 (D72: the page-visit word rules are to be removed)
+- **Measured (two repeated Juice Shop runs at 1fac294):** 5/15 confirmed in both (was 4/15; JUICE-0004 is new). bWAPP is unchanged at 0/55.
 - **What (defect fix, CC-CRAWL-0044):** a Logout or other destructive-looking reveal click is made last, not in place. Clicked early on Juice Shop, it ended the session and stopped every later reveal and query load: reveals fell from 42 to 2 (F-065).
 - **What (review round 2, CC-CRAWL-0043):** "destructive last" now also covers a point's sibling entries, header points, the confirm budget's order and a start page's own query. Tests that could not fail now can.
 - **What (built, CC-CRAWL-0042):** no GET or HEAD visit is refused for its words any more, in the crawler, auditor, importer or fuzzer. Destructive-looking pages are visited and fuzzed last. Writes, DELETE, the login flow's strict rules and scope are unchanged. About 90 tests that encoded the old rules were rewritten, and the mechanism tests now use an off-origin target.
