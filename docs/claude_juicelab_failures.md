@@ -788,3 +788,18 @@ Juice Shop lab is complete.
   the table.
 - **Status:** corrected to the owner in the same turn. Whether the labs actually start
   here is unverified until the daemon is started and an image is pulled.
+
+### F-061 — I said GitHub's web pages were "blocked here" without checking who returned the 403
+- **What:** when I dispatched the crawler-survey agents I told the owner, and the agents'
+  prompts, that GitHub's web pages and API "return 403 here", implying a network block.
+  I had not read the response. The owner asked; I then read it:
+  - the 403 bodies come from the session's GitHub access gate ("GitHub access to this
+    repository is not enabled for this session. Use add_repo ...");
+  - git clone works; raw.githubusercontent.com returns 200;
+  - the network itself is not restricted.
+- **Evidence:** the 2026-10-16 `curl` of github.com and api.github.com (403 JSON body),
+  `git ls-remote` (ok), raw.githubusercontent.com (200).
+- **Impact:** small. All six agents cloned their repositories, so the survey was not
+  hindered. But it repeated F-060's pattern: a limitation stated before it was checked.
+- **Status:** corrected to the owner in the same turn. Rule I follow from now on: read
+  the response, and say who refused, before stating that something is blocked.
