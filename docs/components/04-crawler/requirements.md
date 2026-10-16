@@ -317,7 +317,7 @@ fuzzer.
     interaction, FR-CRAWL-15) until after the close: `Escape`, popups opened in the
     window closed, the route reloaded (a GET navigation the window lets through for its
     own context and that URL only; a dialog's timers die with it) and a final quiet
-    period (`_quiesce`: `_settle` — nothing in flight, three quiet 100 ms polls — then
+    period (`_quiesce`: `_settle` — nothing in flight (realtime transports and event streams not counted, CC-CRAWL-0035: they stay open by design and are held or blocked by the window anyway), three quiet 100 ms polls — then
     a driver round trip that flushes pending events). Only `click_vetted`'s final vetted
     submission of a named-route form lifts it, for that click and its settle; the lift
     is cleared when that submission ends, even if its click raised (review B-M1). The

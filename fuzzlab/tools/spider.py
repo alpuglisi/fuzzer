@@ -345,6 +345,22 @@ def _write_key(method, url):
     return ((method or "").upper(), urlparse(url or "").path or "/")
 
 
+#: Request types that stay open by design (an event stream; a WebSocket handshake).
+_BACKGROUND_TYPES = frozenset({"eventsource", "websocket"})
+
+
+def _background_request(request) -> bool:
+    """A request a settle does not wait for (CC-CRAWL-0035): a realtime transport
+    (`spa.is_transport_url`: socket.io / engine.io polling) or a request of a type that
+    stays open by design. Judged on the URL and type alone, so the count goes up and
+    down for the same requests. Unreadable: counted (waited for)."""
+    try:
+        return spa.is_transport_url(request.url) or \
+            (request.resource_type or "") in _BACKGROUND_TYPES
+    except Exception:  # noqa: BLE001 - fail towards waiting
+        return False
+
+
 #: ``names => {name: localStorage value}`` (FR-CRAWL-14's session check).
 _LOCAL_STORAGE_JS = ("names => Object.fromEntries(names.map(n => "
                      "[n, window.localStorage.getItem(n)]))")
@@ -978,15 +994,21 @@ class LocalSpider:
 
     def _track(self, page):
         """Count a page's requests in flight, so a settle waits for the app's own XHRs
-        (a hash-route change or a click leaves the page's load state as it was)."""
+        (a hash-route change or a click leaves the page's load state as it was).
+
+        Realtime transport requests are not counted (`_background_request`,
+        CC-CRAWL-0035): a socket.io long-poll or an event stream stays open by design,
+        so counting it held every settle to its budget."""
         key = id(page)
         self._inflight[key] = 0
 
-        def up(_request):
-            self._inflight[key] = self._inflight.get(key, 0) + 1
+        def up(request):
+            if not _background_request(request):
+                self._inflight[key] = self._inflight.get(key, 0) + 1
 
-        def down(_request):
-            self._inflight[key] = max(0, self._inflight.get(key, 0) - 1)
+        def down(request):
+            if not _background_request(request):
+                self._inflight[key] = max(0, self._inflight.get(key, 0) - 1)
         page.on("request", up)
         page.on("requestfinished", down)
         page.on("requestfailed", down)

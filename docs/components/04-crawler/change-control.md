@@ -3,6 +3,36 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0035 — A settle does not wait for realtime transports (crawler survey option 2) (2026-10-16)
+- Goal / acceptance: `_settle` returns once the page's own requests have finished, not
+  at its 5 s budget, when a socket.io / engine.io long-poll or an event stream is open.
+  Acceptance: the real-Chromium test below fails on the old code (5 s) and passes
+  (about 1.2 s) with the change, and the app's slow request is still waited for.
+- Change: `tools/spider.py`: `_background_request(request)` (a transport URL by
+  `spa.is_transport_url`, or resource type `eventsource` / `websocket`); `_track` counts
+  neither up nor down for such a request. Unreadable requests are counted (fail
+  towards waiting).
+- Impact (other components / consumers / project): every settle (`_settle`,
+  `_quiesce`, the window's final quiet period) is shorter on apps with realtime
+  transports; on Juice Shop each settle was held by socket.io. No contract change.
+- Risk (class; consequence and exposure; mitigation): medium (the window's quiet
+  period, W1). Consequence if wrong: the window lifts while a transport request is in
+  flight. A request in flight has already passed the route, so the window's decision on
+  it is made; what it answers can trigger app code later, but so could a WebSocket
+  message at any time before this change. The window still leaves or reloads the page
+  before its final quiet period.
+- Hypothesis: prediction — crawl time on Juice Shop falls; the confirmed count is not
+  expected to move by this alone; exit — the re-run's crawl time and settle counts.
+- Verification / review: `tests/test_crawl_survey_options.py::test_a_settle_waits_for_the_apps_request_but_not_for_a_long_poll_or_a_stream`
+  (fails on the unchanged code: 5 s), `::test_what_a_settle_does_not_wait_for`. Combined
+  review and `verify_change.py` evidence: CC-CRAWL-0038.
+- Deliverables:
+  - [x] code — done
+  - [x] tests — done
+  - [x] FR-CRAWL-16 (W1's quiet period) edited in place — done
+- Rollback / recovery: revert `_track`'s two conditions.
+- Effectiveness: pending the Juice Shop re-run.
+
 ### CC-CRAWL-0034 — An untainted realtime transport write never demotes a query seed (crawler survey option 1) (2026-10-16)
 - Goal / acceptance: a seed or probe window's untainted socket.io / engine.io write
   (polling POST or WebSocket message) is a baseline write wherever it is seen, so it no
