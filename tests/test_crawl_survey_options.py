@@ -304,3 +304,148 @@ def test_a_captured_requests_headers_are_stored_redacted_and_an_old_db_gains_the
         st.close()
     assert json.loads(raw) == {"kept": {"x-app": "web"}, "withheld": ["authorization"]}
     assert "s3cr3t" not in raw
+
+
+# =====================================================================================
+# Option 6: the listener registry and Enter submission (CC-CRAWL-0038)
+# =====================================================================================
+#: A framework-style SPA: every handler is bound with addEventListener (no role, no
+#: class, no button), as Angular's (click) and (keyup.enter) bindings are.
+_LISTEN_JS = r"""
+const routes = [{path:'finder'}, {path:'note'}, {path:'tiles'}, {path:'pwd'},
+  {path:'people'}, {path:'blank'}, {path:'plain'}];
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
+  'application/json'}, body: JSON.stringify(body)}).catch(() => {});
+const views = {
+  'finder': "<div class='bar'><input id='term' name='term' type='search'></div>",
+  'note': "<div class='box'><input id='text' name='text'><span id='go'>Send note</span></div>",
+  'tiles': "<div class='grid'><div id='t1'>Product details</div></div>",
+  'pwd': "<div><input id='pin' name='pin' type='password'></div>",
+  'people': "<div><input id='who' name='who'><span id='del'>Delete account</span></div>",
+  'blank': "<div><input id='q2' name='q2'><span id='nolabel'></span></div>",
+  'plain': "<div><input id='nokey' name='nokey'></div>",
+};
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '').split('?')[0];
+  const app = document.getElementById('app');
+  app.innerHTML = views[name] || '<p>home</p>';
+  const $ = id => document.getElementById(id);
+  if ($('term')) $('term').addEventListener('keyup', e => {
+    if (e.key === 'Enter') post('/api/find', {term: $('term').value}); });
+  if ($('go')) $('go').addEventListener('click', () => post('/api/note', {text: $('text').value}));
+  if ($('t1')) $('t1').addEventListener('click', () => {
+    fetch('/rest/marker/tile-opened').catch(() => {});
+    const d = document.createElement('div');
+    d.setAttribute('role', 'dialog');
+    d.innerHTML = "<a href='#/plain'>more</a>";
+    document.body.appendChild(d); });
+  if ($('pin')) $('pin').addEventListener('keydown', e => {
+    if (e.key === 'Enter') post('/api/pin', {pin: $('pin').value}); });
+  if ($('del')) $('del').addEventListener('click', () => post('/api/wipe', {who: 1}));
+  if ($('nolabel')) $('nolabel').addEventListener('click', () => post('/api/nolabel', {}));
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+class _ListenSpa(_Lab):
+    index = ("<!doctype html><html><head><title>listen</title>"
+             "<script src='/listen.js' defer></script></head><body>"
+             "<nav><a href='#/finder'>Finder</a></nav><div id='app'></div></body></html>")
+    script = ("/listen.js", _LISTEN_JS)
+
+
+def _listen_crawl(tmp_path, routes):
+    from tests.test_forms_phase4 import _crawl
+    lab = _ListenSpa()
+    try:
+        sp, db, logs = _crawl(lab, tmp_path, submit_spa_forms=routes)
+    finally:
+        lab.close()
+    return lab, sp, db, logs
+
+
+def _posted(lab, path):
+    import json
+    return [json.loads(r[4] or b"{}") for r in lab.requests
+            if r[0] == "POST" and r[1].startswith(path)]
+
+
+def test_listener_found_forms_are_submitted_on_named_routes_and_gated(monkeypatch,
+                                                                      tmp_path):
+    """Real Chromium, `_ListenSpa`, every route named: a search box with only a keyup
+    listener is submitted by Enter; a container whose one submitter is a click-listened
+    span is clicked; both send their filler. A password control is never an Enter form;
+    a "Delete account" listener submitter is refused by the label gate; a label-less
+    one is refused; an input with no listener and no button is no form. A click-listened
+    div with no role or class is a reveal candidate (a card)."""
+    chromium_or_skip(monkeypatch)
+    lab, sp, _db, logs = _listen_crawl(tmp_path, ["finder", "note", "tiles", "pwd", "people",
+                                                  "blank", "plain"])
+    assert [b.get("term") for b in _posted(lab, "/api/find")] == ["fuzzlab"], lab.requests
+    assert [b.get("text") for b in _posted(lab, "/api/note")] == ["fuzzlab"]
+    assert not _posted(lab, "/api/pin")
+    assert not _posted(lab, "/api/wipe") and not _posted(lab, "/api/nolabel")
+    assert sp.spa_counts["forms_submitted_enter"] == 1
+    assert sp.spa_counts["forms_submitted"] >= 2
+    text = "\n".join(logs)
+    assert "#/people not submitted: destructive button ('delete')" in text, text
+    assert "a listener submitter with no label to judge" in text
+    assert sp.spa_counts["reveal_writes_blocked"] == 0   # no submitter used as a reveal
+    assert any(r[1] == "/rest/marker/tile-opened" for r in lab.requests)   # the card
+
+
+def test_an_enter_form_is_never_submitted_on_an_unnamed_route(monkeypatch, tmp_path):
+    """Real Chromium: with a bare ``--submit-spa-forms`` (no route named) the Enter form
+    is found but not submitted (it has no label to vet; only the window may hold it)."""
+    chromium_or_skip(monkeypatch)
+    lab, sp, _db, logs = _listen_crawl(tmp_path, [])
+    assert not _posted(lab, "/api/find")
+    assert sp.spa_counts["forms_submitted_enter"] == 0
+    assert any("submitted by Enter only on a route named" in line for line in logs)
+
+
+def test_the_listener_registry_records_without_changing_the_page(monkeypatch):
+    """Real Chromium: `spa.LISTEN_INIT_JS` records an ``addEventListener`` and an
+    ``on*`` property binding, the listeners still run, ``removeEventListener`` still
+    works, the DOM carries no attribute of ours, and the registry is not enumerable."""
+    from playwright.sync_api import sync_playwright
+
+    from fuzzlab.tools import spa
+    from fuzzlab.tools.navguard import browser_launch_args, chromium_launch_kwargs
+    from tests._browser import skip_or_fail
+    chromium_or_skip(monkeypatch)
+    lab = _ListenSpa()
+    try:
+        with sync_playwright() as pw:
+            try:
+                browser = pw.chromium.launch(
+                    **chromium_launch_kwargs(browser_launch_args([lab.base])))
+            except Exception as exc:  # noqa: BLE001 - a launch failure is a skip
+                skip_or_fail(f"chromium could not launch: {exc}")
+            try:
+                ctx = browser.new_context()
+                ctx.add_init_script(spa.LISTEN_INIT_JS)
+                page = ctx.new_page()
+                page.goto(lab.base + "#/note", wait_until="load")
+                out = page.evaluate("""() => {
+                  const b = document.createElement('b'), c = document.createElement('i');
+                  document.body.append(b, c);
+                  let hits = 0; const f = () => hits++;
+                  b.addEventListener('click', f); b.click();
+                  b.removeEventListener('click', f); b.click();
+                  c.onclick = () => hits += 10; c.click();
+                  const L = window.__fuzzlabListen;
+                  return {hits, b: L.has(b, 'click'), c: L.has(c, 'click'),
+                          go: L.has(document.getElementById('go'), 'click'),
+                          n: L.elements('click').length,
+                          enumerable: Object.keys(window).includes('__fuzzlabListen'),
+                          attrs: document.querySelectorAll('[data-fuzzlab-listen]').length};
+                }""")
+            finally:
+                browser.close()
+    finally:
+        lab.close()
+    assert out["hits"] == 11 and out["b"] and out["c"] and out["go"]
+    assert out["n"] >= 3 and not out["enumerable"] and out["attrs"] == 0

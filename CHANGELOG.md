@@ -9,6 +9,7 @@ changed, and the reason. Reference the commit hash where useful.
 - **What:** option 2 (CC-CRAWL-0035): a settle no longer waits for socket.io / engine.io long-polls or event streams, which stay open by design and held every settle to its 5 s budget.
 - **What:** option 3 (CC-CRAWL-0036): a write the reveal or query window refuses is now recorded as a discovered request (`source = 'blocked'`), redacted and never sent by the crawl; the importer's usual rules decide whether it becomes a fuzz point.
 - **What:** option 5 (CC-CRAWL-0037, CC-CORE-0063): a captured request's dedup signature covers its body's nested leaf paths, and allowlisted non-secret request headers are stored (`redact_captured_headers`; a cookie or credential header by name only).
+- **What:** option 6 (CC-CRAWL-0038): a read-only listener registry (an init script) lets the crawler find button-less forms (a click-listened submitter, or Enter in a key-listened text box) and listener-only reveal targets; Enter forms are submitted only on routes named with `--submit-spa-forms`.
 - **Why:** the owner chose options 1, 2, 3, 5 and 6 of `docs/CRAWLER_SURVEY_2026-10-16.md`. On Juice Shop, six query seeds were lost to dropped socket.io WebSocket messages.
 
 ## 2026-10-16 (crawler survey: options for the three measured discovery losses)

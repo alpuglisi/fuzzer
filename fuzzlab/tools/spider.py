@@ -563,7 +563,7 @@ class LocalSpider:
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "requests_blocked_recorded", "deletes_blocked",
-            "forms_submitted",
+            "forms_submitted", "forms_submitted_enter",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -696,6 +696,7 @@ class LocalSpider:
         from fuzzlab.tools import browserauth
         context = self._browser.new_context(service_workers="block",
                                             **browserauth.context_options(session))
+        context.add_init_script(spa.LISTEN_INIT_JS)            # CC-CRAWL-0038
         # guard the context, not the page, so popups are confined too (BUG-0123)
         self._guard(context, scripts=True, session=session is not None)
         self._context = context
@@ -1898,6 +1899,16 @@ class LocalSpider:
                                             g1=True)
 
     def _fill_and_click_now(self, page, context, form, page_url, explicit, *, g1):
+        # CC-CRAWL-0038: a button-less container is submitted by Enter in its text
+        # control, only inside the window (a named route, G1): with no button there is
+        # no label to vet, so the route and control gates are all it has
+        enter = form.get("submit_by") == "enter" and not form.get("button_id")
+        if enter and not g1:
+            self.spa_counts["forms_not_submittable"] += 1
+            logging.info(f"SPA form on {page_url} not submittable (a button-less form is "
+                         f"submitted by Enter only on a route named with "
+                         f"--submit-spa-forms)")
+            return False
         for (name, kind), cid in zip(form["controls"], form["ids"]):
             if not spa.fillable(kind) or (kind != "password"
                                           and spa.sensitive_control(name)):
@@ -1907,7 +1918,7 @@ class LocalSpider:
                           timeout=self.timeout_ms)
             except PlaywrightError:
                 pass                                    # e.g. a range or read-only input
-        button = form.get("button_id")
+        button = form.get("enter_id") if enter else form.get("button_id")
         selector = f'[data-fuzzlab-id="{button}"]'
         if g1:
             try:
@@ -1922,7 +1933,7 @@ class LocalSpider:
             if not button or not page.is_enabled(selector, timeout=self.timeout_ms):
                 self.spa_counts["forms_not_submittable"] += 1
                 why = "no enabled button"
-                if g1 and button:
+                if g1 and button and not enter:
                     still = self._g1_invalid_names(page, form)
                     why = (f"invalid after {self._g1_attempts} attempts: "
                            f"{', '.join(still) or '(no control reports invalid)'}")
@@ -1935,16 +1946,22 @@ class LocalSpider:
         self._capture_source, self._capture_page = "submit", page_url
         self._delete_ok_for = context if explicit else None
         try:
-            how = self._click_vetted(page, selector, [
-                form.get("button") or "", form.get("button_aria") or "",
-                form.get("button_icons") or ""],
-                before_click=self._lift_for(context) if g1 else None)
+            if enter:
+                how = self._press_enter(page, selector, form, self._lift_for(context))
+            else:
+                how = self._click_vetted(page, selector, [
+                    form.get("button") or "", form.get("button_aria") or "",
+                    form.get("button_icons") or ""],
+                    before_click=self._lift_for(context) if g1 else None)
             if how is None:
                 logging.info(f"SPA form on {page_url} not clicked: its button's labels "
                              f"changed after the gate vetted them")
                 return False
             self.spa_counts["forms_submitted"] += 1
+            if enter:
+                self.spa_counts["forms_submitted_enter"] += 1
             logging.info(f"submitted the SPA form {form.get('button')!r} on {page_url}"
+                         + (" (Enter in its text control)" if enter else "")
                          + (" (click dispatched: the button was covered)"
                             if how == "dispatched" else ""))
             self._settle(page)
@@ -2101,6 +2118,21 @@ class LocalSpider:
         return spa.click_vetted(page, selector, vetted, timeout_ms=self.timeout_ms,
                                 counts=self.spa_counts, before_click=before_click)
 
+    def _press_enter(self, page, selector, form, before_press):
+        """CC-CRAWL-0038: press Enter in a button-less form's text control. The control
+        must still carry the name the gate judged (`spa.form_refusal`) and be enabled;
+        then ``before_press`` lifts the window for this one press (W1). Returns
+        ``"pressed"``, or None when the control changed."""
+        name = next((n for (n, _k), cid in zip(form["controls"], form["ids"])
+                     if f'[data-fuzzlab-id="{cid}"]' == selector), None)
+        now = page.eval_on_selector(selector, spa.CONTROL_NAME_JS)
+        if name is None or now != name or not page.is_enabled(selector,
+                                                               timeout=self.timeout_ms):
+            return None
+        before_press()
+        page.press(selector, "Enter", timeout=self.timeout_ms)
+        return "pressed"
+
     def _refind_form(self, page, sig):
         """The rendered form with signature ``sig`` (marked afresh), or None."""
         try:
@@ -2115,6 +2147,7 @@ class LocalSpider:
         signature there. The context is closed afterwards."""
         from fuzzlab.tools.navguard import release
         context = self._browser.new_context(service_workers="block")
+        context.add_init_script(spa.LISTEN_INIT_JS)            # CC-CRAWL-0038: same forms
         self._guard(context, scripts=False)
         try:
             page = context.new_page()

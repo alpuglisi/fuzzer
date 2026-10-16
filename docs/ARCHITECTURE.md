@@ -1302,6 +1302,10 @@ tracked in the requirements files, not here.
       dedup signature covers the body's nested leaf paths; since CC-CRAWL-0036 it also
       holds, as `source = 'blocked'`, the writes the reveal or query window refused,
       recorded and never sent (the importer's rules decide, FR-AUD-22);
+    - every crawl context runs `spa.LISTEN_INIT_JS` (CC-CRAWL-0038), a read-only
+      registry of the elements that got click / submit / key listeners; `FORMS_JS` and
+      `REVEAL_JS` use it to find button-less forms (a listener submitter, or Enter in a
+      key-listened text control, named routes only) and listener-only cards;
     - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms
       once (`spa.form_refusal`, 50 per crawl); a password form only in a fresh
       unauthenticated context of the same guarded browser; in an authenticated crawl

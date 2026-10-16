@@ -163,6 +163,21 @@ fuzzer.
     submission per form signature (controls and button
     label); at most `spa.MAX_SUBMISSIONS` (50) per crawl, the rest counted and reported.
     The submission's requests pass the same scope, destructive and DELETE guard.
+  - **The listener registry and Enter submission (CC-CRAWL-0038, survey option 6).**
+    Every crawl context runs `spa.LISTEN_INIT_JS` before the page's scripts: it records,
+    in a WeakMap (no DOM change, the listeners unchanged), which elements get a `click`,
+    `submit` or key listener through `addEventListener` (a framework's own bindings) or
+    an `on*` property (at most `spa.MAX_LISTENED`). `FORMS_JS` then also finds (only
+    where no button is): a container whose one submitter is a click-listened element
+    (`submitter = "listener"`, clicked through `click_vetted` like a button; refused
+    without a text or aria-label to judge), and a text control (`spa.ENTER_KINDS`) with
+    a key listener and no button nearby, or a `<form>` with a text control and no button
+    (`submit_by = "enter"`, `enter_id`). A container with a password control is never an
+    Enter container found by its listener. An Enter form passes the same gate; it is
+    submitted only on a named route, inside the reveal window (G1), by pressing Enter in
+    `enter_id` after its name is read again and found unchanged (`_press_enter`; the
+    window is lifted for that one press, W1), counted `forms_submitted_enter`; with no
+    route named it is not submittable (it has no label to vet).
   - **Refused** (`spa.form_refusal`, the one gate): a route not named when routes are
     named (whole-route comparison); a destructive, settings-like (`formnav.settings_word`)
     or transaction (`core.urls.transaction_reason`) route, button label or action -- a
@@ -364,15 +379,19 @@ fuzzer.
     `aria-controls`, sidenav toggles by whole label token or a `menu` glyph), clicked
     through `click_vetted`; cards / list items (`mat-card`, `[role=listitem]`,
     `[role=button]`, `mat-grid-tile`, `mat-list-item`) only when the element itself is
-    interactive (role=button, a tabindex, an `onclick`, or a pointer cursor — the page
-    side cannot see an `addEventListener` handler), has no interactive descendant, and
+    interactive (role=button, a tabindex, an `onclick`, a pointer cursor, or *(CC-CRAWL-0038)*
+    a click listener the listener registry recorded), has no interactive descendant, and
     its whole text (at most `spa.MAX_CARD_TEXT` characters, longer is refused) passes
     the gate, dispatched by the element's own `el.click()` after its labels are read
     again, never a coordinate click. Never a link, a select-like control, a disabled
     element, or an element inside a form (unless a `type=button` button). Each once per
     (route, kind, label signature); cards at most `spa.MAX_CARDS_PER_SIGNATURE` (3) per
     (route, structural signature); at most `spa.MAX_REVEALS_PER_PAGE` (6) per page and
-    `spa.MAX_REVEALS` (60) per crawl (`reveals_over_cap`).
+    `spa.MAX_REVEALS` (60) per crawl (`reveals_over_cap`). *(CC-CRAWL-0038:)* any other
+    element the registry saw get a click listener (a framework binding with no role or
+    class) is a card under the same rules, unless it is a button, link, label, option or
+    summary, or sits within three levels of a typed control (a form-like container's
+    submitter, which FR-CRAWL-13 submits, never a reveal).
   - **The label gate (G2d, `spa.reveal_refusal` / `spa.label_refusal`):** destructive
     (`core.urls.text_destructive_reason`, inflections folded), settings-like,
     transaction or account words in the text or aria-label; any
@@ -714,7 +733,7 @@ fuzzer.
   (FR-CRAWL-17).
   - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`, `tests/test_spa_query.py::test_what_a_query_window_counts_as_a_write`, `tests/test_spa_query.py::test_a_held_websocket_message_is_a_write`, `tests/test_spa_query.py::test_a_seed_is_never_importable_until_its_window_closed_cleanly`, `tests/test_spa_query.py::test_a_session_check_that_raises_is_a_loss`, `tests/test_spa_query.py::test_a_slow_response_that_expires_the_session_cookie_is_a_loss`, `tests/test_spa_query.py::test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again`, `tests/test_spa_query.py::test_the_session_is_rechecked_when_leaving_the_page_fails`, `tests/test_spa_query.py::test_a_withheld_url_while_a_probe_is_open_is_that_probes_blocked_evidence`, `tests/test_spa_query.py::test_a_probe_route_on_another_origin_is_never_minted_nor_loaded`, `tests/test_spa_query.py::test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothing`, `tests/test_spa_query.py::test_a_seeds_leave_reads_the_page_only_when_its_load_committed`, `tests/test_spa_query.py::test_a_failed_seed_load_checks_the_cookies_and_the_server_not_local_storage`, `tests/test_spa_query.py::test_a_query_loads_request_in_flight_is_tracked_until_it_ends`, `tests/test_spa_query.py::test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on`, `tests/test_spa_query.py::test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing`, `tests/test_spa_query.py::test_a_shell_that_writes_on_every_load_still_gives_hash_points`, `tests/test_spa_query.py::test_the_baseline_is_what_a_load_outside_a_window_would_have_written`, `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`, `tests/test_spa_query.py::test_the_guards_url_log_lines_never_carry_a_probe_marker`, `tests/test_spa_query.py::test_a_seeds_forms_are_stored_only_when_it_is_promoted`, `tests/test_spa_query.py::test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_counts`, `tests/test_spa_query.py::test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint`, `tests/test_spa_query.py::test_an_untainted_transport_write_is_baseline_even_when_the_load_saw_none`, `tests/test_spa_query.py::test_only_a_bare_routes_load_is_its_baseline`, `tests/test_spa_query.py::test_a_query_load_whose_bare_route_did_not_load_is_refused`, `tests/test_spa_query.py::test_a_load_that_committed_but_did_not_complete_is_committed`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
-  - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
+  - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`, `tests/test_crawl_survey_options.py::test_listener_found_forms_are_submitted_on_named_routes_and_gated`, `tests/test_crawl_survey_options.py::test_an_enter_form_is_never_submitted_on_an_unnamed_route`, `tests/test_crawl_survey_options.py::test_the_listener_registry_records_without_changing_the_page`
   - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_a_captcha_form_is_not_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_submitted`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`
   - Enforced by (labels judged as texts, BUG-0131): `core.urls.text_destructive_reason` — `tests/test_forms_phase4.py::test_a_hash_in_a_label_name_value_or_option_hides_nothing`, `tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`, `tests/test_forms_phase4.py::test_the_text_guard_catches_synthetic_offenders`
   - Enforced by (destructive redirect hops in the browser): `tests/test_browser_scope.py::test_a_redirect_hop_to_a_destructive_url_is_never_requested`, `tests/test_browser_scope.py::test_an_endless_redirect_chain_is_aborted`

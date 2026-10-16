@@ -35,6 +35,7 @@ Pure helpers, testable without a browser; `tools/spider.py` wires them:
 
 from __future__ import annotations
 
+import json
 import secrets
 import string
 from dataclasses import dataclass, field
@@ -324,7 +325,8 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
     destructive, settings-like or transaction route, button label, action or control
     name; a form with ``<input type=file>``; a credential-change form
     (`store_adapter.credential_change_reason`); a form whose only input is a one-time
-    code (2FA/TOTP).
+    code (2FA/TOTP); *(CC-CRAWL-0038)* a submitter found only by its click listener
+    (``submitter == "listener"``) with no text and no aria-label.
 
     The destructive, transaction and credential-change parts follow `core.sendpolicy`
     (D71: each can be turned off for a lab run); ``strict`` keeps all three, for the
@@ -339,6 +341,9 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
         return f"route {route!r} not named by the operator"
     label = form.get("button") or ""
     aria = form.get("button_aria") or ""
+    if form.get("submitter") == "listener" and not (label.strip() or aria.strip()):
+        # CC-CRAWL-0038: an element found only by its click listener needs a label
+        return "a listener submitter with no label to judge"
     glyph = destructive(submitter_glyph(form.get("button_icons") or "", label, aria))
     if glyph:
         return f"destructive button icon ({glyph!r})"
@@ -501,8 +506,69 @@ def submitter_glyph(icons: str, text: str, aria: str) -> str | None:
             return glyph
     return None
 
+#: The listener registry (CC-CRAWL-0038, crawler survey option 6): an init script every
+#: crawl context runs before the page's own scripts. It records which elements get a
+#: ``click``, ``submit`` or key listener -- through ``addEventListener`` (a framework's
+#: own bindings, Angular's ``(click)`` / ``(keyup.enter)`` included) or an ``on*``
+#: property -- in a WeakMap, so it never changes the DOM, never holds an element alive
+#: and never changes what the listener does. ``window.__fuzzlabListen`` (not enumerable)
+#: answers ``has(el, type)`` and ``elements(type)`` (connected elements only, at most
+#: `MAX_LISTENED` recorded). It only reads: no event is dispatched.
+MAX_LISTENED = 5000
+LISTEN_INIT_JS = r"""
+(() => {
+  if (window.__fuzzlabListen) return;
+  const TYPES = new Set(['click', 'submit', 'keydown', 'keyup', 'keypress']);
+  const seen = new WeakMap(), refs = [];
+  const note = (el, type) => {
+    try {
+      if (!(el instanceof Element) || !TYPES.has(type)) return;
+      let kinds = seen.get(el);
+      if (!kinds) {
+        if (refs.length >= __MAX__) return;
+        kinds = new Set();
+        seen.set(el, kinds);
+        refs.push(new WeakRef(el));
+      }
+      kinds.add(type);
+    } catch (e) { /* the registry never breaks the page */ }
+  };
+  const add = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function addEventListener(type) {
+    note(this, String(type));
+    return add.apply(this, arguments);
+  };
+  for (const type of TYPES) {
+    const d = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'on' + type);
+    if (!d || !d.set || !d.configurable) continue;
+    Object.defineProperty(HTMLElement.prototype, 'on' + type, {
+      configurable: true, enumerable: d.enumerable, get: d.get,
+      set(value) { if (value) note(this, type); return d.set.call(this, value); }});
+  }
+  Object.defineProperty(window, '__fuzzlabListen', {value: Object.freeze({
+    has: (el, type) => { const k = seen.get(el); return !!k && k.has(type); },
+    elements: type => refs.map(r => r.deref())
+      .filter(el => el && el.isConnected && seen.get(el).has(type)),
+  })});
+})();
+""".replace("__MAX__", str(MAX_LISTENED))
+
+#: ``el => name`` of a control, as `FORMS_JS` names it (re-read before Enter is pressed).
+CONTROL_NAME_JS = ("el => el.getAttribute('name') || el.id || "
+                   "el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || "
+                   "el.getAttribute('placeholder') || ''")
+
+#: Text controls a button-less container is submitted from by Enter (CC-CRAWL-0038).
+ENTER_KINDS = ("text", "search", "email", "url", "tel", "number")
+
 #: Finds the rendered page's forms and form-like containers (inputs with exactly one
 #: button), marks each control and button with ``data-fuzzlab-id`` and describes them.
+#: *(CC-CRAWL-0038:)* with the listener registry (`LISTEN_INIT_JS`) it also finds a
+#: button-less container whose one submitter is an element with a click listener, and
+#: a text control with a key listener and no button anywhere near it (``submit_by``
+#: ``"enter"``, the control to press Enter in is ``enter_id``); a ``<form>`` with a text
+#: control and no button is an Enter form too. A container with a password control is
+#: never an Enter container found by its listener.
 FORMS_JS = r"""
 (maxForms) => {""" + _LABELS_FN + r"""
   const BTN = 'button, input[type=submit], input[type=button], input[type=image]';
@@ -529,12 +595,55 @@ FORMS_JS = r"""
       }
     }
   }
+  // CC-CRAWL-0038: the listener registry (LISTEN_INIT_JS), when the context has it
+  const L = window.__fuzzlabListen;
+  const ENTER = __ENTER__;
+  const CTL = 'input, textarea, select';
+  const inContainer = el => containers.some(c => c === el || c.contains(el));
+  const submitters = new Map(), enters = new Map();
+  if (L) {
+    const clickers = L.elements('click').filter(el => !el.matches(CTL) &&
+      !el.querySelector(CTL) && !el.matches(BTN));
+    for (const s of clickers) {
+      if (!shown(s) || s.closest('a[href]') || s.closest('form') || inContainer(s)) continue;
+      let node = s.parentElement;
+      for (let i = 0; node && i < 8; i++, node = node.parentElement) {
+        const ctl = [...node.querySelectorAll(CTL)].filter(typed);
+        if (!ctl.length) continue;
+        const btns = [...node.querySelectorAll(BTN)].filter(buttonOk);
+        const rivals = clickers.filter(o => o !== s && node.contains(o) && shown(o));
+        if (!btns.length && !rivals.length && !ctl.some(inContainer) &&
+            !containers.includes(node)) {
+          containers.push(node);
+          submitters.set(node, s);
+        }
+        break;
+      }
+    }
+    for (const el of document.querySelectorAll('input')) {
+      if (!ENTER.includes(kindOf(el)) || !shown(el) || inContainer(el)) continue;
+      if (!['keydown', 'keyup', 'keypress'].some(t => L.has(el, t))) continue;
+      const node = el.parentElement || el;
+      const ctl = [...node.querySelectorAll(CTL)].filter(typed);
+      if (ctl.some(c => kindOf(c) === 'password' || inContainer(c))) continue;
+      if ([...node.querySelectorAll(BTN)].filter(buttonOk).length) continue;
+      containers.push(node);
+      enters.set(node, el);
+    }
+  }
   window.__fuzzlabN = (window.__fuzzlabN || 0) + 1;
   const run = window.__fuzzlabN;
   const out = [];
   containers.slice(0, maxForms).forEach((c, fi) => {
     const btns = [...c.querySelectorAll(BTN)].filter(buttonOk);
-    const submit = btns.find(b => (b.getAttribute('type') || 'submit').toLowerCase() === 'submit') || btns[0];
+    const submit = submitters.get(c) ||
+      btns.find(b => (b.getAttribute('type') || 'submit').toLowerCase() === 'submit') || btns[0];
+    let enterEl = enters.get(c) || null;
+    if (!submit && !enterEl && c.tagName.toLowerCase() === 'form') {
+      const texts = [...c.querySelectorAll('input')].filter(e => ENTER.includes(kindOf(e)) &&
+        shown(e));
+      enterEl = texts[texts.length - 1] || null;            // implicit submission
+    }
     const controls = [], ids = [], autocomplete = [], tags = [];
     // custom selects (mat-select, a role=combobox that is not an input) are selects
     // too (FR-CRAWL-15): kind "select", their tag kept in `tags`
@@ -571,11 +680,14 @@ FORMS_JS = r"""
       ? c.action : null;
     out.push({controls, ids, autocomplete, tags, button: label, button_aria: aria,
               button_icons: glyphs, button_id: button, action,
-              hints: hints.slice(0, 400), challenge});
+              hints: hints.slice(0, 400), challenge,
+              submit_by: submit ? 'click' : (enterEl ? 'enter' : null),
+              submitter: submitters.has(c) ? 'listener' : (submit ? 'button' : null),
+              enter_id: enterEl ? enterEl.getAttribute('data-fuzzlab-id') : null});
   });
   return out;
 }
-"""
+""".replace("__ENTER__", json.dumps(list(ENTER_KINDS)))
 
 
 # =====================================================================================
@@ -1096,9 +1208,10 @@ REVEAL_JS = r"""
   const inForm = el => !!el.closest('form') && !(el.tagName.toLowerCase() === 'button'
     && (el.getAttribute('type') || '').toLowerCase() === 'button');
   const disabled = el => !!el.disabled || el.getAttribute('aria-disabled') === 'true';
+  const L = window.__fuzzlabListen;                 // CC-CRAWL-0038, when present
   const selfInteractive = el => el.matches('button, [role=button], ' +
     '[tabindex]:not([tabindex="-1"]), [onclick]') || typeof el.onclick === 'function' ||
-    getComputedStyle(el).cursor === 'pointer';
+    getComputedStyle(el).cursor === 'pointer' || (!!L && L.has(el, 'click'));
   const words = t => (t || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const cardLabels = el => {
     const clone = el.cloneNode(true);
@@ -1135,6 +1248,20 @@ REVEAL_JS = r"""
   }
   for (const el of document.querySelectorAll(CARDS)) {
     if (seen.has(el) || !usable(el) || !selfInteractive(el)) continue;
+    if (el.querySelector(INTERACTIVE)) continue;       // B6: not one target
+    const c = cardLabels(el);
+    add(el, 'card', c.labels, sigOf(el), c.long);
+  }
+  // CC-CRAWL-0038: an element the app gave a click listener (a framework binding, no
+  // role or class to find it by) is a card too, under the same rules
+  // (not a form-like container's submitter: within three levels of a typed control)
+  const nearControl = el => { let n = el.parentElement;
+    for (let i = 0; n && i < 3; i++, n = n.parentElement)
+      if (n.querySelector('input, textarea, select')) return true;
+    return false; };
+  if (L) for (const el of L.elements('click')) {
+    if (seen.has(el) || !usable(el) || el.matches('button, a, label, option, ' +
+        'summary, ' + CARDS) || nearControl(el)) continue;
     if (el.querySelector(INTERACTIVE)) continue;       // B6: not one target
     const c = cardLabels(el);
     add(el, 'card', c.labels, sigOf(el), c.long);

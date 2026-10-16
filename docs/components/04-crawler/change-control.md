@@ -3,6 +3,57 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0038 — A listener registry finds button-less forms and listener-only reveal targets; Enter submits on named routes (crawler survey option 6) (2026-10-16)
+- Goal / acceptance: on an app whose handlers are bound with `addEventListener` (no
+  role, class or button to find them by), the crawler finds a container whose submitter
+  is a click-listened element, and a key-listened text box with no button, and submits
+  each on a named route; a click-listened element with no role is a reveal candidate.
+  Every existing gate still applies. Acceptance: the real-Chromium tests below, and the
+  forms-phase-3/4 suites unchanged.
+- Change:
+  - `tools/spa.py`: `LISTEN_INIT_JS` (the registry: a WeakMap filled by a wrapped
+    `EventTarget.prototype.addEventListener` and wrapped `on*` setters; read-only,
+    `window.__fuzzlabListen`, not enumerable; `MAX_LISTENED` = 5000); `ENTER_KINDS`;
+    `CONTROL_NAME_JS`; `FORMS_JS` finds listener-submitter and Enter containers only
+    where no button is, and reports `submit_by`, `submitter`, `enter_id`; `REVEAL_JS`
+    counts a registered click listener as self-interactive and adds listener-only
+    elements as cards (not near a typed control); `form_refusal` refuses a listener
+    submitter with no label.
+  - `tools/spider.py`: the crawl context and the anonymous submission context run the
+    init script; `_fill_and_click_now` submits an Enter form only inside the window
+    (G1) through `_press_enter` (the control's name re-read, then the one-press lift);
+    count `forms_submitted_enter`.
+- Impact (other components / consumers / project): the login flow's own context
+  (`session/browserlogin.py`) does not run the registry, so login-form choice is
+  unchanged. More forms are submittable on named routes; a bare `--submit-spa-forms`
+  never submits an Enter form. Not changed: the named-route gate for a generic command
+  line (an owner decision, survey option 4b/6).
+- Risk (class; consequence and exposure; mitigation): high (destructive sends: a new
+  kind of submission). Consequence if wrong: an Enter press or a listener click does
+  something the gate could not see (no button label). Exposure: named routes only for
+  Enter; listener submitters wherever SPA forms are submitted. Mitigation: route,
+  action and control-name gates; a listener submitter needs a label that passes the
+  label gate; Enter only inside the window, lifted for the one press; the DELETE rule;
+  the session re-check after each submission; the registry only reads, and it never
+  dispatches an event. Residual: an app whose page-wide key handler acts on Enter in
+  any field (the press is still only on a named route).
+- Hypothesis: prediction — on Juice Shop the named-route gate still decides (no
+  generic-run change expected); on framework apps without `role` markup more forms are
+  found when routes are named; exit — the tests below and a named-route Juice Shop run.
+- Verification / review: `tests/test_crawl_survey_options.py::test_listener_found_forms_are_submitted_on_named_routes_and_gated`,
+  `::test_an_enter_form_is_never_submitted_on_an_unnamed_route`,
+  `::test_the_listener_registry_records_without_changing_the_page` (real Chromium).
+  `verify_change.py` for options 1, 2, 3, 5 and 6 (CC-CRAWL-0034..0038): recorded
+  below once run. Review: one combined independent review of the five options.
+- Deliverables:
+  - [x] code (`spa.py`, `spider.py`) — done
+  - [x] tests — done
+  - [x] FR-CRAWL-13, FR-CRAWL-16 (G2a), ARCHITECTURE edited in place — done
+  - [ ] combined review — pending
+- Rollback / recovery: drop the two `add_init_script` calls (FORMS_JS and REVEAL_JS
+  then behave exactly as before: they check for the registry).
+- Effectiveness: pending the review and the lab re-run.
+
 ### CC-CRAWL-0037 — A captured request's signature sees its nested body; non-secret headers are kept (crawler survey option 5) (2026-10-16)
 - Goal / acceptance: two captured bodies to one endpoint with the same top-level keys
   but different nested shapes are two rows (before, the second was a "duplicate"); a
