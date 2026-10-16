@@ -20,6 +20,18 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — tests/test_web_ml_context.py: a run switch is judged after a fixed 800 ms (open)
+- **Symptom:** in `verify_change.py --full` on 7dc3b57, `test_switching_runs_never_leaves_a_stale_panel` failed for run 2 (unscored): `(True, False) == (False, True)`, i.e. the previous run's chart was still shown. It passed 3/3 alone, 3/3 with every CPU busy, and the whole file passed twice (15/15).
+- **Root cause (from the code; the latency is inferred, not measured):** `static/js/ml.js` keeps the old panel until the new `/api/ml/data` response arrives. `load()` then `render()` resets each panel, and a superseded response is aborted or dropped (`loadSeq`), so the page has no stale-overwrite race. The test asserts the panel 800 ms after `select_option`, so a response slower than that under the full suite's load fails it. The failure showed exactly the previous run's state.
+- **Remediation (proposed, not done: outside the survey change's scope):** wait for the `/api/ml/data` response (`page.expect_response`), or for the panel's state, instead of a fixed timeout.
+- **Status:** Open. Unrelated to the crawler change, which touches no web module.
+
+## 2026-10-16 — Cloud container: the lab generator's secret-scanner gate failed (gitleaks missing) (environment)
+- **Symptom:** in `verify_change.py --full` on 7dc3b57, 14 lab-generator tests failed with `secret scanner: 'gitleaks' executable not found on PATH` (`tests/test_labgen_cli.py`, the `*_cli_check_passes_end_to_end*` tests).
+- **Root cause:** the fresh cloud container has no `gitleaks`, and apt has no package for it. The gate fails closed, as designed.
+- **Remediation:** installed the v8.18.4 release binary after checking it against the published SHA-256 (`ba6dbb65…628e7d`). The 13 files then passed (264 tests). `docs/ON_HOST_RUNBOOK.md` Part A3 step 0 now has the commands.
+- **Status:** Environment (fixed outside the repo; per container).
+
 ## 2026-10-16 — tools/spider.py: a seed load's blocked write was recorded and then fuzzed (fixed, CC-CRAWL-0039)
 - **Symptom (reproduction):** `verify_change.py --base 54ced00` on fa22af5: `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it` failed. The fixture server received `POST /api/autopost` (`v=<filler>`) twice during the later `fuzzlab auto` run.
 - **Root cause:** CC-CRAWL-0036 (survey option 3) recorded every write the window refused, the query (seed) window's included. A seed's auto-submitted form became a `blocked` request, the importer made it a body point, and the fuzzer sent it outside any window. This broke FR-CRAWL-17's rule that a seed load's write is never replayed. I knew that rule while designing option 3 and recorded seed-window writes anyway (F-062).

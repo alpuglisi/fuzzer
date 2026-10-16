@@ -66,6 +66,15 @@ Newest first.
   - [x] mutation checks — done
 - Rollback / recovery: revert b019a32 (it restores the reviewed weaknesses).
 - Effectiveness: the review's scenarios pass; the lab re-run is pending.
+- Verification (2026-10-16, 7dc3b57):
+  - `verify_change.py --base 54ced00` (options 1-6 and the fixes): 77 files, 2601 passed,
+    0 failed, 4 skipped, 13 xfailed; evidence key b3814680d7b3.
+  - `--full`: 368 files, 7173 passed, 15 failed, 50 skipped, 28 xfailed (evidence key
+    9d5b93622187). None of the 15 imports a changed module:
+    - 14 lab-generator gate failures: `gitleaks` was missing in the container. After
+      installing it (ERROR_LOG, environment), their 13 files passed (264).
+    - 1 web UI test that waits a fixed 800 ms (ERROR_LOG, open).
+  - A clean `--full` re-run with gitleaks is recorded below when it completes.
 
 ### CC-CRAWL-0039 — A seed or probe load's blocked write is never recorded (defect in CC-CRAWL-0036) (2026-10-16)
 - Goal / acceptance: FR-CRAWL-17's "a query load's write is never replayed" holds again:

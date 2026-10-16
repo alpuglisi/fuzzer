@@ -150,6 +150,15 @@ socket under SELinux, netavark bridge isolation.
    - Run with the venv's Python on `PATH` and `FUZZLAB_PYTHON` set.
    - Result on 2026-10-16: both labs up, loopback only, logins verified; the four live
      tests in step 5 passed (about 33 min).
+   - The full test suite needs `gitleaks` (the lab generator's secret-scanner gate fails
+     closed without it). apt has no package there; install the release binary after
+     checking its published checksum (done 2026-10-16, v8.18.4):
+     ```bash
+     v=8.18.4; base=https://github.com/gitleaks/gitleaks/releases/download/v$v
+     curl -sSLO $base/gitleaks_${v}_linux_x64.tar.gz -sSLO $base/gitleaks_${v}_checksums.txt
+     grep linux_x64.tar.gz gitleaks_${v}_checksums.txt | sha256sum -c -
+     tar -xzf gitleaks_${v}_linux_x64.tar.gz gitleaks && install -m 0755 gitleaks /usr/local/bin/
+     ```
 1. **Identities** (keyring only; bWAPP's is its published default `bee`/`bug`, Juice Shop's
    is created on first bootstrap if you skip this):
    ```bash
