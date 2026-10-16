@@ -770,3 +770,21 @@ Juice Shop lab is complete.
   Re-mapping the corpus labels assigned under the quota is open, for the owner to
   schedule.
 
+
+### F-060 — I told the owner this container "can't run" Juice Shop and bWAPP without checking
+- **What:** reporting the D71 verification skips, I wrote that the 4 live external-lab
+  tests "need the live Juice Shop/bWAPP labs, which this container can't run". I had
+  not checked. When the owner asked why, I checked:
+  - the docker client and daemon are installed but the daemon is not started;
+  - docker compose, node 22, PHP 8.3 and composer are present; no MySQL/MariaDB;
+  - Docker Hub, npm and apt are reachable through the proxy; GitHub downloads return
+    403.
+
+  The tests were skipped because their opt-in (`FUZZLAB_LIVE_EXTERNAL_LABS=1`) was not
+  set and no lab was up, not because the container cannot run the labs.
+- **Evidence:** the 2026-10-16 checks in the session (`docker info`, `command -v`, the
+  proxy status).
+- **Impact:** a false limitation stated as fact; it could have taken live testing off
+  the table.
+- **Status:** corrected to the owner in the same turn. Whether the labs actually start
+  here is unverified until the daemon is started and an image is pulled.
