@@ -132,8 +132,10 @@ fuzzer.
     boolean to `null`, a container empty), identifier-like keys replaced by a
     placeholder, password values blanked, the same whether the body was JSON or
     form-encoded, bodies
-    over 64 KiB or nested deeper than 8 not recorded, fail closed. Request headers and
-    cookies are never recorded; socket.io / engine.io requests are excluded.
+    over 64 KiB or nested deeper than 8 not recorded, fail closed. A cookie's or a
+    credential header's value is never recorded: only allowlisted non-secret headers are
+    (`redact_captured_headers`, CC-CRAWL-0037, contract in §5); socket.io / engine.io
+    requests are excluded.
     Non-sensitive captured values (e.g. a logged-in e-mail address) are kept and are
     replayed as siblings by the importer (reviewer A8).
   - **Blocked writes recorded, never sent (CC-CRAWL-0036, survey option 3).** A write
@@ -755,7 +757,15 @@ signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a
 JSON body's parsed value; a form-encoded body as an object of name → value, last wins);
 `url` and `page_url` are redacted (`core.redaction.redact_url_identifiers`);
 `content_type` is the media type only; `signature` = JSON `[method,
-url_key(url), sorted top-level keys]` (dedupe). No header and no cookie is stored.
+url_key(url), sorted leaf paths of the redacted body]` (dedupe; CC-CRAWL-0037: each
+path is the object keys down to a leaf, an array's items sharing one `"[]"` step, at
+most 256 paths; it was the sorted top-level keys). `headers_json` (CC-CRAWL-0037) is
+`core.redaction.redact_captured_headers`: `{"kept": {name: value}, "withheld":
+[names]}` -- Content-Type as media type and charset, Accept, X-Requested-With and
+non-sensitive `x-` headers whose value is short and not identifier-like are kept; a
+cookie, an Authorization or a sensitively named header is withheld by name, never its
+value; the browser's own headers are not recorded. A database from before it gains the
+column (NULL in old rows).
 An old spider DB has no such table (the importer treats it as none).
 
 ## 6. Dependencies (components)

@@ -80,8 +80,11 @@ class StorageManager:
         ''')
         # The app's own fetch/XHR requests with a JSON or form body (forms phase 3,
         # FR-CRAWL-13), the contract lane J imports: body_json is the redacted body as
-        # JSON text; source is 'passive' or 'submit'; signature = method + canonical URL
-        # path + sorted top-level keys. Request headers and cookies are never stored.
+        # JSON text; source is 'passive', 'submit' or 'blocked' (CC-CRAWL-0036);
+        # signature = method + canonical URL path + the body's sorted leaf paths
+        # (CC-CRAWL-0037); headers_json = `redact_captured_headers` (allowlisted,
+        # non-secret headers; a cookie or credential header's name only, never its
+        # value).
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS discovered_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +94,8 @@ class StorageManager:
                 content_type TEXT,
                 body_json TEXT,
                 source TEXT,
-                signature TEXT UNIQUE
+                signature TEXT UNIQUE,
+                headers_json TEXT
             )
         ''')
         # What the crawl's SPA features did (FR-CRAWL-12/13): `LocalSpider.spa_counts`
@@ -117,10 +121,14 @@ class StorageManager:
             )
         ''')
         # Add columns that older result databases won't have.
-        for col, decl in (("title", "TEXT"), ("content", "TEXT"),
-                          ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
+        for table, col, decl in (
+                ("discovered_pages", "title", "TEXT"),
+                ("discovered_pages", "content", "TEXT"),
+                ("discovered_pages", "rendered", "INTEGER DEFAULT 0"),
+                ("discovered_pages", "source", "TEXT DEFAULT 'link'"),
+                ("discovered_requests", "headers_json", "TEXT")):      # CC-CRAWL-0037
             try:
-                self.cursor.execute(f"ALTER TABLE discovered_pages ADD COLUMN {col} {decl}")
+                self.cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already exists
         self.conn.commit()
@@ -149,17 +157,23 @@ class StorageManager:
             [(str(k), int(v)) for k, v in counts.items()])
         self.conn.commit()
 
-    def record_request(self, page_url, method, url, content_type, body, source):
+    def record_request(self, page_url, method, url, content_type, body, source,
+                       headers=None):
         """Store one request the page made (FR-CRAWL-13), redacted here, at the write
         site, by the one boundary (PA-0100): both URLs by
         `core.redaction.redact_url_identifiers`, the body by
-        `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed). Only the
-        media type of the request's own Content-Type is kept; no other header and no
-        cookie is ever taken. Returns None when stored, else why not (``duplicate`` for
-        a signature already stored)."""
+        `core.redaction.redact_captured_body` (64 KiB, depth 8, fail closed), the
+        request's ``headers`` by `core.redaction.redact_captured_headers` (CC-CRAWL-0037:
+        allowlisted non-secret headers; a cookie or credential header is named, its
+        value never taken). ``content_type`` keeps its media type. The signature is the
+        method, the canonical URL and the redacted body's sorted leaf paths
+        (`_leaf_paths`), so two bodies of different nested shapes are two requests.
+        Returns None when stored, else why not (``duplicate`` for a signature already
+        stored)."""
         import json
 
-        from fuzzlab.core.redaction import redact_captured_body, redact_url_identifiers
+        from fuzzlab.core.redaction import (redact_captured_body, redact_captured_headers,
+                                            redact_url_identifiers)
         doc, why = redact_captured_body(body, content_type)
         if why is not None:
             return why
@@ -167,16 +181,18 @@ class StorageManager:
         doc = json.loads(spa.scrub_markers(json.dumps(doc, ensure_ascii=False)))
         safe_url = spa.scrub_markers(redact_url_identifiers(url))
         method = (method or "").upper()
-        keys = sorted(str(k) for k in doc) if isinstance(doc, dict) else []
-        sig = json.dumps([method, url_key(safe_url), keys])
+        sig = json.dumps([method, url_key(safe_url), _leaf_paths(doc)])
         media = (content_type or "").split(";", 1)[0].strip().lower()
+        kept = spa.scrub_markers(json.dumps(redact_captured_headers(headers),
+                                            ensure_ascii=False))
         try:
             self.cursor.execute('''
                 INSERT INTO discovered_requests
-                    (page_url, method, url, content_type, body_json, source, signature)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (page_url, method, url, content_type, body_json, source, signature,
+                     headers_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (spa.scrub_markers(redact_url_identifiers(page_url)), method, safe_url, media,
-                  json.dumps(doc, ensure_ascii=False), source, sig))
+                  json.dumps(doc, ensure_ascii=False), source, sig, kept))
             self.conn.commit()
             return None
         except sqlite3.IntegrityError:
@@ -280,6 +296,28 @@ class StorageManager:
 
     def close(self):
         self.conn.close()
+
+
+#: At most this many leaf paths make a captured request's signature.
+MAX_SIGNATURE_PATHS = 256
+
+
+def _leaf_paths(doc) -> list:
+    """The sorted leaf paths of a redacted body (CC-CRAWL-0037): each path is the list
+    of object keys down to a value that is not a non-empty container; an array's items
+    share one ``"[]"`` step, so a list's length never makes a new request. A form body
+    (a flat object) gives its names, as the top-level keys did. At most
+    `MAX_SIGNATURE_PATHS`."""
+    out, stack = set(), [((), doc)]
+    while stack and len(out) < MAX_SIGNATURE_PATHS:
+        path, node = stack.pop()
+        if isinstance(node, dict) and node:
+            stack.extend((path + (str(k),), v) for k, v in node.items())
+        elif isinstance(node, list) and node:
+            stack.extend((path + ("[]",), v) for v in node)
+        elif path:
+            out.add(path)
+    return sorted(list(p) for p in out)
 
 
 def _storage_rotated(value) -> bool:
@@ -1129,11 +1167,12 @@ class LocalSpider:
         body = request.post_data_buffer
         if not body:
             return
-        # the request's own Content-Type is the one header read; none is stored
+        # the media type of Content-Type and the allowlisted non-secret headers are kept
+        # (`redact_captured_headers`, CC-CRAWL-0037); a cookie or credential header never
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(self._capture_page or self._current_url, method,
                                           request.url, content_type, body,
-                                          self._capture_source)
+                                          self._capture_source, headers=request.headers)
         if why is None:
             self.spa_counts["requests_captured"] += 1
         elif why != "duplicate":
@@ -1161,7 +1200,8 @@ class LocalSpider:
             return
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(self._capture_page or self._current_url, method,
-                                          request.url, content_type, body, BLOCKED_SOURCE)
+                                          request.url, content_type, body, BLOCKED_SOURCE,
+                                          headers=request.headers)
         if why is None:
             self.spa_counts["requests_blocked_recorded"] += 1
         elif why != "duplicate":

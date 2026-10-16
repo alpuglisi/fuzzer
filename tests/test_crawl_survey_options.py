@@ -221,3 +221,86 @@ def test_a_reveals_blocked_writes_are_recorded_never_sent_and_imported(monkeypat
                 store.close()
         else:
             assert json.loads(rows[0][2]) == {"opened": True}
+
+
+# =====================================================================================
+# Option 5: the signature sees a nested body's shape; non-secret headers kept
+# (CC-CRAWL-0037)
+# =====================================================================================
+def test_two_bodies_of_different_nested_shapes_are_two_requests(tmp_path):
+    """The signature is the body's leaf paths: same top-level keys with different
+    nested shapes are two rows; the same shape with other values, or a longer array, is
+    a duplicate; a form body still dedups on its names."""
+    from fuzzlab.tools.spider import StorageManager, _leaf_paths
+    st = StorageManager(str(tmp_path / "s.db"))
+    url, ct, rec = "http://h/api/order", "application/json", st.record_request
+    try:
+        assert rec("http://h/", "POST", url, ct, b'{"a":{"b":1}}', "passive") is None
+        assert rec("http://h/", "POST", url, ct, b'{"a":{"c":1}}', "passive") is None
+        assert rec("http://h/", "POST", url, ct, b'{"a":{"b":2}}', "passive") == "duplicate"
+        assert rec("http://h/", "POST", url, ct, b'{"l":[{"x":1}]}', "passive") is None
+        assert rec("http://h/", "POST", url, ct, b'{"l":[{"x":1},{"x":2}]}',
+                   "passive") == "duplicate"
+        form = "application/x-www-form-urlencoded"
+        assert rec("http://h/", "POST", url, form, b"q=1&n=2", "passive") is None
+        assert rec("http://h/", "POST", url, form, b"n=5&q=9", "passive") == "duplicate"
+    finally:
+        st.close()
+    assert _leaf_paths({"a": {"b": 1, "c": []}, "d": [1, {"e": "x"}]}) == [
+        ["a", "b"], ["a", "c"], ["d", "[]"], ["d", "[]", "e"]]
+    assert _leaf_paths({}) == [] and _leaf_paths([]) == []
+
+
+def test_only_allowlisted_non_secret_headers_are_kept():
+    """`core.redaction.redact_captured_headers`: Content-Type (media type and
+    charset), Accept, X-Requested-With and non-sensitive ``x-`` headers are kept; a
+    cookie, an Authorization, a sensitively named header (``x-csrf-token``,
+    ``x-api-key``) or an identifier-like value is withheld by name; the browser's own
+    headers are not recorded; anything unreadable keeps nothing."""
+    from fuzzlab.core.redaction import redact_captured_headers as redact
+    out = redact({"Content-Type": "application/json; charset=UTF-8",
+                  "Accept": "application/json", "X-Requested-With": "XMLHttpRequest",
+                  "X-Api-Version": "2", "Cookie": "token=eyJhbGciOi.x.y",
+                  "Authorization": "Bearer eyJhbGciOi.x.y", "X-CSRF-Token": "abc",
+                  "X-Api-Key": "k", "X-User-Id": "4716190207394368",
+                  "User-Agent": "Mozilla/5.0", "Referer": "http://h/#/basket?id=7"})
+    assert out == {"kept": {"accept": "application/json",
+                            "content-type": "application/json; charset=utf-8",
+                            "x-api-version": "2", "x-requested-with": "XMLHttpRequest"},
+                   "withheld": ["authorization", "cookie", "x-api-key", "x-csrf-token",
+                                "x-user-id"]}
+    assert redact({"content-type": "multipart/form-data; boundary=----WebKitFormBoundary"
+                                   "7MA4YWxkTrZu0gW"})["kept"] == \
+        {"content-type": "multipart/form-data"}
+    assert redact({"content-type": "<b>"}) == {"kept": {}, "withheld": ["content-type"]}
+    assert redact({"x-long": "a" * 201}) == {"kept": {}, "withheld": ["x-long"]}
+    for junk in (None, 5, "text", {"x-a": 1}):
+        assert redact(junk)["kept"] == {}
+
+
+def test_a_captured_requests_headers_are_stored_redacted_and_an_old_db_gains_the_column(
+        tmp_path):
+    """The row's ``headers_json`` holds what `redact_captured_headers` keeps, never a
+    credential value; a spider DB from before CC-CRAWL-0037 gains the column."""
+    import json
+    import sqlite3
+
+    from fuzzlab.tools.spider import StorageManager
+    db = str(tmp_path / "old.db")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE discovered_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "page_url TEXT, method TEXT, url TEXT, content_type TEXT, body_json TEXT, "
+                "source TEXT, signature TEXT UNIQUE)")
+    con.commit()
+    con.close()
+    st = StorageManager(db)
+    try:
+        assert st.record_request("http://h/", "POST", "http://h/api/x", "application/json",
+                                 b'{"q":"a"}', "passive",
+                                 headers={"authorization": "Bearer s3cr3tT0kenValue123",
+                                          "x-app": "web"}) is None
+        (raw,) = st.cursor.execute("SELECT headers_json FROM discovered_requests").fetchone()
+    finally:
+        st.close()
+    assert json.loads(raw) == {"kept": {"x-app": "web"}, "withheld": ["authorization"]}
+    assert "s3cr3t" not in raw

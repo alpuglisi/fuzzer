@@ -3,6 +3,8 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0063 — `core.redaction.redact_captured_headers`: the one boundary for a captured request's headers (2026-10-16) — see CC-CRAWL-0037
+
 ### CC-CORE-0062 — One switch for three send rules; the CAPTCHA rule dropped (2026-10-15)
 - Goal / acceptance: the owner's D71 decision. The CAPTCHA rule is gone. The
   destructive, transaction and credential-change rules stay enforced by default, and

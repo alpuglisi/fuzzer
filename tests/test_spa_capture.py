@@ -5,8 +5,9 @@ CC-CORE-0047).
   form-encoded body go to the spider table ``discovered_requests``, redacted only by
   `core.redaction` (``redact_captured_body``, ``redact_url_identifiers``): sensitive
   names and identifier-like values blanked (a string to ``""``, a number to ``null``),
-  64 KiB / depth 8, fail closed. Request headers and cookies are never recorded;
-  socket.io / engine.io requests are excluded.
+  64 KiB / depth 8, fail closed. A cookie or credential header's value is never
+  recorded (only allowlisted non-secret headers are, CC-CRAWL-0037); socket.io /
+  engine.io requests are excluded.
 * **``--submit-spa-forms [ROUTE ...]`` (default off):** fill with our fillers and click
   once per form signature, at most `spa.MAX_SUBMISSIONS` per crawl. Never a destructive,
   settings, transaction, credential-change, 2FA-only or file-upload form; never an
@@ -221,7 +222,7 @@ def test_the_discovered_requests_table_is_exactly_the_contract(tmp_path):
     cols = [r[1] for r in db_rows(str(tmp_path / "s.db"),
                                   "PRAGMA table_info(discovered_requests)")]
     assert cols == ["id", "page_url", "method", "url", "content_type", "body_json",
-                    "source", "signature"]
+                    "source", "signature", "headers_json"]          # CC-CRAWL-0037
     (sql,) = db_rows(str(tmp_path / "s.db"), "SELECT sql FROM sqlite_master WHERE "
                      "name='discovered_requests'")[0]
     assert "signature TEXT UNIQUE" in sql
@@ -248,8 +249,10 @@ def test_record_request_redacts_at_the_write_site_and_dedupes_by_signature(tmp_p
         sm.close()
     rows = db_rows(db, "SELECT page_url, method, url, content_type, body_json, source, "
                        "signature FROM discovered_requests")
+    # the signature holds the body's leaf paths (CC-CRAWL-0037): an array's items share
+    # one "[]" step
     assert rows == [("http://h/", "PUT", "http://h/api/y", JSON, "[1, 2]", "passive",
-                     '["PUT", "http://h:80/api/y", []]')]
+                     '["PUT", "http://h:80/api/y", [["[]"]]]')]
 
 
 def test_record_request_stores_no_secret_and_no_identifier(tmp_path):

@@ -382,6 +382,14 @@ plugin registry. It is the layer that makes the store the integration bus.
     boolean `null`, a container empty. An identifier-like key or form name is replaced
     by `REDACTED_KEY` (`__REDACTED_KEY_<n>__`) and its value blanked. The result never
     depends on whether the body was JSON or form-encoded. Total (never raises).
+  - *(CC-CORE-0063, for CC-CRAWL-0037:)* `redact_captured_headers(headers)` returns
+    `{"kept": {name: value}, "withheld": [names]}` (names lower-cased): Content-Type
+    reduced to its media type and charset; Accept, X-Requested-With and any `x-` header
+    kept when `is_sensitive_name` does not flag its name and its value is a string of at
+    most `CAPTURE_HEADER_MAX_CHARS` (200) that `looks_like_identifier` does not flag;
+    `NEVER_CAPTURE_HEADERS` (cookie, authorization, proxy-authorization), a sensitively
+    named header and an allowlisted one whose value failed are withheld by name; every
+    other header is not recorded; at most `CAPTURE_HEADER_MAX` (32). Total.
   - `is_sensitive_name` also treats the adjacent token pairs `SENSITIVE_PAIRS`
     (`security answer`, `secret answer`, `recovery answer`, plural folded) as secrets;
     a bare `answer` is not one.

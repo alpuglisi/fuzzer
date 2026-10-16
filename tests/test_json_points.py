@@ -1198,4 +1198,4 @@ def test_the_crawlers_table_is_the_contract_the_importer_reads(tmp_path):
     cols = [r[1] for r in db.execute("PRAGMA table_info(discovered_requests)")]
     db.close()
     assert cols == ["id", "page_url", "method", "url", "content_type", "body_json",
-                    "source", "signature"]
+                    "source", "signature", "headers_json"]          # CC-CRAWL-0037

@@ -1297,7 +1297,9 @@ tracked in the requirements files, not here.
     - the spider table `discovered_requests` (the contract lane J imports) holds the
       app's own fetch/XHR requests with a JSON or form body, redacted only by
       `core.redaction.redact_captured_body` / `redact_url_identifiers` at the one write
-      site (PA-0100 guard); no header or cookie is stored; since CC-CRAWL-0036 it also
+      site (PA-0100 guard); no cookie or credential header value is stored, only
+      allowlisted non-secret headers (`redact_captured_headers`, CC-CRAWL-0037), and the
+      dedup signature covers the body's nested leaf paths; since CC-CRAWL-0036 it also
       holds, as `source = 'blocked'`, the writes the reveal or query window refused,
       recorded and never sent (the importer's rules decide, FR-AUD-22);
     - `--submit-spa-forms [ROUTE …]` (off by default) fills and clicks eligible forms

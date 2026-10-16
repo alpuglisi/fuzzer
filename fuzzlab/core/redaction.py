@@ -584,6 +584,75 @@ USERINFO_PLACEHOLDER = "***@"
 MAX_RECORD_CHARS = 4096
 
 
+#: Request headers a capture keeps when their value passes (CC-CRAWL-0037), besides
+#: non-sensitive ``x-`` headers (an app's own API headers).
+CAPTURE_HEADERS = frozenset({"content-type", "accept", "x-requested-with"})
+#: Request headers that are never kept, whatever their value: only their name is noted.
+NEVER_CAPTURE_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
+#: A kept header value is at most this long; at most this many headers are kept.
+CAPTURE_HEADER_MAX_CHARS = 200
+CAPTURE_HEADER_MAX = 32
+
+
+_MEDIA_TYPE = re.compile(r"[a-z0-9!#$&^_.+-]{1,64}/[a-z0-9!#$&^_.+-]{1,64}")
+_CHARSET = re.compile(r"[a-z0-9._-]{1,40}")
+
+
+def _content_type_kept(value):
+    """A Content-Type reduced to its media type and charset (a multipart boundary and
+    every other parameter dropped), or None when it does not parse."""
+    if not isinstance(value, str):
+        return None
+    media, *params = [p.strip().lower() for p in value.split(";")]
+    if not _MEDIA_TYPE.fullmatch(media):
+        return None
+    for param in params:
+        key, _eq, val = param.partition("=")
+        val = val.strip().strip('"')
+        if key.strip() == "charset" and _CHARSET.fullmatch(val):
+            return f"{media}; charset={val}"
+    return media
+
+
+def redact_captured_headers(headers) -> dict:
+    """What a captured request's headers may store (CC-CRAWL-0037, PA-0100: one
+    boundary): ``{"kept": {name: value}, "withheld": [names]}``, names lower-cased.
+
+    Kept: a header in `CAPTURE_HEADERS`, or an ``x-`` header, whose name
+    `is_sensitive_name` does not flag and whose value is a string of at most
+    `CAPTURE_HEADER_MAX_CHARS` that `looks_like_identifier` does not flag; Content-Type
+    is kept as its media type and charset only (a multipart boundary dropped). Withheld
+    (its name only): a header in `NEVER_CAPTURE_HEADERS`, a sensitively named one
+    (``x-csrf-token``, ``x-api-key``), and an allowlisted one whose value failed. Every
+    other header (the browser's own: user-agent, referer, origin, ``sec-*``) is not
+    recorded at all. Total: anything unreadable yields nothing kept."""
+    kept, withheld = {}, set()
+    try:
+        items = list((headers or {}).items())
+    except Exception:  # noqa: BLE001 - total
+        return {"kept": {}, "withheld": []}
+    for name, value in items:
+        try:
+            name = str(name).strip().lower()
+        except Exception:  # noqa: BLE001 - total
+            continue
+        if name in NEVER_CAPTURE_HEADERS or is_sensitive_name(name):
+            withheld.add(name)
+            continue
+        if name not in CAPTURE_HEADERS and not name.startswith("x-"):
+            continue
+        if name == "content-type":
+            value = _content_type_kept(value)       # media type and charset only
+        if not isinstance(value, str) or len(value) > CAPTURE_HEADER_MAX_CHARS \
+                or (name != "content-type" and looks_like_identifier(value)) \
+                or len(kept) >= CAPTURE_HEADER_MAX:
+            withheld.add(name)
+            continue
+        kept[name] = value
+    return {"kept": dict(sorted(kept.items())),
+            "withheld": sorted(withheld)[:CAPTURE_HEADER_MAX]}
+
+
 def redact_for_record(dest: str, value):
     """The one writer-side redactor for what the web UI records about a job or a project
     (``launch.argv``, ``launch.target``, ``project.targets``; PA-0100: one boundary).

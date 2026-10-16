@@ -3,6 +3,52 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0037 — A captured request's signature sees its nested body; non-secret headers are kept (crawler survey option 5) (2026-10-16)
+- Goal / acceptance: two captured bodies to one endpoint with the same top-level keys
+  but different nested shapes are two rows (before, the second was a "duplicate"); a
+  captured request keeps its allowlisted non-secret headers, and a cookie or credential
+  header only by name. Acceptance: the tests below; the capture suites pass with their
+  contract assertions updated.
+- Change:
+  - `tools/spider.py`: `_leaf_paths(doc)` (sorted object-key paths to each leaf; an
+    array's items share one `"[]"` step; at most `MAX_SIGNATURE_PATHS` = 256) replaces
+    the top-level keys in `StorageManager.record_request`'s signature;
+    `discovered_requests` gains `headers_json` (an old DB gains the column);
+    `record_request(..., headers=)` stores `redact_captured_headers(headers)`, and
+    `_observe` and `_note_window_blocked` pass the request's headers.
+  - `core/redaction.py`: `redact_captured_headers` (CC-CORE-0063, SP-36).
+- Impact (other components / consumers / project): the store-as-contract
+  `discovered_requests` gains a column (FR-CRAWL-13 §5 edited in place; the importer
+  does not read it yet: it is data for replay fidelity later). More captured requests
+  per endpoint where bodies differ in nested shape; the importer keeps "the first
+  captured request wins" per parameter name (FR-AUD-22), unchanged. A resumed crawl on
+  an old DB does not dedup against old rows' signatures (one-time duplicates).
+- Risk (class; consequence and exposure; mitigation): high (the PA-0100 redaction
+  boundary and a contract that said "no header is stored"). Consequence if wrong: a
+  secret in a header reaches the spider DB. Mitigation: an allowlist, not a denylist
+  (only Content-Type, Accept, X-Requested-With and `x-` headers), every name through
+  `is_sensitive_name`, every value through `looks_like_identifier` and a 200-char cap,
+  cookie and authorization withheld by name whatever they hold; probe markers are
+  scrubbed from the stored text. Residual: a non-identifier-like secret in an `x-`
+  header with an innocuous name.
+- Hypothesis: prediction — more distinct JSON bodies captured per endpoint on SPAs with
+  nested request bodies; Juice Shop's measurement shows whether it changes the reached
+  count; exit — the re-run's `requests_captured`.
+- Verification / review: `tests/test_crawl_survey_options.py::test_two_bodies_of_different_nested_shapes_are_two_requests`,
+  `::test_only_allowlisted_non_secret_headers_are_kept`,
+  `::test_a_captured_requests_headers_are_stored_redacted_and_an_old_db_gains_the_column`;
+  `tests/test_spa_capture.py` and `tests/test_json_points.py` contract assertions
+  updated for the new column and signature. Combined review and `verify_change.py`
+  evidence: CC-CRAWL-0038.
+- Deliverables:
+  - [x] code (`spider.py`, `core/redaction.py`) — done
+  - [x] tests — done
+  - [x] FR-CRAWL-13 (capture, §5 contract), FR-CORE-37, SHARED_PRIMITIVES SP-36,
+    ARCHITECTURE edited — done
+- Rollback / recovery: restore the top-level-keys signature and stop passing
+  `headers=`; the column can stay (NULL).
+- Effectiveness: pending the Juice Shop re-run.
+
 ### CC-CRAWL-0036 — A write the window refused is recorded as a discovered, unsent request (crawler survey option 3) (2026-10-16)
 - Goal / acceptance: a write that the reveal or query window aborts before it is sent
   is kept as a `discovered_requests` row (method, URL, media type, redacted body) with
