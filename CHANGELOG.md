@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (crawler survey: options for the three measured discovery losses)
+- **What:** `docs/CRAWLER_SURVEY_2026-10-16.md` synthesises six agents' code reviews of katana, Crawlee, ZAP, Black Widow, Wapiti and crawlergo into a ranked list of implementation options. It also records, from the Juice Shop run log, that the 6 demoted query seeds lost to dropped socket.io WebSocket messages, not to HTTP writes.
+- **Why:** the owner asked for the survey, to review the options for viable implementation. Nothing is built yet.
+
 ## 2026-10-16 (the funnel matches a case's whole input: method and location)
 - **What:** `scripts/funnel_report.py` now matches an answer-key case only by its path, HTTP method, location family (query / body — a JSON body included — / fragment / header / cookie) and parameter.
   - A record that does not state its method or location still matches on what it states, and the row is marked `partial`.
