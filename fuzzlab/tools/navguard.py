@@ -91,7 +91,8 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                        cookie_scope: Callable[[str], bool] | None = None,
                        on_session_withheld: Callable[[str, str, str], None] | None = None,
                        strict: bool = False,
-                       isolated_request: Callable[[], object] | None = None):
+                       isolated_request: Callable[[], object] | None = None,
+                       on_window_refused: Callable[[object], None] | None = None):
     """The route handler ``guard_page`` installs (split out so it is testable).
 
     Scope first (BUG-0123): a URL ``in_scope`` refuses is aborted, whatever ``allow``
@@ -140,7 +141,10 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     asked after the scope and destructive checks, before anything is fetched, for the
     request and again for every redirect hop (a navigation's hop is a navigation too);
     a reason aborts it. The caller keeps its own state (whether the window is open, what it
-    blocked, which navigation targets to enqueue)."""
+    blocked, which navigation targets to enqueue). ``on_window_refused(request)``
+    (CC-CRAWL-0036) is told each request the window refused before it was sent (not a
+    redirect hop), so the crawler can record it as discovered and unsent; it is
+    contained: a failing hook never changes the abort."""
     def refused(url: str) -> bool:
         if not in_scope(url):
             logging.info(f"blocked out-of-scope browser request to "
@@ -236,6 +240,9 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         if window is not None:
             if window_refused(req.method.upper(), url, navigation):
                 # its target was kept by the caller
+                if on_window_refused is not None:
+                    with contextlib.suppress(Exception):     # never changes the abort
+                        on_window_refused(req)
                 abort()
                 return
         why = method_refusal(req.method.upper(), url) if method_refusal else None
@@ -722,7 +729,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                cookie_scope: Callable[[str], bool] | None = None,
                on_session_withheld: Callable[[str, str, str], None] | None = None,
                isolated_request: Callable[[], object] | None = None,
-               strict: bool = False) -> None:
+               strict: bool = False,
+               on_window_refused: Callable[[object], None] | None = None) -> None:
     """Confine a Playwright ``BrowserContext`` (pass the context, so popups are covered
     too), WebSockets included. ``in_scope`` is required: there is no unscoped guard
     (BUG-0123). ``method_refusal``, ``observe``, ``request_refusal``, ``window``, the
@@ -730,7 +738,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
     ``on_session_withheld`` / ``isolated_request`` (FR-SESS-20): see
     `make_route_handler` (a WebSocket off the session's origins is never connected,
     `make_ws_handler`); ``ws_hold`` /
-    ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`. Session headers are applied by the route only
+    ``on_ws_drop`` / ``on_ws_send``: see `make_ws_handler`; ``on_window_refused``: see
+    `make_route_handler`. Session headers are applied by the route only
     (FR-CRAWL-14). ``strict`` keeps the destructive rule even when
     ``--allow-destructive-routes`` turned it off (`core.sendpolicy`, D71): the login
     window passes it, so finding a login never navigates to a logout."""
@@ -744,7 +753,8 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
                                             window=window, cookie_scope=cookie_scope,
                                             on_session_withheld=on_session_withheld,
                                             isolated_request=isolated_request,
-                                            strict=strict))
+                                            strict=strict,
+                                            on_window_refused=on_window_refused))
     route_ws = getattr(target, "route_web_socket", None)
     if route_ws is None:                            # an old Playwright: say so, loudly
         logging.warning("this Playwright cannot route WebSockets; the resolver rules "

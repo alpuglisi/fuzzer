@@ -345,6 +345,10 @@ def _write_key(method, url):
     return ((method or "").upper(), urlparse(url or "").path or "/")
 
 
+#: `discovered_requests.source` of a write the window refused and the crawl recorded,
+#: unsent (CC-CRAWL-0036).
+BLOCKED_SOURCE = "blocked"
+
 #: Request types that stay open by design (an event stream; a WebSocket handshake).
 _BACKGROUND_TYPES = frozenset({"eventsource", "websocket"})
 
@@ -520,7 +524,8 @@ class LocalSpider:
             "routes_found", "routes_visited", "routes_skipped_destructive",
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
-            "requests_not_recorded", "deletes_blocked", "forms_submitted",
+            "requests_not_recorded", "requests_blocked_recorded", "deletes_blocked",
+            "forms_submitted",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -702,7 +707,9 @@ class LocalSpider:
                    # the reveal window (W2, W3): every context this crawl opens
                    window=functools.partial(self._window_refusal, context=context),
                    ws_hold=functools.partial(self._ws_hold, context),
-                   on_ws_drop=self._note_ws_drop, on_ws_send=self._note_ws_send)
+                   on_ws_drop=self._note_ws_drop, on_ws_send=self._note_ws_send,
+                   # CC-CRAWL-0036: what the window refused is recorded, never sent
+                   on_window_refused=self._note_window_blocked)
 
     def _note_guard_abort(self, url, reason):
         """The guard aborted ``url`` (destructive, a refused method or body): recorded;
@@ -1133,6 +1140,35 @@ class LocalSpider:
             self.spa_counts["requests_not_recorded"] += 1
             logging.info(f"captured request {method} {request.url.split('?', 1)[0]} not "
                          f"recorded ({why})")
+
+    def _note_window_blocked(self, request):
+        """A write the reveal or query window refused before it was sent
+        (CC-CRAWL-0036, survey option 3): recorded as a discovered request with source
+        `BLOCKED_SOURCE` -- method, URL, body and media type through the one capture
+        boundary (`StorageManager.record_request`, PA-0100) -- and never sent. The
+        import's rules decide whether it becomes a point, as for a captured one
+        (FR-AUD-22). A navigation write (an auto-submitted form, a picker POST) is kept
+        too. Not kept: a GET/HEAD/OPTIONS (a read; a GET navigation's target is queued
+        as before), a transport URL, a body-less write, and anything a probe load
+        refused (a probe records nothing, FR-CRAWL-17)."""
+        if self._probe is not None:
+            return
+        method = (request.method or "").upper()
+        if method in ("GET", "HEAD", "OPTIONS") or spa.is_transport_url(request.url):
+            return
+        body = request.post_data_buffer
+        if not body:
+            return
+        content_type = (request.headers or {}).get("content-type", "")
+        why = self.storage.record_request(self._capture_page or self._current_url, method,
+                                          request.url, content_type, body, BLOCKED_SOURCE)
+        if why is None:
+            self.spa_counts["requests_blocked_recorded"] += 1
+        elif why != "duplicate":
+            self.spa_counts["requests_not_recorded"] += 1
+            logging.info(spa.scrub_markers(
+                f"blocked request {method} {request.url.split('?', 1)[0]} not recorded "
+                f"({why})"))
 
     def _note_script(self, url, response):
         """Scan one already-loaded script for route declarations, if it is same-origin
@@ -2494,6 +2530,9 @@ class LocalSpider:
         if c["requests_captured"] or c["requests_not_recorded"]:
             lines.append(f"Captured {c['requests_captured']} request(s) of the app "
                          f"(redacted); {c['requests_not_recorded']} not recorded.")
+        if c["requests_blocked_recorded"]:
+            lines.append(f"Recorded {c['requests_blocked_recorded']} write(s) the window "
+                         f"blocked (redacted, never sent).")
         if c["transport_urls_skipped"]:
             lines.append(f"Skipped {c['transport_urls_skipped']} socket.io/engine.io "
                          f"transport URL(s).")

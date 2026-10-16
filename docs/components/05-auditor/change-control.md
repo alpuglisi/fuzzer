@@ -3,6 +3,8 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0046 — The importer counts a recorded blocked write (`request_blocked`) under the usual FR-AUD-22 rules (2026-10-16) — see CC-CRAWL-0036
+
 ### CC-AUD-0045 — The importer's and auditor's destructive, transaction and credential refusals follow the send-policy switch (2026-10-15) — see CC-CORE-0062
 
 ### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)

@@ -136,6 +136,15 @@ fuzzer.
     cookies are never recorded; socket.io / engine.io requests are excluded.
     Non-sensitive captured values (e.g. a logged-in e-mail address) are kept and are
     replayed as siblings by the importer (reviewer A8).
+  - **Blocked writes recorded, never sent (CC-CRAWL-0036, survey option 3).** A write
+    the reveal or query window refuses before it is sent (`navguard`
+    `on_window_refused`; any method but GET/HEAD/OPTIONS, a navigation POST of an
+    auto-submitted form or picker included) with a JSON or form-encoded body is recorded
+    through the same write site and boundary with `source = 'blocked'`
+    (`spider.BLOCKED_SOURCE`, counted `requests_blocked_recorded`). Not recorded: a
+    transport URL, a body-less write, and anything a probe load refused (a probe
+    records nothing). It is never sent by the crawl; the importer's FR-AUD-22 rules
+    decide whether it becomes a point.
   - **Active submission (opt-in, `--submit-spa-forms [ROUTE …]`, default off).** On a
     visited SPA route, each rendered `<form>` or form-like container (typed inputs and
     exactly one button) is filled with the importer's fillers (`store_adapter`; a
@@ -741,7 +750,8 @@ and, since FR-CRAWL-13,
 **`discovered_requests`** — the contract
 the importer reads (lane J, forms phase 3):
 `(id, page_url, method, url, content_type, body_json TEXT, source TEXT ('passive' |
-'submit'), signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a
+'submit' | 'blocked': a write the window refused, recorded unsent, CC-CRAWL-0036),
+signature TEXT UNIQUE)`. `body_json` is the redacted body as JSON text (a
 JSON body's parsed value; a form-encoded body as an object of name → value, last wins);
 `url` and `page_url` are redacted (`core.redaction.redact_url_identifiers`);
 `content_type` is the media type only; `signature` = JSON `[method,

@@ -615,12 +615,15 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
     in `form.password_fields`, so the path is isolated, FR-FUZZ-44), a sensitive or
     identifier-like leaf (blanked, `redact_leaf`), and an object selector
     (`_object_selector` on the last key; sent as captured). Refused requests are counted
-    (``request_refused``), never stored. An older spider DB has no such table."""
+    (``request_refused``), never stored. A row with source ``blocked`` (a write the
+    crawl's window refused and recorded unsent, CC-CRAWL-0036) passes the same rules and
+    is also counted ``request_blocked``. An older spider DB has no such table."""
     try:
         rows = src.execute("SELECT * FROM discovered_requests ORDER BY id").fetchall()
     except sqlite3.Error:
         return                                   # a spider DB from before FR-CRAWL-13
-    for key in ("request", "request_json", "request_form", "request_refused"):
+    for key in ("request", "request_json", "request_form", "request_refused",
+                "request_blocked"):
         counts.setdefault(key, 0)
     for row in rows:
         counts["request"] += 1
@@ -628,6 +631,10 @@ def _import_requests(src, store: Store, run_id: int, counts: dict, *,
         if reason is not None:
             counts["request_refused"] += 1
             continue
+        if "source" in row.keys() and row["source"] == "blocked":
+            # CC-CRAWL-0036: a write the crawl's window refused, recorded unsent; the
+            # same rules decide (above), counted on its own
+            counts["request_blocked"] += 1
         _store_request(store, run_id, counts, kind, row["method"].upper(), row["url"],
                        leaves)
 

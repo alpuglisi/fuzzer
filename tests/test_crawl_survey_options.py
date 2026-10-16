@@ -109,3 +109,115 @@ def test_what_a_settle_does_not_wait_for():
     assert not _background_request(req("http://h/rest/products?transport=car"))
     assert not _background_request(req("http://h/main.js", "script"))
     assert not _background_request(Broken())
+
+
+# =====================================================================================
+# Option 3: a write the window refused is recorded, never sent (CC-CRAWL-0036)
+# =====================================================================================
+def test_the_route_tells_the_hook_what_the_window_refused_and_still_aborts():
+    """`make_route_handler(on_window_refused=)` is told each refused request (before
+    any fetch); an allowed one is not; a failing hook never changes the abort."""
+    from fuzzlab.tools import spa
+    from fuzzlab.tools.navguard import make_route_handler
+    from tests.test_forms_phase4 import _Route
+    told = []
+    handler = make_route_handler(in_scope=lambda u: True,
+                                 window=spa.window_request_refusal,
+                                 on_window_refused=told.append)
+    post, get = _Route("http://h/api/x", method="POST"), _Route("http://h/rest/x")
+    handler(post)
+    handler(get)
+    assert told == [post.request]
+    assert (post.outcome, post.fetched, get.outcome) == ("abort", [], "fulfill")
+
+    def boom(_req):
+        raise RuntimeError("hook failed")
+    handler = make_route_handler(in_scope=lambda u: True,
+                                 window=spa.window_request_refusal, on_window_refused=boom)
+    post = _Route("http://h/api/x", method="POST")
+    handler(post)
+    assert (post.outcome, post.fetched) == ("abort", [])
+
+
+def _req(url, method="POST", body=b'{"q":"x"}', ctype="application/json"):
+    return type("R", (), {"url": url, "method": method, "post_data_buffer": body,
+                          "headers": {"content-type": ctype}})()
+
+
+def test_what_a_blocked_write_records(tmp_path):
+    """`_note_window_blocked`: a JSON or form write is recorded with source
+    ``blocked`` through the capture boundary (a password blanked, a probe marker
+    scrubbed); a read, a transport, a body-less write and a probe load's refusals are
+    not."""
+    import json
+
+    from fuzzlab.tools import spa
+    from fuzzlab.tools.spider import BLOCKED_SOURCE, LocalSpider
+    sp = LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    marker = spa.mint_markers(1)[0]
+    try:
+        sp._current_url = "http://127.0.0.1:9/#/search"
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/search",
+                                     body=json.dumps({"q": marker, "page": {"n": 1},
+                                                      "password": "s3cret"}).encode()))
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/revealpost", body=b"v=1",
+                                     ctype="application/x-www-form-urlencoded"))
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/x", method="GET"))
+        sp._note_window_blocked(_req("http://127.0.0.1:9/socket.io/?EIO=4&t=1"))
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/empty", body=None))
+        sp._probe = {"blocked": set(), "requests": []}
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/probe"))
+        sp._probe = None
+        rows = sp.storage.cursor.execute(
+            "SELECT method, url, content_type, body_json, source FROM discovered_requests "
+            "ORDER BY id").fetchall()
+    finally:
+        sp.storage.close()
+    assert [(m, u, s) for m, u, _c, _b, s in rows] == [
+        ("POST", "http://127.0.0.1:9/api/search", BLOCKED_SOURCE),
+        ("POST", "http://127.0.0.1:9/api/revealpost", BLOCKED_SOURCE)]
+    body = json.loads(rows[0][3])
+    assert body["password"] == "" and body["page"] == {"n": 1}
+    assert marker not in rows[0][3]
+    assert json.loads(rows[1][3]) == {"v": "1"} and rows[1][2] == \
+        "application/x-www-form-urlencoded"
+    assert sp.spa_counts["requests_blocked_recorded"] == 2
+
+
+def test_a_reveals_blocked_writes_are_recorded_never_sent_and_imported(monkeypatch,
+                                                                        tmp_path):
+    """Real Chromium, `PostRevealSpa` (a reveal click that auto-submits a POST form: a
+    POST navigation the window refuses) and `RevealSpa` (a menu click that POSTs JSON):
+    neither write reaches the server; both are recorded as ``blocked`` requests; the
+    form one is imported as a body point under the import's usual rules."""
+    import json
+
+    from tests._spa_fixture import PostRevealSpa, RevealSpa, db_rows
+    from tests.test_forms_phase4 import _crawl
+    from tests.test_spa_query import _import, _params
+    chromium_or_skip(monkeypatch)
+    for lab_cls, path in ((PostRevealSpa, "/api/revealpost"),
+                          (RevealSpa, "/api/reveal-post")):
+        lab = lab_cls()
+        tmp = tmp_path / lab_cls.__name__
+        tmp.mkdir()
+        try:
+            sp, db, _logs = _crawl(lab, tmp)
+        finally:
+            lab.close()
+        assert not [r for r in lab.requests if r[1].startswith(path)], path   # unsent
+        rows = db_rows(db, "SELECT method, url, body_json, source FROM "
+                           "discovered_requests WHERE url LIKE '%" + path + "'")
+        assert rows and rows[0][0] == "POST" and rows[0][3] == "blocked", path
+        assert sp.spa_counts["requests_blocked_recorded"] >= 1
+        if lab_cls is PostRevealSpa:
+            assert json.loads(rows[0][2]) == {"v": "1"}
+            store, run, counts = _import(db, tmp / "u.db")
+            try:
+                assert ("/api/revealpost", "v", "body") in _params(store, run)
+                assert counts["request_blocked"] >= 1
+            finally:
+                store.close()
+        else:
+            assert json.loads(rows[0][2]) == {"opened": True}

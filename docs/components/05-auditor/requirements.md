@@ -243,7 +243,10 @@ budget where a vulnerability is plausible.
   phase 3, lane J).*
   - **Source.** `store_adapter.import_spider` reads the spider table
     `discovered_requests` (`id, page_url, method, url, content_type, body_json, source,
-    signature`; FR-CRAWL-13). A spider DB without it imports exactly as before.
+    signature`; FR-CRAWL-13). A spider DB without it imports exactly as before. A row
+    with source `blocked` (a write the crawl's window refused and recorded unsent,
+    CC-CRAWL-0036) passes every rule below like any other, and an accepted one is also
+    counted `request_blocked`.
   - **Never imported** (counted `request_refused`, nothing stored): a method outside
     GET/POST/PUT/PATCH (DELETE included); PUT/PATCH unless `fuzzlab auto
     --fuzz-json-writes` is given (and the URL passes the next rules); a URL

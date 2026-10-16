@@ -7,6 +7,7 @@ changed, and the reason. Reference the commit hash where useful.
 ## 2026-10-16 (crawler survey options built: 1, 2, 3, 5, 6)
 - **What:** option 1 (CC-CRAWL-0034): an untainted socket.io / engine.io write in a seed's window is background traffic, so it no longer demotes the seed. It is still blocked.
 - **What:** option 2 (CC-CRAWL-0035): a settle no longer waits for socket.io / engine.io long-polls or event streams, which stay open by design and held every settle to its 5 s budget.
+- **What:** option 3 (CC-CRAWL-0036): a write the reveal or query window refuses is now recorded as a discovered request (`source = 'blocked'`), redacted and never sent by the crawl; the importer's usual rules decide whether it becomes a fuzz point.
 - **Why:** the owner chose options 1, 2, 3, 5 and 6 of `docs/CRAWLER_SURVEY_2026-10-16.md`. On Juice Shop, six query seeds were lost to dropped socket.io WebSocket messages.
 
 ## 2026-10-16 (crawler survey: options for the three measured discovery losses)

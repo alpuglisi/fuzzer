@@ -3,6 +3,53 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0036 — A write the window refused is recorded as a discovered, unsent request (crawler survey option 3) (2026-10-16)
+- Goal / acceptance: a write that the reveal or query window aborts before it is sent
+  is kept as a `discovered_requests` row (method, URL, media type, redacted body) with
+  `source = 'blocked'`, and nothing more is sent during the crawl. Acceptance: a refused
+  JSON write and a refused POST navigation (an auto-submitted form) are recorded in
+  real Chromium, never reach the server, and the form one imports as a body point.
+- Change:
+  - `tools/navguard.py`: `make_route_handler` / `guard_page` take
+    `on_window_refused(request)`, told for each request the window refused (not a
+    redirect hop), contained (a failing hook never changes the abort).
+  - `tools/spider.py`: `_guard` passes `_note_window_blocked`, which records through
+    `StorageManager.record_request` (the one capture boundary, PA-0100) with
+    `BLOCKED_SOURCE = "blocked"`; skipped: GET/HEAD/OPTIONS, transport URLs, body-less
+    writes, a probe load's refusals. New count `requests_blocked_recorded` (persisted in
+    `crawl_stats`; a summary line).
+  - `tools/store_adapter.py`: an accepted blocked row is also counted
+    `request_blocked` (CC-AUD-0046). The rules are unchanged.
+- Impact (other components / consumers / project): the store-as-contract
+  `discovered_requests.source` gains the value `blocked` (FR-CRAWL-13 §5, FR-AUD-22,
+  ARCHITECTURE edited in place). FUZZ fuzzes these endpoints like captured ones, so a
+  write the crawl never sent can now be sent by a later `fuzzlab auto` run.
+- Risk (class; consequence and exposure; mitigation): high (a new source of fuzzed
+  writes: "destructive sends"). Consequence if wrong: a write the window refused because
+  it was unvetted (a reveal's side effect, a seed's own write) is later fuzzed. Exposure:
+  every app whose clicks or seed loads POST. Mitigation: the import applies the same
+  rules as to a captured request (DELETE never, PUT/PATCH only with `--fuzz-json-writes`,
+  destructive and transaction URLs, credential-change bodies, settings fields,
+  destructive entries, other origins), and the fuzzer's send rules apply at send time.
+  A write seed is still never a point itself (FR-CRAWL-17); only its request is. The
+  owner chose this option ("implement 1,2,3,5, and 6", 2026-10-16). The review is the
+  combined independent review of the survey options.
+- Hypothesis: prediction — Juice Shop gains body points from writes the reveals and
+  seeds blocked; whether any is an answer-key POST case is the re-run's measurement;
+  exit — the funnel's reached count for POST-body cases.
+- Verification / review: `tests/test_crawl_survey_options.py::test_the_route_tells_the_hook_what_the_window_refused_and_still_aborts`,
+  `::test_what_a_blocked_write_records`,
+  `::test_a_reveals_blocked_writes_are_recorded_never_sent_and_imported` (real
+  Chromium: `PostRevealSpa`, `RevealSpa`). Combined review and `verify_change.py`
+  evidence: CC-CRAWL-0038.
+- Deliverables:
+  - [x] code (`navguard.py`, `spider.py`, `store_adapter.py`) — done
+  - [x] tests — done
+  - [x] FR-CRAWL-13 and its §5 contract, FR-AUD-22, ARCHITECTURE edited in place — done
+- Rollback / recovery: drop the `on_window_refused` argument in `_guard`; delete rows
+  with `source = 'blocked'` from a spider DB to undo a run's records.
+- Effectiveness: pending the Juice Shop re-run.
+
 ### CC-CRAWL-0035 — A settle does not wait for realtime transports (crawler survey option 2) (2026-10-16)
 - Goal / acceptance: `_settle` returns once the page's own requests have finished, not
   at its 5 s budget, when a socket.io / engine.io long-poll or an event stream is open.
