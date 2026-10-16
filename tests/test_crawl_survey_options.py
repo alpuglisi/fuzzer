@@ -318,7 +318,8 @@ def test_a_captured_requests_headers_are_stored_redacted_and_an_old_db_gains_the
 #: class, no button), as Angular's (click) and (keyup.enter) bindings are.
 _LISTEN_JS = r"""
 const routes = [{path:'finder'}, {path:'note'}, {path:'tiles'}, {path:'pwd'},
-  {path:'people'}, {path:'blank'}, {path:'plain'}];
+  {path:'people'}, {path:'blank'}, {path:'plain'}, {path:'hidden'}, {path:'external'},
+  {path:'icon'}, {path:'icon2'}, {path:'grand'}, {path:'oneform'}, {path:'twotext'}];
 const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type':
   'application/json'}, body: JSON.stringify(body)}).catch(() => {});
 const views = {
@@ -329,6 +330,21 @@ const views = {
   'people': "<div><input id='who' name='who'><span id='del'>Delete account</span></div>",
   'blank': "<div><input id='q2' name='q2'><span id='nolabel'></span></div>",
   'plain': "<div><input id='nokey' name='nokey'></div>",
+  // review M1: a hidden default button, and one outside the form (form=)
+  'hidden': "<form id='hf'><input name='nick'><button type='submit' style='display:none'>" +
+    "Delete account</button></form>",
+  'external': "<div><form id='ef'><input name='nick2'></form></div>" +
+    "<p><button form='ef'>Pay now</button></p>",
+  // review M2: the click-listened element is itself an icon
+  'icon': "<div><input name='find2'><mat-icon id='ic'>power_settings_new</mat-icon></div>",
+  'icon2': "<div><input name='find3'><mat-icon id='ic2' aria-label='Session'>" +
+    "power_settings_new</mat-icon></div>",
+  // review M3: buttons two levels above the key-listened input
+  'grand': "<div class='row'><span><input id='g' name='g'></span><button>Save</button>" +
+    "<button>Delete</button></div>",
+  // a one-field form with no button: Enter submits it (implicit submission)
+  'oneform': "<form id='of'><input name='only'></form>",
+  'twotext': "<form id='tf'><input name='a1'><input name='a2'></form>",
 };
 function render() {
   const name = location.hash.replace(/^#!?\/?/, '').split('?')[0];
@@ -348,6 +364,14 @@ function render() {
     if (e.key === 'Enter') post('/api/pin', {pin: $('pin').value}); });
   if ($('del')) $('del').addEventListener('click', () => post('/api/wipe', {who: 1}));
   if ($('nolabel')) $('nolabel').addEventListener('click', () => post('/api/nolabel', {}));
+  const onSubmit = (id, url) => { if ($(id)) $(id).addEventListener('submit', e => {
+    e.preventDefault(); post(url, {v: [...$(id).elements].map(x => x.value)}); }); };
+  onSubmit('hf', '/api/hidden'); onSubmit('ef', '/api/external');
+  onSubmit('of', '/api/oneform'); onSubmit('tf', '/api/twotext');
+  if ($('ic')) $('ic').addEventListener('click', () => post('/api/session-end', {}));
+  if ($('ic2')) $('ic2').addEventListener('click', () => post('/api/session-end', {}));
+  if ($('g')) $('g').addEventListener('keyup', e => {
+    if (e.key === 'Enter') post('/api/grand', {g: $('g').value}); });
 }
 window.addEventListener('hashchange', render);
 render();
@@ -387,16 +411,25 @@ def test_listener_found_forms_are_submitted_on_named_routes_and_gated(monkeypatc
     div with no role or class is a reveal candidate (a card)."""
     chromium_or_skip(monkeypatch)
     lab, sp, _db, logs = _listen_crawl(tmp_path, ["finder", "note", "tiles", "pwd", "people",
-                                                  "blank", "plain"])
+                                                  "blank", "plain", "hidden", "external",
+                                                  "icon", "icon2", "grand", "oneform",
+                                                  "twotext"])
     assert [b.get("term") for b in _posted(lab, "/api/find")] == ["fuzzlab"], lab.requests
     assert [b.get("text") for b in _posted(lab, "/api/note")] == ["fuzzlab"]
     assert not _posted(lab, "/api/pin")
     assert not _posted(lab, "/api/wipe") and not _posted(lab, "/api/nolabel")
-    assert sp.spa_counts["forms_submitted_enter"] == 1
-    assert sp.spa_counts["forms_submitted"] >= 2
+    # review M1-M3: no default button, icon or nearby button the gate never judged
+    for path in ("/api/hidden", "/api/external", "/api/session-end", "/api/grand",
+                 "/api/twotext"):
+        assert not _posted(lab, path), path
+    assert [b.get("v") for b in _posted(lab, "/api/oneform")] == [["fuzzlab"]]
+    assert sp.spa_counts["forms_submitted_enter"] == 2           # finder, oneform
+    assert sp.spa_counts["forms_submitted"] >= 3
     text = "\n".join(logs)
     assert "#/people not submitted: destructive button ('delete')" in text, text
     assert "a listener submitter with no label to judge" in text
+    assert "#/icon not submitted: a listener submitter with no label to judge" in text
+    assert "#/icon2 not submitted: destructive button icon ('power_settings_new')" in text
     assert sp.spa_counts["reveal_writes_blocked"] == 0   # no submitter used as a reveal
     assert any(r[1] == "/rest/marker/tile-opened" for r in lab.requests)   # the card
 
@@ -454,3 +487,33 @@ def test_the_listener_registry_records_without_changing_the_page(monkeypatch):
         lab.close()
     assert out["hits"] == 11 and out["b"] and out["c"] and out["go"]
     assert out["n"] >= 3 and not out["enumerable"] and out["attrs"] == 0
+
+
+def test_enter_is_never_pressed_when_the_control_changed_or_gained_a_default_button():
+    """`_press_enter` (review M1): the control's name is re-read in the page right before
+    the press (`spa.CONTROL_NAME_JS`, None once its form has a default button); a
+    changed name or None means no press and no lift."""
+    from fuzzlab.tools.spider import LocalSpider
+
+    class Page:
+        def __init__(self, now):
+            self.now, self.pressed = now, []
+
+        def eval_on_selector(self, sel, js):
+            return self.now
+
+        def is_enabled(self, sel, timeout=None):
+            return True
+
+        def press(self, sel, key, timeout=None):
+            self.pressed.append((sel, key))
+    form = {"controls": [["q", "search"]], "ids": ["r1f0c0"]}
+    sel = '[data-fuzzlab-id="r1f0c0"]'
+    lifted = []
+    sp = LocalSpider.__new__(LocalSpider)
+    sp.timeout_ms = 1000
+    for now, pressed in (("q", True), ("other", False), (None, False)):
+        page = Page(now)
+        how = LocalSpider._press_enter(sp, page, sel, form, lambda: lifted.append(1))
+        assert (how == "pressed") is pressed and bool(page.pressed) is pressed, now
+    assert lifted == [1]

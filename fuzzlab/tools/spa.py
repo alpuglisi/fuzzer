@@ -273,6 +273,29 @@ def is_transport_url(url: str) -> bool:
     return {"eio", "transport"} <= names
 
 
+#: engine.io control packets a page sends on its own: ping, pong, upgrade, noop, the
+#: upgrade probe (CC-CRAWL-0039, review M4).
+_ENGINEIO_CONTROL = frozenset({"2", "3", "5", "6", "2probe", "3probe"})
+
+
+def engineio_control(message) -> bool:
+    """Is a page-to-server WebSocket message an engine.io / socket.io **control** packet
+    -- a ping, pong, upgrade, noop or probe, or a socket.io connect/disconnect (``40`` /
+    ``41``, optionally ``/namespace,``) with no payload? An event (``42[...]``), an ack,
+    a connect with an auth payload and anything unreadable are not."""
+    import re
+    if isinstance(message, (bytes, bytearray)):
+        try:
+            message = bytes(message).decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+    if not isinstance(message, str):
+        return False
+    text = message.strip()
+    return text in _ENGINEIO_CONTROL or \
+        re.fullmatch(r"4[01](/[A-Za-z0-9_-]{0,64},?)?", text) is not None
+
+
 # --- SPA form submission ----------------------------------------------------------------
 #: A field whose name or label has one of these tokens holds a one-time code.
 _OTP_TOKENS = frozenset({"totp", "otp", "mfa", "2fa", "twofa", "tfa", "code", "token",
@@ -344,6 +367,8 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
     if form.get("submitter") == "listener" and not (label.strip() or aria.strip()):
         # CC-CRAWL-0038: an element found only by its click listener needs a label
         return "a listener submitter with no label to judge"
+    if form.get("submitter") == "listener" and form.get("submitter_long"):
+        return "a listener submitter's text too long to judge whole"
     glyph = destructive(submitter_glyph(form.get("button_icons") or "", label, aria))
     if glyph:
         return f"destructive button icon ({glyph!r})"
@@ -417,6 +442,8 @@ _LABELS_FN = r"""
   const buttonLabels = b => {
     const aria = squash(b.getAttribute('aria-label') || b.getAttribute('title'));
     if (b.tagName.toLowerCase() === 'input') return [squash(b.value), aria, ''];
+    // an element that is itself an icon: its text is a glyph name (review M2)
+    if (b.matches(ICONS)) return ['', aria, squash(b.textContent)];
     const clone = b.cloneNode(true);
     const icons = [...clone.querySelectorAll(ICONS)];
     const glyphs = squash(icons.map(e => e.textContent).join(' '));
@@ -525,7 +552,12 @@ LISTEN_INIT_JS = r"""
       if (!(el instanceof Element) || !TYPES.has(type)) return;
       let kinds = seen.get(el);
       if (!kinds) {
-        if (refs.length >= __MAX__) return;
+        if (refs.length >= __MAX__) {                  // drop dead and detached ones
+          const live = refs.filter(r => { const e = r.deref(); return e && e.isConnected; });
+          refs.length = 0;
+          refs.push(...live);
+          if (refs.length >= __MAX__) return;
+        }
         kinds = new Set();
         seen.set(el, kinds);
         refs.push(new WeakRef(el));
@@ -553,10 +585,18 @@ LISTEN_INIT_JS = r"""
 })();
 """.replace("__MAX__", str(MAX_LISTENED))
 
-#: ``el => name`` of a control, as `FORMS_JS` names it (re-read before Enter is pressed).
-CONTROL_NAME_JS = ("el => el.getAttribute('name') || el.id || "
-                   "el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || "
-                   "el.getAttribute('placeholder') || ''")
+#: ``el => name`` of a control, as `FORMS_JS` names it, re-read right before Enter is
+#: pressed; None when its form now has a default button that Enter would click (review
+#: M1: a button rendered after the gate ran).
+CONTROL_NAME_JS = r"""
+el => {
+  if (el.form && [...el.form.elements].some(e => e.matches(
+      'button:not([type]), button[type=submit], input[type=submit], input[type=image]')))
+    return null;
+  return el.getAttribute('name') || el.id || el.getAttribute('formcontrolname') ||
+    el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+}
+"""
 
 #: Text controls a button-less container is submitted from by Enter (CC-CRAWL-0038).
 ENTER_KINDS = ("text", "search", "email", "url", "tel", "number")
@@ -597,6 +637,10 @@ FORMS_JS = r"""
   }
   // CC-CRAWL-0038: the listener registry (LISTEN_INIT_JS), when the context has it
   const L = window.__fuzzlabListen;
+  // a form's default button: any submit or image button among its elements, hidden or
+  // outside it (``form=``) included -- Enter would click it (review M1)
+  const hasDefaultButton = f => [...f.elements].some(e => e.matches(
+    'button:not([type]), button[type=submit], input[type=submit], input[type=image]'));
   const ENTER = __ENTER__;
   const CTL = 'input, textarea, select';
   const inContainer = el => containers.some(c => c === el || c.contains(el));
@@ -626,7 +670,12 @@ FORMS_JS = r"""
       const node = el.parentElement || el;
       const ctl = [...node.querySelectorAll(CTL)].filter(typed);
       if (ctl.some(c => kindOf(c) === 'password' || inContainer(c))) continue;
-      if ([...node.querySelectorAll(BTN)].filter(buttonOk).length) continue;
+      // no button, hidden or shown, and no click-listened element within three levels
+      // (review M3): Enter must never stand in for a button the gate did not judge
+      let near = false;
+      for (let n = el.parentElement, i = 0; n && i < 3 && !near; i++, n = n.parentElement)
+        near = !!n.querySelector(BTN) || clickers.some(o => n.contains(o));
+      if (near || el.form) continue;
       containers.push(node);
       enters.set(node, el);
     }
@@ -639,10 +688,12 @@ FORMS_JS = r"""
     const submit = submitters.get(c) ||
       btns.find(b => (b.getAttribute('type') || 'submit').toLowerCase() === 'submit') || btns[0];
     let enterEl = enters.get(c) || null;
-    if (!submit && !enterEl && c.tagName.toLowerCase() === 'form') {
-      const texts = [...c.querySelectorAll('input')].filter(e => ENTER.includes(kindOf(e)) &&
-        shown(e));
-      enterEl = texts[texts.length - 1] || null;            // implicit submission
+    if (!submit && !enterEl && c.tagName.toLowerCase() === 'form' &&
+        !hasDefaultButton(c)) {
+      // implicit submission with no default button: one text field only (review M1)
+      const texts = [...c.elements].filter(e => e.tagName.toLowerCase() === 'input' &&
+        ENTER.includes(kindOf(e)) && shown(e));
+      enterEl = texts.length === 1 ? texts[0] : null;
     }
     const controls = [], ids = [], autocomplete = [], tags = [];
     // custom selects (mat-select, a role=combobox that is not an input) are selects
@@ -683,6 +734,8 @@ FORMS_JS = r"""
               hints: hints.slice(0, 400), challenge,
               submit_by: submit ? 'click' : (enterEl ? 'enter' : null),
               submitter: submitters.has(c) ? 'listener' : (submit ? 'button' : null),
+              submitter_long: submitters.has(c) &&
+                (submit.textContent || '').replace(/\s+/g, ' ').trim().length > 100,
               enter_id: enterEl ? enterEl.getAttribute('data-fuzzlab-id') : null});
   });
   return out;
@@ -1214,6 +1267,9 @@ REVEAL_JS = r"""
     getComputedStyle(el).cursor === 'pointer' || (!!L && L.has(el, 'click'));
   const words = t => (t || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const cardLabels = el => {
+    if (el.matches(ICONS))                              // itself an icon (review M2)
+      return {labels: ['', squash(el.getAttribute('aria-label') || el.getAttribute('title')),
+                       squash(el.textContent)], long: false};
     const clone = el.cloneNode(true);
     const icons = [...clone.querySelectorAll(ICONS)];
     const glyphs = squash(icons.map(e => e.textContent).join(' '));
@@ -1276,6 +1332,9 @@ CARD_LABELS_JS = r"""
 el => {
   const squash = t => (t || '').replace(/\s+/g, ' ').trim().slice(0, 100);
   const ICONS = 'mat-icon, .material-icons, [class*="material-symbols"]';
+  if (el.matches(ICONS))                                // itself an icon (review M2)
+    return ['', squash(el.getAttribute('aria-label') || el.getAttribute('title')),
+            squash(el.textContent)];
   const clone = el.cloneNode(true);
   const icons = [...clone.querySelectorAll(ICONS)];
   const glyphs = squash(icons.map(e => e.textContent).join(' '));

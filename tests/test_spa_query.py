@@ -1776,37 +1776,49 @@ def test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint(tm
         sp.storage.close()
 
 
-def test_an_untainted_transport_write_is_baseline_even_when_the_load_saw_none(tmp_path):
-    """CC-CRAWL-0034 (the Juice Shop run of 2026-10-16: each of six demoted seeds had
-    only socket.io WebSocket messages dropped, none in its route's baseline): a
-    transport write the bare route's load never sent -- a socket.io WebSocket ping, an
-    engine.io polling POST, an ``EIO``/``transport`` query on another path -- is blocked
-    but is not a write; the same transport carrying the load's filler is (B2); a
-    non-transport write outside the baseline still is."""
+def test_a_transport_control_packet_is_baseline_even_when_the_load_saw_none(tmp_path):
+    """CC-CRAWL-0034 as narrowed by CC-CRAWL-0039 (review M4). The Juice Shop run of
+    2026-10-16: each of six demoted seeds had only socket.io WebSocket messages dropped,
+    none in its route's baseline. An engine.io control packet on a transport WebSocket
+    (ping ``2``, pong ``3``, ``2probe``, a bare socket.io connect ``40``) that the bare
+    route's load never sent is blocked but is not a write. A socket.io event the query
+    causes (``42[...]``, with or without the filler), an auth connect, a message with no
+    text, a polling POST outside the baseline and a non-transport write all are."""
     sp = _requests_spider(tmp_path)
+    ws = "ws://h/socket.io/?EIO=4&transport=websocket"
     try:
         ctx = object()                                # no baseline for this route
         with sp._window(_FakePage("http://h/#/privacy?q=fuzzlab"), ctx,
                         "http://h/#/privacy?q=fuzzlab", query=spa.SEED_SOURCE) as win:
             win["taint"] = frozenset({"fuzzlab"})
             assert not win["baseline"]
-            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket", "2")
-            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket", b"3")
-            sp._window_refusal("POST", "http://h/engine.io/?EIO=4&transport=polling&t=x",
-                               False, context=ctx)
-            sp._window_refusal("POST", "http://h/rt/?EIO=3&transport=polling", False,
-                               context=ctx)
+            for packet in ("2", b"3", "2probe", "40", "41/admin,"):
+                sp._note_ws_drop(ws, packet)
             assert not win.get("writes")
-            assert sp.spa_counts["spa_query_baseline_writes"] == 4
-            assert "http://h/engine.io/?EIO=4&transport=polling&t=x" in win["blocked"]
-            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket",
-                             '42["search","fuzzlab"]')
-            assert win["writes"] == 1                     # B2: it carries the filler
+            assert sp.spa_counts["spa_query_baseline_writes"] == 5
+            sp._note_ws_drop(ws, '42["search","fuzzlab"]')            # B2: the filler
+            sp._note_ws_drop(ws, '42["joinAdminRoom"]')               # caused, untainted
+            sp._note_ws_drop(ws, '40{"token":"abc"}')                 # an auth connect
+            sp._note_ws_drop(ws)                                       # no text
+            assert win["writes"] == 4
+            sp._window_refusal("POST", "http://h/engine.io/?EIO=4&transport=polling&t=x",
+                               False, context=ctx)                    # body not seen
             sp._window_refusal("POST", "http://h/api/rt-socket", False, context=ctx)
-            sp._note_ws_drop("ws://h/live")
-            assert win["writes"] == 3                     # not transports
+            sp._note_ws_drop("ws://h/live", "2")                       # not a transport
+            assert win["writes"] == 7
+            assert "http://h/engine.io/?EIO=4&transport=polling&t=x" in win["blocked"]
     finally:
         sp.storage.close()
+
+
+def test_what_an_engineio_control_packet_is():
+    """`spa.engineio_control`: pings, pongs, upgrade, noop, probes and a bare socket.io
+    connect/disconnect; never an event, an ack, an auth payload or unreadable text."""
+    yes = ("2", "3", "5", "6", "2probe", b"3probe", " 2 ", "40", "41", "40/chat,", "41/a")
+    no = ('42["x"]', "43[1]", '40{"token":"t"}', "4", "1", "0{}", "", None, 3,
+          b"\xff\xfe", "2probe2", "40/a,b")
+    assert all(spa.engineio_control(m) for m in yes)
+    assert not any(spa.engineio_control(m) for m in no)
 
 
 def test_only_a_bare_routes_load_is_its_baseline():

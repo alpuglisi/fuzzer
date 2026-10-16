@@ -306,10 +306,10 @@ def _leaf_paths(doc) -> list:
     """The sorted leaf paths of a redacted body (CC-CRAWL-0037): each path is the list
     of object keys down to a value that is not a non-empty container; an array's items
     share one ``"[]"`` step, so a list's length never makes a new request. A form body
-    (a flat object) gives its names, as the top-level keys did. At most
-    `MAX_SIGNATURE_PATHS`."""
+    (a flat object) gives its names, as the top-level keys did. The first
+    `MAX_SIGNATURE_PATHS` in sorted order."""
     out, stack = set(), [((), doc)]
-    while stack and len(out) < MAX_SIGNATURE_PATHS:
+    while stack:                      # bounded by the capture's 64 KiB / depth-8 cap
         path, node = stack.pop()
         if isinstance(node, dict) and node:
             stack.extend((path + (str(k),), v) for k, v in node.items())
@@ -317,7 +317,8 @@ def _leaf_paths(doc) -> list:
             stack.extend((path + ("[]",), v) for v in node)
         elif path:
             out.add(path)
-    return sorted(list(p) for p in out)
+    # sorted before the cut, so key order never changes the signature (review N1)
+    return [list(p) for p in sorted(out)[:MAX_SIGNATURE_PATHS]]
 
 
 def _storage_rotated(value) -> bool:
@@ -844,18 +845,22 @@ class LocalSpider:
         all the same, counted ``spa_query_baseline_writes``, and does not demote the
         seed.
 
-        A realtime transport write (`spa.is_transport_url`: socket.io / engine.io, the
-        WebSocket included) is background traffic wherever it is seen (CC-CRAWL-0034):
-        whether the bare route's load happened to send one is timing (a periodic ping),
-        so it is baseline even when the recorded load saw none. Blocked all the same;
-        a transport write carrying the load's values still counts (B2)."""
+        A realtime transport's **control** packet -- an engine.io ping, pong, upgrade,
+        noop or probe, or a bare socket.io connect/disconnect, sent on a transport
+        WebSocket (`spa.is_transport_url`, `spa.engineio_control`) -- is background
+        traffic wherever it is seen (CC-CRAWL-0034): whether the bare route's load
+        happened to send one is timing, so it is baseline even when the recorded load
+        saw none. Blocked all the same. A socket.io event (``42[...]``), a polling POST
+        (its body is not seen here) and any write carrying the load's values (B2) are
+        judged as before (CC-CRAWL-0039, review M4)."""
         if _carries(win.get("taint", ()), url, text) or url in win.get("tainted", ()):
             # B2 (review A-S1 = B-S1): a write carrying this load's own query values
             # always counts, a baseline endpoint's included
             win["writes"] = win.get("writes", 0) + 1
             return
         if _write_key(method, url) in win.get("baseline", ()) or \
-                spa.is_transport_url(url):
+                ((method or "").upper() == "WS" and spa.is_transport_url(url)
+                 and spa.engineio_control(text)):
             self.spa_counts["spa_query_baseline_writes"] += 1
             held = win.setdefault("baselined", {})
             held[url] = held.get(url, 0) + 1
