@@ -1776,6 +1776,39 @@ def test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint(tm
         sp.storage.close()
 
 
+def test_an_untainted_transport_write_is_baseline_even_when_the_load_saw_none(tmp_path):
+    """CC-CRAWL-0034 (the Juice Shop run of 2026-10-16: each of six demoted seeds had
+    only socket.io WebSocket messages dropped, none in its route's baseline): a
+    transport write the bare route's load never sent -- a socket.io WebSocket ping, an
+    engine.io polling POST, an ``EIO``/``transport`` query on another path -- is blocked
+    but is not a write; the same transport carrying the load's filler is (B2); a
+    non-transport write outside the baseline still is."""
+    sp = _requests_spider(tmp_path)
+    try:
+        ctx = object()                                # no baseline for this route
+        with sp._window(_FakePage("http://h/#/privacy?q=fuzzlab"), ctx,
+                        "http://h/#/privacy?q=fuzzlab", query=spa.SEED_SOURCE) as win:
+            win["taint"] = frozenset({"fuzzlab"})
+            assert not win["baseline"]
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket", "2")
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket", b"3")
+            sp._window_refusal("POST", "http://h/engine.io/?EIO=4&transport=polling&t=x",
+                               False, context=ctx)
+            sp._window_refusal("POST", "http://h/rt/?EIO=3&transport=polling", False,
+                               context=ctx)
+            assert not win.get("writes")
+            assert sp.spa_counts["spa_query_baseline_writes"] == 4
+            assert "http://h/engine.io/?EIO=4&transport=polling&t=x" in win["blocked"]
+            sp._note_ws_drop("ws://h/socket.io/?EIO=4&transport=websocket",
+                             '42["search","fuzzlab"]')
+            assert win["writes"] == 1                     # B2: it carries the filler
+            sp._window_refusal("POST", "http://h/api/rt-socket", False, context=ctx)
+            sp._note_ws_drop("ws://h/live")
+            assert win["writes"] == 3                     # not transports
+    finally:
+        sp.storage.close()
+
+
 def test_only_a_bare_routes_load_is_its_baseline():
     """B1, unit: the predicate."""
     from fuzzlab.tools.spider import _is_bare_route

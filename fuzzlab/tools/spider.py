@@ -780,13 +780,20 @@ class LocalSpider:
         same one outside any window (P1(b): the app shell's start-up or periodic writes,
         Juice Shop's socket.io polling POST and WebSocket pings): that one is blocked
         all the same, counted ``spa_query_baseline_writes``, and does not demote the
-        seed."""
+        seed.
+
+        A realtime transport write (`spa.is_transport_url`: socket.io / engine.io, the
+        WebSocket included) is background traffic wherever it is seen (CC-CRAWL-0034):
+        whether the bare route's load happened to send one is timing (a periodic ping),
+        so it is baseline even when the recorded load saw none. Blocked all the same;
+        a transport write carrying the load's values still counts (B2)."""
         if _carries(win.get("taint", ()), url, text) or url in win.get("tainted", ()):
             # B2 (review A-S1 = B-S1): a write carrying this load's own query values
             # always counts, a baseline endpoint's included
             win["writes"] = win.get("writes", 0) + 1
             return
-        if _write_key(method, url) in win.get("baseline", ()):
+        if _write_key(method, url) in win.get("baseline", ()) or \
+                spa.is_transport_url(url):
             self.spa_counts["spa_query_baseline_writes"] += 1
             held = win.setdefault("baselined", {})
             held[url] = held.get(url, 0) + 1

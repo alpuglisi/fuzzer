@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (crawler survey options built: 1, 2, 3, 5, 6)
+- **What:** option 1 (CC-CRAWL-0034): an untainted socket.io / engine.io write in a seed's window is background traffic, so it no longer demotes the seed. It is still blocked.
+- **Why:** the owner chose options 1, 2, 3, 5 and 6 of `docs/CRAWLER_SURVEY_2026-10-16.md`. On Juice Shop, six query seeds were lost to dropped socket.io WebSocket messages.
+
 ## 2026-10-16 (crawler survey: options for the three measured discovery losses)
 - **What:** `docs/CRAWLER_SURVEY_2026-10-16.md` synthesises six agents' code reviews of katana, Crawlee, ZAP, Black Widow, Wapiti and crawlergo into a ranked list of implementation options. It also records, from the Juice Shop run log, that the 6 demoted query seeds lost to dropped socket.io WebSocket messages, not to HTTP writes.
 - **Why:** the owner asked for the survey, to review the options for viable implementation. Nothing is built yet.

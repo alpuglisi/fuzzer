@@ -3,6 +3,44 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0034 — An untainted realtime transport write never demotes a query seed (crawler survey option 1) (2026-10-16)
+- Goal / acceptance: a seed or probe window's untainted socket.io / engine.io write
+  (polling POST or WebSocket message) is a baseline write wherever it is seen, so it no
+  longer demotes the seed; a transport write carrying the load's values still counts
+  (B2); every such write stays blocked. Acceptance: the unit regression below, the
+  existing baseline suite, and the Juice Shop re-run (the 6 seeds demoted on
+  2026-10-16 are promoted or are demoted for another stated reason).
+- Change: `LocalSpider._count_query_write` (`tools/spider.py`) treats a write whose URL
+  `spa.is_transport_url` matches as baseline after the taint check. FR-CRAWL-17's P1(b)
+  is edited in place.
+- Impact (other components / consumers / project): more SPA query seeds become
+  fragment points (FUZZ imports them as before). Nothing more is sent during the crawl:
+  the window still drops the message or aborts the request.
+- Risk (class; consequence and exposure; mitigation): medium (the query window's write
+  rule, U1). Consequence if wrong: a seed whose own load causes a write through the
+  transport, with none of the load's values in it, becomes a point, and M6 later loads
+  it outside a window (the stated residual of FR-CRAWL-17 for crawled links). Exposure:
+  apps with socket.io/engine.io only. Mitigation: B2 still applies to the message text
+  and the URL.
+- Hypothesis: prediction — the Juice Shop seeds `#/search?q=` and five others are
+  promoted and the confirmed count rises above 4; ceiling 3 h; exit — the re-run's
+  funnel. Premise evidence: the 2026-10-16 juice-on crawl log: "0 request(s) blocked by
+  their window; 6 seed(s) kept as pages", 4 WebSocket drops in each demoted seed's
+  window, 75 in the run (scratch run `runs/juice-on/crawl.log`; summarised in
+  `docs/CRAWLER_SURVEY_2026-10-16.md`). Whether the pings fall outside the baseline load
+  by timing is inferred, not measured.
+- Verification / review: `tests/test_spa_query.py::test_an_untainted_transport_write_is_baseline_even_when_the_load_saw_none`
+  (socket.io WebSocket, engine.io polling, an `EIO`+`transport` query on another path,
+  a tainted message, two non-transport writes); `verify_change.py` evidence in the
+  combined entry of the survey work (CC-CRAWL-0038). Review: one combined independent
+  review of options 1, 2, 3, 5 and 6.
+- Deliverables:
+  - [x] code (`tools/spider.py`) — done
+  - [x] test — done
+  - [x] FR-CRAWL-17 P1(b) edited in place — done
+- Rollback / recovery: revert the one condition; no stored data changes shape.
+- Effectiveness: pending the Juice Shop re-run.
+
 ### CC-CRAWL-0033 — CAPTCHA forms are submitted; the crawler's destructive, transaction and credential refusals follow the send-policy switch (2026-10-15) — see CC-CORE-0062
 
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
