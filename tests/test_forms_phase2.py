@@ -162,16 +162,21 @@ def test_the_first_crawled_link_wins_for_a_shared_parameter(tmp_path):
 
 @pytest.mark.parametrize("url,refused", [
     ("http://h/app/c.php?user=bob&password_new=x", "credential"),
-    ("http://h/app/c.php?user=bob&do=purge", "destructive"),
 ])
-def test_link_sets_with_a_credential_or_destructive_entry_are_not_bound(tmp_path, url,
-                                                                        refused):
+def test_link_sets_with_a_credential_entry_are_not_bound(tmp_path, url, refused):
     pts, skipped, counts = _points(tmp_path, pages=[url])
     assert counts["link_set_refused"] == 1 and counts["link_set"] == 0
     assert all(p.base_entries is None for p in pts)              # lone points, as before
     if refused == "credential":
         assert "password_new" not in {p.param for p in pts}
         assert any(s[2] == "password_new" for s in skipped)
+
+
+def test_a_link_set_with_a_destructive_entry_is_bound_since_d72(tmp_path):
+    """D72 (owner, 2026-10-16): a link set is sent with GET probes (a visit), so a
+    destructive word in it (``do=purge``) no longer refuses it; it is bound."""
+    _pts, _skipped, counts = _points(tmp_path, pages=["http://h/app/c.php?user=bob&do=purge"])
+    assert counts["link_set_refused"] == 0 and counts["link_set"] == 1
 
 
 def _all_rows_text(store, exclude=()) -> str:
@@ -357,14 +362,16 @@ def test_one_header_point_per_crawled_2xx_page_and_name(tmp_path):
         crawl = injection_points_from_store(store, run, "http://h/app/")
         hdr = header_points_from_store(store, run, "http://h/app/", ["User-Agent", "X-Mine"],
                                        skipped=skipped)
+    # D72: a destructive-looking page (reset.php) gets its header points too, last
     assert [(p.url, p.param) for p in hdr] == [
         ("http://h/app/sub/a.php?x=1&y=2", "User-Agent"),
         ("http://h/app/sub/a.php?x=1&y=2", "X-Mine"),
-        ("http://h/app/sub/b.php", "User-Agent"), ("http://h/app/sub/b.php", "X-Mine")]
+        ("http://h/app/sub/b.php", "User-Agent"), ("http://h/app/sub/b.php", "X-Mine"),
+        ("http://h/app/sub/reset.php", "User-Agent"),
+        ("http://h/app/sub/reset.php", "X-Mine")]
     assert all(p.location == "header" and p.method == "GET" and p.origin == "crawl"
                for p in hdr)
-    assert {(s[0], s[2]) for s in skipped} == {("/app/sub/reset.php", "User-Agent"),
-                                               ("/app/sub/reset.php", "X-Mine")}
+    assert skipped == []
     assert crawl and all(p.location != "header" for p in crawl)
 
 

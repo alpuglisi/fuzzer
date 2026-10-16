@@ -560,8 +560,8 @@ def _print_summary(args, counts, result, plugins=None) -> int:
         print(f"  plugin rules left out (invalid): {m['invalid_plugin_rules']}")
     skipped = m.get("skipped_points") or []
     if skipped and m.get("points_source") == "crawl":
-        print(f"  not fuzzed ({len(skipped)} crawl point(s): destructive URL, credential, "
-              f"or stopped by a breaker; NFR-FUZZ-safe):")
+        print(f"  not fuzzed ({len(skipped)} crawl point(s): a write to a destructive URL, "
+              f"credential, or stopped by a breaker; NFR-FUZZ-safe, D72):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
     elif skipped:

@@ -76,15 +76,17 @@ def redact_sibling(name: str, raw_value: str, value: str) -> str:
     return value
 
 
-def entries_refusal(entries, *, credential_names: bool = False) -> str | None:
+def entries_refusal(entries, *, credential_names: bool = False,
+                    destructive: bool = True) -> str | None:
     """Why an entry list must never be sent as siblings, or None: any name or value
-    tokenises destructive; with ``credential_names``, any name carries a credential
+    tokenises destructive (with ``destructive``; D72: False for what is sent as a GET,
+    a link set or a GET form); with ``credential_names``, any name carries a credential
     token. The one check for forms and link sets (PA-0003)."""
     from fuzzlab.core import sendpolicy
     from fuzzlab.core.redaction import is_credential_name
     from fuzzlab.core.urls import text_destructive_reason
     for name, value in entries:
-        for text in (name, value):
+        for text in (name, value) if destructive else ():
             reason = sendpolicy.destructive(text_destructive_reason(text))   # BUG-0131
             if reason:
                 return f"destructive entry {name}={value!r} ({reason!r})"
@@ -161,7 +163,8 @@ def _write_seed_source() -> str:
 def _import_link_sets(store: Store, run_id: int, link_sets, counts: dict) -> None:
     """Each crawled link's query becomes a `form` row with ``enctype`` NULL
     (`core.forms.LINK_SET_ENCTYPE`): its values pass `redact_sibling`, and a set with a
-    destructive or credential entry is refused (not stored). A set with two or more
+    credential entry is refused (not stored; D72: a destructive word no longer refuses
+    one, it is sent with GET probes). A set with two or more
     names is bound to its parameters that no form already binds, the first crawled
     link winning; a one-name set is kept only as the page's representative query for
     header points (FR-FUZZ-43)."""
@@ -170,7 +173,10 @@ def _import_link_sets(store: Store, run_id: int, link_sets, counts: dict) -> Non
     counts.setdefault("link_set_bound", 0)
     stored_ids: dict[tuple[int, str], int] = {}
     for endpoint_id, pairs in link_sets:
-        if entries_refusal([(n, v) for n, _r, v in pairs], credential_names=True):
+        # D72: a link set is sent with GET probes (a visit): no destructive-word rule,
+        # the credential-name rule kept
+        if entries_refusal([(n, v) for n, _r, v in pairs], credential_names=True,
+                           destructive=False):
             counts["link_set_refused"] += 1
             continue
         entries = [(name, redact_sibling(name, raw, value)) for name, raw, value in pairs]
@@ -373,8 +379,8 @@ MIN_JUDGEABLE_SELECT_NAME = 3
 
 def form_skip_reason(form: dict) -> str | None:
     """Why a crawled form is never fuzzed (reported), or None. The whole form is
-    skipped when submitting it could change a credential, an account, or something
-    destructive (forms phase 1, reviewers A/B). A form with a password control is
+    skipped when submitting it could change a credential, an account, or -- a POST form
+    only since D72 -- something destructive (forms phase 1, reviewers A/B). A form with a password control is
     imported only when it is an in-app login form; its points are then probed on an
     isolated session, never the run's (FR-FUZZ-44).
 
@@ -404,10 +410,14 @@ def form_skip_reason(form: dict) -> str | None:
         return reason
     if credentials and password_fields(form) and not login_shaped(form):
         return "password form that is not a login form (settings, registration or other)"
-    reason = sendpolicy.destructive(destructive_reason(form["action_url"]))
+    # D72: a GET form is sent as a GET (a visit): no destructive-word rule on its
+    # action or entries; a POST form keeps both (a write)
+    write = (form.get("method") or "GET").upper() != "GET"
+    reason = sendpolicy.destructive(destructive_reason(form["action_url"])) if write \
+        else None
     if reason:
         return f"destructive action ({reason!r})"
-    return entries_refusal(form["entries"])
+    return entries_refusal(form["entries"], destructive=write)
 
 
 def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:

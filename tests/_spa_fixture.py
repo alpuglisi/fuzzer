@@ -548,7 +548,10 @@ function render() {
   }
   if (name === 'covered') {
     document.getElementById('ct').onclick = () => mark('card-covered');
-    document.getElementById('veil').onclick = () => mark('veil-hit');
+    // a real pointer (a coordinate click) fires pointerdown; the card's own el.click()
+  // and a click dispatched on the veil itself do not (D72: the veil, label-less, is a
+  // reveal target of its own now)
+  document.getElementById('veil').onpointerdown = () => mark('veil-hit');
   }
   if (name === 'cards') {
     for (const c of document.querySelectorAll('.product-card'))

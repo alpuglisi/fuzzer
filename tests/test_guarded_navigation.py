@@ -30,7 +30,11 @@ import pytest
 from tests.test_navigation_aborts import _chromium_or_skip, _Site
 
 FUZZLAB = Path(__file__).resolve().parent.parent / "fuzzlab"
-_HEAD_NAV = "<script>location.href = '/logout'</script>"
+#: A head script navigating where the guard refuses: another origin (port 9, nothing
+#: listens). D72: it was this site's ``/logout``, refused as destructive; a GET there is
+#: a visit now.
+_OFF = "http://127.0.0.1:9/logout"
+_HEAD_NAV = f"<script>location.href = '{_OFF}'</script>"
 _PAGE = (f"<html><head><title>A</title>{_HEAD_NAV}</head><body><p>A-OWN-CONTENT</p>"
          f"<a href='/next'>n</a></body></html>")
 #: well under the 8 s navigation timeout the tests use
@@ -83,7 +87,7 @@ def test_a_head_script_navigation_to_a_refused_url_is_not_waited_out(monkeypatch
     assert "A-OWN-CONTENT" in (rows.get(a.base) or "")       # content kept
     assert "/next" in a.requests                             # its link crawled
     assert "/logout" not in a.requests
-    assert a.base + "logout" in sp.skipped_destructive       # the refusal, recorded
+    assert sp.skipped_out_of_scope.get("127.0.0.1", 0) >= 1  # the refusal, recorded
 
 
 def test_a_slow_page_is_still_waited_for(monkeypatch, tmp_path):

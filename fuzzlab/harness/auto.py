@@ -18,6 +18,7 @@ import json
 from fuzzlab.audit import InjectionPoint, known_categories
 from fuzzlab.audit.value_shape import SAFE_HOST, neutral_value, redirect_seed, value_shape
 from fuzzlab.core.redaction import is_credential_name
+from fuzzlab.core.urls import is_read_method
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
@@ -281,7 +282,10 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         if key in seen:
             continue
         seen.add(key)
-        reason = _crawl_url_refusal(base + path)
+        # D72: a GET point is fuzzed whatever its URL's words (last: `_late`); a write
+        # point on a destructive URL is still refused here, before any send, so the run
+        # never meets `check_send_url`'s refusal mid-way (review M3)
+        reason = None if is_read_method(method) else _crawl_url_refusal(base + path)
         if reason is not None:
             if skipped is not None:
                 skipped.append((path, method, r["name"], f"destructive URL ({reason!r})"))
@@ -335,7 +339,22 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                                      base_value=(SAFE_HOST if shapes & {"ip", "hostname"}
                                                  else None),
                                      redirect_seed=redirect_seed(example)))
+    # D72: a destructive-looking point (a logout ends the session, bWAPP's reset.php
+    # drops its database) is fuzzed after every other one; stable, so the rest keep
+    # their order
+    points.sort(key=lambda p: _late(p.url))
     return points
+
+
+def _late(url: str) -> bool:
+    """D72: does ``url`` (or its SPA route) look destructive? Ordering only."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.urls import (destructive_reason, is_spa_route_fragment,
+                                   text_destructive_reason)
+    fragment = urlsplit(url or "").fragment
+    return destructive_reason(url) is not None or (
+        is_spa_route_fragment(fragment) and text_destructive_reason(fragment) is not None)
 
 
 def _path_of(url: str) -> str:
@@ -369,14 +388,12 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
     """One header point per crawled 2xx GET page and header name (forms phase 2,
     FR-FUZZ-43). The URL carries the page's representative query -- the first crawled
     link set for that path (`core.forms.first_link_set`, already redacted), its ip/host/
-    url values sent neutral -- so the page runs as on a visit. A destructive page is
-    left out and reported. ``names`` are already checked
-    (`core.http.header_point_refusal`)."""
+    url values sent neutral -- so the page runs as on a visit. *(D72:)* a destructive-
+    looking page is a GET visit like any other (its points last, `_late`). ``names``
+    are already checked (`core.http.header_point_refusal`)."""
     from urllib.parse import urlencode, urlsplit
 
-    from fuzzlab.core import sendpolicy
     from fuzzlab.core.forms import first_link_set
-    from fuzzlab.core.urls import destructive_reason
     parts = urlsplit(base_url)
     origin = f"{parts.scheme}://{parts.netloc}"
     rows = store.conn.execute(
@@ -389,18 +406,13 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
         if path in seen or not _header_page(r["status"]):
             continue
         seen.add(path)
-        reason = sendpolicy.destructive(destructive_reason(origin + path))
-        if reason is not None:
-            if skipped is not None:
-                skipped.extend((path, "GET", name, f"destructive URL ({reason!r})")
-                               for name in names)
-            continue
         query = first_link_set(store.conn, run_id, path)
         url = origin + path
         if query:
             url += "?" + urlencode([(n, _send_value(v)) for n, v in query])
         points.extend(InjectionPoint(url=url, param=name, method="GET", location="header",
                                      origin="crawl") for name in names)
+    points.sort(key=lambda p: _late(p.url))                    # D72: stable, last
     return points
 
 
@@ -412,8 +424,7 @@ def header_point_estimate(spider_db, names) -> tuple[int, int]:
     from pathlib import Path
     from urllib.parse import quote
 
-    from fuzzlab.core import sendpolicy
-    from fuzzlab.core.urls import destructive_reason, to_path
+    from fuzzlab.core.urls import to_path
     path = Path(spider_db)
     if not path.exists():
         return 0, 0
@@ -425,8 +436,6 @@ def header_point_estimate(spider_db, names) -> tuple[int, int]:
     finally:
         conn.close()
     pages = {to_path(url) for url, status in rows if _header_page(status)}
-    pages = {p for p in pages                                     # as the builder checks
-             if sendpolicy.destructive(destructive_reason(p)) is None}
     return len(pages), len(pages) * len(names) * header_point_cost()
 
 

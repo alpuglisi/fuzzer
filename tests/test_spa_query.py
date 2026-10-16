@@ -333,14 +333,16 @@ def test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path():
 @pytest.mark.parametrize("url", [
     "http://h/#/logout?x=fuzzlab",                    # destructive route
     "http://h/#/items?delete=fuzzlab",                # destructive name
-    "http://h/#/x?a=fuzzlab#/logout",                 # a second '#' hides nothing
+    "http://h/#/x?a=fuzzlab#/logout",
     "http://h/#/basket?checkout=fuzzlab",             # a transaction
     "http://h/#/profile?reset=fuzzlab",               # an account action in the fragment
     "http://h/#/x?newPassword=fuzzlab",               # a credential token in the fragment
     "http://h/logout?x=fuzzlab",                      # history mode
 ])
-def test_the_seed_gate_refuses(url):
-    assert spa.query_url_refusal(url) is not None
+def test_the_seed_gate_never_refuses_a_url_for_its_words(url):
+    """D72 (owner, 2026-10-16): a seed or probe load is a GET visit; its window still
+    holds every write the load causes (U1, B2), so no word refuses its URL."""
+    assert spa.query_url_refusal(url) is None
 
 
 def test_the_seed_gate_passes_an_ordinary_seed():
@@ -517,21 +519,24 @@ def test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points(quer
     for route, name in (("track", "id"), ("search", "q"), ("score-board", "q")):
         assert (f"/#/{route}", name, "fragment") in params, route
     c = query_crawl["sp"].spa_counts
-    # track..login, autopost, wsping, txn, hopper, and logout:bye (refused later); never
-    # ./rel
+    # track..login, autopost, wsping, txn, hopper, and logout:bye (visited, last: D72);
+    # never ./rel
     assert c["spa_query_pairs"] == 12
     assert c["spa_query_seeded"] == c["spa_query_seeded_fragment"] >= 9
 
 
 def test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again(query_crawl):
     """Y1 (review A3-S1 / B3-S1): ``#/hopper?x=`` fetches ``/api/go``, which redirects
-    to a transaction GET the window refuses: the request fails, so it is blocked for the
+    to another origin the guard refuses (a transaction GET before D72): the request
+    fails, so it is blocked for the
     window -- never queued from the load's request list, never fetched again outside
     the window (where its hop would run), never stored. Reads the first crawl's own
     requests (M10), whatever other test crawled the lab since."""
     lab, db = query_crawl["lab"], query_crawl["db"]
     first = query_crawl["first_requests"]
-    assert not any(r[1].startswith("/api/order/confirm") for r in first)
+    # the refused hop never reached any server (it is off-origin; D72: the txn seed's own
+    # transaction GET to this lab's /api/order/confirm is a visit, so only the hop's)
+    assert not any("via=go" in r[1] for r in first)
     assert len([r for r in first if r[0] == "GET" and r[1] == "/api/go"]) == 1
     assert not any("/api/go" in u for u in _pages(db))
     assert lab.base + "#/hopper?x=fuzzlab" in _pages(db)
@@ -600,17 +605,20 @@ def test_a_seeds_navigations_are_queued_never_followed_in_its_window(query_crawl
 
 def test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin(
         query_crawl):
+    """D72: the ``#/logout?bye=`` seed is visited (last), never refused for its route;
+    a redirect-ish name still gets a same-origin ``/``, never the filler, and nothing
+    leaves the origin."""
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     pages = _pages(db)
-    assert not any("logout" in u for u in pages)
-    assert lab.seen("GET", "/rest/marker/LOGOUT") == []
+    assert lab.base + "#/logout?bye=fuzzlab" in pages
+    assert lab.seen("GET", "/rest/marker/LOGOUT") != []
     assert lab.base + "#/login?redirectUrl=/" in pages      # never the filler
     assert query_crawl["other"].requests == []               # nothing left the origin
-    assert sp.spa_query_refused.get("destructive route") == 1
+    assert sp.spa_query_refused.get("destructive route") is None
     assert sp.spa_query_refused.get(spa.Q_DYNAMIC) == 1
     assert sp.spa_query_refused.get(spa.Q_SENSITIVE) == 1
     stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
-    assert stats["spa_query_refused[destructive route]"] == 1
+    assert "spa_query_refused[destructive route]" not in stats
     assert stats["spa_query_refused"] == sp.spa_counts["spa_query_refused"]
 
 
@@ -632,7 +640,8 @@ def test_the_probe_keeps_only_observed_names(query_crawl):
     c = sp.spa_counts
     # term, extra, next, and dot (from ``./rel``: a relative route names none, U7)
     assert c["spa_query_unpaired"] == 4 and c["spa_query_kept"] == 5
-    assert c["spa_query_probe_loads"] == 21                 # every rendered route once
+    # every rendered route once (D72: logout's too, 22; it was 21)
+    assert c["spa_query_probe_loads"] == 22
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
     assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
@@ -680,13 +689,13 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     from fuzzlab.tools.probesender import RequestsProbeSender
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
-    # U1: an auto-submitted POST navigation, a held WebSocket message and a transaction
-    # GET the window refused are writes too
-    for seed in ("#/poster?msg=fuzzlab", "#/autopost?go2=fuzzlab", "#/wsping?ping=fuzzlab",
-                 "#/txn?ref=fuzzlab"):
+    # U1: an auto-submitted POST navigation and a held WebSocket message are writes
+    # too; D72: a transaction GET is a visit, so ``#/txn`` is promoted
+    for seed in ("#/poster?msg=fuzzlab", "#/autopost?go2=fuzzlab", "#/wsping?ping=fuzzlab"):
         assert sources[lab.base + seed] == spa.WRITE_SEED_SOURCE, seed
     assert sources[lab.base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE     # promoted
-    assert sp.spa_counts["spa_query_write_seeds"] >= 4
+    assert sources[lab.base + "#/txn?ref=fuzzlab"] == spa.SEED_SOURCE      # D72
+    assert sp.spa_counts["spa_query_write_seeds"] >= 3
     # Y2 (review B3-S2): every window closed cleanly, so these came from real writes
     assert sp.spa_counts["spa_query_unclean_windows"] == 0
     assert dict(db_rows(db, "SELECT name, value FROM crawl_stats"))[
@@ -697,8 +706,8 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     with store, contextlib.closing(requests.Session()) as session:
         params = _params(store, run)
         assert counts["write_seed_skipped"] >= 1
-        assert not any(u in ("/#/poster", "/#/beacon", "/#/autopost", "/#/wsping",
-                             "/#/txn") for u, _n, _l in params)
+        assert not any(u in ("/#/poster", "/#/beacon", "/#/autopost", "/#/wsping")
+                       for u, _n, _l in params)
         run_auto(base_url=lab.base, store=store, run_id=run,
                  sender=RequestsProbeSender(session=session), mode="manual",
                  selected_categories=["xss"], points_source="crawl",
@@ -711,7 +720,7 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     assert not any(m.startswith("ping-") for m in lab.ws_messages)
     # the window's refusals are never queued from the load's request list and fetched
     # outside it (found by this test in review round 2)
-    assert lab.seen("GET", "/api/order/confirm") == [] and lab.seen("GET", "/api/send") == []
+    assert lab.seen("GET", "/api/send") == []
     assert lab.seen("GET", "/api/autopost") == []
 
 
@@ -877,13 +886,15 @@ def test_a_held_websocket_message_is_a_write(tmp_path):
 @pytest.mark.parametrize("method,url,navigation,write", [
     ("POST", "http://127.0.0.1:9/api/autopost", True, True),     # a form's POST nav
     ("POST", "http://127.0.0.1:9/api/x", False, True),
-    ("GET", "http://127.0.0.1:9/api/order/confirm", False, True),  # a word rule
     ("GET", "http://127.0.0.1:9/other", True, False),            # a navigation, queued
-    # P2 (review B-S2): a navigation (or redirect hop) to a word-refused GET is a write,
-    # never queued
-    ("GET", "http://127.0.0.1:9/api/order/confirm?via=hop", True, True),
+    # D72: P2 is superseded -- a navigation to a transaction GET is queued like any GET
+    # navigation, not counted as a write
+    ("GET", "http://127.0.0.1:9/api/order/confirm?via=hop", True, False),
 ])
 def test_what_a_query_window_counts_as_a_write(tmp_path, method, url, navigation, write):
+    """U1 (D72: the window refuses a GET only as a navigation, so a non-navigation GET
+    such as ``/api/order/confirm`` is no longer refused nor a write: see
+    `test_a_transaction_get_in_a_query_window_is_a_visit_not_a_write`)."""
     sp = _requests_spider(tmp_path)
     try:
         ctx = object()
@@ -895,6 +906,21 @@ def test_what_a_query_window_counts_as_a_write(tmp_path, method, url, navigation
         assert sp._win["navs"] == ([url] if navigation and method == "GET" and not write
                                    else [])
         assert url in sp._win["blocked"]          # never queued from the request list
+    finally:
+        sp.storage.close()
+
+
+def test_a_transaction_get_in_a_query_window_is_a_visit_not_a_write(tmp_path):
+    """D72: a non-navigation GET with a transaction word goes through the query window:
+    not refused, not a write, not blocked."""
+    sp = _requests_spider(tmp_path)
+    try:
+        ctx = object()
+        sp._win = {"context": ctx, "lifted_for": None, "own_nav": frozenset(),
+                   "aborted": 0, "navs": [], "query": spa.SEED_SOURCE}
+        assert sp._window_refusal("GET", "http://127.0.0.1:9/api/order/confirm", False,
+                                  context=ctx) is None
+        assert not sp._win.get("writes") and not sp._win.get("blocked")
     finally:
         sp.storage.close()
 
@@ -1468,8 +1494,9 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     windows = {w["url"]: w for w in seen}
     for url in (base + "goaway?x=fuzzlab", base + "next1?y=fuzzlab",
                 base + "late1?z=fuzzlab"):
-        # P2: the goaway seed's one write is its refused transaction hop
-        assert windows[url]["writes"] == (1 if "goaway" in url else 0), url
+        # D72: the goaway seed's hop is refused for its origin (scope, before the
+        # window), so it is no write; the seed is a write seed for its failed visit
+        assert not windows[url]["writes"], url
         assert not [u for u in windows[url]["blocked"] | set(windows[url]["xhr"])
                     if "/api/tick" in u or u.endswith(("/rest/marker/_", "_goaway",
                                                        "_next1", "_late1"))], url
@@ -1578,8 +1605,8 @@ def test_the_baseline_is_what_a_load_outside_a_window_would_have_written(tmp_pat
         sp._on_request(req("GET", "http://127.0.0.1:9/rest/products"))
         sp._on_request(req("GET", "http://127.0.0.1:9/next", navigation=True))
         sp._note_ws_send("ws://127.0.0.1:9/socket.io/?EIO=4&transport=websocket")
-        assert sp._load_writes == {("POST", "/socket.io/"), ("GET", "/api/order/confirm"),
-                                   ("WS", "/socket.io/")}
+        # D72: a transaction GET is a visit, never a write the window would count
+        assert sp._load_writes == {("POST", "/socket.io/"), ("WS", "/socket.io/")}
         sp._recording = False
         sp._note_ws_send("ws://127.0.0.1:9/other")
         assert ("WS", "/other") not in sp._load_writes
@@ -1639,7 +1666,7 @@ def test_the_guards_url_log_lines_never_carry_a_probe_marker(caplog):
     caplog.set_level(logging.INFO)
     marker = spa.mint_markers(1)[0]
     handler = make_route_handler(in_scope=lambda u: True)
-    route = _Route(f"http://h/logout/{marker}")
+    route = _Route(f"http://h/logout/{marker}", method="POST")   # D72: a write
     handler(route)
     assert route.outcome == "abort"
     handler = make_route_handler(in_scope=lambda u: True,
@@ -1834,7 +1861,8 @@ def test_only_a_bare_routes_load_is_its_baseline():
 # =====================================================================================
 def test_a_query_load_whose_bare_route_did_not_load_is_refused(monkeypatch, tmp_path):
     """S3 (BUG-0138 merge), real Chromium, `HeadNavSpa`: the shell's head script
-    navigates to ``/logout.php`` on every load; the guard refuses it, so the bare
+    navigates to another origin on every load (``/logout.php`` before D72); the guard
+    refuses it, so the bare
     route's load never completes. The ``#/track?id=`` seed is refused ("bare route did
     not load", counted) and its window never entered: no seed is promoted, none stored."""
     from tests._spa_query_fixture import HeadNavSpa
@@ -1849,7 +1877,7 @@ def test_a_query_load_whose_bare_route_did_not_load_is_refused(monkeypatch, tmp_
     finally:
         lab.close()
     db = str(tmp_path / "s.db")
-    assert lab.seen("GET", "/logout.php") == []                 # the guard refused it
+    assert sp.skipped_out_of_scope.get("127.0.0.1", 0) >= 1      # the guard refused it
     assert sp.spa_counts["spa_query_pairs"] == 1                 # the seed was planned
     assert sp.spa_query_refused.get("bare route did not load", 0) >= 1
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))

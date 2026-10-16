@@ -175,7 +175,8 @@ def classify_route(path: str, *, strict: bool = False) -> tuple[str, str | None]
     (`core.urls.destructive_reason` on the route path), the root, a socket.io /
     engine.io transport path (socket.io's own ``{path:'/socket.io'}`` option,
     `is_transport_url`), or not a route (a protocol-relative ``//host`` value and a
-    relative ``.`` / ``..`` segment included, FR-CRAWL-17 review A-S2)."""
+    relative ``.`` / ``..`` segment included, FR-CRAWL-17 review A-S2). *(D72:)*
+    destructive only with ``strict`` (the login flow); a crawl's routes never are."""
     if (path or "").lstrip("#!").startswith("//"):
         return ROUTE_INVALID, None
     route = normalise_route(path)
@@ -188,9 +189,11 @@ def classify_route(path: str, *, strict: bool = False) -> tuple[str, str | None]
         return ROUTE_TRANSPORT, None
     if "*" in route or any(seg.startswith(":") for seg in route.split("/")):
         return ROUTE_PARAM, route
+    if not strict:
+        # D72: a crawl visits a destructive-looking route (last, `_deferrable`); only
+        # the login flow's choice of a route (``strict``) still refuses one
+        return ROUTE_OK, None
     reason = destructive_reason("/" + route)
-    if not strict:                     # D71; the login flow's route choice passes strict
-        reason = sendpolicy.destructive(reason)
     if reason:
         return ROUTE_DESTRUCTIVE, reason
     return ROUTE_OK, None
@@ -791,21 +794,11 @@ def label_refusal(text: str | None) -> str | None:
 
 
 def reveal_refusal(labels) -> str | None:
-    """Why a reveal candidate or a revealed menu item is never clicked, or None (G2d):
-    any `DESTRUCTIVE_GLYPHS` glyph (``exit_to_app`` included: no text-first rule for a
-    reveal), no label at all, or a text / aria-label that fails `label_refusal`.
-    ``labels`` is ``[text, aria, icons]`` (`LABELS_JS`)."""
-    text, aria, icons = (list(labels or []) + ["", "", ""])[:3]
-    glyph = sendpolicy.destructive(
-        next((g for g in (icons or "").lower().split() if g in DESTRUCTIVE_GLYPHS), None))
-    if glyph:
-        return f"destructive icon ({glyph!r})"
-    if not ((text or "").strip() or (aria or "").strip()):
-        return "no label to judge"
-    for where, value in (("text", text), ("aria-label", aria)):
-        why = label_refusal(value)
-        if why:
-            return f"{where} {why}"
+    """Why a reveal candidate or a revealed menu item is never clicked: never, since D72
+    (G2d superseded). A reveal click is a visit: the reveal window (W1-W3) still holds
+    every write it causes -- any method but GET/HEAD, a navigation (queued instead), a
+    WebSocket message -- so no label, glyph or word is judged any more. Kept as the one
+    place a reveal is gated, so a later rule has one home (PA-0003)."""
     return None
 
 
@@ -1044,43 +1037,15 @@ def checkbox_refusal(label: str | None) -> str | None:
 # --- W2: what the reveal window lets through ----------------------------------------------
 def window_request_refusal(method: str, url: str, navigation: bool) -> str | None:
     """Why a request is aborted while the reveal window is open (W2), or None: every
-    navigation (its target is queued through the normal gates instead); every method but
-    GET and HEAD, whatever its destination; and a GET or HEAD that is destructive (also
-    by its SPA fragment), a transaction (`core.urls.transaction_reason`), or carries an
-    explicit account-**action** token (`browserlogin.ACCOUNT_PATH_TOKENS`: register,
-    signup, password, reset, change …, or ``sign up``) or a credential token in its path
-    or query (whole tokens). Not the users / accounts collection rule: the app's own
-    identity check (Juice Shop's ``/rest/user/whoami``) must pass, or the app may log
-    itself out (review A-S3). Residual: an opaque GET with a side effect and none of
-    these words."""
-    from urllib.parse import unquote_plus
-
-    from fuzzlab.core.redaction import CREDENTIAL_TOKENS
-    from fuzzlab.session.browserlogin import ACCOUNT_PATH_TOKENS
+    navigation (its target is queued through the normal gates instead), and every method
+    but GET and HEAD, whatever its destination. *(D72:)* a GET or HEAD that is not a
+    navigation goes through whatever its words: the destructive, transaction, account-
+    action and credential-token GET rules of W2 are superseded."""
     if navigation:
         return "a navigation (its target is queued instead)"
     method = (method or "").upper()
     if method not in ("GET", "HEAD"):
         return f"a {method or '(no method)'} request"
-    reason = sendpolicy.destructive(route_destructive_reason(url))
-    if reason:
-        return f"a destructive GET ({reason!r})"
-    reason = sendpolicy.transaction(transaction_reason(url))
-    if reason:
-        return f"a transaction GET ({reason!r})"
-    parts = urlsplit(url or "")
-    names = [unquote_plus(p.partition("=")[0]) for p in parts.query.split("&") if p]
-    toks = {t.lower() for n in [unquote_plus(parts.path), *names] for t in name_tokens(n)}
-    hit = toks & CREDENTIAL_TOKENS
-    if hit and sendpolicy.enforced(sendpolicy.CREDENTIAL_CHANGES):
-        return f"a credential token in a GET ({sorted(hit)[0]!r})"
-    text = unquote_plus(parts.path) + " " + unquote_plus(parts.query)
-    words = [t.lower() for t in name_tokens(text)]
-    word = next((t for t in words if t in ACCOUNT_PATH_TOKENS), None) or (
-        "sign up" if ("sign", "up") in set(zip(words, words[1:])) else None)
-    word = sendpolicy.credential_change(word)
-    if word:
-        return f"an account action in a GET ({word!r})"
     return None
 
 
@@ -2014,20 +1979,10 @@ def seed_url(route_url: str, names) -> str:
 
 
 def query_url_refusal(url: str) -> str | None:
-    """Why a seed or probe URL is never loaded (FR-CRAWL-17, Q3; A-M1), or None: the
-    destructive rule on the URL and its route fragment (`route_destructive_reason`),
-    then the reveal window's own rule (`window_request_refusal` as a GET, not a
-    navigation) on the URL and on its route fragment's path and query, which a hash URL
-    hides from that rule."""
-    reason = sendpolicy.destructive(route_destructive_reason(url))
-    if reason:
-        return f"destructive ({reason!r})"
-    why = window_request_refusal("GET", url, False)
-    frag = spa_fragment(url)
-    if why is None and frag is not None:
-        routed = urljoin(url.split("#", 1)[0], "/" + frag.lstrip("!/"))
-        why = window_request_refusal("GET", routed, False)
-    return why
+    """Why a seed or probe URL is never loaded (FR-CRAWL-17, Q3; A-M1), or None. *(D72:)*
+    never for its words: a seed or probe load is a GET visit, and its window still holds
+    every write the load causes (U1, B2). Kept as the one gate for a query load's URL."""
+    return None
 
 
 def filler_in_path(url: str) -> bool:

@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-16 (D72: the page-visit word rules are to be removed)
+- **What (built, CC-CRAWL-0042):** no GET or HEAD visit is refused for its words any more, in the crawler, auditor, importer or fuzzer. Destructive-looking pages are visited and fuzzed last. Writes, DELETE, the login flow's strict rules and scope are unchanged. About 90 tests that encoded the old rules were rewritten, and the mechanism tests now use an off-origin target.
 - **What:** the owner's decision D72 is recorded in `docs/DECISIONS_AND_ROADMAP.md`. The destructive, transaction, account and settings word rules on what is visited or clicked by GET go, in the crawler, auditor, importer and fuzzer. The write rules, DELETE refusal, the login flow's strict rules and scope stay. The implementation follows an independent design review.
 - **Why:** the owner judged that a GET visit causes no real damage, and the rules cost coverage.
 

@@ -124,10 +124,10 @@ function render() {
     if (p.get('ping')) { const ws = new WebSocket('ws://' + location.host + '/ws');
       ws.onopen = () => ws.send('ping-' + p.get('ping')); } }
   else if (name === 'txn') { text('txn');
-    // a transaction GET the window's word rules refuse (U1)
+    // a transaction GET: refused by the window's word rules until D72; now a visit
     if (p.get('ref')) fetch('/api/order/confirm?ref=' + p.get('ref')).catch(() => {}); }
   else if (name === 'hopper') { text('hopper');
-    // a GET whose redirect hop is a transaction GET the window refuses (Y1)
+    // a GET whose redirect hop the guard refuses: another origin (Y1)
     if (p.get('x')) fetch('/api/go').catch(() => {}); }
   else if (name === 'logout') mark('LOGOUT');
   else text(name || 'home');
@@ -141,10 +141,15 @@ _QUERY_INDEX = _HASH_INDEX.replace("/main.js", "/q.js").replace(
     "<a href='#/search?q=fuzzlab'>Search</a> <a href='#/search?q=hello'>Hello</a>")
 
 
+#: A target the guard still refuses since D72: another origin (port 9, nothing listens).
+OFF_ORIGIN = "http://127.0.0.1:9/api/order/confirm"
+
+
 def _go(handler):
-    """``/api/go``: a redirect to a transaction GET (Y1)."""
+    """``/api/go``: a redirect to another origin, a hop the guard refuses (Y1; it was a
+    transaction GET before D72 removed the window's GET word rules)."""
     handler.send_response(302)
-    handler.send_header("Location", "/api/order/confirm?via=go")
+    handler.send_header("Location", OFF_ORIGIN + "?via=go")
     handler.send_header("Content-Length", "0")
     handler.end_headers()
 
@@ -268,11 +273,12 @@ _REDIRECT_SEED_INDEX = ("<!doctype html><html><head><title>redir</title><base hr
 
 
 def _goaway(handler):
-    """``/goaway?x=``: the seed's own document redirects to a transaction GET, a hop
-    the window refuses (M4, M7); a bare ``/goaway`` is the app shell."""
+    """``/goaway?x=``: the seed's own document redirects to another origin, a hop the
+    guard refuses (M4, M7; a transaction GET before D72); a bare ``/goaway`` is the app
+    shell."""
     if "x=" in handler.path:
         handler.send_response(302)
-        handler.send_header("Location", "/api/order/confirm?via=hop")
+        handler.send_header("Location", OFF_ORIGIN + "?via=hop")
         handler.send_header("Content-Length", "0")
         handler.end_headers()
         return
@@ -366,11 +372,12 @@ class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}})}}
 
 
 class HeadNavSpa(_Lab):
-    """A hash app whose shell's head script navigates to ``/logout.php`` on every load
-    (S3, BUG-0138 merge): the guard refuses it, so no load of the app completes -- a
-    seed's bare route never loads, and the seed is refused, never entered."""
+    """A hash app whose shell's head script navigates to another origin on every load
+    (S3, BUG-0138 merge; ``/logout.php`` before D72): the guard refuses it, so no load
+    of the app completes -- a seed's bare route never loads, and the seed is refused,
+    never entered."""
     index = ("<!doctype html><html><head><title>headnav</title>"
              "<script src='/hn.js'></script>"
-             "<script>location.href = '/logout.php';</script></head>"
+             "<script>location.href = 'http://127.0.0.1:9/away';</script></head>"
              "<body><a href='#/track'>track</a><div id='app'></div></body></html>")
     script = ("/hn.js", _HEAD_NAV_JS)

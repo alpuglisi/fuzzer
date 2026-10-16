@@ -57,6 +57,18 @@ def test_harmless_urls_are_not(url):
     assert destructive_reason(url) is None
 
 
+def test_the_send_gate_refuses_a_write_or_an_unknown_method_never_a_visit():
+    """D72: a GET or HEAD send is never refused for its URL's words; a write (POST,
+    PUT) and a send that does not say its method still are; DELETE always is."""
+    check_send_url("http://127.0.0.1:8080/logout.php", method="GET")
+    check_send_url("http://127.0.0.1:8080/reset.php", method="HEAD")
+    for method in ("POST", "PUT", None):
+        with pytest.raises(DestructiveUrlRefused):
+            check_send_url("http://127.0.0.1:8080/logout.php", method=method)
+    with pytest.raises(DestructiveUrlRefused):
+        check_send_url("http://127.0.0.1:8080/items.php", method="DELETE")
+
+
 def test_the_send_gate_refuses_unless_explicit_and_keys_canonically():
     with pytest.raises(DestructiveUrlRefused):
         check_send_url("http://127.0.0.1:8080/logout.php")
@@ -88,7 +100,11 @@ class _SiteSession:
         return self.pages.get(url, _Resp(404))
 
 
-def test_static_crawl_never_fetches_a_destructive_link_or_redirect(tmp_path):
+def test_static_crawl_fetches_a_destructive_link_or_redirect_last(tmp_path):
+    """D72 (owner, 2026-10-16): a GET visit is never refused for its words; a
+    destructive-looking link is crawled after every other page (`_deferrable`), so a
+    logout or bWAPP's reset.php cannot end the crawl early. A redirect hop to one is
+    followed (a GET)."""
     from fuzzlab.tools.spider import LocalSpider
     base = "http://127.0.0.1:8090/bWAPP/"
     session = _SiteSession({
@@ -101,15 +117,15 @@ def test_static_crawl_never_fetches_a_destructive_link_or_redirect(tmp_path):
                          engine="requests")
     spider.session = session
     spider.crawl()
-    assert base + "reset.php" not in session.requested
-    assert base + "logout.php" not in session.requested
-    assert base + "x.php?act=del" not in session.requested
-    assert base + "a.php" in session.requested and base + "b.php" in session.requested
-    assert set(spider.skipped_destructive) == {base + "reset.php", base + "logout.php",
-                                               base + "x.php?act=del"}
-    rows = {r[0] for r in sqlite3.connect(tmp_path / "s.db").execute(
-        "SELECT url FROM discovered_pages")}
-    assert not any(destructive_reason(u) for u in rows)
+    got = session.requested
+    for url in (base + "reset.php", base + "x.php?act=del", base + "logout.php"):
+        assert url in got, url
+    # the deferred links come after every other link (the redirect hop to logout.php is
+    # followed when b.php is fetched)
+    assert max(got.index(base + "a.php"), got.index(base + "b.php")) < \
+        min(got.index(base + "reset.php"), got.index(base + "x.php?act=del"))
+    assert spider.skipped_destructive == {}
+    assert spider.spa_counts["pages_deferred"] == 2
 
 
 def test_the_start_url_is_the_operators_own_and_is_fetched(tmp_path):
@@ -120,17 +136,16 @@ def test_the_start_url_is_the_operators_own_and_is_fetched(tmp_path):
     spider.session = session
     spider.crawl()
     assert session.requested == [start]
-    # ...and stays allowed for the browser route and redirect hops (one rule):
-    assert spider._destructive(start) is None
-    assert spider._destructive("http://127.0.0.1:8090/reset.php") == "reset"
+    # ...and is never deferred, though its own words look destructive (D72: ordering)
+    assert spider._deferrable(start) is False
+    assert spider._deferrable("http://127.0.0.1:8090/reset.php") is True
 
 
 class _Route:
     """A fake Playwright route whose fetch answers 200: an allowed request is fetched
     by the guard and fulfilled (BUG-0123), shown here as "continue"."""
-    def __init__(self, url):
+    def __init__(self, url, method="GET"):
         class Req:
-            method = "GET"
             headers: dict = {}
             post_data_buffer = None
 
@@ -138,6 +153,8 @@ class _Route:
                 return False
         self.request = Req()
         self.request.url = url
+        self.request.method = method
+        self.request.post_data_buffer = b"x=1" if method != "GET" else None
         self.outcome = None
 
     def fetch(self, max_redirects=None):
@@ -154,17 +171,25 @@ class _Route:
         self.outcome = "continue"
 
 
-def test_the_browser_route_aborts_destructive_requests_only():
+def test_the_browser_route_aborts_destructive_writes_only():
+    """D72: a GET to a destructive URL goes through; a write to one is aborted (unless
+    it is the operator's own URL); the login flow's ``strict`` guard aborts both."""
     aborted = []
     handler = make_route_handler(frozenset({url_key("http://h/setup.php")}),
                                  on_abort=lambda u, r: aborted.append(u),
                                  in_scope=lambda u: True)
-    for url, outcome in [("http://h/logout.php", "abort"), ("http://h/a.php", "continue"),
-                         ("http://h/setup.php", "continue")]:
-        route = _Route(url)
+    for url, method, outcome in [("http://h/logout.php", "GET", "continue"),
+                                 ("http://h/logout.php", "POST", "abort"),
+                                 ("http://h/a.php", "POST", "continue"),
+                                 ("http://h/setup.php", "POST", "continue")]:
+        route = _Route(url, method)
         handler(route)
-        assert route.outcome == outcome
+        assert route.outcome == outcome, (url, method)
     assert aborted == ["http://h/logout.php"]
+    strict = make_route_handler(in_scope=lambda u: True, strict=True)
+    route = _Route("http://h/logout.php")
+    strict(route)
+    assert route.outcome == "abort"
 
 
 class _LoggingHandler(BaseHTTPRequestHandler):
@@ -203,8 +228,9 @@ def _chromium_or_skip(monkeypatch):
         monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", exe[0])
 
 
-def test_rendered_crawl_sends_no_destructive_request_at_all(tmp_path, monkeypatch):
-    """Subresources and script fetches are aborted in the browser, not just unqueued."""
+def test_rendered_crawl_visits_destructive_links_and_subresources(tmp_path, monkeypatch):
+    """D72: a destructive-looking link, ``<img>`` and script GET fetch are sent like any
+    other GET (writes are covered by the route test above)."""
     _chromium_or_skip(monkeypatch)
     from fuzzlab.tools import spider as spider_mod
     server = _loopback_site()
@@ -224,11 +250,11 @@ def test_rendered_crawl_sends_no_destructive_request_at_all(tmp_path, monkeypatc
         server.shutdown()
     seen = set(_LoggingHandler.seen)
     assert "/" in seen and "/ok.php" in seen                  # the crawl did run
-    assert not seen & {"/delete.php", "/logout.php", "/reset.php"}
+    assert {"/delete.php", "/logout.php", "/reset.php"} <= seen
 
 
 # --- auditor ---------------------------------------------------------------------
-def test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db(tmp_path):
+def test_the_auditor_refetches_a_destructive_url_last(tmp_path):
     from fuzzlab.tools.fetcher import load_urls
     db = tmp_path / "old.db"
     con = sqlite3.connect(db)
@@ -238,15 +264,22 @@ def test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db(tmp
                      ("http://h/logout.php", 1, "link")])
     con.commit()
     con.close()
-    assert load_urls(str(db)) == [("http://h/a.php", "link")]
+    assert load_urls(str(db)) == [("http://h/a.php", "link"), ("http://h/reset.php", "link"),
+                                  ("http://h/logout.php", "link")]          # D72: last
 
 
-def test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one():
+def test_the_auditors_static_fetch_follows_a_redirect_to_one():
+    """D72: a redirect hop is a GET visit; the same-origin rule still holds."""
     from fuzzlab.tools.fetcher import ContentFetcher
     fetcher = ContentFetcher(engine="requests")
-    fetcher.session = _SiteSession({"http://h/a.php": _Resp(302, location="/reset.php")})
-    status, _ct, _html, _xhr = fetcher.fetch("http://h/a.php")
-    assert status == 302 and fetcher.session.requested == ["http://h/a.php"]
+    fetcher.session = _SiteSession({"http://h/a.php": _Resp(302, location="/reset.php"),
+                                    "http://h/b.php": _Resp(302,
+                                                            location="http://x/reset.php")})
+    fetcher.fetch("http://h/a.php")
+    assert fetcher.session.requested == ["http://h/a.php", "http://h/reset.php"]
+    fetcher.session.requested.clear()
+    fetcher.fetch("http://h/b.php")
+    assert fetcher.session.requested == ["http://h/b.php"]       # another origin: never
 
 
 # --- probe senders ---------------------------------------------------------------
@@ -270,15 +303,20 @@ class _CountingSession:
         return R()
 
 
-def test_requests_probe_sender_refuses_a_destructive_url_and_sends_nothing():
+def test_requests_probe_sender_refuses_a_destructive_write_and_sends_nothing():
+    """D72: a GET probe to a destructive URL is sent; a POST to one is refused, unless
+    the operator enumerated it."""
     session = _CountingSession()
     sender = RequestsProbeSender(session=session)
-    with pytest.raises(DestructiveUrlRefused):
-        sender.send("http://localhost/logout.php", "x", "1")
-    assert session.calls == 0
-    sender.allow_explicit(["http://localhost/logout.php"])
-    sender.send("http://localhost/logout.php", "x", "1")
+    sender.send("http://localhost/logout.php", "x", "1")                 # a GET
     assert session.calls == 1
+    with pytest.raises(DestructiveUrlRefused):
+        sender.send("http://localhost/logout.php", "x", "1", method="POST",
+                    location="body")
+    assert session.calls == 1
+    sender.allow_explicit(["http://localhost/logout.php"])
+    sender.send("http://localhost/logout.php", "x", "1", method="POST", location="body")
+    assert session.calls == 2
 
 
 def test_requests_probe_sender_keeps_no_cookie_between_probes():
@@ -346,8 +384,9 @@ def test_greybox_sender_gates_drops_the_cookie_on_auth_endpoints_and_clears_the_
                                        is_auth_endpoint=lambda u: u.endswith("/login.php"))
     sender.send_correlated("http://h/login.php", "u", "x")
     sender.send_correlated("http://h/a.php", "id", "1")
-    with pytest.raises(DestructiveUrlRefused):
-        sender.send_correlated("http://h/logout.php", "x", "1")
+    with pytest.raises(DestructiveUrlRefused):                     # a write (D72)
+        sender.send_correlated("http://h/logout.php", "x", "1", method="POST",
+                               location="body")
     (_u1, h1, jar1), (_u2, h2, jar2) = sent
     assert "Cookie" not in h1 and h2["Cookie"] == "PHPSESSID=s"
     assert jar2 == {}                                      # nothing carried over
@@ -369,9 +408,9 @@ def test_blind_sqli_senders_gate_but_allow_the_operators_own_url():
             return R()
     sender = RequestsSender(S(), explicit=_explicit_url("http://h/delete.php"))
     sender.get("http://h/delete.php", "id", "1", 5)
-    with pytest.raises(DestructiveUrlRefused):
-        RequestsSender(S()).get("http://h/delete.php", "id", "1", 5)
-    assert S.calls == 1
+    # D72: these senders only GET, and now say so: a destructive URL is a visit
+    RequestsSender(S()).get("http://h/delete.php", "id", "1", 5)
+    assert S.calls == 2
 
 
 # --- point selection ---------------------------------------------------------------
@@ -395,7 +434,9 @@ class _Recorder:
         return Probe(200, "ok")
 
 
-def test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it(tmp_path):
+def test_crawl_sourced_runs_fuzz_a_destructive_get_point_last(tmp_path):
+    """D72: a GET crawl point on a destructive URL is fuzzed, after every other point
+    (`auto._late`); nothing is skipped for its words."""
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")
         _seed(store, run_id, [("/a.php", "id"), ("/logout.php", "x"), ("/reset.php", "y")])
@@ -403,20 +444,23 @@ def test_crawl_sourced_runs_never_fuzz_a_destructive_url_and_report_it(tmp_path)
         result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
                           sender=sender, mode="manual", selected_categories=["sql-injection"],
                           points_source="crawl")
-    assert sender.urls and all(u.startswith("http://localhost/a.php") for u in sender.urls)
-    skipped = {(path, param) for path, _m, param, _r in result.metrics["skipped_points"]}
-    assert skipped == {("/logout.php", "x"), ("/reset.php", "y")}
+    order = [u.split("?")[0] for u in sender.urls]
+    assert {"http://localhost/a.php", "http://localhost/logout.php",
+            "http://localhost/reset.php"} <= set(order)
+    assert order.index("http://localhost/logout.php") > \
+        max(i for i, u in enumerate(order) if u == "http://localhost/a.php")
+    assert not result.metrics["skipped_points"]
 
 
-def test_greybox_crawl_points_are_filtered_too(tmp_path):
+def test_greybox_crawl_points_keep_a_destructive_get_point_last(tmp_path):
     from fuzzlab.greybox.run import points_from_store
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("greybox", "h")
         _seed(store, run_id, [("/a.php", "id"), ("/delete.php", "x")])
         skipped = []
         points = points_from_store(store, run_id, "http://localhost", skipped=skipped)
-    assert [p.url for p in points] == ["http://localhost/a.php"]
-    assert [s[0] for s in skipped] == ["/delete.php"]
+    assert [p.url for p in points] == ["http://localhost/a.php", "http://localhost/delete.php"]
+    assert skipped == []
 
 
 def test_ground_truth_runs_mark_their_points_explicit(tmp_path):
@@ -511,7 +555,7 @@ def test_the_sender_guard_catches_a_synthetic_offender(tmp_path):
     assert _sender_offenders(tmp_path) == ["rogue.py:Rogue.send"]
 
 
-def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(monkeypatch):
+def test_the_m6_browser_aborts_destructive_writes_but_loads_its_targets(monkeypatch):
     """`browserexec` runs only on-host (its Chromium is the pinned bundled build), so its
     wiring is checked with a fake Playwright: the context is guarded, the observe and
     store URLs are the explicit allowance, anything else destructive is aborted."""
@@ -584,10 +628,14 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
     (pattern, handler), = routes
     assert pattern == "**/*"
     outcomes = {}
-    for url in ("http://h/comments/delete.php?q=x", "http://h/logout.php",
-                "http://h/app.js"):
-        route = _Route(url)
+    for url, method in (("http://h/comments/delete.php?q=x", "GET"),
+                        ("http://h/logout.php", "GET"), ("http://h/logout.php", "POST"),
+                        ("http://h/app.js", "GET")):
+        route = _Route(url, method)
         handler(route)
-        outcomes[url] = route.outcome
-    assert outcomes == {"http://h/comments/delete.php?q=x": "continue",
-                        "http://h/logout.php": "abort", "http://h/app.js": "continue"}
+        outcomes[(url, method)] = route.outcome
+    # D72: a destructive GET subresource goes through; a write to one is aborted
+    assert outcomes == {("http://h/comments/delete.php?q=x", "GET"): "continue",
+                        ("http://h/logout.php", "GET"): "continue",
+                        ("http://h/logout.php", "POST"): "abort",
+                        ("http://h/app.js", "GET"): "continue"}

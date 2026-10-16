@@ -542,6 +542,11 @@ chose **"Page-visit rules"**, and for the importer and fuzzer **"Yes, same chang
   - bWAPP's `reset.php` (`DROP DATABASE` on GET) and `logout.php` will be visited;
     reset the lab between crawl and fuzz.
   - A crawl that visits a logout page continues without its session.
+  - A page whose script navigates to a destructive-looking page is read as the page it
+    landed on. Seeds whose load makes a transaction GET become points, and M6 replays
+    that GET.
+  - Built in CC-CRAWL-0042: destructive-looking pages are visited and fuzzed **last**,
+    never skipped.
 
 ### Deferred decisions (revisit at the noted point)
 

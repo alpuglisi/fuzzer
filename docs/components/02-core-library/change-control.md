@@ -3,6 +3,8 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0064 — `core.urls.is_read_method`; `check_send_url` refuses a destructive URL only for a write or an unstated method (D72) (2026-10-16) — see CC-CRAWL-0042
+
 ### CC-CORE-0063 — `core.redaction.redact_captured_headers`: the one boundary for a captured request's headers (2026-10-16) — see CC-CRAWL-0037
 
 ### CC-CORE-0062 — One switch for three send rules; the CAPTCHA rule dropped (2026-10-15)

@@ -104,7 +104,8 @@ _LOOP = {f"{H}/r{i}": _Resp(302, f"{H}/r{i + 1}") for i in range(10)}
 #: reason -> (url, handler keywords, route keywords): every abort branch of the handler
 REASONS = {
     "out of scope": (f"http://127.0.0.1:3000/x", {}, {}),
-    "destructive": (f"{H}/logout.php", {}, {}),
+    # D72: a destructive URL is refused for a write only (a GET goes through)
+    "destructive": (f"{H}/logout.php", {}, {"method": "POST"}),
     "method refused": (f"{H}/item", {"method_refusal": lambda m, u: "DELETE"},
                        {"method": "DELETE"}),
     "body refused": (f"{H}/login", {"request_refusal": lambda m, u, h, b: "password"},
@@ -115,8 +116,9 @@ REASONS = {
                           "cookie_scope": lambda u: in_origin_scope(u, _SESSION)}, {}),
     "hop out of scope": (f"{H}/go", {}, {"site": {f"{H}/go": _Resp(302,
                                                                   "http://x.example/")}}),
-    "hop destructive": (f"{H}/go", {}, {"site": {f"{H}/go": _Resp(302,
-                                                                  "/logout.php")}}),
+    # a 307 keeps the POST, so the hop is a write to a destructive URL (D72)
+    "hop destructive": (f"{H}/go", {}, {"method": "POST",
+                                        "site": {f"{H}/go": _Resp(307, "/logout.php")}}),
     "hop withheld": (f"{H}/go", {"in_scope": lambda u: "127.0.0.1" in u,
                                  "cookie_scope": lambda u: in_origin_scope(u, _SESSION)},
                      {"site": {f"{H}/go": _Resp(302, "http://127.0.0.1:3000/land")}}),
@@ -268,16 +270,17 @@ def test_a_script_navigation_out_of_scope_keeps_the_page_crawled(monkeypatch, tm
     assert sp.skipped_out_of_scope.get("127.0.0.1", 0) >= 1    # the reason, recorded
 
 
-def test_a_script_navigation_to_a_destructive_url_keeps_the_page_crawled(monkeypatch,
-                                                                       tmp_path):
-    """The destructive rule (BUG-0111) refuses it; the page keeps its content and
-    links, and the refusal is still recorded."""
+def test_a_script_navigation_to_a_destructive_url_is_a_visit(monkeypatch, tmp_path):
+    """D72 (owner, 2026-10-16): a page's script navigation to a destructive-looking GET
+    is not refused (it was, BUG-0111): the navigation's target is requested, and --
+    like any same-origin script navigation -- the crawl reads the page it landed on, so
+    the start page's row holds the landed page's text (a stated consequence of D72);
+    nothing is recorded as refused."""
     sp, a, _b, rows = _crawl_a_page_that_navigates_to(lambda a, b: a.base + "logout.php",
                                                       tmp_path, monkeypatch)
-    assert "A-OWN-CONTENT" in _content(rows, a.base)
-    assert "/next" in a.requests
-    assert "/logout.php" not in a.requests                     # never requested
-    assert a.base + "logout.php" in sp.skipped_destructive     # the reason, recorded
+    assert a.base in rows and a.base + "logout.php" in rows
+    assert "/logout.php" in a.requests
+    assert sp.skipped_destructive == {}
 
 
 def test_goto_of_a_refused_target_still_raises_and_the_page_stays(monkeypatch):
@@ -300,10 +303,11 @@ def test_goto_of_a_refused_target_still_raises_and_the_page_stays(monkeypatch):
                 guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
                 page = ctx.new_page()
                 page.goto(a.base, wait_until="load")
-                for refused in (b.base + "x", a.base + "logout.php"):
+                for refused in (b.base + "x", b.base + "logout.php"):
                     with pytest.raises(PlaywrightError, match="ERR_ABORTED"):
                         page.goto(refused, wait_until="load")
                     assert page.url == a.base and "A-OWN-CONTENT" in page.content()
+                page.goto(a.base + "logout.php", wait_until="load")   # D72: a visit
                 release(ctx)
                 ctx.close()
             finally:
@@ -311,14 +315,17 @@ def test_goto_of_a_refused_target_still_raises_and_the_page_stays(monkeypatch):
     finally:
         a.close()
         b.close()
-    assert b.requests == [] and "/logout.php" not in a.requests
+    assert b.requests == [] and "/logout.php" in a.requests
 
 
 # --- review of BUG-0136 (D50) -------------------------------------------------------
+#: What the crawl still refuses for a GET (a redirect, an iframe): another origin. D72
+#: removed the destructive GET rule, so it is not a refusal reason for these.
 _REFUSED = {
     "out of scope": lambda a, b: b.base + "away",
-    "destructive": lambda a, b: "/logout.php",
 }
+#: ... and for a write (a POST form submission): also a destructive URL.
+_REFUSED_WRITE = {**_REFUSED, "destructive": lambda a, b: "/logout.php"}
 
 
 def _nothing_refused_was_sent(where, sp, a, b):
@@ -363,7 +370,7 @@ def test_the_crawls_own_target_redirected_to_a_refused_url_raises_and_falls_back
     _nothing_refused_was_sent(where, sp, a, b)
 
 
-@pytest.mark.parametrize("where", sorted(_REFUSED))
+@pytest.mark.parametrize("where", sorted(_REFUSED_WRITE))
 def test_a_refused_post_form_submission_keeps_the_page_crawled(where, monkeypatch,
                                                                tmp_path):
     """X4 (A-S2): a page's script submits a POST form to a refused URL: the
@@ -371,7 +378,7 @@ def test_a_refused_post_form_submission_keeps_the_page_crawled(where, monkeypatc
     links."""
     def build(a, b):
         a.pages["/"] = (f"<html><body><p>A-OWN-CONTENT</p><a href='/next'>n</a>"
-                        f"<form method='post' action='{_REFUSED[where](a, b)}'>"
+                        f"<form method='post' action='{_REFUSED_WRITE[where](a, b)}'>"
                         f"<input name='q' value='1'></form><script>"
                         f"setTimeout(()=>document.forms[0].submit(),200)</script>"
                         f"</body></html>")
@@ -411,7 +418,7 @@ def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
             "<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
             "headers: {'content-type': 'application/json'}, "
             "body: JSON.stringify({['k' + (n++)]: 1})}), 50)</script></body></html>")
-        a.redirects["/go"] = "/logout.php"
+        a.redirects["/go"] = b.base + "away"            # refused: another origin (D72)
 
     def hook(sp, a, b):
         real = sp._fetch_static
@@ -442,7 +449,7 @@ def test_a_failed_load_ends_the_previous_document(monkeypatch, tmp_path):
     late = [i for i, _page in ticks if i > captured]
     assert len(late) <= 2
     assert len(ticks) <= a.log[:fallback].count(("POST", "/tick"))
-    assert "/next" in a.requests and "/logout.php" not in a.requests
+    assert "/next" in a.requests and b.requests == []
 
 
 _TICKER = ("<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST', "
@@ -452,7 +459,8 @@ _TICKER = ("<script>let n = 0; setInterval(() => fetch('/tick', {method: 'POST',
 
 def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
     """X1's twin in the auditor (CC-AUD-0042): `ContentFetcher.fetch` keeps one page
-    for the whole audit. After a refused `goto` (/go redirects to /logout.php) it sends
+    for the whole audit. After a refused `goto` (/go redirects to another origin; to
+    /logout.php before D72) it sends
     the page to ``about:blank`` before the static fallback: A's ticker stops there, so
     the server sees no tick once the fallback's own request is sent, and the next
     URL's XHR list holds none of A's ticks (before, the ticks queued during the
@@ -462,9 +470,9 @@ def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
     from tests._browser import skip_or_fail
     from fuzzlab.tools.fetcher import ContentFetcher
     _chromium_or_skip(monkeypatch)
-    a = _Site()
+    a, b = _Site(), _Site()
     a.pages["/"] = f"<html><body><p>A-OWN-CONTENT</p>{_TICKER}</body></html>"
-    a.redirects["/go"] = "/logout.php"
+    a.redirects["/go"] = b.base + "away"                # refused: another origin (D72)
     marks = {}
     try:
         with ContentFetcher(engine="playwright", timeout_ms=3000) as fetcher:
@@ -484,32 +492,39 @@ def test_the_auditors_failed_load_ends_the_previous_document(monkeypatch):
             _status, _ct, _html, next_xhr = fetcher.fetch(a.base + "next")
     finally:
         a.close()
+        b.close()
     shown, seen = marks[a.base + "go"]
     assert shown == "about:blank"                              # the failed load ended A
     fallback = a.log.index(("GET", "/go"), seen)
     assert ("POST", "/tick") not in a.log[fallback:]           # no tick after that
     assert not any("/tick" in url for url in next_xhr)         # none filed under /next
-    assert "/logout.php" not in a.requests
+    assert b.requests == []
 
 
 # --- the M6 executor (X2, B-S1) -----------------------------------------------------
 def _m6_site():
+    """The M6 test site and the other origin its pages navigate to. The executor's scope
+    is the observe URL's origin, so every navigation to ``away`` is refused there -- a
+    request reaching ``away`` is an escape from origin containment (QUALITY_POLICY §9).
+    Before D72 the target was this site's ``/logout.php``, refused as destructive."""
     from fuzzlab.oracle.browser import SENTINEL
-    site = _Site()
+    site, away = _Site(), _Site()
+    target = away.base + "logout.php"
     site.pages["/fire"] = (f"<html><body><script>window.{SENTINEL}('tok');"
-                           f"setTimeout(() => location.href = '/logout.php', 50)"
+                           f"setTimeout(() => location.href = '{target}', 50)"
                            f"</script></body></html>")
     # the page navigates away once loaded, before (and instead of) any payload
     site.pages["/early"] = ("<html><body><p>escaped</p><script>"
                             "window.addEventListener('load', () => "
-                            "location.href = '/logout.php')</script></body></html>")
+                            f"location.href = '{target}')</script></body></html>")
     # the page navigates away once loaded; its sink fires 300 ms later
     site.pages["/late"] = (f"<html><body><script>"
                            f"window.addEventListener('load', () => "
-                           f"location.href = '/logout.php');"
+                           f"location.href = '{target}');"
                            f"setTimeout(() => window.{SENTINEL}('tok'), 300)"
                            f"</script></body></html>")
-    site.redirects["/redir"] = "/logout.php"
+    site.redirects["/redir"] = target
+    site.away = away
     return site
 
 
@@ -532,15 +547,16 @@ def _m6_run(site, path, settle_ms=1500, value="x"):
 
 
 def test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed(monkeypatch):
-    """(a): the sentinel fires, then the page navigates to /logout.php (refused):
-    executed, and /logout.php is never requested."""
+    """(a): the sentinel fires, then the page navigates to another origin (refused):
+    executed, and the other origin is never requested."""
     _chromium_or_skip(monkeypatch)
     site = _m6_site()
     try:
         assert _m6_run(site, "/fire").executed is True
     finally:
         site.close()
-    assert "/logout.php" not in site.requests
+        site.away.close()
+    assert site.away.requests == []                     # nothing left the origin
 
 
 def test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative(monkeypatch):
@@ -555,7 +571,8 @@ def test_m6_a_refused_navigation_before_the_payload_runs_is_a_negative(monkeypat
         assert _m6_run(site, "/early", settle_ms=500).executed is False
     finally:
         site.close()
-    assert "/logout.php" not in site.requests
+        site.away.close()
+    assert site.away.requests == []                     # nothing left the origin
 
 
 def test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed(monkeypatch):
@@ -569,7 +586,8 @@ def test_m6_a_sink_that_fires_after_a_refused_navigation_is_executed(monkeypatch
         assert _m6_run(site, "/late").executed is True
     finally:
         site.close()
-    assert "/logout.php" not in site.requests
+        site.away.close()
+    assert site.away.requests == []                     # nothing left the origin
 
 
 def test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict(monkeypatch):
@@ -585,5 +603,6 @@ def test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict(monkeypatch):
             _m6_run(site, "/redir", value="PAYLOAD-MARK")
     finally:
         site.close()
+        site.away.close()
     assert "PAYLOAD-MARK" not in str(err.value) and site.base not in str(err.value)
-    assert "/logout.php" not in site.requests
+    assert site.away.requests == []                     # nothing left the origin

@@ -47,7 +47,7 @@ class RequestsSender:
 
     def get(self, url, param, value, timeout):
         from fuzzlab.core.urls import check_send_url
-        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        check_send_url(url, self._explicit, method="GET")   # NFR-FUZZ-safe (BUG-0112); a GET
         start = time.perf_counter()
         try:
             # allow_redirects=False (BUG-0044/PA-0046 sweep): a followed
@@ -77,7 +77,7 @@ class SeamSender:
     def get(self, url, param, value, timeout):
         from fuzzlab.core.http import Request
         from fuzzlab.core.urls import check_send_url
-        check_send_url(url, self._explicit)              # NFR-FUZZ-safe (BUG-0112)
+        check_send_url(url, self._explicit, method="GET")   # NFR-FUZZ-safe (BUG-0112); a GET
 
         req = Request("GET", with_query_param(url, param, value),
                       identity=self._identity, timing=True, component="fuzzer")

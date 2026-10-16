@@ -84,6 +84,8 @@ def canonical_origin(url: str | None) -> str | None:
 
 
 # --- destructive URLs (NFR-CRAWL-safe / NFR-FUZZ-safe; BUG-0111/0112) ---------------
+#: D72: these words refuse a **write** (any method but GET/HEAD) and the login flow's
+#: navigation; a GET/HEAD visit is never refused for them, only ordered last.
 #: Words that name a destructive or session-ending action. Matched as whole tokens of
 #: the decoded path and query, so ``model``, ``dropdown`` or ``clearance`` never match.
 #: ``format`` is deliberately absent: ``?format=csv`` is the common export selector.
@@ -280,6 +282,15 @@ def spa_route(url: str | None) -> tuple[str, str] | None:
 #: FR-FUZZ-47): a crawl-captured DELETE is never imported, and refused again at the send.
 REFUSED_SEND_METHODS = frozenset({"DELETE"})
 
+#: The methods that only read (D72): a visit, never refused for the words in its URL.
+READ_METHODS = frozenset({"GET", "HEAD"})
+
+
+def is_read_method(method: str | None) -> bool:
+    """Is ``method`` a visit (GET or HEAD; D72)? An unknown method (None or empty) is
+    not: a sender that does not say what it sends keeps the write rules."""
+    return (method or "").upper() in READ_METHODS
+
 
 class DestructiveUrlRefused(ValueError):
     """A send to a destructive URL the operator did not explicitly enumerate."""
@@ -293,10 +304,13 @@ def check_send_url(url: str, explicit: frozenset[str] = frozenset(),
     Every probe sender calls this first (NFR-FUZZ-safe, CC-FUZZ-0060), passing its
     send's ``method``. ``explicit`` holds :func:`url_key` values of operator-enumerated
     (ground-truth) points. ``--allow-destructive-routes`` turns the URL rule off
-    (`core.sendpolicy`, D71); a refused method (``DELETE``) stays refused.
+    (`core.sendpolicy`, D71); a refused method (``DELETE``) stays refused. *(D72:)* a
+    visit (`is_read_method`: GET or HEAD) is never refused for its URL's words; an
+    unknown method keeps the rule.
     """
     from fuzzlab.core import sendpolicy
-    reason = sendpolicy.destructive(destructive_reason(url))
+    reason = None if is_read_method(method) else sendpolicy.destructive(
+        destructive_reason(url))
     if reason is None and (method or "").upper() in REFUSED_SEND_METHODS:
         reason = f"{method.upper()} method"
     if reason is not None and url_key(url) not in explicit:

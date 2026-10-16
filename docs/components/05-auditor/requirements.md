@@ -317,7 +317,11 @@ budget where a vulnerability is plausible.
 - **NFR-AUD-idempotent** Re-auditing the same surface produces stable candidate
   identities (no duplicate churn).
 - **NFR-AUD-safe** Probing uses non-destructive canaries only; destructive checks
-  are gated off by default.
+  are gated off by default. *(D72, CC-AUD-0047:)* the auditor re-fetches a destructive-
+  looking spider URL, last (`fetcher.load_urls`), and follows a same-origin redirect hop
+  to one (a GET); payloads and scope are unchanged. The importer (FR-AUD-22): a GET form
+  and a link set are no longer refused for destructive words; a POST form, a captured
+  request and a body keep every rule.
   - Clause (scope; CC-AUD-0033, BUG-0123): the auditor's scope is one origin, fixed
     once (the auth base's, else the first fetched URL's); a URL outside it is never
     fetched, and the rendered fetcher's browser reaches nothing else (a context-wide
@@ -326,7 +330,7 @@ budget where a vulnerability is plausible.
     elsewhere), every page fetch is refused and logged ("outside the audit scope"),
     so the audit finds nothing; audit with a base URL on the pages' own origin.
   - Enforced by (scope): `ContentFetcher.fetch` / `_start_browser`, `navguard` — `tests/test_browser_scope.py::test_the_auditors_browser_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_auditors_scope_is_fixed_and_never_moves`, `tests/test_browser_scope.py::test_the_static_auditor_refuses_another_origin_too`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`
-  - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_does_not_follow_a_redirect_to_one`
+  - Enforced by: the auditor sends only GETs of crawled URLs, now deny-listed and redirect-checked — `tests/test_destructive_urls.py::test_the_auditor_refetches_a_destructive_url_last`, `tests/test_destructive_urls.py::test_the_auditors_static_fetch_follows_a_redirect_to_one`
   - Enforced by (session headers; CC-AUD-0038, FR-CRAWL-14's mechanism): the rendered fetcher ensures the session before its context opens and hands its headers to the guarded route only (in scope, the session's host, its transport), never `set_extra_http_headers` — `tests/test_browser_scope.py::test_no_browser_context_gets_session_headers_outside_the_route`, `tests/test_browser_scope.py::test_session_headers_are_added_by_the_route_only_in_scope`, `tests/test_browserauth.py::test_an_https_sessions_headers_never_go_over_http`
   - Enforced by (a browser login's state adopted in scope only, through the one helper; CC-AUD-0040): `ContentFetcher._start_browser` → `browserauth.context_options` — `tests/test_session_browser_login.py::test_the_auditors_browser_adopts_a_browser_logins_local_storage`, `tests/test_session_browser_login.py::test_the_auditors_browser_renders_the_app_logged_in`, `tests/test_session_browser_login.py::test_storage_state_adoption_keeps_in_scope_origins_only`
   - Not yet enforced: there is no destructive-check gate in `fuzzlab/audit` (it has no destructive checks today), and the FR-AUD-3 reflection canary is not wired into production code. (BUG-0111 sweep.)

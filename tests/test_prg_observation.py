@@ -503,9 +503,8 @@ def test_a_second_redirect_is_no_observation(site):
 @pytest.mark.parametrize("location,why", [
     ("http://127.0.0.2:1/profile", "another origin"),
     ("https://example.com/profile", "another origin"),
-    ("/logout.php", "destructive target"),
-    ("/checkout", "transaction target"),
-    ("/account/password", "account target"),
+    # D72: following the PRG redirect is a GET visit, so a destructive, transaction or
+    # account-looking target is followed (`test_a_destructive_looking_target_is_followed`)
     ("/login", "login page"),
     ("javascript:alert(1)", "another origin"),
 ])
@@ -516,6 +515,17 @@ def test_a_refused_target_is_never_fetched(site, location, why):
     assert probe.prg == f"skipped: {why}" and probe.followed is None
     assert probe.follow_up_sends == 0
     assert [m for m, _p, _d in app.log] == ["POST"]
+
+
+@pytest.mark.parametrize("location", ["/logout.php", "/checkout", "/account/password"])
+def test_a_destructive_looking_target_is_followed(site, location):
+    """D72 (owner, 2026-10-16): the follow-up of a PRG redirect is a GET visit; its
+    target's words (destructive, transaction, account) no longer refuse it."""
+    app = site(location=location)
+    probe = RequestsProbeSender().send(app.base + "/profile", "username", "x",
+                                       method="POST", location="body", prg=True)
+    assert probe.prg == "observed" and probe.follow_up_sends == 1
+    assert [m for m, _p, _d in app.log] == ["POST", "GET"]
 
 
 def test_open_redirect_reads_the_raw_location(site):

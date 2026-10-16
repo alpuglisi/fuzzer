@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urljoin, parse_qsl
 import requests
 from bs4 import BeautifulSoup
 
-from fuzzlab.core import get_logger, sendpolicy
+from fuzzlab.core import get_logger
 from fuzzlab.core.forms import default_value
 from fuzzlab.core.urls import (canonical_origin, destructive_reason, in_origin_scope,
                                origin_scope)
@@ -179,16 +179,13 @@ def load_urls(spider_db="spider_results.db"):
             cursor.execute("SELECT url FROM discovered_pages ORDER BY depth ASC")
             rows = [(row[0], 'link') for row in cursor.fetchall()]
         conn.close()
-        # NFR-CRAWL-safe (BUG-0111): never re-fetch a destructive URL, also from a
-        # spider DB written before the crawler gained its deny-list.
-        kept = []
+        # D72: a re-fetch is a GET visit, never refused for its words; a
+        # destructive-looking URL (a logout, bWAPP's reset.php) is fetched **last**, so
+        # it cannot end the session or wipe the lab before the other pages are read
+        kept, last = [], []
         for url, source in rows:
-            reason = sendpolicy.destructive(destructive_reason(url))
-            if reason is not None:
-                logging.info(f"skipped destructive URL {url} ({reason!r})")
-                continue
-            kept.append((url, source))
-        return kept
+            (last if destructive_reason(url) is not None else kept).append((url, source))
+        return kept + last
     except sqlite3.Error as e:
         logging.error(f"Spider DB error: {e}")
         return []
@@ -488,8 +485,7 @@ class ContentFetcher:
         from fuzzlab.tools.navguard import get_checked
         origin = canonical_origin(url)
         resp = get_checked(self.session, url, self.timeout_ms / 1000,
-                           lambda nxt: canonical_origin(nxt) == origin
-                           and sendpolicy.destructive(destructive_reason(nxt)) is None)
+                           lambda nxt: canonical_origin(nxt) == origin)   # D72: a GET hop
         return resp.status_code, resp.headers.get('Content-Type', ''), resp.text, []
 
 

@@ -117,17 +117,18 @@ def test_out_of_scope_requests_are_aborted_and_reported():
     out, destructive = [], []
     handler = make_route_handler(on_abort=lambda u, r: destructive.append(u),
                                  in_scope=_scope(), on_out_of_scope=out.append)
-    cases = [("http://127.0.0.1:8080/a.js", "fulfill"),
-             ("https://github.com/x", "abort"),
-             ("http://127.0.0.1:3000/rest", "abort"),
-             ("http://127.0.0.1:8080/logout.php", "abort"),
-             ("data:image/png;base64,AAAA", "continue"),     # not network requests
-             ("blob:http://127.0.0.1:8080/uuid", "continue"),
-             ("about:blank", "continue")]
-    for url, outcome in cases:
-        route = _Route(url)
+    cases = [("http://127.0.0.1:8080/a.js", "GET", "fulfill"),
+             ("https://github.com/x", "GET", "abort"),
+             ("http://127.0.0.1:3000/rest", "GET", "abort"),
+             ("http://127.0.0.1:8080/logout.php", "GET", "fulfill"),   # D72: a visit
+             ("http://127.0.0.1:8080/logout.php", "POST", "abort"),    # a write
+             ("data:image/png;base64,AAAA", "GET", "continue"),  # not network requests
+             ("blob:http://127.0.0.1:8080/uuid", "GET", "continue"),
+             ("about:blank", "GET", "continue")]
+    for url, method, outcome in cases:
+        route = _Route(url, method=method)
         handler(route)
-        assert route.outcome == outcome, url
+        assert route.outcome == outcome, (url, method)
     assert out == ["https://github.com/x", "http://127.0.0.1:3000/rest"]
     assert destructive == ["http://127.0.0.1:8080/logout.php"]
 
@@ -169,17 +170,26 @@ def test_a_redirect_hop_out_of_scope_is_never_requested(location):
     assert [c[0] for c in api.calls] == [f"{H}/hop"]           # the bad hop: never
 
 
-def test_a_redirect_hop_to_a_destructive_url_is_never_requested():
+def test_a_redirect_hop_to_a_destructive_url_is_never_requested_by_a_write():
     """BUG-0111's guard never saw redirect hops either (Playwright does not route
-    them): the hop is checked here like a first request."""
+    them): each hop is checked here like a first request, with its own method (D72).
+    A POST answered 307 stays a POST: the hop to a destructive URL is a write, aborted.
+    A GET's 302 hop there is a visit and is fetched; so is a POST's 303 (a GET after
+    the browser's downgrade)."""
     hits = []
-    site = {f"{H}/a.php": _Resp(302, "/logout.php")}
+    site = {f"{H}/a.php": _Resp(307, "/logout.php")}
     api = _Api(site)
-    route = _Route(f"{H}/a.php", site)
+    route = _Route(f"{H}/a.php", site, method="POST")
     make_route_handler(on_abort=lambda u, r: hits.append((u, r)), in_scope=_scope(),
                        api=api)(route)
     assert route.outcome == "abort" and api.calls == []
     assert hits == [(f"{H}/logout.php", "logout")]
+    for status, method in ((302, "GET"), (303, "POST")):
+        site = {f"{H}/a.php": _Resp(status, "/logout.php")}
+        api = _Api(site)
+        route = _Route(f"{H}/a.php", site, method=method)
+        make_route_handler(in_scope=_scope(), api=api)(route)
+        assert [c[0] for c in api.calls] == [f"{H}/logout.php"], (status, method)
 
 
 def test_an_endless_redirect_chain_is_aborted():

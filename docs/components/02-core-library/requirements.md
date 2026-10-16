@@ -399,6 +399,13 @@ plugin registry. It is the layer that makes the store the integration bus.
     is not a route is left alone), for the crawler's stored route URLs.
 
 - **FR-CORE-45** *(which send rules a run enforces; `CC-CORE-0062`, 2026-10-15, D71).*
+  *(D72, CC-CORE-0064, 2026-10-16:)* the three rules govern **writes** only. A visit
+  (`core.urls.is_read_method`: GET or HEAD; an unknown method is not one) is never
+  refused for its words at any site -- route, reveal, the window's GETs, seed URLs, the
+  browser guard, `check_send_url`, the PRG follow-up, GET points, GET forms, link sets --
+  so the three flags now only switch the write refusals. The login flow's strict rules
+  are unchanged. The text below describes the D71 state; where it names a visit site, D72
+  supersedes it.
   - `core/sendpolicy.py` is the one switch for three rules: **destructive**
     (`destructive_reason` / `text_destructive_reason`, FR-CORE-28), **transactions**
     (`transaction_reason`) and **credential changes**

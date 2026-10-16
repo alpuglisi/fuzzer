@@ -3,6 +3,8 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0047 — D72: the auditor re-fetches destructive-looking URLs last and follows a redirect hop to one; GET forms and link sets lose the destructive-word import rule (2026-10-16) — see CC-CRAWL-0042
+
 ### CC-AUD-0046 — The importer counts a recorded blocked write (`request_blocked`) under the usual FR-AUD-22 rules (2026-10-16) — see CC-CRAWL-0036
 
 ### CC-AUD-0045 — The importer's and auditor's destructive, transaction and credential refusals follow the send-policy switch (2026-10-15) — see CC-CORE-0062

@@ -3,6 +3,96 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0042 — D72: the page-visit word rules are removed; destructive-looking pages are visited last; the write rules stay (2026-10-16)
+- Goal / acceptance: the owner's decision D72 ("get rid of all of the rules for the
+  crawler ... A crawler submitting a get request is not going to cause any actual
+  damage"; chosen scope "Page-visit rules", downstream "Yes, same change"). No visit
+  (GET/HEAD) is refused for its words in the crawler, auditor, importer or fuzzer.
+  Writes, DELETE, the login flow's strict rules and scope are unchanged. Acceptance: the
+  rewritten tests below, and nothing leaves the origin under load (the M6 tests with an
+  off-origin target, 8 rounds × 8 runs).
+- Change:
+  - `core/urls.py`: `is_read_method` (SP-37); `check_send_url` refuses a destructive
+    URL only for a write or an unstated method (CC-CORE-0064).
+  - `tools/navguard.py`: `refused(url, method)`. Scope first; a GET/HEAD is never
+    refused for its words; a write keeps the rule; `strict` keeps it for every method.
+    Each redirect hop is judged with its own method, after the 301/302/303 downgrade.
+  - `tools/spider.py`:
+    - `_destructive` is replaced by `_deferrable`: a destructive-looking page, route,
+      seed or probe is visited after every other one (`pages_deferred`; counted once
+      per page), never skipped;
+    - the queue, landing, picker-target, route, navigation, reveal-link, link and XHR
+      word checks are removed;
+    - P2's word-navigation write (`word_nav`) is removed;
+    - the reveal "card text too long to judge" refusal is removed;
+    - `routes_skipped_destructive` is replaced by `pages_deferred`.
+  - `tools/spa.py`:
+    - `classify_route` is destructive only with `strict` (the login flow);
+    - `reveal_refusal` refuses nothing;
+    - `window_request_refusal` refuses only navigations and non-GET/HEAD;
+    - `query_url_refusal` refuses nothing for its words.
+  - `tools/fetcher.py`: the auditor re-fetches destructive-looking URLs last and
+    follows a same-origin redirect hop to one (CC-AUD-0047).
+  - `tools/store_adapter.py`: a GET form and a link set lose the destructive-word rule
+    (`entries_refusal(destructive=)`). A POST form, a captured request and a body keep
+    every rule (CC-AUD-0047).
+  - `harness/auto.py`: GET crawl points and header points are no longer refused for
+    words, and are ordered last (`_late`); a write point on a destructive URL is still
+    refused when the run is built. `tools/probesender.py`: the PRG follow-up has no
+    transaction or account rule. `tools/blind_sqli_fuzzer.py`: its senders state
+    `method="GET"` (CC-FUZZ-0093).
+  - Text: `sendpolicy` docs and flag help, the `navguard` module doc, the
+    `DESTRUCTIVE_TOKENS` comment, the `auto_cli` summary line.
+- Impact (other components / consumers / project):
+  - CORE, AUD and FUZZ: one-line entries.
+  - The store contract is unchanged.
+  - Crawl-stats key `routes_skipped_destructive` is replaced by `pages_deferred` (read
+    only by tests).
+  - D71's three flags now switch only the write refusals.
+- Risk (class; consequence and exposure; mitigation): high, a safety-rule removal,
+  decided by the owner. Consequence: GETs to logout, reset, delete, order and account
+  URLs are sent by the crawler, the auditor, M6 and the fuzzer. bWAPP's `reset.php`
+  drops its database on a GET.
+  - Mitigation: those pages are visited and fuzzed last. Scope is first in the guard,
+    and an off-origin escape was not reproduced under load. Writes keep every rule; the
+    login flow is strict.
+  - Stated consequences: a crawl that visits a logout page goes on without its session;
+    a page whose script navigates to one is read as the page it landed on; seeds whose
+    load makes a transaction GET are promoted, and M6 replays that GET (review M6).
+  - Residual: a GET that is itself a credential write (e.g. a change-password GET) is
+    sent, per the decision.
+- Hypothesis: prediction — Juice Shop's and bWAPP's reached and confirmed counts rise
+  (order-history, wallet and membership pages; bWAPP pages behind links with
+  destructive-looking names); ceiling 4 h; exit — two repeated runs per lab.
+- Verification / review:
+  - Pre-implementation design review: one round, 10 must-fix items (M1-M10), all taken
+    into the design. M1, the per-hop method, is in `test_a_redirect_hop_to_a_destructive_url_is_never_requested_by_a_write`.
+    M2, the blind-SQLi senders, is in `test_blind_sqli_senders_gate_but_allow_the_operators_own_url`.
+    M3, write points still refused at build, is in `_crawl_url_refusal` for non-GET.
+    M4, captured requests unchanged, holds in the unchanged `test_spa_capture`.
+  - The reviewer's auto-mode action to list the affected tests by turning every rule
+    off was refused by the safety classifier. It was not worked around; the named list
+    comes from the run of the affected files.
+  - Rewritten tests: `tests/test_destructive_urls.py`, `test_spa_routes.py`,
+    `test_forms_phase4.py` (window table, reveal gate, W2, menu items; the overlay
+    fixture records a real pointer only), `test_spa_query.py` (seed gate, U1 table,
+    logout seed visited, txn seed promoted, Y1/M4/S3 triggers moved to another origin),
+    `test_navigation_aborts.py` (destructive becomes a destructive write; M6 and the
+    failed-load tests target a second, off-origin server), `test_guarded_navigation.py`,
+    `test_browser_scope.py`, `test_prg_observation.py`, `test_json_points.py`,
+    `test_forms_phase2.py`, `test_send_policy.py` (write sites switched, visit sites
+    never refuse).
+  - `verify_change.py` and the post-implementation review are recorded below.
+- Deliverables:
+  - [x] code — done
+  - [x] tests — done
+  - [x] D72; NFR-CRAWL-safe, NFR-FUZZ-safe, NFR-AUD-safe, FR-CORE-45, FR-CRAWL-16 (W2,
+    G2d) and FR-CRAWL-17 (Q3/U1/P2) edited in place; SP-37 — done
+  - [ ] post-implementation review, `verify_change.py`, lab runs — pending
+- Rollback / recovery: revert this change. Reset the labs after any run made with it
+  (`labctl.sh reset`).
+- Effectiveness: pending the repeated lab runs.
+
 ### CC-CRAWL-0041 — A refused request that is not recorded is counted by its reason; the survey options measured on Juice Shop (2026-10-16)
 - Goal / acceptance: a crawl says why each request the reveal window refused was not
   recorded (PA-0110: each count is of an effect). Acceptance: the counts in

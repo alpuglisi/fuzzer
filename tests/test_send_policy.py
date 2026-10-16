@@ -50,9 +50,10 @@ def off(*rules):
 class _Route:
     """A fake Playwright route (as `tests/test_browser_scope.py`)."""
 
-    def __init__(self, url):
+    def __init__(self, url, method="GET"):
         self.request = type("Req", (), {
-            "url": url, "method": "GET", "headers": {}, "post_data_buffer": None,
+            "url": url, "method": method, "headers": {},
+            "post_data_buffer": b"x=1" if method != "GET" else None,
             "is_navigation_request": lambda _self: False})()
         self.outcome = None
 
@@ -69,9 +70,9 @@ class _Route:
         self.outcome = "fulfill"
 
 
-def _guard_aborts(url, **kw):
+def _guard_aborts(url, method="GET", **kw):
     origins = origin_scope(BASE + "/")
-    route = _Route(url)
+    route = _Route(url, method)
     navguard.make_route_handler(in_scope=lambda u: in_origin_scope(u, origins), **kw)(route)
     return route.outcome == "abort"
 
@@ -170,16 +171,12 @@ def test_destructive_rule_on_and_off_at_its_refusal_sites():
             sent = False
         return {
             "probe gate": sent,
-            "route": spa.classify_route("/logout")[0] == spa.ROUTE_OK,
             "form button": spa_form(button="Delete all"),
             "form glyph": spa_form(button="", button_aria="", button_icons="delete"),
             "form action": spa_form(action=BASE + "/#/logout"),
             "form control": spa_form(controls=[("deleteAll", "checkbox")]),
             "label": spa.label_refusal("Remove item") is None,
-            "reveal glyph": spa.reveal_refusal(["More", "", "delete"]) is None,
-            "window": spa.window_request_refusal("GET", url, False) is None,
-            "seed": spa.query_url_refusal(BASE + "/#/logout?q=1") is None,
-            "browser guard": not _guard_aborts(BASE + "/logout.php"),
+            "browser guard": not _guard_aborts(BASE + "/logout.php", method="POST"),
             "crawl point": auto._crawl_url_refusal(url) is None,
             "import request": store_adapter.request_refusal("POST", url) is None,
             "import form": store_adapter.form_skip_reason(record) is None,
@@ -201,6 +198,30 @@ def test_a_delete_method_stays_refused_with_the_destructive_rule_off():
         check_send_url(BASE + "/api/Feedbacks/1", method="DELETE")
 
 
+# --------------------------------------------------------------- visits (D72)
+
+
+@pytest.mark.parametrize("disabled", [(), tuple(sendpolicy.RULES)])
+def test_a_visit_is_never_refused_for_its_words_whatever_the_flags(disabled):
+    """D72 (owner, 2026-10-16): the three rules govern writes only. Every visit site --
+    a route, a reveal click, a GET in the window, a seed URL, a GET through the browser
+    guard, a GET send, a PRG follow-up -- refuses nothing for its words, with the flags
+    or without them."""
+    off(*disabled)
+    assert spa.classify_route("/logout")[0] == spa.ROUTE_OK
+    assert spa.reveal_refusal(["More", "", "delete"]) is None
+    assert spa.reveal_refusal(["Register", "", ""]) is None
+    for url in ("/rest/user/logout", "/rest/wallet/balance", "/rest/user/change-password"):
+        assert spa.window_request_refusal("GET", BASE + url, False) is None, url
+    assert spa.query_url_refusal(BASE + "/#/logout?q=1") is None
+    assert not _guard_aborts(BASE + "/logout.php")
+    check_send_url(BASE + "/rest/user/logout", method="GET")
+    for target in ("/logout.php", "/checkout", "/register"):
+        assert _prg(target)[1] is None, target
+    # the login flow keeps its strict rule whatever the flags
+    assert spa.classify_route("/logout", strict=True)[0] == spa.ROUTE_DESTRUCTIVE
+
+
 # ----------------------------------------------------------------- transactions
 
 
@@ -217,11 +238,8 @@ def test_transaction_rule_on_and_off_at_its_refusal_sites():
         return {
             "form": spa.form_refusal(form, "basket", named=None) is None,
             "label": spa.label_refusal("Checkout") is None,
-            "window": spa.window_request_refusal("GET", BASE + "/rest/wallet/balance",
-                                                 False) is None,
             "import request": store_adapter.request_refusal(
                 "POST", BASE + "/rest/basket/1/checkout") is None,
-            "prg target": _prg("/checkout")[1] is None,
         }
 
     assert not any(verdicts().values()), verdicts()
@@ -250,10 +268,7 @@ def test_credential_rule_on_and_off_at_its_refusal_sites():
             "spa form": spa.form_refusal(form, "change-password", named=None) is None,
             "import form": store_adapter.form_skip_reason(record) is None,
             "import body": not body.startswith("credential-change"),
-            "window": spa.window_request_refusal("GET", BASE + "/rest/user/change-password",
-                                                 False) is None,
             "label account word": spa.label_refusal("Register") is None,
-            "prg target": _prg("/register")[1] is None,
         }
 
     assert not any(verdicts().values()), verdicts()
@@ -266,7 +281,8 @@ def test_credential_rule_on_and_off_at_its_refusal_sites():
 
 def test_turning_one_rule_off_leaves_the_others_on():
     off(sendpolicy.TRANSACTIONS)
-    assert spa.classify_route("/logout")[0] == spa.ROUTE_DESTRUCTIVE
+    with pytest.raises(DestructiveUrlRefused):                   # a write (D72)
+        check_send_url(BASE + "/logout", method="POST")
     form = {"controls": CHANGE_PASSWORD, "button": "Change", "button_aria": "",
             "action": None}
     assert spa.form_refusal(form, "change-password", named=None)

@@ -51,20 +51,23 @@ from tests._spa_fixture import (
     ("PUT", "http://other.example/x", False, "a PUT request"),          # any destination
     ("DELETE", "http://h/api/x", False, "a DELETE request"),
     ("GET", "http://h/profile", True, "a navigation"),
-    ("GET", "http://h/logout", False, "a destructive GET"),
-    ("GET", "http://h/#/delete-account", False, "a destructive GET"),
-    ("GET", "http://h/api/order-history", False, "a transaction GET"),
-    ("GET", "http://h/rest/wallet/balance", False, "a transaction GET"),
-    ("GET", "http://h/rest/user/change-password?new=x", False, "a credential token"),
-    ("GET", "http://h/rest/user/change-email?new=x", False, "an account action"),
-    ("GET", "http://h/api/register", False, "an account action"),
-    ("GET", "http://h/api/items?action=sign-up", False, "an account action"),
-    ("GET", "http://h/rest/user/signup?x=1", False, "an account action"),
-    # review A-S3: the app's own identity check and a users collection pass
+    ("POST", "http://h/logout", False, "a POST request"),               # a write, kept
+    # D72 (owner, 2026-10-16): a GET goes through whatever its words -- the window's
+    # destructive, transaction, credential-token and account-action GET rules are gone
+    ("GET", "http://h/logout", False, None),
+    ("GET", "http://h/#/delete-account", False, None),
+    ("GET", "http://h/api/order-history", False, None),
+    ("GET", "http://h/rest/wallet/balance", False, None),
+    ("GET", "http://h/rest/user/change-password?new=x", False, None),
+    ("GET", "http://h/rest/user/change-email?new=x", False, None),
+    ("GET", "http://h/api/register", False, None),
+    ("GET", "http://h/api/items?action=sign-up", False, None),
+    ("GET", "http://h/rest/user/signup?x=1", False, None),
     ("GET", "http://h/rest/user/whoami", False, None),
     ("GET", "http://h/api/Users/1", False, None),
-    ("GET", "http://h/rest/products?password=x", False, "a credential token"),
-    ("GET", "http://h/rest/products?pwd=x", False, "a credential token"),
+    ("GET", "http://h/rest/products?password=x", False, None),
+    ("GET", "http://h/rest/products?pwd=x", False, None),
+    ("GET", "http://h/logout", True, "a navigation"),                  # still queued
 ])
 def test_the_window_lets_only_safe_gets_through(method, url, navigation, blocked):
     why = spa.window_request_refusal(method, url, navigation)
@@ -128,11 +131,18 @@ def test_the_window_is_asked_again_on_every_redirect_hop():
         def fetch(self, *a, **kw):
             self.calls.append(a)
             raise AssertionError("a refused hop is never fetched")
-    handler = make_route_handler(in_scope=lambda u: True, api=_Api(),
-                                 window=spa.window_request_refusal)
+    asked = []
+
+    def window(method, url, navigation):
+        # D72: no GET word rule is left in W2, so this window refuses the hop by URL to
+        # show it is asked again on the hop (and the hop is never fetched)
+        asked.append(url)
+        return "refused hop" if url.endswith("/api/orders") else None
+    handler = make_route_handler(in_scope=lambda u: True, api=_Api(), window=window)
     route = _Route("http://h/rest/go", site={"http://h/rest/go": redirect})
     handler(route)
     assert route.outcome == "abort" and _Api.calls == []
+    assert asked == ["http://h/rest/go", "http://h/api/orders"]
 
 
 class _WS:
@@ -170,19 +180,21 @@ def test_the_websocket_forwarder_drops_page_messages_only_inside_the_window():
 # The label gate (G2d) and the Juice Shop login button
 # =====================================================================================
 @pytest.mark.parametrize("labels,refused", [
+    # D72 (owner, 2026-10-16): a reveal click is a visit whose writes the window holds;
+    # no label, glyph or word refuses one any more (G2d superseded)
     (["Account", "Show/hide account menu", "account_circle"], None),
     (["", "Open Sidenav", "menu"], None),
-    (["more_vert", "", ""], None),                   # an icon-only toggle: its raw text
-    (["Log in", "Login", "exit_to_app"], "destructive icon"),   # no text-first for reveals
-    (["Logout", "", ""], "destructive"),
-    (["Delete all", "", ""], "destructive"),
-    (["Items removed", "", ""], "destructive"),      # inflections folded
-    (["Privacy & Security", "", ""], "settings-like"),
-    (["Language", "", ""], "settings-like"),
-    (["Orders & Payment", "", ""], "transaction"),
-    (["Register", "", ""], "account word"),
-    (["", "", ""], "no label"),
-    (["#1 Delete", "", ""], "destructive"),           # BUG-0131: a '#' hides nothing
+    (["more_vert", "", ""], None),
+    (["Log in", "Login", "exit_to_app"], None),
+    (["Logout", "", ""], None),
+    (["Delete all", "", ""], None),
+    (["Items removed", "", ""], None),
+    (["Privacy & Security", "", ""], None),
+    (["Language", "", ""], None),
+    (["Orders & Payment", "", ""], None),
+    (["Register", "", ""], None),
+    (["", "", ""], None),
+    (["#1 Delete", "", ""], None),
 ])
 def test_the_reveal_gate(labels, refused):
     why = spa.reveal_refusal(labels)
@@ -478,16 +490,17 @@ def _paths(lab, method=None):
 
 
 def test_w2_a_reveal_can_only_read(revealed):
-    """W2: the menu's click POSTs and makes side-effect GETs (transaction, account,
-    credential words); none reaches the server. The plain GETs do (the reveal ran)."""
+    """W2: the menu's click POSTs, and its WebSocket message is held: no write reaches
+    the server. *(D72:)* its GETs do, whatever their words (transaction, account,
+    credential): a GET is a visit."""
     lab, sp, _db, _logs = revealed
     assert "/rest/marker/menu-opened" in _paths(lab, "GET")
     assert "/rest/marker/plain-get" in _paths(lab, "GET")
     assert _paths(lab, "POST") == []
-    for refused in ("/api/order-history", "/rest/user/change-password",
+    for visited in ("/api/order-history", "/rest/user/change-password",
                     "/rest/products"):
-        assert not any(p.startswith(refused) for p in _paths(lab)), refused
-    assert sp.spa_counts["reveal_writes_blocked"] >= 5
+        assert any(p.startswith(visited) for p in _paths(lab, "GET")), visited
+    assert sp.spa_counts["reveal_writes_blocked"] >= 1
 
 
 def test_w2_a_menu_items_navigation_is_queued_never_sent_during_the_reveal(revealed):
@@ -537,15 +550,16 @@ def test_w1_a_debounced_post_after_close_never_arrives(revealed):
     assert "/api/after-close" not in _paths(lab)
 
 
-def test_g2b_a_menu_item_failing_the_gate_is_never_clicked(revealed):
-    """Logout, Orders & Payment and Privacy & Security are never clicked; History (a
-    passing item) is, after a reload and a re-click of the trigger."""
+def test_g2b_menu_items_are_clicked_whatever_their_words(revealed):
+    """*(D72, G2d superseded:)* Orders & Payment, Privacy & Security and History are
+    clicked, each after a reload and a re-click of the trigger, inside the window; no
+    item is refused for its words. At most `spa.MAX_MENU_ITEMS` per reveal: the menu's
+    fifth button item (Logout) is over that cap."""
     lab, sp, _db, _logs = revealed
     gets = _paths(lab, "GET")
-    for item in ("item-L", "item-O", "item-P"):
-        assert f"/rest/marker/{item}" not in gets, item
-    assert "/rest/marker/item-H" in gets
-    assert sp.spa_counts["reveals_refused"] >= 3
+    for item in ("item-O", "item-P", "item-H"):
+        assert f"/rest/marker/{item}" in gets, item
+    assert sp.spa_counts["reveals_refused"] == 0
 
 
 def test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants(revealed):

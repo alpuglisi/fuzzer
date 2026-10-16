@@ -14,9 +14,8 @@ from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
-from fuzzlab.core import sendpolicy
 from fuzzlab.core.urls import (DestructiveUrlRefused, canonical_origin, check_send_url,
-                               to_path, transaction_reason, url_key)
+                               to_path, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
                                   PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
                                   Probe, ProbeUnobserved, UnplaceableLocation)
@@ -85,12 +84,11 @@ def prg_target(probe: Probe, url: str, method: str,
     A PRG redirect is `PRG_ANY_METHOD` after any method, or `PRG_GET_ONLY` after a GET
     only. Its target (``Location`` resolved against the probed URL, fragment dropped)
     must be the probed URL's own origin (`canonical_origin`), pass `check_send_url` as a
-    GET, and be neither a transaction (`transaction_reason`), an account endpoint
-    (`account_endpoint_reason`) nor a login page (`redirect_is_logout`, BUG-0122; that
-    redirect is the session's own logout handling)."""
+    GET, and not be a login page (`redirect_is_logout`, BUG-0122; that redirect is the
+    session's own logout handling). *(D72:)* following it is a GET visit, so no word
+    rule (transaction, account endpoint) applies to it any more."""
     from urllib.parse import urldefrag, urljoin
 
-    from fuzzlab.session.browserlogin import account_endpoint_reason
     from fuzzlab.session.detect import redirect_is_logout
     status = probe.status
     if status not in REDIRECT_STATUSES:
@@ -111,13 +109,11 @@ def prg_target(probe: Probe, url: str, method: str,
             not target.lower().startswith(("http://", "https://")):
         return None, _skipped("another origin")
     try:
-        check_send_url(target, explicit, method="GET")
+        check_send_url(target, explicit, method="GET")   # a GET: no word rule (D72)
     except DestructiveUrlRefused:
         return None, _skipped("destructive target")
-    if sendpolicy.transaction(transaction_reason(target)) is not None:
-        return None, _skipped("transaction target")
-    if sendpolicy.credential_change(account_endpoint_reason(target)) is not None:
-        return None, _skipped("account target")
+    # D72: the follow is a GET visit -- no transaction or account word rule; a redirect
+    # to the login page is still not the submission's result
     if redirect_is_logout(location, url, None):
         return None, _skipped("login page")
     return target, None

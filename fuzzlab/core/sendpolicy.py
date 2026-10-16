@@ -12,6 +12,12 @@ Three rules keep the tool away from parts of a lab:
   account (``store_adapter.credential_change_rule``), a non-login password form, and
   the reveal window's and label gate's account words.
 
+*(D72, owner, 2026-10-16:)* the rules govern **writes** only: submitting a form, a
+captured request with a body, a non-GET send, and the write-blocking windows. A GET or
+HEAD visit -- a page, a link, a route, a redirect hop, a reveal click (whose writes the
+window still holds), a GET probe -- is never refused for its words; a destructive-
+looking one is only visited or fuzzed last.
+
 All three are enforced by default. The owner's decision D71 keeps them and adds a
 lab-only flag per rule to turn it off for one run (``--allow-destructive-routes``,
 ``--allow-transactions``, ``--allow-credential-changes``). Turning one off costs lab
@@ -47,12 +53,13 @@ _disabled: frozenset[str] = frozenset()
 
 FLAGS = (
     ("--allow-destructive-routes", DESTRUCTIVE,
-     "lab-only: visit, submit and fuzz URLs, routes, buttons and entries with "
-     "destructive words (logout, reset, delete, erase, ...); the run may log itself out "
+     "lab-only: submit and fuzz writes (POST forms, captured requests, non-GET sends) "
+     "to URLs and with buttons or entries with destructive words (logout, reset, "
+     "delete, erase, ...); GET visits never need it (D72); the run may log itself out "
      "or delete lab data"),
     ("--allow-transactions", TRANSACTIONS,
      "lab-only: submit and fuzz forms and requests that name a transaction "
-     "(checkout, payment, order, transfer, ...)"),
+     "(checkout, payment, order, transfer, ...); GET visits never need it (D72)"),
     ("--allow-credential-changes", CREDENTIAL_CHANGES,
      "lab-only: submit and import forms and bodies that change a credential or manage "
      "an account (password change, registration, account settings); a password "

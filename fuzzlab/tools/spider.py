@@ -560,7 +560,7 @@ class LocalSpider:
         #: What the SPA features did, reported at the end of the crawl (PA-0110: each
         #: count is of an effect that happened, e.g. a route page actually loaded).
         self.spa_counts = dict.fromkeys((
-            "routes_found", "routes_visited", "routes_skipped_destructive",
+            "routes_found", "routes_visited", "pages_deferred",
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "requests_blocked_recorded",
@@ -650,17 +650,15 @@ class LocalSpider:
         from fuzzlab.core.redaction import redact_spa_fragment
         return redact_spa_fragment(spa.crawl_url(url, self._spa_on))
 
-    def _destructive(self, url):
-        """The deny-list reason for ``url`` (None for the start URL), recorded once. A SPA
-        route's fragment is checked too (``/#/logout``), which the browser's route guard
-        never sees: a hash navigation sends no request (FR-CRAWL-12)."""
+    def _deferrable(self, url):
+        """D72: a destructive-looking page (its URL, or a SPA route's fragment such as
+        ``/#/logout``; `spa.route_destructive_reason`) is visited **last**, never
+        skipped: a logout would end the crawl's session, and bWAPP's ``reset.php``
+        drops its database, before the other pages are crawled. The start URL is never
+        deferred. Ordering only: it refuses nothing."""
         if url_key(url) in self._allow and spa.spa_fragment(url) is None:
-            return None
-        reason = sendpolicy.destructive(spa.route_destructive_reason(url))
-        if reason is not None and url not in self.skipped_destructive:
-            self.skipped_destructive[url] = reason
-            logging.info(f"skipped destructive link {url} ({reason!r})")
-        return reason
+            return False
+        return spa.route_destructive_reason(url) is not None
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -790,13 +788,9 @@ class LocalSpider:
         if why is None:
             return None
         win["aborted"] += 1
-        # P2 (review B-S2): in a query window a refused GET navigation's target (a
-        # redirect hop included) passes the window's GET word rules before it is
-        # queued; a target they refuse (a transaction or account GET) is a blocked
-        # write, never queued
-        word_nav = bool(win.get("query")) and navigation and \
-            method in ("GET", "HEAD") and \
-            spa.window_request_refusal(method, url, False) is not None
+        # D72: the window's GET word rules are gone (P2's "a transaction or account GET
+        # navigation is a blocked write" with them): a refused GET navigation's target
+        # is always queued through the normal gates
         if win.get("query"):
             # FR-CRAWL-17 (review A-M1): a seed records whether it blocked a write; a
             # probe's blocked requests are never evidence; a blocked URL is never queued
@@ -805,11 +799,11 @@ class LocalSpider:
             if self._probe is not None:
                 self._probe["blocked"].add(url)
             # a write (review round 2, U1): every refused non-GET/HEAD, a navigation (an
-            # auto-submitted form) included, and every non-navigation GET the window's
-            # word rules refused (a transaction or account GET)
-            if method not in ("GET", "HEAD") or not navigation or word_nav:
+            # auto-submitted form) included (D72: a GET is never refused unless it is a
+            # navigation, which is queued, not counted)
+            if method not in ("GET", "HEAD") or not navigation:
                 self._count_query_write(win, method, url)
-        if navigation and method in ("GET", "HEAD") and not word_nav:
+        if navigation and method in ("GET", "HEAD"):
             win["navs"].append(url)
         else:
             # one rule for both windows (CC-CRAWL-0029): a refused non-GET navigation (an
@@ -1363,7 +1357,7 @@ class LocalSpider:
         followed by hand, each hop in scope and not destructive (BUG-0111)."""
         from fuzzlab.tools.navguard import get_checked
         resp = get_checked(self.session, url, self.timeout_ms / 1000,
-                           lambda nxt: self._in_scope(nxt) and not self._destructive(nxt))
+                           lambda nxt: self._in_scope(nxt))   # D72: no word rule on a GET
         ct = resp.headers.get('Content-Type', '')
         title, text, links = None, None, []
         self._last_final_url = getattr(resp, "url", None) or url
@@ -1538,7 +1532,7 @@ class LocalSpider:
         # it neither reveals nor submits (the bare route's visit does)
         seed = self._win is not None and bool(self._win.get("query"))
         if (landing and not seed and spa.visit_key(landing) != spa.visit_key(url)
-                and self._in_scope(landing) and not self._destructive(landing)):
+                and self._in_scope(landing)):
             # the landing URL keeps its query (xss_eval.php?date=Date()), redacted
             self.storage.mark_visited(redact_url(landing), status, depth,
                                       title, content, source='redirect')
@@ -1582,7 +1576,7 @@ class LocalSpider:
             for target in formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
                     on_verdict=lambda v, k=key: self.storage.record_verdict(k, v)):
-                if not self._destructive(target) and not self.storage.is_visited(target):
+                if not self.storage.is_visited(target):    # formnav stops on a destructive one
                     more.append((target, depth + 1, 'form'))
         return more
 
@@ -1626,7 +1620,8 @@ class LocalSpider:
                 logging.info(f"SPA route {name!r} skipped: parameterised or wildcard")
                 continue
             if kind == spa.ROUTE_DESTRUCTIVE:
-                self.spa_counts["routes_skipped_destructive"] += 1
+                # the login flow's strict classification only; the crawl's is not
+                # (D72), so this never happens here
                 logging.info(f"SPA route {name!r} skipped: destructive ({reason!r})")
                 continue
             target = spa.route_url(page_url, path, hash_mode=hash_mode, hashbang=hashbang,
@@ -1636,7 +1631,7 @@ class LocalSpider:
                 self._probe_routes.setdefault(name, (target, depth + 1))   # Q5
             if depth >= self.max_depth:
                 continue
-            if (self._in_scope(target) and not self._destructive(target)
+            if (self._in_scope(target)
                     and not self.storage.is_visited(target)):
                 more.append((target, depth + 1, 'spa-route'))
         # FR-CRAWL-17 (Q3): each paired route's seed, queued after the bare routes (B8)
@@ -1834,7 +1829,7 @@ class LocalSpider:
             return more
         for href in navs:
             link = self._crawl_url(href)
-            if (self._in_scope(link) and not self._destructive(link)
+            if (self._in_scope(link)
                     and not self.storage.is_visited(link)):
                 more.append((link, depth + 1, "redirect"))
         return more
@@ -2285,8 +2280,7 @@ class LocalSpider:
             if key in self._reveal_seen:
                 continue
             self._reveal_seen.add(key)
-            why = spa.reveal_refusal(cand.get("labels")) or (
-                "a card text too long to judge whole" if cand.get("long") else None)
+            why = spa.reveal_refusal(cand.get("labels"))     # D72: no word rule
             if why:
                 self.spa_counts["reveals_refused"] += 1
                 logging.info(f"reveal on {page_url} refused: {why}")
@@ -2472,7 +2466,7 @@ class LocalSpider:
             return more
         for href in found:
             link = self._crawl_url(urljoin(page_url, href))
-            if not (self._in_scope(link) and not self._destructive(link)):
+            if not self._in_scope(link):
                 continue
             key = spa.visit_key(link)
             if key not in self._revealed_link_keys:
@@ -2610,7 +2604,6 @@ class LocalSpider:
         lines = []
         if c["routes_found"] or c["routes_visited"]:
             lines.append(f"SPA routes: {c['routes_visited']} visited, "
-                         f"{c['routes_skipped_destructive']} skipped as destructive, "
                          f"{c['routes_skipped_parameterised']} skipped as parameterised "
                          f"({c['routes_found']} found in {c['scripts_scanned']} script(s)).")
         if c["scripts_too_large"] or c["scripts_over_page_cap"]:
@@ -2703,14 +2696,27 @@ class LocalSpider:
             self._start_browser()
 
         crawled = 0
+        deferred, draining = [], False          # D72: destructive-looking pages, last
+        deferred_keys: set = set()
         try:
-            while queue or self._query_on:
+            while queue or self._query_on or deferred:
                 if not queue:
                     # FR-CRAWL-17 (Q5): the bare routes are visited; probe them
                     queue.extend(self._plan_probes())
-                    if not queue:
-                        break
+                if not queue and deferred:
+                    queue, deferred, draining = deferred, [], True
+                if not queue:
+                    break
                 current_url, depth, source = queue.pop(0)
+                # seeds and probes too: a session lost in a query load stops every
+                # later one (S10)
+                if not draining and self._deferrable(current_url):
+                    deferred.append((current_url, depth, source))
+                    key = spa.visit_key(current_url)
+                    if key not in deferred_keys:
+                        deferred_keys.add(key)
+                        self.spa_counts["pages_deferred"] += 1
+                    continue
                 probe = None
                 if source in (spa.SEED_SOURCE, spa.PROBE_SOURCE) and self.spa_query_stopped:
                     self._refuse_query("session lost")     # S10: no more query loads
@@ -2825,7 +2831,6 @@ class LocalSpider:
                             for href in raw_links:
                                 absolute_link = self._crawl_url(urljoin(current_url, href))
                                 if (self._in_scope(absolute_link)
-                                        and not self._destructive(absolute_link)
                                         and not self.storage.is_visited(absolute_link)):
                                     queue.append((absolute_link, depth + 1, 'link'))
                         # XHR/fetch targets are queued whatever the page's own
@@ -2838,7 +2843,6 @@ class LocalSpider:
                                 #                   flight, M8) in the window
                             absolute_link = self._queue_xhr(current_url, href)
                             if absolute_link and (self._in_scope(absolute_link)
-                                    and not self._destructive(absolute_link)
                                     and not self.storage.is_visited(absolute_link)):
                                 queue.append((absolute_link, depth + 1, 'xhr'))
 
@@ -2891,8 +2895,11 @@ class LocalSpider:
             else:
                 logging.info(f"Crawled {crawled} page(s).")
             if self.skipped_destructive:
-                logging.info(f"Skipped {len(self.skipped_destructive)} destructive "
-                             f"URL(s) (NFR-CRAWL-safe).")
+                logging.info(f"Refused {len(self.skipped_destructive)} destructive "
+                             f"write(s) (NFR-CRAWL-safe, D72: writes only).")
+            if self.spa_counts["pages_deferred"]:
+                logging.info(f"Visited {self.spa_counts['pages_deferred']} destructive-"
+                             f"looking page(s) last (D72: deferred, never skipped).")
             if self.skipped_out_of_scope:
                 hosts = ", ".join(f"{h} x{n}" for h, n in
                                   sorted(self.skipped_out_of_scope.items()))

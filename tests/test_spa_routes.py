@@ -116,8 +116,9 @@ def test_one_script_yields_at_most_the_route_cap():
     ("login", spa.ROUTE_OK), ("/about", spa.ROUTE_OK), ("track-result/new", spa.ROUTE_OK),
     ("product/:id", spa.ROUTE_PARAM), ("/users/:id/edit", spa.ROUTE_PARAM),
     ("**", spa.ROUTE_PARAM), ("files/*", spa.ROUTE_PARAM),
-    ("logout", spa.ROUTE_DESTRUCTIVE), ("delete-account", spa.ROUTE_DESTRUCTIVE),
-    ("/reset-password", spa.ROUTE_DESTRUCTIVE), ("signOut", spa.ROUTE_DESTRUCTIVE),
+    # D72: a crawl's routes are never destructive (visited last instead)
+    ("logout", spa.ROUTE_OK), ("delete-account", spa.ROUTE_OK),
+    ("/reset-password", spa.ROUTE_OK), ("signOut", spa.ROUTE_OK),
     ("", spa.ROUTE_ROOT), ("/", spa.ROUTE_ROOT),
     ("{path:", spa.ROUTE_INVALID), ("a b", spa.ROUTE_INVALID), ("a//b", spa.ROUTE_INVALID),
     ("http://evil.example/x", spa.ROUTE_INVALID),
@@ -128,6 +129,13 @@ def test_one_script_yields_at_most_the_route_cap():
 ])
 def test_routes_are_classified(path, kind):
     assert spa.classify_route(path)[0] == kind
+
+
+@pytest.mark.parametrize("path", ["logout", "delete-account", "/reset-password", "signOut"])
+def test_the_login_flows_strict_classification_still_refuses_a_destructive_route(path):
+    """D72 keeps the login flow's rule: finding a login never navigates to a logout."""
+    assert spa.classify_route(path, strict=True)[0] == spa.ROUTE_DESTRUCTIVE
+    assert spa.classify_route("about", strict=True)[0] == spa.ROUTE_OK
 
 
 def test_transport_and_protocol_relative_values_are_not_counted_as_routes():
@@ -392,11 +400,16 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
         assert lab.base + "#/" + route in urls, route
     rendered = {r[1] for r in lab.seen("GET", "/rest/marker/")}
     assert {"/rest/marker/login", "/rest/marker/contact"} <= rendered
-    # destructive and parameterised routes never render
-    assert not rendered & {"/rest/marker/L", "/rest/marker/D", "/rest/marker/P"}
-    assert not any("logout" in u or "delete-account" in u or ":id" in u for u in urls)
+    # D72: destructive-looking routes are visited, after every other page; a
+    # parameterised one still never renders
+    assert {"/rest/marker/L", "/rest/marker/D"} <= rendered
+    assert "/rest/marker/P" not in rendered and not any(":id" in u for u in urls)
+    order = [u for (u,) in db_rows(db, "SELECT url FROM discovered_pages ORDER BY id")]
+    late = [order.index(lab.base + "#/" + r) for r in ("logout", "delete-account")]
+    early = [order.index(lab.base + "#/" + r) for r in ("login", "about", "contact")]
+    assert min(late) > max(early), order
     c = sp.spa_counts
-    assert c["routes_skipped_destructive"] == 2            # logout, delete-account
+    assert c["pages_deferred"] == 2                         # logout, delete-account
     assert c["routes_skipped_parameterised"] == 2          # product/:id, **
     assert c["routes_visited"] >= 10 and c["scripts_scanned"] == 1
     # the 14 declared routes; socket.io's {path:'/socket.io'} and a //host value are not
@@ -408,7 +421,9 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0,   # + FR-CRAWL-16
                      "spa_query_stopped": 0}                          # + FR-CRAWL-17
     # the bundle was read from the guard's own fetch: main.js requested once per document
-    assert len(lab.seen("GET", "/main.js")) == 1
+    # (D72: the deferred routes come after other pages, so they load the app again)
+    docs = [r for r in lab.seen("GET") if r[1] == "/"]
+    assert len(lab.seen("GET", "/main.js")) == len(docs) <= 2
     # a form on a route is recorded
     pages = {p for (p,) in db_rows(db, "SELECT page_url FROM discovered_forms")}
     assert lab.base + "#/contact" in pages
@@ -419,7 +434,7 @@ def test_the_summary_reports_the_route_counts(hash_lab, tmp_path):
     lab, _other = hash_lab
     sp, _db = _crawl(lab, tmp_path)
     (line,) = [ln for ln in sp.spa_summary() if ln.startswith("SPA routes:")]
-    assert "2 skipped as destructive" in line and "2 skipped as parameterised" in line
+    assert "skipped as destructive" not in line and "2 skipped as parameterised" in line
     assert f"{sp.spa_counts['routes_visited']} visited" in line
 
 
@@ -478,8 +493,8 @@ def test_history_mode_routes_are_paths_under_the_base(monkeypatch, tmp_path):
         lab.close()
     urls = {u for (u,) in db_rows(db, "SELECT url FROM discovered_pages")}
     assert {lab.base + "about", lab.base + "contact"} <= urls
-    assert not any("users" in u or "signout" in u for u in urls)
+    assert not any("users" in u for u in urls)
+    assert lab.base + "signout" in urls                    # D72: visited, last
     assert sp.spa_counts["routes_skipped_parameterised"] == 1
-    assert sp.spa_counts["routes_skipped_destructive"] == 1
-    assert not any(r[1].startswith("/users") or r[1].startswith("/signout")
-                   for r in lab.requests)
+    assert sp.spa_counts["pages_deferred"] == 1
+    assert not any(r[1].startswith("/users") for r in lab.requests)

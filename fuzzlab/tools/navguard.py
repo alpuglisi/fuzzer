@@ -6,7 +6,8 @@ A headless browser sends requests no link queue controls: redirects, page script
 Every one is checked where it is made (PA-0123):
 
 * **the route** -- ``guard_page`` routes the whole browser *context* (popups included):
-  a request outside the scope origins (``core.urls.in_origin_scope``) or one
+  a request outside the scope origins (``core.urls.in_origin_scope``) or, for a write
+  (any method but GET/HEAD; D72) or with ``strict``, one
   ``core.urls.destructive_reason`` flags is aborted before it is sent, unless, for the
   destructive rule only, that exact URL (by ``url_key``) is in ``allow`` -- the
   operator's explicit input, which never lifts scope. Playwright never routes a
@@ -62,7 +63,8 @@ from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
 from fuzzlab.core import sendpolicy
-from fuzzlab.core.urls import canonical_origin, destructive_reason, document_key, url_key
+from fuzzlab.core.urls import (canonical_origin, destructive_reason, document_key,
+                               is_read_method, url_key)
 
 
 def _scrubbed(text: str) -> str:
@@ -145,13 +147,17 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
     (CC-CRAWL-0036) is told each request the window refused before it was sent (not a
     redirect hop), so the crawler can record it as discovered and unsent; it is
     contained: a failing hook never changes the abort."""
-    def refused(url: str) -> bool:
-        if not in_scope(url):
+    def refused(url: str, method: str) -> bool:
+        if not in_scope(url):                     # scope first, for every method
             logging.info(f"blocked out-of-scope browser request to "
                          f"{urlsplit(url).hostname or url[:40]!r}")
             if on_out_of_scope is not None:
                 on_out_of_scope(url)
             return True
+        # D72: a visit (GET/HEAD) is never refused for its words; a write keeps the
+        # destructive rule, and the login flow (``strict``) keeps it for every method
+        if not strict and is_read_method(method):
+            return False
         reason = destructive_reason(url) if strict else sendpolicy.destructive(
             destructive_reason(url))
         if reason is not None and url_key(url) not in allow:
@@ -233,7 +239,7 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
         def abort() -> None:
             route.abort(_abort_code(document)) if document else route.abort()
 
-        if refused(url):
+        if refused(url, req.method.upper()):
             abort()
             return
         navigation = document if window is not None else False
@@ -279,11 +285,12 @@ def make_route_handler(allow: frozenset[str] = frozenset(),
                 if final.status not in _REDIRECTS or not location:
                     break
                 nxt = urljoin(final_url, location)
-                if api is None or refused(nxt):
-                    abort()
-                    return
                 if final.status in (301, 302, 303) and method not in ("GET", "HEAD"):
                     method = "GET"                          # as a browser does
+                # each hop judged with its own method, after the downgrade (D72)
+                if api is None or refused(nxt, method):
+                    abort()
+                    return
                 # a navigation's redirect hop is still a navigation (review A-S2)
                 if window is not None and window_refused(method, nxt, navigation):
                     abort()

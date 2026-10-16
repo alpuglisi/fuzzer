@@ -681,13 +681,18 @@ def test_link_sets_and_header_queries_read_only_the_real_query(tmp_path):
         ("a", "query"), ("b", "query"), ("q", "fragment")}
 
 
-def test_a_destructive_spa_route_is_never_a_point(tmp_path):
-    store, run, _c = _import(tmp_path, pages=["http://localhost/#/logout?next=x"])
+def test_a_destructive_spa_route_is_a_point_fuzzed_last(tmp_path):
+    """D72: a destructive-looking SPA route's fragment point is a GET point like any
+    other (M6 loads it); it comes after the other points (`auto._late`)."""
+    store, run, _c = _import(tmp_path, pages=["http://localhost/#/logout?next=x",
+                                              "http://localhost/#/search?q=x"])
     with store:
         skipped: list = []
-        assert injection_points_from_store(store, run, BASE, skipped=skipped,
-                                           browser_available=True) == []
-    assert skipped and "destructive" in skipped[0][3]
+        points = injection_points_from_store(store, run, BASE, skipped=skipped,
+                                             browser_available=True)
+    assert [p.url for p in points] == ["http://localhost/#/search",
+                                       "http://localhost/#/logout"]
+    assert skipped == []
 
 
 @pytest.mark.parametrize("url", ["http://localhost/#/a#/logout",
@@ -703,13 +708,16 @@ def test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection(url):
     assert _crawl_url_refusal("http://localhost/#/a#top") is None
 
 
-def test_a_destructive_route_behind_a_second_hash_is_never_a_point(tmp_path):
+def test_a_destructive_route_behind_a_second_hash_is_still_seen_as_destructive(tmp_path):
+    """BUG-0131 under D72: the second ``#`` still hides nothing from the destructive
+    reading -- the point is kept (a GET) and ordered last, as `_late` reads it."""
+    from fuzzlab.harness.auto import _late
     store, run, _c = _import(tmp_path, pages=["http://localhost/#/a#/logout?next=x"])
     with store:
         skipped: list = []
         points = injection_points_from_store(store, run, BASE, skipped=skipped,
                                              browser_available=True)
-    assert points == [] and skipped and "destructive" in skipped[0][3]
+    assert len(points) == 1 and skipped == [] and _late(points[0].url)
 
 
 def test_route_helpers():
