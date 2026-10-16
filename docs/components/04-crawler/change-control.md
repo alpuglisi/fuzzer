@@ -3,6 +3,70 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0040 — Review fixes to the survey options: Enter never clicks an unjudged button, icons are judged as glyphs, only engine.io control packets are exempt (2026-10-16)
+- Goal / acceptance: the combined independent review of CC-CRAWL-0034..0038 is resolved,
+  and each scenario becomes a regression test. The review was one round; its must-fix
+  items M1-M4 were each shown by the reviewer with a loopback probe or by reading.
+- Change (commit b019a32):
+  - **M1** (`spa.FORMS_JS`, `spa.CONTROL_NAME_JS`, `spider._press_enter`):
+    - A `<form>` is an Enter form only when its elements hold no submit or image button
+      at all (hidden, or outside it through `form=`) and it has exactly one text control
+      (implicit submission; also the review's non-blocking 4).
+    - The page re-checks right before the press: a default button rendered since the gate
+      ran means no press.
+  - **M2** (`_LABELS_FN`, `REVEAL_JS.cardLabels`, `CARD_LABELS_JS`):
+    - An element that is itself an icon returns `['', aria, glyph]`, so
+      `submitter_glyph` and the reveal glyph rule apply.
+    - A listener submitter whose text is over 100 characters is refused
+      (`submitter_long`).
+  - **M3** (`FORMS_JS` Enter loop): no button (hidden or shown) and no click-listened
+    element may be within three levels of the key-listened input, and an input inside a
+    form is never an Enter container.
+  - **M4** (`spider._count_query_write`, `spa.engineio_control`): CC-CRAWL-0034's
+    exemption is narrowed to engine.io control packets on a transport WebSocket: ping,
+    pong, upgrade, noop, the probes, and a bare socket.io connect/disconnect. A socket.io
+    event, an auth connect and a polling POST are judged by the baseline and B2 as
+    before.
+  - Non-blocking:
+    - N1: `_leaf_paths` sorts before it truncates, so key order never changes the
+      signature.
+    - N2: the listener registry prunes dead and detached elements at its cap.
+- Impact (other components / consumers / project):
+  - Fewer forms count as button-less.
+  - Fewer seeds are promoted than CC-CRAWL-0034 alone allowed.
+  - Every change here only narrows what is sent or exempted.
+- Risk (class; consequence and exposure; mitigation): high (gate bypasses in a new send
+  path). The fixes only narrow it. Mutation-checked:
+  - removing the M2 or the M3 fix fails the real-Chromium test;
+  - removing both M1 layers (FORMS_JS and the press-time check) sends the hidden button's
+    write and fails it;
+  - each M1 layer alone holds.
+- Hypothesis: none (corrective).
+- Verification / review:
+  - Tests:
+    - `tests/test_crawl_survey_options.py::test_listener_found_forms_are_submitted_on_named_routes_and_gated`
+      (routes `hidden`, `external`, `icon`, `icon2`, `grand`, `oneform` and `twotext`
+      added);
+    - `::test_enter_is_never_pressed_when_the_control_changed_or_gained_a_default_button`;
+    - `tests/test_spa_query.py::test_a_transport_control_packet_is_baseline_even_when_the_load_saw_none`;
+    - `::test_what_an_engineio_control_packet_is`.
+  - The reviewer's non-blocking items not done:
+    - N3: the wrapper is detectable as non-native.
+    - N5: an `x-` header with an innocuous name can hold a non-identifier secret (the
+      stated residual).
+    - N6: React-style delegated listeners are not seen. The registry covers direct
+      bindings only, so it must not be claimed for any app.
+    - N7: B2 may keep Juice Shop's search seed demoted; to be checked in the re-run.
+    - N8: a blocked row recorded first labels a later passive capture of the same
+      request.
+    - N9 (pre-existing): overlapping containers re-mark a control.
+  - `verify_change.py` and the full suite: below.
+- Deliverables:
+  - [x] code, tests, FR-CRAWL-13 / FR-CRAWL-16 / FR-CRAWL-17 edited in place — done
+  - [x] mutation checks — done
+- Rollback / recovery: revert b019a32 (it restores the reviewed weaknesses).
+- Effectiveness: the review's scenarios pass; the lab re-run is pending.
+
 ### CC-CRAWL-0039 — A seed or probe load's blocked write is never recorded (defect in CC-CRAWL-0036) (2026-10-16)
 - Goal / acceptance: FR-CRAWL-17's "a query load's write is never replayed" holds again:
   `test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it` passes.

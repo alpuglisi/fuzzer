@@ -397,7 +397,8 @@ fuzzer.
     (route, structural signature); at most `spa.MAX_REVEALS_PER_PAGE` (6) per page and
     `spa.MAX_REVEALS` (60) per crawl (`reveals_over_cap`). *(CC-CRAWL-0038:)* any other
     element the registry saw get a click listener (a framework binding with no role or
-    class) is a card under the same rules, unless it is a button, link, label, option or
+    class) is a card under the same rules (an element that is itself an icon is judged by
+    its glyph, CC-CRAWL-0040), unless it is a button, link, label, option or
     summary, or sits within three levels of a typed control (a form-like container's
     submitter, which FR-CRAWL-13 submits, never a reveal).
   - **The label gate (G2d, `spa.reveal_refusal` / `spa.label_refusal`):** destructive

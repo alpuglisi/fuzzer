@@ -10,6 +10,8 @@ changed, and the reason. Reference the commit hash where useful.
 - **What:** option 3 (CC-CRAWL-0036, corrected by CC-CRAWL-0039): a write the reveal window refuses (never a seed or probe load's) is now recorded as a discovered request (`source = 'blocked'`), redacted and never sent by the crawl; the importer's usual rules decide whether it becomes a fuzz point.
 - **What:** option 5 (CC-CRAWL-0037, CC-CORE-0063): a captured request's dedup signature covers its body's nested leaf paths, and allowlisted non-secret request headers are stored (`redact_captured_headers`; a cookie or credential header by name only).
 - **What:** option 6 (CC-CRAWL-0038): a read-only listener registry (an init script) lets the crawler find button-less forms (a click-listened submitter, or Enter in a key-listened text box) and listener-only reveal targets; Enter forms are submitted only on routes named with `--submit-spa-forms`.
+- **What:** review fixes (CC-CRAWL-0039, CC-CRAWL-0040). A seed load's blocked write is never recorded (it had been fuzzed: a defect caught by `verify_change.py`). Enter never sets off a hidden, outside or nearby button the gate did not judge. An icon is judged as a glyph. Option 1's exemption covers engine.io control packets only.
+- **Why:** the combined independent review found four gate bypasses, and the harness found one. Each now has a regression test.
 - **Why:** the owner chose options 1, 2, 3, 5 and 6 of `docs/CRAWLER_SURVEY_2026-10-16.md`. On Juice Shop, six query seeds were lost to dropped socket.io WebSocket messages.
 
 ## 2026-10-16 (crawler survey: options for the three measured discovery losses)
