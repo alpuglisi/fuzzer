@@ -20,6 +20,17 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — Full suite: three timing-bounded tests failed only inside the 368-file parallel run (open)
+- **Symptom:** `verify_change.py --full` on 7cd2fae. 7213 passed, 3 failed:
+  - `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`: 3 in-flight ticks where at most 2 are allowed;
+  - `tests/test_procutil.py::test_stop_server_catches_a_grandchild_that_escaped_group_and_session`: CHILD not seen reaped;
+  - `tests/test_labgen_redos.py::test_secure_twin_stays_fast_on_the_same_adversarial_term_in_real_node`: 20.4 ms against a 5 ms ceiling.
+
+  All three passed alone (3/3) and with every CPU busy (4/4).
+- **Root cause:** not established. Each test bounds a timing (in-flight requests, a reap, an elapsed time), and only the full 8-worker suite's load broke the bound. Two are in code no recent change touched (procutil, labgen). The first is a test whose redirect target D72 moved off-origin, refused by the same function as before; that it was caused by the change is not shown either way.
+- **Remediation:** none yet. Proposed: measure each bound under the full suite's load and fix the test or the code that the measurement implicates.
+- **Status:** Open.
+
 ## 2026-10-16 — tools/spider.py: D72's reveal clicks of Logout stopped every later reveal (fixed, CC-CRAWL-0044)
 - **Symptom (measured):** two Juice Shop runs at 7cd2fae: 2 reveals clicked, against 42 before D72; the log shows "the session was lost after a reveal", then "reveals stopped: the session was lost again", then "SPA query loads stopped". Confirmed stayed 4/15.
 - **Root cause:** D72 (CC-CRAWL-0042) removed the reveal gate, so the account menu's Logout item was clicked in place. It cleared the session token client-side; W4 re-adopted once, and the second loss stopped every reveal and query load for the crawl (W4/S10). The design deferred destructive-looking *pages* but not destructive-looking *clicks* (F-065).
