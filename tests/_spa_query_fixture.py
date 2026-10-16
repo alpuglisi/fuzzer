@@ -141,15 +141,18 @@ _QUERY_INDEX = _HASH_INDEX.replace("/main.js", "/q.js").replace(
     "<a href='#/search?q=fuzzlab'>Search</a> <a href='#/search?q=hello'>Hello</a>")
 
 
-#: A target the guard still refuses since D72: another origin (port 9, nothing listens).
-OFF_ORIGIN = "http://127.0.0.1:9/api/order/confirm"
+def _off_origin(handler):
+    """A target the guard still refuses since D72: another origin -- the lab's
+    ``other_port``, a listening `Recorder` when the test passes one, so an escape is a
+    request it records (review 2, M5)."""
+    return f"http://127.0.0.1:{handler.server.lab.other_port}/api/order/confirm"
 
 
 def _go(handler):
     """``/api/go``: a redirect to another origin, a hop the guard refuses (Y1; it was a
     transaction GET before D72 removed the window's GET word rules)."""
     handler.send_response(302)
-    handler.send_header("Location", OFF_ORIGIN + "?via=go")
+    handler.send_header("Location", _off_origin(handler) + "?via=go")
     handler.send_header("Content-Length", "0")
     handler.end_headers()
 
@@ -278,7 +281,7 @@ def _goaway(handler):
     shell."""
     if "x=" in handler.path:
         handler.send_response(302)
-        handler.send_header("Location", OFF_ORIGIN + "?via=hop")
+        handler.send_header("Location", _off_origin(handler) + "?via=hop")
         handler.send_header("Content-Length", "0")
         handler.end_headers()
         return

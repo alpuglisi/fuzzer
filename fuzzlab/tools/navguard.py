@@ -835,7 +835,8 @@ MAX_REDIRECTS = 5
 
 def get_checked(session, url: str, timeout: float, may_follow: Callable[[str], bool]):
     """GET ``url`` with ``requests``, following redirects **by hand**: a hop is fetched
-    only if ``may_follow(next_url)`` allows it (scope, and no destructive token). A
+    only if ``may_follow(next_url)`` allows it (the caller's rule: scope; D72: no word
+    rule for a GET hop). A
     refused hop is not followed; the redirect response itself is returned (BUG-0111).
     """
     resp = None

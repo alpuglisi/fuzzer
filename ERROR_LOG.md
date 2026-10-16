@@ -20,6 +20,12 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — tools/spider.py: the write guard's start-URL allowance ignores the query (open, pre-existing)
+- **Symptom (found by the D72 review, round 2, item N8; by reading):** `guard_page(allow=self._allow)` keys the operator's start URL by `url_key` (origin and path). A **write** to the start URL's own path with a destructive query, such as `POST index.php?do=delete` on a crawl started at `index.php`, is therefore never refused as destructive.
+- **Root cause:** `url_key` drops the query. The allowance was meant for the start URL itself.
+- **Remediation:** not done; outside D72's scope. Proposed: key the allowance by `document_key` (path and query), as `_deferrable` now does.
+- **Status:** Open.
+
 ## 2026-10-16 — tools/browserexec.py (M6): under load, a refused navigation after a hit reaches the server (open; formal CAPA required)
 - **Symptom (reproduction):** `tests/test_navigation_aborts.py::test_m6_a_sink_that_fires_before_a_refused_navigation_is_executed` failed in `verify_change.py --base 49e0768` and in `--full` on 388d073. The `/fire` page calls the sentinel, then sets `location.href = '/logout.php'` 50 ms later, and the test server received `/logout.php`. It passes alone (5/5). With 4 CPU-bound loops and `-n 8` (the `m6` tests, twice over), it failed in 5 of 6 rounds on 388d073 and in 6 of 6 on 54ced00, the commit before the crawler-survey work.
 - **Root cause:** not established. The escape predates the survey commits (54ced00 reproduces it). In `PlaywrightBrowserExecutor._in_browser`, a hit returns at once, and the `finally` calls `navguard.release` (close the pages, then `unroute_all(behavior="ignoreErrors")`) and then `browser.close()`. A navigation the page starts during that teardown reached the network, past the guard's destructive rule. Which step lets it through is unverified.

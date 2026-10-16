@@ -522,7 +522,7 @@ DESTRUCTIVE_GLYPHS = frozenset({
 #: (G2d): Juice Shop's LOGIN button is ``<button aria-label="Login"><mat-icon>
 #: exit_to_app</mat-icon> Log in</button>`` (lane S's live fix). Such a submitter with a
 #: text or aria-label is judged on those (`form_refusal`'s label rules); a glyph-only
-#: one is refused. A reveal candidate (`reveal_refusal`) is refused on any glyph.
+#: one is refused. *(D72:)* a reveal candidate is no longer judged at all.
 TEXT_FIRST_GLYPHS = frozenset({"exit_to_app"})
 
 

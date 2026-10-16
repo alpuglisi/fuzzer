@@ -259,13 +259,15 @@ def test_the_auditor_refetches_a_destructive_url_last(tmp_path):
     db = tmp_path / "old.db"
     con = sqlite3.connect(db)
     con.execute("CREATE TABLE discovered_pages (url TEXT, depth INT, source TEXT)")
+    # destructive rows at a lower depth, so `ORDER BY depth` alone would put them first
     con.executemany("INSERT INTO discovered_pages VALUES (?,?,?)",
-                    [("http://h/a.php", 0, "link"), ("http://h/reset.php", 1, "link"),
-                     ("http://h/logout.php", 1, "link")])
+                    [("http://h/reset.php", 0, "link"), ("http://h/logout.php", 0, "link"),
+                     ("http://h/a.php", 1, "link"), ("http://h/#/logout", 1, "link")])
     con.commit()
     con.close()
     assert load_urls(str(db)) == [("http://h/a.php", "link"), ("http://h/reset.php", "link"),
-                                  ("http://h/logout.php", "link")]          # D72: last
+                                  ("http://h/logout.php", "link"),
+                                  ("http://h/#/logout", "link")]            # D72: last
 
 
 def test_the_auditors_static_fetch_follows_a_redirect_to_one():
@@ -436,10 +438,11 @@ class _Recorder:
 
 def test_crawl_sourced_runs_fuzz_a_destructive_get_point_last(tmp_path):
     """D72: a GET crawl point on a destructive URL is fuzzed, after every other point
-    (`auto._late`); nothing is skipped for its words."""
+    (`auto.late`); nothing is skipped for its words. Seeded destructive-first, so only
+    the sort puts them last (review 2, M5)."""
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")
-        _seed(store, run_id, [("/a.php", "id"), ("/logout.php", "x"), ("/reset.php", "y")])
+        _seed(store, run_id, [("/logout.php", "x"), ("/reset.php", "y"), ("/a.php", "id")])
         sender = _Recorder()
         result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
                           sender=sender, mode="manual", selected_categories=["sql-injection"],
@@ -456,7 +459,7 @@ def test_greybox_crawl_points_keep_a_destructive_get_point_last(tmp_path):
     from fuzzlab.greybox.run import points_from_store
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("greybox", "h")
-        _seed(store, run_id, [("/a.php", "id"), ("/delete.php", "x")])
+        _seed(store, run_id, [("/delete.php", "x"), ("/a.php", "id")])  # destructive first
         skipped = []
         points = points_from_store(store, run_id, "http://localhost", skipped=skipped)
     assert [p.url for p in points] == ["http://localhost/a.php", "http://localhost/delete.php"]
@@ -639,3 +642,71 @@ def test_the_m6_browser_aborts_destructive_writes_but_loads_its_targets(monkeypa
                         ("http://h/logout.php", "GET"): "continue",
                         ("http://h/logout.php", "POST"): "abort",
                         ("http://h/app.js", "GET"): "continue"}
+
+
+# --- D72 ordering: review round 2 -------------------------------------------------------
+def test_a_point_sending_a_destructive_entry_is_late_too():
+    """M1: a link set's or GET form's sibling entry (``action=logout``) makes every
+    probe of the point a logout; `late` reads the entries and the store URL too."""
+    from fuzzlab.audit import InjectionPoint
+    from fuzzlab.harness.auto import late
+    assert late(InjectionPoint(url="http://h/p.php", param="id",
+                               base_entries=(("action", "logout"), ("id", "1"))))
+    assert late(InjectionPoint(url="http://h/c.php", param="c",
+                               store_url="http://h/#/delete"))
+    assert late(InjectionPoint(url="http://h/#/logout", param="q"))
+    assert not late(InjectionPoint(url="http://h/p.php", param="id",
+                                   base_entries=(("page", "2"),)))
+
+
+def test_destructive_looking_points_come_after_the_header_points(tmp_path):
+    """M2: with header points joined, one stable sort puts every destructive-looking
+    point last; header points stay after the other points."""
+    from fuzzlab.harness import auto
+    pts = [type("P", (), {"url": u, "store_url": None, "base_entries": None,
+                          "location": loc})()
+           for u, loc in (("http://h/a.php", "query"), ("http://h/logout.php", "query"),
+                          ("http://h/a.php", "header"), ("http://h/logout.php", "header"))]
+    pts.sort(key=auto.late)
+    assert [(p.url.rsplit("/", 1)[1], p.location) for p in pts] == [
+        ("a.php", "query"), ("a.php", "header"),
+        ("logout.php", "query"), ("logout.php", "header")]
+
+
+def test_a_budgeted_confirmation_order_puts_destructive_keys_last(tmp_path):
+    """M3: with ``--confirm-budget`` and a prioritizer that ranks the logout point
+    first, the logout point is still confirmed after the others."""
+    from types import SimpleNamespace
+
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed(store, run_id, [("/a.php", "id"), ("/logout.php", "x"), ("/b.php", "id")])
+        sender = _Recorder()
+
+        def reverse(_store, _run, ids):
+            return SimpleNamespace(order=list(reversed(ids)), method="test",
+                                   training_rows=0, training_positives=0)
+        run_auto(base_url="http://localhost", store=store, run_id=run_id, sender=sender,
+                 mode="manual", selected_categories=["sql-injection"],
+                 points_source="crawl", confirm_budget=3, prioritizer=reverse)
+    order = [u.split("?")[0].rsplit("/", 1)[1] for u in sender.urls]
+    assert "logout.php" in order
+    last_other = max(i for i, u in enumerate(order) if u in ("a.php", "b.php"))
+    assert order.index("logout.php") > last_other, order
+
+
+def test_only_the_start_document_itself_is_never_deferred(tmp_path):
+    """M4: a crawl started at ``index.php`` still defers ``index.php?do=logout``."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.1:8090/index.php", db_name=str(tmp_path / "s.db"),
+                     engine="requests")
+    try:
+        assert sp._deferrable("http://127.0.0.1:8090/index.php") is False
+        assert sp._deferrable("http://127.0.0.1:8090/index.php?do=logout") is True
+        assert sp._deferrable("http://127.0.0.1:8090/index.php?page=a") is False
+        logout = LocalSpider("http://127.0.0.1:8090/logout.php",
+                             db_name=str(tmp_path / "t.db"), engine="requests")
+        assert logout._deferrable("http://127.0.0.1:8090/logout.php") is False
+        logout.storage.close()
+    finally:
+        sp.storage.close()

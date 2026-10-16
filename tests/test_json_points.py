@@ -683,7 +683,7 @@ def test_link_sets_and_header_queries_read_only_the_real_query(tmp_path):
 
 def test_a_destructive_spa_route_is_a_point_fuzzed_last(tmp_path):
     """D72: a destructive-looking SPA route's fragment point is a GET point like any
-    other (M6 loads it); it comes after the other points (`auto._late`)."""
+    other (M6 loads it); it comes after the other points (`auto.late`)."""
     store, run, _c = _import(tmp_path, pages=["http://localhost/#/logout?next=x",
                                               "http://localhost/#/search?q=x"])
     with store:
@@ -710,14 +710,14 @@ def test_a_second_hash_in_a_spa_route_hides_nothing_from_point_selection(url):
 
 def test_a_destructive_route_behind_a_second_hash_is_still_seen_as_destructive(tmp_path):
     """BUG-0131 under D72: the second ``#`` still hides nothing from the destructive
-    reading -- the point is kept (a GET) and ordered last, as `_late` reads it."""
-    from fuzzlab.harness.auto import _late
+    reading -- the point is kept (a GET) and ordered last, as `late` reads it."""
+    from fuzzlab.harness.auto import late
     store, run, _c = _import(tmp_path, pages=["http://localhost/#/a#/logout?next=x"])
     with store:
         skipped: list = []
         points = injection_points_from_store(store, run, BASE, skipped=skipped,
                                              browser_available=True)
-    assert len(points) == 1 and skipped == [] and _late(points[0].url)
+    assert len(points) == 1 and skipped == [] and late(points[0])
 
 
 def test_route_helpers():

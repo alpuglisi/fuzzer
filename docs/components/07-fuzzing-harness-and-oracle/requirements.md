@@ -1486,7 +1486,7 @@ rewards) derives from it.
   excluded from scope; no traffic off localhost. *(D72, CC-FUZZ-0093, owner
   2026-10-16:)* a **GET** point, header point, link set or GET form is fuzzed whatever
   its URL's or entries' words; destructive-looking points are fuzzed after every other
-  point (`auto._late`). `check_send_url` refuses a destructive URL only for a write
+  point (`auto.late`; the confirm budget keeps that order too). `check_send_url` refuses a destructive URL only for a write
   (any method but GET/HEAD) or a send that does not state its method; a PRG follow-up
   (a GET) has no word rule. A write point on a destructive URL is still refused when
   the run is built (`_crawl_url_refusal`, before any send). *(D71, CC-FUZZ-0092:)* the destructive

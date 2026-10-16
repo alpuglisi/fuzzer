@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
 from fuzzlab.core.forms import default_value
-from fuzzlab.core.urls import (canonical_origin, destructive_reason, in_origin_scope,
+from fuzzlab.core.urls import (canonical_origin, in_origin_scope,
                                origin_scope)
 from fuzzlab.tools import paths
 
@@ -182,9 +182,11 @@ def load_urls(spider_db="spider_results.db"):
         # D72: a re-fetch is a GET visit, never refused for its words; a
         # destructive-looking URL (a logout, bWAPP's reset.php) is fetched **last**, so
         # it cannot end the session or wipe the lab before the other pages are read
+        from fuzzlab.tools.spa import route_destructive_reason     # the crawl's own rule
         kept, last = [], []
         for url, source in rows:
-            (last if destructive_reason(url) is not None else kept).append((url, source))
+            (last if route_destructive_reason(url) is not None else kept).append(
+                (url, source))
         return kept + last
     except sqlite3.Error as e:
         logging.error(f"Spider DB error: {e}")

@@ -273,6 +273,7 @@ class _Lab:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.lab = self              # a responder reads its lab (other_port)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def script_body(self) -> str:

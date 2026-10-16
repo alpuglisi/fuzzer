@@ -534,8 +534,11 @@ def test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again(query_c
     requests (M10), whatever other test crawled the lab since."""
     lab, db = query_crawl["lab"], query_crawl["db"]
     first = query_crawl["first_requests"]
-    # the refused hop never reached any server (it is off-origin; D72: the txn seed's own
-    # transaction GET to this lab's /api/order/confirm is a visit, so only the hop's)
+    # the refused hop's target is the listening other origin: it received nothing, and
+    # the refusal was the scope's (D72: the txn seed's own transaction GET to this lab is
+    # a visit, so only the hop is checked here)
+    assert query_crawl["other"].requests == []
+    assert query_crawl["sp"].skipped_out_of_scope.get("127.0.0.1", 0) >= 1
     assert not any("via=go" in r[1] for r in first)
     assert len([r for r in first if r[0] == "GET" and r[1] == "/api/go"]) == 1
     assert not any("/api/go" in u for u in _pages(db))
@@ -1463,7 +1466,8 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
     from tests.test_forms_phase4 import _LsManager
     chromium_or_skip(monkeypatch)
     seen = _window_spy(monkeypatch)
-    lab = RedirectSeedSpa()
+    other = Recorder()                       # the refused hop's listening origin
+    lab = RedirectSeedSpa(other_port=other.server.server_address[1])
     try:
         manager = _LsManager(lab.base)
         sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
@@ -1473,8 +1477,12 @@ def test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on(
         requests = list(lab.requests)
     finally:
         lab.close()
+        other.close()
     db, base = str(tmp_path / "s.db"), lab.base
     gets = [r[1] for r in requests if r[0] == "GET"]
+    # the hop's origin received nothing: the scope refused it (review 2, M5)
+    assert other.requests == []
+    assert sp.skipped_out_of_scope.get("127.0.0.1", 0) >= 1
     # M4: one load of the seed, in its window; never a static re-send
     assert gets.count("/goaway?x=fuzzlab") == 1
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))

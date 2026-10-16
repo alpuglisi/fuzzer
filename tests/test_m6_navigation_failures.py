@@ -27,11 +27,14 @@ from fuzzlab.oracle.probe import Probe, UnplaceableLocation
 from fuzzlab.oracle.strategies import _xss_exec_payloads
 from tests.test_navigation_aborts import _chromium_or_skip, _m6_run, _Site
 
-_NAV = "location.href = '/logout.php'"
-
-
 def _site():
-    site = _Site()
+    """The test site, and the other origin its pages navigate to (``site.away``,
+    listening). The executor's scope is the observe URL's origin, so the navigation is
+    refused: a request reaching ``away`` is an escape (QUALITY_POLICY §9). D72: it was
+    this site's ``/logout.php``, refused as destructive; a GET there is a visit now."""
+    site, away = _Site(), _Site()
+    site.away = away
+    _NAV = f"location.href = '{away.base}logout.php'"
     # navigates by script to a refused URL while it is being parsed (before `load`)
     site.pages["/inline"] = f"<html><body><script>{_NAV}</script><p>x</p></body></html>"
     # the same, and its sink fires 300 ms later
@@ -41,7 +44,7 @@ def _site():
     site.pages["/dom"] = ("<html><body><div id=o></div><script>document.getElementById"
                           "('o').innerHTML = new URLSearchParams(location.search)"
                           ".get('q') || ''</script></body></html>")
-    site.redirects["/redir"] = "/logout.php"
+    site.redirects["/redir"] = away.base + "logout.php"
     return site
 
 
@@ -58,9 +61,10 @@ def test_a_before_load_navigation_is_no_verdict_well_under_the_timeout(monkeypat
         took = time.monotonic() - started
     finally:
         site.close()
+        site.away.close()
     assert took < 6.5, f"{took:.1f}s: the superseded load was waited out"
     assert "did not finish loading" in str(err.value)
-    assert "/logout.php" not in site.requests
+    assert site.away.requests == []
 
 
 def test_a_hit_after_a_before_load_navigation_counts(monkeypatch):
@@ -71,6 +75,8 @@ def test_a_hit_after_a_before_load_navigation_counts(monkeypatch):
         assert _m6_run(site, "/inline-fire", settle_ms=1500).executed is True
     finally:
         site.close()
+        site.away.close()
+    assert site.away.requests == []
 
 
 class _QuietSender:
@@ -116,6 +122,7 @@ def test_a_page_that_cannot_load_never_ends_the_pipeline(monkeypatch, tmp_path):
                           "WHERE run_id=?", (run,))}
     finally:
         site.close()
+        site.away.close()
     assert any(url.endswith("/dom") and vc == "xss-dom" for url, vc in found)
     assert not any(url.endswith("/redir") for url, _vc in found)
     assert status == {"redir": "inconclusive", "dom": "checked"}
@@ -125,7 +132,7 @@ def test_a_page_that_cannot_load_never_ends_the_pipeline(monkeypatch, tmp_path):
     # the run's inconclusive detail says why (review B-N1), with no URL in it
     detail, = [item for item in result.inconclusive if item["url"].endswith("/redir")]
     assert "could not load" in detail["reason"] and "http" not in detail["reason"]
-    assert "/logout.php" not in site.requests
+    assert site.away.requests == []
 
 
 # --- a fake Playwright: failures the real browser cannot be made to give on demand --

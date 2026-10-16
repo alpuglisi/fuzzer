@@ -114,6 +114,16 @@ def _header_stop_reason(sender) -> str | None:
     return None
 
 
+def _late_evidence(ev: dict) -> bool:
+    """D72: `harness.auto.late` on a candidate's evidence (its URL, store URL and the
+    sibling entries it sends). Ordering only."""
+    from types import SimpleNamespace
+
+    from fuzzlab.harness.auto import late
+    return late(SimpleNamespace(url=ev.get("url") or "", store_url=ev.get("store_url"),
+                                base_entries=ev.get("entries")))
+
+
 def _confirmation_key(ev: dict) -> tuple:
     """Rows that would send the oracle the identical confirmation (several rules firing
     on one point) share one key, one budget slot and one status."""
@@ -282,6 +292,9 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                     status[cid] = _checked(key)
         else:
             chosen = set(selected)
+            # D72 (review 2, M3): the prioritizer chooses which keys; destructive-looking
+            # ones are still confirmed after the others (stable within each part)
+            selected = sorted(selected, key=lambda k: _late_evidence(keyed[k][0][1]))
             for key in selected:                             # one confirmation per key
                 _confirm(key, keyed[key][0][1])
                 if key not in stopped_keys:

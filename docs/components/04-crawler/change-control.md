@@ -3,6 +3,59 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0043 — D72 review round 2: "destructive last" holds for entries, headers, the confirm budget and a start page's own query; tests that could not fail now can (2026-10-16)
+- Goal / acceptance: the second (final) independent review of CC-CRAWL-0042 found five
+  must-fix items, each backed by a loopback probe or a reading. Each is fixed and has a
+  regression test.
+- Change:
+  - **M1** (`harness/auto.py`): `late(point)` replaces `_late(url)`. It reads the
+    point's URL and SPA route (`spa.route_destructive_reason`, the crawler's own
+    predicate), its store URL, and every sibling entry (a link set's or GET form's
+    `action=logout`).
+  - **M2** (`harness/auto.py`): after header points are joined, one stable sort by
+    `late`, so destructive-looking points come after the header points too.
+  - **M3** (`harness/pipeline.py`): with a confirm budget, the prioritizer still chooses
+    the keys, but destructive-looking keys are confirmed after the others
+    (`_late_evidence`).
+  - **M4** (`tools/spider.py`): `_deferrable` exempts only the start document itself
+    (origin, path and query, and its SPA route); `index.php?do=logout` is deferred on a
+    crawl started at `index.php`.
+  - **M5** (tests):
+    - The Y1 and goaway hops target a listening `Recorder` (the lab's `other_port`,
+      read through `server.lab`), and the tests assert it received nothing and that the
+      scope refused the hop.
+    - The run_auto, greybox and `load_urls` ordering tests seed destructive rows first,
+      so only the sort orders them.
+    - `tests/test_m6_navigation_failures.py` (found by `verify_change.py`, 3 failures)
+      targets a listening off-origin server.
+  - Non-blocking items taken: the deferral log line says what it counts (deferred, not
+    visited); the auditor uses `spa.route_destructive_reason`, so `/#/logout` goes last
+    there too; stale docstrings fixed (`injection_points_from_store`, `_fetch_static`,
+    `_query_gate` and its dead mapping, `get_checked`, the reveal-glyph comment).
+- Impact (other components / consumers / project): FUZZ (budget order) and AUD (the
+  auditor's order) as above. No contract change.
+- Risk (class; consequence and exposure; mitigation): high class (D72's mitigation). The
+  fixes only change order; nothing more is sent. Mutation-checked: dropping the budget
+  sort fails `test_a_budgeted_confirmation_order_puts_destructive_keys_last`.
+- Hypothesis: none (corrective).
+- Verification / review: `tests/test_destructive_urls.py::test_a_point_sending_a_destructive_entry_is_late_too`,
+  `::test_destructive_looking_points_come_after_the_header_points`,
+  `::test_a_budgeted_confirmation_order_puts_destructive_keys_last`,
+  `::test_only_the_start_document_itself_is_never_deferred`, plus the rewritten tests
+  above. `verify_change.py` is below.
+- Not done, from the review's non-blocking list:
+  - N4: other GET/HEAD literals besides SP-37.
+  - N5: PRG follow-ups to a destructive-looking target are sent with the session in the
+    middle of the run; order cannot cover a follow-up. A residual for the owner.
+  - N6: destructive pages found while draining are visited in discovery order.
+  - N7: two test names (the logout seed test; the menu test never clicks Logout, which
+    is over the menu cap).
+  - N8 (pre-existing): see ERROR_LOG.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert this commit (it restores the reviewed gaps).
+- Effectiveness: pending the repeated lab runs.
+
 ### CC-CRAWL-0042 — D72: the page-visit word rules are removed; destructive-looking pages are visited last; the write rules stay (2026-10-16)
 - Goal / acceptance: the owner's decision D72 ("get rid of all of the rules for the
   crawler ... A crawler submitting a get request is not going to cause any actual

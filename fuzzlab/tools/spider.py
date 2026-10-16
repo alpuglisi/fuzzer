@@ -654,9 +654,12 @@ class LocalSpider:
         """D72: a destructive-looking page (its URL, or a SPA route's fragment such as
         ``/#/logout``; `spa.route_destructive_reason`) is visited **last**, never
         skipped: a logout would end the crawl's session, and bWAPP's ``reset.php``
-        drops its database, before the other pages are crawled. The start URL is never
-        deferred. Ordering only: it refuses nothing."""
-        if url_key(url) in self._allow and spa.spa_fragment(url) is None:
+        drops its database, before the other pages are crawled. Only the start URL
+        itself -- the same document (origin, path **and query**) and SPA route -- is never
+        deferred: ``index.php?do=logout`` on a crawl started at ``index.php`` is
+        (review 2, M4). Ordering only: it refuses nothing."""
+        if document_key(url) == document_key(self.start_url) and \
+                spa.spa_fragment(url) == spa.spa_fragment(self.start_url):
             return False
         return spa.route_destructive_reason(url) is not None
 
@@ -1354,7 +1357,8 @@ class LocalSpider:
     # ----- fetchers -----
     def _fetch_static(self, url):
         """No JavaScript. Parses the raw HTML with BeautifulSoup. Redirects are
-        followed by hand, each hop in scope and not destructive (BUG-0111)."""
+        followed by hand, each hop in scope (BUG-0111; D72: a GET hop is not refused for
+        its words)."""
         from fuzzlab.tools.navguard import get_checked
         resp = get_checked(self.session, url, self.timeout_ms / 1000,
                            lambda nxt: self._in_scope(nxt))   # D72: no word rule on a GET
@@ -1678,13 +1682,12 @@ class LocalSpider:
 
     def _query_gate(self, url):
         """Why a seed or probe URL is never loaded, as a counted reason class, or None:
-        `spa.query_url_refusal` (the destructive rule, then the window's own rule as a
-        GET, A-M1) and scope."""
+        `spa.query_url_refusal` (since D72 it refuses nothing for words; kept as the one
+        hook) and scope."""
         why = spa.query_url_refusal(url)
         if why is not None:
             logging.info(f"SPA query URL {url.split('?', 1)[0]} not loaded: {why}")
-            return "destructive URL" if why.startswith("destructive") else \
-                "write-window refusal"
+            return "write-window refusal"
         if not self._in_scope(url):
             return "out of scope"
         return None
@@ -2898,8 +2901,9 @@ class LocalSpider:
                 logging.info(f"Refused {len(self.skipped_destructive)} destructive "
                              f"write(s) (NFR-CRAWL-safe, D72: writes only).")
             if self.spa_counts["pages_deferred"]:
-                logging.info(f"Visited {self.spa_counts['pages_deferred']} destructive-"
-                             f"looking page(s) last (D72: deferred, never skipped).")
+                logging.info(f"Deferred {self.spa_counts['pages_deferred']} destructive-"
+                             f"looking page(s) to the end of the crawl (D72: never "
+                             f"skipped for their words).")
             if self.skipped_out_of_scope:
                 hosts = ", ".join(f"{h} x{n}" for h, n in
                                   sorted(self.skipped_out_of_scope.items()))

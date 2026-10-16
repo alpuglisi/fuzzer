@@ -231,9 +231,11 @@ def injection_points_from_store(store, run_id: int, base_url: str,
                                 browser_available: bool = False) -> list[InjectionPoint]:
     """Build injection points from the run's endpoint/parameter rows.
 
-    A point on a destructive URL (``core.urls.destructive_reason``: logout, reset,
-    delete, ...) is never fuzzed from a crawl (NFR-FUZZ-safe, BUG-0112); it is appended
-    to ``skipped`` as ``(path, method, param, reason)`` instead.
+    A **write** point (any method but GET/HEAD) on a destructive URL
+    (``core.urls.destructive_reason``: logout, reset, delete, ...) is never fuzzed from a
+    crawl (NFR-FUZZ-safe, BUG-0112); it is appended to ``skipped`` as ``(path, method,
+    param, reason)`` instead. *(D72:)* a GET point is fuzzed whatever its words, after
+    every other point (`late`).
 
     A point on a path with an in-app login form (`isolated_paths_from_store`) needs an
     isolated session (FR-FUZZ-44). By default (``isolated`` None) such points are
@@ -282,7 +284,7 @@ def injection_points_from_store(store, run_id: int, base_url: str,
         if key in seen:
             continue
         seen.add(key)
-        # D72: a GET point is fuzzed whatever its URL's words (last: `_late`); a write
+        # D72: a GET point is fuzzed whatever its URL's words (last: `late`); a write
         # point on a destructive URL is still refused here, before any send, so the run
         # never meets `check_send_url`'s refusal mid-way (review M3)
         reason = None if is_read_method(method) else _crawl_url_refusal(base + path)
@@ -342,19 +344,31 @@ def injection_points_from_store(store, run_id: int, base_url: str,
     # D72: a destructive-looking point (a logout ends the session, bWAPP's reset.php
     # drops its database) is fuzzed after every other one; stable, so the rest keep
     # their order
-    points.sort(key=lambda p: _late(p.url))
+    points.sort(key=late)
     return points
 
 
-def _late(url: str) -> bool:
-    """D72: does ``url`` (or its SPA route) look destructive? Ordering only."""
-    from urllib.parse import urlsplit
+def late(point) -> bool:
+    """D72: is ``point`` destructive-looking, to be fuzzed after every other one? Its
+    URL or SPA route (`spa.route_destructive_reason`, the crawler's own predicate), its
+    stored-XSS plant URL, or any name or value it sends as a sibling (a link set's or
+    GET form's ``base_entries``: ``action=logout`` makes every probe of the point a
+    logout; review 2, M1). Ordering only: it refuses nothing."""
+    import json
 
-    from fuzzlab.core.urls import (destructive_reason, is_spa_route_fragment,
-                                   text_destructive_reason)
-    fragment = urlsplit(url or "").fragment
-    return destructive_reason(url) is not None or (
-        is_spa_route_fragment(fragment) and text_destructive_reason(fragment) is not None)
+    from fuzzlab.core.urls import text_destructive_reason
+    from fuzzlab.tools.spa import route_destructive_reason
+    if route_destructive_reason(point.url or "") is not None:
+        return True
+    if getattr(point, "store_url", None) and \
+            route_destructive_reason(point.store_url) is not None:
+        return True
+    for entry in getattr(point, "base_entries", None) or ():
+        for part in entry:
+            text = part if isinstance(part, str) else json.dumps(part)
+            if text_destructive_reason(text) is not None:
+                return True
+    return False
 
 
 def _path_of(url: str) -> str:
@@ -389,7 +403,7 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
     FR-FUZZ-43). The URL carries the page's representative query -- the first crawled
     link set for that path (`core.forms.first_link_set`, already redacted), its ip/host/
     url values sent neutral -- so the page runs as on a visit. *(D72:)* a destructive-
-    looking page is a GET visit like any other (its points last, `_late`). ``names``
+    looking page is a GET visit like any other (its points last, `late`). ``names``
     are already checked (`core.http.header_point_refusal`)."""
     from urllib.parse import urlencode, urlsplit
 
@@ -412,7 +426,7 @@ def header_points_from_store(store, run_id: int, base_url: str, names,
             url += "?" + urlencode([(n, _send_value(v)) for n, v in query])
         points.extend(InjectionPoint(url=url, param=name, method="GET", location="header",
                                      origin="crawl") for name in names)
-    points.sort(key=lambda p: _late(p.url))                    # D72: stable, last
+    points.sort(key=late)                                      # D72: stable, last
     return points
 
 
@@ -611,6 +625,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
             # last, so they are confirmed last and a budget runs out on them first
             points += header_points_from_store(store, run_id, base_url,
                                                list(header_names), skipped=skipped)
+            # D72 (review 2, M2): destructive-looking points after every other one,
+            # headers included; stable, so "headers last" holds within each part
+            points.sort(key=late)
 
     if plugins is not None:
         plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
