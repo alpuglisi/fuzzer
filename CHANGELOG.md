@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (stall diagnosis: why confirmed positives stay at 4/15)
+- **What:** `docs/CRAWLER_SURVEY_2026-10-16.md` lists the four measured causes. Three are blocked on owner decisions: the search-page rule, the named-route gate for SPA forms, and bWAPP's pickers. One can be fixed without a decision: reveal discovery varies from run to run.
+- **Why:** the progress guard's stall rule (PA-0141): the metric had not moved for 11 h.
+
 ## 2026-10-16 (the survey options measured; a refused request's skip is counted)
 - **What:** one Juice Shop run confirmed 5/15 (JUICE-0004 new, likely through option 6's extra reveal targets). The repeat run confirmed 4/15, so no gain is established (F-064). bWAPP is unchanged at 0/55.
   - Option 1 had no effect. The six seeds are demoted by Juice Shop's own `verifyLocalXssChallenge` socket.io event, which carries the query value; rule B2 counts it, as designed (F-063, survey doc corrected).

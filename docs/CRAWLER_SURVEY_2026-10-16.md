@@ -204,3 +204,20 @@ Measured at 49e0768 (generic command line, rules on), against the baseline at f6
 (42 reveal clicks, against 60). The 5/15 above did not repeat, so no effect on the
 metric is established (F-064).
 
+
+## Why the metric is not moving (stall diagnosis, STALL-0016, 2026-10-16)
+
+The goal metric is Juice Shop positives confirmed by one generic command line. It has
+stayed at 4/15 for 11 h. The causes, measured today:
+
+| Loss | Cases | Cause | Blocked on |
+| --- | --- | --- | --- |
+| Search-style pages discarded | `q`-style fragment cases | Juice Shop sends `verifyLocalXssChallenge` with the query value, and rule B2 counts it as a write | owner decision (question 2: keep, flag, or allow) |
+| SPA forms never submitted | 9 POST-body cases | SPA forms are submitted only on routes named with `--submit-spa-forms`, which a generic run does not name | owner decision (option 4b / 6 send gate) |
+| bWAPP pages unreached | 55/55 | the "choose your bug" POST picker is enumerated only for a named select | owner decision (option 4b) |
+| Run-to-run variance | JUICE-0004 | reveal discovery differs between runs (42-60 clicks), so a case reached through a reveal comes and goes | engineering, possible without a decision: make reveal order and caps deterministic |
+
+The survey options built today (1, 2, 3, 5, 6) are safe and verified. Measured on
+Juice Shop, none moves a confirmed case reliably; the gains left need the decisions
+above. Separately, an existing safety escape in M6 (a refused navigation after a hit,
+under load) needs a formal CAPA (ERROR_LOG, open).
