@@ -1182,16 +1182,18 @@ class LocalSpider:
                          f"recorded ({why})")
 
     def _note_window_blocked(self, request):
-        """A write the reveal or query window refused before it was sent
+        """A write the reveal window refused before it was sent
         (CC-CRAWL-0036, survey option 3): recorded as a discovered request with source
         `BLOCKED_SOURCE` -- method, URL, body and media type through the one capture
         boundary (`StorageManager.record_request`, PA-0100) -- and never sent. The
         import's rules decide whether it becomes a point, as for a captured one
         (FR-AUD-22). A navigation write (an auto-submitted form, a picker POST) is kept
         too. Not kept: a GET/HEAD/OPTIONS (a read; a GET navigation's target is queued
-        as before), a transport URL, a body-less write, and anything a probe load
-        refused (a probe records nothing, FR-CRAWL-17)."""
-        if self._probe is not None:
+        as before), a transport URL, a body-less write, and anything a seed or probe
+        load's window refused (CC-CRAWL-0039: a query load's write is never replayed,
+        FR-CRAWL-17 -- it is caused by our own query value, and M6 or the fuzzer would
+        send it outside any window; a probe records nothing)."""
+        if self._probe is not None or (self._win or {}).get("query"):
             return
         method = (request.method or "").upper()
         if method in ("GET", "HEAD", "OPTIONS") or spa.is_transport_url(request.url):

@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — tools/spider.py: a seed load's blocked write was recorded and then fuzzed (fixed, CC-CRAWL-0039)
+- **Symptom (reproduction):** `verify_change.py --base 54ced00` on fa22af5: `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it` failed. The fixture server received `POST /api/autopost` (`v=<filler>`) twice during the later `fuzzlab auto` run.
+- **Root cause:** CC-CRAWL-0036 (survey option 3) recorded every write the window refused, the query (seed) window's included. A seed's auto-submitted form became a `blocked` request, the importer made it a body point, and the fuzzer sent it outside any window. This broke FR-CRAWL-17's rule that a seed load's write is never replayed. I knew that rule while designing option 3 and recorded seed-window writes anyway (F-062).
+- **Remediation:** `_note_window_blocked` records only what the reveal window refused; a seed or probe window's refusals are never recorded. The regression is the failing test itself (passes now) plus a unit case in `tests/test_crawl_survey_options.py::test_what_a_blocked_write_records`. FR-CRAWL-13 corrected in place.
+- **Scope:** the five survey commits on the working branch only (pushed, never merged or run against a lab); the only sends were to the test's own loopback fixture.
+- **Status:** Fixed. An ordinary defect: the verification control caught it before any merge or lab run, so no control failed and no CAPA is opened.
+
 ## 2026-10-16 — scripts/funnel_report.py: a case was "reached" by a point on another method (fixed)
 - **Symptom (reproduction):** a store holding only `GET /rest/user/login?email=` scored JUICE-0003 (POST body `email`) as `reached`. The new test `test_a_point_on_another_method_or_location_never_reaches_a_case` failed on the old code.
 - **Root cause:** case identity was path plus parameter only; the method and location were never compared.

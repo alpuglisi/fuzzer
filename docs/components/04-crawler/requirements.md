@@ -139,12 +139,13 @@ fuzzer.
     Non-sensitive captured values (e.g. a logged-in e-mail address) are kept and are
     replayed as siblings by the importer (reviewer A8).
   - **Blocked writes recorded, never sent (CC-CRAWL-0036, survey option 3).** A write
-    the reveal or query window refuses before it is sent (`navguard`
+    the **reveal** window refuses before it is sent (`navguard`
     `on_window_refused`; any method but GET/HEAD/OPTIONS, a navigation POST of an
     auto-submitted form or picker included) with a JSON or form-encoded body is recorded
     through the same write site and boundary with `source = 'blocked'`
     (`spider.BLOCKED_SOURCE`, counted `requests_blocked_recorded`). Not recorded: a
-    transport URL, a body-less write, and anything a probe load refused (a probe
+    transport URL, a body-less write, and anything a seed or probe load's window refused
+    (*CC-CRAWL-0039:* a query load's write is never replayed, FR-CRAWL-17; a probe
     records nothing). It is never sent by the crawl; the importer's FR-AUD-22 rules
     decide whether it becomes a point.
   - **Active submission (opt-in, `--submit-spa-forms [ROUTE …]`, default off).** On a

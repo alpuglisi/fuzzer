@@ -147,8 +147,8 @@ def _req(url, method="POST", body=b'{"q":"x"}', ctype="application/json"):
 def test_what_a_blocked_write_records(tmp_path):
     """`_note_window_blocked`: a JSON or form write is recorded with source
     ``blocked`` through the capture boundary (a password blanked, a probe marker
-    scrubbed); a read, a transport, a body-less write and a probe load's refusals are
-    not."""
+    scrubbed); a read, a transport, a body-less write and a seed or probe load's
+    refusals are not (CC-CRAWL-0039)."""
     import json
 
     from fuzzlab.tools import spa
@@ -169,6 +169,11 @@ def test_what_a_blocked_write_records(tmp_path):
         sp._probe = {"blocked": set(), "requests": []}
         sp._note_window_blocked(_req("http://127.0.0.1:9/api/probe"))
         sp._probe = None
+        # CC-CRAWL-0039: a seed load's own write is never recorded (never replayed)
+        sp._win = {"query": spa.SEED_SOURCE}
+        sp._note_window_blocked(_req("http://127.0.0.1:9/api/autopost", body=b"v=fuzzlab",
+                                     ctype="application/x-www-form-urlencoded"))
+        sp._win = None
         rows = sp.storage.cursor.execute(
             "SELECT method, url, content_type, body_json, source FROM discovered_requests "
             "ORDER BY id").fetchall()

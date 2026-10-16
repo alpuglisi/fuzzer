@@ -3,6 +3,24 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0039 — A seed or probe load's blocked write is never recorded (defect in CC-CRAWL-0036) (2026-10-16)
+- Goal / acceptance: FR-CRAWL-17's "a query load's write is never replayed" holds again:
+  `test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it` passes.
+- Change: `LocalSpider._note_window_blocked` returns when the open window is a query
+  window (`self._win["query"]`) as well as during a probe; only the reveal window's
+  refusals are recorded. FR-CRAWL-13 and ARCHITECTURE corrected in place.
+- Impact (other components / consumers / project): fewer `blocked` rows (no seed or
+  probe writes). CC-CRAWL-0036's other behaviour is unchanged.
+- Risk (class; consequence and exposure; mitigation): high (it restores a
+  destructive-send rule); the fix only narrows what is recorded.
+- Verification / review: the failing test passes; unit case added to
+  `tests/test_crawl_survey_options.py::test_what_a_blocked_write_records`; ERROR_LOG
+  2026-10-16; F-062. The combined `verify_change.py` re-run is recorded with the review.
+- Deliverables:
+  - [x] code, tests, FR-CRAWL-13, ARCHITECTURE, ERROR_LOG, F-062 — done
+- Rollback / recovery: none wanted (this is the correction).
+- Effectiveness: the re-run of the harness on the corrected head.
+
 ### CC-CRAWL-0038 — A listener registry finds button-less forms and listener-only reveal targets; Enter submits on named routes (crawler survey option 6) (2026-10-16)
 - Goal / acceptance: on an app whose handlers are bound with `addEventListener` (no
   role, class or button to find them by), the crawler finds a container whose submitter

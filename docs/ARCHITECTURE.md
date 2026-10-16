@@ -1300,7 +1300,8 @@ tracked in the requirements files, not here.
       site (PA-0100 guard); no cookie or credential header value is stored, only
       allowlisted non-secret headers (`redact_captured_headers`, CC-CRAWL-0037), and the
       dedup signature covers the body's nested leaf paths; since CC-CRAWL-0036 it also
-      holds, as `source = 'blocked'`, the writes the reveal or query window refused,
+      holds, as `source = 'blocked'`, the writes the reveal window refused (never a seed or
+      probe load's, CC-CRAWL-0039),
       recorded and never sent (the importer's rules decide, FR-AUD-22);
     - every crawl context runs `spa.LISTEN_INIT_JS` (CC-CRAWL-0038), a read-only
       registry of the elements that got click / submit / key listeners; `FORMS_JS` and
