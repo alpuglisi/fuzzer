@@ -3,6 +3,39 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0044 — D72: a destructive-looking reveal click is made last, never in place (defect found by the Juice Shop measurement) (2026-10-16)
+- Goal / acceptance: a Logout menu item or a destructive-looking reveal target no
+  longer ends the session before the rest of the crawl. It is clicked after every
+  page, deferred page, reveal and seed, under the same caps, and never refused.
+  Acceptance: the real-Chromium test below, a mutation check, and the Juice Shop re-runs.
+- Change:
+  - `tools/spa.py`: `reveal_looks_destructive(labels)` (ordering only). A
+    `DESTRUCTIVE_GLYPHS` glyph is judged text-first (`submitter_glyph`), and the text
+    and aria-label by `text_destructive_reason` with inflections folded.
+  - `tools/spider.py`:
+    - `_reveal_page` and `_reveal_one`'s menu loop defer such a candidate or item into
+      `_deferred_reveals` (counted `reveals_deferred`).
+    - The crawl loop runs `_run_deferred_reveals` once the queue, the deferred pages and
+      the probes are done. It reloads the page and clicks through `_reveal_one`; an item
+      is reached through its trigger again (`only_item`).
+    - The per-signature card cap and `MAX_REVEALS` apply there too; the summary line
+      shows the count.
+- Impact (other components / consumers / project): crawl only. New crawl-stats key
+  `reveals_deferred`.
+- Risk (class; consequence and exposure; mitigation): medium (ordering of clicks
+  already allowed by D72). Mutation-checked: with the predicate returning None, the
+  test fails. The W4 test of a non-destructive-looking toggle that logs out still
+  passes (its stop rule is unchanged).
+- Verification / review: `tests/test_d72_visit_rules.py::test_a_logout_menu_item_is_clicked_last_and_stops_nothing_before_it`,
+  `::test_what_a_reveal_looks_destructive_for`. `test_forms_phase4.py`: the Delete-all
+  card, deferred, stays over its signature cap. `verify_change.py` and the lab re-runs
+  are below. ERROR_LOG 2026-10-16; F-065.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert (it restores the early logout).
+- Effectiveness: pending two Juice Shop re-runs (reveals clicked should return towards
+  the pre-D72 42).
+
 ### CC-CRAWL-0043 — D72 review round 2: "destructive last" holds for entries, headers, the confirm budget and a start page's own query; tests that could not fail now can (2026-10-16)
 - Goal / acceptance: the second (final) independent review of CC-CRAWL-0042 found five
   must-fix items, each backed by a loopback probe or a reading. Each is fixed and has a

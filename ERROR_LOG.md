@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — tools/spider.py: D72's reveal clicks of Logout stopped every later reveal (fixed, CC-CRAWL-0044)
+- **Symptom (measured):** two Juice Shop runs at 7cd2fae: 2 reveals clicked, against 42 before D72; the log shows "the session was lost after a reveal", then "reveals stopped: the session was lost again", then "SPA query loads stopped". Confirmed stayed 4/15.
+- **Root cause:** D72 (CC-CRAWL-0042) removed the reveal gate, so the account menu's Logout item was clicked in place. It cleared the session token client-side; W4 re-adopted once, and the second loss stopped every reveal and query load for the crawl (W4/S10). The design deferred destructive-looking *pages* but not destructive-looking *clicks* (F-065).
+- **Remediation:** a destructive-looking reveal candidate or menu item (`spa.reveal_looks_destructive`: a logout or delete text or glyph, judged text-first) is deferred to the end of the crawl (`_deferred_reveals`, `_run_deferred_reveals`, counted `reveals_deferred`), under the same caps, and never refused. Regression: `tests/test_d72_visit_rules.py::test_a_logout_menu_item_is_clicked_last_and_stops_nothing_before_it`; removing the deferral fails it.
+- **Scope:** reveal clicks only (pages and fuzz points were already deferred). The working branch only; not merged.
+- **Status:** Fixed. An ordinary defect: caught by the lab measurement before any merge.
+
 ## 2026-10-16 — tools/spider.py: the write guard's start-URL allowance ignores the query (open, pre-existing)
 - **Symptom (found by the D72 review, round 2, item N8; by reading):** `guard_page(allow=self._allow)` keys the operator's start URL by `url_key` (origin and path). A **write** to the start URL's own path with a destructive query, such as `POST index.php?do=delete` on a crawl started at `index.php`, is therefore never refused as destructive.
 - **Root cause:** `url_key` drops the query. The allowance was meant for the start URL itself.

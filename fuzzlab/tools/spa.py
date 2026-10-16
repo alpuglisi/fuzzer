@@ -793,6 +793,25 @@ def label_refusal(text: str | None) -> str | None:
     return None
 
 
+def reveal_looks_destructive(labels) -> str | None:
+    """D72: does a reveal candidate or menu item look like it ends the session or deletes
+    something (``Logout``, a ``logout`` / ``delete`` glyph)? Then the crawl clicks it
+    **last**, after every other page, reveal and seed (`LocalSpider._deferred_reveals`);
+    it is never refused. The glyph is judged text-first (`submitter_glyph`: Juice Shop's
+    ``exit_to_app`` LOGIN button is not a logout), the text and aria-label by
+    `text_destructive_reason` with inflections folded. Ordering only."""
+    text, aria, icons = (list(labels or []) + ["", "", ""])[:3]
+    glyph = submitter_glyph(icons or "", text or "", aria or "")
+    if glyph:
+        return glyph
+    for value in (text, aria):
+        reason = text_destructive_reason(value or "") or \
+            text_destructive_reason(_base_forms(value or ""))
+        if reason:
+            return reason
+    return None
+
+
 def reveal_refusal(labels) -> str | None:
     """Why a reveal candidate or a revealed menu item is never clicked: never, since D72
     (G2d superseded). A reveal click is a visit: the reveal window (W1-W3) still holds

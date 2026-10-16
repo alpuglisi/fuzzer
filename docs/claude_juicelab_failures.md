@@ -853,3 +853,18 @@ Juice Shop lab is complete.
   survey doc amended. Rule I follow from now on: a measurement is claimed as a change
   only after it repeats, as the baseline did.
 
+### F-065 — D72's design put destructive pages last but not destructive clicks
+- **What:** implementing D72, I deferred destructive-looking pages, routes and fuzz
+  points, but removed the reveal gate without deferring the clicks it guarded. On Juice
+  Shop the account menu's Logout was clicked early. The session-protection rules (W4/S10)
+  then stopped every later reveal and query load: reveals fell from 42 to 2. Neither
+  review round caught it, and the unit and fixture tests passed. Only the lab
+  measurement showed it.
+- **Evidence:** scratch runs `juice-d72-1` and `juice-d72-2` (crawl.log, crawl_stats);
+  ERROR_LOG 2026-10-16.
+- **Impact:** D72 as first built cut Juice Shop's discovery; no confirmed case was lost
+  in the measured runs (4/15 before and after).
+- **Status:** fixed in CC-CRAWL-0044. Rule I follow from now on: when a rule is removed,
+  trace every consequence it prevented (here, a session loss and what that stops), not
+  only the requests it refused.
+

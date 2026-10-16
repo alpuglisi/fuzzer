@@ -572,7 +572,7 @@ class LocalSpider:
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
-            "reveals_clicked", "reveals_refused", "reveals_over_cap",
+            "reveals_clicked", "reveals_refused", "reveals_over_cap", "reveals_deferred",
             "reveal_writes_blocked", "reveal_ws_dropped", "reveal_navigations_captured",
             "revealed_links", "revealed_forms", "session_losses_after_reveal",
             "g1_controls_filled", "g1_forms_unsatisfiable",
@@ -626,6 +626,10 @@ class LocalSpider:
         self.reveals_stopped = None
         self._reveal_stopped_routes: set = set()
         self._reveal_seen: set = set()
+        #: D72: destructive-looking reveal clicks, made after everything else:
+        #: ``(page_url, route, cand, depth, item_labels or None)``
+        self._deferred_reveals: list = []
+        self._reveal_draining = False
         self._card_counts: dict = {}
         self._reveal_losses = 0
         self._revealed_link_keys: set = set()
@@ -2288,6 +2292,12 @@ class LocalSpider:
                 self.spa_counts["reveals_refused"] += 1
                 logging.info(f"reveal on {page_url} refused: {why}")
                 continue
+            if not self._reveal_draining and spa.reveal_looks_destructive(cand.get("labels")):
+                # D72: clicked last (a logout would end the session, and the second loss
+                # stops every reveal and query load, W4/S10), never refused
+                self._deferred_reveals.append((page_url, route, cand, depth, None))
+                self.spa_counts["reveals_deferred"] += 1
+                continue
             card = (route, cand.get("sig")) if cand.get("kind") == "card" else None
             if card and self._card_counts.get(card, 0) >= spa.MAX_CARDS_PER_SIGNATURE:
                 self.spa_counts["reveals_over_cap"] += 1
@@ -2345,7 +2355,39 @@ class LocalSpider:
         self.spa_counts["reveal_navigations_captured"] += len(navs)
         return found + navs
 
-    def _reveal_one(self, page_url, route, cand, depth):
+    def _run_deferred_reveals(self):
+        """D72: the destructive-looking reveal clicks, at the very end of the crawl: each
+        page is loaded again and the click made as any reveal is (`_reveal_one`, its
+        window and session check). A menu item is reached by its trigger again and only
+        that item is clicked. Stops when reveals stop (a session loss). Returns more to
+        queue."""
+        todo, self._deferred_reveals = self._deferred_reveals, []
+        self._reveal_draining = True
+        more = []
+        for page_url, route, cand, depth, item in todo:
+            if self.reveals_stopped or route in self._reveal_stopped_routes:
+                break
+            if self.spa_counts["reveals_clicked"] >= spa.MAX_REVEALS:
+                self.spa_counts["reveals_over_cap"] += 1
+                continue
+            # the same per-signature card cap as an in-place reveal (G2a)
+            card = (route, cand.get("sig")) if cand.get("kind") == "card" and \
+                item is None else None
+            if card and self._card_counts.get(card, 0) >= spa.MAX_CARDS_PER_SIGNATURE:
+                self.spa_counts["reveals_over_cap"] += 1
+                continue
+            if card:
+                self._card_counts[card] = self._card_counts.get(card, 0) + 1
+            try:
+                navguard.navigate(self._page, page_url, timeout_ms=self.timeout_ms)
+                self._settle(self._page)
+                more += self._reveal_one(page_url, route, cand, depth, only_item=item)
+            except PlaywrightError as exc:
+                logging.info(f"deferred reveal on {page_url} failed "
+                             f"({str(exc).splitlines()[0][:80]})")
+        return more
+
+    def _reveal_one(self, page_url, route, cand, depth, only_item=None):
         """One reveal (G2), inside one window (W1): click, settle, collect links, routes
         and forms; click the revealed menu items that pass the label gate (each after a
         reload and a re-click, inside the window; G2b); a revealed form is filed (G2e)
@@ -2372,10 +2414,22 @@ class LocalSpider:
             for item in items:
                 if item.get("href") or item.get("disabled"):
                     continue                     # a link item: queued as a link
+                if only_item is not None:
+                    # a deferred item (D72): only that one
+                    if item.get("labels") == only_item:
+                        todo.append(item)
+                    continue
                 why = spa.reveal_refusal(item.get("labels"))
                 if why:
                     self.spa_counts["reveals_refused"] += 1
                     logging.info(f"revealed menu item on {page_url} not clicked: {why}")
+                    continue
+                if not self._reveal_draining and \
+                        spa.reveal_looks_destructive(item.get("labels")):
+                    # D72: clicked last, through its trigger again (never refused)
+                    self._deferred_reveals.append((page_url, route, cand, depth,
+                                                   item.get("labels")))
+                    self.spa_counts["reveals_deferred"] += 1
                     continue
                 todo.append(item)
             for i, item in enumerate(todo[:spa.MAX_MENU_ITEMS]):
@@ -2644,7 +2698,8 @@ class LocalSpider:
                          f"made valid, {c['g1_forms_unsatisfiable']} form(s) still "
                          f"invalid.")
         if c["reveals_clicked"] or c["reveals_refused"] or c["reveals_over_cap"]:
-            lines.append(f"Reveals: {c['reveals_clicked']} clicked, "
+            lines.append(f"Reveals: {c['reveals_clicked']} clicked "
+                         f"({c['reveals_deferred']} destructive-looking, last), "
                          f"{c['reveals_refused']} refused, {c['reveals_over_cap']} over "
                          f"the caps; {c['revealed_links']} link(s) and "
                          f"{c['revealed_forms']} form(s) revealed, "
@@ -2702,12 +2757,16 @@ class LocalSpider:
         deferred, draining = [], False          # D72: destructive-looking pages, last
         deferred_keys: set = set()
         try:
-            while queue or self._query_on or deferred:
+            while queue or self._query_on or deferred or self._deferred_reveals:
                 if not queue:
                     # FR-CRAWL-17 (Q5): the bare routes are visited; probe them
                     queue.extend(self._plan_probes())
                 if not queue and deferred:
                     queue, deferred, draining = deferred, [], True
+                if not queue and self._deferred_reveals and self._page is not None:
+                    # D72: the destructive-looking clicks, after everything else
+                    queue.extend(self._run_deferred_reveals())
+                    continue
                 if not queue:
                     break
                 current_url, depth, source = queue.pop(0)

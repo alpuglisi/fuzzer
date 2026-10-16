@@ -565,8 +565,9 @@ def test_g2b_menu_items_are_clicked_whatever_their_words(revealed):
 def test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants(revealed):
     """G2a: interactive cards (role=button) are clicked by ``el.click()``, at most
     `MAX_CARDS_PER_SIGNATURE` per signature; a card with an interactive descendant is
-    not one target; a card whose text fails the gate is refused; G2c: the dialog's own
-    Close button is never clicked."""
+    not one target; a "Delete all" card of the same signature is over that cap (D72:
+    deferred to the end, the same cap applies there); G2c: the dialog's own Close button
+    is never clicked."""
     lab, sp, _db, _logs = revealed
     gets = _paths(lab, "GET")
     clicked = [n for n in range(1, 5) if f"/rest/marker/card-{n}" in gets]

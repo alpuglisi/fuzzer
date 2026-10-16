@@ -404,7 +404,10 @@ fuzzer.
     submitter, which FR-CRAWL-13 submits, never a reveal).
   - *(G2d superseded for reveals by D72, CC-CRAWL-0042: `spa.reveal_refusal` refuses
     nothing -- a reveal click is a visit whose writes the window holds; `label_refusal`
-    still gates G1's select options and checkboxes, on the write path.)*
+    still gates G1's select options and checkboxes, on the write path. CC-CRAWL-0044: a
+    destructive-looking candidate or menu item (`spa.reveal_looks_destructive`) is
+    clicked at the end of the crawl, under the same caps, so a logout cannot stop the
+    reveals and query loads after it (W4/S10).)*
   - **The label gate (G2d, `spa.reveal_refusal` / `spa.label_refusal`):** destructive
     (`core.urls.text_destructive_reason`, inflections folded), settings-like,
     transaction or account words in the text or aria-label; any
