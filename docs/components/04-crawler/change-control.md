@@ -3,6 +3,35 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0041 — A refused request that is not recorded is counted by its reason; the survey options measured on Juice Shop (2026-10-16)
+- Goal / acceptance: a crawl says why each request the reveal window refused was not
+  recorded (PA-0110: each count is of an effect). Acceptance: the counts in
+  `test_what_a_blocked_write_records`.
+- Change: `LocalSpider._note_window_blocked` counts its skips
+  (`requests_blocked_skipped_read`, `_transport`, `_no_body`, `_query`), persisted in
+  `crawl_stats`; the summary line names them.
+- Impact (other components / consumers / project): reporting only.
+- Risk (class; consequence and exposure; mitigation): low (counts only).
+- Hypothesis: none.
+- Verification / review: the unit test above; `verify_change.py` with this commit.
+- Effectiveness of CC-CRAWL-0034..0040 (measured 2026-10-16 at 49e0768; Juice Shop
+  generic command line, rules on; baseline f69e3c7):
+  - confirmed 5/15 (was 4), reached 7/15 (was 6); the new case is JUICE-0004, reached
+    through a crawled `#/search?q=` link;
+  - reveals clicked 60 (was 12), navigations captured 23 (was 4), pages 87 (was 61):
+    option 6 (inferred: which click produced the link is not traced);
+  - option 1 (CC-CRAWL-0034/0040): no effect. A traced crawl showed that every counted
+    seed-window message was `42["verifyLocalXssChallenge","<our value>"]`, a write B2
+    counts (F-063);
+  - option 2 (CC-CRAWL-0035): not shown. The crawl took 7m43s (was 6m32s), confounded by
+    five times as many reveal clicks;
+  - option 3 (CC-CRAWL-0036): 0 recorded of 171 refused POSTs, why not unknown at that
+    commit; hence this change;
+  - option 5: `requests_captured` 0 in that run (no passive capture on Juice Shop's
+    pages without submissions);
+  - bWAPP: 0/55, unchanged, as expected: its pages are behind the POST pickers (survey
+    option 4b, an owner decision).
+
 ### CC-CRAWL-0040 — Review fixes to the survey options: Enter never clicks an unjudged button, icons are judged as glyphs, only engine.io control packets are exempt (2026-10-16)
 - Goal / acceptance: the combined independent review of CC-CRAWL-0034..0038 is resolved,
   and each scenario becomes a regression test. The review was one round; its must-fix

@@ -188,6 +188,9 @@ def test_what_a_blocked_write_records(tmp_path):
     assert json.loads(rows[1][3]) == {"v": "1"} and rows[1][2] == \
         "application/x-www-form-urlencoded"
     assert sp.spa_counts["requests_blocked_recorded"] == 2
+    # CC-CRAWL-0041: every skip is counted by its reason
+    assert [sp.spa_counts[f"requests_blocked_skipped_{k}"]
+            for k in ("read", "transport", "no_body", "query")] == [1, 1, 1, 2]
 
 
 def test_a_reveals_blocked_writes_are_recorded_never_sent_and_imported(monkeypatch,

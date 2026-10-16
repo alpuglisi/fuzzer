@@ -172,3 +172,31 @@ consensus:
 - With option 1 in place, how many of the 6 demoted seeds become confirmed findings?
 - Whether SPA forms and POST pickers should run under a generic command line at all
   (options 4b and 6 change send gates).
+
+## Correction (2026-10-16, after the options were built and measured)
+
+The problem-3 mechanism above was wrong (F-063). A traced Juice Shop crawl read the
+WebSocket messages that demoted the six query seeds. Every one was Juice Shop's
+`42["verifyLocalXssChallenge","<the seed's own value>"]`: the app sends the query
+value to its server. Rule B2 counts such a write, as designed, whatever the baseline.
+Timing had nothing to do with it.
+
+- Option 1, as narrowed by the review, exempts only engine.io control packets, and it
+  never fired on Juice Shop (`spa_query_baseline_writes` = 0).
+- Whether a seed whose app reports the query value to its own server should stay a
+  "write seed" is a policy question for the owner. Today it does: loading it outside a
+  window sends that value to the server.
+
+Measured at 49e0768 (generic command line, rules on), against the baseline at f69e3c7:
+
+| Lab | Confirmed | Reached | Crawled pages |
+| --- | --- | --- | --- |
+| Juice Shop | 5/15 (was 4) | 7/15 (was 6) | 87 (was 61) |
+| bWAPP | 0/55 (unchanged) | 0/55 | unchanged |
+
+- The new Juice Shop case is JUICE-0004 (DOM XSS, `#/search` `q`). It came through a
+  crawled `#/search?q=` link, not through a seed.
+- Its likely source is option 6's listener-found reveal targets: 60 reveal clicks
+  instead of 12, and 23 navigations captured instead of 4. Which click produced the link
+  is not traced.
+

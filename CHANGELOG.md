@@ -4,6 +4,12 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (the survey options measured; a refused request's skip is counted)
+- **What:** Juice Shop now confirms 5/15 (was 4/15; JUICE-0004 is new). The likely cause is more reveal targets from option 6. bWAPP is unchanged at 0/55.
+  - Option 1 had no effect. The six seeds are demoted by Juice Shop's own `verifyLocalXssChallenge` socket.io event, which carries the query value; rule B2 counts it, as designed (F-063, survey doc corrected).
+  - The crawler now counts, by reason, each refused request it does not record (CC-CRAWL-0041).
+- **Why:** to measure the owner's chosen options, and to show why option 3 recorded none of Juice Shop's 171 refused POSTs.
+
 ## 2026-10-16 (crawler survey options built: 1, 2, 3, 5, 6)
 - **What:** option 1 (CC-CRAWL-0034): an untainted socket.io / engine.io write in a seed's window is background traffic, so it no longer demotes the seed. It is still blocked.
 - **What:** option 2 (CC-CRAWL-0035): a settle no longer waits for socket.io / engine.io long-polls or event streams, which stay open by design and held every settle to its 5 s budget.

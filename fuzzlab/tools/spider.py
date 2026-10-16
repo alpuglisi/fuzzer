@@ -563,7 +563,11 @@ class LocalSpider:
             "routes_found", "routes_visited", "routes_skipped_destructive",
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
-            "requests_not_recorded", "requests_blocked_recorded", "deletes_blocked",
+            "requests_not_recorded", "requests_blocked_recorded",
+            # CC-CRAWL-0041: why a refused request was not recorded (PA-0110)
+            "requests_blocked_skipped_read", "requests_blocked_skipped_transport",
+            "requests_blocked_skipped_no_body", "requests_blocked_skipped_query",
+            "deletes_blocked",
             "forms_submitted", "forms_submitted_enter",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
@@ -1199,12 +1203,18 @@ class LocalSpider:
         FR-CRAWL-17 -- it is caused by our own query value, and M6 or the fuzzer would
         send it outside any window; a probe records nothing)."""
         if self._probe is not None or (self._win or {}).get("query"):
+            self.spa_counts["requests_blocked_skipped_query"] += 1
             return
         method = (request.method or "").upper()
-        if method in ("GET", "HEAD", "OPTIONS") or spa.is_transport_url(request.url):
+        if method in ("GET", "HEAD", "OPTIONS"):
+            self.spa_counts["requests_blocked_skipped_read"] += 1
+            return
+        if spa.is_transport_url(request.url):
+            self.spa_counts["requests_blocked_skipped_transport"] += 1
             return
         body = request.post_data_buffer
         if not body:
+            self.spa_counts["requests_blocked_skipped_no_body"] += 1
             return
         content_type = (request.headers or {}).get("content-type", "")
         why = self.storage.record_request(self._capture_page or self._current_url, method,
@@ -2610,9 +2620,14 @@ class LocalSpider:
         if c["requests_captured"] or c["requests_not_recorded"]:
             lines.append(f"Captured {c['requests_captured']} request(s) of the app "
                          f"(redacted); {c['requests_not_recorded']} not recorded.")
-        if c["requests_blocked_recorded"]:
+        skipped = {k: c[f"requests_blocked_skipped_{k}"]
+                   for k in ("read", "transport", "no_body", "query")}
+        if c["requests_blocked_recorded"] or any(skipped.values()):
             lines.append(f"Recorded {c['requests_blocked_recorded']} write(s) the window "
-                         f"blocked (redacted, never sent).")
+                         f"blocked (redacted, never sent); not recorded: "
+                         f"{skipped['transport']} transport, {skipped['no_body']} without "
+                         f"a body, {skipped['read']} read(s), {skipped['query']} in a seed "
+                         f"or probe load.")
         if c["transport_urls_skipped"]:
             lines.append(f"Skipped {c['transport_urls_skipped']} socket.io/engine.io "
                          f"transport URL(s).")

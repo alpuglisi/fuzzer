@@ -820,3 +820,23 @@ Juice Shop lab is complete.
   documented safety rule, follow the rule's purpose, or stop and ask the owner. Never
   argue my way around its wording.
 
+### F-063 — I called the Juice Shop seed losses "evidence-backed" without reading the messages
+- **What:** in `docs/CRAWLER_SURVEY_2026-10-16.md` and CC-CRAWL-0034 I wrote that
+  "WebSocket messages counted as writes because the route's baseline did not have them"
+  (timing), and ranked option 1 first as evidence-backed. The evidence covered only the
+  count: 4 dropped messages per demoted seed. I never read their text. A traced crawl
+  read them: every one was `42["verifyLocalXssChallenge","<the seed's filler or a
+  probe marker>"]`, Juice Shop's challenge tracker sending the query value. Rule B2
+  counts those, correctly, whatever the baseline. The reviewer had flagged this
+  possibility (N7).
+- **Evidence:** the 2026-10-16 traced crawl (scratch `diag/seedws.log`): 50 counted
+  seed-window writes, 48 of them that event carrying our value; and the juice-opts run:
+  option 1's exemption never fired (`spa_query_baseline_writes` = 0), and the same 6
+  seeds were demoted.
+- **Impact:** option 1 was built and ranked first on a wrong mechanism. It is safe and
+  correct after the review narrowed it, but it had no effect on the measured loss. The
+  owner chose options on a ranking that overstated it.
+- **Status:** corrected in the survey doc, CC-CRAWL-0041 and to the owner. Rule I
+  follow from now on: "evidence-backed" means I have read the decisive data itself (the
+  message, the request, the response), not a count that is consistent with it.
+
