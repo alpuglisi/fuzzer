@@ -40,3 +40,51 @@ def test_each_case_reports_the_furthest_stage_and_confirmation_is_class_aware(tm
     assert rows["JUICE-0006"] == "confirmed"          # ssti on /profile username
     assert rows["JUICE-0008"] == "reached"            # same input, stored XSS: not confirmed
     assert rows["JUICE-0009"] == "not reached"
+
+
+def _store(tmp_path, rows, candidates=()):
+    """A store with ``rows`` of (url, method, param, location) points and candidates of
+    (evidence dict), in a fresh directory under ``tmp_path``."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        c = store.conn
+        for url, method, name, location in rows:
+            ep = c.execute("INSERT INTO endpoint (run_id, url, method, source) "
+                           "VALUES (?,?,?,?)", (run, url, method, "crawl")).lastrowid
+            c.execute("INSERT INTO parameter (run_id, endpoint_id, name, location) "
+                      "VALUES (?,?,?,?)", (run, ep, name, location))
+        for ev in candidates:
+            c.execute("INSERT INTO candidate (run_id, rule, evidence) VALUES (?,?,?)",
+                      (run, "R", json.dumps(ev)))
+        c.commit()
+    return {r["case"]: r for r in _funnel()(str(tmp_path / "s.db"), str(GT))}
+
+
+def test_a_point_on_another_method_or_location_never_reaches_a_case(tmp_path):
+    """JUICE-0003 is POST body /rest/user/login email. Before 2026-10-16 the funnel was
+    method-insensitive, so a GET or query point with that name 'reached' it."""
+    login = "http://127.0.0.1:3000/rest/user/login"
+    rows = _store(tmp_path, [(login, "GET", "email", "query")])
+    assert rows["JUICE-0003"]["stage"] == "not reached"
+    rows = _store(tmp_path / "b", [(login, "POST", "email", "query")])
+    assert rows["JUICE-0003"]["stage"] == "not reached"
+
+
+def test_a_json_body_field_reaches_a_body_case_exactly(tmp_path):
+    rows = _store(tmp_path, [("http://127.0.0.1:3000/rest/user/login", "POST", "email",
+                              "json")])
+    assert rows["JUICE-0003"]["stage"] == "reached"
+    assert rows["JUICE-0003"]["attribution"] == "exact"
+
+
+def test_a_record_without_method_or_location_matches_only_partially(tmp_path):
+    rows = _store(tmp_path, [], candidates=[
+        {"url": "http://127.0.0.1:3000/rest/products/search", "param": "q",
+         "category": "sql-injection"}])
+    assert rows["JUICE-0002"]["stage"] == "candidate"
+    assert rows["JUICE-0002"]["attribution"] == "partial"
+    rows = _store(tmp_path / "c", [], candidates=[
+        {"url": "http://127.0.0.1:3000/rest/products/search", "param": "q",
+         "category": "sql-injection", "method": "POST", "location": "body"}])
+    assert rows["JUICE-0002"]["stage"] == "not reached"   # a known method disagrees

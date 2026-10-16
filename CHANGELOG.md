@@ -4,6 +4,12 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (the funnel matches a case's whole input: method and location)
+- **What:** `scripts/funnel_report.py` now matches an answer-key case only by its path, HTTP method, location family (query / body — a JSON body included — / fragment / header / cookie) and parameter.
+  - A record that does not state its method or location still matches on what it states, and the row is marked `partial`.
+  - `tests/test_funnel_report.py` adds the GET-versus-POST, query-versus-body and partial cases.
+- **Why:** the funnel is the goal metric's instrument. It was method-insensitive, so a GET point "reached" a POST case and the reached count could be inflated (lean QC review; cross-lab proposal §3). The fix comes before the next measurement.
+
 ## 2026-10-16 (external labs run in the cloud container)
 - **What:** in this cloud container, `docs/ON_HOST_RUNBOOK.md` Part A3 gains step 0:
   - start `dockerd` with the session's proxy settings;

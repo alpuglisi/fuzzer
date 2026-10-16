@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-16 — scripts/funnel_report.py: a case was "reached" by a point on another method (fixed)
+- **Symptom (reproduction):** a store holding only `GET /rest/user/login?email=` scored JUICE-0003 (POST body `email`) as `reached`. The new test `test_a_point_on_another_method_or_location_never_reaches_a_case` failed on the old code.
+- **Root cause:** case identity was path plus parameter only; the method and location were never compared.
+- **Remediation:** identity is path, method, location family and parameter. A record missing its method or location matches only as `partial`, and is shown as such. Regression tests are in `tests/test_funnel_report.py`.
+- **Scope:** only the scoring of runs. Earlier "reached" counts (6/15 Juice Shop, 3/20 held-out #1) may be overstated and are not comparable with new ones.
+- **Status:** Fixed. An ordinary defect: no CAPA.
+
 ## 2026-10-15 — Process controls: the progress guard and two Stop hooks enforced proxies (fixed, BUG-0156, BUG-0157)
 - **Symptom:** three failures, all reproduced:
   - Any user message, "status?" included, cleared every progress-guard hold. It restarted the stall and budget clocks and zeroed the review-round count. Two parallel reviewers counted as two rounds (lean QC review, synthetic replay).

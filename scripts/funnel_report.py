@@ -2,7 +2,15 @@
 """Where each answer-key case is lost: a per-stage funnel for one run.
 
 For every positive case of a ground-truth contract, report the furthest stage the run
-reached for its input (same path, method-insensitive, same parameter name):
+reached for its input. An input is the same path, HTTP method, location family (query,
+body -- a JSON body included --, fragment, header, cookie) and parameter name: a GET
+point never reaches a POST case, a query field never a body field. A record that does
+not say its method or location still matches on what it does say, and the row's
+``attribution`` is then ``partial`` instead of ``exact``, so an ambiguous match is
+visible rather than counted silently (lean QC review; the funnel was method-insensitive
+before 2026-10-16).
+
+Stages:
 
     reached    the input exists in the run's points (endpoint + parameter)
     candidate  an audit rule made it a candidate of the case's category
@@ -47,43 +55,84 @@ def _key(url: str) -> str:
     return parts.path or "/"
 
 
+#: a store location -> the answer key's location family
+LOCATION_FAMILY = {"json": "body", "form": "body", "multipart": "body"}
+
+
+def _loc(location: str | None) -> str | None:
+    if not location:
+        return None
+    location = location.lower()
+    return LOCATION_FAMILY.get(location, location)
+
+
+def _method(method: str | None) -> str | None:
+    return method.upper() if method else None
+
+
+def _match(case_id: tuple, rec: tuple) -> str | None:
+    """``"exact"`` / ``"partial"`` when record ``rec`` = (path, method, loc, param) is the
+    case's input, else None. A known method or location must agree; an unknown one
+    makes the match partial."""
+    if rec[0] != case_id[0] or rec[3] != case_id[3]:
+        return None
+    for i in (1, 2):
+        if rec[i] is not None and case_id[i] is not None and rec[i] != case_id[i]:
+            return None
+    return "exact" if rec[1] is not None and rec[2] is not None else "partial"
+
+
+def _best(case_id: tuple, recs) -> str | None:
+    hits = {_match(case_id, r) for r in recs} - {None}
+    return "exact" if "exact" in hits else ("partial" if hits else None)
+
+
 def funnel(store: str, gt_dir: str, run_id: int | None = None) -> list[dict]:
     from fuzzlab.labels import contract
     db = sqlite3.connect(store)
     db.row_factory = sqlite3.Row
     if run_id is None:
         run_id = db.execute("SELECT max(id) FROM run").fetchone()[0]
-    points = {(_key(r["url"]), r["name"]) for r in db.execute(
-        "SELECT e.url, p.name FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
-        "WHERE p.run_id = ?", (run_id,))}
-    cands: dict[tuple, set] = {}
-    probed: set[tuple] = set()
-    for r in db.execute("SELECT c.id, c.evidence, (SELECT count(*) FROM attempt a "
-                        "WHERE a.candidate_id = c.id) n FROM candidate c "
-                        "WHERE c.run_id = ?", (run_id,)):
+    points = {(_key(r["url"]), _method(r["method"]), _loc(r["location"]), r["name"])
+              for r in db.execute(
+                  "SELECT e.url, e.method, p.name, p.location FROM parameter p "
+                  "JOIN endpoint e ON p.endpoint_id = e.id WHERE p.run_id = ?", (run_id,))}
+    cands: dict[tuple, set] = {}            # identity -> categories
+    probed: dict[tuple, set] = {}           # identity -> categories with an attempt
+    for r in db.execute(
+            "SELECT c.evidence, e.url AS purl, e.method AS pmethod, p.name AS pname, "
+            "p.location AS ploc, (SELECT count(*) FROM attempt a "
+            "WHERE a.candidate_id = c.id) n FROM candidate c "
+            "LEFT JOIN parameter p ON c.parameter_id = p.id "
+            "LEFT JOIN endpoint e ON p.endpoint_id = e.id WHERE c.run_id = ?", (run_id,)):
         e = json.loads(r["evidence"] or "{}")
-        k = (_key(e.get("url", "")), e.get("param"))
-        cands.setdefault(k, set()).add(e.get("category"))
-        points.add(k)                       # a candidate's point was reached
+        ident = (_key(e.get("url") or r["purl"] or ""),
+                 _method(e.get("method") or r["pmethod"]),
+                 _loc(e.get("location") or r["ploc"]),
+                 e.get("param") or r["pname"] or e.get("target_identifier"))
+        cands.setdefault(ident, set()).add(e.get("category"))
+        points.add(ident)                   # a candidate's point was reached
         if r["n"]:
-            probed.add((k, e.get("category")))
-    found = {(_key(r["url"]), r["param"], r["vuln_class"]) for r in db.execute(
-        "SELECT url, param, vuln_class FROM finding WHERE run_id = ?", (run_id,))}
+            probed.setdefault(ident, set()).add(e.get("category"))
+    found = [((_key(r["url"]), _method(r["method"]), None, r["param"]), r["vuln_class"])
+             for r in db.execute("SELECT url, method, param, vuln_class FROM finding "
+                                 "WHERE run_id = ?", (run_id,))]
     rows = []
     for case in contract.load(gt_dir).positives():
-        k = (_key(case.url), case.param)
+        ident = (_key(case.url), _method(case.method), _loc(case.location), case.param)
         want = CATEGORY.get(case.vuln_class, {case.vuln_class})
-        stage = None
-        if k in points:
-            stage = "reached"
-        if cands.get(k, set()) & want:
-            stage = "candidate"
-        if any((k, c) in probed for c in want):
-            stage = "probed"
-        if (k[0], k[1], case.vuln_class) in found:     # the case's own class only
-            stage = "confirmed"
-        rows.append({"case": case.case_id, "class": case.vuln_class, "path": k[0],
-                     "param": k[1], "stage": stage or "not reached"})
+        stage, how = None, None
+        for name, recs in (
+                ("reached", points),
+                ("candidate", [k for k, cats in cands.items() if cats & want]),
+                ("probed", [k for k, cats in probed.items() if cats & want]),
+                ("confirmed", [k for k, cls in found if cls == case.vuln_class])):
+            hit = _best(ident, recs)
+            if hit:
+                stage, how = name, hit
+        rows.append({"case": case.case_id, "class": case.vuln_class, "path": ident[0],
+                     "method": ident[1], "location": ident[2], "param": ident[3],
+                     "stage": stage or "not reached", "attribution": how})
     return rows
 
 
@@ -99,7 +148,9 @@ def main(argv=None) -> int:
         print(json.dumps(rows, indent=2))
         return 0
     for r in rows:
-        print(f"{r['case']:<11} {r['class']:<26} {r['path']:<24} {r['param']:<16} {r['stage']}")
+        mark = " (partial)" if r["attribution"] == "partial" else ""
+        print(f"{r['case']:<11} {r['class']:<24} {r['method'] or '?':<5} "
+              f"{r['location'] or '?':<8} {r['path']:<24} {r['param']:<16} {r['stage']}{mark}")
     n = len(rows)
     order = ("not reached",) + STAGES
     for i, stage in enumerate(STAGES):
