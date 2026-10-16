@@ -4,6 +4,14 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-16 (external labs run in the cloud container)
+- **What:** in this cloud container, `docs/ON_HOST_RUNBOOK.md` Part A3 gains step 0:
+  - start `dockerd` with the session's proxy settings;
+  - the keyring caveat (no OS keyring there; credentials fall back to a plaintext file unless the encrypted store is configured).
+
+  bWAPP and Juice Shop were brought up with `labctl.sh` (loopback only, logins verified), and `tests/test_external_labs_live.py` passed 4/4 with `FUZZLAB_LIVE_EXTERNAL_LABS=1`.
+- **Why:** the owner asked for the labs to run here. My earlier statement that the container "can't run" them was unchecked and wrong (F-060).
+
 ## 2026-10-15 (D71: CAPTCHA rule dropped; off-switches for three send rules)
 - **What:**
   - The crawler no longer refuses CAPTCHA forms; `spa.captcha_reason` is removed.

@@ -134,6 +134,22 @@ the unverified points listed in `docs/components/01-target-lab/requirements.md`
 (NFR-LAB-safety) — `network_mode: none` under podman-compose's pod mode, the shared unix
 socket under SELinux, netavark bridge isolation.
 
+0. **In a Claude Code cloud container** (executed 2026-10-16). Docker and compose are
+   installed, but the daemon is not started. Image pulls must go through the session's
+   agent proxy.
+   ```bash
+   nohup env HTTPS_PROXY=$HTTPS_PROXY HTTP_PROXY=$HTTPS_PROXY NO_PROXY="$NO_PROXY" dockerd \
+     > /tmp/dockerd.log 2>&1 &
+   docker info | grep -E "Server Version|HTTPS Proxy"     # wait until it answers
+   ```
+   - The pinned images pull through the proxy. bWAPP's zip is fetched on the host, so
+     the build itself needs no network.
+   - There is no OS keyring there: without `FUZZLAB_KEYRING_PATH` and
+     `FUZZLAB_KEYRING_PASSPHRASE`, credentials land in keyrings.alt's **plaintext**
+     file. Set both for the encrypted store.
+   - Run with the venv's Python on `PATH` and `FUZZLAB_PYTHON` set.
+   - Result on 2026-10-16: both labs up, loopback only, logins verified; the four live
+     tests in step 5 passed (about 33 min).
 1. **Identities** (keyring only; bWAPP's is its published default `bee`/`bug`, Juice Shop's
    is created on first bootstrap if you skip this):
    ```bash
