@@ -100,6 +100,33 @@ def test_quiet_is_measured_from_the_action_not_the_last_request():
     assert ex.wait_quiet(Page()) and sum(waited) >= 500
 
 
+def test_an_app_under_a_subpath_is_explored_from_its_whole_start_url(monkeypatch):
+    """PA-0300 / PA-0113(3): the start URL is navigated as given, path and all, never
+    truncated to its origin; a sibling path on the origin stays in scope (scope is an
+    origin) and another port does not."""
+    from fuzzlab.disco import explore
+    start = "http://127.0.0.1:8092/shop/app/"
+    ex = explore.Explorer(start, scope_urls=[start], proxy="127.0.0.1:2")
+    assert ex._in_scope("http://127.0.0.1:8092/other") and \
+        not ex._in_scope("http://127.0.0.1:8093/shop/app/")
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def navigate(page, url, **kw):
+        seen.append(url)
+        raise Stop
+    monkeypatch.setattr(explore.navguard, "navigate", navigate)
+    ctx = type("Ctx", (), {"new_page": lambda self: object()})()
+    ex._ctx = ctx
+    try:
+        ex._explore(browser=None, pw=None)
+    except Stop:
+        pass
+    assert seen == [start]
+
+
 # --- the synthesizer -------------------------------------------------------------------
 
 def rec(method, path, *, status=200, body=None, res=None, t=0.0, action="act-1",

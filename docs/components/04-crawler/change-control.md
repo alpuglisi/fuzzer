@@ -79,7 +79,16 @@ Newest first.
     DECISIONS (D70); CHANGELOG — done
   - [ ] the owner's held-out measurement with `disco` — todo (needs the labs)
   - [ ] the web launcher entry and `OPTION_CLASS` paths — todo (UI follow-up)
-- Effectiveness (assessed 2026-10-17): see the verification record below.
+- Effectiveness (assessed 2026-10-17): Phase 1 does what it was built for on the
+  fixture (the measurements above; `tests/test_disco_e2e.py` 6 passed, five
+  consecutive runs). Verification record:
+  - `scripts/verify_change.py --base e66685a` on e27fb40: 80 files, 3128 passed,
+    1 failed, 9 skipped, 18 xfailed. The failure was the PA-0300 registry guard
+    (`test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`):
+    `Explorer.__init__(start_url)` and `build_contract(base_url)` had no sub-path test.
+    Both now have one (an app under `/shop/`), registered.
+  - The re-run on the follow-up commit is recorded in the CHANGELOG line's commit.
+  - Not assessed: the owner's held-out metric (the labs are not in this container).
 
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
 - Change:

@@ -322,6 +322,13 @@ REGISTRY = {
         Covered(f"{_ME}::test_auth_origins_are_scoped_by_a_subpath_bases_host"),
     "fuzzlab.tools.probesender:SeamProbeSender._run_origins":
         Covered(f"{_ME}::test_a_senders_run_origins_from_a_subpath_base"),
+    # disco (D70, CC-CRAWL-0031 / CC-MUT-0402)
+    "fuzzlab.disco.explore:Explorer.__init__":
+        Covered("tests/test_disco_synth.py::"
+                "test_an_app_under_a_subpath_is_explored_from_its_whole_start_url"),
+    "fuzzlab.disco.generate:build_contract":
+        Covered("tests/test_disco_contract.py::"
+                "test_a_contract_for_an_app_under_a_subpath_keeps_its_paths_once"),
 }
 
 

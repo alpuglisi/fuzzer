@@ -289,6 +289,22 @@ def test_an_endpoint_path_is_origin_absolute_never_under_the_base_sub_path():
     assert r.prepare("ep_010", path_params={"p1": 3}).url == f"{BASE}/app/api/orders/3"
 
 
+def test_a_contract_for_an_app_under_a_subpath_keeps_its_paths_once():
+    """PA-0300: an inventory captured under ``/shop/`` with a sub-path base URL gives
+    endpoints whose (origin-absolute) paths the runner sends once."""
+    from tests.test_disco_synth import rec
+    from fuzzlab.disco.synth import synthesize
+    inv = synthesize([rec("GET", "/shop/api/items/12345", res={"id": 1}, t=1)])
+    base = "http://127.0.0.1:8080/shop/"
+    contract, _ = generate.build_contract(inv, None, run_id="r1", base_url=base)
+    assert contract["run"]["target"]["base_url"] == base
+    [ep] = contract["endpoints"]
+    assert ep["path"] == "/shop/api/items/{p1}"
+    r, _ = runner(contract)
+    assert r.prepare(ep["id"], path_params={"p1": 7}).url == \
+        "http://127.0.0.1:8080/shop/api/items/7"
+
+
 def test_a_body_is_read_up_to_its_cap():
     r, _ = runner(routes={("GET", "/api/orders/1"): FakeResponse(200, b"x" * 100_000)})
     ex = r.send(r.prepare("ep_010", path_params={"p1": 1}))
