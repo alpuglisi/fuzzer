@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (PFF input-boundary fuzzing specification)
+- **What:** `docs/research/pff-fuzz-spec.md` (new): a static-analysis fuzzing spec for the generated `php_laravel` Puppy Fort Factory app. It covers 31 endpoints, each with its source line, developer assumption, UI path, flaw, strategy and payloads, followed by the same entries as JSON. It also flags things not yet filed as bugs: two "secure" twins that are still exploitable (`LABGEN-PL-0017` XSS, `LABGEN-CF-0006` open redirect via `//`); six cells that always return 500 in the containerized lab because `lab/sql/schema.sql` lacks `bookings`, `inventory`, `photos`, `products.active` and `users.password_hash`; the mass-assignment cell never updating a row; and no coverage data for `/comments/share`, which calls `exit`.
+- **Why:** the owner asked for a map of the lab's input surface with deterministic test vectors. Analysis only; no traffic was sent to the lab.
+
 ## 2026-10-15 (session handoff document)
 - **What:** `docs/HANDOFF-2026-10-15.md` (new): the goal in the owner's words, the held-out metric and its current values, the owner's decisions D67-D69, the unmerged lane branches and their state, the integration items, the work queue in order, the labs, and the working rules. `docs/claude_juicelab_failures.md` gains F-057 (a lane worked around a blocked command and changed the host).
 - **Why:** the owner asked for a handoff to a fresh session.
