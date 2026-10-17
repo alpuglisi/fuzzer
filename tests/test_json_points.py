@@ -320,9 +320,15 @@ def test_the_credential_change_rule_is_one_function_shared_with_forms():
                 for c in ast.walk(fns[fn]) if isinstance(c, ast.Call)}
     assert "credential_change_rule" in calls("credential_change_reason")
     assert "credential_change_rule" in calls("body_refusal")
-    users = [n for n, fn in fns.items() if any(isinstance(x, ast.Name) and x.id in (
-        "_CHANGE_SUBSTRINGS", "_CHANGE_TOKENS") for x in ast.walk(fn))]
-    assert users == ["credential_change_rule"]
+    # CC-CRAWL-0048: the account-token half is `account_reason`, which the rule calls
+    # and a POST picker uses alone (D73); still one holder per word set
+    assert "account_reason" in calls("credential_change_rule")
+    users = {name: sorted({x.id for x in ast.walk(fn) if isinstance(x, ast.Name) and x.id
+                           in ("_CHANGE_SUBSTRINGS", "_CHANGE_TOKENS")})
+             for name, fn in fns.items()}
+    users = {k: v for k, v in users.items() if v}
+    assert users == {"credential_change_rule": ["_CHANGE_SUBSTRINGS"],
+                     "account_reason": ["_CHANGE_TOKENS"]}
     # and the forms' own wording is unchanged
     form = {"action_url": BASE + "login.php", "entries": [],
             "controls": [("p1", "password"), ("p2", "password")]}

@@ -56,6 +56,25 @@ Newest first.
     requirements; ARCHITECTURE
 - Rollback / recovery: revert.
 - Effectiveness: pending a Juice Shop run (the six seeds promoted; confirmed cases).
+- Effectiveness (assessed 2026-10-17, Juice Shop at 02625e9, generic command line,
+  run juice-d74-1):
+  - every seed was promoted: `spa_query_write_seeds` went from 8 to 0, and
+    `spa_query_tainted_writes` was 64;
+  - confirmed cases: 5/15, the same five as before (JUICE-0001, 0002, 0004, 0006,
+    0007). The hypothesis (more confirmed DOM-XSS cases) does **not** hold on Juice
+    Shop;
+  - the promoted seeds are points M6 loads, but none of them is a further answer-key
+    case M6 confirms.
+- Owner (2026-10-17) on the fresh-token proposal: "do not build this if the app can't
+  store the values". The app cannot store the value through a write, because every
+  write in a window is blocked. A server may store a GET it receives (a seed load's GET
+  XHRs carry the filler); this was told to the owner, with the recommendation not to
+  build. Not built.
+- Verification: `verify_change.py --base 84598d2` on 02625e9: 80 files, 2636 passed, 2
+  failed. Both were caused by this change and are fixed in the next commit:
+  - `test_lint`: an import left unused by the `account_reason` split;
+  - `test_json_points`: the one-holder guard for the change words, now asserting one
+    holder per word set, with `credential_change_rule` calling `account_reason`.
 
 ### CC-CRAWL-0048 — D73 review round 2: a POST picker's progress is a new path; account words and destructive labels; the importer judges the stored button (defect) (2026-10-17)
 - Goal / acceptance: the verification round of CC-CRAWL-0047 found six gaps (ERROR_LOG
@@ -175,6 +194,13 @@ Newest first.
 - Effectiveness: bWAPP with the picker named (bwapp-named-1, before this change, the
   same mechanism): 41/55 confirmed, 164 pages crawled (was 0/55, 12 pages). Pending:
   the same with no selector flag, at this commit.
+- Effectiveness (assessed 2026-10-17, bWAPP at 02625e9 with CC-CRAWL-0048, generic
+  command line with no selector flag, run bwapp-d73-1):
+  - 41/55 confirmed (was 0/55), the same count as the named run;
+  - 6 pickers enumerated, 2 refused (`security_level` by its settings words, as the
+    log shows), 158 POSTs sent;
+  - verdicts: 3 navigation, 0 settings.
+  - `verify_change.py --base 84598d2` on 1ca0341: 79 files, 2635 passed, 0 failed.
 
 ### CC-CRAWL-0046 — Option 4(a) review fixes: novelty is judged against the picker's own page; a non-UTF-8 answer is decoded (defect) (2026-10-17)
 - Goal / acceptance: fix the review's must-fixes of CC-CRAWL-0045 (ERROR_LOG

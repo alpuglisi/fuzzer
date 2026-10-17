@@ -330,10 +330,8 @@ def credential_change_rule(passwords, action_url: str, *, submitters=(), hidden=
     form's password controls, a body's credential-named leaves), why it changes a
     credential or manages an account, or None. Two or more password fields; a password
     field whose name has a change word (new, confirm, repeat, current, old, ...); or an
-    account-management token in the action path, a submitter, or a hidden field name."""
-    from urllib.parse import urlsplit
-
-    from fuzzlab.core.redaction import name_tokens
+    account-management token in the action path, a submitter, or a hidden field name
+    (`account_reason`, the one holder of those tokens)."""
     passwords = list(passwords)
     if not passwords:
         return None

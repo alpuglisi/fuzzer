@@ -5,6 +5,8 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-17 (D74: a page that sends our own value to its server is fuzzed)
+- **Measured (generic command line, 02625e9):** bWAPP 41/55 confirmed with no selector flag (was 0/55). Juice Shop 5/15, unchanged: D74 promoted all 8 demoted seeds to points, but none gave a new confirmed case.
+- **Fix:** an unused import and a guard test, both broken by the account-word split, were found by `verify_change.py` and fixed.
 - **What (CC-CRAWL-0049):** a search-style page whose load sends our test value to its own server (Juice Shop's score-tracker message) is now fuzzed, not set aside. Each blocked write is judged on its own request. A DELETE, or a write that doesn't carry our value, still sets the page aside, and such a page's forms are not kept. Why: the owner's decision D74. An app acting on our value is what the fuzzer looks for.
 - **What (defect fix, CC-CRAWL-0048):** the second review of D73 found six gaps, now fixed. The stop limit counts by page path; account words and destructive button labels are refused; and the importer judges a stored dropdown's button the same way (F-067).
 
