@@ -3,6 +3,39 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0054 — D76 measured again: a registration's fill path raised; its security question's numeric keys were refused (defect) (2026-10-17)
+- Goal / acceptance: the Juice Shop run juice-d76-2 (at e7caad8) confirmed 6/15 (was
+  5/15; JUICE-0003, login SQLi, is new). It found two more defects:
+  - "Failed to process #/register: module 'fuzzlab.tools.spa' has no attribute
+    'registration_extra'". The spider called the helper on the wrong module. The unit
+    tests called `form_refusal` only, and no test drove a registration through a real
+    browser.
+  - That browser test then showed G1c refusing the security question's numeric option
+    keys ("a numeric record key as an option value").
+- Change:
+  - `tools/spa.py`: `registration_extra` (delegating to the one definition in
+    `store_adapter`, SP-39); `select_refusal(..., registration=)` accepts numeric keys
+    for a registration's security question only.
+  - `tools/spider.py`: `_g1_native_select` and `_g1_custom_select` pass `registration`.
+- Impact: crawl only.
+- Risk: medium; one narrow exemption, registration-shaped forms only.
+- Verification / review:
+  - `tests/test_d73_generic_pickers.py::test_d76_a_registration_form_is_filled_and_submitted_end_to_end`
+    (real Chromium; the button stays disabled until the form is valid; the request is
+    captured);
+  - it fails with either fix removed (mutation checks);
+  - 366 passed across the three form files.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert.
+- Effectiveness:
+  - juice-d76-2 (before this fix): 6/15 confirmed; reached 9/15 (JUICE-0009 now reached,
+    its stored-XSS confirmation pending a render page); login submitted through the
+    fallback by controls (`forms_found_by_shape` 3);
+  - `verify_change.py --base fbc9062` on e7caad8: 79 files, 2640 passed, 0 failed
+    (evidence key 1c0b18c4fbfa);
+  - pending: a run with registration submitted (JUICE-0015).
+
 ### CC-CRAWL-0053 — D76 measured: a password form is found again by its controls when its labels differ (defect found by the Juice Shop run) (2026-10-17)
 - Goal / acceptance: on Juice Shop (juice-d76-1, at 86ed050) the login and register
   forms were "not found in an unauthenticated context". The crawl's own context had

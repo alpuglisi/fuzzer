@@ -344,3 +344,60 @@ def test_a_password_form_whose_label_differs_unauthenticated_is_found_by_its_con
     assert posts, "the login form was never submitted"
     assert sp.spa_counts["forms_found_by_shape"] == 1
     assert sp.spa_counts["forms_not_found_anonymous"] == 0
+
+
+_REGISTER_JS = r"""
+const routes = [{path: 'register'}];
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  const app = document.getElementById('app');
+  if (name !== 'register') { app.innerHTML = '<p>home</p>'; return; }
+  app.innerHTML = "<form id='rf'><input name='emailControl' type='email' required>" +
+    "<input name='passwordControl' type='password' required>" +
+    "<input name='repeatPasswordControl' type='password' required>" +
+    "<select name='securityQuestionControl' required><option value=''>Pick one</option>" +
+    "<option value='1'>Your first pet?</option></select>" +
+    "<input name='securityAnswerControl' type='text' required>" +
+    "<button type='submit' id='rb' disabled>Register</button></form>";
+  const f = document.getElementById('rf'), b = document.getElementById('rb');
+  f.oninput = f.onchange = () => { b.disabled = !f.checkValidity(); };
+  f.onsubmit = e => { e.preventDefault();
+    fetch('/api/Users', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: f.emailControl.value,
+        password: f.passwordControl.value,
+        passwordRepeat: f.repeatPasswordControl.value,
+        securityQuestion: f.securityQuestionControl.value})}).catch(() => {}); };
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+def test_d76_a_registration_form_is_filled_and_submitted_end_to_end(monkeypatch,
+                                                                    tmp_path):
+    """Real Chromium, the generic default (every route): a registration form whose button
+    stays disabled until it is valid -- a security question select and answer
+    included -- is filled (G1) and submitted, and its request is captured. Found by the
+    Juice Shop run juice-d76-2, where the fill path raised (2026-10-17)."""
+    import sqlite3
+
+    from fuzzlab.tools.spider import LocalSpider
+    from tests._spa_fixture import _HASH_INDEX, _Lab, chromium_or_skip, run_crawl
+    chromium_or_skip(monkeypatch)
+
+    class RegSpa(_Lab):
+        index = _HASH_INDEX.replace("/main.js", "/reg.js").replace(
+            "<a href='#/about'>About</a>", "<a href='#/register'>Register</a>")
+        script = ("/reg.js", _REGISTER_JS)
+    lab = RegSpa()
+    try:
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000, submit_spa_forms=[])
+        run_crawl(sp)
+    finally:
+        lab.close()
+    posts = [r for r in lab.requests if r[0] == "POST" and r[1] == "/api/Users"]
+    assert posts, "the registration form was never submitted"
+    rows = sqlite3.connect(tmp_path / "s.db").execute(
+        "SELECT method, url FROM discovered_requests").fetchall()
+    assert any(m == "POST" and u.endswith("/api/Users") for m, u in rows)

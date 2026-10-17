@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-17 (D76: a generic run submits the app's forms)
+- **Measured:** Juice Shop **6/15** confirmed (was 5/15). The login SQL injection is new, found because the login form is now submitted. The run also showed the registration form crashing on a wrong function reference, and its security-question dropdown being refused; both fixed (CC-CRAWL-0054, F-069).
 - **Measured, and fixed (CC-CRAWL-0053):** the first Juice Shop run with D76 submitted the feedback and complaint forms (their requests were captured and probed), but not login or register. The crawler had switched the app's language, so those forms were not recognised in a fresh logged-out session; they are now found by their fields. The scoring script also missed `/api/Feedbacks/` because of a trailing slash; fixed.
 - **What (CC-CRAWL-0051):** a crawl of a loopback lab now fills and submits the app's forms by default, as a person would, so the requests behind them (login, feedback, complaints, registration) are captured. File inputs get a small dummy file, and registration forms and their captured bodies are no longer blocked. Destructive, settings, transaction, change-password and 2FA forms are still never submitted. `--no-submit-spa-forms` turns it off. Why: the owner's decision D76. These submissions were the main discovery gap on Juice Shop.
 

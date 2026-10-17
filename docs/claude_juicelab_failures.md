@@ -920,3 +920,15 @@ Juice Shop lab is complete.
   of loss, and say which cases the tool can never reach the way it is built, before
   working on any mechanism.
 
+### F-069 — D76 shipped a registration path that crashed on first use
+- **What:** I called `spa.registration_extra` from the spider when the helper was
+  defined only in `store_adapter`. Every registration form in a real crawl raised.
+  My tests called the gate function directly. The review and `verify_change.py`
+  passed because no test drove a registration through a browser, and I reported
+  registration as built.
+- **Evidence:** juice-d76-2 crawl.log; ERROR_LOG 2026-10-17.
+- **Impact:** JUICE-0015 could not move in that run; one measurement cycle lost.
+- **Status:** fixed in CC-CRAWL-0054. Rule I follow from now on: a capability claimed
+  for a real target has at least one test that drives it end to end in the real
+  runtime (here a browser), not only its pure predicate.
+

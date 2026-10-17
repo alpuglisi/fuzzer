@@ -2311,9 +2311,10 @@ class LocalSpider:
                 if why:
                     return why
             elif kind == "select":
-                why = (self._g1_custom_select(page, sel, info)
+                why = (self._g1_custom_select(page, sel, info, registration=registration)
                        if info.get("tag") == "custom-select"
-                       else self._g1_native_select(page, sel, info))
+                       else self._g1_native_select(page, sel, info,
+                                                   registration=registration))
                 if why:
                     return why
             else:
@@ -2348,18 +2349,19 @@ class LocalSpider:
     def _g1_label(info):
         return info.get("label") or next(iter(info.get("names") or []), info["id"])
 
-    def _g1_native_select(self, page, sel, info):
+    def _g1_native_select(self, page, sel, info, *, registration=False):
         options = [(v, t) for v, t, disabled in info.get("options") or [] if not disabled]
         chosen = next(((v, t) for v, t in options if v and t), None)
         why = spa.select_refusal(info.get("names") or [], options,
-                                 chosen[1] if chosen else "")
+                                 chosen[1] if chosen else "",
+                                 registration=registration)
         if why or chosen is None:
             return f"select {self._g1_label(info)!r}: {why or 'no option'}"
         self._g1_attempts += 1
         page.select_option(sel, value=chosen[0], timeout=self.timeout_ms)
         return None
 
-    def _g1_custom_select(self, page, sel, info):
+    def _g1_custom_select(self, page, sel, info, *, registration=False):
         """A mat-select (role=combobox): its names are judged before it is opened; it is
         opened by a click, its options read and judged, and the first non-empty one
         chosen by a click (the option click is not a submission; G1c)."""
@@ -2372,7 +2374,8 @@ class LocalSpider:
         chosen = next((o for o in opts if o.get("text")), None)
         why = spa.select_refusal(info.get("names") or [],
                                  [(o.get("value"), o.get("text")) for o in opts],
-                                 chosen["text"] if chosen else "")
+                                 chosen["text"] if chosen else "",
+                                 registration=registration)
         if why or chosen is None:
             page.keyboard.press("Escape")
             return f"select {self._g1_label(info)!r}: {why or 'no option'}"

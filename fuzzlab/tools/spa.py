@@ -445,6 +445,13 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
     return None
 
 
+def registration_extra(name: str) -> bool:
+    """`store_adapter.registration_extra` (the one definition, SP-39): a registration's
+    security question or answer."""
+    from fuzzlab.tools.store_adapter import registration_extra as extra
+    return extra(name)
+
+
 def is_registration(form: dict, route: str) -> bool:
     """`store_adapter.registration_shaped` for an SPA form on ``route`` (D76): its
     password controls, the route and the button's text and aria-label."""
@@ -1100,14 +1107,18 @@ def _digit_run(text: str) -> int:
     return best
 
 
-def select_refusal(names, options, chosen_label: str) -> str | None:
+def select_refusal(names, options, chosen_label: str, *,
+                   registration: bool = False) -> str | None:
     """Why a select, mat-select or radio group is never chosen in (G1c; the form is then
     not submittable), or None: a name that is an object selector
     (`store_adapter._object_selector`, or ``id``); an option whose value or text looks
     like an identifier (`core.redaction.is_identifier_value` / `looks_like_identifier`),
     holds a run of `OPTION_ID_DIGITS` digits, or is a number that is not its own text (a
     record key); or a chosen option whose label fails `label_refusal`. Countries,
-    ratings and plain enums pass. ``options``: ``[(value, text)]``."""
+    ratings and plain enums pass. ``options``: ``[(value, text)]``. *(D76:)* with
+    ``registration``, a registration's security question (`registration_extra`) may
+    have numeric record keys as values (a list of questions, not another user's
+    records)."""
     from fuzzlab.core.redaction import is_identifier_value, looks_like_identifier
     from fuzzlab.tools.store_adapter import _object_selector
     for name in names or []:
@@ -1119,7 +1130,8 @@ def select_refusal(names, options, chosen_label: str) -> str | None:
         if is_identifier_value(value) or looks_like_identifier(text) \
                 or max(_digit_run(value), _digit_run(text)) >= OPTION_ID_DIGITS:
             return f"an identifier-like option ({text[:40]!r})"
-        if value.isascii() and value.isdigit() and value not in name_tokens(text):
+        if value.isascii() and value.isdigit() and value not in name_tokens(text) \
+                and not (registration and any(registration_extra(n) for n in names or [])):
             return f"a numeric record key as an option value ({text[:40]!r})"
     why = label_refusal(chosen_label)
     return f"option {chosen_label[:40]!r}: {why}" if why else None

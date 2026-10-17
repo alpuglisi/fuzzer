@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — D76: the registration fill path raised (wrong module); its security question was refused (fixed)
+- **Symptom:** the Juice Shop run juice-d76-2: "Failed to process http://127.0.0.1:3000/#/register: module 'fuzzlab.tools.spa' has no attribute 'registration_extra'". After the fix, a real-browser test showed G1c refusing the security question ("a numeric record key as an option value").
+- **Root cause:** CC-CRAWL-0051 called `spa.registration_extra` from the spider, but the helper lived only in `store_adapter`. The unit tests exercised `form_refusal` alone; no test filled a registration in a browser. G1c's identifier rule has no registration exemption.
+- **Remediation (CC-CRAWL-0054):** `spa.registration_extra` delegates to the one definition; numeric keys are allowed for a registration's security question only.
+- **Regression check:** `test_d76_a_registration_form_is_filled_and_submitted_end_to_end` (real Chromium), mutation-checked for both fixes.
+- **Status:** Fixed.
+
 ## 2026-10-17 — D76 measured: login/register not found unauthenticated; the funnel missed a trailing slash (fixed)
 - **Symptom:** Juice Shop at 86ed050 (juice-d76-1): 5/15, unchanged.
   - The crawl log shows the login and register forms "not found in an unauthenticated context".
