@@ -798,3 +798,38 @@ def test_d76_the_filler_file_follows_accept_and_is_never_xml_first():
     assert spa.file_filler(".xml,.pdf")["mimeType"] == "application/pdf"
     assert spa.file_filler(".xml")["mimeType"] == "application/xml"
     assert b"DOCTYPE" not in spa.file_filler(".xml")["buffer"]
+
+
+@pytest.mark.parametrize("path,ok", [
+    ("/api/Users", True), ("/api/accounts", True), ("/signup", True),
+    ("/api/users/me", False), ("/api/users/alice", False), ("/api/Users/7", False),
+])
+def test_d76_a_registration_post_goes_to_the_collection_only(path, ok):
+    """Verification round MF-1: a POST to the user collection is a registration; to one
+    user, whatever names it, it is a change."""
+    from fuzzlab.tools.store_adapter import body_refusal, registration_shaped
+    assert registration_shaped(["password", "passwordRepeat"], [path],
+                               resource_ok=True) is ok
+    leaves = [("password", ["password"], None, ""),
+              ("passwordRepeat", ["passwordRepeat"], None, "")]
+    assert (body_refusal("http://h" + path, leaves) is None) is ok
+
+
+def test_d76_a_revealed_account_form_is_never_submitted_with_the_session(tmp_path):
+    """Verification round MF-2: in an authenticated crawl, a revealed "Save" form on a
+    route nobody named is refused (it cannot be found again unauthenticated)."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests", submit_spa_forms=[])
+    sp._spa_on, sp._authenticated = True, True
+    seen = []
+    sp._fill_and_click = lambda page, ctx, form, url, explicit: seen.append(form)
+    save = dict(_form([("nickname", "text")], "Save"), ids=["a"], button_id="b")
+    send = dict(CONTACT, ids=["a", "b"], button_id="c")
+    try:
+        sp._submit_revealed(None, None, "http://127.0.0.1:9/#/x", "x", [save])
+        assert seen == [] and sp.spa_counts["forms_refused"] == 1
+        sp._submit_revealed(None, None, "http://127.0.0.1:9/#/x", "x", [send])
+        assert seen == [send]
+    finally:
+        sp.storage.close()

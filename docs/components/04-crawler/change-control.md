@@ -3,6 +3,28 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0052 — D76 verification round: a registration POST goes to the user collection only; a revealed account-like form is refused (defect) (2026-10-17)
+- Goal / acceptance: the verification round of 86ed050 found two gaps (ERROR_LOG
+  2026-10-17).
+- Change:
+  - `tools/store_adapter.py`: `registration_shaped(resource_ok=True)` accepts a user
+    resource only as the path's last segment (a POST to the collection).
+    `/api/users/me` and `/api/users/alice` are changes; the digit test is gone.
+  - `tools/spider.py`: `_submit_revealed` refuses an account-like form
+    (`spa.account_like`) on a route nobody named in an authenticated crawl. A reveal
+    cannot be found again unauthenticated.
+- Impact: as CC-CRAWL-0051; tightened only.
+- Risk: high (a send gate), tightened.
+- Verification / review:
+  - `tests/test_spa_capture.py::test_d76_a_registration_post_goes_to_the_collection_only`
+    (six paths) and `::test_d76_a_revealed_account_form_is_never_submitted_with_the_session`;
+  - each fails when its fix is removed (mutation checks);
+  - 430 passed across five files.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert with CC-CRAWL-0051.
+- Effectiveness: as CC-CRAWL-0051.
+
 ### CC-CRAWL-0051 — D76: a generic run submits SPA forms; the file-upload, registration and login blocks go (2026-10-17)
 - Goal / acceptance: the owner's D76. A generic loopback crawl submits app-built forms
   (Juice Shop's login, feedback, complaint, registration). Acceptance: the tests below,

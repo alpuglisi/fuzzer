@@ -2760,7 +2760,12 @@ class LocalSpider:
             self._submitted_sigs.add(sig)
             why = (spa.form_refusal(form, route, named=named)
                    or ("a password form (submitted only unauthenticated; not from a "
-                       "reveal)" if spa.has_password(form) else None))
+                       "reveal)" if spa.has_password(form) else None)
+                   # D76 verification round MF-2: a reveal cannot be found again in an
+                   # unauthenticated context, so an account-like form is refused here
+                   or ("an account-like form (not from a reveal on a route nobody "
+                       "named)" if self._authenticated and not operator_named
+                       and spa.account_like(form, route) else None))
             if why:
                 self.spa_counts["forms_refused"] += 1
                 logging.info(f"revealed SPA form on {page_url} not submitted: {why}")

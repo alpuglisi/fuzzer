@@ -241,8 +241,8 @@ budget where a vulnerability is plausible.
     drops the query).
 - **FR-AUD-22** *(captured requests and JSON leaves; `CC-AUD-0035`, 2026-10-14, forms
   phase 3, lane J).* *(Amended, D76, CC-CRAWL-0051:)* a captured registration POST
-  (`registration_shaped`, a user resource such as `/api/Users` allowed, never one with
-  an id segment) is imported. Its passwords are isolated (sent empty, never points) and
+  (`registration_shaped`, a user collection such as `/api/Users` as the path's last
+  segment; never a path to one user, `/api/users/me` included) is imported. Its passwords are isolated (sent empty, never points) and
   its security question and answer are not settings fields; any other two-password
   body is still a credential change.
   - **Source.** `store_adapter.import_spider` reads the spider table

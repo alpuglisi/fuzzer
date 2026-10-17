@@ -402,9 +402,12 @@ def registration_shaped(passwords, texts, *, resource_ok: bool = False, hidden=(
     pairs = {p for t in words for p in zip(t, t[1:])}
     if flat & _REGISTER_TOKENS or pairs & _REGISTER_PAIRS:
         return True
-    # a POST to a user resource creates one; to one user (an id segment) it changes it
-    return resource_ok and bool(flat & _REGISTER_RESOURCES) and \
-        not any(w.isdigit() for w in flat)
+    # a POST to the user collection creates one; to one user (any segment after it:
+    # an id, "me", a name) it changes it -- verification round MF-1
+    if not resource_ok:
+        return False
+    last = [(t or "").rstrip("/").rsplit("/", 1)[-1].lower() for t in texts]
+    return any(seg in _REGISTER_RESOURCES for seg in last)
 
 
 def registration_extra(name: str) -> bool:

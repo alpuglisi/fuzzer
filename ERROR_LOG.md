@@ -20,6 +20,16 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — D76 (86ed050): a single-user path read as a registration; a revealed account form went out with the session (fixed)
+- **Symptom:** the verification round of 86ed050, by reading the code and calling the pure functions:
+  - (1) `registration_shaped(["password", "passwordRepeat"], ["/api/users/me"], resource_ok=True)` was True. A password change at `/api/users/me` or `/api/users/alice` would have been imported as a registration;
+  - (2) `_submit_revealed` did not apply `spa.account_like`. A revealed "Save" form on an unnamed route of an authenticated crawl would have been submitted with the operator's session.
+- **Root cause:** (1) "one user" was judged by a digit in the path, not by the collection being the last segment; (2) the account check was added to route forms only.
+- **Remediation (CC-CRAWL-0052):** the collection must be the last segment; a revealed account-like form is refused on unnamed routes of an authenticated crawl.
+- **Regression check:** two new tests, both mutation-checked.
+- **Scope:** pushed to the development branch only. The Juice Shop run juice-d76-1 measures 86ed050.
+- **Status:** Fixed.
+
 ## 2026-10-17 — 02625e9: the account-word split left an unused import and broke a guard (fixed)
 - **Symptom:** `verify_change.py --base 84598d2` on 02625e9: 2636 passed, 2 failed. `tests/test_lint.py::test_fuzzlab_is_pyflakes_clean` reported `urlsplit` (and `name_tokens`) unused in `credential_change_rule`. `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms` found `_CHANGE_TOKENS` in a second function.
 - **Root cause:** CC-CRAWL-0048 moved the token check into `account_reason` without removing its imports or updating the one-holder guard. My local runs covered the changed tests, not these two guard files.
