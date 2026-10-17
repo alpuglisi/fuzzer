@@ -612,10 +612,9 @@ script is the exact thing we are looking for" (question 2: Juice Shop's
   - The gain is DOM-XSS points on these routes; no mechanism yet detects the stored
     effect.
   - The seed value is still the constant filler. A stale echo of it would be taken as
-    taint: the review's fresh-token proposal was not built, and that is the owner's
-    call.
-- **Not decided:** whether an untainted query-caused write should stop demoting too (put
-  to the owner).
+    taint. The review's fresh-token proposal is not built: the owner said "Do not build
+    the d74 random seeding" (2026-10-17, final).
+- **Followed by D75:** an untainted query-caused write no longer demotes either.
 
 ### Deferred decisions (revisit at the noted point)
 
