@@ -4,6 +4,9 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (D73: a generic run goes through page pickers)
+- **What (CC-CRAWL-0047):** the crawler's default now goes through dropdown-and-button page pickers without the operator naming them. POST pickers are followed only when the start URL is loopback (a lab). Each must pass one rule, shared with the importer: no settings, destructive, transaction or account picker, and no "Save"/"Set"/"Apply" button. Five answers in a row that add nothing stop a picker. `--no-follow-selector-forms` turns it off. Why: the owner's decision D73. bWAPP's pages are all behind such a picker; with the picker named, a run confirmed 41/55 (was 0/55).
+
 ## 2026-10-17 (option 4(a): picker pages that answer 200)
 - **What (defect fix, CC-CRAWL-0046):** the review found two problems, now fixed. A settings dropdown that re-renders its own page could have been walked through every choice; it now stops after five answers that show nothing new. The browser crawler also crashed on a non-UTF-8 answer (F-066).
 - **What (CC-CRAWL-0045):** when the crawler submits a page picker (a dropdown plus a button) and the app answers with the page itself (200 HTML) rather than a redirect, it now reads that page: it queues the page's links, records its forms, and moves on to the next choice. Before, it stopped. Why: the owner chose survey option 4(a). bWAPP's picker redirects, so its score is unaffected; option 4(b) is still undecided.

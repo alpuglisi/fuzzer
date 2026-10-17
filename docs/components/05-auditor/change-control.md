@@ -3,6 +3,8 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0048 — The importer's `MIN_JUDGEABLE_SELECT_NAME` is defined once in `formnav`, and its POST-form rule is shared with the crawler's unnamed POST pickers (D73) (2026-10-17) — see CC-CRAWL-0047
+
 ### CC-AUD-0047 — D72: the auditor re-fetches destructive-looking URLs last and follows a redirect hop to one; GET forms and link sets lose the destructive-word import rule (2026-10-16) — see CC-CRAWL-0042
 
 ### CC-AUD-0046 — The importer counts a recorded blocked write (`request_blocked`) under the usual FR-AUD-22 rules (2026-10-16) — see CC-CRAWL-0036

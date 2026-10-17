@@ -347,7 +347,21 @@ def form_record(form, page_url: str) -> dict:
         "controls": [[n, k] for n, k in controls(form)],
         "selector": is_selector_form(form),
         "options": _selector_options(form) if is_selector_form(form) else [],
+        # D73: what an unnamed POST picker is judged by (in memory; not stored)
+        "submitter": _submitter_record(form),
     }
+
+
+def _submitter_record(form) -> dict | None:
+    """The default button's name, value, visible label and overrides, or None when the
+    form has no enabled submit control (D73: an unnamed POST picker is judged by it)."""
+    sub = submitter(form)
+    if sub is None:
+        return None
+    label = sub.get_text(" ", strip=True) if sub.name == "button" else \
+        (sub.get("value") or sub.get("alt") or "")
+    return {"name": sub.get("name") or "", "value": sub.get("value") or "",
+            "label": label, "overrides": list(submitter_overrides(form))}
 
 
 def _selector_options(form) -> list[list[str]]:

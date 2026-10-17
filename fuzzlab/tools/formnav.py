@@ -101,15 +101,77 @@ def signature_key(record: dict) -> str:
     return json.dumps(signature(record))
 
 
-def refusal(record: dict, named: frozenset[str], allow_get: bool,
+class _AllSelects:
+    """D73's "every select" (a generic run): tested by identity, never a name an
+    operator can type."""
+
+    def __repr__(self) -> str:
+        return "ALL_SELECTS"
+
+
+#: ``named`` for a generic run (D73): a POST picker is submitted without being named,
+#: when `unnamed_post_refusal` finds nothing against it.
+ALL_SELECTS = _AllSelects()
+
+#: A select whose name is shorter than this cannot be judged by its name (``t``, ``v``,
+#: ``tz``): an unnamed POST picker so named is never submitted, and the importer never
+#: fuzzes one (forms phase 2, reviewer B-R4; one definition since D73).
+MIN_JUDGEABLE_SELECT_NAME = 3
+
+#: A submit button that says one of these sets something (D73 review M4): an unnamed
+#: POST picker submitted by it is a settings form (bWAPP's security picker says "Set").
+SETTER_WORDS = frozenset({"set", "save", "apply", "update", "change", "switch",
+                          "select", "choose", "assign", "move"})
+
+
+def unnamed_post_refusal(record: dict) -> str | None:
+    """Why a POST picker the operator did not name must never be submitted (D73), or
+    None. The importer's own rule for a POST form first (`store_adapter.form_skip_reason`
+    without a verdict: multipart, settings controls, a select too short to judge,
+    credential and account changes, a destructive action or entry, hidden ones
+    included), then the transaction rule on the action, the entries and the submit
+    button, a submit button that sets something or is missing, and a button that sends
+    the form elsewhere (``formaction``...). Option labels are not judged by the
+    transaction rule: they name the page chosen, not what the submission does."""
+    from fuzzlab.core.urls import transaction_reason
+    from fuzzlab.tools.store_adapter import form_skip_reason
+    reason = form_skip_reason({**record, "verdict": None})
+    if reason:
+        return reason
+    sub = record.get("submitter")
+    if not sub:
+        return "no enabled submit button"
+    if sub.get("overrides"):
+        return f"submit button overrides {', '.join(sub['overrides'])}"
+    texts = [record["action_url"], sub.get("name"), sub.get("value"), sub.get("label")]
+    texts += [t for e in record.get("entries") or () for t in e]
+    for text in texts:
+        why = sendpolicy.transaction(transaction_reason(text))
+        if why:
+            return f"transaction ({why!r})"
+    for text in (sub.get("label"), sub.get("value"), sub.get("name")):
+        word = next((t for t in (x.lower() for x in name_tokens(text or ""))
+                     if t in SETTER_WORDS), None)
+        if word:
+            return f"submit button sets something ({word!r})"
+    return None
+
+
+def refusal(record: dict, named, allow_get: bool,
             in_scope: Callable[[str], bool]) -> str | None:
-    """Why this selector form must never be submitted, or None when it may be."""
+    """Why this selector form must never be submitted, or None when it may be.
+    ``named`` is the operator's select names, or `ALL_SELECTS` (D73)."""
     if not record.get("selector") or not record.get("options"):
         return "not a selector form"
     select = record["options"][0][0]
-    if record["method"] == "POST" and select not in named:
+    if record["method"] == "POST" and named is ALL_SELECTS:
+        why = unnamed_post_refusal(record)
+        if why:
+            return f"unnamed POST select {select!r}: {why}"
+    elif record["method"] == "POST" and select not in named:
         return f"POST select {select!r} not named by the operator"
-    if record["method"] == "GET" and not allow_get and select not in named:
+    if record["method"] == "GET" and not allow_get and named is not ALL_SELECTS \
+            and select not in named:
         return "GET selector forms not enabled"
     for name, _kind in record.get("controls") or []:
         word = settings_word(name)
@@ -145,25 +207,33 @@ VERDICT_SETTINGS = "settings"
 def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
                    log: Callable[[str], None] = logging.info,
                    on_verdict: Callable[[str], None] | None = None,
-                   on_page: Callable[[str, str], int] | None = None) -> list[str]:
+                   on_page: Callable[[str, str], int] | None = None,
+                   on_sent: Callable[[], None] | None = None) -> list[str]:
     """Submit each allowed option of a gated selector form; return the in-scope,
     non-destructive URLs it redirects to (to crawl as ordinary GET links).
 
     ``on_verdict`` (forms phase 2) is told ``"settings"`` when enumeration stops on a
-    cookie or on the self-redirect run, else ``"navigation"`` when a redirect was found
-    or a page was read. It only reports; what is submitted is unchanged.
+    cookie, or on a run of redirects back to the form itself before anything was
+    found; else ``"navigation"`` when a redirect was found or a page was read. An
+    answer that only re-renders a page (200) is never a settings verdict (D73 review
+    M1: bWAPP's ``sqli_13.php`` movie picker answers so, and is an injection point). It
+    only reports; what is submitted is unchanged.
 
     ``on_page(action_url, html)`` (option 4(a)) reads a cookie-less 2xx HTML answer as
     the chosen page and returns how many links and forms it found that neither the
-    picker's own page nor an earlier answer showed. Five such answers in a row adding
-    nothing stop the form; a settings form when nothing was found before them."""
+    picker's own page nor an earlier answer showed.
+
+    The stall (D73 review M2): a redirect back to the form, a redirect to a page
+    already found and an answer that adds nothing are one run; `MAX_SELF_REDIRECTS` in
+    a row stop the form, whatever was found before (measured on bWAPP's 159 options:
+    its longest such run is 3). ``on_sent`` is called once per submission."""
     base = FormEntries(tuple(e) for e in record["entries"])
     select = record["options"][0][0]
     own = {url_key(record["page_url"]), url_key(record["action_url"])}
     found: list[str] = []
     pages = 0
-    self_run = 0
-    empty_run = 0       # 200 answers in a row that added nothing (review M1)
+    stall = 0
+    self_only = True        # every answer of the current stall redirected to the form
     settings = False
     for _name, value, label in (record["options"] or [])[:MAX_OPTIONS]:
         why = option_refusal(value, label)
@@ -172,6 +242,8 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
             continue
         answer = submit(record["method"], record["action_url"],
                         base.replace(select, value))
+        if on_sent is not None:
+            on_sent()
         status, headers = answer[0], answer[1]
         html = answer[2] if len(answer) > 2 else None
         low = {k.lower(): v for k, v in (headers or {}).items()}
@@ -180,41 +252,37 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
             log(f"selector {select!r}: response set a cookie; stopped (settings form)")
             settings = True
             break
+        progress, to_self = False, False
         if on_page is not None and html and html_answer(status, headers) \
                 and not location:
             # option 4(a): the chosen page itself, read from this answer -- never a
             # second request
             if on_page(record["action_url"], html[:MAX_PAGE_CHARS]):
                 pages += 1
-                self_run = empty_run = 0
-                continue
-            # an answer that adds nothing is a self-redirect; five in a row stop the
-            # form even after a page was read (a settings form that re-renders itself
-            # must not be walked through every option)
-            empty_run += 1
-            if empty_run >= MAX_SELF_REDIRECTS:
-                settings = not (found or pages)
-                log(f"selector {select!r}: {empty_run} answers in a row add nothing new; "
-                    f"stopped" + (" (settings form)" if settings else ""))
+                progress = True
+        else:
+            if not (300 <= status < 400) or not location:
+                log(f"selector {select!r}: non-redirect response {status}; stopped")
                 break
-            continue
-        if not (300 <= status < 400) or not location:
-            log(f"selector {select!r}: non-redirect response {status}; stopped")
-            break
-        target = urljoin(record["action_url"], location).split("#")[0]
-        if not in_scope(target) or sendpolicy.destructive(destructive_reason(target)):
-            log(f"selector {select!r}: redirect to {urlsplit(target).path} refused; stopped")
-            break
-        if url_key(target) in own:
-            self_run += 1
-            if self_run >= MAX_SELF_REDIRECTS and not (found or pages):
-                log(f"selector {select!r}: redirects back to itself; stopped (settings form)")
-                settings = True
+            target = urljoin(record["action_url"], location).split("#")[0]
+            if not in_scope(target) or sendpolicy.destructive(destructive_reason(target)):
+                log(f"selector {select!r}: redirect to {urlsplit(target).path} refused; "
+                    f"stopped")
                 break
+            to_self = url_key(target) in own
+            if not to_self and target not in found:
+                found.append(target)
+                progress = True
+        if progress:
+            stall, self_only = 0, True
             continue
-        self_run = empty_run = 0
-        if target not in found:
-            found.append(target)
+        stall += 1
+        self_only = self_only and to_self
+        if stall >= MAX_SELF_REDIRECTS:
+            settings = self_only and not (found or pages)
+            log(f"selector {select!r}: {stall} answers in a row add nothing new; stopped"
+                + (" (settings form)" if settings else ""))
+            break
     if on_verdict is not None and (settings or found or pages):
         on_verdict(VERDICT_SETTINGS if settings else VERDICT_NAVIGATION)
     return found

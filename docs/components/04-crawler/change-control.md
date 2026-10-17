@@ -3,6 +3,89 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0047 — D73: a generic run goes through selector forms without naming them (2026-10-17)
+- Goal / acceptance: the owner's decision D73 ("a generic run go should through
+  dropdowns like bWAPP's without you naming them").
+  - Without a selector flag, a crawl follows GET pickers and, in a loopback lab, POST
+    pickers nobody named. Each unnamed POST picker must pass one refusal rule.
+  - Acceptance: the tests below; the mutation checks; and the bWAPP crawl with no
+    selector flag, measured below.
+- Pre-implementation review: an independent design review (2026-10-17) returned ten
+  must-fixes. All are taken:
+  - (1) an answer that only re-renders a page never gives a `settings` verdict.
+    bWAPP's `sqli_13.php` movie picker answers 200 with its own page, verified on the
+    lab, and it is an answer-key injection point.
+  - (2) one stall counter, never exempted by an earlier find.
+  - (3) the importer's POST-form rule is shared, plus transactions (SP-38).
+  - (4) setter buttons are refused.
+  - (5) loopback only.
+  - (6) `--no-follow-selector-forms`, refused together with the narrowing.
+  - (7) a live session check.
+  - (8) counters and a `--dry-run` line.
+  - (9) the default sits in `spider_kwargs` and the library stays off.
+  - (10) independent variations.
+
+  One part of (3) is not taken: option labels are not judged by the transaction rule.
+  They name the page chosen; on bWAPP that would skip "Order Tickets" and "Transfer
+  Amount", which are navigation (D72).
+- Change:
+  - `core/forms.py`: `form_record` keeps the default button (`submitter`: name, value,
+    label, overrides), in memory only.
+  - `tools/formnav.py`:
+    - `ALL_SELECTS` (tested by identity) and `unnamed_post_refusal`. It runs
+      `store_adapter.form_skip_reason` without a verdict, then the transaction rule on
+      the action, the entries and the button, then `SETTER_WORDS` on the button, then
+      a missing or disabled button and button overrides.
+    - `MIN_JUDGEABLE_SELECT_NAME` moves here (one definition).
+    - `enumerate_form`: one stall counter; `settings` only for a cookie, or for a stall
+      of redirects back to the form with nothing found. New `on_sent` callback.
+  - `tools/spider.py`:
+    - `selector_forms=ALL_SELECTS` is downgraded to GET pickers when the start host is
+      not loopback (`core.net.is_loopback_host`).
+    - A live session check after each unnamed POST picker in an authenticated crawl
+      (`selector_stopped`).
+    - Counters `picker_forms_enumerated`, `picker_forms_refused`, `picker_posts_sent`,
+      `picker_gets_sent`, `picker_verdict_settings`, `picker_verdict_navigation`, and a
+      summary line.
+    - CLI: `_selector_forms_arg` (no flag gives `ALL_SELECTS`), `--no-follow-selector-forms`
+      (refused with `--follow-selector-forms` in `parse_args`; the CLI copier carries no
+      mutually exclusive group), and `selector_forms_plan` for `--dry-run`.
+  - `cli_taxonomy.py`: the new flag is classified.
+- Measured premise (R2), on the local bWAPP build, loopback:
+  - the `bug` picker has 159 options, all answering 302 with no cookie;
+  - 148 pass `option_refusal`, and they reach 123 distinct pages;
+  - the longest run of options adding nothing is 3, so the bound of 5 never cuts it;
+  - the `security_level` picker is refused by its settings words, and its button
+    says "Set".
+- Impact (other components / consumers / project):
+  - auditor/importer: the shared constant and rule (CC-AUD-0048);
+  - UI: the CLI taxonomy and the launcher (CC-UI-0058). The launcher can't express "GET
+    pickers only" until BUG-0400 is fixed.
+  - Saved launches with no selector flag now follow pickers.
+- Risk (class; consequence and exposure; mitigation): high (a send gate).
+  - Consequence: a generic lab crawl POSTs to pickers, and a state-writing one is
+    submitted up to six times. A 200 answer that shows a new link every time is
+    bounded only by `MAX_OPTIONS`.
+  - Exposure: loopback labs only (a non-loopback start gives GET pickers).
+  - Mitigation: the shared refusal rule, the cookie stop, the stall bound, the live
+    session check.
+- Verification / review:
+  - `tests/test_d73_generic_pickers.py` (22 tests) and `tests/test_picker_pages.py`.
+    The re-render tests now expect no verdict (review M1).
+  - Mutation checks fail their tests: the refusal rule removed (8), the stall exempted
+    after a find (4), the old verdict on empty answers (5), the loopback check removed
+    (1).
+  - `verify_change.py`, the post-implementation review and the lab measurement are
+    below.
+- Deliverables:
+  - [x] code, tests — done
+  - [x] D73 in `docs/DECISIONS_AND_ROADMAP.md`; FR-CRAWL-8 and NFR-CRAWL-safe amended;
+    ARCHITECTURE; SP-38
+- Rollback / recovery: revert; or `--no-follow-selector-forms` for one run.
+- Effectiveness: bWAPP with the picker named (bwapp-named-1, before this change, the
+  same mechanism): 41/55 confirmed, 164 pages crawled (was 0/55, 12 pages). Pending:
+  the same with no selector flag, at this commit.
+
 ### CC-CRAWL-0046 — Option 4(a) review fixes: novelty is judged against the picker's own page; a non-UTF-8 answer is decoded (defect) (2026-10-17)
 - Goal / acceptance: fix the review's must-fixes of CC-CRAWL-0045 (ERROR_LOG
   2026-10-17).

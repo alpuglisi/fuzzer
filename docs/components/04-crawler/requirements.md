@@ -44,6 +44,22 @@ fuzzer.
   - the gate, per-option checks, fail-safes and cookie isolation are as in
     `tools/formnav.py`;
   - redirects found this way are crawled as ordinary links.
+  - *(Amended in place, CC-CRAWL-0047, 2026-10-17, D73.)* The CLI's default (no flag)
+    follows every picker: GET ones, and, when the start URL is loopback, POST ones
+    nobody named. An unnamed POST picker must pass `formnav.unnamed_post_refusal`.
+    `--no-follow-selector-forms` turns navigation off; `--follow-selector-forms`
+    narrows it as before. A library `LocalSpider` is off unless `selector_forms` is
+    given.
+    - One stall counter: a redirect back to the form, a redirect to a page already
+      found, or an answer that adds nothing. Five in a row stop the form.
+    - `settings` is recorded only for a cookie, or for a stall made of redirects
+      back to the form before anything was found.
+    - After an unnamed POST picker in an authenticated crawl, the session is checked
+      live, and a loss stops selector navigation (`selector_stopped`).
+    - Isolation covers the cookie jar only: a submission can still change
+      server-side session state.
+    - Counted: `picker_forms_enumerated`, `picker_forms_refused`, `picker_posts_sent`,
+      `picker_gets_sent`, `picker_verdict_*`.
   - *(Amended in place, CC-CRAWL-0014, 2026-10-14.)* The settings words are the one
     shared `formnav.settings_word`, extended with `sort`, `tz`, `currency`, `country`,
     `region`, `layout`, `skin`, `view`, `display`, `default`, `notify`, `privacy`,
@@ -688,7 +704,10 @@ fuzzer.
   new. *(D71, CC-CRAWL-0033:)* `--allow-destructive-routes` turns this rule off for one
   lab run (FR-CORE-45); without it there is no opt-in. The login flow keeps it. *(CC-CRAWL-0013:)* the crawler
   POSTs only to operator-named selector forms (FR-CRAWL-8), never to a settings or
-  destructive one. *(CC-CRAWL-0015, BUG-0123:)* **no request leaves the crawl scope**
+  destructive one. *(Superseded in place, D73, CC-CRAWL-0047:)* in a loopback lab,
+  the crawler also POSTs to unnamed selector forms that pass
+  `formnav.unnamed_post_refusal` (the importer's POST-form rule, transactions, setter
+  buttons). It never POSTs to a settings, destructive, transaction or account one. *(CC-CRAWL-0015, BUG-0123:)* **no request leaves the crawl scope**
   (FR-CRAWL-11), and the destructive rule covers every redirect hop, at each layer:
   the queue; static redirects (by hand); the browser (a context-wide route that walks
   redirect chains hop by hop, WebSockets routed, plus launch arguments that resolve

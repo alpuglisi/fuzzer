@@ -548,6 +548,43 @@ chose **"Page-visit rules"**, and for the importer and fuzzer **"Yes, same chang
   - Built in CC-CRAWL-0042: destructive-looking pages are visited and fuzzed **last**,
     never skipped.
 
+### D73 — A generic run goes through selector forms without naming them (owner, 2026-10-17)
+
+**The owner's decision:** "a generic run go should through dropdowns like bWAPP's
+without you naming them" (survey option 4(b)). It follows option 4(a) (a picker's 200
+answer is read as the chosen page, CC-CRAWL-0045).
+
+- **Built (CC-CRAWL-0047), after an independent pre-implementation review:**
+  - The CLI's default follows every selector form: GET ones, and POST ones in a
+    loopback lab. A crawl takes no `--authorized`, so a non-loopback start keeps GET
+    pickers only.
+  - `--no-follow-selector-forms` turns it off. `--follow-selector-forms [names]` keeps
+    its meaning as a narrowing. A library `LocalSpider` stays off unless asked.
+  - An unnamed POST picker passes one rule, `formnav.unnamed_post_refusal`, first.
+    It starts with the importer's own POST-form rule: multipart, settings controls,
+    select names too short to judge, credential and account changes, destructive
+    actions and entries (hidden ones included). Then the transaction rule on the
+    action, the entries and the submit button. Then a submit button that sets
+    something ("Set", "Save", "Apply"...), is missing, or sends the form elsewhere.
+- **Kept:** the per-option settings and destructive checks, the cookie stop, the
+  isolated client, scope, and DELETE refused.
+- **Stall bound:** one counter covers redirects back to the form, redirects to a page
+  already found, and answers that add nothing. Five in a row stop the form, whatever
+  was found before (bWAPP's longest such run is 3 of 159 options).
+- **Verdicts:** an answer that only re-renders a page is never a `settings` verdict
+  (bWAPP's `sqli_13.php` movie picker is an injection point).
+- **Session check:** after an unnamed POST picker in an authenticated crawl, the
+  session is checked live; a loss stops selector navigation.
+- **Stated consequences:**
+  - A generic lab crawl now POSTs to pickers. A state-writing picker (a cart quantity,
+    a vote) is submitted up to six times. A 200 answer that shows a new link every
+    time is bounded only by `MAX_OPTIONS` (500).
+  - The isolated client keeps the crawler's cookie jar unchanged, but a submission
+    writes server-side state through the copied session cookie.
+  - Saved launches with no selector flag change from off to on.
+  - The web launcher cannot yet express "GET pickers only" (BUG-0400: an empty value
+    is dropped); it offers off, named, or the default.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

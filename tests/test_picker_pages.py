@@ -81,14 +81,17 @@ def test_a_200_that_sets_a_cookie_is_a_settings_form():
     assert app.sent == ["1"] and verdicts == ["settings"]
 
 
-def test_five_answers_that_add_nothing_mark_a_settings_form():
+def test_five_answers_that_add_nothing_stop_the_form_without_a_settings_verdict():
+    """D73 review M1: a picker answering 200 with its own page re-rendered is stopped,
+    but never marked settings -- bWAPP's sqli_13.php movie picker answers so and is an
+    injection point the importer must keep."""
     many = "".join(f"<option value='{i}'>opt {i}</option>" for i in range(8))
     rec = _rec(f"<form action='/app/s.php' method='POST'><select name='bug'>{many}"
                f"</select><button>Go</button></form>", page="http://h/app/s.php")
     app, verdicts = _App(lambda v: (200, {"Content-Type": "text/html"}, "<p>same</p>")), []
     formnav.enumerate_form(rec, app.submit, lambda u: True, on_verdict=verdicts.append,
                            on_page=lambda a, h: 0)
-    assert len(app.sent) == 5 and verdicts == ["settings"]
+    assert len(app.sent) == 5 and verdicts == []
 
 
 def test_five_empty_answers_stop_a_form_even_after_a_page_was_read():
@@ -248,18 +251,19 @@ def _check_settings(tmp_path, lab):
     posts = [b for m, _p, b in lab if m == "POST"]
     assert len(posts) == 5, posts                    # five empty answers, then stopped
     db = sqlite3.connect(tmp_path / "s.db")
-    assert [r[0] for r in db.execute("SELECT verdict FROM selector_verdicts")] == \
-        ["settings"]
+    # D73 review M1: stopped, but no settings verdict (a re-rendering page may be an
+    # injection point; only a cookie or redirects back to the form mark settings)
+    assert [r[0] for r in db.execute("SELECT verdict FROM selector_verdicts")] == []
     gets = [p for m, p, _b in lab if m == "GET"]
     assert "/app/a.php" in gets                      # the page's own links still crawled
 
 
-def test_a_picker_that_re_renders_itself_is_a_settings_form_static(tmp_path):
+def test_a_picker_that_re_renders_itself_stops_after_five_static(tmp_path):
     _sp, lab = _crawl(tmp_path, "requests", _PrefsApp, "prefs.php")
     _check_settings(tmp_path, lab)
 
 
-def test_a_picker_that_re_renders_itself_is_a_settings_form_browser(tmp_path,
+def test_a_picker_that_re_renders_itself_stops_after_five_browser(tmp_path,
                                                                     monkeypatch):
     from tests._spa_fixture import chromium_or_skip
     chromium_or_skip(monkeypatch)

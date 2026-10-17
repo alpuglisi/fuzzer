@@ -538,10 +538,26 @@ class LocalSpider:
         # followed through a redirect; the start URL is the operator's own input.
         self._allow = frozenset({url_key(start_url)})
         self.skipped_destructive: dict[str, str] = {}
-        # Selector-form navigation (FR-CRAWL-8): None = off (default); else the set of
-        # select names the operator named (POST forms need a name; GET ones are allowed
-        # whenever the feature is on).
-        self._selector_forms = None if selector_forms is None else frozenset(selector_forms)
+        # Selector-form navigation (FR-CRAWL-8): None = off (the library default); else
+        # the set of select names the operator named (POST forms need a name; GET ones
+        # are allowed whenever the feature is on), or `formnav.ALL_SELECTS` (D73, the
+        # CLI's default: unnamed POST pickers too, behind `formnav.unnamed_post_refusal`)
+        from fuzzlab.tools import formnav as _formnav
+        if selector_forms is _formnav.ALL_SELECTS:
+            from fuzzlab.core.net import is_loopback_host
+            if is_loopback_host(urlparse(start_url).hostname or ""):
+                self._selector_forms = _formnav.ALL_SELECTS
+            else:
+                # D73 review M5: a crawl takes no --authorized, so an unnamed POST picker
+                # is submitted only in a loopback lab; elsewhere GET pickers only
+                logging.info("selector forms: the start URL is not loopback, so only "
+                             "GET pickers are followed (D73)")
+                self._selector_forms = frozenset()
+        else:
+            self._selector_forms = None if selector_forms is None \
+                else frozenset(selector_forms)
+        #: why selector navigation stopped for the crawl (D73 review M7), or None
+        self.selector_stopped = None
         self._enumerated: set = set()
         self._auth_headers: dict = {}
         #: where the session's headers may go (FR-CRAWL-14; set with the session)
@@ -603,6 +619,9 @@ class LocalSpider:
         self.spa_counts = dict.fromkeys((
             "routes_found", "routes_visited", "pages_deferred",
             "picker_pages_read",                # option 4(a): a picker's 200 answer
+            # D73 review M8: what selector navigation did
+            "picker_forms_enumerated", "picker_forms_refused", "picker_posts_sent",
+            "picker_gets_sent", "picker_verdict_settings", "picker_verdict_navigation",
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "requests_blocked_recorded",
@@ -1613,6 +1632,8 @@ class LocalSpider:
             self.storage.record_form(record)
             if self._selector_forms is None or not record["selector"] or depth >= self.max_depth:
                 continue
+            if self.selector_stopped:
+                continue
             from fuzzlab.tools import formnav
             sig = formnav.signature(record)
             if sig in self._enumerated:
@@ -1620,22 +1641,42 @@ class LocalSpider:
             self._enumerated.add(sig)
             why = formnav.refusal(record, self._selector_forms, True, self._in_scope)
             if why:
+                self.spa_counts["picker_forms_refused"] += 1
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
             key = formnav.signature_key(record)
+            unnamed = record["method"] == "POST" and \
+                self._selector_forms is formnav.ALL_SELECTS
+            self.spa_counts["picker_forms_enumerated"] += 1
+            sent = "picker_posts_sent" if record["method"] == "POST" else "picker_gets_sent"
             # option 4(a): what the picker's own page already shows is not new in an
             # answer (review M1: its links are queued by the crawl loop, after this)
             read: list = []
             seen = _page_keys(self._last_html, page)
             for target in formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
-                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v),
+                    on_verdict=lambda v, k=key: self._note_verdict(k, v),
                     on_page=lambda action, html, s=seen: self._read_picker_page(
-                        action, html, depth, read, s)):
+                        action, html, depth, read, s),
+                    on_sent=lambda c=sent: self.spa_counts.__setitem__(
+                        c, self.spa_counts[c] + 1)):
                 if not self.storage.is_visited(target):    # formnav stops on a destructive one
                     more.append((target, depth + 1, 'form'))
             more.extend(read)
+            if unnamed and self._authenticated:
+                # D73 review M7: the isolated client copies the session cookie, so a
+                # submission can change the server's session state; a lost session stops
+                # selector navigation for the crawl (as FR-CRAWL-13's submissions)
+                ok, lost = self._live_session_intact()
+                if not ok:
+                    self.selector_stopped = f"the session was lost after a picker ({lost})"
+                    logging.warning(f"selector navigation stopped: {self.selector_stopped}")
         return more
+
+    def _note_verdict(self, key, verdict):
+        """File a submitted picker's verdict (FR-CRAWL-10), counted."""
+        self.storage.record_verdict(key, verdict)
+        self.spa_counts[f"picker_verdict_{verdict}"] += 1
 
     def _read_picker_page(self, action_url, html, depth, out, seen):
         """Option 4(a): a picker's 200 HTML answer read as the chosen page -- never
@@ -3054,6 +3095,17 @@ class LocalSpider:
                 logging.info(f"Deferred {self.spa_counts['pages_deferred']} destructive-"
                              f"looking page(s) to the end of the crawl (D72: never "
                              f"skipped for their words).")
+            if self.spa_counts["picker_forms_enumerated"] or \
+                    self.spa_counts["picker_forms_refused"]:
+                c = self.spa_counts
+                logging.info(
+                    f"Selector forms: {c['picker_forms_enumerated']} enumerated "
+                    f"({c['picker_posts_sent']} POST(s), {c['picker_gets_sent']} GET(s) "
+                    f"sent), {c['picker_forms_refused']} refused; verdicts: "
+                    f"{c['picker_verdict_navigation']} navigation, "
+                    f"{c['picker_verdict_settings']} settings (FR-CRAWL-8, D73).")
+            if self.selector_stopped:
+                logging.info(f"Selector navigation stopped: {self.selector_stopped}.")
             if self.spa_counts["picker_pages_read"]:
                 logging.info(f"Read {self.spa_counts['picker_pages_read']} selector-form "
                              f"200 answer(s) in place of a redirect (option 4(a)).")
@@ -3112,13 +3164,20 @@ def build_parser():
     from fuzzlab.session.manager import AUTH_ORIGIN_HELP
     p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
                    help=AUTH_ORIGIN_HELP)
+    # D73: --follow-selector-forms and --no-follow-selector-forms exclude each other
+    # (checked in `parse_args`: the CLI copier carries no mutually exclusive group)
     p.add_argument("--follow-selector-forms", nargs="?", const="", default=None,
-                   metavar="SELECT[,SELECT...]",
-                   help="Navigate through menu-like forms (one <select> and a button). "
-                        "Alone: GET forms only. With names: also submit POST forms whose "
-                        "<select> has one of these names (e.g. 'bug'). Off by default: "
-                        "a submission can change state, so POST pickers are submitted "
-                        "only when named, never settings-like ones (FR-CRAWL-8).")
+                         metavar="SELECT[,SELECT...]",
+                         help="Narrow menu-like form navigation (one <select> and a "
+                              "button). Alone: GET forms only. With names: GET forms and "
+                              "the POST forms whose <select> has one of these names "
+                              "(e.g. 'bug'). Without this flag (D73) every picker is "
+                              "followed, POST ones too on a loopback lab, except "
+                              "settings-like, destructive, transaction and account "
+                              "ones (FR-CRAWL-8).")
+    p.add_argument("--no-follow-selector-forms", action="store_true",
+                         help="Do not submit menu-like forms at all (D73: on by "
+                              "default; a POST picker's submission can change state).")
     p.add_argument("--no-spa-routes", action="store_true",
                    help="Do not read single-page-app routes from the page's own scripts "
                         "nor crawl hash routes (#/x) as pages. On by default in the "
@@ -3158,6 +3217,34 @@ def spa_route_names(values):
     return [r for v in values for r in v.replace(",", " ").split() if r]
 
 
+def _selector_forms_arg(args):
+    """D73: no flag -> every picker (`formnav.ALL_SELECTS`); ``--no-follow-selector-forms``
+    -> off; ``--follow-selector-forms [names]`` -> the operator's narrowing."""
+    from fuzzlab.tools import formnav
+    if getattr(args, "no_follow_selector_forms", False):
+        return None
+    if args.follow_selector_forms is None:
+        return formnav.ALL_SELECTS
+    return [n.strip() for n in args.follow_selector_forms.split(",") if n.strip()]
+
+
+def selector_forms_plan(args) -> str:
+    """What selector navigation will submit, for ``--dry-run`` (D73 review M8)."""
+    from fuzzlab.core.net import is_loopback_host
+    from fuzzlab.tools import formnav
+    chosen = _selector_forms_arg(args)
+    if chosen is None:
+        return "off (--no-follow-selector-forms)"
+    if chosen is formnav.ALL_SELECTS:
+        if is_loopback_host(urlparse(args.start).hostname or ""):
+            return ("every picker; unnamed POST pickers are submitted (a loopback lab), "
+                    "except settings-like, destructive, transaction and account ones")
+        return "GET pickers only (the start URL is not loopback)"
+    if chosen:
+        return f"GET pickers and the POST pickers named {', '.join(chosen)}"
+    return "GET pickers only"
+
+
 def spider_kwargs(args, session_manager=None) -> dict:
     """The `LocalSpider` keywords the CLI's ``args`` select (one place, so every flag is
     wired and testable; review B-N1)."""
@@ -3169,9 +3256,7 @@ def spider_kwargs(args, session_manager=None) -> dict:
         resume=args.resume,
         session_manager=session_manager,
         identity=args.identity,
-        selector_forms=(None if args.follow_selector_forms is None else
-                        [n.strip() for n in args.follow_selector_forms.split(",")
-                         if n.strip()]),
+        selector_forms=_selector_forms_arg(args),
         spa_routes=not args.no_spa_routes,
         submit_spa_forms=spa_route_names(args.submit_spa_forms),
         reveal=not args.no_reveal,
@@ -3192,6 +3277,9 @@ def session_manager_for(args):
 def parse_args(argv=None):
     p = build_parser()
     args = p.parse_args(argv)
+    if args.no_follow_selector_forms and args.follow_selector_forms is not None:
+        p.error("--follow-selector-forms and --no-follow-selector-forms exclude each "
+                "other (D73)")
     sendpolicy.apply(args)                   # D71, before any side effect
     if args.auth_origin:                 # a usage error before any side effect (R5)
         from fuzzlab.session.manager import parse_auth_origins
@@ -3209,6 +3297,7 @@ if __name__ == "__main__":
     if args.dry_run:
         from fuzzlab.cli_dryrun import report
         report("crawl", args)
+        print("  selector forms: " + selector_forms_plan(args))      # D73 review M8
         raise SystemExit(0)
     get_logger("crawler").info("crawler starting",
                                extra={"start": args.start, "engine": args.engine,

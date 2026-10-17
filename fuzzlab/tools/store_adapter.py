@@ -372,9 +372,7 @@ def password_fields(form: dict) -> list[str]:
     return [n for n, k in form["controls"] if k == "password"]
 
 
-#: A POST selector whose select name is this short or shorter cannot be judged by its
-#: name (``t``, ``v``, ``tz``): it is skipped (forms phase 2, reviewer B-R4).
-MIN_JUDGEABLE_SELECT_NAME = 3
+from fuzzlab.tools.formnav import MIN_JUDGEABLE_SELECT_NAME  # noqa: E402 (D73: one definition)
 
 
 def form_skip_reason(form: dict) -> str | None:
