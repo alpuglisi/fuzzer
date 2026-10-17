@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — G1 never chose an untouched required mat-select (fixed)
+- **Symptom:** Juice Shop's register form: "not submittable (invalid after 5 attempts: (no control reports invalid))" (juice-d76-3).
+- **Root cause:** the required, empty `mat-select` reports `aria-invalid="false"` until touched, and only its `mat-form-field` carries `ng-invalid`. G1's invalid checks read the control's own state and the field's touched-only classes.
+- **Remediation (CC-CRAWL-0055):** a required empty custom select, or a field marked `ng-invalid`, counts as invalid.
+- **Regression check:** a real-Chromium test of that shape; it fails without the change.
+- **Status:** Fixed.
+
 ## 2026-10-17 — D76: the registration fill path raised (wrong module); its security question was refused (fixed)
 - **Symptom:** the Juice Shop run juice-d76-2: "Failed to process http://127.0.0.1:3000/#/register: module 'fuzzlab.tools.spa' has no attribute 'registration_extra'". After the fix, a real-browser test showed G1c refusing the security question ("a numeric record key as an option value").
 - **Root cause:** CC-CRAWL-0051 called `spa.registration_extra` from the spider, but the helper lived only in `store_adapter`. The unit tests exercised `form_refusal` alone; no test filled a registration in a browser. G1c's identifier rule has no registration exemption.

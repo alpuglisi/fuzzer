@@ -401,3 +401,71 @@ def test_d76_a_registration_form_is_filled_and_submitted_end_to_end(monkeypatch,
     rows = sqlite3.connect(tmp_path / "s.db").execute(
         "SELECT method, url FROM discovered_requests").fetchall()
     assert any(m == "POST" and u.endswith("/api/Users") for m, u in rows)
+
+
+_MAT_REGISTER_JS = r"""
+const routes = [{path: 'register'}];
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  const app = document.getElementById('app');
+  if (name !== 'register') { app.innerHTML = '<p>home</p>'; return; }
+  // Angular Material's shape: the required mat-select is empty and reports nothing
+  // invalid until touched; only its mat-form-field carries ng-invalid
+  app.innerHTML = "<div id='rf'><input id='emailControl' type='email' required>" +
+    "<input id='passwordControl' type='password' required>" +
+    "<input id='repeatPasswordControl' type='password' required>" +
+    "<mat-form-field class='mat-mdc-form-field ng-invalid' id='qf'>" +
+    "<mat-select id='securityQuestionControl' role='combobox' aria-required='true' " +
+    "aria-invalid='false' class='mat-mdc-select mat-mdc-select-required " +
+    "mat-mdc-select-empty' tabindex='0'>Security question</mat-select></mat-form-field>" +
+    "<input id='securityAnswerControl' type='text' required>" +
+    "<button id='registerButton' disabled>Register</button></div>";
+  const $ = id => document.getElementById(id);
+  let question = '';
+  const check = () => { $('registerButton').disabled = !(question &&
+    [...document.querySelectorAll('#rf input')].every(i => i.validity.valid)); };
+  document.querySelectorAll('#rf input').forEach(i => i.oninput = check);
+  $('securityQuestionControl').onclick = () => {
+    const box = document.createElement('div'); box.setAttribute('role', 'listbox');
+    box.innerHTML = "<div role='option'>Your eldest sibling's middle name?</div>" +
+      "<div role='option'>Your favourite book?</div>";
+    document.body.appendChild(box);
+    for (const o of box.querySelectorAll('[role=option]')) o.onclick = () => {
+      question = o.textContent; box.remove();
+      $('securityQuestionControl').classList.remove('mat-mdc-select-empty');
+      $('qf').classList.remove('ng-invalid'); check(); };
+  };
+  $('registerButton').onclick = () => fetch('/api/Users', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({
+      email: $('emailControl').value, password: $('passwordControl').value,
+      passwordRepeat: $('repeatPasswordControl').value, question})}).catch(() => {});
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+def test_d76_an_untouched_required_custom_select_is_filled(monkeypatch, tmp_path):
+    """Measured on Juice Shop (juice-d76-3): the register form stayed "invalid after 5
+    attempts: (no control reports invalid)" -- the required mat-select was empty but
+    reported aria-invalid="false" until touched; only its mat-form-field carried
+    ng-invalid. G1 now treats a required empty custom select, and a field marked
+    ng-invalid, as invalid, so it chooses an option and the form is submitted."""
+    from fuzzlab.tools.spider import LocalSpider
+    from tests._spa_fixture import _HASH_INDEX, _Lab, chromium_or_skip, run_crawl
+    chromium_or_skip(monkeypatch)
+
+    class MatRegSpa(_Lab):
+        index = _HASH_INDEX.replace("/main.js", "/mreg.js").replace(
+            "<a href='#/about'>About</a>", "<a href='#/register'>Register</a>")
+        script = ("/mreg.js", _MAT_REGISTER_JS)
+    lab = MatRegSpa()
+    try:
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000, submit_spa_forms=[])
+        run_crawl(sp)
+    finally:
+        lab.close()
+    posts = [r for r in lab.requests if r[0] == "POST" and r[1] == "/api/Users"]
+    assert posts, "the registration form was never submitted"
+    assert b"question" in posts[0][4] and b'"question":""' not in posts[0][4]

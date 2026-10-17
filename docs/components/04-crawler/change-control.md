@@ -3,6 +3,32 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0055 — G1: an untouched required custom select is invalid (defect found by the Juice Shop run) (2026-10-17)
+- Goal / acceptance:
+  - juice-d76-3 (at 160e6b6) repeated 6/15 (the same six cases as juice-d76-2).
+  - Juice Shop's register form was "not submittable (invalid after 5 attempts: (no
+    control reports invalid))".
+  - A loopback probe of the form showed why. The required `mat-select` was empty
+    (`mat-mdc-select-empty`, `aria-required="true"`) but reported
+    `aria-invalid="false"` until touched. Only its `mat-form-field` carried
+    `ng-invalid`, and G1 read neither.
+- Change: `tools/spa.py` `G1_READ_JS` and `G1_INVALID_JS` treat as invalid a required
+  empty custom select, or a control whose `mat-form-field` carries `ng-invalid`.
+- Impact: crawl only (G1 fills one more kind of control).
+- Risk: low/medium; it only widens which invalid controls G1 tries to satisfy, under
+  the same refusal rules.
+- Verification / review:
+  - `tests/test_d73_generic_pickers.py::test_d76_an_untouched_required_custom_select_is_filled`
+    (real Chromium; fails without the change);
+  - 379 passed across the four form files.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert.
+- Effectiveness:
+  - juice-d76-3: 6/15, repeated (JUICE-0001, 0002, 0003, 0004, 0006, 0007);
+  - `verify_change.py --base e7caad8` on 160e6b6: 75 files, 2344 passed, 0 failed;
+  - pending: a run with registration submitted.
+
 ### CC-CRAWL-0054 — D76 measured again: a registration's fill path raised; its security question's numeric keys were refused (defect) (2026-10-17)
 - Goal / acceptance: the Juice Shop run juice-d76-2 (at e7caad8) confirmed 6/15 (was
   5/15; JUICE-0003, login SQLi, is new). It found two more defects:

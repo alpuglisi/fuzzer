@@ -1213,9 +1213,14 @@ G1_READ_JS = r"""
     if (flagged(el)) return true;
     const host = el.parentElement && el.parentElement.closest(HOST);
     if (flagged(host)) return true;
+    // a required custom control that is still empty (a mat-select reports
+    // aria-invalid only once touched, 2026-10-17: Juice Shop's security question)
+    if ((el.getAttribute('aria-required') || '') === 'true' &&
+        el.matches('.mat-mdc-select-empty, .mat-select-empty')) return true;
     const field = el.closest(FIELD);
     return !!(field && (field.classList.contains('mat-form-field-invalid') ||
-                        field.classList.contains('mat-mdc-form-field-invalid')));
+                        field.classList.contains('mat-mdc-form-field-invalid') ||
+                        field.classList.contains('ng-invalid')));
   };
   const labelOf = el => {
     const parts = [];
@@ -1267,6 +1272,10 @@ el => {
     (x.getAttribute('aria-invalid') || '') === 'true');
   if (el.validity && !el.validity.valid) return true;
   if (flagged(el)) return true;
+  if ((el.getAttribute('aria-required') || '') === 'true' &&
+      el.matches('.mat-mdc-select-empty, .mat-select-empty')) return true;
+  const field = el.closest('mat-form-field, .mat-mdc-form-field, .mat-form-field');
+  if (field && field.classList.contains('ng-invalid')) return true;
   return flagged(el.parentElement && el.parentElement.closest(HOST));
 }
 """
