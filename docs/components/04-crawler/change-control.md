@@ -87,7 +87,8 @@ Newest first.
     (`test_base_url_subpath_registry.py::test_every_base_url_function_is_registered`):
     `Explorer.__init__(start_url)` and `build_contract(base_url)` had no sub-path test.
     Both now have one (an app under `/shop/`), registered.
-  - The re-run on the follow-up commit is recorded in the CHANGELOG line's commit.
+  - Re-run on 7c4931d (`--base e66685a`, the whole change): 80 files, 3131 passed,
+    0 failed, 9 skipped, 18 xfailed.
   - Not assessed: the owner's held-out metric (the labs are not in this container).
 
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
