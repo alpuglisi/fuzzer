@@ -20,6 +20,13 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — 02625e9: the account-word split left an unused import and broke a guard (fixed)
+- **Symptom:** `verify_change.py --base 84598d2` on 02625e9: 2636 passed, 2 failed. `tests/test_lint.py::test_fuzzlab_is_pyflakes_clean` reported `urlsplit` (and `name_tokens`) unused in `credential_change_rule`. `tests/test_json_points.py::test_the_credential_change_rule_is_one_function_shared_with_forms` found `_CHANGE_TOKENS` in a second function.
+- **Root cause:** CC-CRAWL-0048 moved the token check into `account_reason` without removing its imports or updating the one-holder guard. My local runs covered the changed tests, not these two guard files.
+- **Remediation (0b6a3d5):** the imports are removed. The guard now asserts one holder per word set and that `credential_change_rule` calls `account_reason`.
+- **Regression check:** both tests pass (`FUZZLAB_REQUIRE_LINT=1`); `verify_change.py` re-run below.
+- **Status:** Fixed.
+
 ## 2026-10-17 — M6's browser guard has no method rule: a page's own DELETE is sent (open)
 - **Symptom:** found by the D74 design review, by reading the code, not reproduced.
   `browserexec._in_browser` calls `guard_page` without a `method_refusal`. A fuzzed
