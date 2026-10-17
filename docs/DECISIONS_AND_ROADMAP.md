@@ -457,6 +457,35 @@ request."
 - The caller's own headers always win. That includes a header point's value, and an
   app's captured `Accept`.
 
+### D70 — Behavioural black-box discovery replaces static crawling (owner, 2026-10-17)
+
+**The owner's instruction:** deprecate and eliminate the legacy spider ("safely remove or
+deprecate"), and build a container-agnostic, behavioural framework in three phases: an
+interception proxy with scope enforcement and a state-graph browser explorer feeding a
+schema synthesizer (Phase 1); LLM test-case synthesis per endpoint (Phase 2); an
+execution-contract runner with oracles and a results ledger (Phase 3). The design is
+the owner's "Container-Agnostic Black-Box Discovery & Payload Generation Framework".
+Built as `fuzzlab/disco` (CC-CRAWL-0031, CC-MUT-0402, CC-FUZZ-0089). What the agent
+chose within it, each open for the owner:
+- **Deprecated, not deleted.** `tools/spider.py` stays, unchanged, because `fuzzlab
+  auto` (the pipeline the held-out metric is measured with) reads its spider DB, and
+  `navguard` / `spa` / `formnav` are shared with the auditor, the session manager and
+  M6. `disco` imports none of the spider's modules (guarded). Removal follows once
+  `auto` reads a disco inventory.
+- **mitmproxy, through navguard.** The browser keeps both navguard confinement layers.
+  The proxy is a third layer. Measured: the guarded driver's fetches honour the launch
+  proxy.
+- **`requests`, not `httpx`, for the runner**, so transport failures go through the one
+  classifier (SP-34).
+- **Phase 2 is opt-in (`--llm`)** under NFR-MUT-offline, and sends schemas only. The
+  default model takes no temperature. Determinism is bounded by structured output and
+  `effort: "low"`. Injection payloads stay with the oracle pipeline and rule packs.
+- **The browser's own captured headers** (an endpoint's static headers) are what the
+  runner replays (D69: measured from Chromium). `DEFAULT_BROWSER_HEADERS` is the
+  fallback.
+- Not the "autonomous LLM agent loop" deferred below: Phase 2 is one structured request
+  per endpoint, with no tools and no loop.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

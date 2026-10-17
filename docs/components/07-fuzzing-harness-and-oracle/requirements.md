@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-23 · see CC-FUZZ-0046
+· Last updated: 2026-10-17 · see CC-FUZZ-0089
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -1477,6 +1477,42 @@ rewards) derives from it.
   directory, then runs the engine in automatic mode (so D15 stays in `resolve_run`) with
   the default store. It requires `--authorized` before the crawl.
 
+- **FR-FUZZ-51 (the execution contract, `CC-FUZZ-0089`, 2026-10-17, D70)** A YAML or JSON
+  document (`contract_version: "1.0"`, `fuzzlab.disco.contract`) names the run (id, target
+  `base_url`, `scope_allowlist` of URLs or `host:port`, limits `rps` / `timeout_ms` /
+  `max_body_bytes`, an optional `reset_hook`), the auth profiles (`none`, `bearer`,
+  `basic`, `cookie`, `header`: a `keyring:<identity>` or `env:<NAME>` ref, never the
+  secret, D12; `storage_state`: a file), the endpoints (from a disco inventory: method,
+  path template, origin, content type, path parameters with their dependency source,
+  request and response schemas, the browser's static headers, auth, provenance), the
+  test cases (class, rationale, auth profile, setup steps with `extract` JSONPaths, the
+  request with `{{variables}}`, `raw_body` for syntax cases, the oracle's
+  `expect_status_class` and `findings_if` rules: `status_class`, `status_in`,
+  `body_matches`, `latency_ms_gt`, `response_schema_drift`, `state_check`; `safety`),
+  and `results`. `load_contract` is the one reader: the schema, then every reference,
+  variable, scope and secret check, each failure a typed `ContractError` before anything
+  is sent.
+- **FR-FUZZ-52 (the contract runner, `CC-FUZZ-0089`, 2026-10-17, D70)** `fuzzlab disco run
+  --authorized` executes a contract (`fuzzlab.disco.runner.Runner`):
+  - per case, in order: setup steps in order (a failing step is an `error`, not a
+    finding), variables extracted by JSONPath, then the request;
+  - every send is gated at the send: scope on the final URL; `check_send_url` (SP-09);
+    no redirect followed; the body read up to `max_body_bytes` within `timeout_ms`;
+    sends spaced to `rps`. A case marked destructive is `skipped` unless
+    `--allow-destructive` (then its own URL is the explicit allowance); a `reset_hook`
+    runs around it only with `--allow-reset-hook`, through `procutil.run_bounded`;
+  - credentials go only to the base URL's origin; evidence is redacted
+    (`core.redaction`);
+  - a send with no complete response is an `error` for that case and the run goes on
+    (SP-34); a timeout is an `error`, or a `finding` under a latency rule; an
+    unreachable target stops the run with the results so far written;
+  - the oracle: the case's rules plus a 5xx and `LEAK_PATTERNS` (stack traces, database
+    errors) that the endpoint's baseline (its first clean answer in the run) did not
+    show; an answer outside `expect_status_class` is matched;
+  - the ledger: one JSON line per case as it completes (`test_case`, `endpoint`,
+    `class`, `status`, `latency_ms`, `verdict` pass/finding/error/skipped, `matched`,
+    `reason`, `evidence` refs); the verdict counts are printed.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.
@@ -1511,6 +1547,11 @@ rewards) derives from it.
     `SeamProbeSender._prg_session_gate` at the send — `tests/test_prg_observation.py::test_a_refused_target_is_never_fetched`, `tests/test_prg_observation.py::test_a_307_after_post_is_not_followed_but_after_get_it_is`, `tests/test_prg_observation.py::test_a_second_redirect_is_no_observation`, `tests/test_prg_observation.py::test_a_redirect_to_the_login_page_is_not_followed`, `tests/test_prg_observation.py::test_a_redirect_to_an_auth_endpoint_is_not_followed`, `tests/test_prg_observation.py::test_a_main_session_probe_redirected_to_an_isolated_path_is_not_followed`, `tests/test_prg_observation.py::test_an_isolated_post_is_followed_on_the_same_copy`, `tests/test_prg_observation.py::test_an_anonymous_probe_follows_anonymously`, `tests/test_prg_observation.py::test_no_follow_up_once_the_header_breaker_stopped_header_probes`, `tests/test_prg_observation.py::test_a_timing_send_never_follows`, `tests/test_prg_observation.py::test_sqli_timing_and_boolean_never_cause_a_follow_up`, `tests/test_prg_observation.py::test_prg_rule`
   - Not yet enforced (BUG-0301, deferred to the owner of `core/urls.py`, CC-CORE-0301): the send gate `check_send_url` lets through Juice Shop's `GET /rest/user/change-password?current=&new=&repeat=` (changes the session user's password; `current` is optional) and `/dataerasure` (files an erasure request, clears the token cookie). An imported change-password URL, or the erasure form once crawled, would be fuzzed. Pinned by strict xfails: `tests/test_destructive_routes_external_labs.py::test_juice_change_password_url_is_refused_at_the_send_gate`, `tests/test_destructive_routes_external_labs.py::test_juice_dataerasure_form_is_never_imported`; the compensating controls are checked by `tests/test_destructive_routes_external_labs.py::test_bug_0301_compensating_controls_hold_meanwhile`.
   - Not yet enforced: the destructive-**payload** gate on the `auto`/`fuzz` senders (their payload lists are non-destructive today; wiring it needs on-host benchmark verification); "no traffic off localhost" for the probe senders (scope is the operator's target, and BUG-0050 deliberately allows authorized external hosts, so the clause needs re-wording or a loopback gate; the browser part is enforced above, BUG-0123); the CLI `--authorized` refusal is untested for fuzz/auto/greybox-run/mutate-run/proxy. (BUG-0111 sweep; reported to the operator.) The existing SQLi timing templates include an OR form (`1' OR SLEEP(d)-- -`) and comment-terminated forms that can widen a WHERE or strip trailing predicates in a write (BUG-0118, open).
+  - Clause (the contract runner, FR-FUZZ-52, CC-FUZZ-0089): every send is gated at the
+    send -- scope, the destructive URL and method gate, no redirects, a byte cap -- a
+    destructive case is skipped by default, credentials reach only the base origin, and
+    disco issues HTTP nowhere else.
+  - Enforced by (the contract runner): `disco.runner.Runner.send` / `run_case` / `prepare` — `tests/test_disco_contract.py::test_the_send_gate_refuses_out_of_scope_and_destructive_urls_at_the_send`, `tests/test_disco_contract.py::test_a_destructive_case_is_skipped_and_sends_nothing`, `tests/test_disco_contract.py::test_credentials_go_only_to_the_base_origin`, `tests/test_disco_contract.py::test_setup_extracts_and_the_oracle_flags_a_logic_bug`, `tests/test_disco_contract.py::test_a_body_is_read_up_to_its_cap`, `tests/test_disco_contract.py::test_the_runner_needs_authorized`, `tests/test_disco_isolation.py::test_disco_sends_http_only_through_the_runner_s_gated_send`, `tests/test_disco_isolation.py::test_the_send_guard_catches_synthetic_offenders`
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
 - **NFR-FUZZ-dry-run** `fuzzlab fuzz`, `fuzzlab auto`, and `fuzzlab greybox-run`

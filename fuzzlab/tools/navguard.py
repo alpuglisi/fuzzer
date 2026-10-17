@@ -61,6 +61,7 @@ from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
+from fuzzlab.core.net import require_loopback
 from fuzzlab.core.urls import canonical_origin, destructive_reason, document_key, url_key
 
 
@@ -752,9 +753,31 @@ def guard_page(target, allow: frozenset[str] = frozenset(),
 _LOOPBACK_SPELLINGS = ("127.0.0.1", "localhost", "[::1]")
 
 
-def browser_launch_args(scope_urls, *, any_port_hosts=()) -> list[str]:
+def _proxy_endpoint(proxy: str) -> tuple[str, int]:
+    """``host:port`` of a capture proxy, refused unless ``host`` is a loopback IP
+    literal and ``port`` a port (CC-CRAWL-0031): the proxy is this machine's own
+    recorder (``fuzzlab.disco``), never a remote hop."""
+    host, sep, port = (proxy or "").rpartition(":")
+    if not sep or not port.isdigit() or not 0 < int(port) < 65536 \
+            or host not in ("127.0.0.1", "[::1]"):
+        raise ValueError(f"a capture proxy is a loopback IP literal and port, not {proxy!r}")
+    require_loopback(host.strip("[]"), "capture proxy")
+    return host, int(port)
+
+
+def browser_launch_args(scope_urls, *, any_port_hosts=(), proxy: str | None = None) -> list[str]:
     """Chromium arguments for every launch we make (BUG-0123): no proxy, nothing
     resolvable outside scope, and no background networking.
+
+    ``proxy`` (CC-CRAWL-0031, the disco capture layer): a loopback ``host:port``
+    recorder every request goes through instead of ``--no-proxy-server``. Its own
+    ``host:port`` is added to the resolver rules (without it Chromium's
+    ``MAP * ~NOTFOUND`` refuses the proxy itself: ``ERR_PROXY_CONNECTION_FAILED``,
+    measured), and loopback is not bypassed (``<-loopback>``), so a loopback lab's
+    traffic is recorded too. Scope stays enforced at both layers: the rules still name
+    only scope origins, and the proxy refuses anything else on its own. Pass the same
+    ``proxy`` to `chromium_launch_kwargs`, which gives it to the Playwright driver: the
+    driver fetches every routed request, and it honours only the launch option.
 
     ``--host-resolver-rules`` maps each scope ``host:port`` to itself and every other
     name to ``~NOTFOUND``. Chromium applies the rules to IP literals and matches them on
@@ -775,21 +798,42 @@ def browser_launch_args(scope_urls, *, any_port_hosts=()) -> list[str]:
         spellings = _LOOPBACK_SPELLINGS if host == "127.0.0.1" else (host,)
         rules += [f"MAP {h}:{port} {h}:{port}" for h in spellings]
     rules += [f"EXCLUDE {h.lower()}" for h in any_port_hosts if h]
+    proxy_args = ["--no-proxy-server"]
+    if proxy is not None:
+        host, port = _proxy_endpoint(proxy)
+        rules.append(f"MAP {host}:{port} {host}:{port}")
+        proxy_args = [f"--proxy-server=http://{host}:{port}", "--proxy-bypass-list=<-loopback>"]
     rules = list(dict.fromkeys(rules)) + ["MAP * ~NOTFOUND"]
-    return ["--no-sandbox", "--disable-dev-shm-usage", "--no-proxy-server",
+    return ["--no-sandbox", "--disable-dev-shm-usage", *proxy_args,
             f"--host-resolver-rules={', '.join(rules)}", "--disable-background-networking",
             "--disable-component-update", "--disable-sync", "--disable-domain-reliability",
             "--no-pings", "--dns-prefetch-disable", "--disable-features=NetworkPrediction",
             "--no-default-browser-check", "--metrics-recording-only"]
 
 
-def chromium_launch_kwargs(args: list[str], *, headless: bool = True) -> dict:
+def chromium_launch_kwargs(args: list[str], *, headless: bool = True,
+                           proxy: str | None = None) -> dict:
     """The keyword arguments of every Chromium launch we make (BUG-0126, PA-0003):
     ``args`` (from `browser_launch_args`), ``headless``, and the operator's configured
     binary (``PLAYWRIGHT_CHROMIUM_EXECUTABLE``) when set. One helper, so no launch site
-    drifts from the others (the M6 executor ignored the binary and crashed a run)."""
+    drifts from the others (the M6 executor ignored the binary and crashed a run).
+
+    ``proxy`` (CC-CRAWL-0031): the loopback recorder `browser_launch_args` was given.
+    It becomes Playwright's launch ``proxy`` (loopback not bypassed), which the driver
+    honours for the requests the route guard fetches (measured: they reach the proxy
+    with the launch option, carrying the route's headers). ``args`` built for
+    another proxy, or for none, are refused: the two layers never disagree."""
     import os
+    if proxy is not None:
+        host, port = _proxy_endpoint(proxy)
+        if f"--proxy-server=http://{host}:{port}" not in args:
+            raise ValueError("chromium_launch_kwargs: args were not built for this proxy "
+                             "(browser_launch_args(..., proxy=...))")
+    elif any(a.startswith("--proxy-server=") for a in args):
+        raise ValueError("chromium_launch_kwargs: args name a proxy; pass it as proxy=")
     kwargs = {"headless": headless, "args": list(args)}
+    if proxy is not None:
+        kwargs["proxy"] = {"server": f"http://{host}:{port}", "bypass": "<-loopback>"}
     exe = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
     if exe:
         kwargs["executable_path"] = exe

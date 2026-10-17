@@ -32,7 +32,8 @@ import pytest
 
 from fuzzlab.core.urls import in_origin_scope, origin_scope, url_key
 from fuzzlab.tools.navguard import (browser_launch_args, checked_api_request,
-                                    make_route_handler, make_ws_handler)
+                                    chromium_launch_kwargs, make_route_handler,
+                                    make_ws_handler)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -297,6 +298,43 @@ def test_launch_args_disable_the_proxy_and_resolve_only_scope_origins():
                  "--disable-features=NetworkPrediction", "--disable-component-update",
                  "--disable-sync", "--disable-domain-reliability"):
         assert flag in args
+
+
+def test_a_capture_proxy_replaces_no_proxy_and_is_itself_resolvable():
+    """CC-CRAWL-0031: with ``proxy=`` the browser goes through the loopback recorder.
+    Its host:port is added to the resolver rules (else ``MAP * ~NOTFOUND`` refuses the
+    proxy itself: ERR_PROXY_CONNECTION_FAILED, measured), loopback is not bypassed, and
+    the rules still name only the scope origins and the proxy."""
+    args = browser_launch_args(["http://localhost:3000/"], proxy="127.0.0.1:18102")
+    assert "--no-proxy-server" not in args
+    assert "--proxy-server=http://127.0.0.1:18102" in args
+    assert "--proxy-bypass-list=<-loopback>" in args
+    assert _resolver_rules(args) == (
+        "MAP 127.0.0.1:3000 127.0.0.1:3000, MAP localhost:3000 localhost:3000, "
+        "MAP [::1]:3000 [::1]:3000, MAP 127.0.0.1:18102 127.0.0.1:18102, MAP * ~NOTFOUND")
+    kw = chromium_launch_kwargs(args, proxy="127.0.0.1:18102")
+    assert kw["proxy"] == {"server": "http://127.0.0.1:18102", "bypass": "<-loopback>"}
+    assert "proxy" not in chromium_launch_kwargs(browser_launch_args(["http://h/"]))
+
+
+@pytest.mark.parametrize("proxy", ["10.0.0.5:8080", "localhost:8080", "0.0.0.0:8080",
+                                   "127.0.0.1", "127.0.0.1:0", "127.0.0.1:99999",
+                                   "proxy.example:3128", ""])
+def test_a_capture_proxy_is_a_loopback_ip_literal_and_port_only(proxy):
+    with pytest.raises(ValueError):
+        browser_launch_args(["http://127.0.0.1:3000/"], proxy=proxy)
+
+
+def test_launch_kwargs_refuse_args_built_for_another_proxy_or_none():
+    """The route layer (the driver honours only the launch option) and Chromium's flags
+    never disagree about the proxy."""
+    with pytest.raises(ValueError):
+        chromium_launch_kwargs(browser_launch_args(["http://h/"]), proxy="127.0.0.1:5000")
+    with pytest.raises(ValueError):
+        chromium_launch_kwargs(browser_launch_args(["http://h/"], proxy="127.0.0.1:5000"),
+                               proxy="127.0.0.1:5001")
+    with pytest.raises(ValueError):
+        chromium_launch_kwargs(browser_launch_args(["http://h/"], proxy="127.0.0.1:5000"))
 
 
 def test_a_loopback_origin_admits_its_three_spellings_on_its_port_only():
@@ -770,12 +808,14 @@ def test_the_browser_guard_catches_synthetic_offenders(tmp_path):
 
 def test_the_launch_sites_are_the_four_known_ones():
     """Not vacuous: the guard sees every launch site there is (the session manager's
-    browser login, FR-SESS-19, is the fourth)."""
+    browser login, FR-SESS-19, is the fourth; the disco explorer, CC-CRAWL-0031, the
+    fifth)."""
     sites = set()
     for path in (ROOT / "fuzzlab").rglob("*.py"):
         if ".chromium.launch(" in path.read_text():
             sites.add(path.name)
-    assert sites == {"spider.py", "fetcher.py", "browserexec.py", "browserlogin.py"}
+    assert sites == {"spider.py", "fetcher.py", "browserexec.py", "browserlogin.py",
+                     "explore.py"}
 
 
 # --- BUG-0126: the M6 executor honours the configured Chromium; no browser, no verdict --

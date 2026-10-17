@@ -1,6 +1,6 @@
 # Crawler / Spider — Requirement Specification
 
-Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-10-14
+Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-10-17
 
 Related: `ARCHITECTURE.md` #4; `DECISIONS_AND_ROADMAP.md` (D5, D6, Phase 2);
 `./change-control.md`.
@@ -603,6 +603,91 @@ fuzzer.
     makes the app shell's start-up writes once more, for real (outside the window): on
     Juice Shop, one socket.io handshake per seed and per probe.
 
+- **FR-CRAWL-18 (behavioural capture: the interception layer, CC-CRAWL-0031, D70)**
+  `fuzzlab disco capture` records every exchange the application makes, whatever stack
+  it runs on, by sending the browser through a loopback capture proxy:
+  - **The proxy** is mitmdump running `fuzzlab.disco.recorder` in this interpreter
+    (`python -m fuzzlab.disco.mitm`), started and stopped through `procutil` (SP-22,
+    SP-31), listening on `127.0.0.1` only and checked loopback-only after boot
+    (PA-0130). Its CA lives in the run's own directory.
+  - **It is a scope firewall.** A request whose canonical origin is outside the run's
+    scope (`core.urls.in_origin_scope`) is killed before it is forwarded and counted per
+    host; an empty scope refuses everything. A CONNECT names a host and port, not a
+    scheme (the Playwright driver tunnels plain `http` too, measured): it is opened
+    when `host:port` is in scope under either scheme, and each request inside is checked
+    on its real origin. mitmproxy connects upstream only after that check
+    (`connection_strategy=lazy`).
+  - **One record format, one producer, one reader** (`fuzzlab.disco.capture`,
+    SP-35): `make_record` builds each `capture.jsonl` line -- method, URL, request and
+    response headers and bodies, content types, status, latency, the UI action
+    (`x-disco-action`) and the auth profile -- redacted at the write through
+    `core.redaction` (`redact_url`, `redact_body` failing closed, every sensitively named
+    header's value replaced); identifier values are kept; a body is cut at 200 000
+    characters only after redaction, and marked truncated. `read_capture` types every
+    line and quarantines (counts) a malformed one.
+  - **The action tag** is added by the browser route's header hook and stripped by the
+    proxy before forwarding (`--keep-tag` forwards it), so the target never sees it.
+  - **One capture per run** (PA-0450): a run directory that already holds a capture is
+    refused.
+- **FR-CRAWL-19 (behavioural capture: the interaction engine, CC-CRAWL-0031, D70)**
+  `fuzzlab.disco.explore.Explorer` drives a guarded Chromium through the proxy:
+  - **The browser** is launched like every other (SP-03/SP-04) with
+    `navguard.browser_launch_args(scope, proxy=)` and `chromium_launch_kwargs(proxy=)`;
+    the context ignores HTTPS errors, blocks service workers, is guarded by
+    `navguard.guard_page`, navigated through `navguard.navigate` and released through
+    `navguard.release`.
+  - **States** are layout fingerprints (`fingerprint.state_fingerprint`): the normalised
+    route and the set of visible interactive elements' signatures (tag, role, type,
+    name, class tokens, a three-ancestor chain, normalised id / href / action; digit runs
+    folded; text never). Breadth first, each (state, element signature, occurrence,
+    action) is tried once; at most `max_same_signature` (2) elements of one signature
+    per state; a state is restored by its entry URL and its replayed path (with a
+    fallback path for a page only a POST shows).
+  - **Actionable elements:** native controls and ARIA roles; elements with a JS
+    click / pointer / key listener from Chrome DevTools
+    (`DOMDebugger.getEventListeners`, at most 200 candidates per enumeration);
+    `cursor: pointer` as a fallback; re-enumerated after every action. Text-like
+    controls are filled through their form, never clicked alone.
+  - **Forms valid-first** (`formfill`): each control gets the first candidate (from its
+    type, pattern, bounds, autocomplete, name, label, placeholder, options) its own
+    `checkValidity()` accepts, then the submitter is clicked; then up to six
+    submissions with one control perturbed (empty, boundary length or value, another
+    option). A page-set or optional sensitive control is left as it is; a required
+    empty one is filled. A password gets a filler, never a credential.
+  - **Network quiescence:** after each action, no request in flight for 500 ms
+    (polled), at most 8 s.
+  - **Budgets:** states (60), actions (400), a deadline (900 s); the one hit is reported.
+  - **Authenticated runs** start from a Playwright storage state kept to in-scope
+    origins (`browserlogin.filter_storage_state`); with more than one scope origin the
+    guard's `cookie_scope` keeps the session to the start URL's origin (FR-SESS-20). A
+    landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
+    the action is denied for the rest of the run and the context rebuilt.
+  - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
+    label, the new state).
+- **FR-CRAWL-20 (the schema synthesizer, CC-CRAWL-0031, D70)** `fuzzlab disco synth`
+  turns captures into an OpenAPI 3.1-shaped inventory (`fuzzlab.disco.synth`):
+  - path segments classified across samples (`int`, `uuid`, `id` via
+    `looks_like_identifier`, and `slug` when one position varies over at least three
+    siblings) and templated `{p1}`, `{p2}`...; static assets excluded;
+  - endpoint key (origin, method, template, request content-type family);
+  - genson-style body, query and response schemas: type unions, `required` = present in
+    every sample, `enum` only for 2..5 distinct string values over 4+ samples, formats,
+    observed ranges under `x-observed` (never constraints), `x-redacted` for a field
+    seen only redacted; form and multipart bodies flattened; truncated bodies skipped;
+  - headers classed `session` / `static` (value kept) / `varies`; auth `none` /
+    `optional` / `required` from session headers and anonymous answers;
+  - response-only fields per resource (mass-assignment candidates);
+  - producer -> consumer edges with the extracting JSONPath (identifier-like values
+    only; a small integer only into an id slot);
+  - `x-disco` provenance per operation (samples, actions, profiles, statuses, latency);
+    path literals mined from captured JS bundles listed as `observed: false`
+    candidates, never as operations.
+- **FR-CRAWL-21 (the legacy spider is deprecated, CC-CRAWL-0031, D70)** `fuzzlab crawl`
+  (`tools/spider.py`) still runs, unchanged, and says on stderr that it is deprecated:
+  `fuzzlab auto` reads its spider DB. `fuzzlab/disco` imports nothing from
+  `tools/spider.py`, `tools/spa.py` or `tools/formnav.py` (an AST guard). Removing the
+  module waits for `auto` to read a disco inventory.
+
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
   to not clicking them. *(Built CC-CRAWL-0011, BUG-0111:)* the one rule is
@@ -703,6 +788,19 @@ fuzzer.
   - Enforced by: `core.urls.destructive_reason`; `tools/spider.py` (queue filter, hand-followed redirects, `navguard.guard_page`); `tools/fetcher.py:load_urls` — `tests/test_destructive_urls.py::test_static_crawl_never_fetches_a_destructive_link_or_redirect`, `tests/test_destructive_urls.py::test_rendered_crawl_sends_no_destructive_request_at_all`, `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_login_discovery_never_follows_a_redirect_to_a_destructive_url`, `tests/test_forms_phase1.py::test_a_named_picker_is_navigated_and_the_settings_one_never_touched`, `tests/test_forms_phase1.py::test_a_settings_picker_is_never_submitted_even_when_named`, `tests/test_forms_phase1.py::test_selector_submissions_never_change_the_crawlers_cookies`, `tests/test_forms_phase1.py::test_bwapps_destructive_gets_are_refused`
   - Enforced by (PA-0114 / PA-0301 tables: each lab's destructive routes judged by the real gates, and the compound-spelling scan over every lab's routes; BUG-0301): `core.urls.destructive_reason`, `store_adapter.form_skip_reason`, `spa.form_refusal` — `tests/test_destructive_routes_external_labs.py::test_each_destructive_route_gets_its_gates_actual_verdict`, `tests/test_destructive_routes_external_labs.py::test_no_lab_route_hides_a_destructive_word_in_a_compound`, `tests/test_destructive_routes_external_labs.py::test_the_spelling_scan_catches_synthetic_offenders`
   - Not yet enforced (BUG-0301, deferred to the owner of `core/urls.py`, CC-CORE-0301): the deny rule does not refuse Juice Shop's `/dataerasure` (one token, `dataerasure`) or `GET /rest/user/change-password?current=&new=&repeat=` (a `change`+`password` pair). A crawl that reaches `/dataerasure` would visit it and import its server-rendered erasure form, which passes `form_skip_reason`. Neither is captured today: the SPA's change-password form is never submitted, and a captured GET has no body to import. Pinned by strict xfails: `tests/test_destructive_routes_external_labs.py::test_juice_dataerasure_url_is_refused`, `tests/test_destructive_routes_external_labs.py::test_juice_dataerasure_form_is_never_imported`, `tests/test_destructive_routes_external_labs.py::test_juice_change_password_url_is_refused`.
+  *(CC-CRAWL-0031, D70:)* **behavioural capture keeps every layer's scope and never acts
+  on a destructive control.** The capture proxy refuses anything outside the run's
+  origins on its own (it is the third layer beside the browser route and the launch
+  arguments, and trusts neither); the explorer's browser keeps both navguard layers,
+  with the proxy's own `host:port` added to the resolver rules only; an element whose
+  label, name or id is destructive (`text_destructive_reason`) or operator-denied, or
+  whose link or form action is destructive, is never acted on; a credential-change or
+  CAPTCHA form is never submitted; the route still aborts destructive requests
+  whatever the page sends.
+  - Enforced by (the proxy, per request and per tunnel): `disco.recorder.Recorder.request` / `http_connect` — `tests/test_disco_capture.py::test_an_out_of_scope_request_is_killed_counted_and_never_recorded`, `tests/test_disco_capture.py::test_an_empty_scope_refuses_everything`, `tests/test_disco_capture.py::test_a_tunnel_is_opened_for_an_in_scope_host_port_under_either_scheme`, `tests/test_disco_e2e.py::test_the_proxy_refuses_an_out_of_scope_request_on_its_own`
+  - Enforced by (the browser through the proxy): `navguard.browser_launch_args(proxy=)` / `chromium_launch_kwargs(proxy=)` — `tests/test_browser_scope.py::test_a_capture_proxy_replaces_no_proxy_and_is_itself_resolvable`, `tests/test_browser_scope.py::test_a_capture_proxy_is_a_loopback_ip_literal_and_port_only`, `tests/test_browser_scope.py::test_launch_kwargs_refuse_args_built_for_another_proxy_or_none`, `tests/test_browser_scope.py::test_the_launch_sites_are_the_four_known_ones`
+  - Enforced by (the explorer, end to end in a real browser): `disco.explore.refusal` / `form_refusal` — `tests/test_disco_e2e.py::test_destructive_controls_and_other_origins_are_never_reached`, `tests/test_disco_e2e.py::test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app`
+  - Enforced by (the capture is redacted at the write): `disco.capture.make_record` — `tests/test_disco_capture.py::test_no_secret_reaches_the_capture_file_and_benign_content_stays`, `tests/test_disco_capture.py::test_a_secret_straddling_the_body_cut_is_still_removed`, `tests/test_disco_capture.py::test_an_unparseable_json_body_with_a_secret_is_omitted`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
   spaces.
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →
@@ -740,6 +838,22 @@ JSON body's parsed value; a form-encoded body as an object of name → value, la
 `content_type` is the media type only; `signature` = JSON `[method,
 url_key(url), sorted top-level keys]` (dedupe). No header and no cookie is stored.
 An old spider DB has no such table (the importer treats it as none).
+
+**Behavioural capture (FR-CRAWL-18..20, D70) -- file contracts, not store tables:**
+- `<run>/capture.jsonl`: one JSON object per exchange, `v: 1`: `kind` (`http`/`ws`), `t`,
+  `action_id`, `profile`, `method`, `url`, `req_headers`, `req_ctype`, `req_body`,
+  `req_truncated`, `status` (null with `error` when there was no response),
+  `res_headers`, `res_ctype`, `res_body`, `res_truncated`, `latency_ms`,
+  `ws_direction`. Redacted at the write; written only by `disco.capture.make_record`,
+  read only by `disco.capture.read_capture`.
+- `<run>/capture.jsonl.stats.json` (refusals per host, recorded, dropped),
+  `<run>/actions.jsonl` (one line per UI action), `<run>/explore.json` (the report).
+- The inventory: an OpenAPI 3.1 document whose operations carry `x-disco`
+  (`origin`, `method`, `content_type_family`, `observed`, `samples`, `actions`,
+  `profiles`, `statuses`, `headers` {name: {class, value?}}, `auth`, `dependencies`
+  [{producer, extract, target, count}], `response_only_fields`, `latency_ms`); path
+  parameters carry `x-kind`; the document's `x-disco` holds the record counts and the
+  JS candidates. Phase 2 (FR-MUT-10) reads it.
 
 ## 6. Dependencies (components)
 `core/`, session manager, target lab.

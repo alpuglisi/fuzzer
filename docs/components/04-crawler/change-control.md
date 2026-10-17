@@ -3,6 +3,84 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0031 — Behavioural black-box discovery: capture proxy, state-graph explorer, schema synthesizer; the legacy spider deprecated (D70) (2026-10-17)
+- Change:
+  - **`fuzzlab/disco/` (new):** the owner's instruction (D70) to replace static crawling
+    with protocol-level discovery, independent of the stack inside the container.
+    - `capture.py` -- the `capture.jsonl` record: one producer (`make_record`, redacted
+      at the write through `core.redaction`), one reader (`read_capture`, typed,
+      quarantining). SP-35.
+    - `recorder.py` -- the mitmproxy addon: the scope firewall (requests and CONNECT
+      tunnels), the action tag read and stripped, records queued to one writer thread.
+    - `mitm.py` / `proxyproc.py` -- mitmdump in this interpreter, on a free loopback
+      port through `procutil`, checked loopback-only after boot; one capture per run.
+    - `fingerprint.py` / `formfill.py` / `explore.py` -- the interaction engine:
+      layout-fingerprint states, BFS with replayable paths, DevTools listener
+      discovery, valid-first forms judged by the browser's `checkValidity()`, one
+      perturbation per control, network quiescence, logout recovery, safety rails.
+    - `synth.py` -- the OpenAPI 3.1 inventory: path templating, merged schemas,
+      header classes, auth, response-only fields, dependency edges, JS candidates.
+    - `cli.py` -- `fuzzlab disco capture|synth|generate|run` (generate is CC-MUT-0402,
+      run CC-FUZZ-0089).
+  - **`tools/navguard.py` (SP-03/SP-04 owners):** `browser_launch_args(..., proxy=)`
+    and `chromium_launch_kwargs(..., proxy=)`: a loopback `host:port` recorder replaces
+    `--no-proxy-server`, is added to the resolver rules, loopback is not bypassed; a
+    non-loopback or malformed proxy, or args built for another proxy, are refused.
+    Default (`proxy=None`) output is unchanged.
+  - **`tools/spider.py`:** a deprecation docstring only; `fuzzlab crawl` prints a
+    deprecation note (FR-CRAWL-21). Nothing else changes.
+  - **`cli.py` / `cli_taxonomy.py`:** the `disco` command, its classified flags.
+  - **Measured before design (CLAUDE.md rule 8), real mitmdump + Chromium:**
+    - the Playwright driver's routed fetches (navguard's guard) honour the launch-level
+      proxy and carry the route's headers;
+    - without the proxy's own `host:port` in the resolver rules Chromium fails with
+      `ERR_PROXY_CONNECTION_FAILED`;
+    - the driver CONNECT-tunnels plain-`http` origins, so a tunnel is judged by
+      `host:port` under either scheme (the first recorder killed every guarded request);
+    - the explorer, on a client-rendered fixture, reaches listener-only navigation, a
+      validated form's POST, a UUID-keyed PUT and a dialog-only webhook, and never the
+      destructive controls or the out-of-scope image.
+    - quiescence is measured from the action, not the last request: with a 120 ms
+      click-to-fetch debounce, settling on "nothing in flight for 500 ms since the last
+      request" read each state before its render and lost the dialog's subtree (3/3
+      runs: 2 states, the POST never reached); counting the click and each navigation
+      as activity (`Explorer.mark_activity`) reaches it 3/3. The fixture keeps the
+      debounce; the e2e file then passed 5 consecutive runs. Listener hits are taken in
+      document order (CDP lists properties in no stated order).
+    - a page that navigates away while it is read ("execution context destroyed") is
+      waited out once (`settled_fingerprint`), never the end of the exploration.
+- Impact (other components / project):
+  - Consumers of the SP-03/SP-04 owners, found from the code: `tools/spider.py`,
+    `tools/fetcher.py` (AUD), `tools/browserexec.py` (FUZZ, M6),
+    `session/browserlogin.py` (SESS) call them without `proxy`, so their launches are
+    byte-for-byte unchanged (`test_launch_args_disable_the_proxy_and_resolve_only_scope_origins`
+    still holds); `disco/explore.py` is the fifth launch site.
+  - No store table, schema or existing CLI flag changes; `fuzzlab auto` still reads the
+    spider DB. The inventory feeds Phase 2 (MUT) and the contract runner (FUZZ).
+  - New optional dependency extra `disco` (mitmproxy, playwright, anthropic).
+  - The web launcher does not list `disco` yet (a stated follow-up for UI).
+- Risk: medium (a new traffic-sending path). Mitigated:
+  - three scope layers, each tested on its own (proxy, route, launch arguments), the
+    proxy one also with a plain HTTP client and no browser;
+  - every launch and navigation through the navguard owners (AST guards);
+  - redaction at the write with planted secrets; `--authorized` before any side effect;
+  - the legacy pipeline left intact, so the measured `auto` path keeps working.
+  - Not measured: the owner's metric (held-out lab recall). The held-out labs lived in
+    the previous session's container; this change is measured on a fixture only.
+- Deliverables:
+  - [x] code (`fuzzlab/disco/*`, `tools/navguard.py`, `cli.py`, `cli_taxonomy.py`,
+    `tools/spider.py` docstring, `pyproject.toml` extra) — done
+  - [x] tests (`test_disco_capture.py`, `test_disco_synth.py`, `test_disco_e2e.py` real
+    browser + proxy, `test_disco_isolation.py` AST guards with synthetic offenders,
+    `test_disco_cli.py`, `test_browser_scope.py` proxy cases and the fifth launch
+    site, `test_cli_taxonomy.py` subcommand parsers derived) — done
+  - [x] FR-CRAWL-18..21, NFR-CRAWL-safe clause and data contracts edited in place;
+    SHARED_PRIMITIVES (SP-03, SP-04 amended; SP-35, SP-36 new); ARCHITECTURE;
+    DECISIONS (D70); CHANGELOG — done
+  - [ ] the owner's held-out measurement with `disco` — todo (needs the labs)
+  - [ ] the web launcher entry and `OPTION_CLASS` paths — todo (UI follow-up)
+- Effectiveness (assessed 2026-10-17): see the verification record below.
+
 ### CC-CRAWL-0030 — A guarded navigation never waits for a load a refused navigation cancelled: one helper (BUG-0138) (2026-10-15)
 - Change:
   - **`tools/navguard.py`:** the one way a guarded page is navigated (PA-0138):

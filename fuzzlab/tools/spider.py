@@ -1,3 +1,16 @@
+"""DEPRECATED (D70, 2026-10-17): the legacy link/DOM crawler.
+
+Behavioural discovery is `fuzzlab.disco` (``fuzzlab disco capture``): a capture proxy
+records every request the application makes while a guarded browser explores it by
+layout state, listeners and valid-first forms, independent of the stack in the
+container. This module is kept, unchanged, because ``fuzzlab auto`` still imports the
+spider DB it writes; `fuzzlab.disco` imports nothing from it (guarded by
+``tests/test_disco_isolation.py``). The browser primitives it shares with the auditor,
+the session manager and the M6 executor (`fuzzlab.tools.navguard`, SP-01..SP-04) are not
+deprecated. Removing this module is a separate change, once ``auto`` reads a disco
+inventory.
+"""
+
 import argparse
 import contextlib
 import copy

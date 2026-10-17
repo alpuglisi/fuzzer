@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — Environment and measurement: a pip-installed Playwright newer than the container's Chromium; the capture proxy killed the browser's own tunnels (fixed before commit)
+- **Symptom:**
+  - `pip install -e '.[browser]'` resolved Playwright 1.64, whose `chromium.launch()` failed with "Executable doesn't exist at .../chromium_headless_shell-1248"; the container ships build 1194.
+  - In the first disco measurement every guarded browser navigation timed out through the capture proxy, while `curl` through the same proxy worked.
+- **Root cause:**
+  - The project's `playwright>=1.40,<2` range floats to the newest release; the pre-installed browser matches Playwright 1.56.
+  - The Playwright driver CONNECT-tunnels even plain-`http` origins, and the recorder's first `http_connect` judged a tunnel as `https://host:port`, which is outside an `http` scope, so it killed the driver's in-scope tunnels. (A stray proxy from an earlier manual run also held one port and confused one measurement: F-059.)
+- **Remediation:**
+  - Pinned `playwright==1.56.0` in this container (environment only; `PLAYWRIGHT_CHROMIUM_EXECUTABLE`, honoured by `navguard.chromium_launch_kwargs`, is the alternative).
+  - `Recorder.http_connect` opens a tunnel when `host:port` is in scope under either scheme, and every request inside is still checked on its real origin (CC-CRAWL-0031; `tests/test_disco_capture.py::test_a_tunnel_is_opened_for_an_in_scope_host_port_under_either_scheme`).
+- **Status:** Environment (the Playwright pin); Fixed in the new code before its first commit (the tunnel rule), so no shipped defect and no bug report.
+
 ## 2026-10-15 — Oracle: a connection reset from the target ended the whole confirmation run (fixed, BUG-0147, PA-0153)
 - **Symptom:** `test_multitarget_category4::test_both_apps_run_through_multitarget_for_real` failed intermittently under the full parallel suite with `ConnectionResetError` on the template-injection confirmer's redirect follow-up to the Go Twitch clone (`GET /channels/$%7B603*129%7D`).
 - **Root cause:**

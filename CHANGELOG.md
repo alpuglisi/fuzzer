@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (D70: behavioural black-box discovery and contract fuzzing; the legacy spider deprecated)
+- **What:** `fuzzlab/disco` (new), `fuzzlab disco capture|synth|generate|run`. Phase 1: a procutil-owned mitmdump recorder as the scope firewall and the one producer of a redacted `capture.jsonl`; a navguard-guarded Chromium sent through it (`browser_launch_args`/`chromium_launch_kwargs` gain a loopback `proxy=`) explores a layout-fingerprint state graph, with DevTools listener discovery, valid-first forms, network quiescence and action tags; a synthesizer builds an OpenAPI 3.1 inventory (templated paths, merged schemas, header classes, response-only fields, dependency edges). Phase 2: opt-in (`--llm`) structured-output test cases per endpoint, validated and scope-filtered. Phase 3: a YAML/JSON execution contract and a gated runner with oracles and a JSONL results ledger. `fuzzlab crawl` is deprecated but kept, because `fuzzlab auto` reads its DB. CC-CRAWL-0031, CC-MUT-0402, CC-FUZZ-0089; SP-35/SP-36 new, SP-03/SP-04 amended; new `disco` extra.
+- **Why:** the owner's instruction (D70). Static link/DOM crawling misses the API surface modern stacks expose only through client JavaScript (POST/PUT routes, dialog-only webhooks, JSON structures), so discovery moves to the protocol level, independent of the technology in the container.
+
 ## 2026-10-15 (session handoff document)
 - **What:** `docs/HANDOFF-2026-10-15.md` (new): the goal in the owner's words, the held-out metric and its current values, the owner's decisions D67-D69, the unmerged lane branches and their state, the integration items, the work queue in order, the labs, and the working rules. `docs/claude_juicelab_failures.md` gains F-057 (a lane worked around a blocked command and changed the host).
 - **Why:** the owner asked for a handoff to a fresh session.

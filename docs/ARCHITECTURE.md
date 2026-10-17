@@ -1378,8 +1378,32 @@ tracked in the requirements files, not here.
   the most load-bearing dependency; everything authenticated flows through it, on
   every host — the Puppy Fort Factory and the external validation labs (D10).
 
-### 4. Crawler / spider `[built; to harden]`
-- **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch
+### 4. Crawler / spider `[built; to harden]` -- behavioural discovery `fuzzlab/disco` `[built offline; held-out measurement pending]`, the legacy spider `[deprecated, D70]`
+- **Behavioural discovery (D70, CC-CRAWL-0031, FR-CRAWL-18..21) -- `fuzzlab/disco/`,
+  `fuzzlab disco capture|synth`.** Protocol-level, stack-independent discovery: what
+  the application sends is recorded, not what its HTML says.
+  - `recorder.py` + `mitm.py` + `proxyproc.py`: mitmdump (this interpreter, a
+    procutil-owned child on a free loopback port) with the recorder addon: the scope
+    firewall (each request and each CONNECT tunnel), the `x-disco-action` tag read and
+    stripped, records queued to one writer thread.
+  - `capture.py` (SP-35): `capture.jsonl`, written only by `make_record` (redacted at
+    the write) and read only by `read_capture` (typed, quarantining).
+  - `explore.py` + `fingerprint.py` + `formfill.py`: a guarded Chromium (navguard
+    launch, route, navigation and release owners; `proxy=` the recorder) explores a
+    state graph keyed by layout fingerprint, finds listener-only elements through
+    DevTools, fills forms valid-first (the browser's `checkValidity()` decides), waits
+    for network quiescence, recovers a lost session, and never acts on a destructive
+    control.
+  - `synth.py`: the captures become an OpenAPI 3.1 inventory (templated paths, merged
+    schemas, header classes, auth, response-only fields, dependency edges, JS
+    candidates) -- the input of Phase 2 (component 9) and the contract (component 7).
+  - Imports nothing from `tools/spider.py`, `tools/spa.py`, `tools/formnav.py`
+    (`tests/test_disco_isolation.py`).
+- **The legacy spider (`tools/spider.py`) is deprecated (FR-CRAWL-21).** It runs
+  unchanged because `fuzzlab auto` reads its spider DB; its removal waits for `auto` to
+  read a disco inventory. Its browser primitives (`tools/navguard.py`) are shared and
+  current.
+- **Subcomponents (legacy spider):** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget. Built for single-page apps (forms
   phase 3, `tools/spa.py`): SPA route discovery from loaded scripts (hash and history
@@ -1442,6 +1466,16 @@ tracked in the requirements files, not here.
 - **Consumed by:** auditor (indicators), scheduler and fuzzer (payloads/families).
 
 ### 7. Fuzzing harness and oracle `[built; grey-box/OOB mechanisms partial]`
+- **The execution contract and its runner (D70, CC-FUZZ-0089, FR-FUZZ-51/52) --
+  `fuzzlab/disco/contract.py`, `runner.py`, `fuzzlab disco run --authorized`.** A YAML /
+  JSON contract (run and scope, auth profiles by keyring/env/storage-state reference,
+  endpoints from a disco inventory, test cases with setup dependencies and oracles) is
+  validated by one reader, then executed: setup steps in order with JSONPath
+  extraction, every send gated at the send (scope, `check_send_url`, no redirects, byte
+  cap, rps), no-response classified by SP-34, oracles (case rules, 5xx, stack-trace and
+  database-error patterns against the endpoint's baseline, schema drift, state checks),
+  a JSONL results ledger and redacted evidence. Independent of the store and of the
+  oracle pipeline below.
 - **Fuzzing harness** `[built]`: the generalized `template + injection_point +
   payload_source + oracle` pipeline (`harness/pipeline.py`, `harness/auto.py`,
   `harness/scoring.py`, `harness/integration.py`), so one harness serves multiple
@@ -1504,6 +1538,12 @@ tracked in the requirements files, not here.
 - **Pending (on-host):** the beats-uniform-on-hits-per-1000-requests exit (T4.6).
 
 ### 9. Mutation engine `[partial — full offline stack built; live coverage exit on-host]` (Phase 8)
+- **Runtime payload synthesis (D70, CC-MUT-0402, FR-MUT-10) -- `fuzzlab/disco/generate.py`,
+  `fuzzlab disco generate [--llm]`.** Inventory -> contract; with `--llm` (opt-in,
+  NFR-MUT-offline) one structured-output request per endpoint (`claude-opus-5-5`,
+  effort low, server-side refusal fallback) for type / boundary / structural / syntax /
+  logic cases, each validated and scope-filtered, drops counted. Only schemas leave the
+  machine.
 - **Operators + semantics validator** `[built]` (`fuzzlab/mutation/`): typed,
   meaning-preserving operators (`operators.py`) and a validator (`semantics.py`) that
   refutes meaning changes via canonicalization + an `sqlglot` AST path (skip-guarded).
@@ -2007,6 +2047,14 @@ authenticated action depends on the session manager; every confirmed finding and
 every training label depends on the oracle; the bandit's dense reward and the
 mutation engine's hill climbing depend on grey-box signals.
 
+`fuzzlab/disco` (D70) sits beside the crawler layer and talks through files, not the
+store: `capture.jsonl` -> inventory -> contract -> results. It imports `core/`
+(urls, redaction, net, credentials, http headers), the session layer's login-URL and
+storage-state predicates, `tools/navguard.py` (every browser owner),
+`tools/store_adapter.credential_change_rule` (SP-19), `tools/probesender._unobserved`
+(SP-34) and `procutil` -- and nothing from the legacy spider (`tools/spider.py`,
+`spa.py`, `formnav.py`).
+
 ## Key interaction flows
 
 **1. The core discovery-to-label loop.**
@@ -2087,6 +2135,13 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
+- `[built offline]` **Behavioural discovery and contract fuzzing (D70, `fuzzlab/disco`).**
+  - Phase 1 (capture proxy, explorer, synthesizer), Phase 2 (opt-in LLM cases) and
+    Phase 3 (contract runner) are built and tested on a loopback fixture with a real
+    mitmdump and Chromium (`tests/test_disco_e2e.py`).
+  - Not measured yet: the owner's held-out-lab metric; a live LLM call; the web launcher
+    entry. The legacy spider is deprecated, kept for `fuzzlab auto`.
+  - New optional extra: `disco` (mitmproxy, playwright, anthropic).
 - `[partial]` **CLI simplification (`docs/CLI_WORKING_VS_TRAINING_DESIGN.md`).**
   - **Phase 1 is built:** the default store (FR-CORE-400), the `fuzzlab train` group
     (FR-FUZZ-400), the taxonomy and refusal machinery (FR-FUZZ-401), the grouped help,

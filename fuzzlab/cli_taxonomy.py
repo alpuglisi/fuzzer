@@ -54,8 +54,12 @@ COMMANDS: tuple[Command, ...] = (
     Command("auto", WORKING, "auto [args]",
             "crawl results -> audit -> oracle-confirm pipeline (requires --authorized; "
             "ground-truth and training flags: use `train run`)", flags="auto"),
+    Command("disco", WORKING, "disco <sub>",
+            "behavioural discovery + contract fuzzing: capture | synth | generate | run "
+            "(capture and run require --authorized)", flags="disco"),
     Command("crawl", WORKING, "crawl [args]",
-            "run the crawler (python -m fuzzlab.tools.spider)", flags="crawl"),
+            "run the legacy crawler, deprecated: use `disco capture` (python -m "
+            "fuzzlab.tools.spider)", flags="crawl"),
     Command("audit", WORKING, "audit [args]",
             "run the auditor (python -m fuzzlab.tools.fetcher)", flags="audit"),
     Command("fuzz", WORKING, "fuzz [args]",
@@ -152,6 +156,7 @@ def _load(module: str, name: str = "build_parser") -> Callable[[], argparse.Argu
 PARSERS: dict[str, Callable[[], argparse.ArgumentParser]] = {
     "auto": _load("fuzzlab.harness.auto_cli"),
     "crawl": _load("fuzzlab.tools.spider"),
+    "disco": _load("fuzzlab.disco.cli"),
     "audit": _load("fuzzlab.tools.fetcher"),
     "fuzz": _load("fuzzlab.tools.blind_sqli_fuzzer"),
     "session": _load("fuzzlab.session.cli"),
@@ -197,6 +202,18 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
                         "identity", "follow_selector_forms", "no_spa_routes",
                         "submit_spa_forms", "no_reveal", "dry_run", "auth_origin",
                         "no_spa_query"]),
+    "disco": {
+        **_all("B", [f"capture:{d}" for d in (
+            "start", "scope", "out", "profile", "storage_state", "max_states", "max_actions",
+            "deadline", "deny", "keep_tag", "upstream_insecure", "authorized", "dry_run")]),
+        **_all("B", ["synth:capture", "synth:out"]),
+        **_all("B", [f"generate:{d}" for d in (
+            "inventory", "out", "run_id", "base_url", "scope", "auth_profile", "max_cases",
+            "endpoint", "model", "api_key_identity", "llm")]),
+        **_all("B", [f"run:{d}" for d in (
+            "contract", "results", "evidence", "allow_destructive", "allow_reset_hook",
+            "authorized", "dry_run")]),
+    },
     "audit": _all("B", ["spider_db", "indicator_db", "out", "engine", "timeout", "append",
                         "quiet", "store", "identity", "base_url", "dry_run"]),
     "fuzz": _all("B", ["url", "param", "output", "baseline_iterations", "repeats", "sigma",

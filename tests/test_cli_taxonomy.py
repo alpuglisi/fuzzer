@@ -170,7 +170,13 @@ def action_variants(parser, *, skip=()):
             yield a, base + extra
 
 
-@pytest.mark.parametrize("key", sorted(k for k in tx.PARSERS if k != "session"))
+def _has_subcommands(key: str) -> bool:
+    """A subcommand parser (``session``, ``disco``) is never copied: `copy_parser`
+    refuses it (`test_a_shape_copy_parser_cannot_carry_is_refused`)."""
+    return any(isinstance(a, argparse._SubParsersAction) for a in tx.PARSERS[key]()._actions)
+
+
+@pytest.mark.parametrize("key", sorted(k for k in tx.PARSERS if not _has_subcommands(k)))
 def test_a_copy_parses_every_action_exactly_like_its_source(key):
     """PA-0400(1): copy vs source, over every action of every parser (discovered)."""
     src = tx.PARSERS[key]()

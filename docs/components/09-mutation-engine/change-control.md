@@ -3,6 +3,38 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0402 — Runtime payload synthesis: LLM test cases per discovered endpoint, opt-in (D70, FR-MUT-10) (2026-10-17)
+- Change:
+  - **`fuzzlab/disco/generate.py` (new):** inventory -> contract endpoints; with a
+    `CaseProvider`, per endpoint the zero-prose prompt (`SYSTEM_PROMPT`), structured
+    output held to `CASES_SCHEMA`, conversion (`to_contract_case`), validation
+    (`validate_case`: schema, endpoint references, scope, auth profiles, variables, cap),
+    and a `GenerationReport` of kept, dropped-by-reason and declined endpoints.
+  - `AnthropicProvider`: `claude-opus-5-5`, `output_config` {effort `low`, json_schema
+    format}, `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`), refusal
+    and `max_tokens` stops handled. No temperature: the model rejects sampling
+    parameters, so determinism is bounded by schema, prompt and effort (the spec's
+    "low temperature" is unavailable on this model; stated in the module).
+  - **`fuzzlab disco generate`**: endpoints only by default; `--llm` is the explicit
+    opt-in NFR-MUT-offline requires. The key from the SDK's resolution or the keyring.
+- Impact (other components / project): a new producer of FUZZ contracts (CC-FUZZ-0089);
+  reads the CRAWL inventory (CC-CRAWL-0031). The existing `mutation/llm.py` expander is
+  untouched. No store change.
+- Risk: medium (data leaves the machine with `--llm`). Mitigated: opt-in; only schemas
+  are sent (captured values redacted at capture; header values withheld); every case
+  validated and scope-filtered, drops counted, never repaired; no injection payloads
+  asked of the LLM.
+  - Not exercised: a live API call (no key used in this session). The provider is tested
+    with a fake client asserting the exact request (model, output format, effort,
+    fallback, no temperature).
+- Deliverables:
+  - [x] code (`disco/generate.py`, `disco/cli.py` generate) — done
+  - [x] tests (`test_disco_contract.py` Phase 2 cases; `test_disco_cli.py`; the output
+    schema checked against what structured outputs accept) — done
+  - [x] FR-MUT-10, NFR-MUT-offline clause — done
+  - [ ] a live run against the API on the owner's key — todo
+- Effectiveness (assessed 2026-10-17): see CC-CRAWL-0031's verification record.
+
 ### CC-MUT-0401 — `--store` help from the one constant; FR-MUT-400 states the real check order (2026-10-15)
 - Change:
   - **`mutation/cli.py`:** the `--store` help comes from `storepath.store_help`.

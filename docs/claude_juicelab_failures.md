@@ -742,3 +742,12 @@ Juice Shop lab is complete.
 - **Status:** pushed to `ccr-27885270-9ahcdd` and `main` without a test run, on the
   owner's instruction. Rule from now on: documentation-only commits are pushed directly.
   Verification applies to code and test changes.
+
+### F-059 — A stray capture proxy from my own manual run contaminated one measurement, and I first blamed the wrong cause
+- **What:** While measuring the disco capture path (2026-10-17), I started mitmdump by hand under `timeout` in one shell call. It was still holding its port when the next call started another proxy on the same port. That proxy failed to bind, and the old one answered.
+  - I read the timeouts as a flag conflict ("duplicated proxy flags") before checking the proxy log. The log showed the bind failure.
+  - The real defect (the recorder killing the driver's CONNECT tunnels) was found only after a clean re-measurement on fresh ports, with the addon bisected.
+- **Evidence:** this session's transcript; ERROR_LOG 2026-10-17.
+- **Impact:** about three wasted measurement runs. No code or result was affected: the shipped launcher uses `procutil` (fresh free port, ownership checked), which cannot repeat this.
+- **Status:** recorded. Scratch measurements now use fresh ports per run, and a proxy log is read before a cause is named.
+

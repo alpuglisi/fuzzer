@@ -88,6 +88,12 @@ labgen-python-fastapi = [
     "sqlalchemy>=2.0,<3",
     "httpx>=0.27,<1",
 ]
+# Behavioural discovery and contract fuzzing (D70, fuzzlab/disco/): the capture proxy
+# (mitmproxy, run in this interpreter by `python -m fuzzlab.disco.mitm`), the guarded
+# browser (playwright) and Phase 2's LLM client (anthropic; used only with
+# `fuzzlab disco generate --llm`). Each is imported lazily where used (PA-0005); `synth`,
+# the contract and the runner need none of them.
+disco = ["playwright>=1.40,<2", "mitmproxy>=12,<13", "anthropic>=1.15,<2"]
 # Developer tooling.
 dev = ["pytest>=8,<9", "pyflakes>=3,<4"]
 

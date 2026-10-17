@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back (reachable from both fuzzlab mutate-run and the main greybox-run harness), the live HttpFilter + fuzzlab mutate-run driver (live WAF evasion verified on-host), and optional MutationSearch reward/novelty telemetry into metric_series]` (Phase 8; B0 emitter sub-lane) · Last updated: 2026-09-22 · see CC-MUT-0011
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back (reachable from both fuzzlab mutate-run and the main greybox-run harness), the live HttpFilter + fuzzlab mutate-run driver (live WAF evasion verified on-host), and optional MutationSearch reward/novelty telemetry into metric_series]` (Phase 8; B0 emitter sub-lane) · Last updated: 2026-10-17 · see CC-MUT-0402
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.
@@ -53,6 +53,32 @@ feedback and the scheduler.
     store.
   - The summary and the dry run name the resolved store.
 
+- **FR-MUT-10 (runtime payload synthesis, `CC-MUT-0402`, 2026-10-17, D70)**
+  `fuzzlab disco generate` turns a disco inventory (FR-CRAWL-20) into an execution
+  contract (FR-FUZZ-51), and **with `--llm` only** asks an LLM for test cases per
+  endpoint (`fuzzlab.disco.generate`):
+  - the prompt (`SYSTEM_PROMPT`) asks, without prose, for type, boundary, structural,
+    syntax and logic (authorization, ordering, one-time, negative quantity) cases, each
+    with a rationale, an oracle and a destructive flag, at most `--max-cases` (12);
+  - the answer is held to `CASES_SCHEMA` by structured output (closed objects, request
+    values as strings: a body as JSON text, parameters as name/value pairs);
+  - determinism: the default model, `claude-opus-5-5`, takes no sampling parameters (a
+    temperature is a 400), so variance is bounded by the output schema, a terse prompt
+    and `effort: "low"`; a classifier decline is retried server-side
+    (`fallbacks: "default"`), and one that still declines is reported per endpoint;
+  - every case is converted and validated before it is kept, and a dropped one is
+    counted by reason (`unparseable`, `truncated`, `unconvertible`, `schema`,
+    `foreign-endpoint`, `out-of-scope`, `reference`, `over-cap`): it references only its
+    endpoint and its dependencies' producers, names no out-of-scope URL, uses defined
+    auth profiles, extracts every `{{variable}}` before use;
+  - what is sent: schemas, formats, observed ranges, enums, header *names*, dependency
+    edges -- never a captured header value or a session (captured values were redacted
+    at capture);
+  - the API key comes from the SDK's own resolution, or from the keyring
+    (`--api-key-identity`, D12);
+  - class `injection` is reserved for a rule-pack producer: the LLM is not asked for
+    injection payloads.
+
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
   rejects transformations that change meaning. This includes fail-closed handling
@@ -67,6 +93,10 @@ feedback and the scheduler.
   to an external service without explicit opt-in.
   - Enforced by: `LlmExpander` default off — `tests/test_mutation_catalog.py::test_llm_expander_default_off`, `tests/test_mutation_catalog.py::test_llm_disabled_ignores_generator`
   - Not yet enforced: no static no-network check for `mutation/llm.py` (offline by construction: the generator is injected). (BUG-0111 sweep.)
+  - Clause (Phase 2 test-case synthesis, FR-MUT-10, CC-MUT-0402): `fuzzlab disco
+    generate` sends nothing to the LLM API without `--llm`; with it, only schemas, never
+    a captured header value or a session.
+  - Enforced by (Phase 2): `disco.cli._generate` (`--llm`), `disco.generate.prompt_payload` — `tests/test_disco_cli.py::test_synth_then_generate_without_llm_sends_nothing_and_makes_a_valid_contract`, `tests/test_disco_contract.py::test_the_prompt_carries_schemas_never_header_values_or_sessions`
 - **NFR-MUT-dry-run** `fuzzlab mutate-run` accepts `--dry-run`: plans and prints
   the exact argv/command it would run and sends nothing (no payload/probe), for
   headless use outside the web UI. Reuses the web launcher's dry-run plan/report

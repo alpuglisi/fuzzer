@@ -3,6 +3,39 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0089 — The execution contract and its runner (D70, FR-FUZZ-51/52) (2026-10-17)
+- Change:
+  - **`fuzzlab/disco/contract.py` (new):** `CONTRACT_SCHEMA` / `TEST_CASE_SCHEMA`
+    (contract_version 1.0: run, auth profiles, endpoints, test cases, results),
+    `scope_origins` (SP-36), `load_contract` (typed `ContractError` for every failure)
+    and the semantic checks (references, variables, scope, no inline secrets).
+  - **`fuzzlab/disco/runner.py` (new):** `Runner`: setup steps in order with JSONPath
+    extraction, `{{variable}}` filling, the gated `send` (scope, `check_send_url`, no
+    redirects, byte cap, deadline, rps pacing), auth profiles (keyring/env/storage
+    state; base origin only), the oracle (case rules, 5xx, `LEAK_PATTERNS` against the
+    endpoint's baseline, expect_status_class, schema drift, state checks), redacted
+    evidence, `summary`.
+  - **`fuzzlab disco run --authorized`**: the JSONL ledger, one line per case as it
+    completes; destructive cases only with `--allow-destructive`; a reset hook only with
+    `--allow-reset-hook`.
+- Impact (other components / project): consumes contracts from CC-MUT-0402 or by hand;
+  reuses `core.urls.check_send_url` (SP-09), `tools.probesender._unobserved` /
+  `_is_timeout` (SP-34, not changed), `core.redaction`, `core.credentials`,
+  `procutil.run_bounded`. The oracle pipeline (`oracle/`, `harness/auto`) is untouched.
+- Risk: medium (a new sender). Mitigated: every gate at the send, counted in tests; one
+  send site in the package (AST guard); usage errors exit 2 before any side effect;
+  results never appended to an earlier file.
+  - Stated limits: `refresh` of an expired session is not implemented (an expired
+    session shows as 401s); `body_matches` patterns from a contract run on at most 256
+    KiB of each body (a pathological pattern is the contract author's risk); `injection`
+    cases need a rule-pack producer that does not exist yet.
+- Deliverables:
+  - [x] code (`disco/contract.py`, `disco/runner.py`, `disco/cli.py` run) — done
+  - [x] tests (`test_disco_contract.py` runner and contract cases, `test_disco_e2e.py`
+    contract against the live fixture, `test_disco_cli.py`) — done
+  - [x] FR-FUZZ-51/52, NFR-FUZZ-safe clause — done
+- Effectiveness (assessed 2026-10-17): see CC-CRAWL-0031's verification record.
+
 ### CC-FUZZ-0088 — A probe that gets no response is no verdict, never the end of the run (BUG-0147) (2026-10-15)
 - Change:
   - `oracle/probe.py`: `ProbeUnobserved(RuntimeError)`, the one class for "sent, no

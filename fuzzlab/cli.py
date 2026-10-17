@@ -90,6 +90,15 @@ def main(argv: list[str] | None = None) -> int:
         from fuzzlab.harness import reveal_cli
         return reveal_cli.main(rest)
 
+    if command == "disco":
+        from fuzzlab.disco import cli as disco_cli
+        return disco_cli.main(rest)
+
+    if command == "crawl":
+        print("fuzzlab: 'crawl' (the legacy spider) is deprecated (D70); behavioural "
+              "discovery is 'fuzzlab disco capture'. It still runs: 'fuzzlab auto' reads "
+              "its spider DB.", file=sys.stderr)
+
     if command == "lab-generate":
         from fuzzlab.labgen import cli as labgen_cli
         return labgen_cli.main(rest)
