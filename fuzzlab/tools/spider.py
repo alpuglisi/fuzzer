@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import logging
+import re
 import sqlite3
 import time
 from urllib.parse import urljoin, urlparse
@@ -404,9 +405,16 @@ def _carries_word(tokens, *texts):
 _OVERRIDE_HEADERS = ("x-http-method-override", "x-http-method", "x-method-override")
 
 
+#: ``_method`` followed, within a few non-word characters, by ``delete``: a form field,
+#: a JSON key or a multipart part (D75 review M2; Laravel reads JSON ``_method``, Rack
+#: and Symfony a multipart field -- unverified against a live target, tested here).
+_METHOD_DELETE = re.compile(r"_method\W{1,40}delete\b", re.IGNORECASE)
+
+
 def _delete_tunnel(url, headers, body) -> bool:
     """A write that asks the server to treat it as a DELETE (D74 review M4): an override
-    header, or a ``_method=DELETE`` in the query or a form body."""
+    header, or a ``_method`` naming DELETE in the query or the body, whatever the
+    body's encoding (form, JSON, multipart; `_METHOD_DELETE`)."""
     from urllib.parse import parse_qs
     low = {k.lower(): v for k, v in (headers or {}).items()}
     if any((low.get(h) or "").strip().upper() == "DELETE" for h in _OVERRIDE_HEADERS):
@@ -421,7 +429,8 @@ def _delete_tunnel(url, headers, body) -> bool:
             values = parse_qs(text or "").get("_method", [])
         except ValueError:
             values = []
-        if any(v.strip().upper() == "DELETE" for v in values):
+        if any(v.strip().upper() == "DELETE" for v in values) or \
+                _METHOD_DELETE.search(text or ""):
             return True
     return False
 
@@ -694,7 +703,9 @@ class LocalSpider:
             "spa_query_baseline_writes",
             # D74: a write carrying the load's value (seed and probe windows alike);
             # the forms a seed promoted past one did not keep
-            "spa_query_tainted_writes", "spa_query_forms_withheld"), 0)
+            "spa_query_tainted_writes", "spa_query_forms_withheld",
+            # D75: an untainted, non-baseline write (no longer demotes)
+            "spa_query_untainted_writes"), 0)
         # --- forms phase 5: route query parameters (FR-CRAWL-17) ---
         #: On with SPA routes (it reads the same scripts); ``spa_query=False`` turns it off.
         self._query_on = self._spa_on and bool(spa_query)
@@ -961,8 +972,10 @@ class LocalSpider:
         `_note_window_blocked`, on the same request). Every write is blocked all the
         same; what differs is whether it keeps a seed from becoming a point.
 
-        - A DELETE always counts (D74 review M4; a method-override tunnel is caught in
-          `_note_window_blocked`).
+        - *(D75, owner 2026-10-17: "only DELETEs would keep a page from being fuzzed".)*
+          Only a DELETE counts (D74 review M4; a method-override tunnel is caught in
+          `_note_window_blocked`, failing closed). Every other kind is counted and
+          blocked, and keeps no seed a page.
         - *(D74, owner 2026-10-17:)* a write that carries the load's own query value
           (B2's taint, matched as a whole word, `_carries_word`) does not count: the
           app acting on or storing what we typed is what the fuzzer looks for. Counted
@@ -973,7 +986,7 @@ class LocalSpider:
           realtime transport's **control** packet (an engine.io ping, pong, upgrade,
           noop or probe, a bare socket.io connect/disconnect on a transport WebSocket,
           CC-CRAWL-0034).
-        - Any other write counts.
+        - Any other write is untainted (``spa_query_untainted_writes``).
 
         Returns what it was (``"delete"``, ``"tainted"``, ``"baseline"``, ``"write"``),
         also kept as ``win["last"]`` for the body check."""
@@ -993,28 +1006,46 @@ class LocalSpider:
         return kind
 
     def _tally_query_write(self, win, kind, n):
-        if kind in ("delete", "write"):
+        """D75: only a DELETE is a write that keeps a seed a page (``win["writes"]``);
+        the others are counted by kind (seed and probe windows alike)."""
+        if kind == "delete":
             win["writes"] = win.get("writes", 0) + n
         elif kind == "tainted":
             win["tainted_writes"] = win.get("tainted_writes", 0) + n
             self.spa_counts["spa_query_tainted_writes"] += n
+        elif kind == "write":
+            win["untainted_writes"] = win.get("untainted_writes", 0) + n
+            self.spa_counts["spa_query_untainted_writes"] += n
         else:
             self.spa_counts["spa_query_baseline_writes"] += n
 
     def _judge_blocked_body(self, win, request):
         """D74 review M1: the HTTP write the window just refused, judged again on its
         own body and headers -- the same request object, never another one to the same
-        URL. A method-override tunnel (``X-HTTP-Method-Override: DELETE``, a
-        ``_method=DELETE`` body or query) counts as a DELETE; an untainted write whose
-        body carries the load's value is reclassified as tainted. Anything that fails
-        here leaves the count as `_count_query_write` made it (fail closed)."""
+        URL. A method-override tunnel (`_delete_tunnel`) counts as a DELETE; an untainted
+        write whose body carries the load's value is reclassified as tainted. D75
+        review M1: since only a DELETE keeps a seed a page, this fails closed -- a body
+        or headers it cannot read, or a body the browser does not expose although the
+        headers announce one (a multipart blob), counts as a DELETE."""
         last = win.pop("last", None)
-        method = (request.method or "").upper()
-        if last is None or last[:2] != (method, request.url):
+        try:
+            method = (request.method or "").upper()
+            url = request.url
+        except Exception:  # noqa: BLE001 - unreadable: nothing to match it to
+            return
+        if last is None or last[:2] != (method, url):
             return
         kind = last[2]
-        body = request.post_data_buffer
-        if _delete_tunnel(request.url, request.headers or {}, body):
+        try:
+            headers = request.headers or {}
+            body = request.post_data_buffer
+            low = {k.lower(): v for k, v in headers.items()}
+            announced = (low.get("content-type") or "").lower().startswith("multipart/") \
+                or (low.get("content-length") or "0").strip() not in ("", "0")
+            delete = _delete_tunnel(url, headers, body) or (body is None and announced)
+        except Exception:  # noqa: BLE001 - fail closed (D75 review M1)
+            delete = True
+        if delete:
             if kind != "delete":
                 self._tally_query_write(win, kind, -1)
                 self._tally_query_write(win, "delete", +1)
@@ -1155,7 +1186,8 @@ class LocalSpider:
             return
         try:
             ok, why = self._cookies_intact()
-            if ok and (win.get("writes") or win.get("tainted_writes")):
+            if ok and (win.get("writes") or win.get("tainted_writes")
+                       or win.get("untainted_writes")):
                 ok, why = self._live_session_intact()
         except Exception as exc:  # noqa: BLE001 - fail closed: recorded as a loss
             ok, why = False, f"the session re-check failed ({type(exc).__name__})"
@@ -2006,11 +2038,11 @@ class LocalSpider:
         if win.get("query") == spa.SEED_SOURCE:
             if visited and win.get("closed") and not win.get("writes"):
                 self.storage.set_source(url, spa.SEED_SOURCE)
-                if win.get("tainted_writes"):
-                    # D74 review M3: a form the query rendered may be the write the
-                    # window blocked (an auto-submitted one); the fuzzer would send its
-                    # whole corpus to it over HTTP, so a seed promoted past a tainted
-                    # write keeps none of its forms
+                if win.get("tainted_writes") or win.get("untainted_writes"):
+                    # D74 review M3 (D75: any non-baseline write): a form the query
+                    # rendered may be the write the window blocked (an auto-submitted
+                    # one); the fuzzer would send its whole corpus to it over HTTP, so a
+                    # seed promoted past such a write keeps none of its forms
                     self.spa_counts["spa_query_forms_withheld"] += len(win.get("forms", ()))
                 else:
                     for record in win.get("forms", ()):     # promoted: its forms with it
@@ -2019,7 +2051,7 @@ class LocalSpider:
                 # a write, an unclean close, or a failed visit (filed by the loop's
                 # failure path): kept as a page, never a point (B3-N2: all counted)
                 self.spa_counts["spa_query_write_seeds"] += 1
-                logging.info(f"SPA query seed {url} blocked a write (or its window did "
+                logging.info(f"SPA query seed {url} blocked a DELETE (or its window did "
                              f"not close cleanly, or its visit failed): kept as a page, "
                              f"never a point")
         ok, why = win.get("session", (not self._authenticated, "no session check"))
@@ -2955,18 +2987,20 @@ class LocalSpider:
                 c["spa_query_unclean_windows"]:
             lines.append(f"SPA query loads: {c['spa_query_writes_blocked']} request(s) "
                          f"blocked by their window; {c['spa_query_write_seeds']} seed(s) "
-                         f"kept as pages, never points (a write, an unclean close or a "
+                         f"kept as pages, never points (a DELETE, an unclean close or a "
                          f"failed visit); "
                          f"{c['spa_query_marker_in_path']} marker(s) or filler(s) seen in "
                          f"a request path (no point); the step budget stopped "
                          f"{c['spa_query_step_cap']} script scan(s); "
                          f"{c['spa_query_unclean_windows']} window(s) did not close "
                          f"cleanly.")
-        if c["spa_query_tainted_writes"]:
+        if c["spa_query_tainted_writes"] or c["spa_query_untainted_writes"]:
             lines.append(f"SPA query loads: {c['spa_query_tainted_writes']} blocked "
-                         f"write(s) carried the load's own value and kept no seed from "
-                         f"becoming a point (D74); {c['spa_query_forms_withheld']} form(s) "
-                         f"of such seeds were not kept.")
+                         f"write(s) carried the load's own value and "
+                         f"{c['spa_query_untainted_writes']} did not; neither kept a seed "
+                         f"from becoming a point (D74, D75: only a DELETE does); "
+                         f"{c['spa_query_forms_withheld']} form(s) of such seeds were not "
+                         f"kept.")
         if self.spa_query_stopped:
             lines.append(f"SPA query loads stopped: {self.spa_query_stopped}.")
         return lines

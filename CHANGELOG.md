@@ -4,6 +4,9 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (D75: only a DELETE keeps a page from being fuzzed)
+- **What (CC-CRAWL-0050):** a search-style page whose test load sends anything other than a DELETE is now fuzzed. The DELETE check also catches a POST that asks the server to treat it as a DELETE (a header, or `_method` in a form, JSON or multipart body), and when it cannot read a body it assumes a DELETE. Why: the owner's decision D75. The owner also said not to build D74's random seed values (final).
+
 ## 2026-10-17 (D74: a page that sends our own value to its server is fuzzed)
 - **Measured (generic command line, 02625e9):** bWAPP 41/55 confirmed with no selector flag (was 0/55). Juice Shop 5/15, unchanged: D74 promoted all 8 demoted seeds to points, but none gave a new confirmed case.
 - **Fix:** an unused import and a guard test, both broken by the account-word split, were found by `verify_change.py` and fixed.

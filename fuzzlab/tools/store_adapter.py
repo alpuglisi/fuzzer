@@ -101,7 +101,8 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     query-bearing URL's query as a link set (forms phase 2), each SPA hash route's query
     as ``fragment`` parameters, and the app's own captured requests (forms phase 3,
     FR-AUD-22; PUT/PATCH only with ``fuzz_json_writes``). A SPA query seed that blocked
-    a write (``source = 'spa-query-writes'``, FR-CRAWL-17) is a page only: no endpoint,
+    a DELETE, or whose load did not close cleanly or failed (``source =
+    'spa-query-writes'``, FR-CRAWL-17, D75) is a page only: no endpoint,
     parameter or link set comes from it (counted ``write_seed_skipped``)."""
     src = sqlite3.connect(str(spider_db))
     src.row_factory = sqlite3.Row
@@ -128,8 +129,9 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
             seen_pages.add((path, "GET"))
             counts["page"] += 1
         if source == _write_seed_source():
-            # a SPA query seed whose load blocked a write (FR-CRAWL-17, review A-M1): a
-            # page, never a point -- an M6 load of it would send that write unguarded
+            # a SPA query seed whose load blocked a DELETE, or did not close cleanly or
+            # failed (FR-CRAWL-17, review A-M1; D75): a page, never a point -- an M6 load
+            # of it would send that DELETE unguarded
             counts["write_seed_skipped"] = counts.get("write_seed_skipped", 0) + 1
             continue
         # blank values are parameters too (`?title=`), forms phase 1

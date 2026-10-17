@@ -1429,8 +1429,8 @@ tracked in the requirements files, not here.
   through the existing importer; a seed's GET XHRs, `query` points. A seed is filed as
   a page the importer never turns into a point (`source = 'spa-query-writes'`) and
   promoted only when its window closed cleanly with no write (a non-GET, a held
-  WebSocket message, a word-rule GET; since D74 a write carrying the load's own value
-  does not count, a DELETE always does), and no stored row carries a probe marker (scrubbed at the
+  WebSocket message, a word-rule GET; since D74/D75 only a DELETE, or a tunnelled one,
+  counts), and no stored row carries a probe marker (scrubbed at the
   spider's storage boundary). `--no-spa-query` turns it off.
 - **Depends on (components):** `core/` (including the one open-redirect name set
   `core.urls.REDIRECT_PARAMS`, FR-CORE-39, which the auditor's redirect rule shares),

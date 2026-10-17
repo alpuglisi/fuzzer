@@ -616,6 +616,35 @@ script is the exact thing we are looking for" (question 2: Juice Shop's
     the d74 random seeding" (2026-10-17, final).
 - **Followed by D75:** an untainted query-caused write no longer demotes either.
 
+### D75 — Only a DELETE keeps a query seed from being fuzzed (owner, 2026-10-17)
+
+**The owner's decision:** "that last case should stop counting too. only DELETEs would
+keep a page from being fuzzed." ("That last case" is a seed's blocked write that does
+not carry the seed's value and is not one the bare route also sends.) With it: "Do not
+build the d74 random seeding" (final).
+
+- **Built (CC-CRAWL-0050), after an independent pre-implementation review:**
+  - An untainted write is counted `spa_query_untainted_writes` and keeps no seed a
+    page.
+  - Only a DELETE does: the method, an `X-HTTP-Method-Override`-style header, or
+    `_method` naming DELETE in the query or in a form, JSON or multipart body. The body
+    check fails closed: a body or headers it cannot read, or a body the headers
+    announce but the browser does not expose, counts as a DELETE.
+  - A seed promoted past any non-baseline write keeps none of its forms.
+  - The live session check runs after any blocked write.
+- **Kept:**
+  - the window blocks every write during the crawl;
+  - a seed whose window did not close cleanly, or whose visit failed, stays a page
+    (the page was not seen);
+  - probes are unchanged.
+- **Stated consequences:**
+  - M6 loads such seeds, so the app's own writes, untainted ones included (logging,
+    sync, a mutation the route makes when opened), reach the lab server.
+  - The crawl only sees DELETEs the load makes within its quiet period. An M6 load can
+    still make one, and the closing control is the open item "M6's browser guard has
+    no method rule" (ERROR_LOG 2026-10-17).
+  - The `_method` encodings are tested here, not against a live framework.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

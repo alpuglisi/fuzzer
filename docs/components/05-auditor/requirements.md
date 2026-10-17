@@ -296,8 +296,8 @@ budget where a vulnerability is plausible.
     load blocked a write (`discovered_pages.source = 'spa-query-writes'`, FR-CRAWL-17) is
     imported as a page only: no endpoint, parameter or link set comes from it (counted
     `write_seed_skipped`; `CC-AUD-0041`), so M6 never replays that write outside a
-    window. *(D74, CC-CRAWL-0049:)* a seed whose blocked writes all carried its own
-    value is promoted and imported as a point; M6 then sends the app's own write with
+    window. *(D74, CC-CRAWL-0049; D75, CC-CRAWL-0050:)* a seed whose window blocked no
+    DELETE is promoted and imported as a point; M6 then sends the app's own write with
     its sentinel payload. A POST selector form is skipped also for its stored button
     and account words (`formnav.post_picker_extras`, SP-38; CC-CRAWL-0048).
   - **Client-side categories only on fragment points.** A `fragment` payload never

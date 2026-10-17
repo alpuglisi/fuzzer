@@ -3,6 +3,49 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0050 — D75: only a DELETE keeps a query seed a page (2026-10-17)
+- Goal / acceptance: the owner's D75: an untainted blocked write no longer demotes a
+  seed. Acceptance: the tests below and the mutation checks. No metric change is
+  expected, since no seed was demoted on the measured labs after D74.
+- Pre-implementation review (independent): every must-fix is taken.
+  - (1) the body judgement fails closed: unreadable, or announced but not exposed,
+    counts as a DELETE;
+  - (2) `_method` is detected in JSON and multipart bodies (`_METHOD_DELETE`; the
+    framework behaviour is labelled unverified and tested here);
+  - (3) the untainted counter is kept in every place the old meaning was read: the
+    tally and its re-judgement, the persisted keys, the session recheck, the forms
+    rule, the summary and the log line;
+  - (4) the counter's scope (seed and probe windows) is stated in the spec;
+  - (5) the importer's docstring and comment are updated.
+- Change:
+  - `tools/spider.py`: `_tally_query_write` (`win["writes"]` counts DELETEs only; an
+    untainted write goes to `untainted_writes`), `_judge_blocked_body`,
+    `_METHOD_DELETE` / `_delete_tunnel`, `_recheck_query_session`,
+    `_after_query_window`, `spa_summary`;
+  - docstrings in `spa.py` and `store_adapter.py`.
+- Impact (other components / consumers / project): importer (CC-AUD-0050); M6
+  (CC-FUZZ-0095): more fragment points, whose untainted app writes M6 now sends.
+- Risk (class; consequence and exposure; mitigation): high (what M6 sends).
+  - Consequence: a seed's own non-DELETE writes reach the lab server during M6.
+  - Exposure: lab only.
+  - Mitigation: DELETE detection fails closed, and forms are withheld.
+  - Residual: a DELETE that only an M6 load makes (see D75).
+- Verification / review: `tests/test_spa_query.py`, nine tests rewritten.
+  - `#/counter` and `BaselineSpa`'s poster are now points.
+  - Unit cases for JSON, multipart, a body not exposed and an unreadable body.
+  - Forms cases: untainted (withheld), baseline-only (kept).
+  - The session recheck after an untainted write.
+  - 118 passed.
+  - Mutation checks, each failing its test: the fail-closed branch inverted; the
+    `_method` pattern removed; untainted writes demoting again; forms kept after an
+    untainted write.
+- Deliverables:
+  - [x] code, tests — done
+  - [x] D75; FR-CRAWL-17 and NFR-CRAWL-safe superseded again in place; auditor
+    requirements; ARCHITECTURE
+- Rollback / recovery: revert.
+- Effectiveness: as stated in the goal; measured with the next Juice Shop run.
+
 ### CC-CRAWL-0049 — D74: a seed's write that carries its own value no longer keeps it a page (2026-10-17)
 - Goal / acceptance: the owner's D74. Juice Shop's six query seeds were demoted only
   by `verifyLocalXssChallenge` messages carrying the seed value; such a write must not

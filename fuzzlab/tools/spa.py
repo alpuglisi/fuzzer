@@ -1953,8 +1953,9 @@ SEED_SOURCE = "spa-query"
 PROBE_SOURCE = "spa-query-probe"
 #: A seed whose window blocked a write (a non-GET): kept as a page, never imported as a
 #: point -- an M6 fuzz load of it would send that write outside any window (review A-M1;
-#: `tools.store_adapter.import_spider` reads it). D74: a write carrying the load's own
-#: value does not count (`LocalSpider._count_query_write`); a DELETE always does.
+#: `tools.store_adapter.import_spider` reads it). D74/D75: only a DELETE (or a
+#: tunnelled one) counts (`LocalSpider._count_query_write`), with an unclean close or a
+#: failed visit.
 WRITE_SEED_SOURCE = "spa-query-writes"
 
 

@@ -3,6 +3,8 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0095 — D75: M6 now loads seeds whose load made untainted writes; those writes reach the lab server (2026-10-17) — see CC-CRAWL-0050
+
 ### CC-FUZZ-0094 — D74: M6 now loads seeds whose app writes carry the payload, and those writes reach the lab server (2026-10-17) — see CC-CRAWL-0049
 
 ### CC-FUZZ-0093 — D72: GET crawl and header points are fuzzed whatever their words, last; write points keep the refusal; PRG follow-ups and blind-SQLi GETs have no word rule (2026-10-16) — see CC-CRAWL-0042
