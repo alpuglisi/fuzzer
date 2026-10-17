@@ -868,3 +868,19 @@ Juice Shop lab is complete.
   trace every consequence it prevented (here, a session loss and what that stops), not
   only the requests it refused.
 
+### F-066 — Option 4(a) was pushed with two defects the review then found
+- **What:** I built option 4(a), tested it only with a fake reader that returned 0 for
+  "nothing new", and pushed it (4a60859) before the independent review came back.
+  - The real reader counted the picker page's own nav links as new. That switched off
+    the settings-form brake, so a settings picker that re-renders itself would have
+    been walked through every option.
+  - The browser path crashed on a non-UTF-8 answer.
+- **Evidence:** the review report (reproduced on loopback, both engines); ERROR_LOG
+  2026-10-17.
+- **Impact:** none observed. Selector navigation is off by default, and no lab run used
+  the commit. Had a run named a settings picker that answers 200, it would have changed
+  that setting up to 500 times.
+- **Status:** fixed in CC-CRAWL-0046. Rule I follow from now on: a guard that a callback
+  feeds (here, the settings brake) is tested through the real callback, not a stub of
+  its answer.
+

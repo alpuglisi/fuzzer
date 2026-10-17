@@ -3,6 +3,46 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0046 — Option 4(a) review fixes: novelty is judged against the picker's own page; a non-UTF-8 answer is decoded (defect) (2026-10-17)
+- Goal / acceptance: fix the review's must-fixes of CC-CRAWL-0045 (ERROR_LOG
+  2026-10-17).
+  - A settings picker that re-renders its own page stops after five answers with
+    verdict `settings`.
+  - A Latin-1 answer is read, not raised.
+- Change:
+  - `tools/spider.py`:
+    - `_page_keys(html, page_url)` collects what the picker's own page shows: its links
+      by `_link_key` (origin and path) and its forms by `_form_key` (action origin and
+      path, method, control names).
+    - `_read_picker_page(..., seen)` counts as new only what neither that page nor an
+      earlier answer showed. It still queues every unvisited in-scope link.
+    - Links and forms resolve against the action URL, as a page's resolve against its
+      own URL (`<base>` is no longer read there; review note).
+    - `_decode_body` decodes the Playwright body with the declared charset, undecodable
+      bytes replaced.
+  - `tools/formnav.py`: a separate run of empty 200 answers. Five in a row stop the
+    form even after a page was read; the verdict is `settings` only when nothing was
+    found before them. A productive answer or a redirect to a new page resets it.
+- Impact (other components / consumers / project): crawl only, as CC-CRAWL-0045.
+- Risk (class; consequence and exposure; mitigation): medium. It tightens the
+  CC-CRAWL-0045 behaviour: fewer submissions, never more.
+- Verification / review: `tests/test_picker_pages.py`, 11 tests:
+  - `test_a_picker_that_re_renders_itself_is_a_settings_form_static` and `_browser`;
+  - `test_a_latin1_answer_is_read_by_the_browser_crawler`;
+  - `test_five_empty_answers_stop_a_form_even_after_a_page_was_read`.
+
+  Mutation checks: with the own page's keys emptied, both re-render tests fail; with
+  `resp.text()` restored, the Latin-1 test fails. `verify_change.py` is below.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert with CC-CRAWL-0045.
+- Effectiveness: as CC-CRAWL-0045 (no change in the goal metric expected).
+- Review notes not taken: a GET picker that answers 200 can now be walked through up to
+  500 options, where before it stopped at one. FR-CRAWL-8 allows GET pickers whenever the
+  feature is on, so this is within its gate. A destructive-looking link on an answer page
+  is queued and deferred like any link (D72). A destructive redirect target still stops
+  the form.
+
 ### CC-CRAWL-0045 — Option 4(a): a picker answering 200 with HTML is read as the chosen page (2026-10-17)
 - Goal / acceptance: the owner chose survey option 4(a) ("When the crawler submits a
   page picker and gets a normal page back, read that page instead of stopping",
@@ -25,10 +65,10 @@ Newest first.
   - `tools/spider.py`:
     - `_isolated_submit` returns the body of an HTML 2xx answer from the same response
       (never a second request).
-    - `_read_picker_page` parses it without rendering. It honours `<base>`, queues
-      in-scope links that are not yet visited or queued, and records the page's forms
-      under the action URL. It does not enumerate them: the page has no URL to come back
-      to.
+    - `_read_picker_page` parses it without rendering. It queues in-scope links that
+      are not yet visited or queued, and records the page's forms under the action
+      URL. It does not enumerate them (one level of answers; corrected in
+      CC-CRAWL-0046).
     - New crawl-stats key `picker_pages_read`, and a summary line.
 - Impact (other components / consumers / project): crawl only. The importer sees the
   recorded forms and the queued pages as before. A picker is still gated exactly as

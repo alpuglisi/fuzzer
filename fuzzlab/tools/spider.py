@@ -422,6 +422,47 @@ def _parse_html(html):
         [a['href'] for a in soup.find_all('a', href=True)]
 
 
+def _link_key(url):
+    """A link as option 4(a) judges novelty: origin and path (`core.urls.url_key`), so a
+    per-render nonce in a query is not a new link."""
+    from fuzzlab.core.urls import url_key
+    return ("a", url_key(url))
+
+
+def _form_key(record):
+    """A form as option 4(a) judges novelty: its action's origin and path, method and
+    control names (a nonce in the action's query or a value is not a new form)."""
+    from fuzzlab.core.urls import url_key
+    return ("form", url_key(record["action_url"]), record["method"],
+            tuple(sorted(n for n, _k in record["controls"])))
+
+
+def _page_keys(html, page_url):
+    """`_link_key` and `_form_key` of everything ``html`` shows (option 4(a)): what a
+    picker's own page already offers."""
+    from fuzzlab.core.forms import form_record
+    if not html:
+        return set()
+    soup = BeautifulSoup(html, 'html.parser')
+    keys = {_link_key(urljoin(page_url, a['href'])) for a in soup.find_all('a', href=True)}
+    keys |= {_form_key(form_record(f, page_url)) for f in soup.find_all('form')}
+    return keys
+
+
+def _decode_body(body, headers):
+    """A response body as text: the Content-Type's charset, else UTF-8, undecodable bytes
+    replaced (review M2: Playwright's ``text()`` is strict UTF-8)."""
+    import codecs
+    ct = {k.lower(): v for k, v in (headers or {}).items()}.get("content-type", "")
+    charset = next((p.split("=", 1)[1].strip().strip('"\'') for p in ct.split(";")[1:]
+                    if p.strip().lower().startswith("charset=")), "") or "utf-8"
+    try:
+        codecs.lookup(charset)
+    except LookupError:
+        charset = "utf-8"
+    return body.decode(charset, errors="replace")
+
+
 class LocalSpider:
     """Crawls a local site, optionally rendering JavaScript with a headless browser."""
 
@@ -1582,39 +1623,48 @@ class LocalSpider:
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
             key = formnav.signature_key(record)
+            # option 4(a): what the picker's own page already shows is not new in an
+            # answer (review M1: its links are queued by the crawl loop, after this)
             read: list = []
+            seen = _page_keys(self._last_html, page)
             for target in formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
                     on_verdict=lambda v, k=key: self.storage.record_verdict(k, v),
-                    on_page=lambda action, html: self._read_picker_page(
-                        action, html, depth, read)):
+                    on_page=lambda action, html, s=seen: self._read_picker_page(
+                        action, html, depth, read, s)):
                 if not self.storage.is_visited(target):    # formnav stops on a destructive one
                     more.append((target, depth + 1, 'form'))
             more.extend(read)
         return more
 
-    def _read_picker_page(self, action_url, html, depth, out):
+    def _read_picker_page(self, action_url, html, depth, out, seen):
         """Option 4(a): a picker's 200 HTML answer read as the chosen page -- never
-        rendered, never requested again. Its in-scope links go to ``out`` as
-        ``(url, depth + 1, 'form')``; its forms are recorded (not enumerated: the page
-        has no URL of its own to come back to). Returns how many links and forms were
-        new."""
+        rendered, never requested again. Links resolve against the action URL, as a
+        page's resolve against its own URL. Its in-scope links not yet visited or queued
+        go to ``out`` as ``(url, depth + 1, 'form')``; its forms are recorded, not
+        enumerated (bounded: one level of answers). Returns how many links and forms it
+        shows that ``seen`` -- the picker's own page and the earlier answers, by
+        `_page_keys` -- did not; ``seen`` grows by them."""
         from fuzzlab.core.forms import form_record
         soup = BeautifulSoup(html, 'html.parser')
-        base_tag = soup.find('base', href=True)
-        base = urljoin(action_url, base_tag['href']) if base_tag else action_url
         queued = {u for u, _d, _s in out}
         new = 0
         for a in soup.find_all('a', href=True):
-            link = self._crawl_url(urljoin(base, a['href']))
-            if (link in queued or not self._in_scope(link)
-                    or self.storage.is_visited(link)):
-                continue
-            queued.add(link)
-            out.append((link, depth + 1, 'form'))
-            new += 1
+            link = self._crawl_url(urljoin(action_url, a['href']))
+            key = _link_key(link)
+            if key not in seen:
+                seen.add(key)
+                new += 1
+            if (link not in queued and self._in_scope(link)
+                    and not self.storage.is_visited(link)):
+                queued.add(link)
+                out.append((link, depth + 1, 'form'))
         for form in soup.find_all('form'):
-            if self.storage.record_form(form_record(form, base)):
+            record = form_record(form, action_url)
+            self.storage.record_form(record)
+            key = _form_key(record)
+            if key not in seen:
+                seen.add(key)
                 new += 1
         self.spa_counts["picker_pages_read"] += 1
         logging.info(f"selector answer from {action_url} read as a page: "
@@ -2665,7 +2715,8 @@ class LocalSpider:
                                      timeout=self.timeout_ms)
                 headers = dict(resp.headers)
                 # option 4(a): a 2xx HTML answer's body, read from this response
-                html = resp.text() if formnav.html_answer(resp.status, headers) else None
+                html = _decode_body(resp.body(), headers) \
+                    if formnav.html_answer(resp.status, headers) else None
                 return resp.status, headers, html
             finally:
                 ctx.dispose()
@@ -3005,7 +3056,7 @@ class LocalSpider:
                              f"skipped for their words).")
             if self.spa_counts["picker_pages_read"]:
                 logging.info(f"Read {self.spa_counts['picker_pages_read']} selector-form "
-                             f"answer(s) as pages (the app answered 200, not a redirect).")
+                             f"200 answer(s) in place of a redirect (option 4(a)).")
             if self.skipped_out_of_scope:
                 hosts = ", ".join(f"{h} x{n}" for h, n in
                                   sorted(self.skipped_out_of_scope.items()))

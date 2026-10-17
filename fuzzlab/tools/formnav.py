@@ -20,9 +20,10 @@ Submitting a form can change state, so the gate comes **before** any submission
 * option 4(a) (owner, 2026-10-17): a cookie-less 200 answer with an HTML body is the
   chosen page itself (an app that renders it instead of redirecting). With an
   ``on_page`` reader it is read as a page -- its links queued, its forms recorded --
-  and enumeration goes on; an answer that adds nothing new counts as a self-redirect,
-  so five in a row still mark a settings form. Without a reader, or with no HTML body,
-  a non-redirect still stops;
+  and enumeration goes on. An answer that adds nothing the picker's own page or an
+  earlier answer did not show is a self-redirect: five in a row stop the form (a
+  settings form when nothing was found before them). Without a reader, or with no HTML
+  body, a non-redirect still stops;
 * submissions go through an isolated client (the caller's ``submit``), so a response
   cookie never reaches the crawler.
 
@@ -153,14 +154,16 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
     or a page was read. It only reports; what is submitted is unchanged.
 
     ``on_page(action_url, html)`` (option 4(a)) reads a cookie-less 2xx HTML answer as
-    the chosen page and returns how many new links and forms it found; zero counts as
-    a self-redirect."""
+    the chosen page and returns how many links and forms it found that neither the
+    picker's own page nor an earlier answer showed. Five such answers in a row adding
+    nothing stop the form; a settings form when nothing was found before them."""
     base = FormEntries(tuple(e) for e in record["entries"])
     select = record["options"][0][0]
     own = {url_key(record["page_url"]), url_key(record["action_url"])}
     found: list[str] = []
     pages = 0
     self_run = 0
+    empty_run = 0       # 200 answers in a row that added nothing (review M1)
     settings = False
     for _name, value, label in (record["options"] or [])[:MAX_OPTIONS]:
         why = option_refusal(value, label)
@@ -181,15 +184,18 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
                 and not location:
             # option 4(a): the chosen page itself, read from this answer -- never a
             # second request
-            new = on_page(record["action_url"], html[:MAX_PAGE_CHARS])
-            if new:
+            if on_page(record["action_url"], html[:MAX_PAGE_CHARS]):
                 pages += 1
-                self_run = 0
+                self_run = empty_run = 0
                 continue
-            self_run += 1
-            if self_run >= MAX_SELF_REDIRECTS and not (found or pages):
-                log(f"selector {select!r}: answers add nothing new; stopped (settings form)")
-                settings = True
+            # an answer that adds nothing is a self-redirect; five in a row stop the
+            # form even after a page was read (a settings form that re-renders itself
+            # must not be walked through every option)
+            empty_run += 1
+            if empty_run >= MAX_SELF_REDIRECTS:
+                settings = not (found or pages)
+                log(f"selector {select!r}: {empty_run} answers in a row add nothing new; "
+                    f"stopped" + (" (settings form)" if settings else ""))
                 break
             continue
         if not (300 <= status < 400) or not location:
@@ -206,7 +212,7 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
                 settings = True
                 break
             continue
-        self_run = 0
+        self_run = empty_run = 0
         if target not in found:
             found.append(target)
     if on_verdict is not None and (settings or found or pages):

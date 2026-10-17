@@ -20,6 +20,25 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — Crawler option 4(a): picker answers defeated settings detection; a Latin-1 answer crashed the browser path (fixed)
+- **Symptom:** the independent review of 4a60859 reproduced both on a loopback server.
+  - (M1) A named POST picker that re-renders its own page (a settings form, no cookie) was walked through all 8 options with verdict `navigation`, on both engines. Before 4a60859 it sent 1 POST.
+  - (M2) With the browser engine, a picker answering `text/html; charset=iso-8859-1` with a non-UTF-8 byte raised `UnicodeDecodeError` out of `_after_fetch`. That page's own links and forms were then lost too.
+- **Root cause:**
+  - (M1) An answer's novelty was measured against the visited set and the answers' own queue. But `_after_fetch` runs before the crawl loop queues the page's own links. So the first answer's nav links all counted as new, and once a page had been read the five-in-a-row brake was off for good. A nonce in a link or a form action also made every answer "new".
+  - (M2) Playwright's `APIResponse.text()` decodes strictly as UTF-8.
+- **Remediation (CC-CRAWL-0046):**
+  - (M1) Novelty is judged by origin and path (`_link_key`, `_form_key`) against what the picker's own page shows (`_page_keys`) and the earlier answers. Five empty answers in a row stop the form even after a page was read (`settings` only when nothing was found before them).
+  - (M2) The body is decoded with its declared charset, undecodable bytes replaced (`_decode_body`).
+- **Regression check:** `tests/test_picker_pages.py`:
+  - a settings picker that re-renders itself with nonces gives exactly 5 POSTs and `settings`, on both engines;
+  - a Latin-1 answer is read in the browser;
+  - five empty answers stop the form after a page was read.
+
+  Mutation-checked: removing either fix fails its tests.
+- **Scope:** crawl only; selector navigation is off unless `--follow-selector-forms` is passed. 4a60859 was pushed to the development branch only, and no lab run used it.
+- **Status:** Fixed.
+
 ## 2026-10-16 — Full suite: three timing-bounded tests failed only inside the 368-file parallel run (open)
 - **Symptom:** `verify_change.py --full` on 7cd2fae. 7213 passed, 3 failed:
   - `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`: 3 in-flight ticks where at most 2 are allowed;

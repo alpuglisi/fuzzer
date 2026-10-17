@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-17 (option 4(a): picker pages that answer 200)
+- **What (defect fix, CC-CRAWL-0046):** the review found two problems, now fixed. A settings dropdown that re-renders its own page could have been walked through every choice; it now stops after five answers that show nothing new. The browser crawler also crashed on a non-UTF-8 answer (F-066).
 - **What (CC-CRAWL-0045):** when the crawler submits a page picker (a dropdown plus a button) and the app answers with the page itself (200 HTML) rather than a redirect, it now reads that page: it queues the page's links, records its forms, and moves on to the next choice. Before, it stopped. Why: the owner chose survey option 4(a). bWAPP's picker redirects, so its score is unaffected; option 4(b) is still undecided.
 
 ## 2026-10-16 (D72: the page-visit word rules are to be removed)

@@ -91,6 +91,16 @@ def test_five_answers_that_add_nothing_mark_a_settings_form():
     assert len(app.sent) == 5 and verdicts == ["settings"]
 
 
+def test_five_empty_answers_stop_a_form_even_after_a_page_was_read():
+    many = "".join(f"<option value='{i}'>opt {i}</option>" for i in range(12))
+    rec = _rec(f"<form action='/app/s.php' method='POST'><select name='bug'>{many}"
+               f"</select><button>Go</button></form>", page="http://h/app/s.php")
+    app, verdicts = _App(), []
+    formnav.enumerate_form(rec, app.submit, lambda u: True, on_verdict=verdicts.append,
+                           on_page=lambda a, h: 1 if "bug0." in h else 0)
+    assert app.sent == [str(i) for i in range(6)] and verdicts == ["navigation"]
+
+
 def test_a_settings_option_is_still_never_sent():
     rec = _rec(PICKER.replace("Command injection", "Set security level"))
     app = _App()
@@ -136,17 +146,59 @@ class _PickerApp(BaseHTTPRequestHandler):
         self._send("<html>" + PICKER + _page(body["bug"][0]) + "</html>")
 
 
-def _serve():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _PickerApp)
+class _PrefsApp(_PickerApp):
+    """``/app/prefs.php``: a named POST picker (8 options) that re-renders its own page
+    on every answer -- nav links the crawl has not visited yet, a per-render nonce in a
+    link and in the form's action -- and sets no cookie: a settings form (review M1)."""
+
+    n = 0
+
+    def _prefs(self):
+        type(self).n += 1
+        opts = "".join(f"<option value='{i}'>choice {i}</option>" for i in range(8))
+        return (f"<html><a href='a.php'>A</a><a href='b.php?nonce={self.n}'>B</a>"
+                f"<form action='/app/prefs.php?nonce={self.n}' method='POST'>"
+                f"<select name='bug'>{opts}</select><button>Save</button></form></html>")
+
+    def do_GET(self):
+        self.server.lab.append(("GET", self.path, None))
+        if self.path.startswith("/app/prefs.php"):
+            self._send(self._prefs())
+        else:
+            self._send(f"<html><p>{self.path}</p></html>")
+
+    def do_POST(self):
+        body = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+        self.server.lab.append(("POST", self.path, body))
+        self._send(self._prefs())
+
+
+class _Latin1App(_PickerApp):
+    """The picker answers in ISO-8859-1 with a byte that is not UTF-8 (review M2)."""
+
+    def do_POST(self):
+        body = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+        self.server.lab.append(("POST", self.path, body))
+        data = ("<html><p>CAF\u00c9</p>" + _page(body["bug"][0]) + "</html>"
+                ).encode("iso-8859-1")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=iso-8859-1")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def _serve(handler=_PickerApp):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     server.lab = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
 
-def _crawl(tmp_path, engine, monkeypatch=None):
+def _crawl(tmp_path, engine, handler=_PickerApp, page="portal.php"):
     from fuzzlab.tools.spider import LocalSpider
-    server = _serve()
-    base = f"http://127.0.0.1:{server.server_address[1]}/app/portal.php"
+    server = _serve(handler)
+    base = f"http://127.0.0.1:{server.server_address[1]}/app/{page}"
     try:
         sp = LocalSpider(base, max_depth=2, db_name=str(tmp_path / "s.db"),
                          engine=engine, selector_forms=["bug"])
@@ -189,4 +241,34 @@ def test_the_browser_crawler_reads_a_pickers_200_answers(tmp_path, monkeypatch):
     from tests._spa_fixture import chromium_or_skip
     chromium_or_skip(monkeypatch)
     sp, lab = _crawl(tmp_path, "playwright")
+    _check(tmp_path, sp, lab)
+
+
+def _check_settings(tmp_path, lab):
+    posts = [b for m, _p, b in lab if m == "POST"]
+    assert len(posts) == 5, posts                    # five empty answers, then stopped
+    db = sqlite3.connect(tmp_path / "s.db")
+    assert [r[0] for r in db.execute("SELECT verdict FROM selector_verdicts")] == \
+        ["settings"]
+    gets = [p for m, p, _b in lab if m == "GET"]
+    assert "/app/a.php" in gets                      # the page's own links still crawled
+
+
+def test_a_picker_that_re_renders_itself_is_a_settings_form_static(tmp_path):
+    _sp, lab = _crawl(tmp_path, "requests", _PrefsApp, "prefs.php")
+    _check_settings(tmp_path, lab)
+
+
+def test_a_picker_that_re_renders_itself_is_a_settings_form_browser(tmp_path,
+                                                                    monkeypatch):
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    _sp, lab = _crawl(tmp_path, "playwright", _PrefsApp, "prefs.php")
+    _check_settings(tmp_path, lab)
+
+
+def test_a_latin1_answer_is_read_by_the_browser_crawler(tmp_path, monkeypatch):
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    sp, lab = _crawl(tmp_path, "playwright", _Latin1App)
     _check(tmp_path, sp, lab)
