@@ -28,6 +28,14 @@ Newest first.
   - juice-d76-3: 6/15, repeated (JUICE-0001, 0002, 0003, 0004, 0006, 0007);
   - `verify_change.py --base e7caad8` on 160e6b6: 75 files, 2344 passed, 0 failed;
   - pending: a run with registration submitted.
+- Effectiveness (assessed 2026-10-17, juice-d76-4 at 5bbe213):
+  - the register form was submitted and `POST /api/Users/` (and `/api/SecurityAnswers/`)
+    captured; JUICE-0015 is now reached;
+  - reached 10/15 (was 7/15 before D76), confirmed 6/15;
+  - the three stored-XSS cases now reached (feedback comment, registration e-mail,
+    profile username) are not confirmed: no mechanism renders the page that shows the
+    stored value;
+  - `verify_change.py --base 160e6b6` on 5bbe213: 59 files, 1447 passed, 0 failed.
 
 ### CC-CRAWL-0054 — D76 measured again: a registration's fill path raised; its security question's numeric keys were refused (defect) (2026-10-17)
 - Goal / acceptance: the Juice Shop run juice-d76-2 (at e7caad8) confirmed 6/15 (was

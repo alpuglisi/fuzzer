@@ -5,6 +5,7 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-10-17 (D76: a generic run submits the app's forms)
+- **Measured (juice-d76-4):** registration is now submitted and captured. Juice Shop reaches 10/15 cases (was 7/15 before D76) and confirms 6/15. The three newly reached stored-XSS cases need the page that displays the stored value, which nothing renders yet.
 - **Repeated:** Juice Shop 6/15 in a second run. Registration was still not submitted: the security-question dropdown reports nothing invalid until someone touches it, so the form filler never chose a question. It now treats a required, empty dropdown as unfilled (CC-CRAWL-0055).
 - **Measured:** Juice Shop **6/15** confirmed (was 5/15). The login SQL injection is new, found because the login form is now submitted. The run also showed the registration form crashing on a wrong function reference, and its security-question dropdown being refused; both fixed (CC-CRAWL-0054, F-069).
 - **Measured, and fixed (CC-CRAWL-0053):** the first Juice Shop run with D76 submitted the feedback and complaint forms (their requests were captured and probed), but not login or register. The crawler had switched the app's language, so those forms were not recognised in a fresh logged-out session; they are now found by their fields. The scoring script also missed `/api/Feedbacks/` because of a trailing slash; fixed.
