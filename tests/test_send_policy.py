@@ -172,7 +172,12 @@ def test_destructive_rule_on_and_off_at_its_refusal_sites():
         return {
             "probe gate": sent,
             "form button": spa_form(button="Delete all"),
-            "form glyph": spa_form(button="", button_aria="", button_icons="delete"),
+            # a glyph-only button on a named route (D76: on an unnamed one a label-less
+            # button is refused whatever the rules)
+            "form glyph": spa.form_refusal(
+                {"controls": [("q", "text")], "button": "", "button_aria": "",
+                 "button_icons": "delete", "action": None}, "a",
+                named=frozenset({"a"})) is None,
             "form action": spa_form(action=BASE + "/#/logout"),
             "form control": spa_form(controls=[("deleteAll", "checkbox")]),
             "label": spa.label_refusal("Remove item") is None,
@@ -263,7 +268,9 @@ def test_credential_rule_on_and_off_at_its_refusal_sites():
               ("passwordRepeat", ["passwordRepeat"], None, "a")]
 
     def verdicts():
-        body = store_adapter.body_refusal(BASE + "/api/Users", leaves) or ""
+        # D76: a POST to one user (an id) with two passwords is a change; to the
+        # collection it is a registration (imported, asserted below)
+        body = store_adapter.body_refusal(BASE + "/api/Users/7", leaves) or ""
         return {
             "spa form": spa.form_refusal(form, "change-password", named=None) is None,
             "import form": store_adapter.form_skip_reason(record) is None,
@@ -272,6 +279,7 @@ def test_credential_rule_on_and_off_at_its_refusal_sites():
         }
 
     assert not any(verdicts().values()), verdicts()
+    assert store_adapter.body_refusal(BASE + "/api/Users", leaves) is None    # D76
     off(sendpolicy.CREDENTIAL_CHANGES)
     assert all(verdicts().values()), verdicts()
 

@@ -686,7 +686,7 @@ class LocalSpider:
             "requests_blocked_skipped_read", "requests_blocked_skipped_transport",
             "requests_blocked_skipped_no_body", "requests_blocked_skipped_query",
             "deletes_blocked",
-            "forms_submitted", "forms_submitted_enter",
+            "forms_submitted", "forms_submitted_enter", "files_attached",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -2120,7 +2120,12 @@ class LocalSpider:
                 continue
             # the route was named (form_refusal refuses an unnamed one when routes are)
             explicit = named is not None
-            anonymous = spa.has_password(form) or (self._authenticated and not explicit)
+            # D76 (review M5): in an authenticated crawl a form on a route nobody named
+            # is submitted in the crawl's own context -- unless it looks like an account
+            # change (`spa.account_like`: an account word, a setter button), which goes
+            # to a fresh unauthenticated context as before; a password form always does
+            anonymous = spa.has_password(form) or (
+                self._authenticated and not explicit and spa.account_like(form, route))
             if anonymous:
                 self._submit_anonymously(page_url, sig, explicit)
                 continue
@@ -2147,16 +2152,15 @@ class LocalSpider:
     def _fill_and_click(self, page, context, form, page_url, explicit):
         """Fill ``form``'s typed controls with our fillers and click its button once.
         Returns True when the click happened (counted). A DELETE it causes is allowed
-        only on a named route (``explicit``) and only from ``context``.
+        only on a route the operator named (``explicit``) and only from ``context``, and
+        so is Enter in a button-less form.
 
-        On a named route (``explicit``) this is constraint-aware (G1, FR-CRAWL-15) and
-        runs entirely inside the reveal window (W1): the fill, every G1 interaction and
-        the checks happen with the window's write block on; only the vetted final click
-        lifts it, for that click (`spa.click_vetted`'s ``before_click``); the route is
-        then closed and reloaded inside the window again."""
-        if not explicit:
-            return self._fill_and_click_now(page, context, form, page_url, explicit,
-                                            g1=False)
+        *(D76 review M1:)* every submission is constraint-aware (G1, FR-CRAWL-15) and runs
+        entirely inside the reveal window (W1) -- a named route's and the generic
+        default's alike: the fill, the filler file, every G1 interaction and the checks
+        happen with the window's write block on; only the vetted final click lifts it,
+        for that click (`spa.click_vetted`'s ``before_click``); the route is then closed
+        and reloaded inside the window again."""
         with self._window(page, context, page_url):
             return self._fill_and_click_now(page, context, form, page_url, explicit,
                                             g1=True)
@@ -2166,26 +2170,39 @@ class LocalSpider:
         # control, only inside the window (a named route, G1): with no button there is
         # no label to vet, so the route and control gates are all it has
         enter = form.get("submit_by") == "enter" and not form.get("button_id")
-        if enter and not g1:
+        if enter and not explicit:
             self.spa_counts["forms_not_submittable"] += 1
             logging.info(f"SPA form on {page_url} not submittable (a button-less form is "
                          f"submitted by Enter only on a route named with "
                          f"--submit-spa-forms)")
             return False
-        for (name, kind), cid in zip(form["controls"], form["ids"]):
-            if not spa.fillable(kind) or (kind != "password"
+        registration = spa.is_registration(form, self._form_route(page_url))
+        accepts = form.get("accepts") or [""] * len(form["controls"])
+        for (name, kind), cid, accept in zip(form["controls"], form["ids"], accepts):
+            sel = f'[data-fuzzlab-id="{cid}"]'
+            if kind == "file":
+                # D76 (review M7): a small benign filler file, as a payload (nothing on
+                # disk), set inside the window before the vetted click
+                try:
+                    page.set_input_files(sel, files=[spa.file_filler(accept)],
+                                         timeout=self.timeout_ms)
+                    self.spa_counts["files_attached"] += 1
+                except PlaywrightError:
+                    pass
+                continue
+            extra = registration and spa.registration_extra(name)
+            if not spa.fillable(kind) or (kind != "password" and not extra
                                           and spa.sensitive_control(name)):
                 continue
             try:
-                page.fill(f'[data-fuzzlab-id="{cid}"]', spa.filler(kind),
-                          timeout=self.timeout_ms)
+                page.fill(sel, spa.filler(kind), timeout=self.timeout_ms)
             except PlaywrightError:
                 pass                                    # e.g. a range or read-only input
         button = form.get("enter_id") if enter else form.get("button_id")
         selector = f'[data-fuzzlab-id="{button}"]'
         if g1:
             try:
-                why = self._g1(page, form)
+                why = self._g1(page, form, registration=registration)
             except PlaywrightError as exc:
                 why = f"constraint-aware filling failed ({str(exc).splitlines()[0][:80]})"
             if why is not None:
@@ -2250,7 +2267,10 @@ class LocalSpider:
         return [names.get(i["id"]) or i["id"] for i in infos
                 if not i.get("missing") and i.get("invalid")]
 
-    def _g1(self, page, form):
+    def _form_route(self, page_url):
+        return spa.route_of(page_url, self._last_base or self._app_base)
+
+    def _g1(self, page, form, *, registration=False):
         """Make each invalid control valid with ladder values (G1a), inside the window.
         Returns None, or why the form is not submittable: a sensitive or credential-like
         control that is invalid (G1b; never filled), an object-selector or identifier
@@ -2272,6 +2292,8 @@ class LocalSpider:
             if kind == "password":
                 continue                                # the filler only (G1b)
             hit = spa.g1_sensitive(info.get("names") or [name])
+            if hit and registration and spa.registration_extra(name):
+                hit = None             # D76: a registration's security answer is filled
             if hit:
                 return f"a sensitive or credential control is invalid ({hit!r}): never filled"
             if kind == "checkbox":
@@ -2417,6 +2439,11 @@ class LocalSpider:
             self._track(page)
             navguard.navigate(page, page_url, timeout_ms=self.timeout_ms)
             self._settle(page)
+            # D76 review: a fresh context's first-visit dialog (Juice Shop's welcome
+            # banner) would intercept G1's clicks; Escape closes such an overlay
+            with contextlib.suppress(PlaywrightError):
+                page.keyboard.press("Escape")
+                self._settle(page, budget_ms=1000)
             forms = page.evaluate(spa.FORMS_JS, 20)
             match = next((f for f in forms if spa.form_signature(f) == sig), None)
             if match is None:
@@ -2721,9 +2748,11 @@ class LocalSpider:
         the open window (its vetted click lifts it, for that click only). Returns True
         after the first click **attempt** -- a click that raised included: nothing more
         (no other form, no menu item) is done in that reveal (review B-M1)."""
-        if not self._submit_routes or self.spa_submit_stopped or not self._spa_on:
+        if self._submit_routes is None or self.spa_submit_stopped or not self._spa_on:
             return False
-        named = self._submit_routes
+        named = self._submit_routes or None
+        # D76 review M2: a DELETE (and Enter) only from a route the operator named
+        operator_named = bool(named) and spa.normalise_route(route) in named
         for form in forms:
             sig = spa.form_signature(form)
             if sig in self._submitted_sigs:
@@ -2740,7 +2769,7 @@ class LocalSpider:
                 self.spa_counts["submissions_over_cap"] += 1
                 continue
             self._click_attempted = False
-            clicked = self._fill_and_click(page, context, form, page_url, True)
+            clicked = self._fill_and_click(page, context, form, page_url, operator_named)
             if not clicked and self._click_attempted:
                 # one click attempt per reveal, even one that raised (review B-M1)
                 logging.info(f"revealed SPA form on {page_url}: its click failed; no "
@@ -3311,13 +3340,18 @@ def build_parser():
                         "Playwright engine: it is navigation, like link following "
                         "(FR-CRAWL-12).")
     p.add_argument("--submit-spa-forms", nargs="*", default=None, metavar="ROUTE",
-                   help="Fill and submit SPA forms once each, with filler values, so the "
-                        "app sends its real requests (captured, redacted). Alone: every "
-                        "eligible route (in an authenticated crawl, only in a fresh "
-                        "unauthenticated context). With routes (e.g. 'login search'): "
-                        "only those. Off by default: a submission changes lab state. "
-                        "Destructive, settings, transaction, credential-change, 2FA and "
-                        "file-upload forms are never submitted (FR-CRAWL-13).")
+                   help="Narrow SPA form submission to these routes (e.g. 'login "
+                        "search'); alone, every eligible route. Without this flag (D76) "
+                        "every eligible route's forms are filled (constraint-aware, G1) "
+                        "and submitted once each when the start URL is loopback (a lab); "
+                        "off elsewhere. File inputs get a small filler file; a "
+                        "registration form is submitted. Destructive, settings, "
+                        "transaction, change-password and 2FA forms are never "
+                        "submitted, and a DELETE is sent only from a named route "
+                        "(FR-CRAWL-13).")
+    p.add_argument("--no-submit-spa-forms", action="store_true",
+                   help="Do not submit SPA forms at all (D76: on by default in a "
+                        "loopback lab; a submission changes lab state).")
     p.add_argument("--no-reveal", action="store_true",
                    help="Do not open menus, dialogs and drawers to find the links and "
                         "forms behind them. On by default in the Playwright engine: "
@@ -3342,6 +3376,18 @@ def spa_route_names(values):
     if values is None:
         return None
     return [r for v in values for r in v.replace(",", " ").split() if r]
+
+
+def _submit_spa_forms_arg(args):
+    """D76: no flag -> every eligible route (``[]``) when the start URL is loopback,
+    else off; ``--no-submit-spa-forms`` -> off; ``--submit-spa-forms [routes]`` -> as
+    before (alone: every route; with routes: those)."""
+    from fuzzlab.core.net import is_loopback_host
+    if getattr(args, "no_submit_spa_forms", False):
+        return None
+    if args.submit_spa_forms is None:
+        return [] if is_loopback_host(urlparse(args.start).hostname or "") else None
+    return spa_route_names(args.submit_spa_forms)
 
 
 def _selector_forms_arg(args):
@@ -3385,7 +3431,7 @@ def spider_kwargs(args, session_manager=None) -> dict:
         identity=args.identity,
         selector_forms=_selector_forms_arg(args),
         spa_routes=not args.no_spa_routes,
-        submit_spa_forms=spa_route_names(args.submit_spa_forms),
+        submit_spa_forms=_submit_spa_forms_arg(args),
         reveal=not args.no_reveal,
         spa_query=not args.no_spa_query,
     )
@@ -3407,6 +3453,8 @@ def parse_args(argv=None):
     if args.no_follow_selector_forms and args.follow_selector_forms is not None:
         p.error("--follow-selector-forms and --no-follow-selector-forms exclude each "
                 "other (D73)")
+    if args.no_submit_spa_forms and args.submit_spa_forms is not None:
+        p.error("--submit-spa-forms and --no-submit-spa-forms exclude each other (D76)")
     sendpolicy.apply(args)                   # D71, before any side effect
     if args.auth_origin:                 # a usage error before any side effect (R5)
         from fuzzlab.session.manager import parse_auth_origins
@@ -3425,6 +3473,10 @@ if __name__ == "__main__":
         from fuzzlab.cli_dryrun import report
         report("crawl", args)
         print("  selector forms: " + selector_forms_plan(args))      # D73 review M8
+        routes = _submit_spa_forms_arg(args)                          # D76
+        print("  SPA forms: " + ("off" if routes is None else
+                                 f"submitted on {', '.join(routes)}" if routes else
+                                 "submitted on every eligible route"))
         raise SystemExit(0)
     get_logger("crawler").info("crawler starting",
                                extra={"start": args.start, "engine": args.engine,

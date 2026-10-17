@@ -897,3 +897,26 @@ Juice Shop lab is complete.
   stated in a decision is backed by a test that tries to exceed it with the shape it
   names.
 
+
+
+### F-068 — I took two days to trace the missed cases to how a person reaches them
+- **What:** the owner's goal was more confirmed cases. I worked on secondary
+  mechanisms (realtime-transport writes, settle timing, body signatures, seed write
+  rules) before checking, case by case, how a person reaches each missed Juice Shop
+  case. That check took about ten minutes when I finally did it. It showed two things:
+  - The main gap was the crawler's own safety defaults: no SPA form submitted in a
+    generic run, and POST pickers only when named. The 2026-10-16 survey had already
+    named "no SPA form is submitted" as the first measured loss, and I presented it as
+    one option among several.
+  - Four of the 15 answer-key cases cannot be reached through the UI at all: an API
+    with no button, an unlinked `/api-docs`, a parameter the form never sends, and a
+    proxy-only header. Yet I scored the crawler against all 15 without flagging it.
+- **Evidence:** the trace in this session, from Juice Shop's front-end bundle and
+  `juice-d74-1`'s spider DB; the survey `docs/CRAWLER_SURVEY_2026-10-16.md` §1.
+- **Impact:** the owner's time; a metric that read as a crawler failure where part
+  of it is not crawling at all.
+- **Status:** D73 and D76 address the defaults. Rule I follow from now on: when a
+  metric stalls, first trace every missed case to its human path and its first point
+  of loss, and say which cases the tool can never reach the way it is built, before
+  working on any mechanism.
+

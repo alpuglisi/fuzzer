@@ -218,6 +218,9 @@ def test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_gl
     assert spa.form_refusal(_form("Log in", "Login", "exit_to_app"), "login",
                             named=None) is None
     assert "destructive button icon ('exit_to_app')" in \
+        spa.form_refusal(_form("", "", "exit_to_app"), "login", named=frozenset({"login"}))
+    # D76 review M8: on a route nobody named, a label-less button is refused first
+    assert "no label to judge" in \
         spa.form_refusal(_form("", "", "exit_to_app"), "login", named=None)
     assert "destructive button aria-label" in \
         spa.form_refusal(_form("", "Logout", "exit_to_app"), "x", named=None)

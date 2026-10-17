@@ -154,6 +154,31 @@ fuzzer.
     gap).
 
 - **FR-CRAWL-13 (request capture and SPA form submission, CC-CRAWL-0017, forms phase 3)**
+  - *(Amended in place, D76, CC-CRAWL-0051, 2026-10-17; owner: "Submit the forms,
+    remove the blocks".)* **Submission is on by default in a loopback lab.** With no
+    flag and a loopback start, the CLI submits every eligible route's forms, once per
+    signature (`--no-submit-spa-forms` turns it off; `--submit-spa-forms [routes]`
+    narrows it; elsewhere it is off). A library `LocalSpider` stays off unless asked.
+    - A file input gets a small benign filler file (`spa.file_filler`: PDF, PNG or
+      text by its `accept`; XML only when nothing else fits; given as a payload,
+      nothing on disk).
+    - A registration (`store_adapter.registration_shaped`, SP-39) is not a credential
+      change: exactly two passwords, one a confirmation; a registration word on the
+      route or button; no change word, no current/old password, no
+      `autocomplete=current-password`, no hidden object selector. Its security question
+      and answer are not settings controls, and its answer gets the text filler.
+    - A change-password, forgot-password, destructive, settings, transaction or 2FA
+      form is still refused.
+    - On a route nobody named, a submitter with neither text nor aria-label is refused
+      (review M8).
+    - In an authenticated crawl, a form on an unnamed route is submitted in the crawl's
+      own context, the session re-checked after it, unless it looks like an account
+      change (`spa.account_like`: an account word, a setter button). That form, and any
+      password form, goes to a fresh unauthenticated context, which presses Escape once
+      before filling (a first-visit dialog).
+    - A DELETE, and Enter in a button-less form, only from a route the operator named.
+    - Not yet: a multipart body is not recorded, so a file upload's request is sent but
+      not captured. A follow-up item.
   - **Passive capture (default on, Playwright engine).** Every fetch/XHR request the
     page itself makes through the guarded route with a body (not GET/HEAD/OPTIONS) that
     is JSON or form-encoded is recorded in the spider table `discovered_requests`
@@ -322,7 +347,9 @@ fuzzer.
 - **FR-CRAWL-15 (constraint-aware SPA form filling, CC-CRAWL-0023, forms phase 4, G1)**
   - **When.** Only for a form that passed `spa.form_refusal` on a
     route the operator **named** with `--submit-spa-forms ROUTE …`, in the crawl's own
-    context or the fresh unauthenticated one. Entirely inside the reveal window
+    context or the fresh unauthenticated one. *(Superseded in place, D76 review M1:
+    every submission is constraint-aware and inside the window, the generic default's
+    and a bare flag's included; only a DELETE and Enter stay named-route only.)* Entirely inside the reveal window
     (FR-CRAWL-16, W1): the existing fill, every G1 interaction and the checks run with
     its write block on; only `spa.click_vetted`'s final vetted click lifts it, for that
     click and its settle only (`before_click`; the lift is cleared when the submission

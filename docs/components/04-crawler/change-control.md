@@ -3,6 +3,63 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0051 — D76: a generic run submits SPA forms; the file-upload, registration and login blocks go (2026-10-17)
+- Goal / acceptance: the owner's D76. A generic loopback crawl submits app-built forms
+  (Juice Shop's login, feedback, complaint, registration). Acceptance: the tests below,
+  then a Juice Shop run in which those requests are captured.
+- Pre-implementation review (independent): eight must-fixes, all taken.
+  - (M1) G1 and the window for every submission;
+  - (M2) a revealed form's DELETE allowance only on a named route;
+  - (M3, M4) registration as a separate shared predicate (SP-39), with the security
+    question and answer handled;
+  - (M5) account-like forms stay unauthenticated;
+  - (M6) the default only on a loopback start, and the flag refused with its opposite;
+  - (M7) a payload filler file, `accept` reported, set inside the window (the
+    multipart premise was wrong; capture is a follow-up);
+  - (M8) label-less submitters refused on unnamed routes.
+  - Also: Escape before filling in the fresh context.
+  - Not taken: XML first for file inputs (lab-fitted, R3).
+- Change:
+  - `tools/spa.py`: `FORMS_JS` reports `accepts`; `form_refusal` (the label rule,
+    registration, file inputs only under `strict`); `is_registration`, `account_like`,
+    `file_filler`.
+  - `tools/store_adapter.py`: `registration_shaped`, `registration_extra`, and
+    `body_refusal(..., method)`.
+  - `tools/spider.py`:
+    - `_fill_and_click` always uses G1 and the window;
+    - `_fill_and_click_now` (filler files, registration answers);
+    - `_g1(registration=)`;
+    - `_submit_spa_forms` (`account_like`), `_submit_revealed` (on whenever submission
+      is, `operator_named`), and Escape in `_submit_anonymously`;
+    - CLI: `_submit_spa_forms_arg`, `--no-submit-spa-forms`, a dry-run line, the
+      `files_attached` counter.
+  - `core/sendpolicy.py`: help text. `cli_taxonomy.py`: the new flag.
+- Impact (other components / consumers / project):
+  - importer (CC-AUD-0051): registration bodies imported;
+  - UI (CC-UI-0059): the taxonomy;
+  - lab state: an account, feedback and complaints with filler values.
+- Risk (class; consequence and exposure; mitigation): high (what the crawler sends).
+  - Consequence: lab state changes; a non-password form on an unnamed route goes out
+    with the operator's session.
+  - Exposure: loopback labs only.
+  - Mitigation: the refusal list, `account_like`, the session re-check after each
+    submission, and DELETE only from named routes.
+- Verification / review: the tests changed and added:
+  - `tests/test_spa_capture.py`: `test_d76_*`, `test_each_refusal`, the bare and
+    authenticated submission tests;
+  - `tests/test_json_points.py`: the registration body is now on an isolated session;
+  - `tests/test_send_policy.py`: a change body by id, and the registration imported;
+  - `tests/test_forms_phase4.py`: the glyph-only button on a named route;
+  - `tests/test_crawl_survey_options.py`: the Enter form refused by the label rule.
+
+  984 passed across the 13 affected files. `verify_change.py`, mutation checks and the
+  lab run are below.
+- Deliverables:
+  - [x] code, tests — done
+  - [x] D76; FR-CRAWL-13 and FR-CRAWL-15 amended; FR-AUD-22; SP-39; ARCHITECTURE
+- Rollback / recovery: revert, or `--no-submit-spa-forms` for one run.
+- Effectiveness: pending a Juice Shop run.
+
 ### CC-CRAWL-0050 — D75: only a DELETE keeps a query seed a page (2026-10-17)
 - Goal / acceptance: the owner's D75: an untainted blocked write no longer demotes a
   seed. Acceptance: the tests below and the mutation checks. No metric change is
@@ -45,6 +102,14 @@ Newest first.
     requirements; ARCHITECTURE
 - Rollback / recovery: revert.
 - Effectiveness: as stated in the goal; measured with the next Juice Shop run.
+- Effectiveness and verification (assessed 2026-10-17, at fbc9062):
+  - `verify_change.py --base 0b6a3d5`: 77 files, 2450 passed, 0 failed (evidence key
+    8fff9bb8e2ae);
+  - Juice Shop (juice-d75-1, generic command line): 5/15 confirmed, unchanged, as
+    expected (no seed was demoted after D74);
+  - the live bWAPP acceptance test (`FUZZLAB_LIVE_EXTERNAL_LABS=1`,
+    `test_bwapp_fixture_scores_its_confirmed_rows`, the crawl with no selector flag,
+    D73's acceptance with its security-level oracle) passed in 30 min.
 
 ### CC-CRAWL-0049 — D74: a seed's write that carries its own value no longer keeps it a page (2026-10-17)
 - Goal / acceptance: the owner's D74. Juice Shop's six query seeds were demoted only

@@ -309,9 +309,9 @@ def test_passive_capture_takes_only_bodied_non_transport_requests(tmp_path):
 # =====================================================================================
 # The submission gate (spa.form_refusal)
 # =====================================================================================
-def _form(controls, button="Submit", action=None, autocomplete=None):
+def _form(controls, button="Submit", action=None, autocomplete=None, aria=""):
     return {"controls": [list(c) for c in controls], "button": button, "action": action,
-            "autocomplete": autocomplete or [""] * len(controls)}
+            "autocomplete": autocomplete or [""] * len(controls), "button_aria": aria}
 
 
 LOGIN = _form([("email", "text"), ("password", "password")], "Log in")
@@ -356,10 +356,13 @@ def test_transaction_pairs_and_phrases_are_refused(label):
      "destructive or transaction action"),
     (_form(CONTACT["controls"], action="http://h/#/wallet"), "contact",
      "destructive or transaction action"),
-    (_form([("f", "file"), ("title", "text")], "Upload"), "upload", "file input"),
-    (_form([("email", "email"), ("password", "password"), ("passwordRepeat", "password")],
-           "Register"), "register", "credential-change"),
+    # D76: a file input and a registration are no longer refused (below); a change of
+    # an existing password still is
     (_form([("current", "password"), ("next", "text")], "Go"), "x", "credential-change"),
+    (_form([("password", "password"), ("passwordRepeat", "password")], "Change"),
+     "account", "credential-change"),
+    (_form([("old", "password"), ("password", "password")], "Register"), "register",
+     "credential-change"),
     (_form([("username", "text"), ("password", "password")], "Log in"), "register",
      "credential-change"),
     (_form([("totp", "text")], "Verify"), "2fa", "one-time-code"),
@@ -369,6 +372,45 @@ def test_transaction_pairs_and_phrases_are_refused(label):
 ])
 def test_each_refusal(form, route, expect):
     assert expect in (spa.form_refusal(form, route, named=None) or "")
+
+
+@pytest.mark.parametrize("form,route", [
+    (_form([("f", "file"), ("title", "text")], "Upload"), "upload"),
+    (_form([("email", "email"), ("password", "password"), ("passwordRepeat", "password")],
+           "Register"), "register"),
+    # independent variations (R3): other words for the same shape
+    (_form([("mail", "email"), ("pw", "password"), ("pw2", "password")], "Sign up"),
+     "join"),
+    (_form([("login", "text"), ("pass", "password"), ("confirmPass", "password")],
+           "Create account"), "welcome"),
+    (_form([("emailControl", "email"), ("passwordControl", "password"),
+            ("repeatPasswordControl", "password"), ("securityQuestionControl", "select"),
+            ("securityAnswerControl", "text")], "Register",
+           aria="Button to complete the registration"), "register"),
+])
+def test_d76_a_file_input_and_a_registration_are_submitted(form, route):
+    """D76 (owner: "Submit the forms, remove the blocks")."""
+    assert spa.form_refusal(form, route, named=None) is None
+    # the login flow's strict choice still never picks a file form
+    if any(k == "file" for _n, k in form["controls"]):
+        assert "file input" in spa.form_refusal(form, route, named=None, strict=True)
+
+
+@pytest.mark.parametrize("form,route", [
+    # three passwords, a current-password marker, a change word, a hidden user id
+    (_form([("a", "password"), ("b", "password"), ("c", "password")], "Register"),
+     "register"),
+    (_form([("password", "password"), ("confirm", "password")], "Register",
+           autocomplete=["current-password", "new-password"]), "register"),
+    (_form([("password", "password"), ("confirm", "password")], "Update"), "register"),
+    (_form([("user_id", "hidden"), ("password", "password"), ("confirm", "password")],
+           "Create account"), "signup"),
+    (_form([("emailControl", "email"), ("securityAnswerControl", "text"),
+            ("newPasswordControl", "password"), ("newPasswordRepeatControl", "password")],
+           "Change"), "forgot-password"),
+])
+def test_d76_what_is_not_a_registration_stays_refused(form, route):
+    assert spa.form_refusal(form, route, named=None)
 
 
 @pytest.mark.parametrize("label,aria,refused", [
@@ -555,8 +597,9 @@ def test_bare_submission_in_an_anonymous_crawl(lab, tmp_path, monkeypatch):
     assert spa.PASSWORD_FILLER not in db_text(db)
     # one submission per signature: the footer form is on every route
     assert len(spa_lab.seen("POST", "/api/questions")) == 1
-    # refused: transaction route, file input, 2FA-only, registration (credential change)
-    assert sp.spa_counts["forms_refused"] == 4
+    # refused: transaction route, 2FA-only (D76: the file input and the registration
+    # are submitted)
+    assert sp.spa_counts["forms_refused"] == 2
     assert spa_lab.seen("POST", "/checkout") == [] and spa_lab.seen("DELETE") == []
     # the submission's own requests stay in scope (contact's cross-origin fetch)
     assert other.requests == []
@@ -603,16 +646,21 @@ def test_a_named_login_route_is_still_submitted_only_unauthenticated(lab, tmp_pa
     assert sp.spa_counts["deletes_blocked"] >= 1
 
 
-def test_an_authenticated_bare_flag_never_submits_in_the_crawls_context(lab, tmp_path):
-    """Revision 4 (B must-fix 1): profile / contact forms change the operator's account
-    without a password control; a bare flag submits them only unauthenticated."""
+def test_an_authenticated_bare_flag_submits_an_account_form_only_unauthenticated(
+        lab, tmp_path):
+    """Revision 4 (B must-fix 1) as D76 (review M5) leaves it: a form that looks like an
+    account change (the ``profile`` route, a "Save" button: `spa.account_like`) is
+    submitted only unauthenticated; another form on a route nobody named (contact, the
+    footer question) is submitted in the crawl's own context, the session re-checked
+    after it."""
     spa_lab, _other = lab
     sp, _db = _crawl(spa_lab, tmp_path, submit_spa_forms=[],
                      session_manager=_Manager(), identity="alice")
-    submitted = (spa_lab.seen("PATCH", "/api/profile") + spa_lab.seen("POST", "/api/Feedbacks")
-                 + spa_lab.seen("POST", "/api/questions"))
-    assert submitted and all(r[3] == "" and TOKEN not in r[2] for r in submitted)
-    assert sp.spa_submit_stopped is None
+    profile = spa_lab.seen("PATCH", "/api/profile")
+    assert profile and all(r[3] == "" and TOKEN not in r[2] for r in profile)
+    in_context = spa_lab.seen("POST", "/api/Feedbacks") + spa_lab.seen("POST",
+                                                                       "/api/questions")
+    assert in_context and all(TOKEN in r[2] for r in in_context)
 
 
 def test_a_named_route_is_submitted_authenticated_and_session_loss_stops_it(lab,
@@ -703,3 +751,50 @@ def test_submissions_are_capped_and_the_cap_is_reported(lab, tmp_path, monkeypat
     assert sp.spa_counts["forms_submitted"] == 2
     assert sp.spa_counts["submissions_over_cap"] >= 1
     assert any("over the cap" in ln for ln in sp.spa_summary())
+
+
+def test_d76_a_revealed_form_on_an_unnamed_route_gets_no_delete_allowance(tmp_path):
+    """D76 review M2: revealed forms are submitted whenever submission is on, but a
+    DELETE (and Enter) is allowed only from a route the operator named -- the flag
+    `_submit_revealed` passes to `_fill_and_click`."""
+    from fuzzlab.tools.spider import LocalSpider
+    sp = LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "s.db"),
+                     engine="requests", submit_spa_forms=[])
+    sp._spa_on = True
+    seen = []
+    sp._fill_and_click = lambda page, ctx, form, url, explicit: seen.append(explicit)
+    form = dict(CONTACT, ids=["a", "b"], button_id="btn")
+    try:
+        assert sp._submit_revealed(None, None, "http://127.0.0.1:9/#/contact", "contact",
+                                   [form]) is False
+        sp._submitted_sigs.clear()
+        sp._submit_routes = frozenset({"contact"})
+        sp._submit_revealed(None, None, "http://127.0.0.1:9/#/contact", "contact", [form])
+        assert seen == [False, True]
+    finally:
+        sp.storage.close()
+
+
+def test_d76_the_cli_default_submits_only_in_a_loopback_lab():
+    from fuzzlab.tools.spider import parse_args, spider_kwargs
+    assert spider_kwargs(parse_args(["--start", "http://127.0.0.1:1/"]))[
+        "submit_spa_forms"] == []
+    assert spider_kwargs(parse_args(["--start", "http://example.test/"]))[
+        "submit_spa_forms"] is None
+    assert spider_kwargs(parse_args(["--start", "http://127.0.0.1:1/",
+                                     "--no-submit-spa-forms"]))["submit_spa_forms"] is None
+    assert spider_kwargs(parse_args(["--start", "http://127.0.0.1:1/",
+                                     "--submit-spa-forms", "login"]))[
+        "submit_spa_forms"] == ["login"]
+    with pytest.raises(SystemExit):
+        parse_args(["--start", "http://127.0.0.1:1/", "--submit-spa-forms",
+                    "--no-submit-spa-forms"])
+
+
+def test_d76_the_filler_file_follows_accept_and_is_never_xml_first():
+    assert spa.file_filler(".pdf,.zip")["mimeType"] == "application/pdf"
+    assert spa.file_filler("image/*")["mimeType"] == "image/png"
+    assert spa.file_filler("")["mimeType"] == "text/plain"
+    assert spa.file_filler(".xml,.pdf")["mimeType"] == "application/pdf"
+    assert spa.file_filler(".xml")["mimeType"] == "application/xml"
+    assert b"DOCTYPE" not in spa.file_filler(".xml")["buffer"]

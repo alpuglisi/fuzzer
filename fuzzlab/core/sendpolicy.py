@@ -62,8 +62,9 @@ FLAGS = (
      "(checkout, payment, order, transfer, ...); GET visits never need it (D72)"),
     ("--allow-credential-changes", CREDENTIAL_CHANGES,
      "lab-only: submit and import forms and bodies that change a credential or manage "
-     "an account (password change, registration, account settings); a password "
-     "control is still never fuzzed, and a revealed password form stays refused"),
+     "an account (password change, account settings; a registration needs no flag "
+     "since D76); a password control is still never fuzzed, and a revealed password "
+     "form stays refused"),
 )
 
 

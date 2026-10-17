@@ -439,12 +439,14 @@ def test_listener_found_forms_are_submitted_on_named_routes_and_gated(monkeypatc
 
 def test_an_enter_form_is_never_submitted_on_an_unnamed_route(monkeypatch, tmp_path):
     """Real Chromium: with a bare ``--submit-spa-forms`` (no route named) the Enter form
-    is found but not submitted (it has no label to vet; only the window may hold it)."""
+    is found but not submitted (it has no label to vet). D76 (review M8): on a route
+    nobody named, a label-less submitter is refused by the gate itself."""
     chromium_or_skip(monkeypatch)
     lab, sp, _db, logs = _listen_crawl(tmp_path, [])
     assert not _posted(lab, "/api/find")
     assert sp.spa_counts["forms_submitted_enter"] == 0
-    assert any("submitted by Enter only on a route named" in line for line in logs)
+    assert any("submitted by Enter only on a route named" in line
+               or "no label to judge (route not named)" in line for line in logs)
 
 
 def test_the_listener_registry_records_without_changing_the_page(monkeypatch):

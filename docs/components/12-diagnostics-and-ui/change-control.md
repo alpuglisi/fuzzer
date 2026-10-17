@@ -3,6 +3,8 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0059 — `--no-submit-spa-forms` is classified in the CLI taxonomy; no flag now means D76's default (2026-10-17) — see CC-CRAWL-0051
+
 ### CC-UI-0058 — `--no-follow-selector-forms` is classified in the CLI taxonomy; a blank selector field now means the D73 default (every picker) (2026-10-17) — see CC-CRAWL-0047
 
 ### CC-UI-0057 — The three D71 flags are classified in the CLI taxonomy; the top-level entry clears a stray policy (2026-10-15) — see CC-CORE-0062

@@ -4,6 +4,9 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (D76: a generic run submits the app's forms)
+- **What (CC-CRAWL-0051):** a crawl of a loopback lab now fills and submits the app's forms by default, as a person would, so the requests behind them (login, feedback, complaints, registration) are captured. File inputs get a small dummy file, and registration forms and their captured bodies are no longer blocked. Destructive, settings, transaction, change-password and 2FA forms are still never submitted. `--no-submit-spa-forms` turns it off. Why: the owner's decision D76. These submissions were the main discovery gap on Juice Shop.
+
 ## 2026-10-17 (D75: only a DELETE keeps a page from being fuzzed)
 - **What (CC-CRAWL-0050):** a search-style page whose test load sends anything other than a DELETE is now fuzzed. The DELETE check also catches a POST that asks the server to treat it as a DELETE (a header, or `_method` in a form, JSON or multipart body), and when it cannot read a body it assumes a DELETE. Why: the owner's decision D75. The owner also said not to build D74's random seed values (final).
 

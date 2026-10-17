@@ -1223,6 +1223,8 @@ tracked in the requirements files, not here.
     enumerated (ground truth / `--url`); an AST guard enforces this. Authenticated
     senders probe the session's auth endpoints anonymously;
   - **Forms (phase 1, CC-CRAWL-0013 / CC-FUZZ-0062 / CC-CORE-0039):**
+    - since D76 (CC-CRAWL-0051) a loopback crawl submits SPA forms by default (G1, in
+      the window), registrations and file inputs included;
     - the crawler records every form (redacted) and navigates gated selector forms
       (`tools/formnav.py`). Since D73 (CC-CRAWL-0047) the CLI's default follows
       unnamed POST pickers too, in a loopback lab, behind

@@ -305,7 +305,9 @@ _OTP_TOKENS = frozenset({"totp", "otp", "mfa", "2fa", "twofa", "tfa", "code", "t
                          "authenticator", "verification", "passcode"})
 #: Control kinds a submission fills, with what (`store_adapter`'s fillers).
 _TEXT_KINDS = frozenset({"text", "search", "textarea"})
-#: The password filler: never a real credential.
+#: The password filler: never one of the operator's credentials. D76: once a crawl has
+#: submitted a lab's registration form, it is a working password for the filler e-mail
+#: in that lab (reset the lab between runs).
 PASSWORD_FILLER = "fuzzlab-filler-not-a-password"
 
 
@@ -358,7 +360,7 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
     (D71: each can be turned off for a lab run); ``strict`` keeps all three, for the
     login flow's choice of a login form (`browserlogin.login_form_refusal`)."""
     from fuzzlab.tools.formnav import settings_word
-    from fuzzlab.tools.store_adapter import credential_change_reason
+    from fuzzlab.tools.store_adapter import credential_change_reason, registration_extra
     keep = (lambda r: r) if strict else None
     destructive = keep or sendpolicy.destructive
     transaction = keep or sendpolicy.transaction
@@ -367,6 +369,12 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
         return f"route {route!r} not named by the operator"
     label = form.get("button") or ""
     aria = form.get("button_aria") or ""
+    operator_named = bool(named) and normalise_route(route) in named
+    if not strict and not operator_named and not (label.strip() or aria.strip()):
+        # D76 review M8: on a route nobody named (the generic default), a button with
+        # neither text nor aria-label is never clicked: there is nothing to judge
+        return "a submitter with no label to judge (route not named)"
+    registration = not strict and is_registration(form, route)
     if form.get("submitter") == "listener" and not (label.strip() or aria.strip()):
         # CC-CRAWL-0038: an element found only by its click listener needs a label
         return "a listener submitter with no label to judge"
@@ -397,12 +405,16 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
         if reason:
             return f"destructive or transaction action ({reason!r})"
     kinds = [k for _n, k in form["controls"]]
-    if kinds.count("file"):
+    if kinds.count("file") and strict:
+        # D76 (owner: "remove the blocks"): a file input is filled with a small filler
+        # file (`file_filler`); the login flow's strict choice still never picks one
         return "form with a file input"
     for name, _kind in form["controls"]:
         reason = destructive(text_destructive_reason(name))     # BUG-0131
         if reason:
             return f"destructive control {name!r} ({reason!r})"
+        if registration and registration_extra(name):
+            continue                         # D76: a registration's security question
         word = settings_word(name)
         if word:
             return f"settings control {name!r} ({word!r})"
@@ -411,7 +423,9 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
              + [(label, "submit"), (aria, "submit")],
              "action_url": "/" + normalise_route(route),
              "entries": [(label, label), (aria, aria)]}
-    reason = credential(credential_change_reason(shape))
+    # D76: a registration (two passwords, one a confirmation, a registration route or
+    # button, no change word) is not a credential change; a change-password form is
+    reason = None if registration else credential(credential_change_reason(shape))
     if reason:
         return reason
     typed = [(n, k) for n, k in form["controls"] if fillable(k)]
@@ -421,6 +435,74 @@ def form_refusal(form: dict, route: str, *, named: frozenset[str] | None,
         if auto.count("one-time-code") or _words(name) & _OTP_TOKENS:
             return f"one-time-code form ({name!r})"
     return None
+
+
+def is_registration(form: dict, route: str) -> bool:
+    """`store_adapter.registration_shaped` for an SPA form on ``route`` (D76): its
+    password controls, the route and the button's text and aria-label."""
+    from fuzzlab.tools.store_adapter import registration_shaped
+    passwords = [n for n, k in form["controls"] if k == "password"]
+    autos = [a for (_n, k), a in zip(form["controls"], form.get("autocomplete") or [])
+             if k == "password"]
+    return registration_shaped(
+        passwords, ["/" + normalise_route(route), form.get("button") or "",
+                    form.get("button_aria") or ""],
+        hidden=[n for n, k in form["controls"] if k == "hidden"], autocompletes=autos)
+
+
+#: D76: the filler files a file input gets, benign and small (review M7): a PDF, a PNG,
+#: a text file, and XML only when the input accepts nothing else of ours (no DOCTYPE).
+#: Given to Playwright as a payload (name, mime type, bytes): nothing touches the disk.
+_FILLER_FILES = {
+    "pdf": ("fuzzlab.pdf", "application/pdf",
+            b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"),
+    "png": ("fuzzlab.png", "image/png", bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d4944415478da63f8ffff3f0005fe02fea7d6a4b50000000049454e44ae426082")),
+    "txt": ("fuzzlab.txt", "text/plain", b"fuzzlab\n"),
+    "xml": ("fuzzlab.xml", "application/xml",
+            b'<?xml version="1.0" encoding="UTF-8"?><fuzzlab>fuzzlab</fuzzlab>\n'),
+}
+
+
+def file_filler(accept: str) -> dict:
+    """The filler file for a file input whose ``accept`` is given (D76): the first of
+    PDF, PNG (any image), text that the input accepts; XML only when it accepts nothing
+    else of ours; text when ``accept`` is empty or names nothing we have."""
+    tokens = [t.strip().lower() for t in (accept or "").split(",") if t.strip()]
+
+    def ok(*forms):
+        return any(t in forms for t in tokens)
+    if ok(".pdf", "application/pdf"):
+        key = "pdf"
+    elif any(t.startswith("image/") for t in tokens) or ok(".png", ".jpg", ".jpeg", ".gif"):
+        key = "png"
+    elif ok(".txt", "text/plain", "text/*"):
+        key = "txt"
+    elif ok(".xml", "application/xml", "text/xml"):
+        key = "xml"
+    else:
+        key = "txt"
+    name, mime, data = _FILLER_FILES[key]
+    return {"name": name, "mimeType": mime, "buffer": data}
+
+
+def account_like(form: dict, route: str) -> bool:
+    """Might submitting this form change the operator's account (D76 review M5)? An
+    account or change word on the route, the button or a hidden field's name
+    (`store_adapter.account_reason`, the D73 rule), or a button that sets something
+    (`formnav.SETTER_WORDS`). Such a form on an unnamed route of an authenticated crawl is
+    submitted in a fresh unauthenticated context, never with the operator's session."""
+    from fuzzlab.core.redaction import name_tokens
+    from fuzzlab.tools.formnav import SETTER_WORDS
+    from fuzzlab.tools.store_adapter import account_reason
+    label, aria = form.get("button") or "", form.get("button_aria") or ""
+    hidden = [n for n, k in form["controls"] if k == "hidden"]
+    if account_reason("/" + normalise_route(route), submitters=[label, aria],
+                      hidden=hidden):
+        return True
+    words = {t.lower() for t in name_tokens(label) + name_tokens(aria)}
+    return bool(words & SETTER_WORDS)
 
 
 def has_password(form: dict) -> bool:
@@ -698,7 +780,7 @@ FORMS_JS = r"""
         ENTER.includes(kindOf(e)) && shown(e));
       enterEl = texts.length === 1 ? texts[0] : null;
     }
-    const controls = [], ids = [], autocomplete = [], tags = [];
+    const controls = [], ids = [], autocomplete = [], tags = [], accepts = [];
     // custom selects (mat-select, a role=combobox that is not an input) are selects
     // too (FR-CRAWL-15): kind "select", their tag kept in `tags`
     [...c.querySelectorAll('input, textarea, select, ' + CUSTOM_SELECT)].forEach((el, ci) => {
@@ -711,6 +793,7 @@ FORMS_JS = r"""
       tags.push(custom ? 'custom-select' : el.tagName.toLowerCase());
       ids.push(id);
       autocomplete.push(el.getAttribute('autocomplete') || '');
+      accepts.push(el.getAttribute('accept') || '');           // D76: a file input's
     });
     // container hints (G1e): the attribute values and label texts of the container, and
     // a canvas challenge -- recorded only; no CAPTCHA form is refused since D71
@@ -732,7 +815,7 @@ FORMS_JS = r"""
     }
     const action = c.tagName.toLowerCase() === 'form' && c.getAttribute('action')
       ? c.action : null;
-    out.push({controls, ids, autocomplete, tags, button: label, button_aria: aria,
+    out.push({controls, ids, autocomplete, tags, accepts, button: label, button_aria: aria,
               button_icons: glyphs, button_id: button, action,
               hints: hints.slice(0, 400), challenge,
               submit_by: submit ? 'click' : (enterEl ? 'enter' : null),

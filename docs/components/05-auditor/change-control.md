@@ -3,6 +3,8 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0051 — D76: a captured registration POST is imported (`registration_shaped`, SP-39); its passwords stay isolated (2026-10-17) — see CC-CRAWL-0051
+
 ### CC-AUD-0050 — D75: a seed whose window blocked no DELETE is imported as a point (2026-10-17) — see CC-CRAWL-0050
 
 ### CC-AUD-0049 — D74: seeds promoted past a value-carrying write are imported as points; a stored POST selector is judged by its button and account words too (2026-10-17) — see CC-CRAWL-0049, CC-CRAWL-0048

@@ -645,6 +645,37 @@ build the d74 random seeding" (final).
     no method rule" (ERROR_LOG 2026-10-17).
   - The `_method` encodings are tested here, not against a live framework.
 
+### D76 — A generic run submits SPA forms; the file-upload, registration and login blocks go (owner, 2026-10-17)
+
+**The owner's decision:** "Submit the forms, remove the blocks." That answered: should a
+generic run fill and submit app-built forms, and should the file-upload, registration
+and login blocks stay? Asked next, the owner chose to remove the importer's
+registration block too ("Yes, remove it"), and to build multipart capture and fuzzing
+after D76 ("After D76").
+
+- **The evidence:** the Juice Shop crawl (juice-d74-1) visited `#/login`, `#/contact`,
+  `#/complain` and `#/register` and recorded their forms, but submitted none. Their
+  endpoints are sent only when the forms are submitted (verified in the app's own
+  front-end bundle on loopback).
+- **Built (CC-CRAWL-0051), after an independent pre-implementation review (eight
+  must-fixes, all taken):**
+  - default-on submission in a loopback lab, with G1 and the window for every
+    submission;
+  - a filler file for file inputs;
+  - registration (SP-39) in the crawler and the importer;
+  - in-context submission on unnamed routes in an authenticated crawl, except
+    account-like forms;
+  - label-less submitters refused on unnamed routes;
+  - a DELETE and Enter only from named routes.
+- **Kept:** destructive, settings, transaction, change-password, forgot-password and
+  2FA forms refused; DELETE refused except from named routes; scope.
+- **Stated consequences:**
+  - a generic lab crawl creates an account (the filler e-mail and password) and sends
+    feedback, complaints and logins with filler values;
+  - reset the lab between runs;
+  - an account-like form on an unnamed route is still submitted only unauthenticated;
+  - a multipart request is not captured yet.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

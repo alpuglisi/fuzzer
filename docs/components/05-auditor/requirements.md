@@ -240,7 +240,11 @@ budget where a vulnerability is plausible.
     rule and no seed; an allowlist keyed on a query string is not matched (the seed
     drops the query).
 - **FR-AUD-22** *(captured requests and JSON leaves; `CC-AUD-0035`, 2026-10-14, forms
-  phase 3, lane J).*
+  phase 3, lane J).* *(Amended, D76, CC-CRAWL-0051:)* a captured registration POST
+  (`registration_shaped`, a user resource such as `/api/Users` allowed, never one with
+  an id segment) is imported. Its passwords are isolated (sent empty, never points) and
+  its security question and answer are not settings fields; any other two-password
+  body is still a credential change.
   - **Source.** `store_adapter.import_spider` reads the spider table
     `discovered_requests` (`id, page_url, method, url, content_type, body_json, source,
     signature`; FR-CRAWL-13). A spider DB without it imports exactly as before. A row

@@ -255,7 +255,9 @@ REFUSED = [
     ("POST", BASE + "rest/deluxe-membership", {"x": "y"}, "transaction URL"),
     # credential change: the one rule forms use (two passwords; a change word; an
     # account-management action token)
-    ("POST", BASE + "api/Users", {"email": "e", "password": "", "passwordRepeat": ""},
+    # D76: a registration POST to the collection is imported (below); to one user it
+    # is a change
+    ("POST", BASE + "api/Users/7", {"email": "e", "password": "", "passwordRepeat": ""},
      "credential-change body (2 password fields)"),
     ("POST", BASE + "rest/user/login", {"email": "e", "newPassword": ""}, "has 'new'"),
     ("POST", BASE + "rest/user/login", {"email": "e", "currentPassword": ""}, "has 'curr'"),
@@ -883,7 +885,8 @@ def test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only(tmp_path):
     app = JsonLoginApp()
     store, run, counts = _import(tmp_path, _login_requests())
     with store:
-        assert (counts["request_json"], counts["request_refused"]) == (1, 1)
+        # D76: the registration body is imported too (its passwords isolated)
+        assert (counts["request_json"], counts["request_refused"]) == (2, 0)
         _mgr, _client, sender = _seam(app)
         result = run_auto(base_url=BASE, store=store, run_id=run, sender=sender,
                           mode="manual", selected_categories=["sql-injection"],
@@ -893,15 +896,20 @@ def test_a_json_login_sqli_is_confirmed_on_an_isolated_session_only(tmp_path):
         evaluated = {r["param"] for r in store.conn.execute(
             "SELECT DISTINCT param FROM evaluation WHERE run_id=?", (run,))}
     assert ("/app/rest/user/login", "email", "sqli") in found
-    assert evaluated == {"email"}                       # password never a point
+    assert evaluated <= {"email", "securityAnswer"} and "email" in evaluated
+    assert not evaluated & {"password", "passwordRepeat"}  # passwords never points
     main = _main_sid(app)
     to_api = [r for r in app.requests if r[1] == JsonLoginApp.LOGIN]
     assert to_api and all(r[2] != main for r in to_api)      # never the run's session
     assert all(r[3]["password"] == "" for r in to_api)        # sent empty, never fuzzed
     assert all(r[4]["Content-Type"] == "application/json" for r in to_api)
     assert app.sessions[main] == "admin"                     # the run's session survives
-    assert not any(r[1] == "/app/api/Users" for r in app.requests)
-    assert result.metrics["isolated_sessions"]["paths"] == 1
+    # D76: the registration body is a point too -- on an isolated session, its
+    # passwords sent empty, never the run's session
+    to_users = [r for r in app.requests if r[1] == "/app/api/Users"]
+    assert to_users and all(r[2] != main for r in to_users)
+    assert all(r[3]["password"] == "" and r[3]["passwordRepeat"] == "" for r in to_users)
+    assert result.metrics["isolated_sessions"]["paths"] == 2
 
 
 def test_a_json_login_sqli_is_confirmed_anonymously_by_the_plain_sender(tmp_path):

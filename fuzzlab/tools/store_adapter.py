@@ -352,6 +352,70 @@ def credential_change_rule(passwords, action_url: str, *, submitters=(), hidden=
     return None
 
 
+#: D76: a registration's own words (a route, a button, a resource path).
+_REGISTER_TOKENS = frozenset({"register", "registration", "signup", "join", "enrol",
+                              "enroll", "enrolment", "enrollment"})
+_REGISTER_PAIRS = frozenset({("sign", "up"), ("create", "account")})
+#: A POST that creates one of these is a registration when its body is shaped as one.
+_REGISTER_RESOURCES = frozenset({"users", "user", "accounts", "account", "customers",
+                                 "customer", "members", "member"})
+#: A word that makes a two-password form a change, never a registration.
+_NOT_REGISTER = frozenset({"change", "reset", "update", "set", "forgot", "recover",
+                           "recovery", "edit", "modify", "current", "curr", "old", "new",
+                           "password", "passwd", "pwd", "credential", "credentials"})
+#: The confirmation half of a password pair.
+_CONFIRM_TOKENS = frozenset({"repeat", "confirm", "confirmation", "again", "verify",
+                             "verification", "retype", "check", "2"})
+
+
+def registration_shaped(passwords, texts, *, resource_ok: bool = False, hidden=(),
+                        autocompletes=()) -> bool:
+    """Is this a registration -- a new account's password and its confirmation, never
+    a change of an existing one (D76, owner: "remove the blocks")? Exactly two password
+    fields, one a confirmation (`_CONFIRM_TOKENS`); no password named current/old/new and
+    no ``autocomplete=current-password``; no change word (`_NOT_REGISTER`) in ``texts``
+    (a route or action path, a button's text and aria-label); a registration word or pair
+    in them (`_REGISTER_TOKENS`, `_REGISTER_PAIRS`) or, with ``resource_ok`` (a captured
+    POST), a user resource in the path (`_REGISTER_RESOURCES`); no hidden object
+    selector. The one test for SPA forms (`spa.form_refusal`) and captured bodies
+    (`body_refusal`), SP-39; the login flow's strict choice never consults it."""
+    from fuzzlab.core.redaction import name_tokens
+
+    def toks(text):
+        return [t.lower() for t in name_tokens(text or "")]
+    passwords = list(passwords)
+    if len(passwords) != 2:
+        return False
+    ptoks = [set(toks(p)) for p in passwords]
+    if any(t & {"current", "curr", "old", "new"} for t in ptoks):
+        return False
+    if not any(t & _CONFIRM_TOKENS for t in ptoks):
+        return False
+    if any((a or "").strip().lower() == "current-password" for a in autocompletes):
+        return False
+    if any(_object_selector(n) for n in hidden):
+        return False
+    words = [toks(t) for t in texts]
+    flat = {w for t in words for w in t}
+    if flat & _NOT_REGISTER:
+        return False
+    pairs = {p for t in words for p in zip(t, t[1:])}
+    if flat & _REGISTER_TOKENS or pairs & _REGISTER_PAIRS:
+        return True
+    # a POST to a user resource creates one; to one user (an id segment) it changes it
+    return resource_ok and bool(flat & _REGISTER_RESOURCES) and \
+        not any(w.isdigit() for w in flat)
+
+
+def registration_extra(name: str) -> bool:
+    """A registration's security question or answer (D76): not a settings word there,
+    and its answer is filled with the text filler (its captured value is still blanked
+    at the capture boundary)."""
+    from fuzzlab.core.redaction import name_tokens
+    words = {t.lower() for t in name_tokens(name or "")}
+    return "security" in words and bool(words & {"question", "answer"})
+
+
 def account_reason(action_url: str, *, submitters=(), hidden=(),
                    what: str = "form") -> str | None:
     """The account-management half of `credential_change_rule`: an account or change
@@ -616,21 +680,30 @@ def request_refusal(method: str, url: str, *, fuzz_json_writes: bool = False,
     return None
 
 
-def body_refusal(url: str, leaves) -> str | None:
+def body_refusal(url: str, leaves, method: str = "POST") -> str | None:
     """Why a captured body is never imported, or None (FR-AUD-22): a credential-change
     or account-management body (`credential_change_rule`, the one rule forms use), a
     settings field (`formnav.settings_word` on any key), or a destructive or credential
-    entry (`entries_refusal`, credential names checked on every non-password leaf)."""
+    entry (`entries_refusal`, credential names checked on every non-password leaf).
+    *(D76:)* a registration POST (`registration_shaped`, a user resource in the path
+    allowed) is not a credential change, and its security question and answer are not
+    settings fields; its password leaves stay isolated (sent empty, never points)."""
+    from urllib.parse import urlsplit
+
     from fuzzlab.core import sendpolicy
     from fuzzlab.core.redaction import is_credential_name
     from fuzzlab.tools.formnav import settings_word
     passwords = [name for name, segs, _p, _v in leaves
                  if any(is_credential_name(s) for s in segs)]
-    reason = sendpolicy.credential_change(
+    registration = (method or "POST").upper() == "POST" and registration_shaped(
+        passwords, [urlsplit(url).path], resource_ok=True)
+    reason = None if registration else sendpolicy.credential_change(
         credential_change_rule(passwords, url, what="body", field="password field"))
     if reason:
         return reason
     for name, segs, _p, _v in leaves:
+        if registration and any(registration_extra(s) for s in segs):
+            continue
         word = next((w for w in map(settings_word, segs) if w), None)
         if word:
             return f"settings field {name!r} ({word!r})"
@@ -699,7 +772,7 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
         return leaves, kind, None
     if not leaves:
         return "an empty body", kind, None
-    return body_refusal(url, leaves), kind, leaves
+    return body_refusal(url, leaves, row.get("method") or "POST"), kind, leaves
 
 
 def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
