@@ -519,9 +519,9 @@ def test_paired_seeds_are_visited_after_their_bare_route_as_fragment_points(quer
     for route, name in (("track", "id"), ("search", "q"), ("score-board", "q")):
         assert (f"/#/{route}", name, "fragment") in params, route
     c = query_crawl["sp"].spa_counts
-    # track..login, autopost, wsping, txn, hopper, and logout:bye (visited, last: D72);
-    # never ./rel
-    assert c["spa_query_pairs"] == 12
+    # track..login, autopost, wsping, txn, hopper, logout:bye (visited, last: D72), and
+    # D74's counter, remover, tunnel and relay; never ./rel
+    assert c["spa_query_pairs"] == 16
     assert c["spa_query_seeded"] == c["spa_query_seeded_fragment"] >= 9
 
 
@@ -643,8 +643,8 @@ def test_the_probe_keeps_only_observed_names(query_crawl):
     c = sp.spa_counts
     # term, extra, next, and dot (from ``./rel``: a relative route names none, U7)
     assert c["spa_query_unpaired"] == 4 and c["spa_query_kept"] == 5
-    # every rendered route once (D72: logout's too, 22; it was 21)
-    assert c["spa_query_probe_loads"] == 22
+    # every rendered route once (D72: logout's too, 22; it was 21; D74's four routes: 26)
+    assert c["spa_query_probe_loads"] == 26
     assert c["spa_query_marker_in_path"] >= 2   # pathy: its probe's marker, its seed's filler
     assert lab.seen("POST", "/api/beacon") == []            # blocked, never evidence
     # Q6: the seeded visit's GET XHR is a query point; a path segment gives none
@@ -677,14 +677,17 @@ def test_the_summary_reports_kept_vs_confirmable_without_a_browser(query_crawl):
     assert all(stats[k] == v for k, v in c.items())
 
 
-def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
+def test_a_seed_whose_untainted_write_was_blocked_is_never_a_point_and_m6_never_sends_it(
         query_crawl, tmp_path, monkeypatch):
-    """S1 (review A-M1): ``#/poster?msg=`` POSTs on load. Its seed's window blocked the
-    write, so the seed is kept as a page (``source = 'spa-query-writes'``) but is never a
-    point, and ``beacon``, whose only evidence was the blocked POST, is never kept: a
-    later M6 run (real browser, outside any window) never loads them, so the server sees
-    no POST to ``/api/send`` or ``/api/beacon`` -- through the crawl, the import and
-    M6."""
+    """S1 (review A-M1) as D74 leaves it (owner, 2026-10-17). A seed whose load made a
+    write that does **not** carry the seed's value (``#/counter``), a DELETE
+    (``#/remover``) or a POST tunnelling a DELETE (``#/tunnel``) is kept as a page
+    (``source = 'spa-query-writes'``), never a point: the M6 run (real browser, outside
+    any window) never loads it, so the server never sees those writes. ``beacon``,
+    whose only evidence was a blocked POST, is never kept. D74: a seed whose only
+    writes carry its own value -- a JSON POST (``#/poster``), an auto-submitted form
+    (``#/autopost``), a WebSocket message (``#/wsping``), an app relaying the value
+    (``#/relay``) -- is a point; its forms are not kept (D74 review M3)."""
     import requests
 
     from fuzzlab.harness.auto import run_auto
@@ -692,25 +695,32 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
     from fuzzlab.tools.probesender import RequestsProbeSender
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     sources = dict(db_rows(db, "SELECT url, source FROM discovered_pages"))
-    # U1: an auto-submitted POST navigation and a held WebSocket message are writes
-    # too; D72: a transaction GET is a visit, so ``#/txn`` is promoted
-    for seed in ("#/poster?msg=fuzzlab", "#/autopost?go2=fuzzlab", "#/wsping?ping=fuzzlab"):
+    for seed in ("#/counter?n=fuzzlab", "#/remover?rid=fuzzlab", "#/tunnel?tid=fuzzlab"):
         assert sources[lab.base + seed] == spa.WRITE_SEED_SOURCE, seed
-    assert sources[lab.base + "#/track?id=fuzzlab"] == spa.SEED_SOURCE     # promoted
-    assert sources[lab.base + "#/txn?ref=fuzzlab"] == spa.SEED_SOURCE      # D72
+    for seed in ("#/poster?msg=fuzzlab", "#/autopost?go2=fuzzlab", "#/wsping?ping=fuzzlab",
+                 "#/relay?note=fuzzlab", "#/track?id=fuzzlab",
+                 "#/txn?ref=fuzzlab"):                                  # D72, D74
+        assert sources[lab.base + seed] == spa.SEED_SOURCE, seed
     assert sp.spa_counts["spa_query_write_seeds"] >= 3
+    assert sp.spa_counts["spa_query_tainted_writes"] >= 4
+    assert sp.spa_counts["spa_query_forms_withheld"] >= 1
+    # D74 review M3: the forms the promoted seeds rendered (their blocked writes) are
+    # never stored, so the fuzzer never sends its corpus to them over HTTP
+    assert not db_rows(db, "SELECT action_url FROM discovered_forms WHERE action_url "
+                           "LIKE '%/api/relay%' OR action_url LIKE '%/api/autopost%'")
     # Y2 (review B3-S2): every window closed cleanly, so these came from real writes
     assert sp.spa_counts["spa_query_unclean_windows"] == 0
-    assert dict(db_rows(db, "SELECT name, value FROM crawl_stats"))[
-        "spa_query_write_seeds"] >= 1
+    stats = dict(db_rows(db, "SELECT name, value FROM crawl_stats"))
+    assert stats["spa_query_write_seeds"] >= 1 and stats["spa_query_tainted_writes"] >= 1
     monkeypatch.setattr("fuzzlab.tools.browserexec.PlaywrightBrowserExecutor.SETTLE_MS",
                         1000)                       # the fixture's sinks are synchronous
     store, run, counts = _import(db, tmp_path / "m6.db")
     with store, contextlib.closing(requests.Session()) as session:
         params = _params(store, run)
-        assert counts["write_seed_skipped"] >= 1
-        assert not any(u in ("/#/poster", "/#/beacon", "/#/autopost", "/#/wsping")
+        assert counts["write_seed_skipped"] >= 3
+        assert not any(u in ("/#/counter", "/#/remover", "/#/tunnel", "/#/beacon")
                        for u, _n, _l in params)
+        assert ("/#/poster", "msg", "fragment") in params                  # D74
         run_auto(base_url=lab.base, store=store, run_id=run,
                  sender=RequestsProbeSender(session=session), mode="manual",
                  selected_categories=["xss"], points_source="crawl",
@@ -718,13 +728,13 @@ def test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it(
         found = {(r["url"], r["param"]) for r in store.conn.execute(
             "SELECT url, param FROM finding WHERE run_id=?", (run,))}
     assert ("/#/track", "id") in found                      # M6 did run
-    assert lab.seen("POST", "/api/send") == [] and lab.seen("POST", "/api/beacon") == []
-    assert lab.seen("POST", "/api/autopost") == []
-    assert not any(m.startswith("ping-") for m in lab.ws_messages)
+    assert lab.seen("POST", "/api/counter") == [] and lab.seen("POST", "/api/beacon") == []
+    assert lab.seen("DELETE", "/api/item") == [] and lab.seen("POST", "/api/tunnel") == []
     # the window's refusals are never queued from the load's request list and fetched
     # outside it (found by this test in review round 2)
     assert lab.seen("GET", "/api/send") == []
     assert lab.seen("GET", "/api/autopost") == []
+    assert lab.seen("GET", "/api/counter") == []
 
 
 def test_two_crawls_give_the_same_pages_endpoints_and_parameters(query_crawl, tmp_path):
@@ -1439,6 +1449,7 @@ def _window_spy(monkeypatch):
 
     def spy(self, win, url, visited=True):
         seen.append({"url": url, "writes": win.get("writes", 0),
+                     "tainted_writes": win.get("tainted_writes", 0),
                      "blocked": set(win.get("blocked", ())), "visited": visited,
                      "xhr": list(self._xhr_urls), "session": win.get("session"),
                      "baseline": set(win.get("baseline", ()))})
@@ -1568,8 +1579,8 @@ def test_a_shell_that_writes_on_every_load_still_gives_hash_points(query_crawl):
     is sent there and never blocked in the seed's window; the seed is the same-document
     hash change inside it. (b) The pings that land inside the window are blocked but
     match the bare route's own writes (its baseline), so ``#/track?id=`` is promoted and
-    imported as a fragment point, while ``#/poster?msg=``'s query-caused POST is still
-    a write."""
+    imported as a fragment point. ``#/poster?msg=``'s query-caused POST carries the
+    value: since D74 it is counted as tainted, not as a write."""
     lab, db, sp = query_crawl["lab"], query_crawl["db"], query_crawl["sp"]
     first = query_crawl["first_requests"]
     assert [r for r in first if r[0] == "POST" and r[1].startswith("/socket.io/")]
@@ -1590,8 +1601,11 @@ def test_a_shell_that_writes_on_every_load_still_gives_hash_points(query_crawl):
     assert not db_rows(db, "SELECT action_url FROM discovered_forms "
                            "WHERE action_url LIKE '%/api/autopost%'")
     poster = windows[lab.base + "#/poster?msg=fuzzlab"]
-    assert poster["writes"] >= 1
-    assert sources[lab.base + "#/poster?msg=fuzzlab"] == spa.WRITE_SEED_SOURCE
+    assert poster.get("tainted_writes", 0) >= 1 and not poster.get("writes")
+    assert sources[lab.base + "#/poster?msg=fuzzlab"] == spa.SEED_SOURCE        # D74
+    counter = windows[lab.base + "#/counter?n=fuzzlab"]
+    assert counter["writes"] >= 1                    # an untainted query-caused write
+    assert sources[lab.base + "#/counter?n=fuzzlab"] == spa.WRITE_SEED_SOURCE
 
 
 def test_the_baseline_is_what_a_load_outside_a_window_would_have_written(tmp_path):
@@ -1712,16 +1726,17 @@ def test_a_seeds_forms_are_stored_only_when_it_is_promoted(tmp_path):
 # =====================================================================================
 # The write baseline's holes (D60, B1-B3)
 # =====================================================================================
-def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_counts(
+def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_never_demotes(
         monkeypatch, tmp_path):
     """B1 + B2, real Chromium, `BaselineSpa`. B1 (review A-M1 = B-S2): the crawled links
     ``#/poster?msg=hi`` and ``#/search?q=foo`` POST to ``/api/send`` and ``/api/s``
-    because of their query; only a bare route's load is its baseline, so neither is,
-    and both seeds stay write seeds, never imported. B2 (A-S1 = B-S1): ``#/find?q=``
-    POSTs ``{"q": "fuzzlab"}`` to the shell's own ``/api/events`` and ``#/talk?q=`` emits
-    the filler on the shell's socket.io socket: both baseline endpoints, but carrying
-    the seed's filler, so both are writes. ``#/calm?q=`` (the shell's writes only) is
-    still promoted and imported as a fragment point."""
+    because of their query; only a bare route's load is its baseline, so neither is.
+    ``#/poster``'s POST does not carry the value: its seed stays a write seed, never
+    imported. B2 as D74 leaves it: ``#/search?q=``'s POST, ``#/find?q=``'s POST of
+    ``{"q": "fuzzlab"}`` to the shell's own ``/api/events`` and ``#/talk?q=``'s socket.io
+    emit carry the seed's filler: the app acting on our value, so they never demote
+    (counted ``spa_query_tainted_writes``) and the three seeds are points.
+    ``#/calm?q=`` (the shell's writes only) is promoted as before."""
     from fuzzlab.tools.spider import LocalSpider
     from tests._spa_query_fixture import BaselineSpa
     chromium_or_skip(monkeypatch)
@@ -1746,10 +1761,12 @@ def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_
     assert ("POST", "/api/events") in sp._write_baseline[base + "#/find"]
     assert ("WS", "/socket.io/") in sp._write_baseline[base + "#/talk"]
     windows = {w["url"]: w for w in seen}
-    for seed in ("#/poster?msg=fuzzlab", "#/search?q=fuzzlab",      # B1
-                 "#/find?q=fuzzlab", "#/talk?q=fuzzlab"):            # B2
-        assert sources[base + seed] == spa.WRITE_SEED_SOURCE, seed
-        assert windows[base + seed]["writes"] >= 1, seed
+    assert sources[base + "#/poster?msg=fuzzlab"] == spa.WRITE_SEED_SOURCE     # B1
+    assert windows[base + "#/poster?msg=fuzzlab"]["writes"] >= 1
+    for seed in ("#/search?q=fuzzlab", "#/find?q=fuzzlab", "#/talk?q=fuzzlab"):  # D74
+        assert sources[base + seed] == spa.SEED_SOURCE, seed
+        assert not windows[base + seed].get("writes"), seed
+        assert windows[base + seed].get("tainted_writes", 0) >= 1, seed
     assert sources[base + "#/calm?q=fuzzlab"] == spa.SEED_SOURCE
     assert sp.spa_counts["spa_query_baseline_writes"] >= 1
     store, run, counts = _import(db, tmp_path / "u.db")
@@ -1761,25 +1778,32 @@ def test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_
     finally:
         store.close()
     assert ("/#/calm", "q", "fragment") in params
-    assert counts["write_seed_skipped"] >= 4                # the four seeds: pages only
+    assert counts["write_seed_skipped"] >= 1                # poster's seed: a page only
     for route in ("find", "talk"):
-        assert not [p for p in params if p[0] == f"/#/{route}"], route
+        assert (f"/#/{route}", "q", "fragment") in params, route
     # the crawled links are points of their own (a stated residual: a crawled link
     # whose load writes is imported until FR-FUZZ-50's M6 window); never the seeds
     assert examples[("/#/poster", "msg")] == "hi"
     assert examples[("/#/search", "q")] == "foo"
 
 
-def test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint(tmp_path):
-    """B2, unit: on a baseline endpoint, a write whose URL, body (seen by the ``request``
-    event, before or after the window refused it) or WebSocket text carries the load's
-    filler or markers counts; the shell's own does not."""
+def test_a_write_is_judged_on_its_own_request_and_the_loads_value_never_demotes(tmp_path):
+    """B2 as D74 leaves it, unit. Each refused write is judged on its own URL, then on
+    its own body (`_note_window_blocked`, the same request object; D74 review M1),
+    never by another request to the same URL. One carrying the load's filler as a
+    whole word is tainted: never a write. A DELETE, or a POST tunnelling one, always
+    is. The shell's own baseline write is neither."""
     sp = _requests_spider(tmp_path)
 
-    def req(url, body=None):
-        return type("R", (), {"url": url, "method": "POST", "resource_type": "fetch",
+    def req(url, body=None, method="POST", headers=None):
+        return type("R", (), {"url": url, "method": method, "resource_type": "fetch",
                               "is_navigation_request": lambda s: False,
-                              "post_data_buffer": body})()
+                              "post_data_buffer": body, "headers": headers or {}})()
+
+    def refuse(r):
+        sp._on_request(r)
+        sp._window_refusal(r.method, r.url, False, context=ctx)
+        sp._note_window_blocked(r)
     try:
         sp._write_baseline["http://h/#/find"] = {("POST", "/api/events"),
                                                  ("WS", "/socket.io/")}
@@ -1788,25 +1812,33 @@ def test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint(tm
                         "http://h/#/find?q=fuzzlab", query=spa.SEED_SOURCE) as win:
             win["taint"] = frozenset({"fuzzlab"})
             # the shell's own: baseline, not counted
-            sp._on_request(req("http://h/api/events", b'{"page":"load"}'))
-            sp._window_refusal("POST", "http://h/api/events", False, context=ctx)
+            refuse(req("http://h/api/events", b'{"page":"load"}'))
             sp._note_ws_drop("ws://h/socket.io/?EIO=4", "3")
-            assert not win.get("writes")
-            # request event first, then the refusal
-            sp._on_request(req("http://h/api/events?a=1", b'{"q":"fuzzlab"}'))
-            sp._window_refusal("POST", "http://h/api/events?a=1", False, context=ctx)
-            assert win["writes"] == 1
-            # the refusal first, then the request event
-            sp._window_refusal("POST", "http://h/api/events?a=2", False, context=ctx)
-            assert win["writes"] == 1
-            sp._on_request(req("http://h/api/events?a=2", b'{"q":"fuzzlab"}'))
+            assert not win.get("writes") and not win.get("tainted_writes")
+            # carrying the value in its body, on a baseline endpoint: tainted
+            refuse(req("http://h/api/events?a=1", b'{"q":"fuzzlab"}'))
+            assert not win.get("writes") and win["tainted_writes"] == 1
+            # per request, not per URL: an untainted write, then a tainted one, to one
+            # non-baseline URL -- the first still counts
+            refuse(req("http://h/graphql", b'{"op":"mutate"}'))
+            refuse(req("http://h/graphql", b'{"q":"fuzzlab"}'))
+            assert win["writes"] == 1 and win["tainted_writes"] == 2
+            # a whole word only: "fuzzlabber" is not the value
+            refuse(req("http://h/api/other", b'{"q":"fuzzlabber"}'))
             assert win["writes"] == 2
             # in the URL (percent-encoded), and in a WebSocket message
-            sp._window_refusal("POST", "http://h/api/events?x=%66uzzlab", False,
-                               context=ctx)
+            refuse(req("http://h/api/x?x=%66uzzlab"))
             sp._note_ws_drop("ws://h/socket.io/?EIO=4", '42["search","fuzzlab"]')
             sp._note_ws_drop("ws://h/socket.io/?EIO=4", b'42["search","fuzzlab"]')
-            assert win["writes"] == 5
+            assert win["writes"] == 2 and win["tainted_writes"] == 5
+            # D74 review M4: a DELETE, or a tunnelled one, counts whatever it carries
+            refuse(req("http://h/api/item?id=fuzzlab", method="DELETE"))
+            refuse(req("http://h/api/t", b'{"id":"fuzzlab"}',
+                       headers={"X-HTTP-Method-Override": "DELETE"}))
+            refuse(req("http://h/api/t2", b"_method=DELETE&id=fuzzlab",
+                       headers={"content-type": "application/x-www-form-urlencoded"}))
+            assert win["writes"] == 5 and win["tainted_writes"] == 5
+        assert sp.spa_counts["spa_query_tainted_writes"] == 5
     finally:
         sp.storage.close()
 
@@ -1817,8 +1849,9 @@ def test_a_transport_control_packet_is_baseline_even_when_the_load_saw_none(tmp_
     none in its route's baseline. An engine.io control packet on a transport WebSocket
     (ping ``2``, pong ``3``, ``2probe``, a bare socket.io connect ``40``) that the bare
     route's load never sent is blocked but is not a write. A socket.io event the query
-    causes (``42[...]``, with or without the filler), an auth connect, a message with no
-    text, a polling POST outside the baseline and a non-transport write all are."""
+    causes without the filler (``42[...]``), an auth connect, a message with no text, a
+    polling POST outside the baseline and a non-transport write all are. One carrying
+    the filler is tainted (D74): never a write."""
     sp = _requests_spider(tmp_path)
     ws = "ws://h/socket.io/?EIO=4&transport=websocket"
     try:
@@ -1831,16 +1864,17 @@ def test_a_transport_control_packet_is_baseline_even_when_the_load_saw_none(tmp_
                 sp._note_ws_drop(ws, packet)
             assert not win.get("writes")
             assert sp.spa_counts["spa_query_baseline_writes"] == 5
-            sp._note_ws_drop(ws, '42["search","fuzzlab"]')            # B2: the filler
+            sp._note_ws_drop(ws, '42["search","fuzzlab"]')    # the filler: D74, tainted
+            assert not win.get("writes") and win["tainted_writes"] == 1
             sp._note_ws_drop(ws, '42["joinAdminRoom"]')               # caused, untainted
             sp._note_ws_drop(ws, '40{"token":"abc"}')                 # an auth connect
             sp._note_ws_drop(ws)                                       # no text
-            assert win["writes"] == 4
+            assert win["writes"] == 3
             sp._window_refusal("POST", "http://h/engine.io/?EIO=4&transport=polling&t=x",
                                False, context=ctx)                    # body not seen
             sp._window_refusal("POST", "http://h/api/rt-socket", False, context=ctx)
             sp._note_ws_drop("ws://h/live", "2")                       # not a transport
-            assert win["writes"] == 7
+            assert win["writes"] == 6
             assert "http://h/engine.io/?EIO=4&transport=polling&t=x" in win["blocked"]
     finally:
         sp.storage.close()

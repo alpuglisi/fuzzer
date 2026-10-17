@@ -20,6 +20,39 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — M6's browser guard has no method rule: a page's own DELETE is sent (open)
+- **Symptom:** found by the D74 design review, by reading the code, not reproduced.
+  `browserexec._in_browser` calls `guard_page` without a `method_refusal`. A fuzzed
+  page's own DELETE (or tunnelled DELETE) therefore reaches the lab server. The
+  crawler's "DELETE refused" (D72) is the crawler's own `_method_refusal`.
+- **Root cause:** not investigated; recorded so D74 does not widen.
+- **Remediation:** none yet. D74 keeps a seed whose load sent a DELETE a page, so M6
+  never loads it from the crawl. A crawled link whose load deletes is still imported.
+- **Status:** Open.
+
+## 2026-10-17 — D73 (CC-CRAWL-0047): six gaps found by the verification round (fixed)
+- **Symptom:** the verification round of 1ca0341, by reading the code:
+  - (1) a POST picker redirecting to `/cart.php?added=<n>` made progress every time,
+    so up to 500 POSTs were possible, not six;
+  - (2) account words were never applied to a picker, because the rule returns early
+    without a password control;
+  - (3) a destructive button label was not checked;
+  - (4) a "Save" picker that re-renders itself lost its `settings` verdict (CC-CRAWL-0047
+    M1), and the importer had no other way to refuse it;
+  - (5) the transaction check on redirect targets was neither built nor declined;
+  - (6) the bWAPP live crawl still named the picker.
+- **Root cause:** (1) progress was judged by full URL; (2) the token check sat behind
+  the password precondition; (3) only the setter and transaction rules read the label;
+  (4) the button was not stored, so the shared rule had nothing to read.
+- **Remediation (CC-CRAWL-0048):** progress by path for POST pickers;
+  `post_picker_extras` with account words and destructive labels; the button stored
+  and judged by the importer; the redirect-target rule declined with its reason (D72);
+  the live test runs flag-less.
+- **Regression check:** `tests/test_d73_generic_pickers.py`; two mutation checks.
+- **Scope:** crawl and import of POST selector forms. 1ca0341 was pushed to the
+  development branch only, and no lab run used it.
+- **Status:** Fixed.
+
 ## 2026-10-17 — Crawler option 4(a): picker answers defeated settings detection; a Latin-1 answer crashed the browser path (fixed)
 - **Symptom:** the independent review of 4a60859 reproduced both on a loopback server.
   - (M1) A named POST picker that re-renders its own page (a settings form, no cookie) was walked through all 8 options with verdict `navigation`, on both engines. Before 4a60859 it sent 1 POST.
@@ -69,6 +102,7 @@ Format per entry:
 - **Remediation:** none yet. This is a security event (a destructive URL requested by the tool) in an existing control (BUG-0111 / NFR-CRAWL-safe), so it is formal CAPA (QUALITY_POLICY §4). It needs a `docs/bugs/BUG-NNNN` report and the owner's scheduling; it is recorded here, not fixed inside the survey change.
 - **Update (D72, 2026-10-16):** a GET to a destructive URL is no longer refused (D72), so the escape as reproduced (a same-origin `/logout.php` navigation) is now allowed by design. The M6 tests now navigate to a second, **off-origin** server. Under the same load (4 CPU-bound loops, `-n 8`, the `m6` tests twice over), 8 rounds of 8 runs passed, and nothing reached that server. The teardown gap that let a same-origin request through is still unexplained. Whether a same-origin **write** started during teardown can pass is not shown.
 - **Status:** Open (narrowed: the same-origin write case; formal CAPA still to be scheduled by the owner).
+- **Owner (2026-10-17):** "I dont think we need to investigate the m6 gap unless we return to that implementation": no CAPA is scheduled. It is reopened if M6's teardown is changed.
 
 ## 2026-10-16 — tests/test_web_ml_context.py: a run switch is judged after a fixed 800 ms (open)
 - **Symptom (second full run, 388d073):** this test failed again, and so did `test_choosing_a_run_fetches_and_shows_that_runs_numbers`. That test read a partly rendered panel 800 ms after the switch, the same fixed wait. It passes alone. The cause is inferred, not timed.

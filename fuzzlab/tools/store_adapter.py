@@ -343,16 +343,31 @@ def credential_change_rule(passwords, action_url: str, *, submitters=(), hidden=
         hit = next((sub for sub in _CHANGE_SUBSTRINGS if sub in name.lower()), None)
         if hit:
             return f"credential-change {what} ({field} {name!r} has {hit!r})"
+    hit = account_reason(action_url, submitters=submitters, hidden=hidden, what=what)
+    if hit:
+        return hit
+    for name in hidden:
+        if _object_selector(name):
+            return f"credential-change {what} (hidden object selector {name!r})"
+    return None
+
+
+def account_reason(action_url: str, *, submitters=(), hidden=(),
+                   what: str = "form") -> str | None:
+    """The account-management half of `credential_change_rule`: an account or change
+    token (`_CHANGE_TOKENS`) in the action path, a submitter text or a hidden field's
+    name. Used alone for a POST picker, which has no password control (D73, SP-38)."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.redaction import name_tokens
     texts = [("action", urlsplit(action_url).path)]
     texts += [("submitter", t) for t in submitters]
     texts += [("hidden field", n) for n in hidden]
     for where, text in texts:
-        hit = next((t for t in name_tokens(text or "") if t in _CHANGE_TOKENS), None)
+        hit = next((t for t in name_tokens(text or "") if t.lower() in _CHANGE_TOKENS),
+                   None)
         if hit:
             return f"credential-change {what} ({where} has {hit!r})"
-    for name in hidden:
-        if _object_selector(name):
-            return f"credential-change {what} (hidden object selector {name!r})"
     return None
 
 
@@ -402,6 +417,14 @@ def form_skip_reason(form: dict) -> str | None:
             return f"POST selector named {select!r}: too short to tell it from a setting"
         if form.get("verdict") == VERDICT_SETTINGS:
             return "POST selector the crawler saw act as a settings form"
+        if "submitter" in form:
+            # CC-CRAWL-0048 (D73 review round 2, M4): the crawler's own POST-picker
+            # checks on its button, transactions and account words, one rule (SP-38);
+            # a spider DB from before the column has no submitter and skips them
+            from fuzzlab.tools.formnav import post_picker_extras
+            why = post_picker_extras(form)
+            if why:
+                return f"POST selector: {why}"
     credentials = sendpolicy.enforced(sendpolicy.CREDENTIAL_CHANGES)    # D71
     reason = credential_change_reason(form) if credentials else None
     if reason:
@@ -428,6 +451,11 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
     except sqlite3.Error:
         return                                   # an older spider DB: no forms
     try:
+        submitters = [r[0] for r in src.execute(
+            "SELECT submitter FROM discovered_forms ORDER BY rowid").fetchall()]
+    except sqlite3.Error:
+        submitters = [None] * len(rows)          # before CC-CRAWL-0048: no column
+    try:
         verdicts = dict(src.execute("SELECT sig, verdict FROM selector_verdicts").fetchall())
     except sqlite3.Error:
         verdicts = {}                            # a spider DB from before FR-CRAWL-10
@@ -437,13 +465,15 @@ def _import_forms(src, store: Store, run_id: int, counts: dict) -> None:
     counts.setdefault("form_skipped", 0)
     counts.setdefault("form_duplicate_selector", 0)
     seen_selectors: set[tuple] = set()
-    for row in rows:
+    for row, submitter in zip(rows, submitters):
         form = {"action_url": row["action_url"], "method": row["method"] or "GET",
                 "enctype": (row["enctype"] or "").lower(),
                 "entries": [tuple(e) for e in json.loads(row["entries"] or "[]")],
                 "controls": [tuple(c) for c in json.loads(row["controls"] or "[]")],
                 "selector": bool(row["selector"]),
                 "options": json.loads(row["options"] or "[]")}
+        if submitter is not None:
+            form["submitter"] = json.loads(submitter)
         if form["selector"]:
             form["verdict"] = verdicts.get(signature_key(form))
         if form_skip_reason(form):

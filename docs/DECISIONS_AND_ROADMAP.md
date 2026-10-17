@@ -585,6 +585,38 @@ answer is read as the chosen page, CC-CRAWL-0045).
   - The web launcher cannot yet express "GET pickers only" (BUG-0400: an empty value
     is dropped); it offers off, named, or the default.
 
+### D74 — A seed's write that carries our own value no longer keeps it from being fuzzed (owner, 2026-10-17)
+
+**The owner's decision:** "no it shouldn't be considered a write. This is an edge case,
+we are using non destructive payloads, and an application acting on or storing a
+script is the exact thing we are looking for" (question 2: Juice Shop's
+`verifyLocalXssChallenge` socket message, which carries the search text).
+
+- **Built (CC-CRAWL-0049), after an independent pre-implementation review:**
+  - A write a seed's window blocks is judged on its own request: its URL, a
+    WebSocket message's text, then its body and headers (the same request object,
+    never another to the same URL).
+  - One that carries the seed's value as a whole word is counted
+    `spa_query_tainted_writes` and keeps no seed a page.
+  - A DELETE, or a POST that tunnels one (`X-HTTP-Method-Override`, `_method=DELETE`),
+    always counts. An untainted, non-baseline write still counts, unchanged.
+  - A seed promoted past a tainted write keeps none of its forms, because the fuzzer
+    would send its whole corpus to such a form over HTTP.
+- **Kept:** the window still blocks every write during the crawl, and probes are
+  unchanged: a name evidenced only by a blocked request is not kept.
+- **Stated consequences:**
+  - M6 loads such a seed with its sentinel payloads, and the app's own write carries
+    them to the server. Payloads persist in lab state, writes land in the operator's
+    account, and on Juice Shop the challenge is solved. Reset the lab after a run, as
+    D72 says.
+  - The gain is DOM-XSS points on these routes; no mechanism yet detects the stored
+    effect.
+  - The seed value is still the constant filler. A stale echo of it would be taken as
+    taint: the review's fresh-token proposal was not built, and that is the owner's
+    call.
+- **Not decided:** whether an untainted query-caused write should stop demoting too (put
+  to the owner).
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

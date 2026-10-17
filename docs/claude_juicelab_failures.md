@@ -884,3 +884,16 @@ Juice Shop lab is complete.
   feeds (here, the settings brake) is tested through the real callback, not a stub of
   its answer.
 
+### F-067 — D73's stated bound ("up to six times") was false when written
+- **What:** in D73 and CC-CRAWL-0047 I wrote that a state-writing picker is submitted
+  at most six times. The verification round found it false: a POST picker that
+  redirects to `/cart.php?added=<n>` counted every option as a new page. I also
+  claimed "account changes" were refused when the account-word rule never ran without
+  a password control.
+- **Evidence:** the verification-round report; ERROR_LOG 2026-10-17.
+- **Impact:** a safety claim in a decision record overstated what the code did, for
+  one pushed commit (1ca0341); no run used it.
+- **Status:** fixed in CC-CRAWL-0048. Rule I follow from now on: a bound or refusal
+  stated in a decision is backed by a test that tries to exceed it with the shape it
+  names.
+

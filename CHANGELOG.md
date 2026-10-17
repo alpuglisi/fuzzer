@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (D74: a page that sends our own value to its server is fuzzed)
+- **What (CC-CRAWL-0049):** a search-style page whose load sends our test value to its own server (Juice Shop's score-tracker message) is now fuzzed, not set aside. Each blocked write is judged on its own request. A DELETE, or a write that doesn't carry our value, still sets the page aside, and such a page's forms are not kept. Why: the owner's decision D74. An app acting on our value is what the fuzzer looks for.
+- **What (defect fix, CC-CRAWL-0048):** the second review of D73 found six gaps, now fixed. The stop limit counts by page path; account words and destructive button labels are refused; and the importer judges a stored dropdown's button the same way (F-067).
+
 ## 2026-10-17 (D73: a generic run goes through page pickers)
 - **What (CC-CRAWL-0047):** the crawler's default now goes through dropdown-and-button page pickers without the operator naming them. POST pickers are followed only when the start URL is loopback (a lab). Each must pass one rule, shared with the importer: no settings, destructive, transaction or account picker, and no "Save"/"Set"/"Apply" button. Five answers in a row that add nothing stop a picker. `--no-follow-selector-forms` turns it off. Why: the owner's decision D73. bWAPP's pages are all behind such a picker; with the picker named, a run confirmed 41/55 (was 0/55).
 

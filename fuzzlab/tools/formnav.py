@@ -121,40 +121,57 @@ MIN_JUDGEABLE_SELECT_NAME = 3
 #: A submit button that says one of these sets something (D73 review M4): an unnamed
 #: POST picker submitted by it is a settings form (bWAPP's security picker says "Set").
 SETTER_WORDS = frozenset({"set", "save", "apply", "update", "change", "switch",
-                          "select", "choose", "assign", "move"})
+                          "assign"})
 
 
-def unnamed_post_refusal(record: dict) -> str | None:
-    """Why a POST picker the operator did not name must never be submitted (D73), or
-    None. The importer's own rule for a POST form first (`store_adapter.form_skip_reason`
-    without a verdict: multipart, settings controls, a select too short to judge,
-    credential and account changes, a destructive action or entry, hidden ones
-    included), then the transaction rule on the action, the entries and the submit
-    button, a submit button that sets something or is missing, and a button that sends
-    the form elsewhere (``formaction``...). Option labels are not judged by the
+def post_picker_extras(record: dict) -> str | None:
+    """What a POST picker is refused for beyond the importer's POST-form rule (SP-38;
+    the importer applies it too, CC-CRAWL-0048): a missing or disabled submit button, a
+    button that sends the form elsewhere (``formaction``...), a button that sets
+    something (`SETTER_WORDS`) or reads destructive, the transaction rule on the
+    action, the entries and the button, and the account words (`_CHANGE_TOKENS`) on the
+    action path, the button and the hidden names. Option labels are not judged by the
     transaction rule: they name the page chosen, not what the submission does."""
-    from fuzzlab.core.urls import transaction_reason
-    from fuzzlab.tools.store_adapter import form_skip_reason
-    reason = form_skip_reason({**record, "verdict": None})
-    if reason:
-        return reason
+    from fuzzlab.core.urls import text_destructive_reason, transaction_reason
+    from fuzzlab.tools.store_adapter import account_reason
     sub = record.get("submitter")
     if not sub:
         return "no enabled submit button"
     if sub.get("overrides"):
         return f"submit button overrides {', '.join(sub['overrides'])}"
-    texts = [record["action_url"], sub.get("name"), sub.get("value"), sub.get("label")]
+    button = [sub.get("name"), sub.get("value"), sub.get("label")]
+    for text in button:
+        word = next((t for t in (x.lower() for x in name_tokens(text or ""))
+                     if t in SETTER_WORDS), None)
+        if word:
+            return f"submit button sets something ({word!r})"
+        why = sendpolicy.destructive(text_destructive_reason(text))
+        if why:
+            return f"submit button is destructive ({why!r})"
+    texts = [record["action_url"], *button]
     texts += [t for e in record.get("entries") or () for t in e]
     for text in texts:
         why = sendpolicy.transaction(transaction_reason(text))
         if why:
             return f"transaction ({why!r})"
-    for text in (sub.get("label"), sub.get("value"), sub.get("name")):
-        word = next((t for t in (x.lower() for x in name_tokens(text or ""))
-                     if t in SETTER_WORDS), None)
-        if word:
-            return f"submit button sets something ({word!r})"
+    if sendpolicy.enforced(sendpolicy.CREDENTIAL_CHANGES):
+        kinds = dict(tuple(c) for c in record.get("controls") or ())
+        why = account_reason(record["action_url"], submitters=[t for t in button if t],
+                             hidden=[n for n, k in kinds.items() if k == "hidden"],
+                             what="POST picker")
+        if why:
+            return why
     return None
+
+
+def unnamed_post_refusal(record: dict) -> str | None:
+    """Why a POST picker the operator did not name must never be submitted (D73), or
+    None: the importer's own rule for a POST form (`store_adapter.form_skip_reason`
+    without a verdict: multipart, settings controls, a select too short to judge,
+    credential changes, a destructive action or entry, hidden ones included), then
+    `post_picker_extras`."""
+    from fuzzlab.tools.store_adapter import form_skip_reason
+    return form_skip_reason({**record, "verdict": None}) or post_picker_extras(record)
 
 
 def refusal(record: dict, named, allow_get: bool,
@@ -231,6 +248,7 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
     select = record["options"][0][0]
     own = {url_key(record["page_url"]), url_key(record["action_url"])}
     found: list[str] = []
+    seen_keys: set[str] = set()
     pages = 0
     stall = 0
     self_only = True        # every answer of the current stall redirected to the form
@@ -270,7 +288,12 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
                     f"stopped")
                 break
             to_self = url_key(target) in own
-            if not to_self and target not in found:
+            # D73 review round 2 (M1): a POST picker's progress is a new path, so a PRG
+            # writer redirecting to /cart.php?added=<n> stalls; a GET picker's (a read)
+            # is a new URL, as before
+            key = url_key(target) if record["method"] == "POST" else target
+            if not to_self and key not in seen_keys:
+                seen_keys.add(key)
                 found.append(target)
                 progress = True
         if progress:

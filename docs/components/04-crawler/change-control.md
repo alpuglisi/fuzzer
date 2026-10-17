@@ -3,6 +3,95 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0049 — D74: a seed's write that carries its own value no longer keeps it a page (2026-10-17)
+- Goal / acceptance: the owner's D74. Juice Shop's six query seeds were demoted only
+  by `verifyLocalXssChallenge` messages carrying the seed value; such a write must not
+  demote. Acceptance: the tests below, the mutation checks, and a Juice Shop run where
+  those seeds are points.
+- Pre-implementation review (independent, 2026-10-17): five must-fixes.
+  - Taken:
+    - (1) taint judged per request, not per URL;
+    - (3) a promoted seed past a tainted write keeps no forms;
+    - (4) a DELETE, or a tunnelled one, always counts;
+    - (5) the docs and counters.
+  - Partly taken: (2). The match is now word-bounded, but a fresh token per seed load
+    was not built. It would change how a seed is loaded, stored and deduplicated in
+    many places. The risk it closes (a stale echo of the filler taken as taint) is
+    small in a generic run: the reveal and seed windows block every write, and SPA
+    forms are submitted only with `--submit-spa-forms`. Put to the owner.
+  - Optional notes not taken: batched engine.io polling packets are judged as one body;
+    a self-echo of the document URL is taken as taint; the counter mixes seed and probe
+    windows.
+- Change (`tools/spider.py`):
+  - `_count_query_write` returns and keeps its kind (`delete`, `tainted`, `baseline`,
+    `write`) and judges taint with `_carries_word` (`spa._bounded_hit`).
+  - `_tally_query_write` keeps the counts.
+  - `_judge_blocked_body` (called from `_note_window_blocked` on the same request
+    object) reclassifies that one count on the body, or as a DELETE (`_delete_tunnel`).
+  - The URL-keyed `_note_tainted` and the `tainted` set are removed.
+  - `_after_query_window` withholds a promoted seed's forms after a tainted write
+    (`spa_query_forms_withheld`).
+  - `_recheck_query_session` also runs after tainted writes.
+  - New counters and a summary line.
+- Impact (other components / consumers / project): importer (CC-AUD-0049) and M6
+  (CC-FUZZ-0094): more fragment points, whose app writes M6 now sends.
+- Risk (class; consequence and exposure; mitigation): high (what M6 sends).
+  - Consequence: the app's own write, carrying M6's sentinel payloads, reaches the lab
+    server.
+  - Exposure: lab only.
+  - Mitigation: DELETE and tunnels still demote; untainted writes still demote; forms
+    are withheld.
+- Verification / review:
+  - `tests/test_spa_query.py`: five tests rewritten for D74 (renamed in FR-CRAWL-17's
+    `Enforced by:` line). The fixture gains `#/counter` (untainted), `#/remover`
+    (DELETE), `#/tunnel` (override) and `#/relay` (relays the value and renders a
+    form). `BaselineSpa`'s poster POST no longer carries the value, so B1 keeps its
+    coverage. The test spy now copies `tainted_writes`.
+  - 117 passed.
+  - Mutation checks: the tainted excusal removed (3 fail), the body judgement removed
+    (4), the DELETE rule removed (2), the forms withholding removed (2).
+- Deliverables:
+  - [x] code, tests — done
+  - [x] D74; FR-CRAWL-17 and NFR-CRAWL-safe superseded in place; auditor
+    requirements; ARCHITECTURE
+- Rollback / recovery: revert.
+- Effectiveness: pending a Juice Shop run (the six seeds promoted; confirmed cases).
+
+### CC-CRAWL-0048 — D73 review round 2: a POST picker's progress is a new path; account words and destructive labels; the importer judges the stored button (defect) (2026-10-17)
+- Goal / acceptance: the verification round of CC-CRAWL-0047 found six gaps (ERROR_LOG
+  2026-10-17).
+- Change:
+  - `tools/formnav.py`:
+    - a POST picker's redirect counts as progress only for a new `url_key`;
+    - `post_picker_extras` holds the button, transaction and account-word checks
+      (`store_adapter.account_reason`, the token half of `credential_change_rule`,
+      with no password needed) and a destructive button label;
+    - `SETTER_WORDS` loses `select`, `choose` and `move`, which also name navigation
+      buttons.
+  - `tools/spider.py`: `discovered_forms.submitter` (migrated with `ALTER TABLE`).
+  - `tools/store_adapter.py`: the importer reads the stored button and applies
+    `post_picker_extras` to a POST selector; a spider DB from before the column skips
+    them.
+  - `tests/test_external_labs_live.py`: the bWAPP crawl pass runs with no selector flag
+    (D73's acceptance), with `bwapp_level_problems` as its safety oracle.
+  - Not taken: a transaction check on a redirect target, which is visited as a GET
+    (D72).
+- Measured on the local bWAPP build (loopback):
+  - the `bug` picker ("Hack") and `sqli_13`'s `movie` picker ("Go") pass;
+  - `security_level` ("Set") is refused;
+  - bWAPP's redirects carry no query, so the path rule leaves its longest stall at 3.
+- Impact: as CC-CRAWL-0047.
+- Risk: high (a send gate), tightened only.
+- Verification / review: `tests/test_d73_generic_pickers.py` (25 tests).
+  - New: the PRG test (a GET picker still counts each URL), the account-word and
+    destructive-label cases, a "Save" picker that neither the crawl nor the importer
+    takes.
+  - Mutation checks: path progress removed (1 fails), importer extras removed (1).
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert with CC-CRAWL-0047.
+- Effectiveness: as CC-CRAWL-0047.
+
 ### CC-CRAWL-0047 — D73: a generic run goes through selector forms without naming them (2026-10-17)
 - Goal / acceptance: the owner's decision D73 ("a generic run go should through
   dropdowns like bWAPP's without you naming them").
@@ -64,7 +153,8 @@ Newest first.
   - Saved launches with no selector flag now follow pickers.
 - Risk (class; consequence and exposure; mitigation): high (a send gate).
   - Consequence: a generic lab crawl POSTs to pickers, and a state-writing one is
-    submitted up to six times. A 200 answer that shows a new link every time is
+    submitted up to six times (true only after CC-CRAWL-0048: a PRG redirect with a
+    new query each time defeated the bound; F-067). A 200 answer that shows a new link every time is
     bounded only by `MAX_OPTIONS`.
   - Exposure: loopback labs only (a non-loopback start gives GET pickers).
   - Mitigation: the shared refusal rule, the cookie stop, the stall bound, the live

@@ -44,7 +44,11 @@ def _picker(action="/app/portal.php", select="bug", button="<button name='form_b
     (_picker(select="pg"), "too short"),
     (_picker(button="<button disabled>Go</button>"), "no enabled submit"),
     (_picker(button="<button formaction='/elsewhere'>Go</button>"), "overrides"),
-    (_picker(action="/app/reset.php"), "destructive"),
+    (_picker(action="/app/reset.php"), "reset"),          # account and destructive
+    # review round 2: account words with no password control, a destructive label
+    (_picker(action="/admin/users.php", select="user_id",
+             button="<button>Impersonate</button>"), "credential-change"),
+    (_picker(button="<button name='go' value='1'>Delete</button>"), "destructive"),
 ])
 def test_an_unnamed_post_picker_is_judged_by_the_importers_rule_and_more(html, word):
     why = formnav.refusal(_rec(html), formnav.ALL_SELECTS, True, lambda u: True)
@@ -88,6 +92,19 @@ def test_a_picker_that_redirects_to_one_page_stops_within_the_bound():
     assert found == ["http://127.0.0.1/app/cart.php"]
     assert len(app.sent) == 1 + formnav.MAX_SELF_REDIRECTS
     assert verdicts == ["navigation"]
+
+
+def test_a_post_picker_redirecting_to_one_path_with_a_new_query_stalls():
+    """Review round 2 (M1): a PRG writer whose every option redirects to
+    ``/cart.php?added=<n>`` is one page by path: six submissions, not 40. A GET picker
+    (a read) still counts each new URL."""
+    rec = _rec(_picker(n=40))
+    app = _App(lambda v: (302, {"Location": f"/app/cart.php?added={v}"}))
+    assert len(formnav.enumerate_form(rec, app.submit, lambda u: True)) == 1
+    assert len(app.sent) == 1 + formnav.MAX_SELF_REDIRECTS
+    get = _rec(_picker(n=12).replace("method='POST'", "method='GET'"))
+    app = _App(lambda v: (302, {"Location": f"/app/list.php?cat={v}"}))
+    assert len(formnav.enumerate_form(get, app.submit, lambda u: True)) == 12
 
 
 def test_self_redirects_after_a_find_stop_too():
@@ -160,6 +177,8 @@ _PAGE = ("<html>" + _picker() +
                  button="<button>Go</button>") +
          _picker(action="/app/cart.php", select="product", n=12,
                  button="<button>Add</button>") +
+         _picker(action="/app/prefs.php", select="colour",
+                 button="<button>Save</button>") +
          "<a href='/app/movies.php'>movies</a></html>")
 _MOVIES = ("<html><form action='/app/movies.php' method='POST'><select name='movie'>"
            + "".join(f"<option value='{i}'>Film {i}</option>" for i in range(8))
@@ -238,7 +257,8 @@ def test_a_generic_crawl_goes_through_unnamed_pickers_and_refuses_the_rest(tmp_p
     verdicts = [r[0] for r in db.execute("SELECT verdict FROM selector_verdicts")]
     assert verdicts.count("settings") == 0                         # the movie picker kept
     c = sp.spa_counts
-    assert c["picker_forms_enumerated"] == 3 and c["picker_forms_refused"] == 2
+    assert c["picker_forms_enumerated"] == 3 and c["picker_forms_refused"] == 3
+    assert "/app/prefs.php" not in paths                           # a "Save" button
     assert c["picker_posts_sent"] == len(posts)
 
 
@@ -259,6 +279,9 @@ def test_the_movie_picker_is_still_imported_as_a_point(tmp_path):
         pts = injection_points_from_store(store, run, base, skipped=[])
     assert any(p.param == "movie" and p.method == "POST" for p in pts), \
         sorted((p.param, p.method) for p in pts)
+    # review round 2 (M4): the importer judges a stored POST picker's button as the
+    # crawler does (SP-38): the "Save" picker the crawl refused is never fuzzed either
+    assert not any(p.param == "colour" for p in pts)
 
 
 def test_a_lost_session_stops_selector_navigation(tmp_path):

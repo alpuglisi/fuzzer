@@ -456,11 +456,14 @@ def test_bwapp_fixture_scores_its_confirmed_rows(lab_factory, monkeypatch):
     gt, report, checked = _score(store, gt_dir)
     _assert_pass(gt, report, checked, BWAPP_GT_FLOOR, "gt")
 
-    # crawl pass (sub-path base for discovery, PA-0113), header points included
+    # crawl pass (sub-path base for discovery, PA-0113), header points included. D73
+    # (CC-CRAWL-0047/0048): no selector flag -- the generic default goes through the
+    # `bug` picker unnamed; the level log below is its safety oracle (the
+    # `security_level` picker must never be submitted)
     spider = lab.tmp / "bwapp_spider.db"
     res = lab.fuzzlab("crawl", "--start", f"{lab.base}/bWAPP/portal.php", "--engine",
                       "playwright", "--identity", lab.meta.identity,
-                      "--follow-selector-forms", "bug", "--no-reveal", "--db", str(spider))
+                      "--no-reveal", "--db", str(spider))
     assert res.returncode == 0, res.stderr[-3000:]
     store = lab.tmp / "bwapp_crawl.db"
     res = lab.fuzzlab("auto", "--base-url", f"{lab.base}/bWAPP/", "--spider-db", str(spider),

@@ -53,7 +53,8 @@ const routes = [{path:'track'}, {path:'search'}, {path:'score-board'}, {path:'po
   {path:'hop'}, {path:'away'}, {path:'login'}, {path:'logout'}, {path:'reflect'},
   {path:'ignore'}, {path:'echohref'}, {path:'save'}, {path:'show'}, {path:'memo'},
   {path:'fetcher'}, {path:'forward'}, {path:'pathy'}, {path:'beacon'}, {path:'autopost'},
-  {path:'wsping'}, {path:'txn'}, {path:'hopper'}];
+  {path:'wsping'}, {path:'txn'}, {path:'hopper'}, {path:'counter'}, {path:'remover'},
+  {path:'tunnel'}, {path:'relay'}];
 // read by the crawler's scan only (never called): Angular-style navigations and reads
 class Navigations{go(t){this.router.navigate([`/track`],{queryParams:{id:t}});
 this.router.navigate([`/search`],{queryParams:{q:t}});
@@ -69,6 +70,10 @@ this.router.navigate([`/autopost`],{queryParams:{go2:t}});
 this.router.navigate([`/wsping`],{queryParams:{ping:t}});
 this.router.navigate([`/txn`],{queryParams:{ref:t}});
 this.router.navigate([`/hopper`],{queryParams:{x:t}});
+this.router.navigate([`/counter`],{queryParams:{n:t}});
+this.router.navigate([`/remover`],{queryParams:{rid:t}});
+this.router.navigate([`/tunnel`],{queryParams:{tid:t}});
+this.router.navigate([`/relay`],{queryParams:{note:t}});
 this.router.navigate([`./rel`],{queryParams:{dot:t}})}
 read(){return[this.route.snapshot.queryParams.term,this.route.queryParams.subscribe(n=>n),
 this.route.snapshot.queryParamMap.get(`extra`),this.route.snapshot.queryParamMap.get(`next`)]}}
@@ -129,6 +134,27 @@ function render() {
   else if (name === 'hopper') { text('hopper');
     // a GET whose redirect hop the guard refuses: another origin (Y1)
     if (p.get('x')) fetch('/api/go').catch(() => {}); }
+  else if (name === 'counter') { text('counter');
+    // D74: a query-caused write that does NOT carry the value: still a write seed
+    if (p.get('n')) fetch('/api/counter', {method: 'POST', headers: {'Content-Type':
+      'application/json'}, body: JSON.stringify({event: 'opened'})}).catch(() => {}); }
+  else if (name === 'remover') { text('remover');
+    // D74 review M4: a DELETE carrying the value still counts
+    if (p.get('rid')) fetch('/api/item?id=' + p.get('rid'), {method: 'DELETE'})
+      .catch(() => {}); }
+  else if (name === 'tunnel') { text('tunnel');
+    // D74 review M4: a POST tunnelling a DELETE, carrying the value, still counts
+    if (p.get('tid')) fetch('/api/tunnel', {method: 'POST', headers: {
+      'X-HTTP-Method-Override': 'DELETE', 'Content-Type': 'application/json'},
+      body: JSON.stringify({id: p.get('tid')})}).catch(() => {}); }
+  else if (name === 'relay') { text('relay');
+    // D74: the app sends the value to its server (Juice Shop's verifyLocalXssChallenge
+    // shape, over HTTP) and renders a form with it: promoted, its form not kept
+    if (p.get('note')) { fetch('/api/relay', {method: 'POST', headers: {'Content-Type':
+      'application/json'}, body: JSON.stringify({note: p.get('note')})}).catch(() => {});
+      const f = document.createElement('form'); f.method = 'post'; f.action = '/api/relay';
+      const i = document.createElement('input'); i.name = 'note'; i.value = p.get('note');
+      f.appendChild(i); app.appendChild(f); } }
   else if (name === 'logout') mark('LOGOUT');
   else text(name || 'home');
 }
@@ -335,8 +361,9 @@ function render() {
   app.textContent = name || 'home';
   fetch('/rest/marker/' + (name || 'home') + (location.hash.indexOf('?') >= 0 ? '-query' : ''))
     .catch(() => {});
-  // B1: a query-caused POST to an endpoint of its own
-  if (name === 'poster' && p.get('msg')) post('/api/send', {msg: p.get('msg')});
+  // B1: a query-caused POST to an endpoint of its own; poster's does not carry the
+  // value (D74: only an untainted one keeps a seed a page), search's does
+  if (name === 'poster' && p.get('msg')) post('/api/send', {event: 'sent'});
   if (name === 'search' && q) post('/api/s', {q: q});
   // B2: a query-caused write to the shell's own endpoints
   if (name === 'find' && q) post('/api/events', {q: q});
@@ -354,8 +381,8 @@ _BASELINE_INDEX = _HASH_INDEX.replace("/main.js", "/b.js").replace(
 class BaselineSpa(_Lab):
     """The write baseline's holes (FR-CRAWL-17, D60). The crawl starts at ``/start``, a
     plain page whose links ``#/poster?msg=hi`` and ``#/search?q=foo`` are crawled before
-    any seed: their query-caused POSTs (``/api/send``, ``/api/s``) are never a baseline
-    (B1). The shell POSTs ``/api/events`` and pings a socket.io WebSocket on every load;
+    any seed: their query-caused POSTs (``/api/send``, untainted; ``/api/s``, carrying
+    ``q``) are never a baseline (B1). The shell POSTs ``/api/events`` and pings a socket.io WebSocket on every load;
     ``#/find?q=`` POSTs ``{"q": q}`` to ``/api/events`` and ``#/talk?q=`` emits ``q`` on
     the shell's socket: writes carrying the seed's filler on baseline endpoints (B2).
     ``#/calm?q=`` only renders ``q``."""
