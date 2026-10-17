@@ -687,6 +687,7 @@ class LocalSpider:
             "requests_blocked_skipped_no_body", "requests_blocked_skipped_query",
             "deletes_blocked",
             "forms_submitted", "forms_submitted_enter", "files_attached",
+            "forms_found_by_shape",
             "forms_refused", "forms_not_submittable", "forms_not_found_anonymous",
             "submissions_over_cap", "clicks_dispatched", "forms_label_changed",
             # forms phase 4 (FR-CRAWL-15/16; persisted in crawl_stats, PA-0110)
@@ -2127,7 +2128,7 @@ class LocalSpider:
             anonymous = spa.has_password(form) or (
                 self._authenticated and not explicit and spa.account_like(form, route))
             if anonymous:
-                self._submit_anonymously(page_url, sig, explicit)
+                self._submit_anonymously(page_url, sig, explicit, spa.form_shape(form))
                 continue
             if stale:
                 # an earlier submission (or G1's reload, W1) re-rendered the page: the
@@ -2426,7 +2427,7 @@ class LocalSpider:
         except PlaywrightError:
             return None
 
-    def _submit_anonymously(self, page_url, sig, explicit):
+    def _submit_anonymously(self, page_url, sig, explicit, shape=None):
         """Load the route in a fresh unauthenticated context (same browser, so the same
         launch arguments; the same guard and scope) and submit the form with this
         signature there. The context is closed afterwards."""
@@ -2446,6 +2447,16 @@ class LocalSpider:
                 self._settle(page, budget_ms=1000)
             forms = page.evaluate(spa.FORMS_JS, 20)
             match = next((f for f in forms if spa.form_signature(f) == sig), None)
+            if match is None and shape is not None:
+                # its labels may differ here (the crawl's own context switched the app's
+                # language; this one did not): the one form with the same controls --
+                # judged again by the gate, on its own labels
+                same = [f for f in forms if spa.form_shape(f) == shape]
+                if len(same) == 1 and spa.form_refusal(
+                        same[0], spa.route_of(page_url, self._last_base or self._app_base),
+                        named=self._submit_routes or None) is None:
+                    match = same[0]
+                    self.spa_counts["forms_found_by_shape"] += 1
             if match is None:
                 self.spa_counts["forms_not_found_anonymous"] += 1
                 logging.info(f"SPA form on {page_url} not found in an unauthenticated "

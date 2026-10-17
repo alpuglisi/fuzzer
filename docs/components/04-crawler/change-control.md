@@ -3,6 +3,38 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0053 — D76 measured: a password form is found again by its controls when its labels differ (defect found by the Juice Shop run) (2026-10-17)
+- Goal / acceptance: on Juice Shop (juice-d76-1, at 86ed050) the login and register
+  forms were "not found in an unauthenticated context". The crawl's own context had
+  switched the app's language, so buttons read "Daxil ol" and "Göndər" there and
+  English in the fresh context, and `spa.form_signature` includes the label.
+- Change:
+  - `tools/spa.py`: `form_shape` (the controls without the label).
+  - `tools/spider.py`: `_submit_anonymously(..., shape)` falls back to the one form
+    with the same controls, judged by `form_refusal` again on its own labels (counted
+    `forms_found_by_shape`).
+- Also measured:
+  - Feedback and complaint were submitted, captured (`POST /api/Feedbacks/`,
+    `/api/Complaints/`), imported (`comment`, `rating`, `captcha` as `json` points) and
+    probed 48 times.
+  - JUICE-0009 read "not reached" only because `scripts/funnel_report.py` matched
+    paths with the trailing slash; fixed, with a test.
+  - Its stored-XSS confirmation needs the page that renders the comment, a separate
+    gap.
+- Impact: crawl only.
+- Risk: medium (finds a form the gate already allowed). The gate is re-applied to the
+  found form.
+- Verification / review:
+  - `tests/test_d73_generic_pickers.py::test_a_password_form_whose_label_differs_unauthenticated_is_found_by_its_controls`
+    (real Chromium; fails without the fallback);
+  - `tests/test_funnel_report.py::test_a_trailing_slash_names_the_same_route`;
+  - the external-route catalogue row for `POST /api/Users` moved to a residual
+    (D76).
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert.
+- Effectiveness: pending the next Juice Shop run (login and register submitted).
+
 ### CC-CRAWL-0052 — D76 verification round: a registration POST goes to the user collection only; a revealed account-like form is refused (defect) (2026-10-17)
 - Goal / acceptance: the verification round of 86ed050 found two gaps (ERROR_LOG
   2026-10-17).

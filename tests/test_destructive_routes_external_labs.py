@@ -184,7 +184,10 @@ JUICE_ROUTES = [
           "body", lambda: _captured("POST", JUICE + "/api/Users", "application/json",
                                     {"email": "a@example.invalid", "password": "x",
                                      "passwordRepeat": "x", "securityAnswer": "y"},
-                                    JUICE + "/"), "refused"),
+                                    JUICE + "/"),
+          "residual: imported since D76 (owner: remove the registration block); its "
+          "passwords are isolated -- sent empty, never points -- and it is probed on an "
+          "isolated session (FR-FUZZ-44)"),
     Route("juice", "POST", JUICE + "/file-upload", "stores an uploaded complaint file",
           "body", lambda: _captured("POST", JUICE + "/file-upload",
                                     "multipart/form-data; boundary=x", None, JUICE + "/"),

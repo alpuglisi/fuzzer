@@ -293,3 +293,54 @@ def test_a_lost_session_stops_selector_navigation(tmp_path):
     gen.close()
     assert sp.selector_stopped and "session was lost" in sp.selector_stopped
     assert sp.spa_counts["picker_forms_enumerated"] == 1          # the first only
+
+
+# --- D76 follow-up (2026-10-17): a password form found again by its controls ---------
+_LANG_JS = r"""
+const routes = [{path: 'login'}];
+const az = !!window.localStorage.getItem('token');      // the crawl's own context only
+function render() {
+  const name = location.hash.replace(/^#!?\/?/, '');
+  const app = document.getElementById('app');
+  if (name !== 'login') { app.innerHTML = '<p>home</p>'; return; }
+  app.innerHTML = "<form id='lf'><input name='email' type='email'>" +
+    "<input name='password' type='password'><button type='submit'>" +
+    (az ? 'Daxil ol' : 'Log in') + "</button></form>";
+  document.getElementById('lf').onsubmit = e => { e.preventDefault();
+    fetch('/rest/user/login', {method: 'POST', headers: {'Content-Type':
+      'application/json'}, body: JSON.stringify({email: e.target.email.value,
+      password: e.target.password.value})}).catch(() => {}); };
+}
+window.addEventListener('hashchange', render);
+render();
+"""
+
+
+def test_a_password_form_whose_label_differs_unauthenticated_is_found_by_its_controls(
+        monkeypatch, tmp_path):
+    """Measured on Juice Shop (juice-d76-1): the crawl's own context had switched the
+    app's language, so the login form's button said "Daxil ol" there and "Log in" in the
+    fresh unauthenticated context, and the form was "not found" by its signature (which
+    includes the label). It is now found by its controls when exactly one form has them,
+    and judged by the gate again on its own labels."""
+    from fuzzlab.tools.spider import LocalSpider
+    from tests._spa_fixture import _HASH_INDEX, _Lab, chromium_or_skip, run_crawl
+    from tests.test_forms_phase4 import _LsManager
+    chromium_or_skip(monkeypatch)
+
+    class LangSpa(_Lab):
+        index = _HASH_INDEX.replace("/main.js", "/lang.js").replace(
+            "<a href='#/about'>About</a>", "<a href='#/login'>Login</a>")
+        script = ("/lang.js", _LANG_JS)
+    lab = LangSpa()
+    try:
+        sp = LocalSpider(lab.base, max_depth=2, db_name=str(tmp_path / "s.db"),
+                         engine="playwright", timeout_ms=10000, submit_spa_forms=[],
+                         session_manager=_LsManager(lab.base), identity="user")
+        run_crawl(sp)
+    finally:
+        lab.close()
+    posts = [r for r in lab.requests if r[0] == "POST" and r[1] == "/rest/user/login"]
+    assert posts, "the login form was never submitted"
+    assert sp.spa_counts["forms_found_by_shape"] == 1
+    assert sp.spa_counts["forms_not_found_anonymous"] == 0

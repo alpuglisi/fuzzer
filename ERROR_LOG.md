@@ -20,6 +20,19 @@ Format per entry:
 
 ---
 
+## 2026-10-17 — D76 measured: login/register not found unauthenticated; the funnel missed a trailing slash (fixed)
+- **Symptom:** Juice Shop at 86ed050 (juice-d76-1): 5/15, unchanged.
+  - The crawl log shows the login and register forms "not found in an unauthenticated context".
+  - JUICE-0009 (`/api/Feedbacks`) read "not reached", although `POST /api/Feedbacks/` was captured, imported and probed 48 times.
+  - `verify_change.py` failed `test_destructive_routes_external_labs.py[juice:POST:/api/Users]`, which expected the registration body refused.
+- **Root cause:**
+  - (1) The crawl's own context switched Juice Shop's language (buttons "Daxil ol", "Göndər"). `spa.form_signature` includes the button label, so the fresh context's English form never matched.
+  - (2) `funnel_report._key` kept the trailing slash.
+  - (3) The catalogue row encoded the block the owner removed (D76).
+- **Remediation (CC-CRAWL-0053):** the form is found again by its controls (one match, gate re-applied); `_key` strips a trailing slash; the catalogue row is a stated residual.
+- **Regression check:** the real-Chromium re-find test (fails without the fix); a funnel test.
+- **Status:** Fixed. Effectiveness pending the next Juice Shop run.
+
 ## 2026-10-17 — D76 (86ed050): a single-user path read as a registration; a revealed account form went out with the session (fixed)
 - **Symptom:** the verification round of 86ed050, by reading the code and calling the pure functions:
   - (1) `registration_shaped(["password", "passwordRepeat"], ["/api/users/me"], resource_ok=True)` was True. A password change at `/api/users/me` or `/api/users/alice` would have been imported as a registration;

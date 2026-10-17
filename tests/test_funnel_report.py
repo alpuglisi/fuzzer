@@ -115,3 +115,17 @@ def test_a_finding_takes_its_location_from_the_one_matching_candidate(tmp_path):
     assert (one["stage"], one["attribution"]) == ("confirmed", "exact")
     two = run(["query", "header"], "two")
     assert (two["stage"], two["attribution"]) == ("confirmed", "partial")
+
+
+def test_a_trailing_slash_names_the_same_route():
+    """2026-10-17: the app's own ``POST /api/Feedbacks/`` (Juice Shop's client) is the
+    answer key's ``/api/Feedbacks``; the root stays ``/``."""
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "funnel_report", Path(__file__).resolve().parents[1] / "scripts/funnel_report.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._key("http://h/api/Feedbacks/") == mod._key("http://h/api/Feedbacks")
+    assert mod._key("http://h/") == "/" and mod._key("http://h") == "/"
+    assert mod._key("http://h/#/search?q=1") == "/#/search"

@@ -332,6 +332,14 @@ def form_signature(form: dict) -> str:
     return json.dumps([sorted([n, k] for n, k in form["controls"]), form["button"]])
 
 
+def form_shape(form: dict) -> str:
+    """A form's controls (name, kind) without its button label: how a form is found
+    again in another context whose labels differ (a language switched in the crawl's
+    own context, 2026-10-17)."""
+    import json
+    return json.dumps(sorted([n, k] for n, k in form["controls"]))
+
+
 def _words(text: str) -> set[str]:
     return {t.lower() for t in name_tokens(text or "")}
 

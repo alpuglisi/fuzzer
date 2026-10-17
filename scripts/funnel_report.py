@@ -52,7 +52,9 @@ def _key(url: str) -> str:
     parts = urlsplit(url or "")
     if parts.fragment.startswith("/"):
         return "/#" + parts.fragment.split("?", 1)[0]
-    return parts.path or "/"
+    # a trailing slash names the same route (Express, Django with APPEND_SLASH...): the
+    # app's own `/api/Feedbacks/` is the answer key's `/api/Feedbacks` (2026-10-17)
+    return (parts.path or "/").rstrip("/") or "/"
 
 
 #: a store location -> the answer key's location family
