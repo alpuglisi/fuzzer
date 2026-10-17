@@ -3,6 +3,55 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0045 — Option 4(a): a picker answering 200 with HTML is read as the chosen page (2026-10-17)
+- Goal / acceptance: the owner chose survey option 4(a) ("When the crawler submits a
+  page picker and gets a normal page back, read that page instead of stopping",
+  2026-10-17). A selector form whose submission answers a cookie-less 2xx with an HTML
+  body is read as the chosen page: its in-scope links are queued as GET links (source
+  `form`), its forms are recorded, and enumeration goes on to the next option.
+  Acceptance: the tests below against a loopback server, with both engines, and a
+  mutation check.
+- Change:
+  - `tools/formnav.py`:
+    - `html_answer(status, headers)`: a 2xx answer whose media type is `text/html` or
+      `application/xhtml+xml`.
+    - `enumerate_form(..., on_page=None)`: `submit` may return `(status, headers,
+      html)`. With a reader, such an answer is passed to `on_page(action_url, html)`
+      (capped at `MAX_PAGE_CHARS`), which returns how many new links and forms it
+      found. An answer that adds nothing counts as a self-redirect, so five in a row,
+      before anything was found, still mark a settings form. A cookie still stops as a
+      settings form; without a reader, a non-HTML body or a non-2xx, it stops as before.
+      The verdict is `navigation` when a page was read.
+  - `tools/spider.py`:
+    - `_isolated_submit` returns the body of an HTML 2xx answer from the same response
+      (never a second request).
+    - `_read_picker_page` parses it without rendering. It honours `<base>`, queues
+      in-scope links that are not yet visited or queued, and records the page's forms
+      under the action URL. It does not enumerate them: the page has no URL to come back
+      to.
+    - New crawl-stats key `picker_pages_read`, and a summary line.
+- Impact (other components / consumers / project): crawl only. The importer sees the
+  recorded forms and the queued pages as before. A picker is still gated exactly as
+  in FR-CRAWL-8: off by default, a POST picker only when its select is named.
+- Premise checked (R2): bWAPP's `portal.php` answers `302` with a `Location` (`bug=13`
+  gives `sqli_1.php`), with no cookie. So this change does not touch bWAPP; its
+  generic-run blocker is option 4(b), which the owner has not chosen.
+- Risk (class; consequence and exposure; mitigation): medium (crawl behaviour). The
+  send gate is unchanged: the only new requests are further options of a picker that
+  was already allowed to be submitted. The cookie, settings-word and destructive
+  checks still apply before each submission, and the crawler's jar never receives a
+  response cookie.
+- Verification / review: `tests/test_picker_pages.py`: five unit tests and two crawls
+  of a loopback picker app (requests and real Chromium). With the reader disabled, five
+  of them fail (mutation check). Independent review and `verify_change.py` are below.
+- Deliverables:
+  - [x] code, tests — done
+- Rollback / recovery: revert (a 200 answer stops enumeration again).
+- Effectiveness: no change in the goal metric is expected. Selector navigation is off
+  in the generic command line (`--follow-selector-forms` is not passed), and bWAPP's
+  picker redirects anyway. The change matters for an app whose named or GET picker
+  renders the chosen page in its answer.
+
 ### CC-CRAWL-0044 — D72: a destructive-looking reveal click is made last, never in place (defect found by the Juice Shop measurement) (2026-10-16)
 - Goal / acceptance: a Logout menu item or a destructive-looking reveal target no
   longer ends the session before the rest of the crawl. It is clicked after every

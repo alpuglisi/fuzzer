@@ -561,6 +561,7 @@ class LocalSpider:
         #: count is of an effect that happened, e.g. a route page actually loaded).
         self.spa_counts = dict.fromkeys((
             "routes_found", "routes_visited", "pages_deferred",
+            "picker_pages_read",                # option 4(a): a picker's 200 answer
             "routes_skipped_parameterised", "scripts_scanned", "scripts_too_large",
             "scripts_over_page_cap", "transport_urls_skipped", "requests_captured",
             "requests_not_recorded", "requests_blocked_recorded",
@@ -1581,12 +1582,44 @@ class LocalSpider:
                 logging.info(f"selector form on {page} not submitted: {why}")
                 continue
             key = formnav.signature_key(record)
+            read: list = []
             for target in formnav.enumerate_form(
                     record, self._isolated_submit, self._in_scope,
-                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v)):
+                    on_verdict=lambda v, k=key: self.storage.record_verdict(k, v),
+                    on_page=lambda action, html: self._read_picker_page(
+                        action, html, depth, read)):
                 if not self.storage.is_visited(target):    # formnav stops on a destructive one
                     more.append((target, depth + 1, 'form'))
+            more.extend(read)
         return more
+
+    def _read_picker_page(self, action_url, html, depth, out):
+        """Option 4(a): a picker's 200 HTML answer read as the chosen page -- never
+        rendered, never requested again. Its in-scope links go to ``out`` as
+        ``(url, depth + 1, 'form')``; its forms are recorded (not enumerated: the page
+        has no URL of its own to come back to). Returns how many links and forms were
+        new."""
+        from fuzzlab.core.forms import form_record
+        soup = BeautifulSoup(html, 'html.parser')
+        base_tag = soup.find('base', href=True)
+        base = urljoin(action_url, base_tag['href']) if base_tag else action_url
+        queued = {u for u, _d, _s in out}
+        new = 0
+        for a in soup.find_all('a', href=True):
+            link = self._crawl_url(urljoin(base, a['href']))
+            if (link in queued or not self._in_scope(link)
+                    or self.storage.is_visited(link)):
+                continue
+            queued.add(link)
+            out.append((link, depth + 1, 'form'))
+            new += 1
+        for form in soup.find_all('form'):
+            if self.storage.record_form(form_record(form, base)):
+                new += 1
+        self.spa_counts["picker_pages_read"] += 1
+        logging.info(f"selector answer from {action_url} read as a page: "
+                     f"{new} new link(s) and form(s)")
+        return new
 
     # ----- SPA routes (forms phase 3, FR-CRAWL-12) -----
     def _is_spa_page(self, url):
@@ -2600,9 +2633,11 @@ class LocalSpider:
     def _isolated_submit(self, method, action_url, entries):
         """Submit a selector form without following redirects, through a client that
         starts with a copy of the crawler's cookies and never writes a response cookie
-        back (reviewers A2/B-M1). Returns ``(status, headers)``."""
+        back (reviewers A2/B-M1). Returns ``(status, headers, html)``: ``html`` is the
+        body of a 2xx HTML answer (`formnav.html_answer`, option 4(a)), else None."""
         from urllib.parse import urlencode
         pairs = list(entries)
+        from fuzzlab.tools import formnav
         from fuzzlab.tools.navguard import checked_api_request
         checked_api_request(self._in_scope, action_url)          # BUG-0123
         if self.engine == "playwright" and self._pw is not None:
@@ -2628,7 +2663,10 @@ class LocalSpider:
                     resp = ctx.fetch(action_url.split("?")[0] + "?" + urlencode(pairs),
                                      method="GET", max_redirects=0,
                                      timeout=self.timeout_ms)
-                return resp.status, dict(resp.headers)
+                headers = dict(resp.headers)
+                # option 4(a): a 2xx HTML answer's body, read from this response
+                html = resp.text() if formnav.html_answer(resp.status, headers) else None
+                return resp.status, headers, html
             finally:
                 ctx.dispose()
         iso = requests.Session()
@@ -2640,7 +2678,9 @@ class LocalSpider:
         else:
             r = iso.get(action_url.split("?")[0], params=pairs, allow_redirects=False,
                         timeout=self.timeout_ms / 1000)
-        return r.status_code, dict(r.headers)
+        headers = dict(r.headers)
+        return r.status_code, headers, \
+            (r.text if formnav.html_answer(r.status_code, headers) else None)
 
     def _queue_xhr(self, current_url, href):
         """An XHR/fetch URL as a page to crawl, or None: socket.io / engine.io transport
@@ -2963,6 +3003,9 @@ class LocalSpider:
                 logging.info(f"Deferred {self.spa_counts['pages_deferred']} destructive-"
                              f"looking page(s) to the end of the crawl (D72: never "
                              f"skipped for their words).")
+            if self.spa_counts["picker_pages_read"]:
+                logging.info(f"Read {self.spa_counts['picker_pages_read']} selector-form "
+                             f"answer(s) as pages (the app answered 200, not a redirect).")
             if self.skipped_out_of_scope:
                 hosts = ", ".join(f"{h} x{n}" for h, n in
                                   sorted(self.skipped_out_of_scope.items()))

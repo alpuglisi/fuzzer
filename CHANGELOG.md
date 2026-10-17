@@ -4,6 +4,9 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-17 (option 4(a): picker pages that answer 200)
+- **What (CC-CRAWL-0045):** when the crawler submits a page picker (a dropdown plus a button) and the app answers with the page itself (200 HTML) rather than a redirect, it now reads that page: it queues the page's links, records its forms, and moves on to the next choice. Before, it stopped. Why: the owner chose survey option 4(a). bWAPP's picker redirects, so its score is unaffected; option 4(b) is still undecided.
+
 ## 2026-10-16 (D72: the page-visit word rules are to be removed)
 - **Measured (two repeated Juice Shop runs at 1fac294):** 5/15 confirmed in both (was 4/15; JUICE-0004 is new). bWAPP is unchanged at 0/55.
 - **What (defect fix, CC-CRAWL-0044):** a Logout or other destructive-looking reveal click is made last, not in place. Clicked early on Juice Shop, it ended the session and stopped every later reveal and query load: reveals fell from 42 to 2 (F-065).

@@ -51,6 +51,12 @@ fuzzer.
     governs navigation too, so a picker or option so named is no longer submitted.
     On bWAPP this refuses exactly the six option labels Phase 1 refused (measured over
     all 159 options of the local build).
+  - *(Amended in place, CC-CRAWL-0045, 2026-10-17, owner option 4(a).)* A cookie-less
+    2xx answer with an HTML body is the chosen page. It is read from that same
+    response, never requested again: its in-scope links are crawled as ordinary links
+    (source `form`) and its forms are recorded (not enumerated). Enumeration then
+    continues. An answer that adds no new link or form counts as a self-redirect.
+    Any other non-redirect still stops enumeration.
 - **FR-CRAWL-9 (landings and forms recorded, CC-CRAWL-0013)** A redirect's landing URL
   is recorded with its query (redacted). Every form seen is recorded in
   `discovered_forms` (redacted).

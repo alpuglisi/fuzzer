@@ -17,11 +17,18 @@ Submitting a form can change state, so the gate comes **before** any submission
 * every response must be a cookie-less 3xx to an in-scope, non-destructive URL, or
   enumeration of that form stops; a redirect back to the form's own page or action is
   skipped, and five of those in a row mark a settings form (stop);
+* option 4(a) (owner, 2026-10-17): a cookie-less 200 answer with an HTML body is the
+  chosen page itself (an app that renders it instead of redirecting). With an
+  ``on_page`` reader it is read as a page -- its links queued, its forms recorded --
+  and enumeration goes on; an answer that adds nothing new counts as a self-redirect,
+  so five in a row still mark a settings form. Without a reader, or with no HTML body,
+  a non-redirect still stops;
 * submissions go through an isolated client (the caller's ``submit``), so a response
   cookie never reaches the crawler.
 
 The HTTP itself is the caller's ``submit(method, action_url, entries) -> (status,
-headers)``; this module is pure and testable.
+headers)`` or ``(status, headers, html)`` (``html`` the body of a 2xx HTML answer, else
+None); this module is pure and testable.
 """
 
 from __future__ import annotations
@@ -53,6 +60,16 @@ SETTINGS_PAIRS = frozenset({("per", "page")})
 MAX_SELF_REDIRECTS = 5
 #: At most this many options of one form are submitted.
 MAX_OPTIONS = 500
+#: A 2xx answer's body is read up to this many characters (option 4(a)).
+MAX_PAGE_CHARS = 2_000_000
+
+
+def html_answer(status: int, headers: dict | None) -> bool:
+    """A 2xx answer whose body is an HTML page (option 4(a)): the caller's ``submit``
+    reads the body only for these."""
+    low = {k.lower(): v for k, v in (headers or {}).items()}
+    media = (low.get("content-type") or "").split(";")[0].strip().lower()
+    return 200 <= status < 300 and media in ("text/html", "application/xhtml+xml")
 
 
 def settings_word(text: str) -> str | None:
@@ -126,17 +143,23 @@ VERDICT_SETTINGS = "settings"
 
 def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
                    log: Callable[[str], None] = logging.info,
-                   on_verdict: Callable[[str], None] | None = None) -> list[str]:
+                   on_verdict: Callable[[str], None] | None = None,
+                   on_page: Callable[[str, str], int] | None = None) -> list[str]:
     """Submit each allowed option of a gated selector form; return the in-scope,
     non-destructive URLs it redirects to (to crawl as ordinary GET links).
 
     ``on_verdict`` (forms phase 2) is told ``"settings"`` when enumeration stops on a
-    cookie or on the self-redirect run, else ``"navigation"`` when a redirect was found.
-    It only reports; what is submitted is unchanged."""
+    cookie or on the self-redirect run, else ``"navigation"`` when a redirect was found
+    or a page was read. It only reports; what is submitted is unchanged.
+
+    ``on_page(action_url, html)`` (option 4(a)) reads a cookie-less 2xx HTML answer as
+    the chosen page and returns how many new links and forms it found; zero counts as
+    a self-redirect."""
     base = FormEntries(tuple(e) for e in record["entries"])
     select = record["options"][0][0]
     own = {url_key(record["page_url"]), url_key(record["action_url"])}
     found: list[str] = []
+    pages = 0
     self_run = 0
     settings = False
     for _name, value, label in (record["options"] or [])[:MAX_OPTIONS]:
@@ -144,14 +167,31 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
         if why:
             log(f"selector {select!r}: skipped option {label!r} ({why})")
             continue
-        status, headers = submit(record["method"], record["action_url"],
-                                 base.replace(select, value))
+        answer = submit(record["method"], record["action_url"],
+                        base.replace(select, value))
+        status, headers = answer[0], answer[1]
+        html = answer[2] if len(answer) > 2 else None
         low = {k.lower(): v for k, v in (headers or {}).items()}
         location = low.get("location")
         if "set-cookie" in low:
             log(f"selector {select!r}: response set a cookie; stopped (settings form)")
             settings = True
             break
+        if on_page is not None and html and html_answer(status, headers) \
+                and not location:
+            # option 4(a): the chosen page itself, read from this answer -- never a
+            # second request
+            new = on_page(record["action_url"], html[:MAX_PAGE_CHARS])
+            if new:
+                pages += 1
+                self_run = 0
+                continue
+            self_run += 1
+            if self_run >= MAX_SELF_REDIRECTS and not (found or pages):
+                log(f"selector {select!r}: answers add nothing new; stopped (settings form)")
+                settings = True
+                break
+            continue
         if not (300 <= status < 400) or not location:
             log(f"selector {select!r}: non-redirect response {status}; stopped")
             break
@@ -161,7 +201,7 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
             break
         if url_key(target) in own:
             self_run += 1
-            if self_run >= MAX_SELF_REDIRECTS and not found:
+            if self_run >= MAX_SELF_REDIRECTS and not (found or pages):
                 log(f"selector {select!r}: redirects back to itself; stopped (settings form)")
                 settings = True
                 break
@@ -169,6 +209,6 @@ def enumerate_form(record: dict, submit, in_scope: Callable[[str], bool],
         self_run = 0
         if target not in found:
             found.append(target)
-    if on_verdict is not None and (settings or found):
+    if on_verdict is not None and (settings or found or pages):
         on_verdict(VERDICT_SETTINGS if settings else VERDICT_NAVIGATION)
     return found
