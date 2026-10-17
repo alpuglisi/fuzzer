@@ -42,6 +42,16 @@ Newest first.
   feature is on, so this is within its gate. A destructive-looking link on an answer page
   is queued and deferred like any link (D72). A destructive redirect target still stops
   the form.
+- Verification (2026-10-17):
+  - The review's verification round confirmed both fixes, and that the commit changes
+    nothing beyond them; its probes give 5 POSTs and `settings` on both engines.
+  - `verify_change.py --base 153f718` on b0dd74d: 74 files, 2292 passed, 0 failed, 4
+    skipped (labgen live-boot cases that are reproduced, unrelated), 13 xfailed. The
+    evidence key is b654264c094a.
+  - Residual, accepted: when the action is in another directory than its page, an
+    answer's relative links resolve to new paths. That first answer is then new and
+    the verdict is `navigation`, not `settings`. The form still stops within 6 POSTs,
+    and the importer treats `navigation` as it treated no verdict before 4(a).
 
 ### CC-CRAWL-0045 — Option 4(a): a picker answering 200 with HTML is read as the chosen page (2026-10-17)
 - Goal / acceptance: the owner chose survey option 4(a) ("When the crawler submits a
