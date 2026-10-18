@@ -21,6 +21,8 @@ Newest first.
     `tests/test_shared_primitives.py::test_a_guarded_page_is_closed_only_through_close_pages` — done
   - [x] BUG-0504, PA-0504, ERROR_LOG, SP-38, NFR-CRAWL-safe, CHANGELOG — done
 - Effectiveness: stress (M6 `/fire`, `-n 8`): before 18/80 leaked; after 0/160.
+- Verified: `verify_change --base 711bcdd` on 34ce24e: 79 files, 3104 passed, 0 failed,
+  5 skipped, 18 xfailed (covers CC-CRAWL-0038/0039/0040).
 
 ### CC-CRAWL-0039 — Write targets are never links; no subresource fetched twice (BUG-0503) (2026-10-18)
 - Change (`fuzzlab/core/linkextract.py`, `fuzzlab/tools/spider.py`): the extractor drops
