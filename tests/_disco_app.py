@@ -30,7 +30,10 @@ particular lab, built to exercise what static crawling cannot see:
   page that moves on under the explorer);
 * a "Delete account" control and a "Log out" control that must never be acted on;
 * an image from ``OTHER`` (another loopback port: out of scope) that must never be
-  fetched.
+  fetched;
+* resources only a harvest reaches (CC-CRAWL-0038): an image named only by a stylesheet
+  rule nothing matches, and a page named only by ``robots.txt``, whose button's request
+  happens only if that page is explored.
 """
 
 from __future__ import annotations
@@ -40,8 +43,17 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SHELL = b"""<!doctype html><html><head><title>Tracker</title></head>
+SHELL = b"""<!doctype html><html><head><title>Tracker</title>
+<link rel="stylesheet" href="/style.css"></head>
 <body><div id=root></div><img id=ext><script src="/app.js"></script></body></html>"""
+
+#: A rule for a selector nothing matches: the browser never fetches its image.
+STYLE = b".never-used { background: url(/img/unused.png) }"
+ROBOTS = b"User-agent: *\nDisallow: /hidden/report.html\n"
+#: Linked from robots.txt only; its button's request happens only if it is explored.
+HIDDEN = b"""<!doctype html><html><body><button id=go>Refresh report</button>
+<script>document.getElementById('go').addEventListener('click',
+  () => fetch('/api/hidden/click'));</script></body></html>"""
 
 HELP = b"""<!doctype html><html><body><p>Help</p><button id=b>Ok</button>
 <script>setTimeout(() => { location.href = '/'; }, 30);</script></body></html>"""
@@ -202,6 +214,16 @@ class DiscoApp:
                     return self._send(200, SHELL, "text/html; charset=utf-8")
                 if method == "GET" and path == "/help":
                     return self._send(200, HELP, "text/html; charset=utf-8")
+                if method == "GET" and path == "/style.css":
+                    return self._send(200, STYLE, "text/css")
+                if method == "GET" and path == "/robots.txt":
+                    return self._send(200, ROBOTS, "text/plain")
+                if method == "GET" and path == "/hidden/report.html":
+                    return self._send(200, HIDDEN, "text/html; charset=utf-8")
+                if method == "GET" and path == "/img/unused.png":
+                    return self._send(200, b"\x89PNG\r\n", "image/png")
+                if path == "/api/hidden/click":
+                    return self._send(200, {"ok": True})
                 if method == "GET" and path == "/app.js":
                     js = APP_JS.replace("__OTHER__", app.other).encode()
                     return self._send(200, js, "application/javascript")

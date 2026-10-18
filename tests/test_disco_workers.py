@@ -110,12 +110,15 @@ def test_one_worker_explores_the_same_graph_inline(monkeypatch):
     assert len({name for _, name in processed}) == 1        # inline: no extra threads
 
 
-def test_a_budget_stops_every_worker(monkeypatch):
-    graph = _tree(depth=6, fanout=4)                       # far more than the budget
-    ex, processed = _explorer(monkeypatch, graph, workers=3, max_states=10)
+def test_the_deadline_stops_every_worker(monkeypatch):
+    """The deadline ends the whole run (``max_states`` / ``max_actions`` end only
+    exploration, CC-CRAWL-0038)."""
+    graph = _tree(depth=6, fanout=4)                       # far more than the time allows
+    ex, processed = _explorer(monkeypatch, graph, workers=3, max_states=10_000,
+                              deadline_s=0.3)
     report = _run_bounded(ex)
-    assert report.budget_hit == "max_states" and report.states == 10
-    assert len(processed) <= 10
+    assert report.budget_hit == "deadline"
+    assert 0 < len(processed) < 5461
 
 
 def test_a_failing_worker_stops_the_run_and_its_exception_reaches_the_caller(monkeypatch):

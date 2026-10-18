@@ -167,7 +167,7 @@ def test_quiet_is_measured_from_the_action_not_the_last_request():
     ex.mark_activity()                              # the click
     assert ex.wait_quiet(Page()) is True
     assert sum(waited) >= 500
-    ex._on_request(None)                            # a request starts inside the wait...
+    ex._on_request(type("Req", (), {"url": "http://127.0.0.1:1/x"})())                            # a request starts inside the wait...
     waited.clear()
     clock["t"] += 0.1
     ex._on_done(None)                               # ...and ends: quiet from its end

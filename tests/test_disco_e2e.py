@@ -86,6 +86,17 @@ def test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once(discover
     assert report.chrome_skipped >= 1
 
 
+def test_the_harvest_loads_what_pages_and_known_files_link_and_explores_it(discovered):
+    """CC-CRAWL-0038: an image only a stylesheet names (the browser never fetches it),
+    robots.txt, and the page it names -- explored, so its button's request is made."""
+    paths = discovered["app"].paths()
+    for path in ("/img/unused.png", "/robots.txt", "/hidden/report.html",
+                 "/api/hidden/click"):
+        assert path in paths, path
+    report = discovered["report"]
+    assert report.harvest_loads >= 3 and report.harvest_states >= 1
+
+
 def test_destructive_controls_and_other_origins_are_never_reached(discovered):
     paths = discovered["app"].paths()
     assert "/api/account/remove" not in paths and "/logout" not in paths

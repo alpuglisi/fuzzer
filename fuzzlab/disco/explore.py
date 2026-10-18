@@ -52,6 +52,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urldefrag, urljoin
 
 from fuzzlab.core.redaction import redact_url
 from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
@@ -214,6 +215,11 @@ _FIELDS_JS = r"""
 _VALID_JS = """(e) => { e.blur(); return !e.checkValidity() ? 'invalid'
   : (e.getAttribute('aria-invalid') === 'true' ? 'aria-invalid' : 'valid'); }"""
 
+#: Response media whose body the harvest reads for links (an HTML document is read
+#: from the rendered page instead).
+_BODY_MEDIA = frozenset({"text/css", "application/javascript", "text/javascript",
+                         "text/plain", "application/xml", "text/xml"})
+
 
 @dataclass
 class Step:
@@ -293,6 +299,9 @@ class ExploreOptions:
     headless: bool = True
     #: Browsers exploring frontier states at once (`Explorer.run`); 1 is sequential.
     workers: int = 1
+    #: Loads of linked, never-requested in-scope URLs once the frontier is empty (the
+    #: harvest, `Explorer._load`); their documents become states outside `max_states`.
+    max_harvest: int = 500
 
 
 #: The most workers a run may ask for (each is a browser).
@@ -314,6 +323,10 @@ class ExploreReport:
     submissions_sent: int = 0
     chrome_skipped: int = 0
     captcha_submissions: int = 0              # of `submissions_sent`, with a CAPTCHA
+    #: the harvest: URLs found linked and never requested, loads made, states they gave
+    harvest_found: int = 0
+    harvest_loads: int = 0
+    harvest_states: int = 0
     errors: int = 0
     session_lost: int = 0
     aborted: int = 0
@@ -346,6 +359,11 @@ class _Shared:
         self.stop: str | None = None
         self.started = 0.0
         self.failure: BaseException | None = None
+        #: in-scope URLs some worker's browser requested, and the harvest queue: URLs a
+        #: page or response links that nothing requested yet (`Explorer._gather`)
+        self.requested: set[str] = set()
+        self.harvest: dict[str, None] = {}
+        self.bodies_read: set[str] = set()
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -467,6 +485,7 @@ class Explorer:
         self._last_change = 0.0
         self._ctx = None
         self._tag_headers: dict[str, str] = {}      # the guard reads it per request
+        self._responses: list = []                # in-scope responses since `_gather`
 
     def _clone(self) -> "Explorer":
         """Another worker of this run: the same configuration and `_shared` state."""
@@ -500,6 +519,7 @@ class Explorer:
             if authenticated else None,
             isolated_request=(lambda: pw.request.new_context()) if authenticated else None)
         ctx.on("request", self._on_request)
+        ctx.on("response", self._on_response)
         ctx.on("requestfinished", self._on_done)
         ctx.on("requestfailed", self._on_done)
         return ctx
@@ -520,8 +540,46 @@ class Explorer:
     def _on_request(self, req) -> None:
         self._inflight += 1
         self._last_change = self.clock()
+        if self._in_scope(req.url):
+            self._shared.requested.add(urldefrag(req.url)[0])
         if self._fill_values and not self._values_sent:
             self._values_sent = carries_value(req, self._fill_values)
+
+    def _on_response(self, resp) -> None:
+        if self._in_scope(resp.url):
+            self._responses.append(resp)          # read later, never in the handler
+
+    def _gather(self, page) -> None:
+        """Queue for the harvest what the page and its responses since the last call
+        link (`core.linkextract`): the rendered document's URLs, every response's
+        header targets, and a stylesheet's, script's, robots.txt's or sitemap's own --
+        in scope, not destructive, never requested."""
+        from fuzzlab.core.linkextract import header_urls, html_urls, response_urls
+        shared = self._shared
+        found: list[str] = []
+        try:
+            found += html_urls(page.content(), page.url)
+        except _pw_error():  # the page moved on under the read
+            pass
+        responses, self._responses = self._responses, []
+        for resp in responses:
+            try:
+                headers = resp.headers or {}
+                found += header_urls(headers, resp.url)
+                media = (headers.get("content-type") or "").split(";", 1)[0].strip()
+                if media in _BODY_MEDIA and resp.url not in shared.bodies_read:
+                    shared.bodies_read.add(resp.url)
+                    found += response_urls(resp.url, media, resp.text(), {})
+            except (_pw_error(), UnicodeDecodeError):  # a body the driver let go
+                continue
+        with shared.lock:
+            for url in found:
+                if url in shared.requested or url in shared.harvest:
+                    continue
+                if not self._in_scope(url) or destructive_reason(url):
+                    continue
+                shared.harvest[url] = None
+                self.report.harvest_found += 1
 
     def _on_done(self, _req) -> None:
         self._inflight = max(0, self._inflight - 1)
@@ -789,15 +847,25 @@ class Explorer:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
 
     # --- the loop ----------------------------------------------------------------------
+    def _explored_states(self) -> int:
+        """States counted against ``max_states``: the harvest's documents are not."""
+        return len(self._shared.known) - self.report.harvest_states
+
     def _budget(self) -> str | None:
-        started = self._shared.started
-        if self.report.states >= self.opts.max_states:
-            return "max_states"
-        if self.report.actions >= self.opts.max_actions:
-            return "max_actions"
-        if self.clock() - started > self.opts.deadline_s:
+        """The budget that ends the whole run (the deadline), or None. ``max_states``
+        and ``max_actions`` end exploration only (`_note_budget`): what is already
+        queued, and the harvest within ``max_harvest``, still run."""
+        if self.clock() - self._shared.started > self.opts.deadline_s:
             return "deadline"
         return None
+
+    def _actions_spent(self) -> bool:
+        return self.report.actions >= self.opts.max_actions
+
+    def _note_budget(self, hit: str) -> None:
+        """Record the first budget hit (the caller holds the lock)."""
+        if self.report.budget_hit is None:
+            self.report.budget_hit = hit
 
     def _steps_for(self, page, el: dict, route: str) -> list[Step]:
         occ = el["occurrence"]
@@ -903,10 +971,18 @@ class Explorer:
             shared.frontier.push(root)
             shared.known.add(got[0])
             self.report.states = 1
+            # the origin's well-known files, read for the URLs they name
+            from fuzzlab.core.linkextract import KNOWN_FILES
+            for path in KNOWN_FILES:
+                url = urljoin(self.start_url, path)
+                if url not in shared.requested:
+                    shared.harvest.setdefault(url, None)
+        self._gather(page)
 
-    def _next_state(self) -> State | None:
-        """The next state for this worker (marked busy), or None when the run is over:
-        a budget hit, a failure, or an empty frontier no busy worker can refill."""
+    def _next_state(self) -> "State | str | None":
+        """The next state for this worker (marked busy) -- or, once the frontier is
+        empty, the next harvest URL (a ``str``) -- or None when the run is over: a
+        budget hit, a failure, or nothing left that no busy worker can refill."""
         shared = self._shared
         with shared.lock:
             while True:
@@ -914,16 +990,74 @@ class Explorer:
                     return None
                 hit = self._budget()
                 if hit:
-                    shared.stop = self.report.budget_hit = hit
+                    self._note_budget(hit)
+                    shared.stop = hit
                     shared.lock.notify_all()
                     return None
+                if shared.frontier and self._actions_spent():
+                    self._note_budget("max_actions")   # nothing left to act with: the
+                    while shared.frontier:              # harvest still loads
+                        shared.frontier.pop()
                 if shared.frontier:
                     shared.busy += 1
                     return shared.frontier.pop()
+                url = self._next_harvest()
+                if url is not None:
+                    shared.busy += 1
+                    return url
                 if shared.busy == 0:
                     shared.lock.notify_all()
                     return None
                 shared.lock.wait(0.5)
+
+    def _next_harvest(self) -> str | None:
+        """The next harvest URL nothing has requested since it was queued, within
+        ``max_harvest`` (the caller holds the lock)."""
+        shared = self._shared
+        while shared.harvest:
+            if self.report.harvest_loads >= self.opts.max_harvest:
+                self._note_budget("max_harvest")
+                return None
+            url = next(iter(shared.harvest))
+            del shared.harvest[url]
+            if url not in shared.requested:
+                self.report.harvest_loads += 1
+                return url
+        return None
+
+    def _load(self, url: str, page):
+        """One harvest load: the URL loaded in this worker's guarded page, its links
+        gathered; an HTML document not seen before becomes a frontier state (explored
+        like any other, outside ``max_states``). Returns the page to go on with."""
+        shared = self._shared
+        ctx = self._ctx
+        self._tag(ctx, "harvest")
+        try:
+            nav = navguard.navigate(page, url, timeout_ms=self.opts.nav_timeout_ms,
+                                    wait_until="load")
+        except _pw_error():  # refused, failed, or a download: nothing to read
+            self._bump("errors")
+            return page
+        self.mark_activity()
+        self.wait_quiet(page)
+        resp = nav.response
+        media = ((resp.headers or {}).get("content-type", "") if resp else "").lower()
+        if "html" in media:
+            got = self.settled_fingerprint(page, ctx)
+            if got is not None:
+                state = State(got[0], page.url, page.url,
+                              core=frozenset(e["signature"] for e in got[1]))
+                with shared.lock:
+                    if got[0] not in shared.known:
+                        if shared.frontier.push(state):
+                            shared.known.add(got[0])
+                            self.report.harvest_states += 1
+                            self.report.states = len(shared.known)
+                            shared.lock.notify_all()
+                        else:
+                            self.report.route_capped += 1
+        self._gather(page)
+        return page
 
     def _release(self) -> None:
         with self._shared.lock:
@@ -948,7 +1082,10 @@ class Explorer:
             if state is None:
                 return
             try:
-                page = self._process(state, page, browser, pw)
+                if isinstance(state, str):             # a harvest load
+                    page = self._load(state, page)
+                else:
+                    page = self._process(state, page, browser, pw)
             finally:
                 self._release()
             if shared.stop is not None:
@@ -968,6 +1105,7 @@ class Explorer:
         if got is None:
             self._bump("unrestorable")
             return page
+        self._gather(page)
         route = normalise_route(state.url)
         with shared.lock:
             for el in got[1]:
@@ -983,8 +1121,12 @@ class Explorer:
                     return page
                 hit = self._budget()
                 if hit:
-                    shared.stop = self.report.budget_hit = hit
+                    self._note_budget(hit)
+                    shared.stop = hit
                     shared.lock.notify_all()
+                    return page
+                if self._actions_spent():
+                    self._note_budget("max_actions")
                     return page
                 key = (route, *step.key())
                 if key in shared.seen or step.key() in shared.denied:
@@ -1047,6 +1189,7 @@ class Explorer:
                 continue
             new_fp = got[0]
             core = frozenset(e["signature"] for e in got[1])
+            self._gather(page)
             self._log_action(self._action_seq, state, el, step, new_fp, url=page.url)
             if new_fp != state.fp:
                 dirty = True
@@ -1059,7 +1202,10 @@ class Explorer:
                                 [*state.path, step], core=core)
                 with shared.lock:
                     if new_fp not in shared.known and \
-                            len(shared.known) < self.opts.max_states:
+                            self._explored_states() >= self.opts.max_states:
+                        self._note_budget("max_states")
+                    if new_fp not in shared.known and \
+                            self._explored_states() < self.opts.max_states:
                         if shared.frontier.push(new):
                             shared.known.add(new_fp)
                             self.report.states = len(shared.known)

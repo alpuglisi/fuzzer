@@ -42,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--storage-state", help="a Playwright storage-state file to start "
                    "authenticated (kept to in-scope origins)")
     c.add_argument("--max-states", type=int, default=60)
+    c.add_argument("--max-harvest", type=int, default=500,
+                   help="loads of linked, never-requested in-scope URLs after exploring")
     c.add_argument("--workers", type=int, default=1,
                    help="browsers exploring at once (1-8; each is a Chromium)")
     c.add_argument("--max-actions", type=int, default=400)
@@ -139,7 +141,7 @@ def _capture(ns) -> int:
     if not 1 <= ns.workers <= MAX_WORKERS:
         return _fail(f"--workers must be 1..{MAX_WORKERS}")
     opts = ExploreOptions(max_states=ns.max_states, max_actions=ns.max_actions,
-                          workers=ns.workers,
+                          workers=ns.workers, max_harvest=ns.max_harvest,
                           deadline_s=ns.deadline, deny=tuple(ns.deny))
     with CaptureProxy(scope, out=out / "capture.jsonl", keep_tag=ns.keep_tag,
                       upstream_insecure=ns.upstream_insecure, profile=ns.profile) as proxy:
@@ -156,6 +158,9 @@ def _capture(ns) -> int:
         blocked[host] = blocked.get(host, 0) + n
     if blocked:
         print(f"  refused out of scope: {dict(sorted(blocked.items()))}")
+    if report.harvest_found:
+        print(f"  harvest: {report.harvest_found} linked URL(s) never requested found, "
+              f"{report.harvest_loads} loaded, {report.harvest_states} state(s) from them")
     if report.captcha_submissions:
         print(f"  CAPTCHA forms sent with a filler answer (D71): "
               f"{report.captcha_submissions}")

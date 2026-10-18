@@ -49,6 +49,11 @@ class _Tree:
                 try:
                     time.sleep(DELAY)
                     path = self.path.split("?", 1)[0].rstrip("/")
+                    if path and not path.startswith("/n"):      # robots.txt, sitemap.xml
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
                     level = 0 if path in ("", "/") else path.count("/") - 1
                     gate = tree.gate
                     if gate is not None and level == 1:
@@ -90,9 +95,12 @@ def tree():
 
 
 def _visited(db) -> list[str]:
+    """The tree's pages the crawl visited (the origin's well-known files, which this
+    site does not serve, are visited too: not counted)."""
     conn = sqlite3.connect(db)
     try:
-        return [r[0] for r in conn.execute("SELECT url FROM discovered_pages")]
+        return [r[0] for r in conn.execute("SELECT url FROM discovered_pages")
+                if not r[0].endswith(("/robots.txt", "/sitemap.xml"))]
     finally:
         conn.close()
 

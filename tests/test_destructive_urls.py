@@ -119,7 +119,9 @@ def test_the_start_url_is_the_operators_own_and_is_fetched(tmp_path):
     spider = LocalSpider(start, db_name=str(tmp_path / "s.db"), engine="requests")
     spider.session = session
     spider.crawl()
-    assert session.requested == [start]
+    # the start URL first, then the origin's well-known files (CC-CRAWL-0038)
+    assert session.requested == [start, "http://127.0.0.1:8090/robots.txt",
+                                 "http://127.0.0.1:8090/sitemap.xml"]
     # ...and stays allowed for the browser route and redirect hops (one rule):
     assert spider._destructive(start) is None
     assert spider._destructive("http://127.0.0.1:8090/reset.php") == "reset"

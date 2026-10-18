@@ -400,12 +400,14 @@ class SessionWithheld(RuntimeError):
     (FR-SESS-20): it is not crawled, and nothing is extracted from it."""
 
 
-def _parse_html(html):
-    """``(title, text, links)`` of an HTML document, as the static engine reads it."""
+def _parse_html(html, base):
+    """``(title, text, links)`` of an HTML document, as the static engine reads it:
+    ``links`` is every URL it links (`core.linkextract.html_urls`, CC-CRAWL-0038), not
+    only ``<a href>``."""
+    from fuzzlab.core.linkextract import html_urls
     soup = BeautifulSoup(html, 'html.parser')
     title = soup.title.string.strip() if soup.title and soup.title.string else None
-    return title, soup.get_text(" ", strip=True), \
-        [a['href'] for a in soup.find_all('a', href=True)]
+    return title, soup.get_text(" ", strip=True), html_urls(html, base)
 
 
 def _shared_field(name):
@@ -1335,12 +1337,15 @@ class LocalSpider:
         from fuzzlab.tools.navguard import get_checked
         resp = get_checked(self.session, url, self.timeout_ms / 1000,
                            lambda nxt: self._in_scope(nxt) and not self._destructive(nxt))
+        from fuzzlab.core.linkextract import response_urls
         ct = resp.headers.get('Content-Type', '')
-        title, text, links = None, None, []
+        title, text = None, None
         self._last_final_url = getattr(resp, "url", None) or url
         self._last_html = resp.text if 'text/html' in ct else None
         if 'text/html' in ct:
-            title, text, links = _parse_html(resp.text)
+            title, text, _links = _parse_html(resp.text, self._last_final_url)
+        # every URL the response links, by its media type, and its headers' targets
+        links = response_urls(self._last_final_url, ct, resp.text, resp.headers)
         return resp.status_code, ct, title, text, links, []
 
     def _fetch_rendered(self, url, fallback=True):
@@ -1459,6 +1464,10 @@ class LocalSpider:
                 # and JS-built content are included.
                 links = self._page.eval_on_selector_all('a[href]',
                                                         'els => els.map(e => e.href)')
+                # and every other URL the rendered document links (CC-CRAWL-0038)
+                from fuzzlab.core.linkextract import html_urls
+                links = list(dict.fromkeys(list(links) +
+                                           html_urls(self._last_html, self._page.url)))
                 try:
                     # read, never waited for: a document whose loading stopped in its
                     # head has no body, and `inner_text('body')` would wait 30 s for one
@@ -1471,7 +1480,7 @@ class LocalSpider:
                 # static engine reads a page -- never a second request
                 html = nav.html
                 if html is not None:
-                    got_title, got_text, got_links = _parse_html(html)
+                    got_title, got_text, got_links = _parse_html(html, url)
                     if not own:
                         # another document replaced this one: this URL's own response
                         # alone, never the other document's title, links or URL
@@ -1491,6 +1500,20 @@ class LocalSpider:
                 self._last_final_url = url              # nothing of the other document
             # the browser shows this page, fully loaded (reveals)
             self._rendered_ok = nav.reached
+        if response is not None and own:
+            # what the response itself links: its headers' targets, and a stylesheet's,
+            # script's, robots.txt's or sitemap's own URLs when that is what was loaded
+            # (CC-CRAWL-0038)
+            from fuzzlab.core.linkextract import header_urls, response_urls
+            more = header_urls(response.headers or {}, url)
+            media = ct.split(";", 1)[0].strip().lower()
+            if media in ("text/css", "application/javascript", "text/javascript",
+                         "text/plain", "application/xml", "text/xml"):
+                try:
+                    more += response_urls(url, ct, response.text(), {})
+                except Exception:       # a body the driver no longer holds
+                    pass
+            links = list(dict.fromkeys(list(links) + more))
         # P4 (review B-N1): the navigation committed (a document, or a same-document
         # hash change), recorded after the navigation returned, never before it -- and
         # only while the page shows this load's own document (BUG-0138 merge)
@@ -2874,13 +2897,14 @@ class LocalSpider:
             )
 
             if depth < self.max_depth:
-                if 'text/html' in ct or ct == '':
-                    for href in raw_links:
-                        absolute_link = self._crawl_url(urljoin(current_url, href))
-                        if (self._in_scope(absolute_link)
-                                and not self._destructive(absolute_link)
-                                and not self.storage.is_visited(absolute_link)):
-                            queue.append((absolute_link, depth + 1, 'link'))
+                # every engine returns the URLs the response links by its own media type
+                # (HTML, CSS, JavaScript, headers), so they are followed whatever it is
+                for href in raw_links:
+                    absolute_link = self._crawl_url(urljoin(current_url, href))
+                    if (self._in_scope(absolute_link)
+                            and not self._destructive(absolute_link)
+                            and not self.storage.is_visited(absolute_link)):
+                        queue.append((absolute_link, depth + 1, 'link'))
                 # XHR/fetch targets are queued whatever the page's own
                 # content type, so JSON APIs behind rendered pages land
                 # in the map and get audited like any other URL.
@@ -2930,6 +2954,11 @@ class LocalSpider:
 
     def crawl(self):
         queue = [(self._crawl_url(self.start_url), 0, 'link')]
+        # the origin's well-known files (robots.txt, sitemap.xml), parsed for the URLs
+        # they name (CC-CRAWL-0038)
+        from fuzzlab.core.linkextract import KNOWN_FILES
+        queue += [(self._crawl_url(urljoin(self.start_url, path)), 1, 'link')
+                  for path in KNOWN_FILES]
         logging.info(f"Starting crawl at {self.start_url} (max_depth={self.max_depth})")
 
         if self.engine == "playwright":

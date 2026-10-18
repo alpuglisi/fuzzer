@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (both discovery tools follow every linked resource)
+- **What:** a shared, spec-based link extractor (HTML attributes, CSS, headers, script strings, robots.txt, sitemaps) feeds the spider's queue and a disco harvest pass; both seed the known files. Security Crawl Maze: spider 6 -> 68/84, disco 3 -> 69/84 (CC-CRAWL-0038).
+- **Why:** both tools read only `<a href>` and clicks; the maze showed how much that missed.
+
 ## 2026-10-18 (Google's Security Crawl Maze is a lab, with a coverage scorer)
 - **What:** `./labctl.sh up security-crawl-maze` builds and serves the maze at a pinned commit on loopback, offline from verified sources; `scripts/crawl_maze_score.py` scores either tool's run against its 91 expected resources. First runs: disco 3/91, spider 6/91 (CC-LAB-0302).
 - **Why:** the owner named it the next lab: a third-party test of how many ways of linking a resource each crawler understands.

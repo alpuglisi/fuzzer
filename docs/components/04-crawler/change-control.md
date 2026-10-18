@@ -3,6 +3,34 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0038 — Both discovery tools follow every URL a response links; disco harvests them (2026-10-18)
+- Change:
+  - `fuzzlab/core/linkextract.py` (new, pure): URLs from every URL-valued HTML attribute
+    of the HTML standard and its obsolete-but-parsed features, `<base>`, refresh
+    `<meta>`, the DOCTYPE system id, CSS (`url()`, `@import`), headers (`Location`,
+    `Content-Location`, `Refresh`, `Link`), path-like script strings, `robots.txt`
+    rules and sitemap `<loc>`s; `KNOWN_FILES`.
+  - Spider: both engines return every URL the response links (`_parse_html`,
+    `response_urls`, header targets; a CSS/JS/robots/sitemap body read when that is what
+    loaded), followed whatever the media type; `robots.txt` and `sitemap.xml` seeded.
+  - Disco: each worker records the in-scope URLs requested and gathers what each settled
+    page and its responses link (`_gather`); once the frontier is empty it loads the
+    never-requested ones through its guarded page (`_load`, `max_harvest`, 500), an HTML
+    document becoming a state outside `max_states`; known files seeded. `max_states` and
+    `max_actions` now end exploration only; the deadline ends the run.
+- Reason: the Security Crawl Maze (CC-LAB-0302) showed both tools reading `<a href>`
+  (and clicks) only: spider 6/91, disco 3/91.
+- Impact: both tools request more (every linked in-scope resource, known files); scope
+  and destructive-URL gates unchanged. FR-CRAWL-19/22 amended by reference here.
+- Risk: medium. More requests per run; a disco run no longer stops at 60 states while
+  queued work and the harvest remain (the deadline bounds it).
+- Deliverables:
+  - [x] code; `tests/test_linkextract.py` (spec-derived), `tests/test_spider_links.py`,
+    the disco e2e harvest test and fixture shapes, updated spider/disco tests — done
+  - [x] CHANGELOG; F-064 — done
+- Effectiveness (Security Crawl Maze, 84 built cases, one run each, 2 workers): spider
+  6 -> 68 found (58 s); disco 3 -> 69 found (123 s). Not re-measured on Juice Shop.
+
 ### CC-CRAWL-0037 — Crawl workers in the legacy spider (FR-CRAWL-22) (2026-10-18)
 - Change (`fuzzlab/tools/spider.py`, `fuzzlab/cli_taxonomy.py`):
   - `fuzzlab crawl --workers N` / `LocalSpider(workers=)` (1..8, default 1).
