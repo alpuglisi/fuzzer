@@ -6,8 +6,9 @@ conventions):
 1. **Path templating.** Every path segment is classified across all samples of the same
    origin and shape: an integer is ``int``, a UUID ``uuid``, a ULID / long hex / other
    identifier-like token (`core.redaction.looks_like_identifier`, SP-18) ``id``; and a
-   position whose value varies across at least `SLUG_MIN_DISTINCT` sibling paths (same
-   segments everywhere else) is a ``slug``. Such positions become ``{p1}``, ``{p2}``...,
+   position (not the first) whose value varies across at least `SLUG_MIN_DISTINCT`
+   sibling paths (same segments everywhere else), every value seen as data in a
+   captured response, is a ``slug``. Such positions become ``{p1}``, ``{p2}``...,
    so ``/users/17/orders`` and ``/users/42/orders`` are one ``/users/{p1}/orders``.
 2. **Endpoint key** = (origin, method, template, request content-type family).
 3. **Body schemas**, merged across samples (genson-style): type unions per field;
@@ -118,8 +119,16 @@ def is_static(rec: CaptureRecord) -> bool:
     return rec.method in ("GET", "HEAD") and any(t in ctype for t in _STATIC_CTYPES)
 
 
-def template_paths(paths: list[tuple[str, str]]) -> dict[tuple[str, str], tuple[str, list[str]]]:
-    """``(origin, path) -> (template, [kind per {pN}])`` for every distinct path."""
+def template_paths(paths: list[tuple[str, str]], data_values: frozenset[str] = frozenset()
+                   ) -> dict[tuple[str, str], tuple[str, list[str]]]:
+    """``(origin, path) -> (template, [kind per {pN}])`` for every distinct path.
+
+    A literal segment is a ``slug`` only when it varies across `SLUG_MIN_DISTINCT`
+    sibling paths **and** every one of its values was seen as data -- a string value in
+    a captured JSON response (``data_values``) -- and never in the first segment. Without
+    that, an API's resource names (``/api/Users/``, ``/api/Products/``) and an app's
+    top-level routes (``/profile``, ``/redirect``) collapsed into one endpoint
+    (BUG-0501, measured on Juice Shop)."""
     split = {(o, p): [s for s in p.split("/") if s != ""] for o, p in paths}
     kinds: dict[tuple[str, str], list[str | None]] = {
         key: [segment_kind(s) for s in segs] for key, segs in split.items()}
@@ -135,9 +144,10 @@ def template_paths(paths: list[tuple[str, str]]) -> dict[tuple[str, str], tuple[
     for (origin, path), segs in split.items():
         k = kinds[(origin, path)]
         for i in range(len(segs)):
-            if k[i] is None:
+            if k[i] is None and i > 0:
                 shape = tuple("{}" if (j == i or k[j]) else s for j, s in enumerate(segs))
-                if len(groups[(origin, len(segs), i, shape)]) >= SLUG_MIN_DISTINCT:
+                values = groups[(origin, len(segs), i, shape)]
+                if len(values) >= SLUG_MIN_DISTINCT and values <= data_values:
                     k[i] = "slug"
     out = {}
     for key, segs in split.items():
@@ -413,7 +423,10 @@ def synthesize(records: list[CaptureRecord], *, title: str = "disco inventory",
     http = sorted((r for r in records if r.kind == "http" and r.status is not None
                    and not is_static(r)), key=lambda r: r.t)
     keys = sorted({(canonical_origin(r.url) or "", urlsplit(r.url).path or "/") for r in http})
-    templates = template_paths(keys)
+    data_values = frozenset(str(v) for r in http
+                            for _jp, v in leaves(parse_body(r.res_body, r.res_ctype))
+                            if isinstance(v, str) and 0 < len(v) <= 200)
+    templates = template_paths(keys, data_values)
     eps: dict[tuple, _Endpoint] = {}
     rec_ep: list[tuple[CaptureRecord, _Endpoint, list[str]]] = []
     for rec in http:

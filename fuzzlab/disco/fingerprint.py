@@ -11,6 +11,13 @@ id / href / form action -- each with digit runs folded to ``#`` (``mat-input-3``
 ``mat-input-7`` are one control; ``/users/17`` and ``/users/42`` are one link shape).
 The ancestry is what tells a list that appeared inside a panel from the toolbar
 entries beside it when neither carries an id or text the signature may use.
+
+**Class tokens that carry UI state are dropped** (`stable_classes`): a BEM modifier
+(``x--visible``) and any class one of whose ``-``/``_`` parts is a state word
+(`STATE_WORDS`: ``visible``, ``showing``, ``active``, ``open``, ``pristine``,
+``touched``...). Frameworks toggle them as the UI changes, so the same element would
+get another signature in another state (measured on Juice Shop: ``ng-untouched`` on an
+input, ``search-container--visible`` on its ancestor).
 """
 
 from __future__ import annotations
@@ -27,6 +34,39 @@ _HEXISH = re.compile(r"\b[0-9a-fA-F]{16,}\b")
 #: The element attributes a signature keeps (text never).
 SIGNATURE_KEYS = ("tag", "role", "type", "name", "id", "cls", "ancestry", "href", "action",
                   "listeners")
+
+
+#: Words that mark a class as UI state rather than identity (any framework).
+STATE_WORDS = frozenset({
+    "active", "inactive", "open", "opened", "opening", "closed", "closing", "show", "shown",
+    "showing", "hide", "hidden", "visible", "invisible", "selected", "unselected",
+    "expanded", "collapsed", "collapsing", "focus", "focused", "hover", "hovered",
+    "disabled", "enabled", "checked", "unchecked", "pressed", "current", "highlighted",
+    "pristine", "dirty", "touched", "untouched", "valid", "invalid", "pending",
+    "submitted", "loading", "loaded", "animating", "animated", "entering", "leaving"})
+#: Deliberately not state words: ``in``, ``out``, ``error``, ``success``, ``empty``...
+#: (``sign-in-button`` and ``error-message`` are identities).
+
+
+def stable_classes(cls: str) -> str:
+    """``a.b.c`` class tokens without the ones that carry UI state (module doc)."""
+    keep = []
+    for token in (cls or "").split("."):
+        if not token or "--" in token or \
+                any(part in STATE_WORDS for part in re.split(r"[-_]", token.lower())):
+            continue
+        keep.append(token)
+    return ".".join(keep)
+
+
+def _stable_ancestry(ancestry: str) -> str:
+    """Each ``tag#id.class`` link of an ancestry with its state classes dropped."""
+    out = []
+    for link in (ancestry or "").split("<"):
+        head, _sep, classes = link.partition(".")
+        kept = stable_classes(classes)
+        out.append(f"{head}.{kept}" if kept else head)
+    return "<".join(out)
 
 
 def _fold(value: str) -> str:
@@ -57,6 +97,12 @@ def element_signature(el: dict) -> str:
         val = el.get(key)
         if val in (None, "", []):
             continue
+        if key == "cls":
+            val = stable_classes(str(val))
+            if not val:
+                continue
+        elif key == "ancestry":
+            val = _stable_ancestry(str(val))
         if key == "href" or key == "action":
             val = normalise_route(str(val))
         elif key == "listeners":

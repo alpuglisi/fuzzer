@@ -3,6 +3,35 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0032 — The disco explorer and synthesizer survive a real SPA (BUG-0501) (2026-10-18)
+- Change (`fuzzlab/disco/explore.py`, `fingerprint.py`, `synth.py`):
+  - `State.core` / `Explorer.reproduces`: a restore succeeds on the same fingerprint, or
+    the same route with every stable element present; a restore with elements only gone
+    narrows the core (one-time and dismissed UI; `transient_dropped`).
+  - `Explorer.restore` leaves for `about:blank` first (a fresh document on a hash-routed
+    app) and skips a replay step whose element is gone.
+  - `fingerprint.stable_classes`: UI-state classes (BEM modifiers, state-word parts) out
+    of signatures.
+  - Form-like containers (the nearest ancestor holding typed inputs) define submitters
+    and fields; a disabled button there is a submitter.
+  - `Frontier`: new routes first, at most `max_states_per_route` (8) states per route
+    (`route_capped`).
+  - `synth.template_paths(paths, data_values)`: a slug needs every value seen as data,
+    never the first segment.
+  - `tests/_disco_app.py` gains a one-time overlay, a dismissible notice, a hash router
+    and state classes; the e2e test asserts 0 unrestorable states.
+- Impact: `fuzzlab/disco` only (no other caller of these functions); the inventory's
+  templates change (fewer false merges). No contract or store change.
+- Risk: low. The rules are framework-neutral (no app's names or routes); the state-word
+  list deliberately excludes ambiguous words (`in`, `out`, `error`).
+- Deliverables:
+  - [x] code, tests (fixture shapes; signature, slug and frontier tests) — done
+  - [x] BUG-0501, PA-0501, ERROR_LOG, F-060, FR-CRAWL-19/20 amended in place, CHANGELOG
+    — done
+  - [x] the pushed explorer shown to fail on the extended fixture (1 state, 0 actions,
+    1 unrestorable, the POST never reached) — done
+- Effectiveness: see the Juice Shop measurement below.
+
 ### CC-CRAWL-0031 — Behavioural black-box discovery: capture proxy, state-graph explorer, schema synthesizer; the legacy spider deprecated (D70) (2026-10-17)
 - Change:
   - **`fuzzlab/disco/` (new):** the owner's instruction (D70) to replace static crawling

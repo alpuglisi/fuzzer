@@ -2389,3 +2389,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
   4. **A hand-written HTTP response that closes its connection says
      `Connection: close`** in its own head (lab templates and the proxy).
   - Enforced by: tests/test_probe_unobserved.py::test_no_default_mechanism_turns_a_probe_without_response_into_a_negative, tests/test_probe_unobserved.py::test_a_point_with_no_response_never_ends_the_pipeline, tests/test_probe_unobserved.py::test_every_http_sender_maps_a_transport_failure, tests/test_probe_unobserved.py::test_every_hand_written_response_that_closes_says_so
+- **PA-0501** — Strengthens `PA-0111(3)` and `PA-0006`, after BUG-0501: the disco
+  explorer, validated only on its author's fixture, explored nothing on Juice Shop.
+  PA-0111(3) named browser *emulation* only, and its guard covers `core.forms` alone.
+  1. **A discovery or exploration mechanism is not reported as working until it has run
+     against at least one application its author did not write**, with its own counters
+     checked (states, actions, submissions, unrestorable, budget hit), not only its
+     findings.
+  2. **Every shape that broke it there joins its fixture as a standing test** (here: a
+     one-time overlay, a dismissible notice, a hash router, state classes), and the
+     fixture is shown to fail on the code before the fix.
+  3. **A rule written for one mechanism class is re-read against a new mechanism of a
+     neighbouring class** when it is built (explorer vs emulator), not only by name.
+     (from BUG-0501)
+  - Enforced by: tests/test_disco_e2e.py::test_the_hidden_api_surface_is_reached, tests/test_disco_synth.py::test_state_classes_never_change_a_signature, tests/test_disco_synth.py::test_segments_are_classified_and_slugs_need_siblings

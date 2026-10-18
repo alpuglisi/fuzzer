@@ -16,6 +16,10 @@ particular lab, built to exercise what static crawling cannot see:
   ``min``/``max``, a ``pattern``); its submit sends ``POST /api/projects/<int>/tasks``
   (JSON) and the answer carries a UUID that a later ``PUT /api/tasks/<uuid>`` and a
   ``POST /api/hooks/notify`` body reuse -- a producer -> consumer edge;
+* third-party SPA shapes the explorer must survive (measured on Juice Shop): a one-time
+  welcome overlay (first visit only), a notice bar gone for good once dismissed, a hash
+  router (`#/` and `#/projects`: a restore between them is a same-document change), and
+  state classes toggled as the UI changes (`toolbar--active`, `is-touched`);
 * a "Help" link to a page whose script navigates away 30 ms after it loads (reads of a
   page that moves on under the explorer);
 * a "Delete account" control and a "Log out" control that must never be acted on;
@@ -48,10 +52,27 @@ function nav(label, fn) {
   d.addEventListener('click', fn);
   return d;
 }
+function welcome() {                       // one-time UI: shown on the first visit only
+  if (localStorage.getItem('welcomed')) return;
+  localStorage.setItem('welcomed', '1');
+  const w = document.createElement('div'); w.className = 'overlay overlay--shown';
+  w.innerHTML = '<h2>Welcome</h2><a href="https://example.org/about">About</a>';
+  const b = document.createElement('button'); b.textContent = 'Dismiss';
+  b.addEventListener('click', () => w.remove());
+  w.appendChild(b); document.body.appendChild(w);
+}
+function notice() {                        // dismissible: gone for good once dismissed
+  if (document.cookie.includes('notice=ok')) return;
+  const n = document.createElement('div'); n.className = 'notice';
+  const b = document.createElement('button'); b.textContent = 'Got it';
+  b.addEventListener('click', () => { document.cookie = 'notice=ok; path=/'; n.remove(); });
+  n.appendChild(b); document.body.appendChild(n);
+}
 function home() {
   root.innerHTML = '';
   const bar = document.createElement('div');
-  bar.appendChild(nav('Projects', projects));
+  bar.className = location.hash === '#/projects' ? 'toolbar toolbar--active' : 'toolbar';
+  bar.appendChild(nav('Projects', () => { location.hash = '#/projects'; }));
   bar.appendChild(nav('Settings', settings));
   const help = document.createElement('a'); help.href = '/help'; help.textContent = 'Help';
   bar.appendChild(help);
@@ -110,9 +131,15 @@ function dialog(pid) {
       root.appendChild(edit); root.appendChild(hook);
     });
   });
+  f.addEventListener('input', (ev) => ev.target.classList.add('is-touched', 'field--dirty'));
   root.appendChild(f);
 }
-home();
+function route() {                         // a hash router: '#/' and '#/projects'
+  home();
+  if (location.hash === '#/projects') projects();
+}
+window.addEventListener('hashchange', route);
+welcome(); notice(); route();
 """
 
 

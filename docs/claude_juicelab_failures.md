@@ -751,3 +751,11 @@ Juice Shop lab is complete.
 - **Impact:** about three wasted measurement runs. No code or result was affected: the shipped launcher uses `procutil` (fresh free port, ownership checked), which cannot repeat this.
 - **Status:** recorded. Scratch measurements now use fresh ports per run, and a proxy log is read before a cause is named.
 
+
+### F-060 — I pushed the disco explorer as working from a fixture I wrote; on the first real SPA it explored nothing
+- **What:** On 2026-10-17 I built, tested and pushed `fuzzlab disco` (CC-CRAWL-0031), and reported that its Phase 1 "reaches the hidden API surface" -- measured only on `tests/_disco_app.py`, an app I wrote for it. On 2026-10-18 the owner asked how the spider performs, and the first real run (Juice Shop) made **1 state, 0 actions**.
+  - The fixture had none of the shapes a third-party SPA has: one-time and dismissible UI, a hash router, framework state classes, form-less forms with disabled submit buttons, overlay-heavy pages, resource-named URL segments. Each one broke the explorer or the synthesizer (BUG-0501, seven defects).
+  - My report did say "proven on a test app" and "not measured" on the held-out metric. But I pushed a discovery tool that had never run on an app I did not write, and PA-0111(3), which asks for a third-party shape, was in the list I read before building it. I judged it not to apply because the explorer does not *emulate* a browser.
+- **Evidence:** BUG-0501; ERROR_LOG 2026-10-18; the first capture's `explore.json` (`states: 1, actions: 0, unrestorable: 1`); the pushed explorer on the extended fixture reproduces it.
+- **Impact:** the owner's first performance question found a tool that did nothing on the lab. About an hour of fixing followed before a real comparison could start.
+- **Status:** fixed (CC-CRAWL-0032); PA-0501 makes a run on an app the author did not write a condition for calling a discovery mechanism working, and it joins the fixture as a standing test.

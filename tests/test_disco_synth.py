@@ -30,6 +30,19 @@ def test_a_state_ignores_text_and_ids_digits_but_not_layout():
     assert state_fingerprint(f"{BASE}/p", panel) != state_fingerprint(f"{BASE}/p", a)
 
 
+def test_state_classes_never_change_a_signature():
+    """BUG-0501: frameworks toggle classes as UI state changes; the signature keeps
+    only identity classes (BEM modifiers and state-word parts dropped)."""
+    from fuzzlab.disco.fingerprint import stable_classes
+    pristine = {"tag": "input", "name": "q", "cls": "ng-untouched.ng-pristine.search-input",
+                "ancestry": "div.search-container<app-bar#search"}
+    touched = {**pristine, "cls": "ng-touched.ng-dirty.search-input",
+               "ancestry": "div.search-container.search-container--visible<app-bar#search"}
+    assert element_signature(pristine) == element_signature(touched)
+    assert stable_classes("sign-in-button.error-message.btn--primary.is-active") == \
+        "sign-in-button.error-message"
+
+
 def test_routes_fold_values_keep_query_names_and_spa_fragments():
     assert normalise_route(f"{BASE}/users/17/orders?page=2&q=x") == \
         normalise_route("http://localhost:8080/users/42/orders?q=y&page=9")
@@ -149,10 +162,17 @@ def test_segments_are_classified_and_slugs_need_siblings():
     paths = [(BASE, f"/u/{n}/orders") for n in (17, 42)] + \
         [(BASE, f"/blog/{s}") for s in ("alpha", "beta", "gamma")[:SLUG_MIN_DISTINCT]] + \
         [(BASE, "/blog/feed/extra")]
-    t = template_paths(paths)
+    t = template_paths(paths, frozenset({"alpha", "beta", "gamma"}))
     assert t[(BASE, "/u/17/orders")] == ("/u/{p1}/orders", ["int"])
     assert t[(BASE, "/blog/alpha")] == ("/blog/{p1}", ["slug"])
     assert t[(BASE, "/blog/feed/extra")][0] == "/blog/feed/extra"
+    # BUG-0501: names never seen as data, and first segments, stay literal
+    names = [(BASE, f"/api/{n}/") for n in ("Users", "Products", "Feedbacks")] + \
+        [(BASE, f"/{n}") for n in ("profile", "redirect", "file-upload")]
+    t = template_paths(names, frozenset({"profile", "redirect", "file-upload"}))
+    assert {v[0] for v in t.values()} == {"/api/Users/", "/api/Products/",
+                                          "/api/Feedbacks/", "/profile", "/redirect",
+                                          "/file-upload"}
 
 
 def test_an_inventory_templates_merges_and_links_dependencies():

@@ -639,15 +639,28 @@ fuzzer.
   - **States** are layout fingerprints (`fingerprint.state_fingerprint`): the normalised
     route and the set of visible interactive elements' signatures (tag, role, type,
     name, class tokens, a three-ancestor chain, normalised id / href / action; digit runs
-    folded; text never). Breadth first, each (state, element signature, occurrence,
-    action) is tried once; at most `max_same_signature` (2) elements of one signature
-    per state; a state is restored by its entry URL and its replayed path (with a
-    fallback path for a page only a POST shows).
+    folded; text never; *(CC-CRAWL-0032, BUG-0501)* classes that carry UI state -- a BEM
+    `--modifier` or a class with a state-word part (`visible`, `active`, `pristine`,
+    `touched`...) -- dropped). Each (state, element signature, occurrence, action) is
+    tried once; at most `max_same_signature` (2) elements of one signature per state.
+  - *(Amended in place, CC-CRAWL-0032, BUG-0501.)* **The frontier** explores a state on
+    a route no known state is on before another state of a known route, and holds at
+    most `max_states_per_route` (8) states per route (`route_capped` counts the rest).
+  - *(Amended in place, CC-CRAWL-0032.)* **Restore:** the page leaves for `about:blank`,
+    then loads the state's entry URL (a fresh document, also on a hash-routed app) and
+    replays its path; a replay step whose element is gone (consumed UI) is skipped. The
+    state is reproduced when its fingerprint comes back, or the route matches and every
+    element of its *stable core* is present; a restore showing core elements only gone,
+    none new, narrows the core (one-time or dismissed UI, `transient_dropped`). A
+    fallback path covers a page only a POST shows.
   - **Actionable elements:** native controls and ARIA roles; elements with a JS
     click / pointer / key listener from Chrome DevTools
     (`DOMDebugger.getEventListeners`, at most 200 candidates per enumeration);
     `cursor: pointer` as a fallback; re-enumerated after every action. Text-like
     controls are filled through their form, never clicked alone.
+  - *(Amended in place, CC-CRAWL-0032.)* **A form** is a `<form>` or, without one, the
+    nearest ancestor (six levels) holding typed inputs; a button there is its submitter,
+    a disabled one included (filling enables it).
   - **Forms valid-first** (`formfill`): each control gets the first candidate (from its
     type, pattern, bounds, autocomplete, name, label, placeholder, options) its own
     `checkValidity()` accepts, then the submitter is clicked; then up to six
@@ -667,8 +680,9 @@ fuzzer.
 - **FR-CRAWL-20 (the schema synthesizer, CC-CRAWL-0031, D70)** `fuzzlab disco synth`
   turns captures into an OpenAPI 3.1-shaped inventory (`fuzzlab.disco.synth`):
   - path segments classified across samples (`int`, `uuid`, `id` via
-    `looks_like_identifier`, and `slug` when one position varies over at least three
-    siblings) and templated `{p1}`, `{p2}`...; static assets excluded;
+    `looks_like_identifier`, and `slug` when one position, never the first, varies over
+    at least three siblings *and every value was seen as data in a captured response*,
+    CC-CRAWL-0032 / BUG-0501) and templated `{p1}`, `{p2}`...; static assets excluded;
   - endpoint key (origin, method, template, request content-type family);
   - genson-style body, query and response schemas: type unions, `required` = present in
     every sample, `enum` only for 2..5 distinct string values over 4+ samples, formats,

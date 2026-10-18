@@ -58,6 +58,10 @@ def test_the_hidden_api_surface_is_reached(discovered):
     assert "/api/hooks/notify" in discovered["app"].paths("POST")
     assert discovered["report"].submissions >= 1
     assert "/help" in paths                     # a page that navigates away under the reads
+    # one-time and dismissed UI, a hash router and state classes never make a state
+    # unrestorable (BUG-0501: Juice Shop's start page was, and nothing was explored)
+    assert discovered["report"].unrestorable == 0
+    assert discovered["report"].transient_dropped >= 1
 
 
 def test_destructive_controls_and_other_origins_are_never_reached(discovered):

@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-18 — Discovery: the disco explorer explored nothing on Juice Shop, and the synthesizer merged its routes (fixed, BUG-0501, PA-0501)
+- **Symptom:** the first real measurement of `fuzzlab disco capture` (Juice Shop v20.3.0, authenticated): 1 state, 0 actions. After the first fixes: 60 states, 143 actions, 0 form submissions, 2/15 answer-key inputs reached, and an inventory with `/{p1}` and `/api/{p1}/` merging unrelated routes.
+- **Root cause:** the explorer's state model and the slug rule were validated only on the agent's own fixture, which had no one-time or dismissible UI, no hash router, no state classes, no form-less forms, no overlay-heavy page and no resource-named segments (BUG-0501).
+- **Remediation:** stable-core restores from a fresh document, vanished replay steps skipped, state classes out of signatures, form-like containers and disabled submitters, a route-first frontier with a per-route cap, slugs only for values seen as data; the fixture gains the shapes and is shown to fail on the old code (CC-CRAWL-0032).
+- **Status:** Fixed.
+
 ## 2026-10-17 — Environment and measurement: a pip-installed Playwright newer than the container's Chromium; the capture proxy killed the browser's own tunnels (fixed before commit)
 - **Symptom:**
   - `pip install -e '.[browser]'` resolved Playwright 1.64, whose `chromium.launch()` failed with "Executable doesn't exist at .../chromium_headless_shell-1248"; the container ships build 1194.

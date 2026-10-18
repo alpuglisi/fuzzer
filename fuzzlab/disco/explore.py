@@ -100,11 +100,22 @@ _ENUMERATE_JS = r"""
     while (a && a !== document.body && out.length < 3) { out.push(node(a)); a = a.parentElement; }
     return out.join('<');
   };
-  window.__discoLayout = {cls, ancestry};
+  const formLike = (e) => {        // a <form>, else the nearest ancestor holding typed inputs
+    if (e.form) return e.form;
+    const f = e.closest('form'); if (f) return f;
+    let a = e.parentElement, n = 0;
+    while (a && a !== document.body && n < 6) {
+      if (a.querySelector('input:not([type=hidden]):not([type=button]):not([type=submit])'
+                          + ':not([type=checkbox]):not([type=radio]),textarea,select')) return a;
+      a = a.parentElement; n++;
+    }
+    return null;
+  };
+  window.__discoLayout = {cls, ancestry, formLike};
   const describe = (e, how) => {
     const id = String(n++);
     e.setAttribute('data-disco-id', id);
-    const form = e.form || e.closest('form');
+    const form = formLike(e);
     const label = (e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
                    || e.value || e.getAttribute('placeholder') || '').trim().slice(0, 80);
     const tag = e.tagName.toLowerCase();
@@ -113,11 +124,13 @@ _ENUMERATE_JS = r"""
               name: e.getAttribute('name') || '', id: e.id || '', cls: cls(e), ancestry: ancestry(e),
               href: tag === 'a' ? e.href : '', label,
               action: form ? (form.action || location.href) : '',
-              in_form: !!form, cursor: getComputedStyle(e).cursor});
+              in_form: !!form, disabled: !!e.disabled, cursor: getComputedStyle(e).cursor});
   };
   for (const e of document.querySelectorAll(NATIVE)) {
     if (out.length >= maxElements) break;
-    if (visible(e) && !e.disabled) describe(e, 'native');
+    // a disabled control is kept only as a submitter (filling its form enables it)
+    if (visible(e) && (!e.disabled || (e.tagName === 'BUTTON' && formLike(e))))
+      describe(e, 'native');
   }
   let c = 0;
   for (const e of document.querySelectorAll('div,span,li,img,svg,td,p,i,section,article,label')) {
@@ -156,7 +169,8 @@ _MARK_JS = r"""
 
 _FIELDS_JS = r"""
 (e) => {
-  const form = e.form || e.closest('form') || e.parentElement;
+  const lay = window.__discoLayout;
+  const form = (lay && lay.formLike(e)) || e.form || e.closest('form') || e.parentElement;
   const ctrls = Array.from(form.querySelectorAll('input,select,textarea'));
   return ctrls.map((c, i) => {
     c.setAttribute('data-disco-field', String(i));
@@ -190,12 +204,52 @@ class Step:
 @dataclass
 class State:
     """A state and how to get back to it: ``entry_url`` then ``path``; when that no
-    longer reproduces it (a page only a POST shows), ``fallback`` is tried."""
+    longer reproduces it (a page only a POST shows), ``fallback`` is tried.
+
+    ``core`` is the state's *stable* element signatures. It starts as everything first
+    seen; any restore that shows the same route with elements only gone, none new,
+    narrows it to what is left: one-time or consumed UI -- a first-visit dialog, a
+    cookie notice dismissed by an earlier action, a toast -- does not come back
+    (measured on Juice Shop: its welcome dialog, then its dismissed cookie banner, each
+    made the start page unrestorable). A restore succeeds when the route matches and
+    every core element is present: what restoring is for is getting the pending
+    actions' elements back."""
     fp: str
     url: str
     entry_url: str
     path: list[Step] = field(default_factory=list)
     fallback: "State | None" = None
+    core: frozenset = frozenset()
+
+
+class Frontier:
+    """The states still to explore: a state on a route no known state is on goes before
+    another state of a known route, and a route holds at most ``per_route`` states.
+    Breadth first alone spent a whole budget on one page's overlays -- toasts, menus,
+    tooltips, pagers -- and never explored the routes its side-nav opened (BUG-0501,
+    measured on Juice Shop: 121 of 143 actions on its start page)."""
+
+    def __init__(self, per_route: int):
+        self.per_route = per_route
+        self.new_routes: deque[State] = deque()
+        self.overlays: deque[State] = deque()
+        self.per: dict[str, int] = {}
+
+    def push(self, state: State) -> bool:
+        """Queue ``state``; False when its route is already full."""
+        route = normalise_route(state.url)
+        n = self.per.get(route, 0)
+        if n >= self.per_route:
+            return False
+        self.per[route] = n + 1
+        (self.new_routes if n == 0 else self.overlays).append(state)
+        return True
+
+    def pop(self) -> State:
+        return self.new_routes.popleft() if self.new_routes else self.overlays.popleft()
+
+    def __bool__(self) -> bool:
+        return bool(self.new_routes or self.overlays)
 
 
 @dataclass
@@ -208,6 +262,7 @@ class ExploreOptions:
     nav_timeout_ms: int = 15000
     max_perturbations: int = 6
     max_same_signature: int = 2
+    max_states_per_route: int = 8
     deny: tuple[str, ...] = ()
     headless: bool = True
 
@@ -220,6 +275,8 @@ class ExploreReport:
     perturbations: int = 0
     refused: dict[str, int] = field(default_factory=dict)
     unrestorable: int = 0
+    transient_dropped: int = 0
+    route_capped: int = 0
     errors: int = 0
     session_lost: int = 0
     aborted: int = 0
@@ -512,9 +569,13 @@ class Explorer:
                     pass
 
     def restore(self, page, ctx, state: State) -> bool:
-        """Bring ``page`` back to ``state``: its entry URL, then its path replayed."""
+        """Bring ``page`` back to ``state``: a fresh document of its entry URL, then its
+        path replayed. The page leaves for ``about:blank`` first: on a hash-routed app,
+        navigating to ``/#/`` from ``/#/x`` is a same-document change, and the previous
+        action's UI would survive the "restore" (measured on Juice Shop)."""
         self._tag(ctx, "restore")
         try:
+            navguard.navigate(page, "about:blank", timeout_ms=self.opts.nav_timeout_ms)
             navguard.navigate(page, state.entry_url, timeout_ms=self.opts.nav_timeout_ms,
                               wait_until="load")
         except _pw_error():  # a refused or failed navigation: not restorable
@@ -524,17 +585,41 @@ class Explorer:
         try:
             for step in state.path:
                 el = self._find(self.enumerate(page, ctx), step)
-                if el is None or not self.act(page, ctx, el, step):
+                if el is None:
+                    # consumed UI (a notice dismissed for good): its effect persists;
+                    # the reproduction check below decides whether that sufficed
+                    continue
+                if not self.act(page, ctx, el, step):
                     return False
                 self.wait_quiet(page)
                 self._close_popups(ctx, page)
         except _pw_error():                 # the replay's page went away under it
             return False
         got = self.settled_fingerprint(page, ctx)
-        if got is not None and got[0] != state.fp:   # a render that lags its response
-            self.wait_quiet(page)
+        if got is not None and not self.reproduces(state, page.url, got):
+            self.wait_quiet(page)                     # a render that lags its response
             got = self.settled_fingerprint(page, ctx)
-        return got is not None and got[0] == state.fp
+        return got is not None and self.reproduces(state, page.url, got, settle=True)
+
+    def reproduces(self, state: State, url: str, got, *, settle: bool = False) -> bool:
+        """Does the page (``url``, its fingerprint and elements) reproduce ``state``?
+        See `State`: the same fingerprint; or the same route with every core element
+        present; or the same route with core elements only gone, none new -- then
+        (``settle``) the core narrows to what is left."""
+        fp, els = got
+        if fp == state.fp:
+            return True
+        if normalise_route(url) != normalise_route(state.url):
+            return False
+        sigs = frozenset(e["signature"] for e in els)
+        if state.core and state.core <= sigs:
+            return True
+        if sigs and sigs < state.core:
+            if settle:
+                state.core = sigs
+                self.report.transient_dropped += 1
+            return True
+        return False
 
     def _log_action(self, action_id_seq: int, state: State, el: dict, step: Step,
                     new_fp: str | None) -> None:
@@ -560,6 +645,8 @@ class Explorer:
         occ = el["occurrence"]
         if occ >= self.opts.max_same_signature or is_fill_only(el):
             return []                     # a long list of one shape: its first few only
+        if el.get("disabled") and not is_submitter(el):
+            return []
         if not is_submitter(el):
             return [Step(el["signature"], "click", occ)]
         steps = [Step(el["signature"], "submit", occ)]
@@ -606,9 +693,11 @@ class Explorer:
         if got is None:
             self.report.unrestorable += 1
             return
-        root = State(got[0], page.url, page.url)
+        root = State(got[0], page.url, page.url,
+                     core=frozenset(e["signature"] for e in got[1]))
         fp = got[0]
-        frontier: deque[State] = deque([root])
+        frontier = Frontier(self.opts.max_states_per_route)
+        frontier.push(root)
         known = {fp}
         seen: set[tuple] = set()
         authenticated = self.storage_state is not None and \
@@ -619,7 +708,7 @@ class Explorer:
             if hit:
                 self.report.budget_hit = hit
                 return
-            state = frontier.popleft()
+            state = frontier.pop()
             if not self._restore_any(page, ctx, state):
                 self.report.unrestorable += 1
                 continue
@@ -682,15 +771,20 @@ class Explorer:
                     dirty = True
                     continue
                 new_fp = got[0]
+                core = frozenset(e["signature"] for e in got[1])
                 self._log_action(self._seq, state, el, step, new_fp)
                 if new_fp != state.fp:
                     dirty = True
                     if new_fp not in known and len(known) < self.opts.max_states:
-                        known.add(new_fp)
-                        self.report.states = len(known)
                         if page.url != before_url:
-                            frontier.append(State(new_fp, page.url, page.url, fallback=State(
-                                new_fp, page.url, state.entry_url, [*state.path, step])))
+                            new = State(new_fp, page.url, page.url, core=core,
+                                        fallback=State(new_fp, page.url, state.entry_url,
+                                                       [*state.path, step], core=core))
                         else:
-                            frontier.append(State(new_fp, page.url, state.entry_url,
-                                                  [*state.path, step]))
+                            new = State(new_fp, page.url, state.entry_url,
+                                        [*state.path, step], core=core)
+                        if frontier.push(new):
+                            known.add(new_fp)
+                            self.report.states = len(known)
+                        else:
+                            self.report.route_capped += 1
