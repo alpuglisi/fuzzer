@@ -68,10 +68,14 @@ SECDEVLABS_PYTHON38_IMAGE = ("docker.io/library/python:3.8@sha256:"
 #: unpinned: pinned here to the releases current when the fixture was built.
 SECDEVLABS_PYTHON312_IMAGE = ("docker.io/library/python:3.12-slim@sha256:"
                               "a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1")
+#: vinijr-blog's upstream base is `php:apache` (unpinned): pinned to 8.3, from Google's
+#: Docker Hub mirror (as bWAPP's PHP_IMAGE; Docker Hub rate-limits this host).
+SECDEVLABS_PHP_IMAGE = ("mirror.gcr.io/library/php:8.3-apache@sha256:"
+                        "f8506a19d79cad7fcf0c8049f1ed2208824961018fdc10bd80f324094dcd36bd")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
-                           SECDEVLABS_PYTHON312_IMAGE})
+                           SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -118,6 +122,7 @@ SECDEVLABS_APPS = {
     "secdevlabs-copy-n-paste": "owasp-top10-2021-apps/a3/copy-n-paste",
     "secdevlabs-gossip-world": "owasp-top10-2021-apps/a3/gossip-world",
     "secdevlabs-sstype": "owasp-top10-2021-apps/a3/sstype",
+    "secdevlabs-vinijr-blog": "owasp-top10-2021-apps/a5/vinijr-blog",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
@@ -190,6 +195,8 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    "secdevlabs-vinijr-blog": LabMeta("secdevlabs-vinijr-blog", "app", "SDL_VINIJR_PORT",
+                                      3075, 80, "/", "/", None, "", False),
     "secdevlabs-sstype": LabMeta("secdevlabs-sstype", "server", "SDL_SSTYPE_PORT", 3073,
                                  10001, "/", "/", None, "", False),
     "secdevlabs-gossip-world": LabMeta("secdevlabs-gossip-world", "app", "SDL_GOSSIP_PORT",

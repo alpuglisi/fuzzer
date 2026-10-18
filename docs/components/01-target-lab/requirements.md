@@ -6398,7 +6398,12 @@ lane) can submit a payload as
   (negatives). CopyNPaste's ground truth also holds a stored DOM XSS in `/register`'s
   `user` (rendered by the login page's `innerHTML`). None is yet in the gated live
   test (FR-LAB-304).
-  **Not built, and why** (A3 apps, 2026-10-18):
+  `secdevlabs-vinijr-blog` (A5, PHP, CC-LAB-0307) on 127.0.0.1:3075
+  (`SDL_VINIJR_PORT`): no dependencies; upstream's unpinned `php:apache` pinned to
+  `php:8.3-apache` from Google's Docker Hub mirror. Ground truth: XXE in the posted XML
+  document's `<name>` (echoed) and `<email>` (blind), reflected XSS through `<name>`
+  (positives), `<email>` and `<subject>` never echoed (negatives).
+  **Not built, and why** (2026-10-18):
   - `mongection` (Node + MongoDB): its one flaw is NoSQL operator injection
     (`{"$ne": null}` in `/login`'s `email`/`password`), not a scoreable class here
     (no strategy, no label class); its echoes are regex-checked emails, so nothing else.
@@ -6407,7 +6412,14 @@ lane) can submit a payload as
     hard-coded `http://localhost:10017`, so the lab needs a second, fixed published port,
     and the sink sits on that second origin, which the ground-truth contract (points
     keyed by a path on one base) cannot express.
-  - `streaming` (Java/Maven + Angular): not attempted yet.
+  - `streaming` (Spring Boot + Angular + MariaDB): the same blocker as comment-killer --
+    its page calls the backend at a hard-coded `http://localhost:8080`.
+  - The other categories (screened 2026-10-18): `tictactoe`, `ecommerce-api` and
+    `snake-pro` hard-code `localhost:<their upstream port>` in their pages; the A1/A7
+    apps (access control, authentication) need several identities per lab; A4
+    (brute force), A5 WordPress/stegonography, A6 (known-vulnerable components) and A9
+    (logging) have no scoreable class here. Candidates still open: `amarelo-designs`
+    (A8, insecure deserialization), `camplake-api` (A1).
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
   commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned

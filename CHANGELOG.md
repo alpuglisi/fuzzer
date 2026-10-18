@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (secDevLabs: Vinijr Blog)
+- **What:** secDevLabs' Vinijr Blog (PHP, XXE and reflected XSS in an XML contact form) is a lab with a live-checked ground truth; the remaining secDevLabs apps were screened and the blocked ones recorded with their reasons (CC-LAB-0307).
+- **Why:** the owner's next lab; streaming shares comment-killer's hard-coded second origin.
+
 ## 2026-10-18 (secDevLabs: SSType; CopyNPaste's DOM XSS)
 - **What:** secDevLabs' SSType (Tornado, template injection) is a lab with a live-checked ground truth; CopyNPaste's ground truth gains the stored DOM XSS its login page renders through `innerHTML` (CC-LAB-0306).
 - **Why:** the third injection app of the owner's next lab; the DOM XSS was found checking CopyNPaste's reach tags.

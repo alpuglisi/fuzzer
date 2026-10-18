@@ -1,0 +1,37 @@
+# secDevLabs "Vinijr Blog" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0307).
+# Lab-only. A static PHP page whose contact form posts an XML document to contact.php,
+# which parses it with external entities enabled (LIBXML_NOENT | LIBXML_DTDLOAD; OWASP
+# 2021 A5, XXE) and echoes the <name> element; the page writes that reply into
+# innerHTML.
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-vinijr-blog` copies into the gitignored .cache/app; it has no
+# dependencies to fetch. Upstream's base is `php:apache`, unpinned: pinned here.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1); capabilities dropped but those Apache
+# needs to bind port 80 and switch to www-data. XXE here reads files inside the
+# container: keep it loopback-only.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-vinijr-blog
+name: fuzzlab-secdevlabs-vinijr-blog
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    build:
+      context: .
+    networks: [vinijr-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_VINIJR_PORT:-3075}:80"
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  vinijr-net: {}

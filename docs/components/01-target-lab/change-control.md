@@ -3,6 +3,25 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0307 — secDevLabs Vinijr Blog (XXE) as an external lab (2026-10-18)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PHP_IMAGE`, app,
+  `LAB_META`); `lab/external/secdevlabs-vinijr-blog/`;
+  `lab/ground-truth-secdevlabs-vinijr-blog/`; `.gitignore`; the static tests' GT list;
+  FR-LAB-306 (also: streaming not built, the other categories screened).
+- Reason: the first single-origin secDevLabs app with a scoreable class outside A3.
+  Docker Hub answered 429 to this host; the base comes from `mirror.gcr.io`, as
+  bWAPP's does.
+- Impact: a new loopback lab (127.0.0.1:3075).
+- Risk: low.
+- Deliverables:
+  - [x] fixture (no dependencies), ground truth (3 positives, 2 negatives, each checked
+    live: `file:///etc/hostname` echoed through `<name>`, an escaped `<u>` in `<name>`
+    returned as markup, `<email>`/`<subject>` never echoed) — done
+  - [x] FR-LAB-306, CHANGELOG — done
+- Noted for the fuzzer, not changed here: the in-band XXE strategy wraps its entity in
+  `<title>` or the root only, never the point's own element, so it cannot see this
+  echo; its OOB layer needs the container to reach the host's listener.
+
 ### CC-LAB-0306 — secDevLabs SSType as an external lab; CopyNPaste's DOM XSS (2026-10-18)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PYTHON312_IMAGE`, the
   `secdevlabs-sstype` app, PyPI pin and `LAB_META`); `lab/external/secdevlabs-sstype/`;

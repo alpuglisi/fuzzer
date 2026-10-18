@@ -1,0 +1,27 @@
+{
+ "version": 1,
+ "target": "secdevlabs_vinijr_blog_10be4384",
+ "points": [
+  {
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "subject",
+   "location": "body",
+   "rendering": "server"
+  }
+ ]
+}

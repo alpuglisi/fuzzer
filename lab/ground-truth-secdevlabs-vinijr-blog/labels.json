@@ -1,0 +1,71 @@
+{
+ "version": 1,
+ "target": "secdevlabs_vinijr_blog_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLVJ-0001",
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "vuln_class": "xxe",
+   "sink_context": "xml",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "php_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a5/vinijr-blog README] app/contact.php:4 loadXML(LIBXML_NOENT | LIBXML_DTDLOAD); an external entity in <name> is echoed ('Thanks for the message, <file content> !'; checked live with file:///etc/hostname). The body is an XML document `<contact><name/><email/><subject/><message/></contact>` the page's script posts. Not reachable by today's in-band XXE strategy (its entity wrappers are <title> and the root, never the point's own element) nor its OOB layer unless the container can reach the host's listener."
+  },
+  {
+   "case_id": "SDLVJ-0002",
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "vuln_class": "xxe",
+   "sink_context": "xml",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "php_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a5/vinijr-blog README] the same parse resolves an entity in <email>, but <email> is never echoed: blind XXE (OOB only). The body is an XML document `<contact><name/><email/><subject/><message/></contact>` the page's script posts."
+  },
+  {
+   "case_id": "SDLVJ-0003",
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "name",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "php_secdevlabs",
+   "notes": "[reach: gt] [prov: found reading app/contact.php at bring-up] <name> is echoed unescaped as text/html (an escaped `<u id=..>` comes back as markup; checked live), and the page writes the reply into innerHTML. The body is an XML document `<contact><name/><email/><subject/><message/></contact>` the page's script posts."
+  },
+  {
+   "case_id": "SDLVJ-0004",
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "email",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "php_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a5/vinijr-blog README] <email> is read and never echoed (checked live)."
+  },
+  {
+   "case_id": "SDLVJ-0005",
+   "url": "/contact.php",
+   "method": "POST",
+   "param": "subject",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "php_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a5/vinijr-blog README] <subject> is read and never echoed (checked live)."
+  }
+ ]
+}

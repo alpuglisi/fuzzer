@@ -1,0 +1,9 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Vinijr Blog at 10be4384 (external
+# lab fixture lab/external/secdevlabs-vinijr-blog), CC-LAB-0307. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLVJ-0001,/contact.php,POST,name,body,xxe,true,/contact.php,sink,,direct
+SDLVJ-0002,/contact.php,POST,email,body,xxe,true,/contact.php,sink,,direct
+SDLVJ-0003,/contact.php,POST,name,body,xss-reflected,true,/contact.php,sink,,direct
+SDLVJ-0004,/contact.php,POST,email,body,xss-reflected,false,/contact.php,sink,,direct
+SDLVJ-0005,/contact.php,POST,subject,body,xss-reflected,false,/contact.php,sink,,direct

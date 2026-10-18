@@ -69,6 +69,7 @@ on_host_results*.txt
 !lab/ground-truth-secdevlabs-copy-n-paste/*.csv
 !lab/ground-truth-secdevlabs-gossip-world/*.csv
 !lab/ground-truth-secdevlabs-sstype/*.csv
+!lab/ground-truth-secdevlabs-vinijr-blog/*.csv
 # CC-LAB-0300: bWAPP is CC BY-NC-ND and is never committed -- its downloaded zip lives
 # in a local cache, and no extracted tree or archive may enter the repo
 lab/external/**/.cache/
