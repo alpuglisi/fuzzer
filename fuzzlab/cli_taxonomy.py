@@ -55,8 +55,8 @@ COMMANDS: tuple[Command, ...] = (
             "crawl results -> audit -> oracle-confirm pipeline (requires --authorized; "
             "ground-truth and training flags: use `train run`)", flags="auto"),
     Command("disco", WORKING, "disco <sub>",
-            "behavioural discovery + contract fuzzing: capture | synth | generate | run "
-            "(capture and run require --authorized)", flags="disco"),
+            "behavioural discovery + contract fuzzing: capture | synth | generate | run | "
+            "ede (capture, run and ede require --authorized)", flags="disco"),
     Command("crawl", WORKING, "crawl [args]",
             "run the legacy crawler, deprecated: use `disco capture` (python -m "
             "fuzzlab.tools.spider)", flags="crawl"),
@@ -213,6 +213,8 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
         **_all("B", [f"run:{d}" for d in (
             "contract", "results", "evidence", "allow_destructive", "allow_reset_hook",
             "authorized", "dry_run")]),
+        **_all("B", [f"ede:{d}" for d in (
+            "run", "scope", "max_pages", "deadline", "authorized", "dry_run")]),
     },
     "audit": _all("B", ["spider_db", "indicator_db", "out", "engine", "timeout", "append",
                         "quiet", "store", "identity", "base_url", "dry_run"]),

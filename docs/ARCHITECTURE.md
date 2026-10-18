@@ -1397,6 +1397,12 @@ tracked in the requirements files, not here.
   - `synth.py`: the captures become an OpenAPI 3.1 inventory (templated paths, merged
     schemas, header classes, auth, response-only fields, dependency edges, JS
     candidates) -- the input of Phase 2 (component 9) and the contract (component 7).
+  - `ede.py` (`fuzzlab disco ede`, FR-CRAWL-25, CC-CRAWL-0042): excessive data exposure
+    by response mutation (after EDEFuzz). A run's JSON GET answers are served from its
+    capture through a route over the guard, one field removed per load (by shape,
+    across list elements); a field whose removal leaves the page unchanged (baseline
+    noise masked, non-deterministic pages skipped) is reported unused at load, with no
+    value.
   - Imports nothing from `tools/spider.py`, `tools/spa.py`, `tools/formnav.py`
     (`tests/test_disco_isolation.py`).
 - **The legacy spider (`tools/spider.py`) is deprecated (FR-CRAWL-21).** It runs

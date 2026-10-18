@@ -3,6 +3,30 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0042 — `fuzzlab disco ede`: excessive data exposure by response mutation (FR-CRAWL-25) (2026-10-18)
+- Change: `fuzzlab/disco/ede.py` (new), `fuzzlab/disco/cli.py` (`ede`),
+  `fuzzlab/cli_taxonomy.py`. A route over the guard serves a disco run's recorded JSON
+  GET answers, one field removed per load; the page's DOM (depth, tag, attributes, own
+  text, value per element) is compared with 3 baseline loads (varying nodes ignored, a
+  varying structure skipped). Unused fields go to `ede.json` with type and
+  sensitive-name flag only.
+- Reason: the owner's paper review (EDEFuzz, ICSE 2024: a metamorphic oracle for OWASP
+  API3, 98.65% true positives on 8 sites, 33,365 exposed fields across 69 Alexa-200
+  sites) and the owner's correction that the replay server's point is to *change* the
+  response. No tool here detected this class.
+- Impact: a new subcommand; nothing else changes. Pages and assets load from the target
+  (`--authorized`); the replayed answers never do. One load per field shape, not one
+  per element (EDEFuzz's cost was linear in leaves).
+- Risk: low. Findings are candidates (a field used only after an interaction is
+  reported; the paper's one false-positive class).
+- Deliverables:
+  - [x] code; `tests/test_disco_ede.py` (shapes, removal, types, noise mask, replay
+    filter and redacted matching; a real browser on a local app: exactly the 4 fields
+    the page never shows are reported, the noisy page skipped, a clock ignored, the API
+    never called; the CLI's refusal, dry run and report) — done
+  - [x] FR-CRAWL-25, ARCHITECTURE, CHANGELOG — done
+- Effectiveness: not run on a lab yet (owner's direction: measure when asked).
+
 ### CC-CRAWL-0041 — Settles never wait for long-lived requests (FR-CRAWL-24, SP-40) (2026-10-18)
 - Change: `fuzzlab/tools/netquiet.py` (new): `Inflight` counts a page's requests in
   flight minus event streams, WebSockets and any request open past `LONG_LIVED_MS`

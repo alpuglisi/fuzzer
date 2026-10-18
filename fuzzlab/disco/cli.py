@@ -81,6 +81,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="opt in: send the inventory's schemas to the LLM API for test cases "
                         "(default: endpoints only, nothing leaves the machine)")
 
+    e = sub.add_parser("ede", help="excessive data exposure: replay a run's JSON answers "
+                       "with one field removed and compare the page")
+    e.add_argument("--run", required=True, help="a disco run directory (its capture.jsonl)")
+    e.add_argument("--scope", action="append", required=True, metavar="URL",
+                   help="an in-scope origin (repeatable): only its pages are tested")
+    e.add_argument("--max-pages", type=int, default=20)
+    e.add_argument("--deadline", type=float, default=900.0, help="seconds")
+    e.add_argument("--authorized", action="store_true",
+                   help="confirm the target is yours to test (required: pages and assets "
+                        "load from it; the replayed API answers do not)")
+    e.add_argument("--dry-run", action="store_true", help="print the plan; send nothing")
+
     r = sub.add_parser("run", help="execute a contract")
     r.add_argument("--contract", required=True)
     r.add_argument("--results", required=True, help="results ledger (JSONL; must not exist)")
@@ -286,9 +298,49 @@ def _run(ns) -> int:
     return 0
 
 
+def _ede(ns) -> int:
+    from fuzzlab.core.urls import canonical_origin
+    from fuzzlab.disco.capture import read_capture
+    from fuzzlab.disco.ede import EdeRunner, write_report
+    run = Path(ns.run)
+    if any(canonical_origin(u) is None for u in ns.scope):
+        return _fail("--scope takes absolute http(s) URLs")
+    if ns.max_pages < 1:
+        return _fail("--max-pages must be at least 1")
+    out = run / "ede.json"
+    if out.exists():
+        return _fail(f"{out} exists (PA-0450)")
+    try:
+        records = read_capture(run / "capture.jsonl").records
+    except FileNotFoundError:
+        return _fail(f"{run} holds no capture.jsonl")
+    runner = EdeRunner(records, scope_urls=ns.scope, max_pages=ns.max_pages,
+                       deadline_s=ns.deadline)
+    if ns.dry_run:
+        print("DRY RUN -- disco ede: plans the test, sends nothing.")
+        print(f"  pages: {len(runner.pages)}  replayable answers: {len(runner.replay)}\n"
+              f"  scope: {sorted({canonical_origin(u) for u in ns.scope})}\n"
+              f"  sends_traffic: True (pages and assets; never the replayed answers)\n"
+              f"  needs_authorized: True\n  would_execute: {bool(ns.authorized)}")
+        return 0
+    if not ns.authorized:
+        return _fail("ede loads the target's pages: pass --authorized (lab-only, D11)")
+    report = runner.run()
+    write_report(report, out)
+    print(f"disco ede: {report.pages} pages ({report.pages_skipped_nondeterministic} "
+          f"non-deterministic, {report.pages_failed} failed), {report.answers} answers, "
+          f"{report.fields_tested} fields tested, {report.fields_unused} unused at load "
+          f"({sum(f['sensitive_name'] for f in report.findings)} with a sensitive name) "
+          f"-> {out}")
+    if report.budget_hit:
+        print(f"  stopped by budget: {report.budget_hit}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ns = build_parser().parse_args(argv)
-    return {"capture": _capture, "synth": _synth, "generate": _generate, "run": _run}[ns.cmd](ns)
+    return {"capture": _capture, "synth": _synth, "generate": _generate, "run": _run,
+            "ede": _ede}[ns.cmd](ns)
 
 
 if __name__ == "__main__":

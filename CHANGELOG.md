@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (excessive data exposure by response mutation)
+- **What:** `fuzzlab disco ede` replays a disco run's JSON answers with one field removed per load and reports the fields whose removal leaves the page unchanged (CC-CRAWL-0042, FR-CRAWL-25).
+- **Why:** the owner's EDEFuzz review: mutating the response, not the request, finds data the server exposes and the client never shows (OWASP API3), a class no tool here covered.
+
 ## 2026-10-18 (settles stop waiting for long-polls)
 - **What:** one network-quiet tracker (`netquiet.Inflight`, SP-40) for the crawler, disco and browser login; it never waits for event streams, WebSockets or requests open past 2 s (CC-CRAWL-0041, CC-SESS-0025, FR-CRAWL-24).
 - **Why:** the crawler spent 64% of its time on Juice Shop in `_settle`, held to its cap by a long-poll that never finishes; on a fixture each settle now ends once the app's own XHR does (under 4 s, was the 8 s budget).

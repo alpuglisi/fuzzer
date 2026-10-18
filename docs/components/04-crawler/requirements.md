@@ -778,6 +778,19 @@ fuzzer.
   after `LONG_LIVED_MS` (2 s; a long-poll such as socket.io's `polling` transport); the
   answer to a long-lived request is not activity. A request in flight has already passed
   the guard and any write window, so not waiting for it lets nothing through.
+- **FR-CRAWL-25 (excessive data exposure, CC-CRAWL-0042)** `fuzzlab disco ede --run DIR
+  --scope URL --authorized` tests each in-scope HTML page of a disco run (at most
+  `--max-pages`, within `--deadline`). The page's JSON GET answers are served from the
+  run's capture (matched by method and redacted URL; whole 2xx JSON bodies only) through
+  a route added over the guard; nothing else changes. The page is loaded 3 times with
+  the recorded answers: nodes that differ are ignored, a page whose structure differs is
+  skipped. Then each scalar field of each answer the page requested, by shape
+  (`$.items[*].id` across every element), is removed for one load; a field whose
+  removal leaves every non-ignored node unchanged is reported *unused at load* in
+  `ede.json`, with its JSON type and whether its name is sensitive, never its value. A
+  finding is a candidate: a field used only after an interaction is reported too. The
+  replayed answers never reach the target; the pages and their assets do (hence
+  `--authorized`); an existing `ede.json` is never overwritten.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

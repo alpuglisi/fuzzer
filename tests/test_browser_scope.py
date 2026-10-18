@@ -810,13 +810,13 @@ def test_the_browser_guard_catches_synthetic_offenders(tmp_path):
 def test_the_launch_sites_are_the_four_known_ones():
     """Not vacuous: the guard sees every launch site there is (the session manager's
     browser login, FR-SESS-19, is the fourth; the disco explorer, CC-CRAWL-0031, the
-    fifth)."""
+    fifth; disco's excessive-data-exposure test, CC-CRAWL-0042, the sixth)."""
     sites = set()
     for path in (ROOT / "fuzzlab").rglob("*.py"):
         if ".chromium.launch(" in path.read_text():
             sites.add(path.name)
     assert sites == {"spider.py", "fetcher.py", "browserexec.py", "browserlogin.py",
-                     "explore.py"}
+                     "explore.py", "ede.py"}
 
 
 # --- BUG-0126: the M6 executor honours the configured Chromium; no browser, no verdict --
