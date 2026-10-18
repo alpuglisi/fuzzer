@@ -116,6 +116,11 @@ def _numeric(field: dict) -> list[str]:
     vals = [base]
     if hi is not None:
         vals.append(hi)
+    else:
+        # no stated maximum: wider magnitudes for a range only a script enforces (one
+        # judged by `aria-invalid`; measured: a phone-number field that wanted 7-10
+        # digits rejected "1")
+        vals += [10.0 ** k for k in range(1, 10) if lo is None or 10.0 ** k > lo]
     return [str(int(v)) if float(v).is_integer() else str(v) for v in vals]
 
 
@@ -132,7 +137,9 @@ def _from_pattern(pattern: str) -> str | None:
         if tok.startswith("{") or tok in "+*?":
             if last is None:
                 return None
-            n = 0 if tok in "*?" else 1
+            # `*` repeats once: an empty value fails `required` (measured: Juice Shop's
+            # `-?[\d]*` CAPTCHA control got "" and blocked its form)
+            n = 0 if tok == "?" else 1
             if tok.startswith("{"):
                 n = int(tok[1:-1].split(",")[0])
             out[-1] = last * n
@@ -148,7 +155,8 @@ def _from_pattern(pattern: str) -> str | None:
             if body.startswith("^"):
                 return None
             m = re.match(r"(.)-(.)", body)
-            last = m.group(1) if m else body[0]
+            esc = {r"\d": "1", r"\w": "a", r"\s": " "}.get(body[:2])
+            last = esc or (m.group(1) if m else body[0])
         elif tok.startswith("\\"):
             last = tok[1]
         else:

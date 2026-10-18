@@ -143,7 +143,8 @@ def _capture(ns) -> int:
     doc = {"explore": report.__dict__, "proxy": proxy.stats()}
     (out / "explore.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
     print(f"disco capture: {report.states} states, {report.actions} actions "
-          f"({report.submissions} submissions, {report.perturbations} perturbations), "
+          f"({report.submissions} submissions, {report.submissions_sent} of them sent "
+          f"the form's values; {report.perturbations} perturbations), "
           f"{doc['proxy'].get('recorded', 0)} exchanges recorded -> {out / 'capture.jsonl'}")
     blocked = {**report.out_of_scope}
     for host, n in (doc["proxy"].get("blocked") or {}).items():
@@ -151,7 +152,7 @@ def _capture(ns) -> int:
     if blocked:
         print(f"  refused out of scope: {dict(sorted(blocked.items()))}")
     if report.captcha_submissions:
-        print(f"  CAPTCHA forms submitted with a filler answer (D71): "
+        print(f"  CAPTCHA forms sent with a filler answer (D71): "
               f"{report.captcha_submissions}")
     if report.refused:
         print(f"  never acted on: {dict(sorted(report.refused.items()))}")

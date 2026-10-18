@@ -13,13 +13,19 @@ particular lab, built to exercise what static crawling cannot see:
   (``GET /api/projects/<int>/tasks``) -- two numeric ids, so path templating has work;
 * a "New task" dialog inserted into the DOM on click, with a form that the browser's
   own validation blocks unless filled validly (``required``, ``minlength``, ``type=email``,
-  ``min``/``max``, a ``pattern``); its submit sends ``POST /api/projects/<int>/tasks``
+  ``min``/``max``, a ``pattern``, a ``-?[\\d]*`` pattern, and a range only its script
+  enforces -- ``aria-invalid`` after blur, the button disabled until it holds: both
+  measured on Juice Shop); its submit sends ``POST /api/projects/<int>/tasks``
   (JSON) and the answer carries a UUID that a later ``PUT /api/tasks/<uuid>`` and a
   ``POST /api/hooks/notify`` body reuse -- a producer -> consumer edge;
 * third-party SPA shapes the explorer must survive (measured on Juice Shop): a one-time
   welcome overlay (first visit only), a notice bar gone for good once dismissed, a hash
   router (`#/` and `#/projects`: a restore between them is a same-document change), and
   state classes toggled as the UI changes (`toolbar--active`, `is-touched`);
+* a toolbar on every route (chrome) holding a search box submitted by Enter only
+  (``GET /api/search``) beside its buttons: the buttons share the search box's
+  container, so each looks like that "form"'s submitter (measured on Juice Shop,
+  BUG-0502);
 * a "Help" link to a page whose script navigates away 30 ms after it loads (reads of a
   page that moves on under the explorer);
 * a "Delete account" control and a "Log out" control that must never be acted on;
@@ -74,6 +80,16 @@ function home() {
   bar.className = location.hash === '#/projects' ? 'toolbar toolbar--active' : 'toolbar';
   bar.appendChild(nav('Projects', () => { location.hash = '#/projects'; }));
   bar.appendChild(nav('Settings', settings));
+  const search = document.createElement('input');          // submitted by Enter only
+  search.type = 'search'; search.placeholder = 'Search tasks';
+  search.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') api('/api/search?q=' + encodeURIComponent(search.value));
+  });
+  bar.appendChild(search);
+  const theme = document.createElement('button');         // a toolbar button: chrome
+  theme.textContent = 'Theme';
+  theme.addEventListener('click', () => bar.classList.toggle('toolbar--dark'));
+  bar.appendChild(theme);
   const help = document.createElement('a'); help.href = '/help'; help.textContent = 'Help';
   bar.appendChild(help);
   const danger = document.createElement('button');
@@ -118,12 +134,21 @@ function dialog(pid) {
     + '<input name="code" pattern="[A-Z]{3}-[0-9]{2}" required placeholder="ABC-12">'
     + '<select name="priority"><option value="">-</option><option value="low">low</option>'
     + '<option value="high">high</option></select>'
+    + '<input name="phone" type="number" required aria-invalid="false">'
+    + '<input name="check" pattern="-?[\\d]*" required>'
     + '<button type="submit">Create</button>';
+  // a range only the script enforces: shown as aria-invalid once the field is touched
+  // (blurred), and the button stays disabled until it holds (measured on Juice Shop)
+  const btn = f.querySelector('button');
+  const phoneOk = () => Number(f.phone.value) >= 1000000 && Number(f.phone.value) <= 9999999999;
+  f.phone.addEventListener('blur', () => f.phone.setAttribute('aria-invalid', String(!phoneOk())));
+  const gate = () => { btn.disabled = !(f.checkValidity() && phoneOk()); };
+  f.addEventListener('input', gate); gate();
   f.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const body = {title: f.title.value, owner_email: f.owner_email.value,
                   estimate: Number(f.estimate.value), code: f.code.value,
-                  priority: f.priority.value};
+                  priority: f.priority.value, phone: f.phone.value, check: f.check.value};
     api('/api/projects/' + pid + '/tasks', 'POST', body).then(t => {
       const edit = document.createElement('button'); edit.textContent = 'Mark done';
       edit.addEventListener('click', () => api('/api/tasks/' + t.id, 'PUT', {done: true}));
@@ -183,6 +208,8 @@ class DiscoApp:
                 if method == "GET" and path == "/api/projects":
                     return self._send(200, [{"id": 101, "name": "Alpha"},
                                             {"id": 102, "name": "Beta"}])
+                if method == "GET" and path == "/api/search":
+                    return self._send(200, [])
                 if method == "GET" and path == "/api/settings":
                     return self._send(200, {"theme": "light", "page_size": 20})
                 parts = path.strip("/").split("/")

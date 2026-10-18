@@ -2403,3 +2403,17 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      neighbouring class** when it is built (explorer vs emulator), not only by name.
      (from BUG-0501)
   - Enforced by: tests/test_disco_e2e.py::test_the_hidden_api_surface_is_reached, tests/test_disco_synth.py::test_state_classes_never_change_a_signature, tests/test_disco_synth.py::test_segments_are_classified_and_slugs_need_siblings
+
+- **PA-0502** — Strengthens `PA-0501(1)` and `PA-0110`, after BUG-0502: the disco
+  explorer reported 75 submissions on Juice Shop when 2 forms' values were sent; its
+  actions went to a header re-acted in every state. PA-0501(1) was met by reading the
+  counters, PA-0110 had never been applied to report counters.
+  1. **A discovery mechanism's effect counters count observed effects**, never its own
+     intent: a submission is counted when the filled values reached a request, not when
+     a submit click ran.
+  2. **Each reported counter is reconciled with independent evidence** (the capture, the
+     action log) before it is recorded in a change-control entry or reported.
+  3. **Element identity carries no context of where the element was seen** (route, URL,
+     state), and **markers a mechanism writes into a page are cleared before it reads
+     them again**. (from BUG-0502)
+  - Enforced by: tests/test_disco_e2e.py::test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once, tests/test_disco_synth.py::test_a_submission_is_sent_only_when_a_distinctive_filled_value_reaches_a_request, tests/test_disco_e2e.py::test_the_hidden_api_surface_is_reached

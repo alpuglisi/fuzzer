@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (BUG-0502: the disco explorer reaches 6/15 on Juice Shop, from 2/15)
+- **What:** the explorer takes each step once per route and chrome once per run, keeps the route out of element signatures, clears its field markers between forms, judges values by `aria-invalid` (after blur) as well as `checkValidity()`, widens pattern and number candidates, presses Enter in search boxes, and counts a submission as sent only when its values reached a request (CC-CRAWL-0034).
+- **Why:** the owner asked for the explorer's gaps to be closed; its Juice Shop run had spent its budget re-acting the header in every state, and its "75 submissions" were mostly header clicks (F-061).
+
 ## 2026-10-18 (D71: CAPTCHA forms are submitted with a filler answer)
 - **What:** the disco explorer and the legacy spider no longer refuse a CAPTCHA form: its CAPTCHA control gets a filler answer like any other control and the form is submitted, so its request is captured; recognising a CAPTCHA now only counts and logs it (CC-CRAWL-0033).
 - **Why:** the owner's decision (D71), asked after the Juice Shop measurement showed the refusal hid the contact form's endpoint from both tools.

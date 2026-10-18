@@ -3,6 +3,66 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0034 — The disco explorer stops re-acting chrome, fills the right fields, satisfies script validators, and counts sent submissions (BUG-0502) (2026-10-18)
+- Change (`fuzzlab/disco/explore.py`, `formfill.py`, `cli.py`):
+  - Steps are keyed `(route, signature, occurrence, kind)`, not per state; a step on a
+    signature seen on more than one route (chrome) is taken once per run
+    (`chrome_skipped`).
+  - The enumerator gives a form-less container no `action` (it was `location.href`,
+    which put the route into signatures); `form_refusal` takes the page URL instead.
+  - `enter_submits` / the `enter` step: a search box or a container without a submit
+    control is filled and Enter pressed.
+  - Perturbations once per form (route and field set), none through a search box's
+    buttons.
+  - `_FIELDS_JS` clears earlier `data-disco-field` marks first.
+  - `_VALID_JS`: a value is kept when the blurred control passes `checkValidity()` and
+    is not `aria-invalid="true"`; else the first browser-valid value is kept.
+  - `formfill._numeric`: wider magnitudes for a number with no stated maximum;
+    `_from_pattern`: `\d` / `\w` / `\s` inside a class, `*` once.
+  - `ExploreReport.submissions_sent` (submit / Enter / perturbation steps whose
+    distinctive filled values reached a request); `captcha_submissions` counts only
+    those; the CLI prints both counts.
+  - Fixture (`tests/_disco_app.py`): a toolbar on every route with an Enter-only search
+    box beside a button; a script-only range validator (`aria-invalid` after blur, the
+    button disabled until it holds); a `-?[\d]*` control.
+- Reason: the owner's "close the explorer's gaps" (2026-10-18). Reading the Juice Shop
+  run's action log against its capture showed the budget spent on the header and the
+  submissions counter counting clicks; a probe of the forms left unsubmitted showed the
+  script validator and the pattern defects (BUG-0502).
+- Impact: `fuzzlab/disco` only. Fewer, different actions per run; the report gains
+  `submissions_sent` and `chrome_skipped`; `explore.json` carries them. No store or
+  contract change.
+- Risk: medium-low. Per-route keys skip an element's re-action in an overlay state of
+  the same route (an overlay's own elements are still explored); a chrome signature is
+  acted once even if it meant something else on another route. Both trade breadth on
+  one route for routes reached. `aria-invalid` is WAI-ARIA, not a framework name.
+- Corrects CC-CRAWL-0032's effectiveness figure (append-only, so here): its "75
+  submissions" counted submit clicks, mostly on header buttons; the capture of that run
+  holds 2 form POSTs (`/api/Complaints`). F-061.
+- Deliverables:
+  - [x] code, unit and e2e tests; the pushed explorer on the extended fixture: no
+    POST, no PUT, no search (fixed: all reached) — done
+  - [x] BUG-0502, PA-0502, ERROR_LOG, F-061, FR-CRAWL-19 amended, CHANGELOG — done
+- Effectiveness (assessed 2026-10-18, Juice Shop v20.3.0 reset via `lab/labctl.sh`, the
+  lab identity, the same scorer as CC-CRAWL-0032):
+  - Before (CC-CRAWL-0032): 60 states (budget hit), 206 actions, 2 form POSTs captured,
+    24 endpoints, **reached 2/15**, 806 s.
+  - After: 43 states (the frontier emptied, no budget hit), 167 actions (102 clicks,
+    33 submits, 6 Enter, 26 perturbations), 127 chrome steps skipped, 0 unrestorable,
+    14 routes, 43 endpoints; **reached 6/15** (+ `/profile/image/url` `imageUrl`,
+    `/profile` `username` x2, `/api/Feedbacks` `comment`) in 766 s.
+  - Counters reconciled with the capture (PA-0502(2)): `submissions` 39,
+    `submissions_sent` 19; the capture holds 35 non-GET, non-socket requests, all from
+    actions, over 11 endpoints (`/api/Feedbacks`, `/api/Cards`, `/rest/deluxe-membership`
+    7 each, `/api/Complaints` 3, `/api/Addresss`, `/rest/chat`, `/profile`,
+    `/profile/image/url` 2 each, `/profile/image/file`, two PUTs 1 each). The excess over
+    19 is restore replays: a state behind a submit is reached by replaying it, which
+    sends it again (a known cost, not changed here).
+  - The legacy pipeline on Juice Shop (CC-CRAWL-0032): reached 7/15. Not reached by disco
+    yet: the login form and registration (an authenticated run), `/file-upload`, the two
+    DOM points (`#/search?q`, `#/track-result?id`: the capture holds no fragment), and
+    routes the side-nav did not open within 43 states (46 route-capped).
+
 ### CC-CRAWL-0033 — CAPTCHA forms are submitted with a filler answer in both discovery tools (D71) (2026-10-18)
 - Change:
   - `fuzzlab/disco/explore.py`: `form_refusal` no longer refuses a CAPTCHA form;
@@ -32,8 +92,10 @@ Newest first.
   - [x] D71, FR-CRAWL-13/15/19 and NFR-CRAWL-safe amended, CHANGELOG — done
   - [x] `verify_change --base 349ce9e` on 3f795b3: 73 files, 3001 passed, 0 failed,
     5 skipped, 18 xfailed — done
-- Effectiveness: to be assessed at the next Juice Shop measurement (the contact form's
-  POST /api/Feedbacks captured by both tools).
+- Effectiveness (assessed 2026-10-18 with CC-CRAWL-0034's explorer on Juice Shop): the
+  contact form's `POST /api/Feedbacks` was captured with its CAPTCHA control's filler
+  answer (`captcha_submissions` 1), and the `/api/Feedbacks` `comment` point is reached.
+  The legacy crawler was not re-run for this change.
 
 ### CC-CRAWL-0032 — The disco explorer and synthesizer survive a real SPA (BUG-0501) (2026-10-18)
 - Change (`fuzzlab/disco/explore.py`, `fingerprint.py`, `synth.py`):

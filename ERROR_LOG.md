@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-18 — crawler (disco explorer)
+- **Symptom:** on Juice Shop the explorer reported 75 submissions while 2 forms' values were sent; its actions went to the same header buttons in every state; the address and contact forms never enabled their submit buttons; on the extended fixture, a form's values went into another form's controls.
+- **Root cause:** steps deduplicated per state, not per element; a form-less container's `action` (`location.href`) put the route into signatures; a toolbar's buttons counted as submitters of its search box; `data-disco-field` marks never cleared; validity judged by `checkValidity()` alone (a script validator shows only `aria-invalid`); `[\d]` and `*` mishandled in pattern candidates; the submission counter counted clicks (BUG-0502, PA-0502).
+- **Remediation:** CC-CRAWL-0034 — per-route steps and chrome taken once; no route in signatures; markers cleared; `aria-invalid` after blur judged; pattern and number candidates widened; Enter steps; `submissions_sent` counts submissions whose values reached a request.
+- **Status:** Fixed
+
 ## 2026-10-18 — Discovery: the disco explorer explored nothing on Juice Shop, and the synthesizer merged its routes (fixed, BUG-0501, PA-0501)
 - **Symptom:** the first real measurement of `fuzzlab disco capture` (Juice Shop v20.3.0, authenticated): 1 state, 0 actions. After the first fixes: 60 states, 143 actions, 0 form submissions, 2/15 answer-key inputs reached, and an inventory with `/{p1}` and `/api/{p1}/` merging unrelated routes.
 - **Root cause:** the explorer's state model and the slug rule were validated only on the agent's own fixture, which had no one-time or dismissible UI, no hash router, no state classes, no form-less forms, no overlay-heavy page and no resource-named segments (BUG-0501).

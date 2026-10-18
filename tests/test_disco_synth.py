@@ -64,6 +64,18 @@ def test_candidates_follow_type_name_pattern_and_bounds():
     assert formfill.candidates({"type": "password", "name": "pw"}) == [formfill.PASSWORD_FILLER]
 
 
+def test_patterns_with_escaped_classes_and_open_ranges_get_candidates():
+    """Measured on Juice Shop: a `-?[\\d]*` control got "" (`*` as zero, `[\\d]` read
+    as a backslash), and a number field whose range only a script enforced got "1"."""
+    assert formfill._from_pattern(r"-?[\d]*") == "1"
+    assert formfill._from_pattern(r"[\w]{3}") == "aaa"
+    assert formfill.candidates({"type": "text", "pattern": r"-?[\d]*",
+                                "required": True})[0] == "1"
+    wide = formfill.candidates({"type": "number"})
+    assert wide[0] == "1" and "1000000" in wide and "1000000000" in wide
+    assert formfill.candidates({"type": "number", "min": "1", "max": "10"}) == ["1", "10"]
+
+
 def test_page_set_or_optional_sensitive_controls_are_left_alone():
     """A CSRF token the page filled is never overwritten; a required empty control is
     filled whatever its name, or the browser refuses the form (measured on the fixture)."""
@@ -95,6 +107,42 @@ def test_a_captcha_form_is_submitted_and_a_credential_change_is_not():
     change = [{"type": "password", "name": "current"}, {"type": "password", "name": "new"},
               {"type": "password", "name": "repeat"}]
     assert form_refusal(change, {"label": "Change password"}) == "credential-change"
+
+
+def test_enter_is_pressed_where_no_submit_control_would_send_the_form():
+    from fuzzlab.disco.explore import enter_submits
+    box = {"tag": "input", "type": "search", "last_typed": True, "typed": 1}
+    assert enter_submits(dict(box, submitters=0, form_tag=False))
+    assert enter_submits(dict(box, submitters=6, form_tag=False))    # a toolbar's box
+    assert not enter_submits(dict(box, submitters=1, form_tag=True))  # click submits it
+    many = dict(box, typed=3, submitters=1, form_tag=False)
+    assert not enter_submits(many)                     # its button is its submitter
+    assert enter_submits(dict(many, submitters=0, form_tag=True))
+    assert not enter_submits(dict(many, submitters=0, last_typed=False))
+    assert not enter_submits(dict(box, type="checkbox", submitters=0))
+    assert not enter_submits(dict(box, submitters=0, disabled=True))
+
+
+def test_a_submission_is_sent_only_when_a_distinctive_filled_value_reaches_a_request():
+    from fuzzlab.disco.explore import carries_value, is_distinctive
+
+    class Req:
+        def __init__(self, url, body=None):
+            self.url, self._body = url, body
+
+        @property
+        def post_data(self):
+            if self._body == b"bin":
+                raise UnicodeDecodeError("utf-8", b"", 0, 1, "x")
+            return self._body
+
+    assert is_distinctive("Hello from disco") and not is_distinctive("test")
+    assert not is_distinctive("12345") and not is_distinctive("1")
+    vals = ["Hello from disco", "disco.user@example.com"]
+    assert carries_value(Req("http://h/api?q=Hello+from+disco"), vals)
+    assert carries_value(Req("http://h/api", '{"email": "disco.user@example.com"}'), vals)
+    assert not carries_value(Req("http://h/api/lang"), vals)
+    assert not carries_value(Req("http://h/api/up", b"bin"), vals)
 
 
 # --- network quiescence (the explorer's settle rule) -------------------------------------

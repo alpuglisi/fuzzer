@@ -112,10 +112,13 @@ _ENUMERATE_JS = r"""
     return null;
   };
   window.__discoLayout = {cls, ancestry, formLike};
+  const TYPED = 'input:not([type=hidden]):not([type=button]):not([type=submit])'
+    + ':not([type=checkbox]):not([type=radio]):not([type=reset]):not([type=image]),textarea';
   const describe = (e, how) => {
     const id = String(n++);
     e.setAttribute('data-disco-id', id);
     const form = formLike(e);
+    const typed = form ? Array.from(form.querySelectorAll(TYPED)) : [];
     const label = (e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
                    || e.value || e.getAttribute('placeholder') || '').trim().slice(0, 80);
     const tag = e.tagName.toLowerCase();
@@ -123,8 +126,16 @@ _ENUMERATE_JS = r"""
     out.push({disco_id: id, how, tag, role: e.getAttribute('role') || '', type,
               name: e.getAttribute('name') || '', id: e.id || '', cls: cls(e), ancestry: ancestry(e),
               href: tag === 'a' ? e.href : '', label,
-              action: form ? (form.action || location.href) : '',
-              in_form: !!form, disabled: !!e.disabled, cursor: getComputedStyle(e).cursor});
+              // a form-less container has no action: location.href put the route into
+              // every signature inside it, so a toolbar was new on each route (BUG-0502)
+              action: form && form.tagName === 'FORM' ? (form.action || location.href) : '',
+              in_form: !!form, disabled: !!e.disabled, cursor: getComputedStyle(e).cursor,
+              // the Enter rule (`enter_submits`): what the element's container holds
+              form_tag: !!(form && form.tagName === 'FORM'), typed: typed.length,
+              last_typed: typed.length > 0 && typed[typed.length - 1] === e,
+              submitters: form ? form.querySelectorAll(
+                'button:not([type=button]):not([type=reset]),input[type=submit],'
+                + 'input[type=image]').length : 0});
   };
   for (const e of document.querySelectorAll(NATIVE)) {
     if (out.length >= maxElements) break;
@@ -169,6 +180,9 @@ _MARK_JS = r"""
 
 _FIELDS_JS = r"""
 (e) => {
+  // markers of an earlier form go first: a stale data-disco-field="0" earlier in the
+  // document was filled in place of this form's first control (BUG-0502)
+  document.querySelectorAll('[data-disco-field]').forEach(c => c.removeAttribute('data-disco-field'));
   const lay = window.__discoLayout;
   const form = (lay && lay.formLike(e)) || e.form || e.closest('form') || e.parentElement;
   const ctrls = Array.from(form.querySelectorAll('input,select,textarea'));
@@ -189,12 +203,22 @@ _FIELDS_JS = r"""
 """
 
 
+#: A control's verdict on its value: ``valid``; ``aria-invalid`` when the browser accepts
+#: it but the page's own script marks it invalid (WAI-ARIA ``aria-invalid="true"``: a
+#: framework validator the browser cannot see -- measured on Juice Shop, where such a
+#: field kept the submit button disabled while ``checkValidity()`` passed); ``invalid``.
+#: The control is blurred first: a framework shows its error state only once a control
+#: is touched (measured: the same field read "false" while focused).
+_VALID_JS = """(e) => { e.blur(); return !e.checkValidity() ? 'invalid'
+  : (e.getAttribute('aria-invalid') === 'true' ? 'aria-invalid' : 'valid'); }"""
+
+
 @dataclass
 class Step:
     """One replayable action: the element (its signature and which occurrence of that
     signature, in document order) and what was done with it."""
     signature: str
-    kind: str                       # "click" | "submit" | "perturb:<field>:<kind>"
+    kind: str                       # "click" | "submit" | "enter" | "perturb:<field>:<kind>"
     occurrence: int = 0
 
     def key(self) -> tuple[str, int, str]:
@@ -277,7 +301,11 @@ class ExploreReport:
     unrestorable: int = 0
     transient_dropped: int = 0
     route_capped: int = 0
-    captcha_submissions: int = 0
+    #: submit / Enter / perturbation steps whose filled values reached a request: what
+    #: proves a submission happened (a "submit" step whose click did nothing is not one)
+    submissions_sent: int = 0
+    chrome_skipped: int = 0
+    captcha_submissions: int = 0              # of `submissions_sent`, with a CAPTCHA
     errors: int = 0
     session_lost: int = 0
     aborted: int = 0
@@ -318,6 +346,38 @@ def is_fill_only(el: dict) -> bool:
 def is_submitter(el: dict) -> bool:
     return bool(el.get("in_form")) and el.get("tag") in ("button", "input") and \
         el.get("type") in ("submit", "image", "")
+
+
+#: Input types Enter is pressed in (`enter_submits`).
+ENTER_TYPES = frozenset({"text", "search", "email", "url", "tel", "number", ""})
+
+
+def enter_submits(el: dict) -> bool:
+    """Whether the explorer fills ``el``'s container and presses Enter in it: a text
+    input, the last typed control of a container with no submit control, or the only
+    one of a form-less container (a search box among a toolbar's buttons). A form that
+    has its own submit control is submitted by clicking it instead."""
+    if el.get("tag") != "input" or el.get("type") not in ENTER_TYPES or el.get("disabled"):
+        return False
+    if not el.get("last_typed"):
+        return False
+    return not el.get("submitters") or (not el.get("form_tag") and el.get("typed") == 1)
+
+
+def is_distinctive(value: str) -> bool:
+    """A filled value specific enough that finding it in a request means the form's
+    data was sent (``1`` or ``test`` could be anywhere)."""
+    return len(value) >= 5 and not value.isdigit()
+
+
+def carries_value(req, values: list[str]) -> bool:
+    """Whether a browser request carries one of ``values`` in its URL or body."""
+    from urllib.parse import unquote_plus
+    try:
+        text = unquote_plus(req.url) + "\n" + (req.post_data or "")
+    except (UnicodeDecodeError, ValueError):     # a binary body: the URL alone
+        text = unquote_plus(req.url)
+    return any(v in text for v in values)
 
 
 def has_captcha(fields: list[dict]) -> bool:
@@ -361,6 +421,9 @@ class Explorer:
         self.clock = clock
         self.report = ExploreReport()
         self._last_fields: list[dict] = []        # the fields of the last form filled
+        self._fill_values: list[str] = []         # the distinctive values just filled
+        self._values_sent = False                 # whether a request carried one
+        self._perturbed: set[tuple] = set()       # (route, field set): perturbed once
         self._seq = 0
         self._inflight = 0
         self._last_change = 0.0
@@ -401,9 +464,11 @@ class Explorer:
     def _count_abort(self) -> None:
         self.report.aborted += 1
 
-    def _on_request(self, _req) -> None:
+    def _on_request(self, req) -> None:
         self._inflight += 1
         self._last_change = self.clock()
+        if self._fill_values and not self._values_sent:
+            self._values_sent = carries_value(req, self._fill_values)
 
     def _on_done(self, _req) -> None:
         self._inflight = max(0, self._inflight - 1)
@@ -528,16 +593,27 @@ class Explorer:
                     if f.get("required") or f["type"] == "checkbox":
                         target.check(timeout=2000)
                     continue
-                chosen = None
+                chosen = native = None
                 for cand in formfill.candidates(f):
                     target.fill(cand, timeout=2000)
-                    if target.evaluate("e => e.checkValidity()"):
+                    verdict = target.evaluate(_VALID_JS)
+                    if verdict == "valid":
                         chosen = cand
                         break
+                    if verdict == "aria-invalid" and native is None:
+                        native = cand
+                if chosen is None and native is not None:
+                    # no candidate satisfied the script's validator: the first the
+                    # browser accepted is still the best value to leave
+                    target.fill(native, timeout=2000)
+                    chosen = native
                 if perturb and perturb[0] == f["field"]:
                     value = dict(formfill.perturbations(f, chosen)).get(perturb[1])
                     if value is not None:
                         target.fill(value, timeout=2000)
+                        chosen = value
+                if chosen and is_distinctive(chosen):
+                    self._fill_values.append(chosen)
             except _pw_error() as exc:  # a control that will not take input
                 logging.info("disco: a form control refused input (%s)", type(exc).__name__)
         return fields
@@ -551,13 +627,21 @@ class Explorer:
             if step.kind.startswith("perturb:"):
                 _, fid, kind = step.kind.split(":", 2)
                 perturb = (fid, kind)
+            self._fill_values, self._values_sent = [], False
             fields = self._fill(page, loc, perturb)
             self._last_fields = fields or []
-            reason = form_refusal(self._last_fields, el)
+            # a form-less container has no action: the page's URL stands for it
+            reason = form_refusal(self._last_fields,
+                                  dict(el, action=el.get("action") or page.url))
             if reason:
                 self.report.refuse(reason)
+                self._fill_values = []
                 return False
         self._tag(ctx, prefix)
+        if step.kind == "enter":
+            loc.press("Enter", timeout=3000)
+            self.mark_activity()
+            return True
         try:
             loc.click(timeout=3000)
         except _pw_error():  # covered or detached: one dispatched click
@@ -649,19 +733,31 @@ class Explorer:
             return "deadline"
         return None
 
-    def _steps_for(self, page, el: dict) -> list[Step]:
+    def _steps_for(self, page, el: dict, route: str) -> list[Step]:
         occ = el["occurrence"]
-        if occ >= self.opts.max_same_signature or is_fill_only(el):
+        if occ >= self.opts.max_same_signature:
             return []                     # a long list of one shape: its first few only
+        if enter_submits(el):
+            return [Step(el["signature"], "enter", occ)]
+        if is_fill_only(el):
+            return []
         if el.get("disabled") and not is_submitter(el):
             return []
         if not is_submitter(el):
             return [Step(el["signature"], "click", occ)]
         steps = [Step(el["signature"], "submit", occ)]
+        if not el.get("form_tag") and el.get("typed") == 1:
+            return steps       # a search box among buttons: its Enter step covers it
         try:
             fields = self._locate(page, el).evaluate(_FIELDS_JS)
         except _pw_error():  # the form went away
             return steps
+        # one perturbation pass per form, not per button: a toolbar's buttons share the
+        # container of its search box, and each re-perturbed it (BUG-0502)
+        form_key = (route, tuple((f["tag"], f["type"], f["name"], f["id"]) for f in fields))
+        if form_key in self._perturbed:
+            return steps
+        self._perturbed.add(form_key)
         for f in fields:
             for kind, _value in formfill.perturbations(f, None):
                 if len(steps) - 1 >= self.opts.max_perturbations:
@@ -707,7 +803,14 @@ class Explorer:
         frontier = Frontier(self.opts.max_states_per_route)
         frontier.push(root)
         known = {fp}
+        # A step is taken once per route, not once per state: an overlay state's
+        # pending work is what it added. A step on chrome -- an element seen on more
+        # than one route (a header, a side-nav) -- is taken once in the whole run.
+        # Per-state keys re-acted a header in every state (BUG-0502, measured on Juice
+        # Shop: 7 header buttons in each of 60 states, most of 206 actions).
         seen: set[tuple] = set()
+        done: set[tuple] = set()
+        sig_routes: dict[str, set[str]] = {}
         authenticated = self.storage_state is not None and \
             not looks_like_login_url(self.start_url)
         self.report.states = 1
@@ -724,17 +827,26 @@ class Explorer:
             if got is None:
                 self.report.unrestorable += 1
                 continue
-            pending = [(el, step) for el in got[1] for step in self._steps_for(page, el)]
+            route = normalise_route(state.url)
+            for el in got[1]:
+                sig_routes.setdefault(el["signature"], set()).add(route)
+            pending = [(el, step) for el in got[1]
+                       if not any((route, el["signature"], el["occurrence"], k) in seen
+                                  for k in ("click", "submit", "enter"))
+                       for step in self._steps_for(page, el, route)]
             dirty = False
             for el_desc, step in pending:
                 hit = self._budget(started)
                 if hit:
                     self.report.budget_hit = hit
                     return
-                key = (state.fp, *step.key())
+                key = (route, *step.key())
                 if key in seen or step.key() in self._denied:
                     continue
                 seen.add(key)
+                if step.key() in done and len(sig_routes.get(step.signature, ())) > 1:
+                    self.report.chrome_skipped += 1
+                    continue
                 why = refusal(el_desc, self.opts.deny)
                 if why:
                     self.report.refuse(why)
@@ -757,14 +869,18 @@ class Explorer:
                     continue
                 if not performed:
                     continue
+                done.add(step.key())
                 self.report.actions += 1
-                if step.kind == "submit":
+                if step.kind in ("submit", "enter"):
                     self.report.submissions += 1
-                    if has_captcha(self._last_fields):
-                        self.report.captcha_submissions += 1
                 elif step.kind.startswith("perturb:"):
                     self.report.perturbations += 1
                 self.wait_quiet(page)
+                if step.kind != "click" and self._values_sent:
+                    self.report.submissions_sent += 1
+                    if has_captcha(self._last_fields):
+                        self.report.captcha_submissions += 1
+                self._fill_values = []
                 self._close_popups(ctx, page)
                 if authenticated and looks_like_login_url(page.url):
                     self.report.session_lost += 1

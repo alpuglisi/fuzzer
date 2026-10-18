@@ -54,6 +54,11 @@ def test_the_hidden_api_surface_is_reached(discovered):
     paths = discovered["app"].paths()
     assert "/api/projects" in paths and "/api/projects/101/tasks" in paths
     assert "/api/projects/101/tasks" in discovered["app"].paths("POST")
+    # a value the script's validator accepts (aria-invalid after blur) and one that fits
+    # the `-?[\d]*` pattern: both blocked every submission before (BUG-0502)
+    [body] = [json.loads(b) for m, p, _h, b in discovered["app"].hits
+              if m == "POST" and p == "/api/projects/101/tasks"][:1]
+    assert 1000000 <= int(body["phone"]) <= 9999999999 and body["check"].isdigit()
     assert any(p.startswith("/api/tasks/") for p in discovered["app"].paths("PUT"))
     assert "/api/hooks/notify" in discovered["app"].paths("POST")
     assert discovered["report"].submissions >= 1
@@ -62,6 +67,23 @@ def test_the_hidden_api_surface_is_reached(discovered):
     # unrestorable (BUG-0501: Juice Shop's start page was, and nothing was explored)
     assert discovered["report"].unrestorable == 0
     assert discovered["report"].transient_dropped >= 1
+
+
+def test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once(discovered):
+    """BUG-0502: a form-less search box (no submit control) is filled and Enter pressed;
+    the toolbar holding it is on every route, and its button -- which shares the search
+    box's container, so it looks like a submitter -- is acted on once in the whole run,
+    not once per state. A submission counts as sent only when the filled values reach a
+    request."""
+    searches = [p for p in discovered["app"].paths() if p == "/api/search"]
+    assert searches
+    actions = [json.loads(ln) for ln in (discovered["out"] / "actions.jsonl").open()]
+    assert any(a["kind"] == "enter" for a in actions)
+    theme = [a for a in actions if a["label"] == "Theme"]
+    assert len(theme) == 1, theme
+    report = discovered["report"]
+    assert 1 <= report.submissions_sent < report.submissions
+    assert report.chrome_skipped >= 1
 
 
 def test_destructive_controls_and_other_origins_are_never_reached(discovered):

@@ -759,3 +759,13 @@ Juice Shop lab is complete.
 - **Evidence:** BUG-0501; ERROR_LOG 2026-10-18; the first capture's `explore.json` (`states: 1, actions: 0, unrestorable: 1`); the pushed explorer on the extended fixture reproduces it.
 - **Impact:** the owner's first performance question found a tool that did nothing on the lab. About an hour of fixing followed before a real comparison could start.
 - **Status:** fixed (CC-CRAWL-0032); PA-0501 makes a run on an app the author did not write a condition for calling a discovery mechanism working, and it joins the fixture as a standing test.
+
+
+### F-061 — I recorded and reported "75 submissions" on Juice Shop without checking them against the capture; 2 forms' values had been sent
+- **What:** In CC-CRAWL-0032's effectiveness section and in my report to the owner (2026-10-18), I gave the explorer's Juice Shop run as "206 actions, 75 submissions, 80 perturbations".
+  - Reading its `actions.jsonl` against its `capture.jsonl` later showed most "submissions" were header buttons ("Open Sidenav", "Language selection menu") counted as submit steps. The capture holds two form POSTs (`/api/Complaints`).
+  - The counter counted the explorer's own submit clicks, and I took it at face value, though PA-0501(1), written by me that day, asks that the counters be checked.
+  - The same reading showed the header re-acted in every state, which spent the budget (BUG-0502).
+- **Evidence:** BUG-0502; `disco-auth2/actions.jsonl` and `capture.jsonl` from that run (scratch); CC-CRAWL-0032 (the figures as recorded).
+- **Impact:** the owner was given a submission figure about 37 times too high, and the "budget runs out before most routes" gap was described without its main cause.
+- **Status:** fixed (CC-CRAWL-0034: `submissions_sent` counts submissions whose values reached a request); CC-CRAWL-0034 corrects CC-CRAWL-0032's figure; PA-0502(2) requires a counter to be reconciled with the capture before it is recorded or reported.

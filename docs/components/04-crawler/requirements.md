@@ -644,8 +644,14 @@ fuzzer.
     name, class tokens, a three-ancestor chain, normalised id / href / action; digit runs
     folded; text never; *(CC-CRAWL-0032, BUG-0501)* classes that carry UI state -- a BEM
     `--modifier` or a class with a state-word part (`visible`, `active`, `pristine`,
-    `touched`...) -- dropped). Each (state, element signature, occurrence, action) is
-    tried once; at most `max_same_signature` (2) elements of one signature per state.
+    `touched`...) -- dropped; *(CC-CRAWL-0034, BUG-0502)* nothing of where the element
+    was seen: a form-less container has no action). At most `max_same_signature` (2)
+    elements of one signature per state.
+  - *(Amended in place, CC-CRAWL-0034, BUG-0502; was: once per state.)* **Each (route,
+    element signature, occurrence, action) is tried once**: an overlay state's work is
+    what it added. A step on **chrome** -- a signature seen on more than one route (a
+    header, a side-nav) -- is tried once in the whole run (`chrome_skipped` counts the
+    rest).
   - *(Amended in place, CC-CRAWL-0032, BUG-0501.)* **The frontier** explores a state on
     a route no known state is on before another state of a known route, and holds at
     most `max_states_per_route` (8) states per route (`route_capped` counts the rest).
@@ -664,14 +670,27 @@ fuzzer.
   - *(Amended in place, CC-CRAWL-0032.)* **A form** is a `<form>` or, without one, the
     nearest ancestor (six levels) holding typed inputs; a button there is its submitter,
     a disabled one included (filling enables it).
+  - *(CC-CRAWL-0034.)* **Enter:** a text input that is the last typed control of a
+    container with no submit control, or the only one of a form-less container (a
+    search box among a toolbar's buttons), gets an Enter step: its container filled,
+    Enter pressed (`enter_submits`).
   - **Forms valid-first** (`formfill`): each control gets the first candidate (from its
-    type, pattern, bounds, autocomplete, name, label, placeholder, options) its own
-    `checkValidity()` accepts, then the submitter is clicked; then up to six
-    submissions with one control perturbed (empty, boundary length or value, another
-    option). A page-set or optional sensitive control is left as it is; a required
+    type, pattern, bounds, autocomplete, name, label, placeholder, options) it accepts,
+    then the submitter is clicked; then up to six submissions with one control perturbed
+    (empty, boundary length or value, another option), once per form (route and field
+    set) and never through a search box's buttons. *(Amended in place, CC-CRAWL-0034,
+    BUG-0502.)* A control accepts a value when, blurred, it passes `checkValidity()` and
+    is not `aria-invalid="true"` (a script validator the browser cannot see); with no
+    such candidate, the first the browser accepted is kept. A number with no stated
+    maximum also gets wider magnitudes (10 .. 10^9); `\d` / `\w` / `\s` inside a
+    pattern class are read as such and `*` repeats once. A page-set or optional sensitive control is left as it is; a required
     empty one is filled. A password gets a filler, never a credential. A CAPTCHA
     control gets a filler answer and its form is submitted (D71, CC-CRAWL-0033); the
-    report counts them (`captcha_submissions`).
+    report counts them (`captcha_submissions`, of the sent submissions).
+  - *(CC-CRAWL-0034, BUG-0502.)* **Counters count effects:** `submissions` counts the
+    submit and Enter steps taken; `submissions_sent` counts the submit, Enter and
+    perturbation steps whose filled values (five characters or more, not all digits)
+    reached a request's URL or body -- the figure that says a form was sent.
   - **Network quiescence:** after each action, no request in flight for 500 ms
     (polled), at most 8 s.
   - **Budgets:** states (60), actions (400), a deadline (900 s); the one hit is reported.
