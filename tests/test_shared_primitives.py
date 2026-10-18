@@ -198,3 +198,44 @@ def test_the_table_checks_flag_a_missing_guard_or_owner(tmp_path):
     assert row.guards[0][1] not in _test_names(ROOT / row.guards[0][0])
     assert _defines(_parse(ROOT / "fuzzlab/session/state.py"), "SessionState.origins")
     assert not _defines(_parse(ROOT / "fuzzlab/session/state.py"), "SessionState.no_such_field")
+
+
+# ------------------------------------------------- SP-38: closing a guarded browser page
+#: Receivers that are browser pages in this package (a page, a popup, a tab).
+_PAGE_NAMES = re.compile(r"(^|_)(page|popup|tab)s?$|^(other|extra)$")
+
+
+def page_close_sites(tree: ast.Module) -> list[int]:
+    """Lines calling ``<page>.close()`` -- a receiver named like a page, or a loop
+    variable over ``<x>.pages``."""
+    loop_vars: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.comprehension)) and \
+                isinstance(node.target, ast.Name) and \
+                any(isinstance(n, ast.Attribute) and n.attr == "pages"
+                    for n in ast.walk(node.iter)):
+            loop_vars.add(node.target.id)
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and \
+                node.func.attr == "close" and not node.args:
+            recv = node.func.value
+            name = recv.id if isinstance(recv, ast.Name) else \
+                recv.attr if isinstance(recv, ast.Attribute) else None
+            if name and (name in loop_vars or _PAGE_NAMES.search(name)):
+                out.append(node.lineno)
+    return out
+
+
+def test_a_guarded_page_is_closed_only_through_close_pages():
+    """SP-38 (BUG-0504): closing a page that has just started a refused navigation let
+    it out un-intercepted; `navguard.close_pages` freezes and drains first. No module
+    but navguard closes a page itself. Proven on synthetic offenders."""
+    offenders = [f"{rel}:{line}" for rel, tree in _package_trees().items()
+                 if rel != "fuzzlab/tools/navguard.py"
+                 for line in page_close_sites(tree)]
+    assert offenders == []
+    bad = ast.parse("def f(ctx, page):\n    for o in ctx.pages:\n        o.close()\n"
+                    "    page.close()\n    self._page.close()\n    popup.close()\n"
+                    "    storage.close()\n    browser.close()\n")
+    assert sorted(page_close_sites(bad)) == [3, 4, 5, 6]

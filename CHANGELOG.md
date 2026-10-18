@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (write targets are never links; teardown keeps refused requests refused)
+- **What:** the shared link extractor no longer returns form actions, formactions, pings or script strings, and the rendered spider stops re-fetching subresources the browser loaded (CC-CRAWL-0039, BUG-0503); browser teardown freezes and drains pages through the guard before closing and never unroutes, so a navigation started at teardown is refused (CC-CRAWL-0040, CC-FUZZ-0091, BUG-0504).
+- **Why:** both were write-safety breaches: the first introduced by the unpushed 6a30ec9 and caught by the verify gate, the second pre-existing and found while root-causing that run.
+
 ## 2026-10-18 (both discovery tools follow every linked resource)
 - **What:** a shared, spec-based link extractor (HTML attributes, CSS, headers, script strings, robots.txt, sitemaps) feeds the spider's queue and a disco harvest pass; both seed the known files. Security Crawl Maze: spider 6 -> 68/84, disco 3 -> 69/84 (CC-CRAWL-0038).
 - **Why:** both tools read only `<a href>` and clicks; the maze showed how much that missed.

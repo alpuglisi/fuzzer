@@ -408,7 +408,11 @@ def test_hash_routes_are_read_from_the_bundle_and_crawled_as_pages(hash_lab, tmp
     assert stats == {**c, "submit_stopped": 0, "reveals_stopped": 0,   # + FR-CRAWL-16
                      "spa_query_stopped": 0}                          # + FR-CRAWL-17
     # the bundle was read from the guard's own fetch: main.js requested once per document
-    assert len(lab.seen("GET", "/main.js")) == 1
+    # (the crawl's known-file seeds are documents of their own, so "/" may load again),
+    # and never fetched as a page of its own (BUG-0503)
+    assert len(lab.seen("GET", "/main.js")) == len([r for r in lab.seen("GET")
+                                                    if r[1] == "/"])
+    assert lab.base + "main.js" not in urls
     # a form on a route is recorded
     pages = {p for (p,) in db_rows(db, "SELECT page_url FROM discovered_forms")}
     assert lab.base + "#/contact" in pages

@@ -26,10 +26,7 @@ B = "http://h.test/dir/page.html"
     ('<audio src="a.mp3"></audio>', "http://h.test/dir/a.mp3"),
     ('<object data="o.swf"></object>', "http://h.test/dir/o.swf"),
     ('<applet code="Ap.class" codebase="/cb/"></applet>', "http://h.test/cb/"),
-    ('<form action="/submit"></form>', "http://h.test/submit"),
-    ('<form><button formaction="/b">x</button></form>', "http://h.test/b"),
     ('<form><input type="image" src="btn.png"></form>', "http://h.test/dir/btn.png"),
-    ('<isindex action="/idx">', "http://h.test/idx"),
     ('<blockquote cite="/quote"></blockquote>', "http://h.test/quote"),
     ('<body background="bg.gif"></body>', "http://h.test/dir/bg.gif"),
     ('<table background="t.gif"></table>', "http://h.test/dir/t.gif"),
@@ -47,12 +44,11 @@ def test_each_url_valued_construct_is_read(markup, expected):
     assert expected in urls, urls
 
 
-def test_srcset_ping_and_archive_lists_give_every_url():
-    urls = lx.html_urls('<img srcset="a.png 1x, b.png 2x"><a href="x" ping="/p1 /p2">'
-                        '</a><object archive="a.jar b.jar"></object>', B)
+def test_srcset_and_archive_lists_give_every_url():
+    urls = lx.html_urls('<img srcset="a.png 1x, b.png 2x">'
+                        '<object archive="a.jar b.jar"></object>', B)
     for u in ("a.png", "b.png", "a.jar", "b.jar"):
         assert f"http://h.test/dir/{u}" in urls
-    assert "http://h.test/p1" in urls and "http://h.test/p2" in urls
 
 
 def test_the_document_base_applies_and_fragments_and_schemes_are_dropped():
@@ -71,10 +67,25 @@ def test_the_doctype_system_identifier_and_conditional_comments():
     assert "http://h.test/dir/no" not in urls           # a plain comment is not markup
 
 
-def test_inline_script_strings_that_are_paths():
-    urls = lx.html_urls('<script>var a = "/api/items"; fetch(\'img/logo.png\');'
-                        'var w = "hello world"; var t = `x/${id}`; var s = "word";</script>', B)
-    assert urls == ["http://h.test/api/items", "http://h.test/dir/img/logo.png"]
+@pytest.mark.parametrize("markup", [
+    '<form action="/submit" method="post"></form>',
+    '<form><button formaction="/b">x</button><input type="submit" formaction="/i"></form>',
+    '<isindex action="/idx">',
+    '<a ping="/p1 /p2">x</a><area ping="/p3">',
+    '<script>fetch("/api/after-close", {method: "POST"}); var j = "img/logo.png";</script>',
+])
+def test_a_submission_target_or_a_script_string_is_never_a_link(markup):
+    """BUG-0503: a crawler GETs whatever this returns; a form's action, a formaction, a
+    ping (a POST beacon) and a script's string literals are write targets or of unknown
+    method, so none is returned -- from markup, or from a script response."""
+    assert lx.html_urls(markup, B) == []
+    assert lx.response_urls(B, "text/html", markup, {}) == []
+    assert not hasattr(lx, "js_urls")
+
+
+def test_a_script_response_links_only_through_its_headers():
+    assert lx.response_urls(B, "application/javascript", 'u="/j/a.json"',
+                            {"Link": "</l>"}) == ["http://h.test/l"]
 
 
 def test_headers_location_content_location_refresh_and_every_link():
@@ -96,13 +107,11 @@ def test_css_urls_and_response_dispatch_by_media_type():
     assert lx.response_urls(B, "text/css; charset=utf-8", css, {}) == \
         ["http://h.test/dir/x.css", "http://h.test/dir/f.woff2"]
     assert lx.response_urls(B, "image/png", "\x89PNG", {"Link": "</l>"}) == ["http://h.test/l"]
-    assert lx.response_urls(B, "application/javascript", 'u="/j/a.json"', {}) == \
-        ["http://h.test/j/a.json"]
 
 
 def test_broken_markup_never_raises():
     assert isinstance(lx.html_urls("<a href='x'<<<<img src=\x00>", B), list)
-    assert lx.html_urls("", B) == [] and lx.css_urls("", B) == [] and lx.js_urls("", B) == []
+    assert lx.html_urls("", B) == [] and lx.css_urls("", B) == [] 
 
 
 def test_robots_rules_and_sitemaps():
@@ -118,3 +127,23 @@ def test_robots_rules_and_sitemaps():
     assert lx.response_urls("http://h.test/sitemap.xml", "application/xml", sm, {}) == \
         ["http://h.test/a", "http://h.test/b"]
     assert lx.KNOWN_FILES == ("/robots.txt", "/sitemap.xml")
+
+
+SUB = "http://h.test/app/"
+
+
+def test_a_base_under_a_subpath_keeps_its_path():
+    """PA-0300: every function that takes a base resolves a relative URL under the
+    app's sub-path and an absolute path at the origin -- never doubled or dropped."""
+    assert lx._absolute("x.html", SUB) == "http://h.test/app/x.html"
+    assert lx._absolute("/x.html", SUB) == "http://h.test/x.html"
+    c = lx._Collector(SUB)
+    assert c.base == SUB
+    assert lx.html_urls('<a href="p.html"><img src="i/a.png">', SUB) == \
+        ["http://h.test/app/p.html", "http://h.test/app/i/a.png"]
+    assert lx.css_urls("p{background:url(b.gif)}", SUB) == ["http://h.test/app/b.gif"]
+    assert lx.refresh_url("0; url=n.html", SUB) == "http://h.test/app/n.html"
+    assert lx.header_urls({"Location": "moved"}, SUB) == ["http://h.test/app/moved"]
+    assert lx.robots_urls("Disallow: private/\n", SUB) == ["http://h.test/app/private/"]
+    assert lx.sitemap_urls("<urlset><loc>s.html</loc></urlset>", SUB) == \
+        ["http://h.test/app/s.html"]

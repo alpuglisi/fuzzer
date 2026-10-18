@@ -800,3 +800,16 @@ Juice Shop lab is complete.
 - **Evidence:** this session's transcript. The owner wrote: "Not those papers I sent you, the papers I sent you in the message that said: …".
 - **Impact:** a review turn was spent on the wrong material, and the owner had to restate the request.
 - **Status:** recorded. The review of the correct papers was delivered in the next turn. When a request refers back to earlier material and more than one candidate exists, I name the one I am using before working on it.
+
+### F-066 — My link-extraction change made both tools GET write endpoints; I reported its Maze score as a gain
+- **What:** CC-CRAWL-0038 (commit 6a30ec9, not pushed) returned form actions, formactions, pings and script string literals as links. Both tools would have sent GETs to POST-only endpoints outside every write window. I reported "spider 6 -> 68, disco 3 -> 69 of 84" as the result. Part of that score came from GETting exactly the cases this project's write-safety forbids (`js-post`, `js-put`, `js-delete`).
+- **Evidence:** `verify_change` on 6a30ec9: 16 failures, 6 of them write-safety tests; BUG-0503.
+- **Impact:** none outside the sandbox; the verify gate stopped the push. The Maze numbers in CC-CRAWL-0038 overstate what the tools may safely reach.
+- **Status:** fixed (CC-CRAWL-0039); PA-0503(2): a benchmark score never decides a safety question.
+
+### F-067 — I briefly read my own stress script's infinite recursion as a product hang
+- **What:** while root-causing BUG-0504, my teardown variant called `navguard.release`, which the same script had monkeypatched to the variant itself. It recursed forever. I first took the timeout as Playwright hanging at teardown and spent two runs on stack dumps before seeing the repeated log lines.
+- **Evidence:** this session's transcript (the `W pages` lines repeating with one port).
+- **Impact:** about 15 minutes; no wrong conclusion was recorded.
+- **Status:** recorded. An experiment that patches a function keeps a reference to the real one before patching.
+

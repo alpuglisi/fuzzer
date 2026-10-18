@@ -766,12 +766,8 @@ class Explorer:
         return True
 
     def _close_popups(self, ctx, page) -> None:
-        for other in list(ctx.pages):
-            if other is not page:
-                try:
-                    other.close()
-                except _pw_error():  # it closed itself
-                    pass
+        # frozen and drained through the guard first (BUG-0504, `navguard.close_pages`)
+        navguard.close_pages(ctx, [other for other in list(ctx.pages) if other is not page])
 
     def restore(self, page, ctx, state: State) -> bool:
         """Bring ``page`` back to ``state``: a fresh document of its entry URL, then its

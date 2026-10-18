@@ -26,7 +26,7 @@ import logging
 import sqlite3
 import threading
 import time
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -530,6 +530,10 @@ class LocalSpider:
         self._page = None
         # URLs requested by JavaScript (fetch/XHR) during the current navigation.
         self._xhr_urls = []
+        # Subresources (scripts, styles, images, frames ...) the browser itself requested
+        # during this crawl, by any worker: a link to one is not fetched again as a page
+        # (BUG-0503). Crawl-wide, since a same-document navigation reuses them unasked.
+        self._subresources: set[str] = set()
         # NFR-CRAWL-safe (BUG-0111): destructive links are never queued, fetched or
         # followed through a redirect; the start URL is the operator's own input.
         self._allow = frozenset({url_key(start_url)})
@@ -1039,11 +1043,11 @@ class LocalSpider:
     @staticmethod
     def _close_window_pages(win, page):
         """Close every page opened while the window was open (popups), errors
-        suppressed."""
-        for extra in list(getattr(win["context"], "pages", []) or []):
-            if extra not in win["pages"] and extra is not page:
-                with contextlib.suppress(PlaywrightError):
-                    extra.close()
+        suppressed: frozen and drained through the guard first (BUG-0504)."""
+        from fuzzlab.tools.navguard import close_pages
+        close_pages(win["context"],
+                    [extra for extra in list(getattr(win["context"], "pages", []) or [])
+                     if extra not in win["pages"] and extra is not page])
 
     def _quiesce(self, page):
         """The final quiet period before the window is lifted (W1): settle, flush the
@@ -1127,6 +1131,9 @@ class LocalSpider:
                 self._probe["requests"].append(
                     (request.url, body[:65536].decode("utf-8", "replace")))
                 return                         # blocked ones are marked at the read
+            if request.resource_type not in ("document", "xhr", "fetch", "websocket",
+                                             "eventsource"):
+                self._subresources.add(urldefrag(request.url)[0])
             if request.resource_type in ("xhr", "fetch"):
                 self._xhr_urls.append(request.url)
                 win = self._win
@@ -1502,8 +1509,8 @@ class LocalSpider:
             self._rendered_ok = nav.reached
         if response is not None and own:
             # what the response itself links: its headers' targets, and a stylesheet's,
-            # script's, robots.txt's or sitemap's own URLs when that is what was loaded
-            # (CC-CRAWL-0038)
+            # robots.txt's or sitemap's own URLs when that is what was loaded
+            # (CC-CRAWL-0038; never a script's strings, BUG-0503)
             from fuzzlab.core.linkextract import header_urls, response_urls
             more = header_urls(response.headers or {}, url)
             media = ct.split(";", 1)[0].strip().lower()
@@ -1518,6 +1525,8 @@ class LocalSpider:
         # hash change), recorded after the navigation returned, never before it -- and
         # only while the page shows this load's own document (BUG-0138 merge)
         self._load_committed = (response is not None or same_document) and own
+        # what the browser already requested for this page is not fetched again
+        links = [u for u in links if urldefrag(urljoin(url, u))[0] not in self._subresources]
         return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
 
     # ----- landing URLs, forms, selector navigation (forms phase 1) -----
@@ -2685,6 +2694,7 @@ class LocalSpider:
         other.session = requests.Session()
         other.session.headers.update(self.session.headers)
         other._xhr_urls, other._query_navs, other._pending_routes = [], [], []
+        other._subresources = self._subresources             # one set: the crawl's
         other._pending_pairs, other._inflight = {}, {}
         other._withheld_targets, other._load_writes = set(), set()
         other._last_final_url = other._last_html = other._last_base = None

@@ -18,6 +18,18 @@ Format per entry:
 
 ---
 
+## 2026-10-18 — crawler / browser guard (teardown let a refused navigation out; BUG-0504, PA-0504)
+- **Symptom:** under parallel load the M6 test `..._fires_before_a_refused_navigation_is_executed` saw `/logout.php` reach the server (8/24, then 18/80 stress runs); it passed alone.
+- **Root cause:** `navguard.release` closed pages then `unroute_all`ed; a navigation the page had just started was paused at interception and went out un-intercepted (BUG-0504).
+- **Remediation:** `navguard.close_pages` freezes, drains through the guard, then closes; `release` adds a refuse-all route and never unroutes; popup closes use it (CC-CRAWL-0040). 0/160 loaded runs leak.
+- **Status:** Fixed
+
+## 2026-10-18 — crawler (link extractor followed write targets; BUG-0503, PA-0503)
+- **Symptom:** `verify_change` on 6a30ec9: 16 failures; POST-only fixture endpoints (`/api/after-close`, `/api/autosave`, `/api/review`) and `/api/order/confirm` received GETs; `/main.js` fetched three times.
+- **Root cause:** `core/linkextract` returned form actions, formactions, pings and script string literals as links; the rendered spider re-fetched subresources the browser had loaded (BUG-0503).
+- **Remediation:** none of those is a link any more; the rendered spider skips what the browser already requested (CC-CRAWL-0039). Caught before push.
+- **Status:** Fixed
+
 ## 2026-10-18 — lab (Security Crawl Maze build)
 - **Symptom:** building upstream's Dockerfile failed at `npm install` with `SELF_SIGNED_CERT_IN_CHAIN`; the first offline image (Python 3.12) exited at start with `ImportError: cannot import name 'MutableMapping' from 'collections'`.
 - **Root cause:** build containers here reach package registries through a TLS-intercepting proxy whose CA they do not trust; Flask 1.0.2 needs a Python before 3.10.

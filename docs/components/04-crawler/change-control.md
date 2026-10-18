@@ -3,6 +3,47 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0040 — Teardown never lets a just-started refused request out (BUG-0504) (2026-10-18)
+- Change (`fuzzlab/tools/navguard.py`, `fuzzlab/disco/explore.py`, `fuzzlab/tools/spider.py`):
+  `close_pages(context, pages)` freezes each page (CDP: scripts disabled, loading
+  stopped), drains `RELEASE_DRAIN_MS` (100) of event dispatch through the guard, then
+  closes; `release` uses it with a refuse-everything route added before the close and
+  never calls `unroute_all`. Disco's `_close_popups` and the spider's
+  `_close_window_pages` close through it. SP-38.
+- Reason: BUG-0504 -- a refused navigation started at teardown reached the server
+  (18/80 loaded M6 runs; 15/15 in the direct test).
+- Impact: every guarded browser (crawler, disco, M6, fetcher, browser login): teardown
+  takes about 100 ms more per page; nothing refused is ever sent.
+- Risk: low. No call waits on in-flight work (PA-0128); each step is best effort.
+- Deliverables:
+  - [x] code; `tests/test_navigation_aborts.py::test_a_navigation_started_at_teardown_is_refused_never_sent`,
+    `tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting` (rewritten),
+    `tests/test_shared_primitives.py::test_a_guarded_page_is_closed_only_through_close_pages` — done
+  - [x] BUG-0504, PA-0504, ERROR_LOG, SP-38, NFR-CRAWL-safe, CHANGELOG — done
+- Effectiveness: stress (M6 `/fire`, `-n 8`): before 18/80 leaked; after 0/160.
+
+### CC-CRAWL-0039 — Write targets are never links; no subresource fetched twice (BUG-0503) (2026-10-18)
+- Change (`fuzzlab/core/linkextract.py`, `fuzzlab/tools/spider.py`): the extractor drops
+  `action`, `formaction`, `ping` and script strings (`js_urls` and inline-script reading
+  removed); its module doc states the contract (every URL returned is GET-safe). The
+  rendered spider records what the browser requested as subresources (one set per
+  crawl, shared by its workers) and never queues one as a page. Eight extractor
+  functions registered with a sub-path test (PA-0300).
+- Reason: BUG-0503 -- CC-CRAWL-0038 (unpushed 6a30ec9) made both tools GET POST-only
+  endpoints.
+- Impact: Security Crawl Maze cases reachable only by GETting a script string or a POST
+  target (`js-post`, `js-put`, `js-delete`, the string-literal cases, form actions) are
+  no longer reached by a GET; disco still reaches a script's requests by acting on the
+  page. Not re-measured (owner's direction: measure when needed). FR-CRAWL-23 added: the
+  extraction CC-CRAWL-0038 left "amended by reference" is now specified in place.
+- Risk: low; fewer requests.
+- Deliverables:
+  - [x] code; `tests/test_linkextract.py` (negative cases, sub-path test),
+    `tests/test_spider_links.py` (write targets never fetched; fails on 6a30ec9),
+    `tests/test_spa_routes.py` (main.js once per document, never a page),
+    `tests/test_navigation_aborts.py` (the previous page stays, whichever it was) — done
+  - [x] BUG-0503, PA-0503, ERROR_LOG, CHANGELOG, F-066 — done
+
 ### CC-CRAWL-0038 — Both discovery tools follow every URL a response links; disco harvests them (2026-10-18)
 - Change:
   - `fuzzlab/core/linkextract.py` (new, pure): URLs from every URL-valued HTML attribute

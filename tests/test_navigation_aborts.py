@@ -348,17 +348,21 @@ def test_the_crawls_own_target_redirected_to_a_refused_url_raises_and_falls_back
         real = sp._goto_and_parse
 
         def goto_and_parse(url):
+            page = sp._page
+            before = (page.url, page.content()) if page is not None else None
             try:
                 return real(url)
             except Exception as exc:
-                raised[url] = (str(exc).splitlines()[0], sp._page.url,
-                               "A-OWN-CONTENT" in sp._page.content())
+                raised[url] = (str(exc).splitlines()[0], before,
+                               (sp._page.url, sp._page.content()))
                 raise
         sp._goto_and_parse = goto_and_parse
     sp, a, b, rows = _crawl(tmp_path, monkeypatch, build, hook)
-    error, shown, kept = raised[a.base + "go"]
+    error, before, after = raised[a.base + "go"]
     assert "ERR_ABORTED" in error
-    assert shown == a.base and kept                            # the page stayed
+    # the page shown before /go stayed, unchanged (the crawl's known-file seeds may
+    # come first, so it is whatever was loaded last, never an error page)
+    assert before is not None and after == before
     assert rows[a.base + "go"][0] == 302                       # via the static fallback
     _nothing_refused_was_sent(where, sp, a, b)
 
@@ -587,3 +591,39 @@ def test_m6_a_target_whose_own_redirect_is_refused_is_no_verdict(monkeypatch):
         site.close()
     assert "PAYLOAD-MARK" not in str(err.value) and site.base not in str(err.value)
     assert "/logout.php" not in site.requests
+
+
+# --- BUG-0504: teardown lets a just-started navigation out -------------------------
+def test_a_navigation_started_at_teardown_is_refused_never_sent(monkeypatch):
+    """BUG-0504: a page that starts a refused navigation just as its guarded context is
+    released (an app's timer firing then). Before the fix `release` closed the page and
+    unrouted, and a navigation paused at interception went out unguarded (18 of 80 loaded
+    M6 runs). Here the navigation is started by the page in the same task as `release`
+    is called, many times over; `/logout.php` must never reach the server."""
+    from playwright.sync_api import sync_playwright
+
+    from tests._browser import launch_browser_or_skip
+    from fuzzlab.tools.navguard import guard_page, navigate, release
+    _chromium_or_skip(monkeypatch)
+    a = _Site()
+    a.pages["/"] = "<html><body><p>A</p></body></html>"
+    origins = origin_scope(a.base)
+    try:
+        with sync_playwright() as pw:
+            browser = launch_browser_or_skip(pw)
+            try:
+                for _ in range(15):
+                    ctx = browser.new_context(service_workers="block")
+                    guard_page(ctx, in_scope=lambda u: in_origin_scope(u, origins))
+                    page = ctx.new_page()
+                    navigate(page, a.base, timeout_ms=8000, wait_until="load")
+                    # starts now, lands at interception while the teardown runs
+                    page.evaluate("() => { setTimeout(() => location.href = "
+                                  "'/logout.php', 0); }")
+                    release(ctx)
+                    ctx.close()
+            finally:
+                browser.close()
+    finally:
+        a.close()
+    assert "/logout.php" not in a.requests

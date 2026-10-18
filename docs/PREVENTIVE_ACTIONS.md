@@ -2417,3 +2417,30 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      state), and **markers a mechanism writes into a page are cleared before it reads
      them again**. (from BUG-0502)
   - Enforced by: tests/test_disco_e2e.py::test_a_search_box_is_submitted_by_enter_and_chrome_is_acted_on_once, tests/test_disco_synth.py::test_a_submission_is_sent_only_when_a_distinctive_filled_value_reaches_a_request, tests/test_disco_e2e.py::test_the_hidden_api_surface_is_reached
+
+- **PA-0503** — New axis beside `PA-0112` / `PA-0123` (scope and destructive gates),
+  after BUG-0503: the shared link extractor handed both crawlers a POST form's action,
+  a ping and script strings as links to GET.
+  1. **A source that feeds a crawl queue states its contract: every URL it returns is
+     safe to GET**, and returns nothing whose evidence implies a write or an unknown
+     method (a submission target, a beacon, a string in a script). Such URLs reach the
+     target only through the gated paths that know their method (form submission,
+     observed browser requests).
+  2. **A coverage benchmark's score never decides a safety question**: a case the
+     benchmark rewards that this project's write-safety forbids is left unmet, and the
+     score is reported with it. (from BUG-0503)
+  - Enforced by: tests/test_linkextract.py::test_a_submission_target_or_a_script_string_is_never_a_link, tests/test_spider_links.py::test_every_linked_resource_is_followed_and_the_gates_still_refuse
+
+- **PA-0504** — Strengthens `PA-0128`, after BUG-0504: browser teardown closed the page
+  and unrouted while a navigation the page had just started was paused at
+  interception, so a refused URL was requested. PA-0128 was about liveness and its test
+  checked call order on fakes.
+  1. **A safety guard outlives the work it guards**: a teardown never removes a guard
+     (routes, gates) while anything it guards can still be in flight; it adds a refusal
+     instead, and lets the in-flight work reach the guard before ending its source.
+  2. **Closing is not stopping**: a page (or any source of work) is frozen and drained
+     before it is closed; a guarded page is closed only through `navguard.close_pages`.
+  3. **A teardown's safety is tested with a refused request started at the moment of
+     teardown**, in the real browser, and a race is measured under parallel load before
+     it is called fixed. (from BUG-0504)
+  - Enforced by: tests/test_navigation_aborts.py::test_a_navigation_started_at_teardown_is_refused_never_sent, tests/test_shared_primitives.py::test_a_guarded_page_is_closed_only_through_close_pages, tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting

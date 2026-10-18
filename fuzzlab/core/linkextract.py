@@ -9,13 +9,11 @@ module reads what the specifications define, never one site's markup:
   ``background``, ``manifest``, ``ping``, ``codebase``/``archive``, ``longdesc``,
   SVG ``href``/``xlink:href`` ...), ``<base href>`` resolution, a ``refresh``
   ``<meta>``, the DOCTYPE's system identifier, CSS in ``style`` attributes and
-  ``<style>`` blocks, inline ``<script>`` text, and markup inside IE conditional
-  comments (``<!--[if ...]> ... <![endif]-->``), which browsers of that era parsed.
+  ``<style>`` blocks, and markup inside IE conditional comments
+  (``<!--[if ...]> ... <![endif]-->``), which browsers of that era parsed.
 * **CSS** (`css_urls`): ``url(...)`` and ``@import``.
 * **HTTP headers** (`header_urls`): ``Location``, ``Content-Location``, ``Refresh``
   and every ``Link`` target.
-* **JavaScript** (`js_urls`): string literals that are a URL or a path (absolute, or
-  relative with a file extension) -- a heuristic, kept conservative.
 * **Known files** (`robots_urls`, `sitemap_urls`): a ``robots.txt``'s ``Allow`` /
   ``Disallow`` paths (wildcard rules skipped) and ``Sitemap`` lines (RFC 9309); a
   sitemap's ``<loc>`` entries (sitemaps.org). `KNOWN_FILES` names where they live.
@@ -24,6 +22,14 @@ Every result is absolute (resolved against the document's URL or its ``<base>``)
 de-duplicated in document order, without its fragment. Non-fetchable schemes
 (``javascript:``, ``data:``, ``mailto:``, ``tel:``, ``blob:``, ``about:``) are dropped.
 Scope and destructive-URL decisions belong to the caller.
+
+**Never a link: a submission target or a script string (BUG-0503).** Whatever this
+module returns, a crawler fetches with GET. A form's ``action``, a ``formaction`` and a
+``ping`` (a POST beacon) are where a *write* goes, and a string literal in a script
+carries no evidence of the method the script uses it with (``fetch(url, {method:
+'POST'})``). Neither is returned: forms reach the target only through the crawlers'
+gated submission paths, and what a script requests is what the browser was seen to
+request.
 """
 
 from __future__ import annotations
@@ -36,8 +42,8 @@ from urllib.parse import urldefrag, urljoin, urlsplit
 #: element -> its URL-valued attributes. ``*`` applies to every element.
 URL_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "*": ("background",),
-    "a": ("href", "ping", "xlink:href"),       # SVG's <a> too
-    "area": ("href", "ping"),
+    "a": ("href", "xlink:href"),       # SVG's <a> too; never ``ping`` (BUG-0503)
+    "area": ("href",),
     "link": ("href",),
     "base": ("href",),
     "img": ("src", "srcset", "longdesc", "lowsrc", "dynsrc"),
@@ -49,10 +55,7 @@ URL_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "video": ("src", "poster"),
     "source": ("src", "srcset"),
     "track": ("src",),
-    "input": ("src", "formaction", "usemap"),
-    "button": ("formaction",),
-    "form": ("action",),
-    "isindex": ("action",),
+    "input": ("src", "usemap"),         # never ``formaction``/``action`` (BUG-0503)
     "object": ("data", "codebase", "archive", "classid"),
     "applet": ("code", "codebase", "archive", "object"),
     "param": ("value",),           # only when it parses as a URL (`_param_url`)
@@ -74,7 +77,7 @@ URL_ATTRIBUTES: dict[str, tuple[str, ...]] = {
     "mpath": ("href", "xlink:href"),
 }
 #: Attributes holding several URLs separated by white space.
-SPACE_LISTS = frozenset({"ping", "archive"})
+SPACE_LISTS = frozenset({"archive"})
 #: Attributes in the ``srcset`` syntax (comma-separated ``URL descriptor``).
 SRCSETS = frozenset({"srcset"})
 #: Schemes a crawler cannot request.
@@ -87,7 +90,6 @@ _REFRESH = re.compile(r"""^\s*\d*\.?\d*\s*[;,]?\s*(?:url\s*=\s*)?(['"]?)(.+?)\1\
 _DOCTYPE_SYSTEM = re.compile(r"""(?:SYSTEM|PUBLIC\s+(['"]).*?\1)\s+(['"])([^'"]+)\2""",
                              re.I | re.S)
 _LINK_TARGET = re.compile(r"<([^>]*)>")
-_JS_STRING = re.compile(r"""(['"`])((?:\\.|(?!\1)[^\\\n])*)\1""")
 _JS_URLISH = re.compile(r"^(?:https?://[^\s<>]+|/[A-Za-z0-9_\-.~/%]*[A-Za-z0-9_\-~/%]"
                         r"(?:\?[^\s<>]*)?|[A-Za-z0-9_\-.~%]+(?:/[A-Za-z0-9_\-.~%]+)*"
                         r"\.[A-Za-z0-9]{1,6}(?:\?[^\s<>]*)?)$")
@@ -140,20 +142,6 @@ def header_urls(headers: Mapping[str, str], base_url: str) -> list[str]:
     return _ordered(out)
 
 
-def js_urls(js: str, base_url: str) -> list[str]:
-    """String literals of a script that are a URL or a path: absolute (``http(s)://``,
-    ``/path``) or relative with a file extension (``img/a.png``). Conservative: a bare
-    word, a template with ``${}``, or anything with white space is not a URL."""
-    out = []
-    for m in _JS_STRING.finditer(js or ""):
-        text = m.group(2)
-        if "${" in text or len(text) > 2048 or text in ("/", "//"):
-            continue
-        if _JS_URLISH.match(text) and not text.startswith("//"):
-            out.append(_absolute(text, base_url))
-    return _ordered(out)
-
-
 #: Well-known locations every origin may serve (a crawler seeds them).
 KNOWN_FILES = ("/robots.txt", "/sitemap.xml")
 _ROBOTS_LINE = re.compile(r"^\s*(allow|disallow|sitemap)\s*:\s*(\S+)", re.I)
@@ -185,7 +173,7 @@ class _Collector(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base = base_url
         self.raw: list[tuple[str, str]] = []   # (kind, value), resolved at the end
-        self._in: str | None = None          # "style" | "script" while inside one
+        self._in: str | None = None          # inside a <style> block
         self._text: list[str] = []
 
     # <base href> applies to the URLs after it and before it alike (HTML resolves
@@ -213,7 +201,7 @@ class _Collector(HTMLParser):
                 self.raw += [("url", u) for u in value.split()]
             else:
                 self.raw.append(("url", value))
-        if tag in ("style", "script") and not values.get("src"):
+        if tag == "style":
             self._in, self._text = tag, []
 
     handle_startendtag = handle_starttag
@@ -254,8 +242,6 @@ def html_urls(html: str, base_url: str) -> list[str]:
             out.append(refresh_url(value, c.base))
         elif kind == "style":
             out += css_urls(value, c.base)
-        elif kind == "script":
-            out += js_urls(value, c.base)
         elif kind == "html":
             out += html_urls(value, c.base)
     return _ordered(out)
@@ -264,8 +250,8 @@ def html_urls(html: str, base_url: str) -> list[str]:
 def response_urls(url: str, content_type: str | None, body: str | None,
                   headers: Mapping[str, str] | None = None) -> list[str]:
     """What one response links: its headers' targets, plus its body's by its media
-    type (HTML, CSS, JavaScript), a robots.txt's rules or a sitemap's entries; anything
-    else: headers only."""
+    type (HTML, CSS), a robots.txt's rules or a sitemap's entries; anything else
+    (a script included: BUG-0503) headers only."""
     media = (content_type or "").split(";", 1)[0].strip().lower()
     out = header_urls(headers or {}, url)
     path = urlsplit(url).path.lower()
@@ -278,7 +264,4 @@ def response_urls(url: str, content_type: str | None, body: str | None,
             out += html_urls(body, url)
         elif media == "text/css":
             out += css_urls(body, url)
-        elif media in ("application/javascript", "text/javascript",
-                       "application/x-javascript", "application/ecmascript"):
-            out += js_urls(body, url)
     return _ordered(out)

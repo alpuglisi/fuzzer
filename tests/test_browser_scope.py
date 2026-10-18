@@ -1074,10 +1074,14 @@ def test_a_hit_before_the_page_navigates_is_kept(monkeypatch):
 
 
 def test_release_closes_every_page_before_unrouting():
-    """BUG-0128: ``unroute_all`` while a page was navigating could leave the driver never
-    answering (the M6 executor hung ~1 run in 9 when the app navigated during the
-    settle wait). Teardown closes the context's pages first, so nothing is in flight,
-    and a page that fails to close never stops the rest."""
+    """BUG-0128 then BUG-0504. BUG-0128: ``unroute_all`` while a page navigated could
+    leave the driver never answering, so pages were closed first. BUG-0504: closing a
+    page (and unrouting) let a navigation it had just started out un-intercepted. So
+    teardown freezes every page (scripts off, loading stopped), drains its already-started
+    requests through the guard, adds a route refusing everything, then closes the pages
+    (popups too, bounded) -- and never unroutes. A failing step never stops the rest.
+    (Name kept: PA-0128 points here; nothing is unrouted at all now.)"""
+    from fuzzlab.tools import navguard
     from fuzzlab.tools.navguard import release
     calls = []
 
@@ -1090,6 +1094,16 @@ def test_release_closes_every_page_before_unrouting():
             if self.fails:
                 raise RuntimeError("Target closed")
 
+        def wait_for_timeout(self, ms):
+            calls.append(("drain", self.name, ms))
+
+    class Cdp:
+        def __init__(self, name):
+            self.name = name
+
+        def send(self, method, params=None):
+            calls.append((method, self.name))
+
     class Context:
         def __init__(self):
             self.passes = [[Page("a", fails=True), Page("b")],
@@ -1100,22 +1114,43 @@ def test_release_closes_every_page_before_unrouting():
         def pages(self):
             return self.passes.pop(0) if self.passes else []
 
+        def new_cdp_session(self, page):
+            if page.fails:
+                raise RuntimeError("Target closed")      # never stops the others
+            return Cdp(page.name)
+
+        def route(self, pattern, handler):
+            calls.append(("route", pattern))
+
         def unroute_all(self, behavior=None):
             calls.append(("unroute_all", behavior))
 
     release(Context())
-    assert calls == [("close", "a"), ("close", "b"), ("close", "popup"),
-                     ("unroute_all", "ignoreErrors")]
+    drain = navguard.RELEASE_DRAIN_MS
+    assert calls == [("Emulation.setScriptExecutionDisabled", "b"), ("Page.stopLoading", "b"),
+                     ("drain", "a", drain), ("drain", "b", drain), ("route", "**/*"),
+                     ("close", "a"), ("close", "b"),
+                     ("Emulation.setScriptExecutionDisabled", "popup"),
+                     ("Page.stopLoading", "popup"), ("drain", "popup", drain),
+                     ("close", "popup")]
+    assert not any(c[0] == "unroute_all" for c in calls)
 
     class Stubborn:                                        # never empties: bounded
         pages = property(lambda self: [Page("x")])
+
+        def new_cdp_session(self, page):
+            raise RuntimeError("no CDP")
+
+        def route(self, pattern, handler):
+            calls.append(("route", pattern))
 
         def unroute_all(self, behavior=None):
             calls.append(("unroute_all", behavior))
 
     calls.clear()
     release(Stubborn())
-    assert calls == [("close", "x")] * 3 + [("unroute_all", "ignoreErrors")]
+    assert calls == [("drain", "x", drain), ("route", "**/*"), ("close", "x")] + \
+        [("drain", "x", drain), ("close", "x")] * 2
 
 
 def test_an_apps_own_dialog_is_never_a_hit(monkeypatch):

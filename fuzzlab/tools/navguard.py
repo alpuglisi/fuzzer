@@ -444,27 +444,83 @@ def _merged(request_headers, extra: dict[str, str]) -> dict[str, str]:
     return out
 
 
+#: How long a frozen page's already-started requests get to reach the guard before the
+#: page closes (`close_pages`).
+RELEASE_DRAIN_MS = 100
+
+
+def close_pages(context, pages, before_close: Callable[[], None] | None = None) -> None:
+    """Close ``pages`` of a guarded ``context`` without letting a request out (BUG-0504):
+    the one way a guarded page is closed, mid-run (a popup) or at teardown (`release`).
+
+    A request is guarded only if Playwright dispatches its route event while the page is
+    alive. A navigation a page starts just before it closes (an app's timer) is paused at
+    interception with its event not yet dispatched, and closing the page let it out
+    un-intercepted (a refused ``/logout.php`` reached the server in 18 of 80 loaded M6
+    runs; 0 of 160 with this order). So:
+
+    1. every page is frozen (scripts disabled, loading stopped): nothing new starts;
+    2. drained: `RELEASE_DRAIN_MS` of event dispatch, so a paused request gets the
+       guard's own answer;
+    3. ``before_close()`` if given (`release` adds its refusing route there);
+    4. closed. Each step is best effort: a page already closed starts nothing."""
+    pages = list(pages)
+    for page in pages:
+        try:
+            cdp = context.new_cdp_session(page)
+            cdp.send("Emulation.setScriptExecutionDisabled", {"value": True})
+            cdp.send("Page.stopLoading")
+        except Exception:  # noqa: BLE001 - a closed page starts nothing
+            pass
+    for page in pages:
+        try:
+            page.wait_for_timeout(RELEASE_DRAIN_MS)
+        except Exception:  # noqa: BLE001 - a closed page has nothing to drain
+            pass
+    if before_close is not None:
+        try:
+            before_close()
+        except Exception:  # noqa: BLE001 - a context already closed sends nothing
+            pass
+    for page in pages:
+        try:
+            page.close()
+        except Exception:  # noqa: BLE001 - best effort, it may have closed itself
+            pass
+
+
 def release(target) -> None:
-    """Before closing a guarded context: close its pages first, so no navigation or
-    request is in flight, then let route handlers fail silently instead of logging
-    ``TargetClosedError`` futures at teardown. Unrouting while a page navigates could
-    leave the driver never answering (seen: ``unroute_all`` hung after an app
-    navigated during the M6 settle wait, 1 run in ~9)."""
+    """Before closing a guarded context: its pages closed through `close_pages`, with a
+    route refusing everything added in between -- and never unroute (BUG-0504).
+
+    ``unroute_all`` -- done after the pages closed since BUG-0128 -- *continued* a
+    request paused at interception with no route left to handle it. The refusing route
+    is added after the drain and before the close (the newest route answers first), so
+    nothing dispatched from then on is fetched; it fails silently on a closed target
+    (what ``unroute_all(behavior="ignoreErrors")`` was for). Popups opened meanwhile are
+    closed too (bounded). No call here waits on in-flight work (PA-0128): the drain is
+    a fixed timer."""
+    def refuse(route, request=None):
+        try:
+            req = route.request
+            document = req.is_navigation_request() or req.resource_type in (
+                "document", "iframe")
+            route.abort(_abort_code(document))
+        except Exception:  # noqa: BLE001 - a closed target: nothing left to refuse
+            pass
+    refusing = [lambda: target.route("**/*", refuse)]
     # until no page is left (bounded): a page may open a popup while another closes,
-    # and a popup missed here would be unrouted before its context closes (reviewer B)
+    # and a popup missed here would be left open (reviewer B)
     for _ in range(3):
         pages = list(getattr(target, "pages", None) or [])
         if not pages:
             break
-        for page in pages:
-            try:
-                page.close()
-            except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
-                pass
-    try:
-        target.unroute_all(behavior="ignoreErrors")
-    except Exception:  # noqa: BLE001 - best effort, the browser is closing anyway
-        pass
+        close_pages(target, pages, refusing.pop() if refusing else None)
+    for add in refusing:                   # no page at all: still refuse from now on
+        try:
+            add()
+        except Exception:  # noqa: BLE001 - a context already closed sends nothing
+            pass
 
 
 # --- guarded navigation (BUG-0138, PA-0138) -----------------------------------------

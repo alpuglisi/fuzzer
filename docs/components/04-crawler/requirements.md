@@ -754,6 +754,23 @@ fuzzer.
   worker is idle. Stop flags and the crawl-wide counts are one value across workers;
   the SQLite store's connection is shared under its own lock (PA-0023). The first
   worker exception stops the crawl and is raised. One worker crawls exactly as before.
+- **FR-CRAWL-23 (every linked resource, CC-CRAWL-0038/0039)** Both discovery tools take
+  the URLs a fetched document links from `core.linkextract` (SP-39), by the rules of its
+  format, not only `<a href>`: every URL-valued HTML attribute of the HTML standard and
+  its obsolete-but-parsed features (`src`, `srcset`, `data`, `poster`, `cite`,
+  `background`, `manifest`, SVG `href`/`xlink:href` ...), `<base>`, a refresh `<meta>`,
+  the DOCTYPE system identifier, CSS in `style` attributes and `<style>` blocks and in
+  stylesheets (`url()`, `@import`), IE conditional comments, the `Location`,
+  `Content-Location`, `Refresh` and `Link` headers, `robots.txt` rules and sitemap
+  entries. Each origin's `robots.txt` and `sitemap.xml` are seeded. The spider follows
+  them whatever the response's media type (scope and destructive gates unchanged); its
+  rendered engine never fetches as a page a subresource the browser already requested
+  in the crawl. Disco gathers them per settled page and loads the never-requested ones
+  once its frontier is empty (`max_harvest`, 500), an HTML document becoming a state.
+  **Never a link** (BUG-0503): a form's `action`, a `formaction`, a `ping`, or a string
+  in a script -- their method is a write or unknown; forms reach the target only through
+  the gated submission paths, and a script's requests are what the browser was seen to
+  make when the page ran or was acted on.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
@@ -815,6 +832,15 @@ fuzzer.
   - Enforced by (a failed load ends the previous document; BUG-0136 review X1): `LocalSpider._fetch_rendered` (`about:blank` before the fallback) — `tests/test_navigation_aborts.py::test_a_failed_load_ends_the_previous_document`
   - Enforced by (no navigation waits for a load a refused navigation cancelled; one helper; BUG-0138): `navguard.navigate` / `reload` / `wait_for_state` / `response_html`, `LocalSpider._goto_and_parse` — `tests/test_guarded_navigation.py::test_a_head_script_navigation_to_a_refused_url_is_not_waited_out`, `tests/test_guarded_navigation.py::test_a_slow_page_is_still_waited_for`, `tests/test_guarded_navigation.py::test_query_probe_and_seed_loads_are_not_waited_out`, `tests/test_guarded_navigation.py::test_every_guarded_navigation_goes_through_the_one_helper`, `tests/test_guarded_navigation.py::test_the_navigation_guard_catches_synthetic_offenders`, `tests/test_guarded_navigation.py::test_a_failure_reported_before_the_commit_never_cuts_the_wait`, `tests/test_guarded_navigation.py::test_a_previous_pages_pending_navigation_never_cuts_the_next_load`, `tests/test_guarded_navigation.py::test_a_merely_slow_page_keeps_its_rendered_text`, `tests/test_guarded_navigation.py::test_another_document_never_fills_this_urls_row`, `tests/test_guarded_navigation.py::test_a_same_path_document_with_another_query_never_fills_this_urls_row`
   - Enforced by (scope, per layer): `LocalSpider._in_scope`, `navguard.guard_page` / `make_route_handler` / `make_ws_handler` / `browser_launch_args` / `checked_api_request` — `tests/test_spider_scope.py::test_loopback_start_treats_aliases_as_one_host`, `tests/test_browser_scope.py::test_a_rendered_crawl_never_leaves_the_target_origin`, `tests/test_browser_scope.py::test_the_launch_args_alone_confine_an_unrouted_page_to_the_origin`, `tests/test_browser_scope.py::test_a_redirect_hop_out_of_scope_is_never_requested`, `tests/test_browser_scope.py::test_out_of_scope_requests_are_aborted_and_reported`, `tests/test_browser_scope.py::test_allow_never_lifts_scope`, `tests/test_browser_scope.py::test_websockets_are_scope_checked`, `tests/test_browser_scope.py::test_the_spiders_isolated_submit_refuses_an_out_of_scope_action`, `tests/test_browser_scope.py::test_every_browser_path_in_fuzzlab_is_scoped`, `tests/test_browser_scope.py::test_the_browser_guard_catches_synthetic_offenders`, `tests/test_browser_scope.py::test_scope_is_checked_before_any_fetch`
+  *(CC-CRAWL-0039, BUG-0503:)* **a URL source feeding the queue returns only GET-safe
+  URLs**: `core.linkextract` never returns a form `action`, a `formaction`, a `ping` or
+  a script string; forms are submitted only through the gated paths, and a script's
+  requests are what the browser was seen to make.
+  - Enforced by (no write target is a link; BUG-0503): `core.linkextract` — `tests/test_linkextract.py::test_a_submission_target_or_a_script_string_is_never_a_link`, `tests/test_spider_links.py::test_every_linked_resource_is_followed_and_the_gates_still_refuse`
+  *(CC-CRAWL-0040, BUG-0504:)* **teardown keeps a refused request refused**: a guarded
+  page is closed only through `navguard.close_pages` (frozen, drained through the guard,
+  then closed); `release` adds a refuse-all route and never unroutes.
+  - Enforced by (teardown; BUG-0504): `navguard.close_pages`, `navguard.release` — `tests/test_navigation_aborts.py::test_a_navigation_started_at_teardown_is_refused_never_sent`, `tests/test_shared_primitives.py::test_a_guarded_page_is_closed_only_through_close_pages`, `tests/test_browser_scope.py::test_release_closes_every_page_before_unrouting`
   *(CC-CRAWL-0016/0017, forms phase 3:)* **a crawl never deletes**: a browser-initiated
   DELETE is aborted unless it comes from a submission on an operator-named route
   (FR-CRAWL-12); a destructive SPA route (by its fragment) is never visited; a SPA form

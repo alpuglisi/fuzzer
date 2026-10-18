@@ -1,7 +1,8 @@
 """The legacy spider follows every URL a response links (CC-CRAWL-0038,
 `core.linkextract`): HTML attributes beyond ``<a href>``, a stylesheet's ``url()`` and
-``@import``, script strings, header targets -- while the scope and destructive-URL
-gates still refuse what they refused. Static engine, a local server."""
+``@import``, header targets -- while the scope and destructive-URL gates still refuse
+what they refused, and a write target (a form's action, a ping, a script's string
+literal: BUG-0503) is never fetched. Static engine, a local server."""
 
 from __future__ import annotations
 
@@ -14,7 +15,9 @@ from fuzzlab.tools import spider as sp
 PAGES = {
     "/": ("text/html", '<html><body><img src="/img/a.png"><iframe src="/frame.html">'
                        '</iframe><link rel=stylesheet href="/s.css">'
-                       '<script>var api = "/api/items.json";</script>'
+                       '<script>fetch("/api/after-close", {method: "POST"});</script>'
+                       '<form action="/api/send" method="post"><input name=q></form>'
+                       '<a href="/a.html" ping="/beacon">a</a>'
                        '<meta http-equiv="refresh" content="9; url=/later.html">'
                        '<a href="/logout">out</a><img src="http://other.test/x.png">'
                        '</body></html>', {"Link": "</preload.js>; rel=preload"}),
@@ -59,10 +62,12 @@ def test_every_linked_resource_is_followed_and_the_gates_still_refuse(tmp_path):
         visited = {u.split(":", 2)[2].split("/", 1)[1] for (u,) in
                    conn.execute("SELECT url FROM discovered_pages")}
         conn.close()
-        for path in ("img/a.png", "frame.html", "s.css", "api/items.json", "later.html",
+        for path in ("img/a.png", "frame.html", "s.css", "a.html", "later.html",
                      "preload.js", "more.css", "bg.gif"):
             assert path in visited, (path, sorted(visited))
         assert "/logout" not in site.hits               # destructive: never fetched
+        for write in ("/api/after-close", "/api/send", "/beacon"):     # BUG-0503
+            assert not any(h.split("?", 1)[0] == write for h in site.hits), write
     finally:
         site.server.shutdown()
         site.server.server_close()

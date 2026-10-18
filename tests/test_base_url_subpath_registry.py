@@ -322,6 +322,11 @@ REGISTRY = {
         Covered(f"{_ME}::test_auth_origins_are_scoped_by_a_subpath_bases_host"),
     "fuzzlab.tools.probesender:SeamProbeSender._run_origins":
         Covered(f"{_ME}::test_a_senders_run_origins_from_a_subpath_base"),
+    # the shared link extractor (CC-CRAWL-0038, BUG-0503)
+    **{f"fuzzlab.core.linkextract:{name}":
+       Covered("tests/test_linkextract.py::test_a_base_under_a_subpath_keeps_its_path")
+       for name in ("_Collector.__init__", "_absolute", "css_urls", "header_urls",
+                    "html_urls", "refresh_url", "robots_urls", "sitemap_urls")},
     # disco (D70, CC-CRAWL-0031 / CC-MUT-0402)
     "fuzzlab.disco.explore:Explorer.__init__":
         Covered("tests/test_disco_synth.py::"

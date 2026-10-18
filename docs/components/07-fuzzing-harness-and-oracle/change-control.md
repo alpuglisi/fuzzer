@@ -3,6 +3,16 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0091 — The M6 executor's teardown keeps refused navigations refused (BUG-0504) (2026-10-18)
+- Change: none in `fuzzlab/tools/browserexec.py`; its `finally` calls `navguard.release`,
+  whose behaviour changed (CC-CRAWL-0040): pages frozen and drained through the guard,
+  a refuse-all route, never unrouted.
+- Reason: BUG-0504 was observed through M6 (`/logout.php` sent after a sink fired).
+- Impact: each M6 observation ends about 100 ms later; verdicts unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] covered by CC-CRAWL-0040's tests and the existing M6 tests — done
+
 ### CC-FUZZ-0090 — `fuzzlab auto --disco-run`: disco discoveries reach the candidate and confirmed stages (FR-FUZZ-53, D70) (2026-10-18)
 - Change (`fuzzlab/harness/auto_cli.py`, `fuzzlab/cli_taxonomy.py`, `fuzzlab/web/projects.py`):
   `--disco-run DIR` (repeatable) imports each run through `store_adapter.import_disco`
