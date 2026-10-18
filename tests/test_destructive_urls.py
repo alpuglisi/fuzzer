@@ -583,7 +583,9 @@ def test_the_m6_browser_aborts_destructive_subresources_but_loads_its_targets(mo
     PlaywrightBrowserExecutor().run(
         ExecRequest(url="http://h/comments/delete.php", param="q", value="x",
                     store=StoreStep(url="http://h/post.php", param="c", value="x")), "tok")
-    (pattern, handler), = routes
+    # the guard's route, then the teardown's refuse-all route (BUG-0504, `release`)
+    (pattern, handler), (teardown_pattern, _refuse) = routes
+    assert teardown_pattern == "**/*"
     assert pattern == "**/*"
     outcomes = {}
     for url in ("http://h/comments/delete.php?q=x", "http://h/logout.php",
