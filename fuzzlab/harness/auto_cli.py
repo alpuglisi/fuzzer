@@ -23,7 +23,7 @@ from fuzzlab.harness.auto import (DEFAULT_HEADER_POINTS, header_point_cost,
                                   header_point_estimate, plan_run, run_auto)
 from fuzzlab.labels import contract
 from fuzzlab.tools.probesender import make_probe_sender
-from fuzzlab.tools.store_adapter import import_spider
+from fuzzlab.tools.store_adapter import import_disco, import_spider
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Target origin, e.g. http://127.0.0.1:8080")
     p.add_argument("--spider-db", default="spider_results.db",
                    help="Crawl results to consolidate (from `fuzzlab crawl`)")
+    p.add_argument("--disco-run", action="append", default=[], metavar="DIR",
+                   help="A `fuzzlab disco capture` run directory (capture.jsonl, "
+                        "actions.jsonl) to consolidate as crawl points; repeatable, "
+                        "with or without --spider-db (D70)")
     p.add_argument("--store", required=True, help="Unified store (SQLite) to write to")
     p.add_argument("--ground-truth", default=None,
                    help="Ground-truth dir (enables D14 categories + scoring)")
@@ -272,6 +276,10 @@ def _precheck_environment(p, args) -> None:
     if args.browser and importlib.util.find_spec("playwright") is None:
         p.error("--browser needs Playwright (pip install playwright; "
                 "playwright install chromium)")
+    for run in args.disco_run:
+        if not os.path.isfile(os.path.join(run, "capture.jsonl")):
+            p.error(f"--disco-run: {run} holds no capture.jsonl (a `fuzzlab disco "
+                    f"capture --out` directory)")
     for flag, path in (("--greybox-coverage-file", args.greybox_coverage_file),
                        ("--greybox-dbfault-file", args.greybox_dbfault_file)):
         if path and not os.path.exists(path):
@@ -279,9 +287,12 @@ def _precheck_environment(p, args) -> None:
 
 
 def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
-    counts = import_spider(args.spider_db, store, run_id,
-                           fuzz_json_writes=getattr(args, "fuzz_json_writes", False)) if \
+    writes = getattr(args, "fuzz_json_writes", False)
+    counts = import_spider(args.spider_db, store, run_id, fuzz_json_writes=writes) if \
         os.path.exists(args.spider_db) else {}
+    for run in getattr(args, "disco_run", None) or []:
+        for key, n in import_disco(run, store, run_id, fuzz_json_writes=writes).items():
+            counts[key] = counts.get(key, 0) + n
     # --auth-origin (FR-SESS-20, R5): passed only when given
     extra = {"auth_origins": args.auth_origin} if getattr(args, "auth_origin", None) \
         else {}

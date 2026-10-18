@@ -185,7 +185,7 @@ def _all(cls: str, dests: Iterable[str]) -> dict[str, str]:
 
 FLAG_CLASSES: dict[str, dict[str, str]] = {
     "auto": {
-        "base_url": "B", "spider_db": "B", "store": "B",
+        "base_url": "B", "spider_db": "B", "disco_run": "B", "store": "B",
         "ground_truth": "T", "mode": "T", "points": "T",
         "categories": "B", "identity": "B", "browser": "B", "oob": "B",
         "greybox_coverage_file": "L", "greybox_dbfault_file": "L",

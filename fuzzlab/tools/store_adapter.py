@@ -113,43 +113,141 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int, *,
     except sqlite3.Error:
         rows = []
     for row in rows:
-        raw = row["url"]
-        path = to_path(raw)
         source = row["source"] if "source" in row.keys() else "link"
-        if (path, "GET") not in seen_pages:
-            store.conn.execute(
-                "INSERT OR IGNORE INTO page (run_id, url, method, status, source) "
-                "VALUES (?,?,?,?,?)",
-                (run_id, path, "GET", row["status_code"], source),
-            )
-            seen_pages.add((path, "GET"))
-            counts["page"] += 1
-        if source == _write_seed_source():
-            # a SPA query seed whose load blocked a write (FR-CRAWL-17, review A-M1): a
-            # page, never a point -- an M6 load of it would send that write unguarded
-            counts["write_seed_skipped"] = counts.get("write_seed_skipped", 0) + 1
-            continue
-        # blank values are parameters too (`?title=`), forms phase 1
-        query = parse_qsl(urlparse(raw).query, keep_blank_values=True)
-        if query:
-            endpoint_id = _upsert_endpoint(store, run_id, path, "GET", source)
-            counts["endpoint"] += 1
-            for name, value in query:
-                if _get_parameter(store, run_id, endpoint_id, name) is None:
-                    store.conn.execute(
-                        "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
-                        "VALUES (?,?,?,?,?)",
-                        (run_id, endpoint_id, name, "query", value),
-                    )
-                    counts["parameter"] += 1
-            link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
-        _import_route_query(store, run_id, raw, source, counts)
+        _import_page_url(store, run_id, row["url"], row["status_code"], source, counts,
+                         seen_pages, link_sets)
     _import_forms(src, store, run_id, counts)
     _import_requests(src, store, run_id, counts, fuzz_json_writes=fuzz_json_writes)
     _import_link_sets(store, run_id, link_sets, counts)   # after forms: forms win
     store.conn.commit()
     src.close()
     return counts
+
+
+def _import_page_url(store: Store, run_id: int, raw: str, status, source: str,
+                     counts: dict, seen_pages: set, link_sets: list) -> None:
+    """One visited URL -> its page row, its query as ``query`` parameters and a link set,
+    its SPA hash route's query as ``fragment`` parameters (`import_spider`,
+    `import_disco`)."""
+    path = to_path(raw)
+    if (path, "GET") not in seen_pages:
+        store.conn.execute(
+            "INSERT OR IGNORE INTO page (run_id, url, method, status, source) "
+            "VALUES (?,?,?,?,?)",
+            (run_id, path, "GET", status, source),
+        )
+        seen_pages.add((path, "GET"))
+        counts["page"] += 1
+    if source == _write_seed_source():
+        # a SPA query seed whose load blocked a write (FR-CRAWL-17, review A-M1): a
+        # page, never a point -- an M6 load of it would send that write unguarded
+        counts["write_seed_skipped"] = counts.get("write_seed_skipped", 0) + 1
+        return
+    # blank values are parameters too (`?title=`), forms phase 1
+    query = parse_qsl(urlparse(raw).query, keep_blank_values=True)
+    if query:
+        endpoint_id = _upsert_endpoint(store, run_id, path, "GET", source)
+        counts["endpoint"] += 1
+        for name, value in query:
+            if _get_parameter(store, run_id, endpoint_id, name) is None:
+                store.conn.execute(
+                    "INSERT INTO parameter (run_id, endpoint_id, name, location, example) "
+                    "VALUES (?,?,?,?,?)",
+                    (run_id, endpoint_id, name, "query", value),
+                )
+                counts["parameter"] += 1
+        link_sets.append((endpoint_id, query_pairs(urlparse(raw).query)))
+    _import_route_query(store, run_id, raw, source, counts)
+
+
+#: The ``source`` of rows imported from a disco run (D70).
+DISCO_SOURCE = "disco"
+#: Response media types whose GET is a page (not an asset) in a disco run.
+_PAGE_MEDIA = ("text/html", "application/xhtml+xml")
+
+
+def import_disco(run_dir: str | Path, store: Store, run_id: int, *,
+                 fuzz_json_writes: bool = False) -> dict[str, int]:
+    """Import a ``fuzzlab disco capture`` run directory (D70, FR-AUD-23) as
+    `import_spider` imports a crawl, so `fuzzlab auto` confirms what disco found:
+
+    - every GET exchange of ``capture.jsonl`` with a query string, or an HTML answer ->
+      `_import_page_url` (page, ``query`` parameters, link set);
+    - every other HTTP exchange -> the captured-request import (`captured_request`
+      then `_store_request`: every FR-AUD-22 refusal and redaction applies, PUT/PATCH
+      only with ``fuzz_json_writes``); a truncated body is refused;
+    - every page URL of ``actions.jsonl`` -> `_import_page_url`, which gives an SPA
+      hash route's query as ``fragment`` parameters: the browser never sends a
+      fragment, so only the explorer's own log holds it.
+
+    WebSocket messages and exchanges without a response are skipped. The capture was
+    redacted when written (`disco.capture`), the store's own redaction runs again."""
+    from fuzzlab.disco.capture import read_capture
+    run_dir = Path(run_dir)
+    read = read_capture(run_dir / "capture.jsonl")
+    counts = {"page": 0, "endpoint": 0, "parameter": 0, "quarantined": read.quarantined}
+    for key in ("request", "request_json", "request_form", "request_refused"):
+        counts.setdefault(key, 0)
+    seen_pages: set[tuple[str, str]] = set()
+    link_sets: list[tuple[int, list[tuple[str, str, str]]]] = []
+    page_urls, visible = _disco_actions(run_dir / "actions.jsonl", counts)
+    for rec in read.records:
+        if rec.kind != "http" or rec.status is None:
+            continue
+        if rec.method == "GET":
+            media = (rec.res_ctype or "").split(";", 1)[0].strip().lower()
+            if urlparse(rec.url).query or media in _PAGE_MEDIA:
+                _import_page_url(store, run_id, rec.url, rec.status, DISCO_SOURCE,
+                                 counts, seen_pages, link_sets)
+            continue
+        counts["request"] += 1
+        body = rec.req_body
+        if body and _body_kind(rec.req_ctype) == "form":
+            # the spider stores a form body as a JSON object; the capture holds the wire
+            body = json.dumps(dict(parse_qsl(body, keep_blank_values=True)))
+        row = {"url": rec.url, "method": rec.method, "content_type": rec.req_ctype,
+               "body_json": body,
+               "page_url": rec.req_headers.get("referer") or rec.req_headers.get("Referer")}
+        if rec.req_truncated:
+            counts["request_refused"] += 1
+            continue
+        reason, kind, leaves = captured_request(row, fuzz_json_writes=fuzz_json_writes)
+        if reason is not None:
+            counts["request_refused"] += 1
+            continue
+        _store_request(store, run_id, counts, kind, rec.method.upper(), rec.url, leaves,
+                       visible=visible.get(rec.action_id or "", frozenset()))
+    for url in page_urls:
+        _import_page_url(store, run_id, url, None, DISCO_SOURCE, counts, seen_pages,
+                         link_sets)
+    _import_link_sets(store, run_id, link_sets, counts)
+    store.conn.commit()
+    return counts
+
+
+def _disco_actions(path: Path, counts: dict) -> tuple[list[str], dict[str, frozenset]]:
+    """A disco ``actions.jsonl``: the page URLs in order, and per action id
+    (``act-<seq>``) the names of the visible (non-hidden) controls its form step
+    filled. A malformed line is counted ``quarantined``; no file is no actions."""
+    urls: list[str] = []
+    visible: dict[str, frozenset] = {}
+    if not path.exists():
+        return urls, visible
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                doc = json.loads(line)
+                url, fields, seq = doc.get("url"), doc.get("fields"), doc.get("seq")
+            except (ValueError, AttributeError):
+                counts["quarantined"] += 1
+                continue
+            if isinstance(url, str) and "://" in url:
+                urls.append(url)
+            if isinstance(fields, list) and isinstance(seq, int):
+                visible[f"act-{seq}"] = frozenset(
+                    f[0] for f in fields if isinstance(f, list) and len(f) == 2
+                    and isinstance(f[0], str) and f[1] != "hidden")
+    return urls, visible
 
 
 def _write_seed_source() -> str:
@@ -651,9 +749,13 @@ def captured_request(row: dict, *, fuzz_json_writes: bool = False):
     return body_refusal(url, leaves), kind, leaves
 
 
-def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
+def _store_request(store, run_id, counts, kind, method, url, leaves, *,
+                   visible: frozenset = frozenset()) -> None:
     """Write one accepted captured request (`_import_requests`): every value passes
-    `redact_leaf` before it is stored (PA-0100)."""
+    `redact_leaf` before it is stored (PA-0100). ``visible`` names the controls a user
+    could see in the form that sent it (a disco form step): an object selector among
+    them is a point, as a crawled form's visible field is (`_import_forms`); unseen, it
+    is pinned."""
     from fuzzlab.core import jsonbody
     from fuzzlab.core.redaction import is_credential_name, is_sensitive_name
     passwords, entries, points = [], [], []
@@ -664,8 +766,9 @@ def _store_request(store, run_id, counts, kind, method, url, leaves) -> None:
         else:
             stored = redact_leaf(segs, value)
         entries.append((path if kind == "json" else name, stored))
+        last = segs[-1] if segs else name
         pinned = (stored != value or any(is_sensitive_name(s) for s in segs)
-                  or _object_selector(segs[-1] if segs else name))
+                  or (_object_selector(last) and last not in visible))
         if name not in passwords and not pinned and jsonbody.is_point_value(value):
             points.append((name, value))
     parts = urlparse(url)

@@ -1512,6 +1512,13 @@ rewards) derives from it.
   - the ledger: one JSON line per case as it completes (`test_case`, `endpoint`,
     `class`, `status`, `latency_ms`, `verdict` pass/finding/error/skipped, `matched`,
     `reason`, `evidence` refs); the verdict counts are printed.
+- **FR-FUZZ-53 (a disco run as auto's input, `CC-FUZZ-0090`, 2026-10-18, D70)**
+  `fuzzlab auto --disco-run DIR` (repeatable) consolidates each `fuzzlab disco capture`
+  run directory into the run's store as crawl points (`store_adapter.import_disco`,
+  FR-AUD-23), with or without `--spider-db`; the import counts add to the crawl's in
+  the summary. A directory with no `capture.jsonl` is a usage error before the store
+  is opened. `--fuzz-json-writes` applies to it as to a spider DB. Header points
+  (`--header-points`) still count the spider DB's pages only.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

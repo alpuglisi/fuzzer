@@ -700,7 +700,9 @@ fuzzer.
     landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
     the action is denied for the rest of the run and the context rebuilt.
   - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
-    label, the new state).
+    label, the new state; *(CC-CRAWL-0035)* the page URL after it, redacted
+    (`redact_url`), and for a form step its controls' names and types, never values).
+    `seq` is the number of the action id its requests carry (`act-<seq>`).
 - **FR-CRAWL-20 (the schema synthesizer, CC-CRAWL-0031, D70)** `fuzzlab disco synth`
   turns captures into an OpenAPI 3.1-shaped inventory (`fuzzlab.disco.synth`):
   - path segments classified across samples (`int`, `uuid`, `id` via
@@ -723,8 +725,10 @@ fuzzer.
 - **FR-CRAWL-21 (the legacy spider is deprecated, CC-CRAWL-0031, D70)** `fuzzlab crawl`
   (`tools/spider.py`) still runs, unchanged, and says on stderr that it is deprecated:
   `fuzzlab auto` reads its spider DB. `fuzzlab/disco` imports nothing from
-  `tools/spider.py`, `tools/spa.py` or `tools/formnav.py` (an AST guard). Removing the
-  module waits for `auto` to read a disco inventory.
+  `tools/spider.py`, `tools/spa.py` or `tools/formnav.py` (an AST guard).
+  *(Amended in place, CC-CRAWL-0035.)* `auto` reads a disco run since CC-FUZZ-0090
+  (`--disco-run`, FR-FUZZ-53); removing the module waits for the owner's decision on
+  the held-out comparison of the two.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

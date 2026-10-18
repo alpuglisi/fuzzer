@@ -3,6 +3,21 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0090 — `fuzzlab auto --disco-run`: disco discoveries reach the candidate and confirmed stages (FR-FUZZ-53, D70) (2026-10-18)
+- Change (`fuzzlab/harness/auto_cli.py`, `fuzzlab/cli_taxonomy.py`, `fuzzlab/web/projects.py`):
+  `--disco-run DIR` (repeatable) imports each run through `store_adapter.import_disco`
+  (CC-AUD-0044) after the spider DB (if any), the counts summed into the summary; a
+  directory without `capture.jsonl` is a usage error before the store opens. The flag
+  is classed `B` (taxonomy) and as an input path (the web launcher's option table).
+- Reason: the owner's item 2 (2026-10-18): connect disco to `auto`.
+- Impact: `auto` only; without the flag nothing changes. FR-FUZZ-53.
+- Risk: low.
+- Deliverables:
+  - [x] code, tests (`tests/test_disco_import.py::test_auto_refuses_a_disco_run_without_a_capture`,
+    `::test_auto_builds_crawl_points_from_the_imported_run`) — done
+  - [x] FR-FUZZ-53, CHANGELOG — done
+- Effectiveness: BRIDGE_PENDING
+
 ### CC-FUZZ-0089 — The execution contract and its runner (D70, FR-FUZZ-51/52) (2026-10-17)
 - Change:
   - **`fuzzlab/disco/contract.py` (new):** `CONTRACT_SCHEMA` / `TEST_CASE_SCHEMA`

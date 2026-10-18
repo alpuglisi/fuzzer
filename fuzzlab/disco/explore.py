@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from fuzzlab.core.redaction import redact_url
 from fuzzlab.core.urls import (destructive_reason, in_origin_scope, origin_scope,
                                text_destructive_reason)
 from fuzzlab.disco import formfill
@@ -714,12 +715,21 @@ class Explorer:
         return False
 
     def _log_action(self, action_id_seq: int, state: State, el: dict, step: Step,
-                    new_fp: str | None) -> None:
+                    new_fp: str | None, url: str | None = None) -> None:
+        """One ``actions.jsonl`` line; ``seq`` is the action id's number (``act-<seq>``
+        on its captured requests). ``url`` is the page's URL after the action, redacted
+        (`redact_url`): a hash route's query lives only there, never in the capture.
+        A form step lists its controls' names and types, never values: which fields a
+        user could see (`store_adapter.import_disco` reads both)."""
         if self.actions_log is None:
             return
         rec = {"seq": action_id_seq, "state": state.fp, "route": normalise_route(state.url),
                "signature": el["signature"], "kind": step.kind,
-               "label": str(el.get("label") or "")[:60], "new_state": new_fp}
+               "label": str(el.get("label") or "")[:60], "new_state": new_fp,
+               "url": redact_url(url) if url else None}
+        if step.kind != "click":
+            rec["fields"] = [[f.get("name") or f.get("id") or "", f.get("type") or f.get("tag")]
+                             for f in self._last_fields if f.get("name") or f.get("id")]
         with open(self.actions_log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
 
@@ -898,7 +908,7 @@ class Explorer:
                     continue
                 new_fp = got[0]
                 core = frozenset(e["signature"] for e in got[1])
-                self._log_action(self._seq, state, el, step, new_fp)
+                self._log_action(self._seq, state, el, step, new_fp, url=page.url)
                 if new_fp != state.fp:
                     dirty = True
                     if new_fp not in known and len(known) < self.opts.max_states:

@@ -3,6 +3,35 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0044 — A disco run imports as crawl points through the spider's own import path (FR-AUD-23, D70) (2026-10-18)
+- Change (`fuzzlab/tools/store_adapter.py`):
+  - `_import_page_url`: `import_spider`'s per-URL step (page row, query parameters and
+    link set, SPA route query as `fragment`), moved out unchanged so both importers
+    call it.
+  - `import_disco(run_dir, store, run_id, fuzz_json_writes=)`: a disco run's GETs with a
+    query or an HTML answer go through `_import_page_url`; its other exchanges through
+    `captured_request` / `_store_request` (form bodies read from the wire into the
+    spider's object form; truncated bodies refused; `Referer` as the sending page);
+    `actions.jsonl` page URLs give `fragment` points.
+  - `_disco_actions` + `_store_request(visible=)`: the controls a disco form step listed
+    as non-hidden make an object selector among them a point, as a crawled form's
+    visible field is; otherwise FR-AUD-22's pinning holds.
+  - SP-37 (the one path to store points) with an AST guard proven on a synthetic
+    offender.
+- Reason: the owner's "connect disco output to `auto` so discoveries get confirmed"
+  (2026-10-18); `auto` read only a spider DB, so disco had no candidate or confirmed
+  stage.
+- Impact: `import_spider`'s behaviour is unchanged (the refactor is a move; its tests
+  pass). `_store_request`'s new keyword defaults to the old rule. New FR-AUD-23.
+- Risk: low-medium. A visible object selector (`username`) from a disco form step is
+  now fuzzed where a captured request's was pinned; that is the crawled-form rule the
+  legacy path already applies to the same field (Juice Shop's `/profile` form).
+- Deliverables:
+  - [x] code, `tests/test_disco_import.py` (points, gates, PUT, truncation, visibility,
+    auto's point builder, the CLI check, the SP-37 guard), an e2e import test — done
+  - [x] FR-AUD-23, SP-37, CHANGELOG — done
+- Effectiveness: see CC-FUZZ-0090 (the Juice Shop run through `auto`).
+
 ### CC-AUD-0043 — The auditor's rendered fetch never waits for a load a refused navigation cancelled (BUG-0138) (2026-10-15)
 - Change: `tools/fetcher.py` `ContentFetcher.fetch` navigates through
   `navguard.navigate` (commit, then a bounded load cut short after a refused navigation;

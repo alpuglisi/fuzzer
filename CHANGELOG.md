@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (`fuzzlab auto --disco-run`: disco discoveries reach confirmation)
+- **What:** `auto` imports a `fuzzlab disco capture` run directory as crawl points through the spider's own import path (`store_adapter.import_disco`: pages and queries, captured requests under every FR-AUD-22 gate, hash-route fragments from the explorer's log, visible form fields); the explorer's action log carries the redacted page URL and a form step's field names (CC-AUD-0044, CC-FUZZ-0090, CC-CRAWL-0035, SP-37).
+- **Why:** the owner asked for disco's output to be connected to `auto`, which read only a spider DB, so nothing disco found could be confirmed.
+
 ## 2026-10-18 (BUG-0502: the disco explorer reaches 6/15 on Juice Shop, from 2/15)
 - **What:** the explorer takes each step once per route and chrome once per run, keeps the route out of element signatures, clears its field markers between forms, judges values by `aria-invalid` (after blur) as well as `checkValidity()`, widens pattern and number candidates, presses Enter in search boxes, and counts a submission as sent only when its values reached a request (CC-CRAWL-0034).
 - **Why:** the owner asked for the explorer's gaps to be closed; its Juice Shop run had spent its budget re-acting the header in every state, and its "75 submissions" were mostly header clicks (F-061).

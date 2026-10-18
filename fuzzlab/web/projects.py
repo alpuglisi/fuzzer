@@ -111,6 +111,7 @@ OPTION_CLASS: dict[tuple[str, str], tuple[str, str]] = {
     ("fuzz", "output"): (PIN_SIDECAR, "fuzz.csv"),
     ("audit", "indicator_db"): (INPUT_PATH, "packaged indicator rules, shared by design"),
     ("auto", "ground_truth"): (INPUT_PATH, "lab ground-truth directory"),
+    ("auto", "disco_run"): (INPUT_PATH, "a disco capture run directory, read only"),
     ("greybox-run", "ground_truth"): (INPUT_PATH, "lab ground-truth directory"),
     ("auto", "greybox_coverage_file"): (INPUT_PATH, "the lab shim's coverage side channel"),
     ("auto", "greybox_dbfault_file"): (INPUT_PATH, "the lab shim's DB-fault side channel"),

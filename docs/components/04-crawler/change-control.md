@@ -3,6 +3,20 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0035 — The explorer's action log carries the page URL and a form step's fields, for `auto` (2026-10-18)
+- Change (`fuzzlab/disco/explore.py::_log_action`): each line gains `url` (the page URL
+  after the action, `redact_url`) and, for a form step, `fields` (its controls' names
+  and types, never values); `seq` is documented as the action id's number.
+- Reason: `store_adapter.import_disco` (CC-AUD-0044) needs a hash route's query (only
+  the browser sees it) and which fields a user could see.
+- Impact: `actions.jsonl` gains two keys; nothing else reads it. FR-CRAWL-19 and
+  FR-CRAWL-21 amended in place; ARCHITECTURE updated (the legacy spider's removal no
+  longer waits on `auto`).
+- Risk: low; the URL is redacted like every other stored URL.
+- Deliverables:
+  - [x] code, `tests/test_disco_e2e.py::test_the_run_directory_feeds_auto` — done
+- Effectiveness: see CC-FUZZ-0090.
+
 ### CC-CRAWL-0034 — The disco explorer stops re-acting chrome, fills the right fields, satisfies script validators, and counts sent submissions (BUG-0502) (2026-10-18)
 - Change (`fuzzlab/disco/explore.py`, `formfill.py`, `cli.py`):
   - Steps are keyed `(route, signature, occurrence, kind)`, not per state; a step on a

@@ -1400,8 +1400,9 @@ tracked in the requirements files, not here.
   - Imports nothing from `tools/spider.py`, `tools/spa.py`, `tools/formnav.py`
     (`tests/test_disco_isolation.py`).
 - **The legacy spider (`tools/spider.py`) is deprecated (FR-CRAWL-21).** It runs
-  unchanged because `fuzzlab auto` reads its spider DB; its removal waits for `auto` to
-  read a disco inventory. Its browser primitives (`tools/navguard.py`) are shared and
+  unchanged. `fuzzlab auto` reads a disco run as crawl points since CC-FUZZ-0090
+  (`--disco-run`, `store_adapter.import_disco`, FR-AUD-23) as well as a spider DB; its
+  removal waits for the owner's decision on the held-out comparison of the two. Its browser primitives (`tools/navguard.py`) are shared and
   current.
 - **Subcomponents (legacy spider):** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
@@ -2004,7 +2005,7 @@ detail):
 | `project` (one metadata row: name, created / opened times, notes, targets, the fuzzlab versions that created / last opened it, the schema version it was created at; migration 22; display-only `uuid` and copy lineage `origin_uuid` / `copied_at` / `copy_kind`, migration 23) | `core.project` only (`ensure_metadata` on the first UI open, `set_meta`, `add_target`, `rename`; values via `redaction.redact_for_record`) | web UI (`/project`, the topbar) |
 | `launch` (a job the UI started: random `token`, command, redacted argv, target, start / finish, status `running`/`succeeded`/`failed`/`stopped`/`unknown`, exit code; migration 22) | `core.project.insert_launch` / `finish_launch` (called by `web.projects`); `ensure_metadata` marks orphaned `running` rows `unknown` | web UI run history (`core.project.run_history`) |
 | `target` (fingerprint) | auditor | scheduler, fuzzer |
-| `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor | auditor, ranker, fuzzer |
+| `page`, `endpoint`, `parameter` (`parameter.location`: `query`, `body`, `header`, `fragment`, `json` — a JSON body leaf, FR-CORE-36) | crawler, auditor (`store_adapter.import_spider`; a disco run through `import_disco`, FR-AUD-23) | auditor, ranker, fuzzer |
 | `form` (a request's default sibling entries, migration 20: a crawled form's, a crawled link's query (`enctype` NULL), or a captured request's body — `enctype` `application/json` with `[[path], typed value]` entries (`core.jsonbody`), or form-encoded; `password_fields`, the names of its password controls or password leaves, migration 21 — non-empty marks an in-app login form or login API) | `store_adapter.import_spider` | `harness.auto` (points with sibling entries; the isolated paths, FR-FUZZ-44); `core.forms` (the one `enctype` reader) |
 | `candidate` (rule evidence, features, score, rank, out-of-fold `score_oof` / `rank_score_oof` (migration 16), `oracle_status`, anomaly score/flag) | auditor; pipeline (`oracle_status`: `pending` before the oracle loop, then `checked` / `skipped_budget` / `no_confirmer` — CC-CORE-0033); classifier/ranker (scores); anomaly tripwire | scheduler, fuzzer, ML (labelled rows only for training; `UNLABELLED` rows — `skipped_budget`, `no_confirmer`, `pending` — are scored, never trained on; labels join on method too, CC-ML-0023), UI |
 | `flow` (+ raw bytes; advisory `anomaly_score` / `anomaly_flag`, migration 18; `identity` is `<identity>#isolated:<n>` for an isolated copy's sends, FR-SESS-17) | proxy, http client; `fuzzlab flow-anomaly` (anomaly columns only) | anomaly detector, UI, analysis |

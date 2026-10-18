@@ -305,6 +305,29 @@ budget where a vulnerability is plausible.
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
+- **FR-AUD-23** *(a disco run as crawl points; `CC-AUD-0044`, 2026-10-18, D70).*
+  `store_adapter.import_disco(run_dir, store, run_id, fuzz_json_writes=)` imports a
+  `fuzzlab disco capture` run directory as `import_spider` imports a crawl, through
+  the same code (`fuzzlab auto --disco-run DIR`, FR-FUZZ-53):
+  - **Pages and queries.** Each captured GET with a query string or an HTML answer goes
+    through `_import_page_url` (the per-URL step of `import_spider`): a `page` row, its
+    query as `query` parameters and a link set (source `disco`). An asset GET (script,
+    style, image, JSON without a query) is not a page.
+  - **Captured requests.** Every other HTTP exchange with a response is judged by
+    `captured_request` and stored by `_store_request`, so every FR-AUD-22 refusal,
+    redaction and pinning applies unchanged. A form-encoded body is read from the wire
+    into the object form the spider stores. A truncated body (`req_truncated`) is
+    refused. The `Referer` header stands for the sending page in the other-origin rule.
+    WebSocket messages and exchanges without a response are skipped.
+  - **Fragments.** Each page URL of `actions.jsonl` (`url`, redacted by the explorer)
+    goes through `_import_page_url`, so an SPA hash route's query is a `fragment` point:
+    the browser never sends a fragment, so only the explorer's log holds it.
+  - **Fields a user saw.** A form step in `actions.jsonl` lists its controls' names and
+    types (`fields`); joined to the capture by action id (`act-<seq>`), the names of
+    its non-hidden controls are `visible` to `_store_request`. An object selector
+    among them (a visible `username` input) is a point, as a crawled form's visible
+    field is (`_import_forms`); a hidden or unseen one stays pinned (FR-AUD-22).
+  - Malformed `actions.jsonl` lines are counted `quarantined`, with the capture's own.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

@@ -192,3 +192,23 @@ def test_the_proxy_refuses_an_out_of_scope_request_on_its_own(tmp_path):
             app.url + "api/settings"]
         with pytest.raises(CaptureExists):
             CaptureProxy([app.url], out=tmp_path / "c.jsonl").start()
+
+
+def test_the_run_directory_feeds_auto(discovered, tmp_path):
+    """FR-AUD-23: `fuzzlab auto --disco-run` reads this run as crawl points -- the
+    validated form's JSON leaves and the Enter-submitted search's query."""
+    from fuzzlab.core.store import Store
+    from fuzzlab.harness.auto import injection_points_from_store
+    from fuzzlab.tools.store_adapter import import_disco
+    actions = [json.loads(ln) for ln in (discovered["out"] / "actions.jsonl").open()]
+    assert all(a["url"] for a in actions if a["new_state"])
+    assert any(f[0] == "title" for a in actions
+               for f in a.get("fields", []))
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("e2e", "hash")
+        import_disco(discovered["out"], store, run_id)
+        base = discovered["app"].url
+        got = {(p.method, p.url.replace(base.rstrip("/"), ""), p.param)
+               for p in injection_points_from_store(store, run_id, base)}
+    assert ("POST", "/api/projects/101/tasks", "title") in got
+    assert ("GET", "/api/search", "q") in got
