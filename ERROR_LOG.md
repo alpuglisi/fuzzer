@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-18 — lab (Security Crawl Maze build)
+- **Symptom:** building upstream's Dockerfile failed at `npm install` with `SELF_SIGNED_CERT_IN_CHAIN`; the first offline image (Python 3.12) exited at start with `ImportError: cannot import name 'MutableMapping' from 'collections'`.
+- **Root cause:** build containers here reach package registries through a TLS-intercepting proxy whose CA they do not trust; Flask 1.0.2 needs a Python before 3.10.
+- **Remediation:** the fixture fetches the pinned source and sha256-verified wheels on the host (which trusts the proxy CA) and builds offline on a digest-pinned `python:3.9-slim` (CC-LAB-0302). TLS verification was never disabled. Upstream's three single-page-app cases are not built (their Node build needs registry access).
+- **Status:** Environment (fixed in the fixture)
+
 ## 2026-10-18 — crawler (disco explorer)
 - **Symptom:** on Juice Shop the explorer reported 75 submissions while 2 forms' values were sent; its actions went to the same header buttons in every state; the address and contact forms never enabled their submit buttons; on the extended fixture, a form's values went into another form's controls.
 - **Root cause:** steps deduplicated per state, not per element; a form-less container's `action` (`location.href`) put the route into signatures; a toolbar's buttons counted as submitters of its search box; `data-disco-field` marks never cleared; validity judged by `checkValidity()` alone (a script validator shows only `aria-invalid`); `[\d]` and `*` mishandled in pattern candidates; the submission counter counted clicks (BUG-0502, PA-0502).

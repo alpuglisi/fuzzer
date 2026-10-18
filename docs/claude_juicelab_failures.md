@@ -794,3 +794,9 @@ Juice Shop lab is complete.
 - **Evidence:** this session's transcript (the owner's messages and my following tool calls).
 - **Impact:** the owner's direction was overridden by my own plan twice in a row, and time went to measurement the owner had asked me to cut.
 - **Status:** recorded. Every owner message is answered with an action or a direct question in the same turn, and lab measurements run only when the owner asks or a change cannot be judged without one.
+
+### F-065 — I reviewed the wrong research papers
+- **What:** On 2026-10-18 the owner asked for a review of "the research papers" to improve the tools. They meant the four links sent earlier: IEEE 8997964 / ResearchGate 339261617 (Wang et al., IAEAC 2019) and ACM 10.1145/3597503.3608133 / ResearchGate 378023467 (EDEFuzz, ICSE'24). I reviewed the three arXiv papers from a later message instead (CASTLE, SeRe, SecureCode). I did not check which message the request referred to.
+- **Evidence:** this session's transcript. The owner wrote: "Not those papers I sent you, the papers I sent you in the message that said: …".
+- **Impact:** a review turn was spent on the wrong material, and the owner had to restate the request.
+- **Status:** recorded. The review of the correct papers was delivered in the next turn. When a request refers back to earlier material and more than one candidate exists, I name the one I am using before working on it.
