@@ -43,6 +43,8 @@ Newest first.
   - [x] code, unit and e2e tests; the pushed explorer on the extended fixture: no
     POST, no PUT, no search (fixed: all reached) — done
   - [x] BUG-0502, PA-0502, ERROR_LOG, F-061, FR-CRAWL-19 amended, CHANGELOG — done
+  - [x] `verify_change --base b2cfbd6` on fc91b02: 54 files, 2331 passed, 0 failed,
+    1 skipped, 10 xfailed — done
 - Effectiveness (assessed 2026-10-18, Juice Shop v20.3.0 reset via `lab/labctl.sh`, the
   lab identity, the same scorer as CC-CRAWL-0032):
   - Before (CC-CRAWL-0032): 60 states (budget hit), 206 actions, 2 form POSTs captured,
