@@ -35,6 +35,16 @@ Newest first.
     `/api/Feedbacks/` and the answer key names `/api/Feedbacks`; `funnel_report.py`
     matches paths exactly, so it reads "not reached" for any tool. Left as is: how
     the metric treats a trailing slash is the owner's call.
+- Amendment (2026-10-18): the blind held-out measurement. A fresh held-out lab (SPA +
+  JSON + JWT, 22 labelled positives, built by a blind curator outside the repo; counts
+  only, F-054) scored by a separate measurement agent at dca57c5 with the generic
+  command lines. Both pipelines ran **unauthenticated**: the tool's own login
+  (`SessionManager.ensure`) raised `SessionAuthError` for the lab identity (FR-SESS-5),
+  though the login works by hand.
+  - Legacy crawl through `auto`: reached 9, candidate 5, probed 3, confirmed 3.
+  - Disco through `--disco-run`: reached 9, candidate 6, probed 4, confirmed 4.
+  - Overlap: reached 8 both, 1 legacy-only, 1 disco-only; confirmed 3 both, 1
+    disco-only (disco's confirmations contain the legacy run's).
 
 ### CC-FUZZ-0089 — The execution contract and its runner (D70, FR-FUZZ-51/52) (2026-10-17)
 - Change:

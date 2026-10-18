@@ -194,8 +194,9 @@ def test_an_app_under_a_subpath_is_explored_from_its_whole_start_url(monkeypatch
     monkeypatch.setattr(explore.navguard, "navigate", navigate)
     ctx = type("Ctx", (), {"new_page": lambda self: object()})()
     ex._ctx = ctx
+    ex._shared.busy = 1                     # as run() marks the seeding worker
     try:
-        ex._explore(browser=None, pw=None)
+        ex._work(browser=None, pw=None, seed=True)
     except Stop:
         pass
     assert seen == [start]

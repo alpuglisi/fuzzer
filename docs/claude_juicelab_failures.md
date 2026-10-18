@@ -769,3 +769,11 @@ Juice Shop lab is complete.
 - **Evidence:** BUG-0502; `disco-auth2/actions.jsonl` and `capture.jsonl` from that run (scratch); CC-CRAWL-0032 (the figures as recorded).
 - **Impact:** the owner was given a submission figure about 37 times too high, and the "budget runs out before most routes" gap was described without its main cause.
 - **Status:** fixed (CC-CRAWL-0034: `submissions_sent` counts submissions whose values reached a request); CC-CRAWL-0034 corrects CC-CRAWL-0032's figure; PA-0502(2) requires a counter to be reconciled with the capture before it is recorded or reported.
+
+
+### F-062 — My crawl profiler crashed after a 27-minute run and lost its timings
+- **What:** To decide how to parallelise the legacy spider (2026-10-18), I profiled a full Juice Shop crawl with a scratch script. The script printed the run's total page count through the spider's store *before* printing the timing table, after `crawl()` had already closed that store. It raised `sqlite3.ProgrammingError`, and the table was never printed.
+  - I had not run the script on a short crawl first, so the bug surfaced only at the end of the long one.
+- **Evidence:** this session's scratch `par/s1.err` (the traceback at the end of the crawl log).
+- **Impact:** about 27 minutes of lab time and a second full crawl; no code, result or report was affected.
+- **Status:** recorded. The rerun prints the timings first; scratch measurement scripts are now tried on a short run before a long one.

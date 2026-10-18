@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -290,6 +291,12 @@ class ExploreOptions:
     max_states_per_route: int = 8
     deny: tuple[str, ...] = ()
     headless: bool = True
+    #: Browsers exploring frontier states at once (`Explorer.run`); 1 is sequential.
+    workers: int = 1
+
+
+#: The most workers a run may ask for (each is a browser).
+MAX_WORKERS = 8
 
 
 @dataclass
@@ -315,6 +322,30 @@ class ExploreReport:
 
     def refuse(self, why: str) -> None:
         self.refused[why] = self.refused.get(why, 0) + 1
+
+
+class _Shared:
+    """What every worker of one run shares, behind one lock (`Explorer.run`): the
+    frontier and the states known, the steps seen and done, which routes each signature
+    was seen on (chrome), the perturbed forms and denied steps, the action-id counter
+    and the report. A worker holds its own browser, context, page, network-quiet
+    tracking and action tag; nothing of those is shared."""
+
+    def __init__(self, opts: ExploreOptions, report: ExploreReport):
+        self.lock = threading.Condition(threading.RLock())
+        self.frontier = Frontier(opts.max_states_per_route)
+        self.known: set[str] = set()
+        self.seen: set[tuple] = set()
+        self.done: set[tuple] = set()
+        self.sig_routes: dict[str, set[str]] = {}
+        self.perturbed: set[tuple] = set()
+        self.denied: set[tuple] = set()
+        self.report = report
+        self.seq = 0
+        self.busy = 0             # workers holding a state (or seeding the root)
+        self.stop: str | None = None
+        self.started = 0.0
+        self.failure: BaseException | None = None
 
 
 def refusal(el: dict, deny: tuple[str, ...]) -> str | None:
@@ -420,17 +451,33 @@ class Explorer:
         self.storage_state = storage_state
         self.actions_log = actions_log
         self.clock = clock
+        if not 1 <= self.opts.workers <= MAX_WORKERS:
+            raise ValueError(f"workers must be 1..{MAX_WORKERS}")
         self.report = ExploreReport()
+        self._shared = _Shared(self.opts, self.report)
+        self._worker_state()
+
+    def _worker_state(self) -> None:
+        """This worker's own state (the rest is `_shared`)."""
         self._last_fields: list[dict] = []        # the fields of the last form filled
         self._fill_values: list[str] = []         # the distinctive values just filled
         self._values_sent = False                 # whether a request carried one
-        self._perturbed: set[tuple] = set()       # (route, field set): perturbed once
-        self._seq = 0
+        self._action_seq = 0                      # the number of this worker's last tag
         self._inflight = 0
         self._last_change = 0.0
-        self._denied: set[tuple] = set()
         self._ctx = None
         self._tag_headers: dict[str, str] = {}      # the guard reads it per request
+
+    def _clone(self) -> "Explorer":
+        """Another worker of this run: the same configuration and `_shared` state."""
+        other = object.__new__(Explorer)
+        other.__dict__.update({k: v for k, v in self.__dict__.items()})
+        other._worker_state()
+        return other
+
+    def _bump(self, counter: str, n: int = 1) -> None:
+        with self._shared.lock:
+            setattr(self.report, counter, getattr(self.report, counter) + n)
 
     # --- browser lifecycle -------------------------------------------------------
     def _in_scope(self, url: str) -> bool:
@@ -460,10 +507,15 @@ class Explorer:
     def _count_out_of_scope(self, url: str) -> None:
         from urllib.parse import urlsplit
         host = urlsplit(url).hostname or "?"
-        self.report.out_of_scope[host] = self.report.out_of_scope.get(host, 0) + 1
+        with self._shared.lock:
+            self.report.out_of_scope[host] = self.report.out_of_scope.get(host, 0) + 1
 
     def _count_abort(self) -> None:
-        self.report.aborted += 1
+        self._bump("aborted")
+
+    def _refuse(self, why: str) -> None:
+        with self._shared.lock:
+            self.report.refuse(why)
 
     def _on_request(self, req) -> None:
         self._inflight += 1
@@ -497,8 +549,10 @@ class Explorer:
 
     def _tag(self, ctx, prefix: str) -> str:
         """Name the next action: every routed request from now on carries its id."""
-        self._seq += 1
-        action_id = f"{prefix}-{self._seq}"
+        with self._shared.lock:
+            self._shared.seq += 1
+            self._action_seq = self._shared.seq
+        action_id = f"{prefix}-{self._action_seq}"
         self._tag_headers[ACTION_HEADER] = action_id
         return action_id
 
@@ -635,7 +689,7 @@ class Explorer:
             reason = form_refusal(self._last_fields,
                                   dict(el, action=el.get("action") or page.url))
             if reason:
-                self.report.refuse(reason)
+                self._refuse(reason)
                 self._fill_values = []
                 return False
         self._tag(ctx, prefix)
@@ -710,7 +764,7 @@ class Explorer:
         if sigs and sigs < state.core:
             if settle:
                 state.core = sigs
-                self.report.transient_dropped += 1
+                self._bump("transient_dropped")
             return True
         return False
 
@@ -724,17 +778,19 @@ class Explorer:
         if self.actions_log is None:
             return
         rec = {"seq": action_id_seq, "state": state.fp, "route": normalise_route(state.url),
-               "signature": el["signature"], "kind": step.kind,
+               "signature": el["signature"], "occurrence": step.occurrence,
+               "kind": step.kind,
                "label": str(el.get("label") or "")[:60], "new_state": new_fp,
                "url": redact_url(url) if url else None}
         if step.kind != "click":
             rec["fields"] = [[f.get("name") or f.get("id") or "", f.get("type") or f.get("tag")]
                              for f in self._last_fields if f.get("name") or f.get("id")]
-        with open(self.actions_log, "a", encoding="utf-8") as fh:
+        with self._shared.lock, open(self.actions_log, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
 
     # --- the loop ----------------------------------------------------------------------
-    def _budget(self, started: float) -> str | None:
+    def _budget(self) -> str | None:
+        started = self._shared.started
         if self.report.states >= self.opts.max_states:
             return "max_states"
         if self.report.actions >= self.opts.max_actions:
@@ -765,9 +821,10 @@ class Explorer:
         # one perturbation pass per form, not per button: a toolbar's buttons share the
         # container of its search box, and each re-perturbed it (BUG-0502)
         form_key = (route, tuple((f["tag"], f["type"], f["name"], f["id"]) for f in fields))
-        if form_key in self._perturbed:
-            return steps
-        self._perturbed.add(form_key)
+        with self._shared.lock:
+            if form_key in self._shared.perturbed:
+                return steps
+            self._shared.perturbed.add(form_key)
         for f in fields:
             for kind, _value in formfill.perturbations(f, None):
                 if len(steps) - 1 >= self.opts.max_perturbations:
@@ -776,28 +833,61 @@ class Explorer:
         return steps
 
     def run(self) -> ExploreReport:
-        from playwright.sync_api import sync_playwright
-        args = navguard.browser_launch_args(self.scope_urls, proxy=self.proxy)
-        launch = navguard.chromium_launch_kwargs(args, headless=self.opts.headless,
-                                                 proxy=self.proxy)
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(**launch)
-            self._ctx = self._new_context(browser, pw)
-            try:
-                self._explore(browser, pw)
-            finally:
-                navguard.release(self._ctx)
-                browser.close()
+        """Explore with ``opts.workers`` browsers. One worker runs here; more run on
+        threads, each with its own Playwright instance (the sync API is per thread),
+        browser, context and page, over the `_shared` frontier: a worker seeds the start
+        state, then each pops a state, restores and explores it, and pushes what it
+        finds, until the frontier is empty with no worker holding a state, or a budget
+        is hit. The first exception a worker raises stops the others and is re-raised."""
+        shared = self._shared
+        shared.started = self.clock()
+        shared.busy = 1                                  # the seeding worker
+        workers = [self] + [self._clone() for _ in range(self.opts.workers - 1)]
+        if len(workers) == 1:
+            self._run_worker(seed=True)
+        else:
+            threads = [threading.Thread(target=w._run_worker, kwargs={"seed": i == 0},
+                                        name=f"disco-worker-{i}", daemon=True)
+                       for i, w in enumerate(workers)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        if shared.failure is not None:
+            raise shared.failure
         return self.report
+
+    def _run_worker(self, *, seed: bool) -> None:
+        from playwright.sync_api import sync_playwright
+        shared = self._shared
+        try:
+            args = navguard.browser_launch_args(self.scope_urls, proxy=self.proxy)
+            launch = navguard.chromium_launch_kwargs(args, headless=self.opts.headless,
+                                                     proxy=self.proxy)
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(**launch)
+                self._ctx = self._new_context(browser, pw)
+                try:
+                    self._work(browser, pw, seed=seed)
+                finally:
+                    navguard.release(self._ctx)
+                    browser.close()
+        except BaseException as exc:  # noqa: BLE001 -- handed to run(), never lost
+            with shared.lock:
+                if shared.failure is None:
+                    shared.failure = exc
+                shared.stop = shared.stop or "error"
+                shared.lock.notify_all()
+            if self.opts.workers == 1:
+                raise
 
     def _restore_any(self, page, ctx, state: State) -> bool:
         return self.restore(page, ctx, state) or (
             state.fallback is not None and self.restore(page, ctx, state.fallback))
 
-    def _explore(self, browser, pw) -> None:
-        ctx = self._ctx
-        started = self.clock()
-        page = ctx.new_page()
+    def _seed(self, page, ctx) -> None:
+        """The start state: loaded, read and queued (the caller holds `busy`)."""
+        shared = self._shared
         self._tag(ctx, "nav")
         navguard.navigate(page, self.start_url, timeout_ms=self.opts.nav_timeout_ms,
                           wait_until="load")
@@ -805,122 +895,175 @@ class Explorer:
         self.wait_quiet(page)
         got = self.settled_fingerprint(page, ctx)
         if got is None:
-            self.report.unrestorable += 1
+            self._bump("unrestorable")
             return
         root = State(got[0], page.url, page.url,
                      core=frozenset(e["signature"] for e in got[1]))
-        fp = got[0]
-        frontier = Frontier(self.opts.max_states_per_route)
-        frontier.push(root)
-        known = {fp}
+        with shared.lock:
+            shared.frontier.push(root)
+            shared.known.add(got[0])
+            self.report.states = 1
+
+    def _next_state(self) -> State | None:
+        """The next state for this worker (marked busy), or None when the run is over:
+        a budget hit, a failure, or an empty frontier no busy worker can refill."""
+        shared = self._shared
+        with shared.lock:
+            while True:
+                if shared.stop is not None:
+                    return None
+                hit = self._budget()
+                if hit:
+                    shared.stop = self.report.budget_hit = hit
+                    shared.lock.notify_all()
+                    return None
+                if shared.frontier:
+                    shared.busy += 1
+                    return shared.frontier.pop()
+                if shared.busy == 0:
+                    shared.lock.notify_all()
+                    return None
+                shared.lock.wait(0.5)
+
+    def _release(self) -> None:
+        with self._shared.lock:
+            self._shared.busy -= 1
+            self._shared.lock.notify_all()
+
+    def _work(self, browser, pw, *, seed: bool) -> None:
+        shared = self._shared
+        page = self._ctx.new_page()
+        if seed:
+            try:
+                self._seed(page, self._ctx)
+            finally:
+                self._release()
         # A step is taken once per route, not once per state: an overlay state's
         # pending work is what it added. A step on chrome -- an element seen on more
         # than one route (a header, a side-nav) -- is taken once in the whole run.
         # Per-state keys re-acted a header in every state (BUG-0502, measured on Juice
         # Shop: 7 header buttons in each of 60 states, most of 206 actions).
-        seen: set[tuple] = set()
-        done: set[tuple] = set()
-        sig_routes: dict[str, set[str]] = {}
+        while True:
+            state = self._next_state()
+            if state is None:
+                return
+            try:
+                page = self._process(state, page, browser, pw)
+            finally:
+                self._release()
+            if shared.stop is not None:
+                return
+
+    def _process(self, state: State, page, browser, pw):
+        """Explore one state's pending steps. Returns the page to go on with (a lost
+        session rebuilds the context)."""
+        shared = self._shared
+        ctx = self._ctx
         authenticated = self.storage_state is not None and \
             not looks_like_login_url(self.start_url)
-        self.report.states = 1
-        while frontier:
-            hit = self._budget(started)
-            if hit:
-                self.report.budget_hit = hit
-                return
-            state = frontier.pop()
-            if not self._restore_any(page, ctx, state):
-                self.report.unrestorable += 1
-                continue
-            got = self.settled_fingerprint(page, ctx)
-            if got is None:
-                self.report.unrestorable += 1
-                continue
-            route = normalise_route(state.url)
+        if not self._restore_any(page, ctx, state):
+            self._bump("unrestorable")
+            return page
+        got = self.settled_fingerprint(page, ctx)
+        if got is None:
+            self._bump("unrestorable")
+            return page
+        route = normalise_route(state.url)
+        with shared.lock:
             for el in got[1]:
-                sig_routes.setdefault(el["signature"], set()).add(route)
-            pending = [(el, step) for el in got[1]
-                       if not any((route, el["signature"], el["occurrence"], k) in seen
-                                  for k in ("click", "submit", "enter"))
-                       for step in self._steps_for(page, el, route)]
-            dirty = False
-            for el_desc, step in pending:
-                hit = self._budget(started)
+                shared.sig_routes.setdefault(el["signature"], set()).add(route)
+            fresh = [el for el in got[1]
+                     if not any((route, el["signature"], el["occurrence"], k) in shared.seen
+                                for k in ("click", "submit", "enter"))]
+        pending = [(el, step) for el in fresh for step in self._steps_for(page, el, route)]
+        dirty = False
+        for el_desc, step in pending:
+            with shared.lock:
+                if shared.stop is not None:
+                    return page
+                hit = self._budget()
                 if hit:
-                    self.report.budget_hit = hit
-                    return
+                    shared.stop = self.report.budget_hit = hit
+                    shared.lock.notify_all()
+                    return page
                 key = (route, *step.key())
-                if key in seen or step.key() in self._denied:
+                if key in shared.seen or step.key() in shared.denied:
                     continue
-                seen.add(key)
-                if step.key() in done and len(sig_routes.get(step.signature, ())) > 1:
+                shared.seen.add(key)
+                if step.key() in shared.done and \
+                        len(shared.sig_routes.get(step.signature, ())) > 1:
                     self.report.chrome_skipped += 1
                     continue
-                why = refusal(el_desc, self.opts.deny)
-                if why:
-                    self.report.refuse(why)
-                    continue
-                if dirty and not self._restore_any(page, ctx, state):
-                    self.report.unrestorable += 1
-                    break
-                dirty = False
-                now = self.settled_fingerprint(page, ctx)
-                el = self._find(now[1], step) if now else None
-                if el is None:
-                    continue
-                before_url = page.url
-                try:
-                    performed = self.act(page, ctx, el, step)
-                except _pw_error() as exc:  # one action failing ends only it
-                    logging.info("disco: action failed (%s)", type(exc).__name__)
-                    self.report.errors += 1
-                    dirty = True
-                    continue
-                if not performed:
-                    continue
-                done.add(step.key())
+            why = refusal(el_desc, self.opts.deny)
+            if why:
+                self._refuse(why)
+                continue
+            if dirty and not self._restore_any(page, ctx, state):
+                self._bump("unrestorable")
+                break
+            dirty = False
+            now = self.settled_fingerprint(page, ctx)
+            el = self._find(now[1], step) if now else None
+            if el is None:
+                continue
+            before_url = page.url
+            try:
+                performed = self.act(page, ctx, el, step)
+            except _pw_error() as exc:  # one action failing ends only it
+                logging.info("disco: action failed (%s)", type(exc).__name__)
+                self._bump("errors")
+                dirty = True
+                continue
+            if not performed:
+                continue
+            with shared.lock:
+                shared.done.add(step.key())
                 self.report.actions += 1
                 if step.kind in ("submit", "enter"):
                     self.report.submissions += 1
                 elif step.kind.startswith("perturb:"):
                     self.report.perturbations += 1
-                self.wait_quiet(page)
-                if step.kind != "click" and self._values_sent:
-                    self.report.submissions_sent += 1
-                    if has_captcha(self._last_fields):
-                        self.report.captcha_submissions += 1
-                self._fill_values = []
-                self._close_popups(ctx, page)
-                if authenticated and looks_like_login_url(page.url):
+            self.wait_quiet(page)
+            if step.kind != "click" and self._values_sent:
+                self._bump("submissions_sent")
+                if has_captcha(self._last_fields):
+                    self._bump("captcha_submissions")
+            self._fill_values = []
+            self._close_popups(ctx, page)
+            if authenticated and looks_like_login_url(page.url):
+                with shared.lock:
                     self.report.session_lost += 1
-                    self._denied.add(step.key())
-                    navguard.release(ctx)
-                    ctx = self._ctx = self._new_context(browser, pw)
-                    page = ctx.new_page()
-                    dirty = True
-                    self._log_action(self._seq, state, el, step, None)
-                    continue
-                got = self.settled_fingerprint(page, ctx)
-                if got is None:
-                    self.report.errors += 1
-                    dirty = True
-                    continue
-                new_fp = got[0]
-                core = frozenset(e["signature"] for e in got[1])
-                self._log_action(self._seq, state, el, step, new_fp, url=page.url)
-                if new_fp != state.fp:
-                    dirty = True
-                    if new_fp not in known and len(known) < self.opts.max_states:
-                        if page.url != before_url:
-                            new = State(new_fp, page.url, page.url, core=core,
-                                        fallback=State(new_fp, page.url, state.entry_url,
-                                                       [*state.path, step], core=core))
-                        else:
-                            new = State(new_fp, page.url, state.entry_url,
-                                        [*state.path, step], core=core)
-                        if frontier.push(new):
-                            known.add(new_fp)
-                            self.report.states = len(known)
+                    shared.denied.add(step.key())
+                navguard.release(ctx)
+                ctx = self._ctx = self._new_context(browser, pw)
+                page = ctx.new_page()
+                dirty = True
+                self._log_action(self._action_seq, state, el, step, None)
+                continue
+            got = self.settled_fingerprint(page, ctx)
+            if got is None:
+                self._bump("errors")
+                dirty = True
+                continue
+            new_fp = got[0]
+            core = frozenset(e["signature"] for e in got[1])
+            self._log_action(self._action_seq, state, el, step, new_fp, url=page.url)
+            if new_fp != state.fp:
+                dirty = True
+                if page.url != before_url:
+                    new = State(new_fp, page.url, page.url, core=core,
+                                fallback=State(new_fp, page.url, state.entry_url,
+                                               [*state.path, step], core=core))
+                else:
+                    new = State(new_fp, page.url, state.entry_url,
+                                [*state.path, step], core=core)
+                with shared.lock:
+                    if new_fp not in shared.known and \
+                            len(shared.known) < self.opts.max_states:
+                        if shared.frontier.push(new):
+                            shared.known.add(new_fp)
+                            self.report.states = len(shared.known)
+                            shared.lock.notify_all()
                         else:
                             self.report.route_capped += 1
+        return page

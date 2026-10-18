@@ -694,13 +694,25 @@ fuzzer.
   - **Network quiescence:** after each action, no request in flight for 500 ms
     (polled), at most 8 s.
   - **Budgets:** states (60), actions (400), a deadline (900 s); the one hit is reported.
+  - *(CC-CRAWL-0036.)* **Workers:** `ExploreOptions.workers` / `disco capture
+    --workers N` (1..8, default 1) explore with N browsers at once. Each worker has its
+    own Playwright instance, browser, guarded context, page, network-quiet tracking and
+    action tag; they share one frontier, the known states, the seen and done steps, the
+    chrome map, the perturbed forms, the denied steps, the action-id counter and the
+    report, behind one lock (every check-then-act holds it, PA-0088). A run ends when the
+    frontier is empty and no worker holds a state, or on a budget, which stops every
+    worker; a worker's exception stops the others and is raised to the caller. One
+    worker runs the same loop without threads. With more than one, which worker takes
+    which state is not deterministic, and one worker's submissions change the server
+    state the others see.
   - **Authenticated runs** start from a Playwright storage state kept to in-scope
     origins (`browserlogin.filter_storage_state`); with more than one scope origin the
     guard's `cookie_scope` keeps the session to the start URL's origin (FR-SESS-20). A
     landing on a login URL (`session.detect.looks_like_login_url`) is a lost session:
     the action is denied for the rest of the run and the context rebuilt.
   - Each action is logged to `actions.jsonl` (state, route, signature, kind, a 60-char
-    label, the new state; *(CC-CRAWL-0035)* the page URL after it, redacted
+    label, the new state, *(CC-CRAWL-0036)* the element's occurrence;
+    *(CC-CRAWL-0035)* the page URL after it, redacted
     (`redact_url`), and for a form step its controls' names and types, never values).
     `seq` is the number of the action id its requests carry (`act-<seq>`).
 - **FR-CRAWL-20 (the schema synthesizer, CC-CRAWL-0031, D70)** `fuzzlab disco synth`

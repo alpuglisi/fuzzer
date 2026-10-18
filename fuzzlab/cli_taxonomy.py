@@ -204,7 +204,7 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
                         "no_spa_query"]),
     "disco": {
         **_all("B", [f"capture:{d}" for d in (
-            "start", "scope", "out", "profile", "storage_state", "max_states", "max_actions",
+            "start", "scope", "out", "profile", "storage_state", "max_states", "max_actions", "workers",
             "deadline", "deny", "keep_tag", "upstream_insecure", "authorized", "dry_run")]),
         **_all("B", ["synth:capture", "synth:out"]),
         **_all("B", [f"generate:{d}" for d in (

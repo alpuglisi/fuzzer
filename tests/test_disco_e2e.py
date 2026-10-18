@@ -212,3 +212,41 @@ def test_the_run_directory_feeds_auto(discovered, tmp_path):
                for p in injection_points_from_store(store, run_id, base)}
     assert ("POST", "/api/projects/101/tasks", "title") in got
     assert ("GET", "/api/search", "q") in got
+
+
+def test_two_workers_reach_the_same_surface_without_repeating_a_step(tmp_path):
+    """`ExploreOptions.workers` (PAR-DISCO): two browsers share one frontier. Every
+    endpoint the one-worker run reaches is reached, no state is lost to a restore, no
+    (route, element, step) is taken twice, and every captured request carries an action
+    id one of the workers issued."""
+    _require_real()
+    from playwright.sync_api import Error as PlaywrightError
+
+    from fuzzlab.disco.capture import read_capture
+    from fuzzlab.disco.explore import Explorer, ExploreOptions
+    from fuzzlab.disco.proxyproc import CaptureProxy
+    with DiscoApp() as other, DiscoApp(other=other.url) as app:
+        with CaptureProxy([app.url], out=tmp_path / "capture.jsonl") as proxy:
+            try:
+                report = Explorer(app.url, scope_urls=[app.url], proxy=proxy.endpoint,
+                                  options=ExploreOptions(max_actions=80, deadline_s=240,
+                                                         workers=2),
+                                  actions_log=tmp_path / "actions.jsonl").run()
+            except PlaywrightError as exc:
+                if "Executable doesn't exist" in str(exc) or "launch" in str(exc).lower():
+                    skip_or_fail(f"chromium unavailable: {str(exc).splitlines()[0]}")
+                raise
+        paths = app.paths()
+        assert "/api/projects/101/tasks" in app.paths("POST")
+        assert any(p.startswith("/api/tasks/") for p in app.paths("PUT"))
+        assert "/api/hooks/notify" in app.paths("POST") and "/api/search" in paths
+        assert "/api/account/remove" not in paths and other.hits == []
+    assert report.unrestorable == 0 and report.errors == 0
+    actions = [json.loads(ln) for ln in (tmp_path / "actions.jsonl").open()]
+    steps = [(a["route"], a["signature"], a["occurrence"], a["kind"]) for a in actions]
+    assert len(steps) == len(set(steps))
+    # one shared counter: two workers never log the same action id
+    assert len({a["seq"] for a in actions}) == len(actions)
+    tagged = [r.action_id for r in read_capture(tmp_path / "capture.jsonl").records
+              if "/api/" in r.url]
+    assert tagged and all(tagged)

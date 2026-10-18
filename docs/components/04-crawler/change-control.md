@@ -3,6 +3,37 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0036 — Parallel exploration workers in disco (2026-10-18)
+- Change (`fuzzlab/disco/explore.py`, `cli.py`, `fuzzlab/cli_taxonomy.py`):
+  `ExploreOptions.workers` / `disco capture --workers N` (1..8, default 1). The run's
+  shared state (frontier, known states, seen/done steps, chrome map, perturbed forms,
+  denied steps, action-id counter, report) moved into `_Shared` behind one lock;
+  each worker is an `Explorer` clone with its own Playwright instance, browser, guarded
+  context, page, quiet tracking and action tag. `run()` seeds the start state in one
+  worker; each pops a state, restores and explores it, and pushes what it finds; the run
+  ends on an empty frontier with no worker busy, or on a budget (every worker stops);
+  a worker's exception stops the rest and is raised. One worker runs inline, as before.
+  The action log gains `occurrence`.
+- Reason: the owner asked for multithreading in the discovery tools (2026-10-18). A
+  profile of a Juice Shop run (752 s) showed it waiting, not computing: 45% restoring
+  states (mostly network-quiet waits), 33% acting (13% filling forms), 14% waiting
+  after actions, 11% reading pages -- time several browsers can overlap.
+- Impact: `fuzzlab/disco` only; the default (1 worker) explores as before. FR-CRAWL-19
+  amended (workers, the log's occurrence).
+- Risk: medium. With more than one worker, which worker takes which state is not
+  deterministic, and one worker's submissions change the server state the others see;
+  each extra worker is another Chromium against the target (lab only).
+- Deliverables:
+  - [x] code; `tests/test_disco_workers.py` (each state once, termination, budget stop,
+    failure propagation, unique action ids, the bound, the CLI check; the termination
+    test fails on a mutant that exits while a worker still holds a state);
+    `tests/test_disco_e2e.py::test_two_workers_reach_the_same_surface_without_repeating_a_step`
+    (real browsers) — done
+  - [x] FR-CRAWL-19, CHANGELOG — done
+- Effectiveness: not measured on a lab in this change (the owner asked to stop
+  re-measuring after each change); the two-worker fixture run reaches the same surface
+  as one worker.
+
 ### CC-CRAWL-0035 — The explorer's action log carries the page URL and a form step's fields, for `auto` (2026-10-18)
 - Change (`fuzzlab/disco/explore.py::_log_action`): each line gains `url` (the page URL
   after the action, `redact_url`) and, for a form step, `fields` (its controls' names

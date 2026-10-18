@@ -42,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--storage-state", help="a Playwright storage-state file to start "
                    "authenticated (kept to in-scope origins)")
     c.add_argument("--max-states", type=int, default=60)
+    c.add_argument("--workers", type=int, default=1,
+                   help="browsers exploring at once (1-8; each is a Chromium)")
     c.add_argument("--max-actions", type=int, default=400)
     c.add_argument("--deadline", type=float, default=900.0, help="seconds")
     c.add_argument("--deny", action="append", default=[], metavar="WORD",
@@ -132,9 +134,12 @@ def _capture(ns) -> int:
         return 0
     if not ns.authorized:
         return _fail("capture sends traffic: pass --authorized (lab-only, D11)")
-    from fuzzlab.disco.explore import Explorer, ExploreOptions
+    from fuzzlab.disco.explore import MAX_WORKERS, Explorer, ExploreOptions
     from fuzzlab.disco.proxyproc import CaptureProxy
+    if not 1 <= ns.workers <= MAX_WORKERS:
+        return _fail(f"--workers must be 1..{MAX_WORKERS}")
     opts = ExploreOptions(max_states=ns.max_states, max_actions=ns.max_actions,
+                          workers=ns.workers,
                           deadline_s=ns.deadline, deny=tuple(ns.deny))
     with CaptureProxy(scope, out=out / "capture.jsonl", keep_tag=ns.keep_tag,
                       upstream_insecure=ns.upstream_insecure, profile=ns.profile) as proxy:
