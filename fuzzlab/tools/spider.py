@@ -524,7 +524,7 @@ class LocalSpider:
             "reveals_clicked", "reveals_refused", "reveals_over_cap",
             "reveal_writes_blocked", "reveal_ws_dropped", "reveal_navigations_captured",
             "revealed_links", "revealed_forms", "session_losses_after_reveal",
-            "g1_controls_filled", "g1_forms_unsatisfiable",
+            "g1_controls_filled", "g1_forms_unsatisfiable", "captcha_forms",
             # forms phase 5 (FR-CRAWL-17; persisted in crawl_stats, PA-0110)
             "spa_query_pairs", "spa_query_unpaired", "spa_query_probe_loads",
             "spa_query_kept", "spa_query_refused", "spa_query_writes_blocked",
@@ -1752,11 +1752,12 @@ class LocalSpider:
             if sig in self._submitted_sigs:
                 continue
             self._submitted_sigs.add(sig)
-            why = spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
+            why = spa.form_refusal(form, route, named=named)
             if why:
                 self.spa_counts["forms_refused"] += 1
                 logging.info(f"SPA form on {page_url} not submitted: {why}")
                 continue
+            self._note_captcha(form, page_url)
             if self.spa_counts["forms_submitted"] >= spa.MAX_SUBMISSIONS:
                 self.spa_counts["submissions_over_cap"] += 1
                 logging.info(f"SPA form on {page_url} not submitted: the crawl's "
@@ -2008,6 +2009,15 @@ class LocalSpider:
         ``"clicked"``, ``"dispatched"`` or None (labels changed)."""
         return spa.click_vetted(page, selector, vetted, timeout_ms=self.timeout_ms,
                                 counts=self.spa_counts, before_click=before_click)
+
+    def _note_captcha(self, form, page_url):
+        """D71: a CAPTCHA form is gated and filled like any other form (its answer is a
+        filler; no CAPTCHA is solved) -- only counted and logged here."""
+        why = spa.captcha_reason(form)
+        if why:
+            self.spa_counts["captcha_forms"] += 1
+            logging.info(f"SPA form on {page_url}: {why}; filled with a filler answer "
+                         f"(D71)")
 
     def _refind_form(self, page, sig):
         """The rendered form with signature ``sig`` (marked afresh), or None."""
@@ -2292,13 +2302,14 @@ class LocalSpider:
             if sig in self._submitted_sigs:
                 continue
             self._submitted_sigs.add(sig)
-            why = (spa.form_refusal(form, route, named=named) or spa.captcha_reason(form)
+            why = (spa.form_refusal(form, route, named=named)
                    or ("a password form (submitted only unauthenticated; not from a "
                        "reveal)" if spa.has_password(form) else None))
             if why:
                 self.spa_counts["forms_refused"] += 1
                 logging.info(f"revealed SPA form on {page_url} not submitted: {why}")
                 continue
+            self._note_captcha(form, page_url)
             if self.spa_counts["forms_submitted"] >= spa.MAX_SUBMISSIONS:
                 self.spa_counts["submissions_over_cap"] += 1
                 continue
@@ -2497,6 +2508,9 @@ class LocalSpider:
             lines.append(f"Constraint-aware filling: {c['g1_controls_filled']} control(s) "
                          f"made valid, {c['g1_forms_unsatisfiable']} form(s) still "
                          f"invalid.")
+        if c["captcha_forms"]:
+            lines.append(f"CAPTCHA forms: {c['captcha_forms']} met, gated like any other "
+                         f"form and filled with a filler answer (D71; none is solved).")
         if c["reveals_clicked"] or c["reveals_refused"] or c["reveals_over_cap"]:
             lines.append(f"Reveals: {c['reveals_clicked']} clicked, "
                          f"{c['reveals_refused']} refused, {c['reveals_over_cap']} over "

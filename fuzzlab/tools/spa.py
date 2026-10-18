@@ -630,15 +630,17 @@ def reveal_refusal(labels) -> str | None:
 
 
 # --- CAPTCHA (G1e) ---------------------------------------------------------------------
-#: A form whose controls or labels carry one of these tokens has a CAPTCHA: refused.
+#: A form whose controls or labels carry one of these tokens has a CAPTCHA: counted and
+#: reported, then gated and filled like any other form (D71).
 CAPTCHA_TOKENS = frozenset({"captcha", "recaptcha", "hcaptcha", "turnstile"})
 
 
 def captcha_reason(form: dict) -> str | None:
-    """Why ``form`` is a CAPTCHA form (never submitted; no CAPTCHA is solved, G1e), or
-    None: a control name or a container hint (`FORMS_JS` ``hints``: attribute values and
-    label texts) with a `CAPTCHA_TOKENS` token (whole tokens), or a ``<canvas>``
-    challenge in the container."""
+    """Why ``form`` is a CAPTCHA form, or None. Since D71 this is reporting only: the
+    form is gated and filled like any other (its answer a filler; no CAPTCHA is solved,
+    G1e). A CAPTCHA form is: a control name or a container hint (`FORMS_JS` ``hints``:
+    attribute values and label texts) with a `CAPTCHA_TOKENS` token (whole tokens), or
+    a ``<canvas>`` challenge in the container."""
     if form.get("challenge"):
         return "CAPTCHA form (a canvas challenge)"
     texts = [n for n, _k in form.get("controls") or []] + list(form.get("hints") or [])

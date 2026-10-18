@@ -35,8 +35,8 @@ its own ``checkValidity()`` accepts, then the submitter is clicked; then up to
 **Safety rails** (never lifted by this module): an element whose label, name or link is
 destructive (`core.urls.text_destructive_reason`, `destructive_reason`: logout, delete
 account, reset, ...) or one the operator denies (``deny``) is never acted on; a form
-that changes a credential (`store_adapter.credential_change_rule`) or has a CAPTCHA is
-never submitted; the route guard aborts destructive and out-of-scope requests whatever
+that changes a credential (`store_adapter.credential_change_rule`) is never submitted
+(a CAPTCHA form is: its CAPTCHA control gets a filler answer, D71); the route guard aborts destructive and out-of-scope requests whatever
 the page does. In an authenticated run, landing on a login URL (`session.detect.
 looks_like_login_url`) marks the session lost: the action that caused it is denied for
 the rest of the run and the context is rebuilt from the storage state.
@@ -277,6 +277,7 @@ class ExploreReport:
     unrestorable: int = 0
     transient_dropped: int = 0
     route_capped: int = 0
+    captcha_submissions: int = 0
     errors: int = 0
     session_lost: int = 0
     aborted: int = 0
@@ -319,12 +320,17 @@ def is_submitter(el: dict) -> bool:
         el.get("type") in ("submit", "image", "")
 
 
-def form_refusal(fields: list[dict], submitter: dict) -> str | None:
-    """Why a form is never submitted: it changes a credential, or has a CAPTCHA."""
-    from fuzzlab.tools.store_adapter import credential_change_rule
+def has_captcha(fields: list[dict]) -> bool:
+    """Whether a form carries a CAPTCHA control (reported only: D71 fills it like any
+    other control, with a filler answer; no CAPTCHA is solved)."""
     names = " ".join(str(f.get(k) or "") for f in fields for k in ("name", "id", "label"))
-    if "captcha" in names.lower():
-        return "captcha"
+    return any(t in names.lower() for t in ("captcha", "turnstile"))
+
+
+def form_refusal(fields: list[dict], submitter: dict) -> str | None:
+    """Why a form is never submitted: it changes a credential. A CAPTCHA form is
+    submitted like any other (D71)."""
+    from fuzzlab.tools.store_adapter import credential_change_rule
     passwords = [f.get("name") or f.get("id") or "password" for f in fields
                  if f.get("type") == "password"]
     hidden = [f.get("name") for f in fields if f.get("type") == "hidden" and f.get("name")]
@@ -354,6 +360,7 @@ class Explorer:
         self.actions_log = actions_log
         self.clock = clock
         self.report = ExploreReport()
+        self._last_fields: list[dict] = []        # the fields of the last form filled
         self._seq = 0
         self._inflight = 0
         self._last_change = 0.0
@@ -545,7 +552,8 @@ class Explorer:
                 _, fid, kind = step.kind.split(":", 2)
                 perturb = (fid, kind)
             fields = self._fill(page, loc, perturb)
-            reason = form_refusal(fields or [], el)
+            self._last_fields = fields or []
+            reason = form_refusal(self._last_fields, el)
             if reason:
                 self.report.refuse(reason)
                 return False
@@ -752,6 +760,8 @@ class Explorer:
                 self.report.actions += 1
                 if step.kind == "submit":
                     self.report.submissions += 1
+                    if has_captcha(self._last_fields):
+                        self.report.captcha_submissions += 1
                 elif step.kind.startswith("perturb:"):
                     self.report.perturbations += 1
                 self.wait_quiet(page)

@@ -10,7 +10,8 @@
   re-adopts the browser state once, a second one stops reveals.
 * **G1 (FR-CRAWL-15).** On a named route, invalid controls get ladder values (all
   fillers, none identifier-like) until the button is enabled; sensitive controls, object
-  selectors, identifier options, gated checkboxes and CAPTCHA forms are refused.
+  selectors, identifier options and gated checkboxes are refused; a CAPTCHA form is
+  submitted, its CAPTCHA control given a filler answer (D71).
 * **G2 (FR-CRAWL-16).** Menus, dialogs and drawers are opened (gated labels, cards by
   their own ``el.click()``), what they reveal is queued through the normal gates, and the
   window closes with Escape and a reload.
@@ -385,7 +386,8 @@ def test_g1_never_fills_a_sensitive_or_credential_control(name, sensitive):
     ({"controls": [["q", "text"]], "hints": [], "challenge": True}, True),
     ({"controls": [["comment", "textarea"]], "hints": ["capture", "captain"]}, False),
 ])
-def test_captcha_forms_are_refused(form, refused):
+def test_captcha_forms_are_recognised(form, refused):
+    """Reporting only since D71 (the form is still submitted)."""
     assert bool(spa.captcha_reason(form)) is refused
 
 
@@ -677,10 +679,18 @@ def test_g1_an_unsatisfiable_pattern_is_not_submittable_with_the_reason(g1):
     assert sp.spa_counts["g1_forms_unsatisfiable"] >= 1
 
 
-def test_g1_a_captcha_form_is_refused(g1):
-    lab, _sp, _db, logs = g1
-    assert "/api/sent/g1captcha" not in _paths(lab)
-    assert any("g1captcha not submitted: CAPTCHA form" in ln for ln in logs)
+def test_g1_a_captcha_form_is_submitted_with_a_filler_answer(g1):
+    """D71: a CAPTCHA form is gated and filled like any other form -- its CAPTCHA
+    control gets a filler (no CAPTCHA is solved), so the request is still captured."""
+    from fuzzlab.tools.store_adapter import is_filler
+    lab, sp, _db, logs = g1
+    posts = [r for r in lab.requests if r[:2] == ("POST", "/api/sent/g1captcha")]
+    assert len(posts) == 1
+    answer = json.loads(posts[0][4])["captcha"]
+    assert answer and is_filler(answer)
+    assert sp.spa_counts["captcha_forms"] >= 1
+    assert any("g1captcha: CAPTCHA form" in ln and "filler answer (D71)" in ln
+               for ln in logs), logs
 
 
 def test_g1_a_saved_card_picker_is_never_chosen_in(g1):

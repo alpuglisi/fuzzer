@@ -640,7 +640,9 @@ function render() {
   const send = document.getElementById('send');
   if (name === 'g1') return g1();
   if (!send) return;
-  send.onclick = () => post('/api/sent/' + name, {});
+  send.onclick = () => post('/api/sent/' + name, name === 'g1captcha' ?
+    {comment: document.getElementById('comment').value,
+     captcha: document.getElementById('captchaControl').value} : {});
   if (name === 'g1bad') document.getElementById('tag').oninput = e =>
     { send.disabled = !e.target.validity.valid; };
   if (name === 'g1card') document.getElementById('mat-select-3').onclick = () =>

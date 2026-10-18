@@ -163,8 +163,9 @@ fuzzer.
     `delete`, `logout`, …; CC-CRAWL-0019); a
     destructive or settings-like control name; a form with `<input type=file>` (a stated
     gap); a credential-change form (`store_adapter.credential_change_reason`); a form
-    whose only typed input is a one-time code (2FA/TOTP); since CC-CRAWL-0023, a CAPTCHA
-    form (`spa.captcha_reason`, FR-CRAWL-15 G1e). Labels, control names and options are
+    whose only typed input is a one-time code (2FA/TOTP). *(Amended in place,
+    CC-CRAWL-0033, D71: a CAPTCHA form is no longer refused -- see FR-CRAWL-15 G1e.)*
+    Labels, control names and options are
     judged as **texts** (`core.urls.text_destructive_reason`), never by embedding them
     in a URL, where a `#` hid the rest (BUG-0131).
   - **Sessions.** A form with a password input is submitted only in a fresh
@@ -251,7 +252,7 @@ fuzzer.
       browser is authenticated (a coverage cost, never a safety one).
 
 - **FR-CRAWL-15 (constraint-aware SPA form filling, CC-CRAWL-0023, forms phase 4, G1)**
-  - **When.** Only for a form that passed `spa.form_refusal` (and the CAPTCHA rule) on a
+  - **When.** Only for a form that passed `spa.form_refusal` on a
     route the operator **named** with `--submit-spa-forms ROUTE …`, in the crawl's own
     context or the fresh unauthenticated one. Entirely inside the reveal window
     (FR-CRAWL-16, W1): the existing fill, every G1 interaction and the checks run with
@@ -298,11 +299,13 @@ fuzzer.
     checkbox whose label (text, `aria-label`, associated `<label>`, mat-checkbox text)
     is empty, fails the label gate (inflections folded: `deleted` → `delete`) or names a
     subscription / default / remember-me (`spa.SUBSCRIPTION_WORDS`) (G1d,
-    `spa.checkbox_refusal`); a CAPTCHA form (`spa.captcha_reason`: a control or a
+    `spa.checkbox_refusal`). *(Amended in place, CC-CRAWL-0033, D71; G1e was a refusal
+    since CC-CRAWL-0023.)* A CAPTCHA form (`spa.captcha_reason`: a control or a
     container hint — attribute values, `<label>` / `<mat-label>` / `<code>` text — with
     a `captcha` / `recaptcha` / `hcaptcha` / `turnstile` token, or a `<canvas>`) is
-    refused before any interaction, for every SPA submission (G1e; counted in
-    `forms_refused`; no CAPTCHA is solved).
+    gated and filled like any other: its CAPTCHA control gets a filler answer and the
+    form is submitted, so its request is captured (G1e; counted in `captcha_forms`,
+    logged; no CAPTCHA is solved).
   - **Outcome.** The button enabled → `click_vetted` as before; still disabled →
     `forms_not_submittable` with "invalid after N attempts: <control names>" and
     `g1_forms_unsatisfiable`. Counts `g1_controls_filled`, `g1_forms_unsatisfiable`
@@ -666,7 +669,9 @@ fuzzer.
     `checkValidity()` accepts, then the submitter is clicked; then up to six
     submissions with one control perturbed (empty, boundary length or value, another
     option). A page-set or optional sensitive control is left as it is; a required
-    empty one is filled. A password gets a filler, never a credential.
+    empty one is filled. A password gets a filler, never a credential. A CAPTCHA
+    control gets a filler answer and its form is submitted (D71, CC-CRAWL-0033); the
+    report counts them (`captcha_submissions`).
   - **Network quiescence:** after each action, no request in flight for 500 ms
     (polled), at most 8 s.
   - **Budgets:** states (60), actions (400), a deadline (900 s); the one hit is reported.
@@ -796,7 +801,7 @@ fuzzer.
   - Enforced by (seed and probe loads, FR-CRAWL-17): `LocalSpider._window(query=)` / `_leave` / `_query_gate` and the crawl loop's store-suppression branch, `spa.query_url_refusal`, `spa.seed_url` — `tests/test_spa_query.py::test_a_seed_load_cannot_write`, `tests/test_spa_query.py::test_a_seeds_navigations_are_queued_never_followed_in_its_window`, `tests/test_spa_query.py::test_a_destructive_seed_is_never_visited_and_a_redirect_name_stays_on_origin`, `tests/test_spa_query.py::test_the_seed_gate_refuses`, `tests/test_spa_query.py::test_a_seed_gets_the_filler_and_a_redirect_name_gets_a_same_origin_path`, `tests/test_spa_query.py::test_no_stored_row_carries_a_marker`, `tests/test_spa_query.py::test_a_seed_that_blocked_a_write_is_never_a_point_and_m6_never_sends_it`, `tests/test_spa_query.py::test_a_session_lost_in_a_query_load_stops_query_loads`, `tests/test_spa_query.py::test_what_a_query_window_counts_as_a_write`, `tests/test_spa_query.py::test_a_held_websocket_message_is_a_write`, `tests/test_spa_query.py::test_a_seed_is_never_importable_until_its_window_closed_cleanly`, `tests/test_spa_query.py::test_a_session_check_that_raises_is_a_loss`, `tests/test_spa_query.py::test_a_slow_response_that_expires_the_session_cookie_is_a_loss`, `tests/test_spa_query.py::test_a_request_whose_redirect_hop_was_refused_is_never_fetched_again`, `tests/test_spa_query.py::test_the_session_is_rechecked_when_leaving_the_page_fails`, `tests/test_spa_query.py::test_a_withheld_url_while_a_probe_is_open_is_that_probes_blocked_evidence`, `tests/test_spa_query.py::test_a_probe_route_on_another_origin_is_never_minted_nor_loaded`, `tests/test_spa_query.py::test_an_authenticated_query_load_that_goes_to_another_origin_hands_it_nothing`, `tests/test_spa_query.py::test_a_seeds_leave_reads_the_page_only_when_its_load_committed`, `tests/test_spa_query.py::test_a_failed_seed_load_checks_the_cookies_and_the_server_not_local_storage`, `tests/test_spa_query.py::test_a_query_loads_request_in_flight_is_tracked_until_it_ends`, `tests/test_spa_query.py::test_a_seed_whose_own_redirect_is_refused_fails_and_the_crawl_goes_on`, `tests/test_spa_query.py::test_a_withheld_seed_is_a_write_seed_and_a_withheld_probe_records_nothing`, `tests/test_spa_query.py::test_a_shell_that_writes_on_every_load_still_gives_hash_points`, `tests/test_spa_query.py::test_the_baseline_is_what_a_load_outside_a_window_would_have_written`, `tests/test_spa_query.py::test_the_websocket_forwarder_reports_each_forwarded_message`, `tests/test_spa_query.py::test_the_guards_url_log_lines_never_carry_a_probe_marker`, `tests/test_spa_query.py::test_a_seeds_forms_are_stored_only_when_it_is_promoted`, `tests/test_spa_query.py::test_the_baseline_never_takes_a_query_caused_write_and_a_query_value_always_counts`, `tests/test_spa_query.py::test_a_write_carrying_the_loads_query_value_counts_on_a_baseline_endpoint`, `tests/test_spa_query.py::test_only_a_bare_routes_load_is_its_baseline`, `tests/test_spa_query.py::test_a_query_load_whose_bare_route_did_not_load_is_refused`, `tests/test_spa_query.py::test_a_load_that_committed_but_did_not_complete_is_committed`
   - Enforced by (the session after a reveal, W4): `LocalSpider._reveal_session_check` / `_client_session_intact` / `_readopt_session` — `tests/test_forms_phase4.py::test_w4_a_client_side_logout_is_readopted_then_a_second_loss_stops_reveals`
   - Enforced by (the reveal gate, G2a-G2d): `spa.reveal_refusal` / `label_refusal` / `submitter_glyph`, `spa.REVEAL_JS`, `LocalSpider._reveal_one` — `tests/test_forms_phase4.py::test_the_reveal_gate`, `tests/test_forms_phase4.py::test_g2b_a_menu_item_failing_the_gate_is_never_clicked`, `tests/test_forms_phase4.py::test_g2a_cards_are_clicked_on_the_element_capped_and_never_with_descendants`, `tests/test_forms_phase4.py::test_a_card_is_dispatched_on_the_element_never_by_a_coordinate_click`, `tests/test_forms_phase4.py::test_juice_shops_login_button_still_passes_with_exit_to_app_a_destructive_glyph`, `tests/test_forms_phase4.py::test_the_crawl_cap_on_reveals`
-  - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_refused`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_refused`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`
+  - Enforced by (constraint-aware filling, G1b-G1e): `spa.g1_sensitive` / `select_refusal` / `checkbox_refusal` / `captcha_reason`, `LocalSpider._g1` — `tests/test_forms_phase4.py::test_g1_never_fills_a_sensitive_or_credential_control`, `tests/test_forms_phase4.py::test_select_refusal`, `tests/test_forms_phase4.py::test_checkbox_refusal`, `tests/test_forms_phase4.py::test_captcha_forms_are_recognised`, `tests/test_forms_phase4.py::test_g1_a_saved_card_picker_is_never_chosen_in`, `tests/test_forms_phase4.py::test_g1_a_delete_account_checkbox_is_never_checked_and_never_submitted`, `tests/test_forms_phase4.py::test_g1_a_captcha_form_is_submitted_with_a_filler_answer`, `tests/test_forms_phase4.py::test_a_revealed_form_is_submitted_only_on_a_named_route`
   - Enforced by (labels judged as texts, BUG-0131): `core.urls.text_destructive_reason` — `tests/test_forms_phase4.py::test_a_hash_in_a_label_name_value_or_option_hides_nothing`, `tests/test_forms_phase4.py::test_no_text_is_judged_through_a_url`, `tests/test_forms_phase4.py::test_the_text_guard_catches_synthetic_offenders`
   - Enforced by (destructive redirect hops in the browser): `tests/test_browser_scope.py::test_a_redirect_hop_to_a_destructive_url_is_never_requested`, `tests/test_browser_scope.py::test_an_endless_redirect_chain_is_aborted`
   - Enforced by: `core.urls.destructive_reason`; `tools/spider.py` (queue filter, hand-followed redirects, `navguard.guard_page`); `tools/fetcher.py:load_urls` — `tests/test_destructive_urls.py::test_static_crawl_never_fetches_a_destructive_link_or_redirect`, `tests/test_destructive_urls.py::test_rendered_crawl_sends_no_destructive_request_at_all`, `tests/test_destructive_urls.py::test_the_auditor_never_refetches_a_destructive_url_from_an_old_spider_db`, `tests/test_destructive_urls.py::test_login_discovery_never_follows_a_redirect_to_a_destructive_url`, `tests/test_forms_phase1.py::test_a_named_picker_is_navigated_and_the_settings_one_never_touched`, `tests/test_forms_phase1.py::test_a_settings_picker_is_never_submitted_even_when_named`, `tests/test_forms_phase1.py::test_selector_submissions_never_change_the_crawlers_cookies`, `tests/test_forms_phase1.py::test_bwapps_destructive_gets_are_refused`
@@ -808,12 +813,12 @@ fuzzer.
   arguments, and trusts neither); the explorer's browser keeps both navguard layers,
   with the proxy's own `host:port` added to the resolver rules only; an element whose
   label, name or id is destructive (`text_destructive_reason`) or operator-denied, or
-  whose link or form action is destructive, is never acted on; a credential-change or
-  CAPTCHA form is never submitted; the route still aborts destructive requests
-  whatever the page sends.
+  whose link or form action is destructive, is never acted on; a credential-change
+  form is never submitted (a CAPTCHA form is, with a filler answer: D71, CC-CRAWL-0033);
+  the route still aborts destructive requests whatever the page sends.
   - Enforced by (the proxy, per request and per tunnel): `disco.recorder.Recorder.request` / `http_connect` — `tests/test_disco_capture.py::test_an_out_of_scope_request_is_killed_counted_and_never_recorded`, `tests/test_disco_capture.py::test_an_empty_scope_refuses_everything`, `tests/test_disco_capture.py::test_a_tunnel_is_opened_for_an_in_scope_host_port_under_either_scheme`, `tests/test_disco_e2e.py::test_the_proxy_refuses_an_out_of_scope_request_on_its_own`
   - Enforced by (the browser through the proxy): `navguard.browser_launch_args(proxy=)` / `chromium_launch_kwargs(proxy=)` — `tests/test_browser_scope.py::test_a_capture_proxy_replaces_no_proxy_and_is_itself_resolvable`, `tests/test_browser_scope.py::test_a_capture_proxy_is_a_loopback_ip_literal_and_port_only`, `tests/test_browser_scope.py::test_launch_kwargs_refuse_args_built_for_another_proxy_or_none`, `tests/test_browser_scope.py::test_the_launch_sites_are_the_four_known_ones`
-  - Enforced by (the explorer, end to end in a real browser): `disco.explore.refusal` / `form_refusal` — `tests/test_disco_e2e.py::test_destructive_controls_and_other_origins_are_never_reached`, `tests/test_disco_e2e.py::test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app`
+  - Enforced by (the explorer, end to end in a real browser): `disco.explore.refusal` / `form_refusal` — `tests/test_disco_e2e.py::test_destructive_controls_and_other_origins_are_never_reached`, `tests/test_disco_e2e.py::test_every_exchange_is_recorded_with_its_cause_and_the_tag_never_reaches_the_app`, `tests/test_disco_synth.py::test_a_captcha_form_is_submitted_and_a_credential_change_is_not`
   - Enforced by (the capture is redacted at the write): `disco.capture.make_record` — `tests/test_disco_capture.py::test_no_secret_reaches_the_capture_file_and_benign_content_stays`, `tests/test_disco_capture.py::test_a_secret_straddling_the_body_cut_is_still_removed`, `tests/test_disco_capture.py::test_an_unparseable_json_body_with_a_secret_is_omitted`
 - **NFR-CRAWL-bounded** Cap per-template instance counts to avoid infinite crawl
   spaces.

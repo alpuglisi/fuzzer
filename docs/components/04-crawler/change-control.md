@@ -3,6 +3,37 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0033 — CAPTCHA forms are submitted with a filler answer in both discovery tools (D71) (2026-10-18)
+- Change:
+  - `fuzzlab/disco/explore.py`: `form_refusal` no longer refuses a CAPTCHA form;
+    `has_captcha(fields)` recognises one for the report only (`captcha_submissions`,
+    printed by `disco capture`).
+  - `fuzzlab/tools/spider.py`: both SPA submission paths (`_submit_spa_forms`,
+    `_submit_revealed`) drop `spa.captcha_reason` from the gate; `_note_captcha` counts
+    (`captcha_forms`, in the crawl summary) and logs it. `spa.captcha_reason` is now a
+    recogniser, its name kept for its callers.
+  - Tests: the G1 fixture's CAPTCHA view sends its answer; it is now asserted submitted
+    once with a filler answer (`test_g1_a_captcha_form_is_submitted_with_a_filler_answer`);
+    the Juice Shop feedback route (POST /api/Feedbacks) becomes a stated residual (row
+    creation, low); a disco unit test pins the new rule beside the credential refusal.
+- Reason: the owner's decision D71 ("Submit with a filler"), asked after the Juice Shop
+  measurement (CC-CRAWL-0032), where the explorer refused 7 CAPTCHA submissions and the
+  legacy crawler never captured the contact form's request.
+- Impact: both discovery tools; more requests captured (a CAPTCHA-gated endpoint and its
+  schema). The server still rejects the filler answer, so the request's effect is at
+  most a failed validation. FR-CRAWL-13/15 (G1e), FR-CRAWL-19 and the NFR-CRAWL-safe
+  clauses amended in place. No store, contract or interface change (one new counter
+  each).
+- Risk: low. Every other gate is unchanged (destructive labels, credential change,
+  password forms, sensitive controls, the named-route rule, the write window); the
+  filler is the same one every other control gets (`store_adapter.is_filler`).
+- Deliverables:
+  - [x] code, tests — done
+  - [x] D71, FR-CRAWL-13/15/19 and NFR-CRAWL-safe amended, CHANGELOG — done
+  - [x] verify_change on the committed tree — see the CHANGELOG line
+- Effectiveness: to be assessed at the next Juice Shop measurement (the contact form's
+  POST /api/Feedbacks captured by both tools).
+
 ### CC-CRAWL-0032 — The disco explorer and synthesizer survive a real SPA (BUG-0501) (2026-10-18)
 - Change (`fuzzlab/disco/explore.py`, `fingerprint.py`, `synth.py`):
   - `State.core` / `Explorer.reproduces`: a restore succeeds on the same fingerprint, or

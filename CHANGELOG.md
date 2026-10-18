@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (D71: CAPTCHA forms are submitted with a filler answer)
+- **What:** the disco explorer and the legacy spider no longer refuse a CAPTCHA form: its CAPTCHA control gets a filler answer like any other control and the form is submitted, so its request is captured; recognising a CAPTCHA now only counts and logs it (CC-CRAWL-0033).
+- **Why:** the owner's decision (D71), asked after the Juice Shop measurement showed the refusal hid the contact form's endpoint from both tools.
+
 ## 2026-10-18 (BUG-0501: the disco explorer survives a real SPA; first Juice Shop measurement)
 - **What:** the explorer's restores use a stable element core from a fresh document, skip consumed UI, drop UI-state classes from signatures, treat form-less forms and disabled submit buttons as forms, and explore new routes before overlays; the synthesizer templates a segment as a slug only when its values were seen as data. The test fixture gains the third-party shapes that broke it. CC-CRAWL-0032, BUG-0501, PA-0501, F-060.
 - **Why:** the first real run of `fuzzlab disco capture` (Juice Shop, on the owner's request) made 1 state and 0 actions: the tool had been validated only on an app the agent wrote.

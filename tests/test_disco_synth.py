@@ -84,6 +84,19 @@ def test_perturbations_are_one_coverage_pass_per_control():
         [("alternate-option", "b")]
 
 
+def test_a_captcha_form_is_submitted_and_a_credential_change_is_not():
+    """D71: a CAPTCHA control is filled like any other (a filler answer) and the form is
+    submitted -- only reported; a form that changes a credential stays refused."""
+    from fuzzlab.disco.explore import form_refusal, has_captcha
+    contact = [{"tag": "textarea", "name": "comment"},
+               {"tag": "input", "type": "text", "id": "captchaControl", "label": "Result"}]
+    assert form_refusal(contact, {"label": "Submit"}) is None and has_captcha(contact)
+    assert not has_captcha([{"name": "capture_mode"}, {"label": "Captain"}])
+    change = [{"type": "password", "name": "current"}, {"type": "password", "name": "new"},
+              {"type": "password", "name": "repeat"}]
+    assert form_refusal(change, {"label": "Change password"}) == "credential-change"
+
+
 # --- network quiescence (the explorer's settle rule) -------------------------------------
 
 def test_quiet_is_measured_from_the_action_not_the_last_request():

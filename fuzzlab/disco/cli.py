@@ -150,6 +150,9 @@ def _capture(ns) -> int:
         blocked[host] = blocked.get(host, 0) + n
     if blocked:
         print(f"  refused out of scope: {dict(sorted(blocked.items()))}")
+    if report.captcha_submissions:
+        print(f"  CAPTCHA forms submitted with a filler answer (D71): "
+              f"{report.captcha_submissions}")
     if report.refused:
         print(f"  never acted on: {dict(sorted(report.refused.items()))}")
     if report.budget_hit:

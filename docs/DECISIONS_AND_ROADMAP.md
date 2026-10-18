@@ -486,6 +486,19 @@ chose within it, each open for the owner:
 - Not the "autonomous LLM agent loop" deferred below: Phase 2 is one structured request
   per endpoint, with no tools and no loop.
 
+### D71 — CAPTCHA forms are submitted with a filler answer (owner, 2026-10-18)
+
+**The owner's answer** (asked after the Juice Shop measurement, CC-CRAWL-0032, where the
+explorer refused 7 CAPTCHA submissions): "Submit with a filler". In both discovery tools
+(the disco explorer and the legacy spider), a CAPTCHA form is gated and filled like any
+other form: its CAPTCHA control gets a filler answer, the form is submitted, and the
+request it sends is captured (the server rejects a wrong answer, but the endpoint, its
+parameters and its schema are discovered). No CAPTCHA is solved; recognising one only
+counts and logs it (`spa.captcha_reason`, `disco.explore.has_captcha`). Every other gate
+is unchanged: destructive labels, credential changes, password forms, sensitive
+controls, the named-route rule and the write window. Supersedes the CC-CRAWL-0023 G1e
+refusal (CC-CRAWL-0033).
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
