@@ -34,6 +34,12 @@ Newest first.
     the write-capable phase never concurrent; a worker's failure ends the crawl; shared
     flags and counts; the bound; two real browsers) — done
   - [x] FR-CRAWL-22, CHANGELOG — done
+  - [x] `verify_change --base 4bda67e` on a92d2c3 (the overlap test made deterministic
+    after a loaded suite showed no overlap in the two-browser test): 77 files, 3057
+    passed, 0 failed, 5 skipped, 18 xfailed — done
+- Profile behind the design (Juice Shop, one worker, 2072 s, self time): `_settle` 64%
+  (503 calls: waiting for in-flight requests, often to its 5 s budget), page loads 13%,
+  reveals 11%, window restore/leave 8%.
 - Effectiveness: not measured on a lab in this change (the owner asked to stop
   re-measuring after each change).
 
