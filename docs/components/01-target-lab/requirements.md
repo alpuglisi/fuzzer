@@ -6398,6 +6398,16 @@ lane) can submit a payload as
   (negatives). CopyNPaste's ground truth also holds a stored DOM XSS in `/register`'s
   `user` (rendered by the login page's `innerHTML`). None is yet in the gated live
   test (FR-LAB-304).
+  **Not built, and why** (A3 apps, 2026-10-18):
+  - `mongection` (Node + MongoDB): its one flaw is NoSQL operator injection
+    (`{"$ne": null}` in `/login`'s `email`/`password`), not a scoreable class here
+    (no strategy, no label class); its echoes are regex-checked emails, so nothing else.
+  - `comment-killer` (React dev server + Go API): built and its stored XSS through
+    `eval` confirmed in a browser, then withdrawn. Its bundle calls the API at a
+    hard-coded `http://localhost:10017`, so the lab needs a second, fixed published port,
+    and the sink sits on that second origin, which the ground-truth contract (points
+    keyed by a path on one base) cannot express.
+  - `streaming` (Java/Maven + Angular): not attempted yet.
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
   commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned
