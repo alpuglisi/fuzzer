@@ -15,7 +15,7 @@ import time
 import pytest
 
 from fuzzlab.disco import explore
-from fuzzlab.disco.explore import Explorer, ExploreOptions, State
+from fuzzlab.disco.explore import ExploreOptions, Explorer, State
 
 START = "http://127.0.0.1:9/"
 
@@ -33,7 +33,7 @@ def _explorer(monkeypatch, graph, *, workers, delay=0.01, **opts):
         self._ctx = _Ctx()
         try:
             self._work(None, None, seed=seed)
-        except BaseException as exc:  # noqa: BLE001 -- as the real one hands it on
+        except BaseException as exc:  # as the real one hands it on
             with self._shared.lock:
                 self._shared.failure = self._shared.failure or exc
                 self._shared.stop = self._shared.stop or "error"

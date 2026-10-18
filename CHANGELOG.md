@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (the legacy spider loads pages with several browsers at once)
+- **What:** `fuzzlab crawl --workers N` loads and renders N pages at once, one browser per worker, while reveals, form submissions and query probes stay one-at-a-time behind a crawl-wide lock; one worker crawls as before (CC-CRAWL-0037).
+- **Why:** the owner asked for multithreading in both discovery tools.
+
 ## 2026-10-18 (disco explores with several browsers at once)
 - **What:** `disco capture --workers N` runs N browser workers over one shared, locked frontier; one worker behaves as before. The held-out #3 result is recorded on CC-FUZZ-0090 (both tools unauthenticated: legacy 9 reached / 3 confirmed, disco 9 / 4) (CC-CRAWL-0036).
 - **Why:** the owner asked for multithreaded discovery; a profile showed a disco run spends its time waiting on the target, which parallel browsers overlap.

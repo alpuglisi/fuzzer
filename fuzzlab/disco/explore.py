@@ -872,7 +872,7 @@ class Explorer:
                 finally:
                     navguard.release(self._ctx)
                     browser.close()
-        except BaseException as exc:  # noqa: BLE001 -- handed to run(), never lost
+        except BaseException as exc:  # handed to run(), never lost
             with shared.lock:
                 if shared.failure is None:
                     shared.failure = exc

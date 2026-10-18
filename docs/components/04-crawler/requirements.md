@@ -741,6 +741,19 @@ fuzzer.
   *(Amended in place, CC-CRAWL-0035.)* `auto` reads a disco run since CC-FUZZ-0090
   (`--disco-run`, FR-FUZZ-53); removing the module waits for the owner's decision on
   the held-out comparison of the two.
+- **FR-CRAWL-22 (crawl workers, CC-CRAWL-0037)** `fuzzlab crawl --workers N` (1..8,
+  default 1) loads and renders N queued pages at once, one browser (or HTTP session)
+  per worker. The first worker runs on the calling thread and starts its browser first
+  (the session is ensured once; the others adopt it); each other worker starts and
+  stops its own browser on its own thread. A URL is claimed under the crawl lock before
+  it is loaded, so no page is loaded twice. Whatever can write -- reveals, SPA form
+  submissions, selector-form enumeration (`_after_fetch`) and every seed or probe load
+  (FR-CRAWL-17) -- runs under one crawl-wide lock (`_interact`), one worker at a time,
+  so the submission, reveal and probe caps and the write windows keep their one-worker
+  meaning. Seeds and probes run on the first worker only; probes are planned once every
+  worker is idle. Stop flags and the crawl-wide counts are one value across workers;
+  the SQLite store's connection is shared under its own lock (PA-0023). The first
+  worker exception stops the crawl and is raised. One worker crawls exactly as before.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

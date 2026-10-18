@@ -3,6 +3,40 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0037 — Crawl workers in the legacy spider (FR-CRAWL-22) (2026-10-18)
+- Change (`fuzzlab/tools/spider.py`, `fuzzlab/cli_taxonomy.py`):
+  - `fuzzlab crawl --workers N` / `LocalSpider(workers=)` (1..8, default 1).
+  - The crawl loop's body moved, unchanged, into `_visit`; one worker runs the same
+    loop as before.
+  - Several workers: `_crawl_parallel` runs the first worker on the calling thread
+    (its browser started first, so the session is ensured once) and the others on
+    threads, each with its own browser and HTTP session (`_clone`: shared containers,
+    counts, store and locks; per-worker browser and per-page state).
+  - `_take` claims each URL under the crawl lock (no page loaded twice), gives seeds and
+    probes to the first worker only and plans probes once every worker is idle.
+  - `_interact` serialises everything that can write: `_after_fetch` (reveals, SPA
+    form submissions, selector forms) and seed/probe loads, so the caps and windows keep
+    their one-worker meaning.
+  - Stop flags and crawl-wide counts are shared fields (`_shared_field`). The SQLite
+    store is opened `check_same_thread=False` and every method holds its lock
+    (PA-0023).
+  - The module docstring is brought current (auto reads a disco run since
+    CC-FUZZ-0090).
+- Reason: the owner asked for multithreading in the spider (2026-10-18).
+- Impact: the spider only; one worker is unchanged. FR-CRAWL-22 added.
+- Risk: medium. Page loads overlap while every write-capable step stays serial; the
+  gain is bounded by how much of a crawl is page loading rather than reveals and
+  submissions. Counters incremented outside `_interact` (request counts) are plain
+  dict increments and may undercount by a few under contention; the caps that matter
+  for safety are all checked inside `_interact`.
+- Deliverables:
+  - [x] code; `tests/test_spider_workers.py` (same pages, each once, overlapping loads;
+    the write-capable phase never concurrent; a worker's failure ends the crawl; shared
+    flags and counts; the bound; two real browsers) — done
+  - [x] FR-CRAWL-22, CHANGELOG — done
+- Effectiveness: not measured on a lab in this change (the owner asked to stop
+  re-measuring after each change).
+
 ### CC-CRAWL-0036 — Parallel exploration workers in disco (2026-10-18)
 - Change (`fuzzlab/disco/explore.py`, `cli.py`, `fuzzlab/cli_taxonomy.py`):
   `ExploreOptions.workers` / `disco capture --workers N` (1..8, default 1). The run's
