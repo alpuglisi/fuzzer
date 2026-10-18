@@ -1162,10 +1162,30 @@ def test_the_crawl_maze_wheels_are_verified_and_a_mismatch_is_refused(tmp_path):
     assert ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest}) \
         == good.parent                                   # cached and verified: no pip
     good.write_bytes(b"tampered")
-    with pytest.raises(ext.ExternalLabError):
-        ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest},
-                                    timeout=60)
+    meta = json.dumps({"urls": [{"filename": good.name, "url": "https://x/w",
+                                 "digests": {"sha256": digest}}]}).encode()
+    served = {"meta": meta, "file": b"still tampered"}
+
+    def get(url, timeout):
+        return served["meta"] if url.endswith("/json") else served["file"]
+    with pytest.raises(ext.ExternalLabError, match="mismatch"):
+        ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest}, get=get)
     assert not good.exists()
+    served["file"] = b"wheel"                              # the right bytes: accepted
+    ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest}, get=get)
+    assert good.read_bytes() == b"wheel"
+    served["meta"] = json.dumps({"urls": [{"filename": good.name, "url": "https://x/w",
+                                           "digests": {"sha256": "0" * 64}}]}).encode()
+    good.unlink()
+    with pytest.raises(ext.ExternalLabError, match="PyPI publishes"):
+        ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest}, get=get)
+
+
+def test_distribution_names_give_project_and_version():
+    assert ext.dist_project("Flask_Cors-3.0.7-py2.py3-none-any.whl") == ("Flask_Cors", "3.0.7")
+    assert ext.dist_project("Flask-Bootstrap-3.3.7.1.tar.gz") == ("Flask-Bootstrap", "3.3.7.1")
+    with pytest.raises(ext.ExternalLabError):
+        ext.dist_project("README.md")
 
 
 # --- secDevLabs (CC-LAB-0303) -----------------------------------------------------------

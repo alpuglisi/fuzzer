@@ -244,38 +244,73 @@ def crawl_maze_source(root: Path = EXTERNAL_DIR) -> Path:
     return root / "security-crawl-maze" / ".cache" / "src"
 
 
-def fetch_crawl_maze_wheels(*, dest: Path | None = None, timeout: float = 600.0,
-                            wheels: Mapping[str, str] | None = None) -> Path:
-    """Download the Crawl Maze image's pinned wheels to the gitignored cache with the
-    host's pip (the host's proxy/CA environment applies), each verified by sha256; a
-    cached wheel is re-hashed, never trusted. A mismatch removes it and raises."""
-    import hashlib
+def dist_project(filename: str) -> tuple[str, str]:
+    """``(project, version)`` of a wheel or sdist file name (PEP 427 / sdist naming)."""
+    if filename.endswith(".whl"):
+        parts = filename.split("-")
+        return parts[0], parts[1]
+    for ext_ in (".tar.gz", ".zip", ".tar.bz2"):
+        if filename.endswith(ext_):
+            project, _, version = filename[:-len(ext_)].rpartition("-")
+            return project, version
+    raise ExternalLabError(f"{filename}: not a wheel or sdist name")
 
-    from fuzzlab.procutil import run_bounded
-    wheels = CRAWL_MAZE_WHEELS if wheels is None else wheels
-    dest = crawl_maze_source().parent / "wheels" if dest is None else dest
+
+def _pypi_get(url: str, timeout: float) -> bytes:
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=timeout) as resp:      # verified TLS
+        return resp.read()
+
+
+def fetch_pypi_dists(pins: Mapping[str, str], dest: Path, *, timeout: float = 600.0,
+                     get=_pypi_get) -> Path:
+    """Download each pinned distribution (``{file name: sha256}``) from PyPI into
+    ``dest`` on the host (the host's proxy and CA environment apply), so an image can
+    install them with no network. PyPI's own published digest must equal the pin, and
+    the bytes must hash to it; a cached file is re-hashed, never trusted; a mismatch
+    leaves nothing behind and raises."""
+    import hashlib
+    import json as _json
     dest.mkdir(parents=True, exist_ok=True)
 
     def ok(name: str) -> bool:
         path = dest / name
-        return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == wheels[name]
+        return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == pins[name]
 
-    missing = [n for n in wheels if not ok(n)]
-    for name in missing:
+    for name, digest in pins.items():
+        if ok(name):
+            continue
         (dest / name).unlink(missing_ok=True)       # a mismatched copy never stays
-    if missing:
-        specs = ["==".join(n.split("-")[:2]) for n in missing]
-        res = run_bounded([sys.executable, "-m", "pip", "download", "--only-binary=:all:",
-                           "--no-deps", "--python-version", "3.9", "--implementation", "cp",
-                           "--platform", "manylinux2014_x86_64", "-d", str(dest), *specs],
-                          timeout=timeout)
-        if res.returncode != 0:
-            raise ExternalLabError(f"pip download failed: {(res.stderr or '').strip()[-200:]}")
-    for name in wheels:
+        project, version = dist_project(name)
+        try:
+            meta = _json.loads(get(f"https://pypi.org/pypi/{project}/{version}/json",
+                                   timeout))
+            entry = next(u for u in meta.get("urls", []) if u.get("filename") == name)
+            if entry.get("digests", {}).get("sha256") != digest:
+                raise ExternalLabError(f"{name}: PyPI publishes another sha256 than the pin")
+            data = get(entry["url"], timeout)
+        except ExternalLabError:
+            raise
+        except (OSError, ValueError, StopIteration, KeyError) as exc:
+            raise ExternalLabError(f"{name}: download failed ({type(exc).__name__})") from None
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ExternalLabError(f"{name}: sha256 mismatch after download")
+        tmp = dest / (name + ".part")
+        tmp.write_bytes(data)
+        tmp.replace(dest / name)
+    for name in pins:
         if not ok(name):
             (dest / name).unlink(missing_ok=True)
             raise ExternalLabError(f"{name}: sha256 mismatch or missing after download")
     return dest
+
+
+def fetch_crawl_maze_wheels(*, dest: Path | None = None, timeout: float = 600.0,
+                            wheels: Mapping[str, str] | None = None, get=_pypi_get) -> Path:
+    """The Crawl Maze image's pinned wheels in the gitignored cache (`fetch_pypi_dists`)."""
+    return fetch_pypi_dists(CRAWL_MAZE_WHEELS if wheels is None else wheels,
+                            crawl_maze_source().parent / "wheels" if dest is None else dest,
+                            timeout=timeout, get=get)
 
 
 def checkout_pinned(dest: Path, repo: str, commit: str, *, timeout: float = 600.0,

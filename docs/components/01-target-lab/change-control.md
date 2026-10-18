@@ -3,6 +3,21 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0304 — One PyPI fetcher for every lab's pinned Python distributions (2026-10-18)
+- Change (`fuzzlab/lab_fixtures/external.py`): `fetch_pypi_dists(pins, dest)` downloads
+  each pinned file (`{file name: sha256}`) by its PyPI metadata, refusing it unless
+  PyPI's published digest and the downloaded bytes both equal the pin; `dist_project`
+  reads a wheel's or sdist's project and version from its name.
+  `fetch_crawl_maze_wheels` now uses it (it ran `pip download` with platform flags).
+- Reason: secDevLabs' Python apps pin old releases that exist only as sdists, and one
+  (`mysqlclient`) cannot be `pip download`ed on a host without MySQL headers (its
+  metadata build runs `mysql_config`). One mechanism for both labs (PA-0003).
+- Impact: the maze's wheels are fetched the new way (re-fetched and verified: all six).
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_external_labs_static.py` (a tampered download refused and
+    removed, the right bytes accepted, a pin PyPI does not publish refused; names) — done
+
 ### CC-LAB-0303 — secDevLabs as external labs, one per app; CopyNPaste API first (2026-10-18)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_*` pins, `checkout_pinned`
   factored out of `fetch_crawl_maze` and shared, `secdevlabs_checkout`, `go_vendor`,
