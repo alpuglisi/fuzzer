@@ -6403,6 +6403,11 @@ lane) can submit a payload as
   `php:8.3-apache` from Google's Docker Hub mirror. Ground truth: XXE in the posted XML
   document's `<name>` (echoed) and `<email>` (blind), reflected XSS through `<name>`
   (positives), `<email>` and `<subject>` never echoed (negatives).
+  `secdevlabs-amarelo-designs` (A8, Flask, CC-LAB-0308) on 127.0.0.1:3076
+  (`SDL_AMARELO_PORT`), read-only root filesystem: upstream pins nothing, so the fixture
+  pins `python:3.12-slim` and Flask 3.1.0 with its dependencies (PyPI digests). Ground
+  truth: insecure deserialization of the `sessionId` cookie on `/user` (positive);
+  the same cookie on `/` and `/admin`'s `username` (negatives).
   **Not built, and why** (2026-10-18):
   - `mongection` (Node + MongoDB): its one flaw is NoSQL operator injection
     (`{"$ne": null}` in `/login`'s `email`/`password`), not a scoreable class here
@@ -6418,8 +6423,8 @@ lane) can submit a payload as
     `snake-pro` hard-code `localhost:<their upstream port>` in their pages; the A1/A7
     apps (access control, authentication) need several identities per lab; A4
     (brute force), A5 WordPress/stegonography, A6 (known-vulnerable components) and A9
-    (logging) have no scoreable class here. Candidates still open: `amarelo-designs`
-    (A8, insecure deserialization), `camplake-api` (A1).
+    (logging) have no scoreable class here. Still open: `camplake-api` (A1, access
+    control, needs two identities).
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
   commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned

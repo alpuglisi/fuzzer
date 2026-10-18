@@ -3,6 +3,21 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0308 — secDevLabs Amarelo Designs (insecure deserialization) as an external lab (2026-10-18)
+- Change: `fuzzlab/lab_fixtures/external.py` (app, PyPI pins for Flask 3.1.0 and its
+  six dependencies, `LAB_META`); `lab/external/secdevlabs-amarelo-designs/`;
+  `lab/ground-truth-secdevlabs-amarelo-designs/`; `.gitignore`; the static tests' GT
+  list; FR-LAB-306.
+- Reason: the A8 app: `/user` unpickles the `sessionId` cookie.
+- Impact: a new loopback lab (127.0.0.1:3076, read-only root filesystem, unprivileged).
+- Risk: low; the sink is remote code execution inside the container, which is why it is
+  loopback-only and read-only. Upstream's netcat (its reverse-shell narrative) is not
+  installed.
+- Deliverables:
+  - [x] fixture (built offline), ground truth (1 positive, 2 negatives, checked live: a
+    pickled `time.sleep(2.5)` delays `/user` by 2.5 s and nothing else) — done
+  - [x] FR-LAB-306, CHANGELOG — done
+
 ### CC-LAB-0307 — secDevLabs Vinijr Blog (XXE) as an external lab (2026-10-18)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PHP_IMAGE`, app,
   `LAB_META`); `lab/external/secdevlabs-vinijr-blog/`;

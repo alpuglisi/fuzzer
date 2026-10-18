@@ -1,0 +1,40 @@
+# secDevLabs "Amarelo Designs" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0308).
+# Lab-only. A Flask app whose /user route unpickles the `sessionId` cookie
+# (base64 of pickle.dumps of the session dict) -- OWASP 2021 A8, insecure
+# deserialization: any cookie value runs code in the container. Upstream runs it with
+# Flask's debug server; so does the fixture.
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-amarelo-designs` copies into the gitignored .cache/app, with
+# its Python wheels downloaded on the host into .cache/dists (verified against PyPI's
+# published sha256 and the repo's pins); the image installs them offline. Upstream pins
+# neither its base nor Flask: the fixture pins python:3.12-slim and Flask 3.1.0.
+# Upstream's netcat (used by its reverse-shell narrative) is not installed.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1) -- unpickling a cookie is remote code
+# execution; capabilities dropped, read-only root filesystem, unprivileged user.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-amarelo-designs
+name: fuzzlab-secdevlabs-amarelo-designs
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    build:
+      context: .
+    networks: [amarelo-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_AMARELO_PORT:-3076}:5000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  amarelo-net: {}

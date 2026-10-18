@@ -1,0 +1,7 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Amarelo Designs at 10be4384 (external
+# lab fixture lab/external/secdevlabs-amarelo-designs), CC-LAB-0308. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLAD-0001,/user,GET,sessionId,cookie,insecure_deserialization,true,/user,sink,,direct
+SDLAD-0002,/,GET,sessionId,cookie,insecure_deserialization,false,/,sink,,direct
+SDLAD-0003,/admin,POST,username,body,insecure_deserialization,false,/admin,sink,,direct

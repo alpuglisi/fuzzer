@@ -1,0 +1,27 @@
+{
+ "version": 1,
+ "target": "secdevlabs_amarelo_designs_10be4384",
+ "points": [
+  {
+   "url": "/user",
+   "method": "GET",
+   "param": "sessionId",
+   "location": "cookie",
+   "rendering": "server"
+  },
+  {
+   "url": "/",
+   "method": "GET",
+   "param": "sessionId",
+   "location": "cookie",
+   "rendering": "server"
+  },
+  {
+   "url": "/admin",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "rendering": "server"
+  }
+ ]
+}

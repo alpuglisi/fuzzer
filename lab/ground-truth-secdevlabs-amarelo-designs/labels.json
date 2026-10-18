@@ -1,0 +1,45 @@
+{
+ "version": 1,
+ "target": "secdevlabs_amarelo_designs_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLAD-0001",
+   "url": "/user",
+   "method": "GET",
+   "param": "sessionId",
+   "location": "cookie",
+   "vuln_class": "insecure_deserialization",
+   "sink_context": "deserialization",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a8/amarelo-designs README] app/app.py:40 pickle.loads(base64.b64decode(cookie)); a pickled time.sleep(2.5) delays the answer by 2.5 s (checked live). The cookie is set by a successful /admin login (admin/admin), which a crawl does not perform."
+  },
+  {
+   "case_id": "SDLAD-0002",
+   "url": "/",
+   "method": "GET",
+   "param": "sessionId",
+   "location": "cookie",
+   "vuln_class": "insecure_deserialization",
+   "sink_context": "deserialization",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a8/amarelo-designs README] `/` never reads the cookie (the same sleeping pickle answers at once; checked live)."
+  },
+  {
+   "case_id": "SDLAD-0003",
+   "url": "/admin",
+   "method": "POST",
+   "param": "username",
+   "location": "body",
+   "vuln_class": "insecure_deserialization",
+   "sink_context": "deserialization",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a8/amarelo-designs README] the login compares `username` with a literal; it is never deserialized (the sleeping pickle as username answers at once; checked live)."
+  }
+ ]
+}

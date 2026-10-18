@@ -123,10 +123,29 @@ SECDEVLABS_APPS = {
     "secdevlabs-gossip-world": "owasp-top10-2021-apps/a3/gossip-world",
     "secdevlabs-sstype": "owasp-top10-2021-apps/a3/sstype",
     "secdevlabs-vinijr-blog": "owasp-top10-2021-apps/a5/vinijr-blog",
+    "secdevlabs-amarelo-designs": "owasp-top10-2021-apps/a8/amarelo-designs",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
 SECDEVLABS_PYPI = {
+    # upstream's requirements say `flask` (unpinned): Flask 3.1.0 and its dependencies
+    "secdevlabs-amarelo-designs": {
+        "blinker-1.9.0-py3-none-any.whl":
+            "ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc",
+        "click-8.5.0-py3-none-any.whl":
+            "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+        "flask-3.1.0-py3-none-any.whl":
+            "d667207822eb83f1c4b50949b1623c8fc8d51f2341d65f72e1a1815397551136",
+        "itsdangerous-2.2.0-py3-none-any.whl":
+            "c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef",
+        "jinja2-3.1.6-py3-none-any.whl":
+            "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67",
+        ("markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64."
+         "manylinux_2_28_x86_64.whl"):
+            "8e124f974786f831d6043728e38296969d3579db8896fe004682f5758e613581",
+        "werkzeug-3.1.9-py3-none-any.whl":
+            "6392e50c78460ba618e5b21f08a71f59c99ce99cdc6cf6e3dd7e6ccca8754fab",
+    },
     "secdevlabs-sstype": {
         ("tornado-6.4.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64."
          "manylinux_2_17_x86_64.manylinux2014_x86_64.whl"):
@@ -195,6 +214,9 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",
+                                          "SDL_AMARELO_PORT", 3076, 5000, "/", "/", None,
+                                          "", False),
     "secdevlabs-vinijr-blog": LabMeta("secdevlabs-vinijr-blog", "app", "SDL_VINIJR_PORT",
                                       3075, 80, "/", "/", None, "", False),
     "secdevlabs-sstype": LabMeta("secdevlabs-sstype", "server", "SDL_SSTYPE_PORT", 3073,
