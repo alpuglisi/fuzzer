@@ -777,3 +777,11 @@ Juice Shop lab is complete.
 - **Evidence:** this session's scratch `par/s1.err` (the traceback at the end of the crawl log).
 - **Impact:** about 27 minutes of lab time and a second full crawl; no code, result or report was affected.
 - **Status:** recorded. The rerun prints the timings first; scratch measurement scripts are now tried on a short run before a long one.
+
+
+### F-063 — A `docker images` listing showed me the held-out lab's image names
+- **What:** While checking which base images were cached for the Crawl Maze build (2026-10-18), I ran `docker images` with no filter. Its output included the held-out lab #3 images, whose names carry the curator's project name and the names of its services.
+  - I had not opened the held-out directories, keys or logs, but the listing still put lab detail into my context (F-054's rule: refer to a held-out lab by profile and counts only).
+- **Evidence:** this session's transcript (the listing during the maze setup).
+- **Impact:** small: names only, no routes, keys or stack. The held-out lab stays usable, but this is noted beside any later result from it.
+- **Status:** recorded. Image and container listings in this environment are now filtered to the lab being worked on.

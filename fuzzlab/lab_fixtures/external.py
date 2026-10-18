@@ -56,12 +56,39 @@ MYSQL_IMAGE = ("docker.io/library/mysql:5.7@sha256:"
                "4bc6bc963e6d8443453676cae56536f4b8156d78bae03c0145cbe47c2aad73bb")
 JUICE_SHOP_IMAGE = ("docker.io/bkimminich/juice-shop:v20.3.0@sha256:"
                     "cea5a4af4aacee498c491491af0408934ec81d004035c0a02ef3e54395e3bf27")
-PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE})
+CRAWL_MAZE_PYTHON_IMAGE = ("docker.io/library/python:3.9-slim@sha256:"
+                           "2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b")
+PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
+                           CRAWL_MAZE_PYTHON_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
 BWAPP_ZIP_SHA256 = "87b5363062b4be9d2aa91916f6396f0f7d56e8acca08b732440e863f8c9e4cd6"
 BWAPP_ZIP_SIZE = 15_058_349
+
+#: Google's Security Crawl Maze (a crawler-coverage testbed: each page links one
+#: resource one way, ``*.found`` expected), built from this pinned commit.
+CRAWL_MAZE_REPO = "https://github.com/google/security-crawl-maze"
+CRAWL_MAZE_COMMIT = "2a0dd0a75e39925ded887bcd25016e8b3ce0f2b3"
+#: Its Flask app's dependencies for the image's Python (3.9: Flask 1.0.2 needs a Python
+#: before 3.10's `collections` change, as upstream's own 3.6), fetched on the host and
+#: installed offline by the build (a build container may sit behind a TLS-intercepting
+#: proxy it does not trust), each verified by sha256.
+CRAWL_MAZE_WHEELS = {
+    "Flask-1.0.2-py2.py3-none-any.whl":
+        "a080b744b7e345ccfcbc77954861cb05b3c63786e93f2b3875e0913d44b43f05",
+    "Werkzeug-1.0.1-py2.py3-none-any.whl":
+        "2de2a5db0baeae7b2d2664949077c2ac63fbd16d98da0ff71837f7d1dea3fd43",
+    "Jinja2-2.11.3-py2.py3-none-any.whl":
+        "03e47ad063331dd6a3f04a43eddca8a966a26ba0c5b7207a9a9e4e08f1b29419",
+    ("MarkupSafe-2.0.1-cp39-cp39-manylinux_2_5_x86_64.manylinux1_x86_64."
+     "manylinux_2_12_x86_64.manylinux2010_x86_64.whl"):
+        "1f2ade76b9903f39aa442b4aadd2177decb66525062db244b35d71d0ee8599b6",
+    "itsdangerous-1.1.0-py2.py3-none-any.whl":
+        "b12271b2047cb23eeb98c8b5622e2e5c5e9abd9784a153e9d8ef9cb4dd09d749",
+    "click-7.1.2-py2.py3-none-any.whl":
+        "dacca89f4bfadd5de3d7489b7c8a566eee0d3676333fbb50030263894c38c0dc",
+}
 
 LAB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PROJECT_LABEL = "com.docker.compose.project"
@@ -84,7 +111,8 @@ class LabMeta:
     app_path: str
     #: Any HTTP answer here means the web tier is up (PA-0050).
     ready_path: str
-    identity: str
+    #: None for a lab without a login (nothing to bootstrap).
+    identity: str | None
     default_username: str
     #: A password may be generated when none is supplied (the account is ours to create).
     may_generate_password: bool
@@ -96,6 +124,8 @@ LAB_META: dict[str, LabMeta] = {
     "juice-shop": LabMeta("juice-shop", "app", "JUICE_PORT", 3000, 3000, "/",
                           "/rest/admin/application-version", "juice-user",
                           "juice-user@fuzzlab.lab", True),
+    "security-crawl-maze": LabMeta("security-crawl-maze", "app", "CRAWLMAZE_PORT", 3061,
+                                   8080, "/", "/", None, "", False),
 }
 
 
@@ -187,6 +217,86 @@ def fetch_bwapp(*, session: Any = None, dest: Path | None = None, timeout: float
                              max_hops=max_hops, url=url, sha256=sha256, size=size)
     finally:
         os.close(lock)                          # releases the lock
+
+
+def crawl_maze_source(root: Path = EXTERNAL_DIR) -> Path:
+    """Where the Crawl Maze's pinned source is checked out (gitignored)."""
+    return root / "security-crawl-maze" / ".cache" / "src"
+
+
+def fetch_crawl_maze_wheels(*, dest: Path | None = None, timeout: float = 600.0,
+                            wheels: Mapping[str, str] | None = None) -> Path:
+    """Download the Crawl Maze image's pinned wheels to the gitignored cache with the
+    host's pip (the host's proxy/CA environment applies), each verified by sha256; a
+    cached wheel is re-hashed, never trusted. A mismatch removes it and raises."""
+    import hashlib
+
+    from fuzzlab.procutil import run_bounded
+    wheels = CRAWL_MAZE_WHEELS if wheels is None else wheels
+    dest = crawl_maze_source().parent / "wheels" if dest is None else dest
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def ok(name: str) -> bool:
+        path = dest / name
+        return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == wheels[name]
+
+    missing = [n for n in wheels if not ok(n)]
+    for name in missing:
+        (dest / name).unlink(missing_ok=True)       # a mismatched copy never stays
+    if missing:
+        specs = ["==".join(n.split("-")[:2]) for n in missing]
+        res = run_bounded([sys.executable, "-m", "pip", "download", "--only-binary=:all:",
+                           "--no-deps", "--python-version", "3.9", "--implementation", "cp",
+                           "--platform", "manylinux2014_x86_64", "-d", str(dest), *specs],
+                          timeout=timeout)
+        if res.returncode != 0:
+            raise ExternalLabError(f"pip download failed: {(res.stderr or '').strip()[-200:]}")
+    for name in wheels:
+        if not ok(name):
+            (dest / name).unlink(missing_ok=True)
+            raise ExternalLabError(f"{name}: sha256 mismatch or missing after download")
+    return dest
+
+
+def fetch_crawl_maze(*, dest: Path | None = None, repo: str = CRAWL_MAZE_REPO,
+                     commit: str = CRAWL_MAZE_COMMIT, timeout: float = 600.0) -> Path:
+    """Check the Crawl Maze's source out at ``commit`` into the gitignored cache (its
+    compose file builds from there). A checkout already at ``commit`` is kept; anything
+    else there is replaced. The checkout's HEAD is verified -- never a substitute."""
+    import shutil
+    import subprocess
+
+    from fuzzlab.procutil import run_bounded
+    dest = crawl_maze_source() if dest is None else dest
+
+    def git(*args: str) -> str:
+        res = run_bounded(["git", "-C", str(dest), *args], timeout=timeout)
+        if res.returncode != 0:
+            raise ExternalLabError(f"git {args[0]} failed: {(res.stderr or '').strip()[:200]}")
+        return res.stdout.strip()
+
+    if (dest / ".git").is_dir():
+        try:
+            if git("rev-parse", "HEAD") == commit:
+                return dest
+        except ExternalLabError:
+            pass
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True)
+    try:
+        git("init", "-q")
+        git("remote", "add", "origin", repo)
+        git("fetch", "-q", "--depth", "1", "origin", commit)
+        git("checkout", "-q", "--detach", "FETCH_HEAD")
+        head = git("rev-parse", "HEAD")
+    except (ExternalLabError, subprocess.TimeoutExpired, OSError):
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    if head != commit:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise ExternalLabError(f"crawl maze checkout is {head}, not {commit}")
+    return dest
 
 
 def _fetch_locked(*, session: Any, dest: Path, timeout: float, max_hops: int, url: str,
@@ -667,7 +777,7 @@ BWAPP_ALREADY = "The bWAPP database already exists..."
 @dataclass
 class BootstrapResult:
     lab: str
-    identity: str
+    identity: str | None
     credential_source: str
     stored: bool
     notes: list[str]
@@ -799,6 +909,8 @@ def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
     login). ``host``/``port`` name the running lab's published address (default: the
     port variable's ``127.0.0.1`` base)."""
     meta = lab_meta(name)
+    if meta.identity is None:
+        return BootstrapResult(name, None, "none", False, ["no login: nothing to bootstrap"])
     shown = f"[{host}]" if ":" in host else host
     origin = f"http://{shown}:{port}" if port else base_url(meta, environ)
     client = _LabClient(origin, session_factory=session_factory)
@@ -828,7 +940,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("info", help="print `<project> <port> <url>` for a lab")
     s.add_argument("lab")
-    s = sub.add_parser("fetch", help="download and verify bWAPP's zip into the cache")
+    s = sub.add_parser("fetch", help="fetch and verify a lab's pinned source (bWAPP's zip, "
+                                     "the Crawl Maze's commit) into the cache")
     s.add_argument("lab")
     s = sub.add_parser("check-config", help="refuse a rendered compose config that is not "
                                             "loopback-only (reads the file or stdin)")
@@ -857,6 +970,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{project} {lab_port(meta)} {base_url(meta)}{meta.app_path}")
             return 0
         if args.cmd == "fetch":
+            if meta.name == "security-crawl-maze":
+                print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
+                print(f"crawl maze wheels verified: {fetch_crawl_maze_wheels()}")
+                return 0
             if meta.name != "bwapp":
                 print(f"{meta.name}: nothing to fetch (pinned image)")
                 return 0
@@ -884,6 +1001,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.project and args.engine:
                 host, port = published_port(meta, args.project, args.engine)
             res = bootstrap(meta.name, port=port, host=host, prompt=_tty_prompt())
+            if res.identity is None:
+                print(f"{res.lab}: " + "; ".join(res.notes))
+                return 0
             print(f"{res.lab}: identity {res.identity!r} ready "
                   f"({res.credential_source}{', stored' if res.stored else ''}); "
                   + "; ".join(res.notes))

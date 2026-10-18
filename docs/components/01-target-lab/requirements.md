@@ -6371,6 +6371,13 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
+  `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
+  commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned
+  source and sha256-verified wheels in the fixture's gitignored `.cache`. It has no login
+  (no identity, bootstrap does nothing) and no injection answer key: it is scored by URL
+  coverage, `scripts/crawl_maze_score.py`, against its own expected set (91 resources;
+  the 7 single-page-app cases are not built, see CC-LAB-0302).
 - **FR-LAB-304** *(external lab live verification; `CC-LAB-0300`).*
   `tests/test_external_labs_live.py`, gated by `FUZZLAB_LIVE_EXTERNAL_LABS=1` (skips with
   that reason otherwise; with it, a missing engine or a failed pull/build fails), brings

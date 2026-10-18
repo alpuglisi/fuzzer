@@ -38,6 +38,9 @@ REPO = Path(__file__).resolve().parent.parent
 LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
 GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop"}
+#: Labs scored by URL coverage, not an injection answer key: the lab serves its own
+#: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
+COVERAGE_LABS = {"security-crawl-maze"}
 
 
 # --- 1. compose loopback lint (every compose file under lab/) ------------------------------
@@ -193,6 +196,8 @@ def test_the_shell_lint_passes_loopback_publishes():
 def _image_refs() -> list[tuple[str, str]]:
     refs = []
     for path in sorted(EXTERNAL.rglob("*")):
+        if ".cache" in path.parts:
+            continue                       # fetched upstream sources are not ours
         if path.name == "Dockerfile":
             for m in re.finditer(r"^FROM\s+(\S+)", path.read_text("utf-8"), re.M):
                 refs.append((path.relative_to(REPO).as_posix(), m.group(1)))
@@ -483,7 +488,8 @@ def test_juice_shop_runs_with_its_unsafe_config():
 
 def test_the_registry_is_the_directory_layout():
     labs = ext.discover_labs()
-    assert set(labs) == set(ext.LAB_META) == set(GT_DIRS)
+    assert set(labs) == set(ext.LAB_META) == set(GT_DIRS) | COVERAGE_LABS
+    assert not set(GT_DIRS) & COVERAGE_LABS
     for name, compose in labs.items():
         assert ext.compose_project(compose) == f"fuzzlab-{name}"
         doc = yaml.safe_load(compose.read_text("utf-8"))
@@ -1095,3 +1101,67 @@ def test_check_config_cli_refuses_a_rendered_wildcard(tmp_path, capsys):
         {"mode": "ingress", "target": 3000, "published": "3000", "protocol": "tcp"}]}}}))
     assert ext.main(["check-config", "juice-shop", "--file", str(f)]) == 1
     assert "REFUSED" in capsys.readouterr().err
+
+
+# --- the Crawl Maze (CC-LAB-0302) -------------------------------------------------------
+
+def _git(*args, cwd):
+    import subprocess
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def test_the_crawl_maze_has_no_login_so_bootstrap_touches_no_credential():
+    class Refuse:
+        def get(self, *a, **k):
+            raise AssertionError("no credential lookup for a lab without a login")
+        set = get
+
+    res = ext.bootstrap("security-crawl-maze", keyring_store=Refuse(), opened_store=Refuse())
+    assert res.identity is None and not res.stored and res.notes
+
+
+def test_the_crawl_maze_source_is_checked_out_at_the_pinned_commit_only(tmp_path):
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    _git("init", "-q", cwd=upstream)
+    (upstream / "app.py").write_text("print('maze')\n")
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "add", ".", cwd=upstream)
+    _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "one", cwd=upstream)
+    pinned = _git("rev-parse", "HEAD", cwd=upstream)
+    _git("config", "uploadpack.allowReachableSHA1InWant", "true", cwd=upstream)
+    dest = tmp_path / "src"
+    got = ext.fetch_crawl_maze(dest=dest, repo=str(upstream), commit=pinned)
+    assert got == dest and _git("rev-parse", "HEAD", cwd=dest) == pinned
+    assert (dest / "app.py").read_text() == "print('maze')\n"
+    marker = dest / "kept"
+    marker.write_text("x")
+    ext.fetch_crawl_maze(dest=dest, repo=str(upstream), commit=pinned)   # kept as is
+    assert marker.exists()
+    with pytest.raises(ext.ExternalLabError):
+        ext.fetch_crawl_maze(dest=tmp_path / "bad", repo=str(upstream), commit="0" * 40)
+    assert not (tmp_path / "bad").exists()
+
+
+def test_the_crawl_maze_build_uses_only_the_pinned_bases_and_the_cached_source():
+    text = (EXTERNAL / "security-crawl-maze/Dockerfile").read_text("utf-8")
+    froms = re.findall(r"^FROM\s+(\S+)", text, re.M)
+    assert froms == [ext.CRAWL_MAZE_PYTHON_IMAGE]
+    copies = re.findall(r"^COPY\s+(\S+)", text, re.M)
+    assert copies and all(c.startswith((".cache/src/", ".cache/wheels")) for c in copies)
+    assert "--no-index" in text                    # the build sends nothing
+
+
+def test_the_crawl_maze_wheels_are_verified_and_a_mismatch_is_refused(tmp_path):
+    good = tmp_path / "w" / "pkg-1.0-py3-none-any.whl"
+    good.parent.mkdir()
+    good.write_bytes(b"wheel")
+    import hashlib
+    digest = hashlib.sha256(b"wheel").hexdigest()
+    assert ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest}) \
+        == good.parent                                   # cached and verified: no pip
+    good.write_bytes(b"tampered")
+    with pytest.raises(ext.ExternalLabError):
+        ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest},
+                                    timeout=60)
+    assert not good.exists()

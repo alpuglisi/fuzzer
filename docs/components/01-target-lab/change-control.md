@@ -3,6 +3,38 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0302 — Google's Security Crawl Maze as a loopback lab fixture, with a coverage scorer (2026-10-18)
+- Change:
+  - `lab/external/security-crawl-maze/` (compose.yaml, Dockerfile): the maze at upstream
+    commit `2a0dd0a`, published on 127.0.0.1:3061 only, capabilities dropped. The image
+    is built from `.cache/src` (the pinned commit, `fetch_crawl_maze`, HEAD verified) and
+    `.cache/wheels` (Flask 1.0.2's set for Python 3.9, `fetch_crawl_maze_wheels`, each
+    sha256-verified), with no network in the build; base image pinned by digest.
+  - `fuzzlab/lab_fixtures/external.py`: `LAB_META` gains the lab (no identity:
+    `LabMeta.identity` and `BootstrapResult.identity` may be None, and bootstrap is a
+    no-op); `fetch` fetches both.
+  - `scripts/crawl_maze_score.py`: a disco run's requests or a spider DB's pages and
+    captured requests, scored against the maze's expected set (read from the pinned
+    source; the lab's own endpoint refuses `path=/`), per category, with the misses.
+  - Tests: the registry allows a coverage-only lab (`COVERAGE_LABS`); the image scan
+    skips fetched `.cache` sources; the bootstrap no-op, the pinned checkout, the
+    Dockerfile's offline build and the wheel verification; the scorer on both outputs.
+- Reason: the owner named it the next lab (2026-10-18): a third-party crawler-coverage
+  testbed, 91 expected resources, each reachable one way.
+- Impact: a third external lab; the existing two are unchanged. FR-LAB-305 added.
+- Risk: low. Not built here: upstream's three single-page-app cases (Angular, Polymer,
+  React; 7 of 91), which need 2021-era Node toolchains and package downloads the build
+  container cannot make through this environment's TLS-intercepting proxy. They are
+  unreachable for every tool alike (`--exclude-prefix /javascript/frameworks`).
+- Deliverables:
+  - [x] fixture, fetch, scorer, tests — done
+  - [x] FR-LAB-305, CHANGELOG — done
+- Effectiveness (2026-10-18, first runs, one each):
+  - disco (`disco capture`, defaults): found 3/91 in 85 s -- its 60-state budget was
+    spent on 60 page navigations (each maze page is a state).
+  - legacy spider (`crawl --engine playwright --max-depth 6`): found 6/91 in 76 s -- it
+    follows `<a href>` only and records no subresource it loads.
+
 ### CC-LAB-0261 — The Juice Shop ground truth reviewed against all 116 challenges: 5 new positives (2026-10-15)
 - Change: `lab/ground-truth-juice-shop/` (labels.json, expectedresults.csv) gains
   JUICE-0014..0018, all `expected_vulnerable: true`, each with a `[reach: none - ...]`

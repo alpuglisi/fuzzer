@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (Google's Security Crawl Maze is a lab, with a coverage scorer)
+- **What:** `./labctl.sh up security-crawl-maze` builds and serves the maze at a pinned commit on loopback, offline from verified sources; `scripts/crawl_maze_score.py` scores either tool's run against its 91 expected resources. First runs: disco 3/91, spider 6/91 (CC-LAB-0302).
+- **Why:** the owner named it the next lab: a third-party test of how many ways of linking a resource each crawler understands.
+
 ## 2026-10-18 (the legacy spider loads pages with several browsers at once)
 - **What:** `fuzzlab crawl --workers N` loads and renders N pages at once, one browser per worker, while reveals, form submissions and query probes stay one-at-a-time behind a crawl-wide lock; one worker crawls as before (CC-CRAWL-0037).
 - **Why:** the owner asked for multithreading in both discovery tools.

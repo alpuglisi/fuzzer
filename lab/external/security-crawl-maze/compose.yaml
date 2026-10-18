@@ -1,0 +1,35 @@
+# Google Security Crawl Maze (external lab fixture, CC-LAB-0302). Lab-only.
+#
+# A crawler-coverage testbed: every page links one resource one way (an HTML tag or
+# attribute, a header, CSS, JavaScript, a framework route, a known file), and every
+# resource a crawler should reach ends in `.found`. The expected set is served at
+# /fetch-expected-results?path=/ (91 URLs at this commit). No login, no vulnerabilities.
+#
+# Built by ./Dockerfile (upstream's build steps, base images pinned by digest) from the
+# pinned upstream commit, which `labctl.sh up security-crawl-maze` checks out into the
+# gitignored .cache/src (fuzzlab.lab_fixtures.external.fetch_crawl_maze, HEAD verified).
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1), on its own bridge network,
+# capabilities dropped. The app binds 0.0.0.0 inside the container only.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up security-crawl-maze
+name: fuzzlab-security-crawl-maze
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    build:
+      context: .
+    networks: [crawl-maze-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${CRAWLMAZE_PORT:-3061}:8080"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  crawl-maze-net: {}
