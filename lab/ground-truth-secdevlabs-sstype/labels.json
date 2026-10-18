@@ -1,0 +1,58 @@
+{
+ "version": 1,
+ "target": "secdevlabs_sstype_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLSST-0001",
+   "url": "/",
+   "method": "GET",
+   "param": "name",
+   "location": "query",
+   "vuln_class": "ssti",
+   "sink_context": "template",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_tornado_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] src/server.py:16-18 splices `name` into the template source, then compiles it: `{{7*7}}` renders 49 (checked live). The page has no form: `name` is known from upstream's README only."
+  },
+  {
+   "case_id": "SDLSST-0002",
+   "url": "/",
+   "method": "GET",
+   "param": "name",
+   "location": "query",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_tornado_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] the same splice puts `name` into the HTML unescaped (a marker tag comes back raw, text/html; checked live)."
+  },
+  {
+   "case_id": "SDLSST-0003",
+   "url": "/",
+   "method": "GET",
+   "param": "q",
+   "location": "query",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_tornado_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] the handler reads only `name`; `q` is never reflected (checked live)."
+  },
+  {
+   "case_id": "SDLSST-0004",
+   "url": "/",
+   "method": "GET",
+   "param": "q",
+   "location": "query",
+   "vuln_class": "ssti",
+   "sink_context": "template",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_tornado_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] `q` never reaches the template (`{{7*191}}` never renders 1337; checked live)."
+  }
+ ]
+}

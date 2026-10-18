@@ -40,6 +40,19 @@
    "rendering": "server-json",
    "stack": "go_echo_secdevlabs",
    "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] `pass` is never in a query: it is compared with the stored bcrypt hash (app/util/db.go AuthenticateUser); a quote answers 400 'User not found or wrong password!' (checked live)."
+  },
+  {
+   "case_id": "SDLCNP-0004",
+   "url": "/register",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "dom",
+   "expected_vulnerable": true,
+   "rendering": "js",
+   "stack": "go_echo_secdevlabs",
+   "notes": "[reach: gt] [prov: found reading app/views/form.html at bring-up; not in the README] the user registered here is echoed by POST /login as text/plain ('Welcome, <user>!'), and the page's login handler writes that response into innerHTML on a 200; checked live with `<svg onload=alert()>` (exactly the 20 characters the Username column holds). Needs a successful login of the stored user."
   }
  ]
 }

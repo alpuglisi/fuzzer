@@ -1,0 +1,36 @@
+# secDevLabs "SSType" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0306).
+# Lab-only. A Tornado app that splices the `name` query parameter into its template's
+# source before compiling it (OWASP 2021 A3: server-side template injection).
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-sstype` copies into the gitignored .cache/app, with its
+# pinned wheel downloaded on the host into .cache/dists (verified against PyPI's
+# published sha256 and the repo's pin); the image installs it offline. Upstream pins
+# neither its base image nor Tornado: the fixture pins current releases.
+#
+# Safety: published on LOOPBACK ONLY (127.0.0.1); capabilities dropped. Template
+# injection here is code execution inside the container: keep it loopback-only.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-sstype
+name: fuzzlab-secdevlabs-sstype
+
+x-podman:
+  in_pod: false
+
+services:
+  server:
+    build:
+      context: .
+    networks: [sstype-net]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_SSTYPE_PORT:-3073}:10001"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  sstype-net: {}

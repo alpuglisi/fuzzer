@@ -3,6 +3,26 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0306 — secDevLabs SSType as an external lab; CopyNPaste's DOM XSS (2026-10-18)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PYTHON312_IMAGE`, the
+  `secdevlabs-sstype` app, PyPI pin and `LAB_META`); `lab/external/secdevlabs-sstype/`;
+  `lab/ground-truth-secdevlabs-sstype/`; `.gitignore`; the static tests' GT list.
+  `lab/ground-truth-secdevlabs-copy-n-paste/` gains SDLCNP-0004.
+- Reason: the next A3 app (template injection). Reading CopyNPaste's page to check its
+  reach tags showed its login handler writes the server's `Welcome, <user>!` into
+  `innerHTML`: a stored DOM XSS the README does not mention.
+- Impact: a new loopback lab (127.0.0.1:3073, read-only root filesystem).
+- Risk: low. Upstream pins neither base nor Tornado; the fixture's pins are its own
+  choice (recorded in the compose file and here).
+- Deliverables:
+  - [x] fixture (built offline), ground truth (SSType: 2 positives, 2 negatives;
+    CopyNPaste: + SDLCNP-0004), each checked live (`{{7*7}}` renders 49; a marker tag
+    comes back raw; `q` never reflected or evaluated; `<svg onload=alert()>` registered
+    and echoed raw by a 200 login) — done
+  - [x] FR-LAB-306 amended, CHANGELOG — done
+- Corrected before commit: SSType's positives were first tagged `[reach: crawl,gt]` on
+  the claim that the page's form submits `name`; it has no form (`[reach: gt]`).
+
 ### CC-LAB-0305 — secDevLabs Gossip World as an external lab (2026-10-18)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PYTHON38_IMAGE`,
   `SECDEVLABS_PYPI` pins for the app's 12 requirements, `fetch_secdevlabs_app` fetching

@@ -1,0 +1,20 @@
+{
+ "version": 1,
+ "target": "secdevlabs_sstype_10be4384",
+ "points": [
+  {
+   "url": "/",
+   "method": "GET",
+   "param": "name",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/",
+   "method": "GET",
+   "param": "q",
+   "location": "query",
+   "rendering": "server"
+  }
+ ]
+}

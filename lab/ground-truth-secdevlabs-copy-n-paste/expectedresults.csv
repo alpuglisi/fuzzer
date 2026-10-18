@@ -5,3 +5,4 @@ case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,
 SDLCNP-0001,/login,POST,user,body,sqli,true,/login,sink,,direct
 SDLCNP-0002,/register,POST,user,body,sqli,true,/register,sink,,direct
 SDLCNP-0003,/login,POST,pass,body,sqli,false,/login,sink,,direct
+SDLCNP-0004,/register,POST,user,body,xss-stored,true,/register,sink,,direct

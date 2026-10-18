@@ -64,9 +64,14 @@ SECDEVLABS_MARIADB_IMAGE = ("docker.io/library/mariadb:10.6.3@sha256:"
                             "3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d")
 SECDEVLABS_PYTHON38_IMAGE = ("docker.io/library/python:3.8@sha256:"
                              "d411270700143fa2683cc8264d9fa5d3279fd3b6afff62ae81ea2f9d070e390c")
+#: sstype's upstream Dockerfile says `python:3` and its requirements `tornado`, both
+#: unpinned: pinned here to the releases current when the fixture was built.
+SECDEVLABS_PYTHON312_IMAGE = ("docker.io/library/python:3.12-slim@sha256:"
+                              "a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
-                           SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE})
+                           SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
+                           SECDEVLABS_PYTHON312_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -112,10 +117,16 @@ SECDEVLABS_COMMIT = "10be438496e928c66567749f0aaf0bb976052bc9"
 SECDEVLABS_APPS = {
     "secdevlabs-copy-n-paste": "owasp-top10-2021-apps/a3/copy-n-paste",
     "secdevlabs-gossip-world": "owasp-top10-2021-apps/a3/gossip-world",
+    "secdevlabs-sstype": "owasp-top10-2021-apps/a3/sstype",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
 SECDEVLABS_PYPI = {
+    "secdevlabs-sstype": {
+        ("tornado-6.4.2-cp38-abi3-manylinux_2_5_x86_64.manylinux1_x86_64."
+         "manylinux_2_17_x86_64.manylinux2014_x86_64.whl"):
+            "bca9eb02196e789c9cb5c3c7c0f04fb447dc2adffd95265b2c7223a8a615ccbf",
+    },
     "secdevlabs-gossip-world": {
         "Click-7.0-py2.py3-none-any.whl":
             "2335065e6395b9e67ca716de5f7526736bfa6ceead690adf616d925bdc622b13",
@@ -179,6 +190,8 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    "secdevlabs-sstype": LabMeta("secdevlabs-sstype", "server", "SDL_SSTYPE_PORT", 3073,
+                                 10001, "/", "/", None, "", False),
     "secdevlabs-gossip-world": LabMeta("secdevlabs-gossip-world", "app", "SDL_GOSSIP_PORT",
                                        3072, 10007, "/", "/login", "sdl-gossip-user",
                                        "fuzzlab_user", True),

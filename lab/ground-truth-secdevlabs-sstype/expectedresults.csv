@@ -1,0 +1,8 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs SSType at 10be4384 (external
+# lab fixture lab/external/secdevlabs-sstype), CC-LAB-0306. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLSST-0001,/,GET,name,query,ssti,true,/,sink,,direct
+SDLSST-0002,/,GET,name,query,xss-reflected,true,/,sink,,direct
+SDLSST-0003,/,GET,q,query,xss-reflected,false,/,sink,,direct
+SDLSST-0004,/,GET,q,query,ssti,false,/,sink,,direct

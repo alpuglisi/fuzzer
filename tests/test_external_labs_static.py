@@ -39,7 +39,8 @@ LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
 GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop",
            "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste",
-           "secdevlabs-gossip-world": LAB / "ground-truth-secdevlabs-gossip-world"}
+           "secdevlabs-gossip-world": LAB / "ground-truth-secdevlabs-gossip-world",
+           "secdevlabs-sstype": LAB / "ground-truth-secdevlabs-sstype"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}

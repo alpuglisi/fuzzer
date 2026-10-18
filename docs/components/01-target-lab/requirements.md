@@ -6390,7 +6390,13 @@ lane) can submit a payload as
   `_csrf_token` read first; a positive differential on `/gossip`; one gossip seeded so
   `/gossip/1` exists). Ground truth `lab/ground-truth-secdevlabs-gossip-world/`: stored
   XSS in `text` and `comment`, reflected XSS in `search` (positives), `title` and
-  `subtitle` escaped (negatives), each checked live. Neither is yet in the gated live
+  `subtitle` escaped (negatives), each checked live. `secdevlabs-sstype` (A3, Tornado,
+  CC-LAB-0306) on 127.0.0.1:3073 (`SDL_SSTYPE_PORT`), read-only root filesystem: upstream
+  pins neither its base nor Tornado, so the fixture pins `python:3.12-slim` and
+  `tornado==6.4.2` by digest; ground truth: SSTI and reflected XSS in `name`
+  (positives; known from the README only, the page has no form), `q` ignored
+  (negatives). CopyNPaste's ground truth also holds a stored DOM XSS in `/register`'s
+  `user` (rendered by the login page's `innerHTML`). None is yet in the gated live
   test (FR-LAB-304).
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
