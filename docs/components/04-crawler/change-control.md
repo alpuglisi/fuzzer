@@ -3,6 +3,29 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0041 — Settles never wait for long-lived requests (FR-CRAWL-24, SP-40) (2026-10-18)
+- Change: `fuzzlab/tools/netquiet.py` (new): `Inflight` counts a page's requests in
+  flight minus event streams, WebSockets and any request open past `LONG_LIVED_MS`
+  (2 s), whose answer is not activity either. The crawler's `_track` / `_settle` /
+  `_quiesce` (`_busy`) and disco's `wait_quiet` (`_net`) count through it; browser
+  login's own `_Inflight` class is gone (CC-SESS-0025).
+- Reason: CC-CRAWL-0037's profile -- Juice Shop, one worker, 2072 s: `_settle` 64% of
+  self time, 503 calls, often to its 5 s cap: a long-poll is in flight across every
+  settle, so the count never reached zero.
+- Impact: every browser settle ends once the app's own requests finish. Safety
+  unchanged: a request in flight already passed the guard and the write window.
+- Risk: low-medium. An ordinary request slower than 2 s is no longer waited for past
+  2 s (its result may render after the page is read); the settle's other bounds stand.
+- Deliverables:
+  - [x] code; `tests/test_netquiet.py` (unit cases; the three settles against a real
+    page holding a long-poll beside an 800 ms XHR: each waits for the XHR and ends in
+    under 4 s -- the old code ran to the 8 s budget in both crawler and login cases;
+    the SP-40 guard), `tests/test_disco_synth.py`, `tests/test_disco_workers.py`
+    updated — done
+  - [x] FR-CRAWL-24, SP-40, CHANGELOG — done
+- Effectiveness: not re-measured on a lab (owner's direction); the fixture shows each
+  settle bounded by the app's own requests instead of its budget.
+
 ### CC-CRAWL-0040 — Teardown never lets a just-started refused request out (BUG-0504) (2026-10-18)
 - Change (`fuzzlab/tools/navguard.py`, `fuzzlab/disco/explore.py`, `fuzzlab/tools/spider.py`):
   `close_pages(context, pages)` freezes each page (CDP: scripts disabled, loading

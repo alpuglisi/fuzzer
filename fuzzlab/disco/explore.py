@@ -62,6 +62,7 @@ from fuzzlab.disco.capture import ACTION_HEADER
 from fuzzlab.disco.fingerprint import element_signature, normalise_route, state_fingerprint
 from fuzzlab.session.detect import looks_like_login_url
 from fuzzlab.tools import navguard
+from fuzzlab.tools.netquiet import Inflight
 
 def _pw_error():
     """Playwright's error class (its timeouts subclass it): the one external failure an
@@ -481,7 +482,9 @@ class Explorer:
         self._fill_values: list[str] = []         # the distinctive values just filled
         self._values_sent = False                 # whether a request carried one
         self._action_seq = 0                      # the number of this worker's last tag
-        self._inflight = 0
+        # requests in flight, minus long-lived ones (SP-40); quiet is measured from
+        # the later of its last change and the last action (`mark_activity`)
+        self._net = Inflight(clock=self.clock)
         self._last_change = 0.0
         self._ctx = None
         self._tag_headers: dict[str, str] = {}      # the guard reads it per request
@@ -538,8 +541,7 @@ class Explorer:
             self.report.refuse(why)
 
     def _on_request(self, req) -> None:
-        self._inflight += 1
-        self._last_change = self.clock()
+        self._net.started(req)
         if self._in_scope(req.url):
             self._shared.requested.add(urldefrag(req.url)[0])
         if self._fill_values and not self._values_sent:
@@ -581,9 +583,8 @@ class Explorer:
                 shared.harvest[url] = None
                 self.report.harvest_found += 1
 
-    def _on_done(self, _req) -> None:
-        self._inflight = max(0, self._inflight - 1)
-        self._last_change = self.clock()
+    def _on_done(self, req) -> None:
+        self._net.ended(req)
 
     def mark_activity(self) -> None:
         """An action (a click, a navigation) is activity itself: its requests reach the
@@ -600,7 +601,8 @@ class Explorer:
         end = self.clock() + self.opts.max_quiet_ms / 1000
         idle = self.opts.idle_ms / 1000
         while self.clock() < end:
-            if self._inflight == 0 and self.clock() - self._last_change >= idle:
+            last = max(self._last_change, self._net.last_change)
+            if self._net.n == 0 and self.clock() - last >= idle:
                 return True
             page.wait_for_timeout(50)
         return False

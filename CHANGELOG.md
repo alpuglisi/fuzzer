@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (settles stop waiting for long-polls)
+- **What:** one network-quiet tracker (`netquiet.Inflight`, SP-40) for the crawler, disco and browser login; it never waits for event streams, WebSockets or requests open past 2 s (CC-CRAWL-0041, CC-SESS-0025, FR-CRAWL-24).
+- **Why:** the crawler spent 64% of its time on Juice Shop in `_settle`, held to its cap by a long-poll that never finishes; on a fixture each settle now ends once the app's own XHR does (under 4 s, was the 8 s budget).
+
 ## 2026-10-18 (write targets are never links; teardown keeps refused requests refused)
 - **What:** the shared link extractor no longer returns form actions, formactions, pings or script strings, and the rendered spider stops re-fetching subresources the browser loaded (CC-CRAWL-0039, BUG-0503); browser teardown freezes and drains pages through the guard before closing and never unroutes, so a navigation started at teardown is refused (CC-CRAWL-0040, CC-FUZZ-0091, BUG-0504).
 - **Why:** both were write-safety breaches: the first introduced by the unpushed 6a30ec9 and caught by the verify gate, the second pre-existing and found while root-causing that run.

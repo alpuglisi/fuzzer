@@ -280,6 +280,8 @@ data. Shared by all tools; a hard dependency for external validation (D10).
     never retried within an attempt. After a 2xx login answer the page is settled until
     it is quiet **and** a probe candidate has been seen, within the settle budget (5 s),
     so an app slow to start its follow-up requests is not cut off by a quiet gap.
+    Quiet never waits for a long-lived request (a long-poll, an event stream;
+    `netquiet.Inflight`, SP-40, CC-SESS-0025).
   - **The credential and success.** `detect.detect_session_credential` on the login
     request's own response (a cookie that response set, else a token in its JSON body,
     `exp` read for refresh); a non-2xx answer is a rejected login. Success is FR-SESS-5's

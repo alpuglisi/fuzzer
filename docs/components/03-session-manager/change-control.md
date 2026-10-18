@@ -3,6 +3,20 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0025 — Browser login's settle never waits for a long-lived request (SP-40) (2026-10-18)
+- Change (`fuzzlab/session/browserlogin.py`): its `_Inflight` counter is replaced by
+  `netquiet.Inflight` (CC-CRAWL-0041): `_settle` and the login-request wait stop
+  counting event streams, WebSockets and requests open past 2 s.
+- Reason: one implementation for every browser settle; an app with a long-poll held
+  every login settle to its budget.
+- Impact: a login on such an app finishes sooner; the quiet-and-candidate condition is
+  unchanged.
+- Risk: low.
+- Deliverables:
+  - [x] code; `tests/test_netquiet.py::test_browser_logins_settle_waits_for_the_xhr_not_the_long_poll`
+    (8 s on the old code, under 4 s now) — done
+  - [x] requirement amended in place, CHANGELOG — done
+
 ### CC-SESS-0024 — The browser login never waits out a login page that navigates away while it is parsed (BUG-0138) (2026-10-15)
 - Change: `session/browserlogin.py` `_drive` loads the base page and each login route
   through `navguard.navigate` (commit, then a bounded load cut short after a refused

@@ -155,8 +155,7 @@ def test_a_clone_shares_the_run_and_owns_its_browser_state():
     other = ex._clone()
     assert other._shared is ex._shared and other.report is ex.report
     assert other._tag_headers is not ex._tag_headers
-    other._inflight = 3
-    assert ex._inflight == 0
+    assert other._net is not ex._net                     # its own network quiet
 
 
 @pytest.mark.parametrize("n", [0, explore.MAX_WORKERS + 1])

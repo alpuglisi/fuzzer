@@ -59,6 +59,7 @@ from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from fuzzlab.core.redaction import name_tokens
 from fuzzlab.core.urls import canonical_origin, in_origin_scope, origin_scope, url_key
+from fuzzlab.tools.netquiet import Inflight
 
 #: The whole browser login (launch to close), joined with this deadline.
 LOGIN_DEADLINE_S = 120.0
@@ -378,23 +379,7 @@ def _driver_env_without_api_logs():
             os.environ.update(saved)
 
 
-class _Inflight:
-    """Requests in flight on a page, so a settle waits for the app's own XHRs."""
-
-    def __init__(self, page):
-        self.n = 0
-        page.on("request", self._up)
-        page.on("requestfinished", self._down)
-        page.on("requestfailed", self._down)
-
-    def _up(self, _request):
-        self.n += 1
-
-    def _down(self, _request):
-        self.n = max(0, self.n - 1)
-
-
-def _settle(page, inflight: _Inflight, budget_ms: int,
+def _settle(page, inflight: "Inflight", budget_ms: int,
             cancelled: threading.Event | None = None, until=None) -> None:
     """Pump the page until it is quiet for 3 polls of 100 ms, at most ``budget_ms``.
     With ``until``, quiet alone is not enough: the condition must hold too. After a 2xx
@@ -535,7 +520,8 @@ def _drive(destination_ok, base_url: str, auth_origins, cred, forms,
                        in_scope=gate.in_scope, on_out_of_scope=gate.note_out_of_scope,
                        request_refusal=gate.request_refusal, observe=gate.observe)
             page = context.new_page()
-            inflight = _Inflight(page)
+            # requests in flight, minus long-lived ones (SP-40)
+            inflight = Inflight(page)
             page.on("dialog", lambda d: d.dismiss())    # an app's alert is never ours
             _alive(cancelled)
             # BUG-0138 (CC-SESS-0024): the commit, then a bounded load: a page whose

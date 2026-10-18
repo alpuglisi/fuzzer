@@ -1056,7 +1056,7 @@ class LocalSpider:
         self._settle(page)
         for _ in range(2):
             page.evaluate("() => 0")
-            if self._inflight.get(id(page), 0) == 0:
+            if self._busy(page) == 0:
                 return
             self._settle(page)
 
@@ -1071,18 +1071,15 @@ class LocalSpider:
 
     def _track(self, page):
         """Count a page's requests in flight, so a settle waits for the app's own XHRs
-        (a hash-route change or a click leaves the page's load state as it was)."""
-        key = id(page)
-        self._inflight[key] = 0
+        (a hash-route change or a click leaves the page's load state as it was) --
+        never for a long-lived one (`netquiet.Inflight`, SP-40)."""
+        from fuzzlab.tools.netquiet import Inflight
+        self._inflight[id(page)] = Inflight(page)
 
-        def up(_request):
-            self._inflight[key] = self._inflight.get(key, 0) + 1
-
-        def down(_request):
-            self._inflight[key] = max(0, self._inflight.get(key, 0) - 1)
-        page.on("request", up)
-        page.on("requestfinished", down)
-        page.on("requestfailed", down)
+    def _busy(self, page) -> int:
+        """Requests a settle of ``page`` still waits for."""
+        tracker = self._inflight.get(id(page))
+        return tracker.n if tracker is not None else 0
 
     def _settle(self, page, budget_ms=None):
         """Let ``page``'s requests finish: three quiet 100 ms polls in a row, bounded."""
@@ -1091,7 +1088,7 @@ class LocalSpider:
         quiet = 0
         while time.monotonic() < deadline and quiet < 3:
             page.wait_for_timeout(100)
-            quiet = quiet + 1 if self._inflight.get(id(page), 0) == 0 else 0
+            quiet = quiet + 1 if self._busy(page) == 0 else 0
 
     def _method_refusal(self, method, url, context=None):
         """FR-CRAWL-12 (reviewer A6): the crawl never deletes. A browser-initiated DELETE

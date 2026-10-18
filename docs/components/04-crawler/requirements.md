@@ -771,6 +771,13 @@ fuzzer.
   in a script -- their method is a write or unknown; forms reach the target only through
   the gated submission paths, and a script's requests are what the browser was seen to
   make when the page ran or was acted on.
+- **FR-CRAWL-24 (network quiet, CC-CRAWL-0041)** Every wait for a page's requests to
+  finish -- the crawler's `_settle` / `_quiesce`, disco's `wait_quiet`, browser login's
+  `_settle` -- counts them through `netquiet.Inflight` (SP-40) and never waits for a
+  long-lived one: an `eventsource` or `websocket` request, or any request still open
+  after `LONG_LIVED_MS` (2 s; a long-poll such as socket.io's `polling` transport); the
+  answer to a long-lived request is not activity. A request in flight has already passed
+  the guard and any write window, so not waiting for it lets nothing through.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default
