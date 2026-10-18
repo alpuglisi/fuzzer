@@ -30,7 +30,8 @@ Newest first.
 - Deliverables:
   - [x] code, tests — done
   - [x] D71, FR-CRAWL-13/15/19 and NFR-CRAWL-safe amended, CHANGELOG — done
-  - [x] verify_change on the committed tree — see the CHANGELOG line
+  - [x] `verify_change --base 349ce9e` on 3f795b3: 73 files, 3001 passed, 0 failed,
+    5 skipped, 18 xfailed — done
 - Effectiveness: to be assessed at the next Juice Shop measurement (the contact form's
   POST /api/Feedbacks captured by both tools).
 
