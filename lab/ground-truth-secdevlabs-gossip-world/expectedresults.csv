@@ -1,0 +1,9 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Gossip World at 10be4384 (external
+# lab fixture lab/external/secdevlabs-gossip-world), CC-LAB-0305. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLGW-0001,/newgossip,POST,text,body,xss-stored,true,/newgossip,sink,,direct
+SDLGW-0002,/gossip/1,POST,comment,body,xss-stored,true,/gossip/1,sink,,direct
+SDLGW-0003,/gossip,GET,search,query,xss-reflected,true,/gossip,sink,,direct
+SDLGW-0004,/newgossip,POST,title,body,xss-stored,false,/newgossip,sink,,direct
+SDLGW-0005,/newgossip,POST,subtitle,body,xss-stored,false,/newgossip,sink,,direct

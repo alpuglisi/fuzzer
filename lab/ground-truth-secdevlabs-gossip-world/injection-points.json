@@ -1,0 +1,41 @@
+{
+ "version": 1,
+ "target": "secdevlabs_gossip_world_10be4384",
+ "points": [
+  {
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "text",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/gossip/1",
+   "method": "POST",
+   "param": "comment",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/gossip",
+   "method": "GET",
+   "param": "search",
+   "location": "query",
+   "rendering": "server"
+  },
+  {
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "title",
+   "location": "body",
+   "rendering": "server"
+  },
+  {
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "subtitle",
+   "location": "body",
+   "rendering": "server"
+  }
+ ]
+}

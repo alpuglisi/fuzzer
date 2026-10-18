@@ -38,7 +38,8 @@ REPO = Path(__file__).resolve().parent.parent
 LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
 GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop",
-           "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste"}
+           "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste",
+           "secdevlabs-gossip-world": LAB / "ground-truth-secdevlabs-gossip-world"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -211,7 +212,9 @@ def _image_refs() -> list[tuple[str, str]]:
 
 def test_every_external_image_is_registry_qualified_and_pinned_by_digest():
     refs = _image_refs()
-    assert len(refs) == len(ext.PINNED_IMAGES)
+    # every reference is a pinned constant and every pin is used (one base may serve
+    # several labs: the secDevLabs apps share MariaDB, CC-LAB-0305)
+    assert {ref for _, ref in refs} == set(ext.PINNED_IMAGES)
     for where, ref in refs:
         host = ref.split("/", 1)[0]
         assert "." in host, f"{where}: {ref} is not registry-qualified (PA-0060)"
@@ -1201,10 +1204,18 @@ def test_the_secdevlabs_builds_use_only_pinned_bases_and_the_cached_app():
         text = (EXTERNAL / lab / "Dockerfile").read_text("utf-8")
         froms = [ln.split()[1] for ln in text.splitlines() if ln.startswith("FROM ")]
         assert froms and all("@sha256:" in f for f in froms), lab
-        assert all(ln.split()[1].startswith(".cache/app/")
+        assert all(ln.split()[1].startswith((".cache/app/", ".cache/dists"))
                    for ln in text.splitlines() if ln.startswith("COPY ")), lab
-        assert "GOPROXY=off" in text and "-mod=vendor" in text, lab   # never the network
-        assert "go mod download" not in text, lab
+        if "golang" in text:
+            assert "GOPROXY=off" in text and "-mod=vendor" in text, lab   # never the network
+            assert "go mod download" not in text, lab
+        if "pip install" in text:
+            assert "--no-index" in text and ".cache/dists" in text, lab
+            pins = ext.SECDEVLABS_PYPI[lab]
+            installed = set(re.findall(r"([A-Za-z0-9_.-]+)==([0-9][^\s\\]*)", text))
+            assert {(n.lower().replace("_", "-"), v) for n, v in installed} == {
+                (ext.dist_project(f)[0].lower().replace("_", "-"), ext.dist_project(f)[1])
+                for f in pins}, lab                   # installs exactly what is pinned
 
 
 def test_a_secdevlabs_app_is_copied_from_the_pinned_checkout_only(tmp_path, monkeypatch):
@@ -1266,4 +1277,50 @@ def test_go_vendor_refuses_a_module_that_fails_verification(tmp_path, monkeypatc
     with pytest.raises(ext.ExternalLabError, match="verify"):
         ext.go_vendor(tmp_path)
     assert calls == [["mod", "download"], ["mod", "verify"]]          # never vendored
+
+
+def test_the_gossip_world_bootstrap_reads_the_csrf_token_and_verifies_by_differential():
+    """Login through the form with its own _csrf_token; register on failure; a positive
+    differential (/gossip 200 with the session, 302 without); one gossip seeded."""
+    from types import SimpleNamespace as NS
+    state = {"users": {}, "gossips": 0, "session_user": None}
+    form = '<input name="_csrf_token" type="hidden" value="tok-1">'
+
+    class Resp:
+        def __init__(self, status, text="", location=""):
+            self.status_code, self.text, self.headers = status, text, {"Location": location}
+
+        def close(self):
+            pass
+
+    class Client:
+        origin = "http://127.0.0.1:3072"
+
+        def request(self, method, path, *, anonymous=False, data=None, **kw):
+            if method == "GET" and path in ("/login", "/register", "/newgossip"):
+                return Resp(200, form)
+            if method == "POST":
+                assert data["_csrf_token"] == "tok-1"
+                if path == "/login":
+                    ok = state["users"].get(data["username"]) == data["password"]
+                    state["session_user"] = data["username"] if ok else None
+                    return Resp(302, location="/gossip") if ok else Resp(200, "bad")
+                if path == "/register":
+                    state["users"][data["username"]] = data["password1"]
+                    return Resp(302, location="/login")
+                if path == "/newgossip":
+                    state["gossips"] += 1
+                    return Resp(302, location="/newgossip")
+            if path == "/gossip":
+                if anonymous or state["session_user"] is None:
+                    return Resp(302, location="/login")
+                links = "".join(f'<a href="/gossip/{i}">' for i in range(1, state["gossips"] + 1))
+                return Resp(200, links)
+            raise AssertionError((method, path))
+    cred = NS(username="fuzzlab_user", password="pw")
+    notes = ext.bootstrap_secdevlabs_gossip_world(Client(), cred, deadline=1,
+                                                  sleep=lambda s: None)
+    assert notes == ["account registered", "login verified", "gossip 1 seeded"]
+    assert ext.bootstrap_secdevlabs_gossip_world(Client(), cred, deadline=1) == \
+        ["login verified"]                           # second time: nothing to create
 

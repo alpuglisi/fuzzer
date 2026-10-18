@@ -6382,7 +6382,16 @@ lane) can submit a payload as
   internal network with tmpfs storage; no identity. Ground truth
   `lab/ground-truth-secdevlabs-copy-n-paste/`: SQLi in `user` on `/login` and
   `/register` (positives), `pass` on `/login` (negative), each checked live at
-  bring-up. Not yet in the gated live test (FR-LAB-304).
+  bring-up. `secdevlabs-gossip-world` (A3, Flask + MariaDB, CC-LAB-0305) on
+  127.0.0.1:3072 (`SDL_GOSSIP_PORT`): its pinned Python distributions are downloaded on
+  the host and accepted only when PyPI's published sha256 and the bytes equal the pin
+  (`SECDEVLABS_PYPI`, `fetch_pypi_dists`), installed offline; identity
+  `sdl-gossip-user`, bootstrapped through the app's own forms (the session-bound
+  `_csrf_token` read first; a positive differential on `/gossip`; one gossip seeded so
+  `/gossip/1` exists). Ground truth `lab/ground-truth-secdevlabs-gossip-world/`: stored
+  XSS in `text` and `comment`, reflected XSS in `search` (positives), `title` and
+  `subtitle` escaped (negatives), each checked live. Neither is yet in the gated live
+  test (FR-LAB-304).
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
   commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned

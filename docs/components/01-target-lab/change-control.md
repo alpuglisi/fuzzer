@@ -3,6 +3,23 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0305 — secDevLabs Gossip World as an external lab (2026-10-18)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_PYTHON38_IMAGE`,
+  `SECDEVLABS_PYPI` pins for the app's 12 requirements, `fetch_secdevlabs_app` fetching
+  them, `LAB_META`, `bootstrap_secdevlabs_gossip_world`); `lab/external/
+  secdevlabs-gossip-world/{compose.yaml,Dockerfile}`; `lab/ground-truth-secdevlabs-
+  gossip-world/`; `.gitignore`; `tests/test_external_labs_static.py` (the image test
+  compares sets, so a base shared by two labs counts once).
+- Reason: the next secDevLabs A3 app (XSS, behind a login with CSRF tokens).
+- Impact: a new loopback lab (127.0.0.1:3072) with a keyring identity.
+- Risk: low. The bootstrap writes one account and one seeded gossip to the lab only.
+- Deliverables:
+  - [x] fixture (built offline: sdists compiled with the base's own setuptools and MySQL
+    headers), bootstrap (unit test of the CSRF read, registration, differential and the
+    once-only seed; run live twice: registered + seeded, then login only), ground truth
+    (3 positives, 2 negatives, each checked live with a marker tag) — done
+  - [x] FR-LAB-306 amended, CHANGELOG — done
+
 ### CC-LAB-0304 — One PyPI fetcher for every lab's pinned Python distributions (2026-10-18)
 - Change (`fuzzlab/lab_fixtures/external.py`): `fetch_pypi_dists(pins, dest)` downloads
   each pinned file (`{file name: sha256}`) by its PyPI metadata, refusing it unless

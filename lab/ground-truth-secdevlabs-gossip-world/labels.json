@@ -1,0 +1,71 @@
+{
+ "version": 1,
+ "target": "secdevlabs_gossip_world_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLGW-0001",
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "text",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossip.html:78 renders the stored text with `| safe` on GET /gossip/<id> (checked live at bring-up with a marker tag: raw). Needs the lab session and the form's _csrf_token."
+  },
+  {
+   "case_id": "SDLGW-0002",
+   "url": "/gossip/1",
+   "method": "POST",
+   "param": "comment",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossip.html:116 renders each stored comment with `| safe` on the same page (checked live at bring-up with a marker tag: raw). /gossip/1 exists because the bootstrap seeds one gossip."
+  },
+  {
+   "case_id": "SDLGW-0003",
+   "url": "/gossip",
+   "method": "GET",
+   "param": "search",
+   "location": "query",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossips.html:58 echoes `search` with `| safe` (checked live at bring-up with a marker tag: raw). Needs the lab session."
+  },
+  {
+   "case_id": "SDLGW-0004",
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "title",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] the title is autoescaped on /gossip and /gossip/<id> (checked live at bring-up with a marker tag: escaped)."
+  },
+  {
+   "case_id": "SDLGW-0005",
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "subtitle",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] the subtitle is autoescaped on /gossip and /gossip/<id> (checked live at bring-up with a marker tag: escaped)."
+  }
+ ]
+}

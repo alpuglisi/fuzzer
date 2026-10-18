@@ -1,0 +1,62 @@
+# secDevLabs "Gossip World" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0305).
+# Lab-only. A Flask app over MariaDB with stored and reflected XSS (OWASP 2021 A3):
+# gossip text and comments and the search echo render with Jinja's `| safe`.
+# Every page but /login and /register needs a session; every POST needs the
+# session-bound `_csrf_token` from the form.
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-gossip-world` copies into the gitignored .cache/app, with its
+# pinned Python distributions downloaded on the host into .cache/dists (each verified
+# against PyPI's published sha256 and the repo's pin: fetch_secdevlabs_app); the image
+# installs them offline.
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped. The database
+# credentials and Flask secret are upstream's lab defaults for this throwaway lab.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-gossip-world
+name: fuzzlab-secdevlabs-gossip-world
+
+x-podman:
+  in_pod: false
+
+services:
+  app:
+    build:
+      context: .
+    networks: [gossip-front, gossip-db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_GOSSIP_PORT:-3072}:10007"
+    environment:
+      SECRET_KEY: secretkey
+      MYSQL_ENDPOINT: mysqldb-a7
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+      MYSQL_DB: a7db
+    depends_on: [mysqldb-a7]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 256m
+
+  mysqldb-a7:
+    image: docker.io/library/mariadb:10.6.3@sha256:3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d
+    networks: [gossip-db]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: a7db
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/var/lib/mysql]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  gossip-front: {}
+  gossip-db:
+    internal: true

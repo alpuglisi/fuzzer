@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (secDevLabs: Gossip World)
+- **What:** secDevLabs' Gossip World (Flask + MariaDB, stored and reflected XSS behind a login with CSRF tokens) is a lab, with a form-driven bootstrap and a live-checked ground truth (CC-LAB-0305).
+- **Why:** the second injection app of the owner's next lab.
+
 ## 2026-10-18 (secDevLabs: the first app as a lab)
 - **What:** secDevLabs (globocom) apps become external labs, one per app, built offline from a pinned checkout with host-verified dependencies; CopyNPaste API (Go + MariaDB, SQLi) is the first, with a live-checked ground truth (CC-LAB-0303, FR-LAB-306).
 - **Why:** the owner named secDevLabs as the next lab; its builds cannot reach registries from inside containers here.

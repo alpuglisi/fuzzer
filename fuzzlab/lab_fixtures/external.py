@@ -62,9 +62,11 @@ SECDEVLABS_GOLANG_IMAGE = ("docker.io/library/golang:1.14@sha256:"
                            "1a7173b5b9a3af3e29a5837e0b2027e1c438fd1b83bbee8f221355087ad416d6")
 SECDEVLABS_MARIADB_IMAGE = ("docker.io/library/mariadb:10.6.3@sha256:"
                             "3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d")
+SECDEVLABS_PYTHON38_IMAGE = ("docker.io/library/python:3.8@sha256:"
+                             "d411270700143fa2683cc8264d9fa5d3279fd3b6afff62ae81ea2f9d070e390c")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
-                           SECDEVLABS_MARIADB_IMAGE})
+                           SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -109,6 +111,37 @@ SECDEVLABS_COMMIT = "10be438496e928c66567749f0aaf0bb976052bc9"
 #: lab name -> the app's directory in the pinned checkout.
 SECDEVLABS_APPS = {
     "secdevlabs-copy-n-paste": "owasp-top10-2021-apps/a3/copy-n-paste",
+    "secdevlabs-gossip-world": "owasp-top10-2021-apps/a3/gossip-world",
+}
+#: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
+#: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
+SECDEVLABS_PYPI = {
+    "secdevlabs-gossip-world": {
+        "Click-7.0-py2.py3-none-any.whl":
+            "2335065e6395b9e67ca716de5f7526736bfa6ceead690adf616d925bdc622b13",
+        "dominate-2.3.4-py2.py3-none-any.whl":
+            "59abf22fe4072a97978afece563155279b3c3d6f26cb9fbbca28d0acc318cb1b",
+        "Flask-1.0.2-py2.py3-none-any.whl":
+            "a080b744b7e345ccfcbc77954861cb05b3c63786e93f2b3875e0913d44b43f05",
+        "Flask-Bootstrap-3.3.7.1.tar.gz":
+            "cb08ed940183f6343a64e465e83b3a3f13c53e1baabb8d72b5da4545ef123ac8",
+        "Flask_Cors-3.0.7-py2.py3-none-any.whl":
+            "7ad56ee3b90d4955148fc25a2ecaa1124fc84298471e266a7fea59aeac4405a5",
+        "itsdangerous-1.1.0-py2.py3-none-any.whl":
+            "b12271b2047cb23eeb98c8b5622e2e5c5e9abd9784a153e9d8ef9cb4dd09d749",
+        "Jinja2-2.10-py2.py3-none-any.whl":
+            "74c935a1b8bb9a3947c50a54766a969d4846290e1e788ea44c1392163723c3bd",
+        "MarkupSafe-1.1.0.tar.gz":
+            "4e97332c9ce444b0c2c38dd22ddc61c743eb208d916e4265a2a3b575bdccb1d3",
+        "mysqlclient-1.3.13.tar.gz":
+            "ff8ee1be84215e6c30a746b728c41eb0701a46ca76e343af445b35ce6250644f",
+        "six-1.11.0-py2.py3-none-any.whl":
+            "832dc0e10feb1aa2c68dcc57dbb658f1c7e65b9b61af69048abc87a2db00a0eb",
+        "visitor-0.1.3.tar.gz":
+            "2c737903b2b6864ebc6167eef7cf3b997126f1aa94bdf590f90f1436d23e480a",
+        "Werkzeug-0.14.1-py2.py3-none-any.whl":
+            "d5da73735293558eb1651ee2fddc4d0dedcfa06538b8813a2e20011583c9e49b",
+    },
 }
 
 
@@ -146,6 +179,9 @@ LAB_META: dict[str, LabMeta] = {
                                    8080, "/", "/", None, "", False),
     "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
                                        3071, 10001, "/", "/healthcheck", None, "", False),
+    "secdevlabs-gossip-world": LabMeta("secdevlabs-gossip-world", "app", "SDL_GOSSIP_PORT",
+                                       3072, 10007, "/", "/login", "sdl-gossip-user",
+                                       "fuzzlab_user", True),
 }
 
 
@@ -403,6 +439,9 @@ def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SEC
     shutil.copytree(src / SECDEVLABS_APPS[lab], dest, symlinks=True)
     for gomod in sorted(dest.rglob("go.mod")):
         go_vendor(gomod.parent, timeout=timeout)
+    if lab in SECDEVLABS_PYPI:
+        fetch_pypi_dists(SECDEVLABS_PYPI[lab], root / lab / ".cache" / "dists",
+                         timeout=timeout)
     return dest
 
 
@@ -1003,7 +1042,61 @@ def bootstrap_juice_shop(client: _LabClient, cred: ResolvedCredential, *,
     return notes
 
 
-_BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop}
+_CSRF_FIELD = re.compile(r'name="_csrf_token"[^>]*value="([^"]+)"')
+
+
+def bootstrap_secdevlabs_gossip_world(client: _LabClient, cred: ResolvedCredential, *,
+                                      deadline: float = 180.0,
+                                      clock: Callable[[], float] = time.monotonic,
+                                      sleep: Callable[[float], None] = time.sleep) -> list[str]:
+    """Log in through the app's own form (its session-bound ``_csrf_token`` read from the
+    form first), registering the account the same way when the login fails, and verify
+    it by a positive differential: ``/gossip`` answers 200 with the session and
+    redirects to ``/login`` without it."""
+    meta = LAB_META["secdevlabs-gossip-world"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+
+    def post_form(path: str, fields: dict[str, str]) -> Any:
+        m = _CSRF_FIELD.search(client.request("GET", path).text or "")
+        if m is None:
+            raise ExternalLabError(f"gossip-world {path}: no _csrf_token in the form")
+        return client.request("POST", path, data={**fields, "_csrf_token": m.group(1)})
+
+    def logged_in() -> bool:
+        r = post_form("/login", {"username": cred.username, "password": cred.password})
+        return r.status_code == 302 and r.headers.get("Location", "").endswith("/gossip")
+
+    if not logged_in():
+        reg = post_form("/register", {"username": cred.username, "password1": cred.password,
+                                      "password2": cred.password})
+        if reg.status_code != 302 or not reg.headers.get("Location", "").endswith("/login"):
+            raise ExternalLabError(f"gossip-world registration failed: HTTP {reg.status_code}")
+        notes.append("account registered")
+        if not logged_in():
+            raise ExternalLabError(
+                "gossip-world login failed after registration (an account of that name with "
+                "another password? run `./labctl.sh reset secdevlabs-gossip-world --authorized`)")
+    authed = client.request("GET", "/gossip")
+    anon = client.request("GET", "/gossip", anonymous=True)
+    if authed.status_code != 200 or anon.status_code != 302:
+        raise ExternalLabError(f"gossip-world /gossip: {anon.status_code} anonymous, "
+                               f"{authed.status_code} logged in (want 302 / 200)")
+    notes.append("login verified")
+    # the comment form lives on a gossip's own page: a fresh lab has none, so one is
+    # seeded (once), and /gossip/1 -- the ground truth's comment point -- exists
+    if 'href="/gossip/1"' not in (authed.text or ""):
+        post_form("/newgossip", {"title": "Welcome", "subtitle": "a seeded gossip",
+                                 "text": "The lab's first gossip (bootstrap)."})
+        if 'href="/gossip/1"' not in (client.request("GET", "/gossip").text or ""):
+            raise ExternalLabError("gossip-world: the seeded gossip is not /gossip/1 "
+                                   "(reset the lab: ./labctl.sh reset ... --authorized)")
+        notes.append("gossip 1 seeded")
+    return notes
+
+
+_BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
+               "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
