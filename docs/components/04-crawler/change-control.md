@@ -30,7 +30,22 @@ Newest first.
     — done
   - [x] the pushed explorer shown to fail on the extended fixture (1 state, 0 actions,
     1 unrestorable, the POST never reached) — done
-- Effectiveness: see the Juice Shop measurement below.
+- Effectiveness (assessed 2026-10-18, Juice Shop v20.3.0 via `lab/labctl.sh`, the lab
+  identity, scored by `funnel_report.py`'s "reached" rule; the explorer's inventory scored
+  by the same rule in a scratch scorer):
+  - Before (CC-CRAWL-0031): 1 state, 0 actions, 0 submissions.
+  - After: 60 states (budget), 206 actions, 75 submissions, 80 perturbations, 9 routes,
+    0 unrestorable, 24 endpoints; **reached 2/15** (`/redirect` `to`,
+    `/rest/products/search` `q`) in 806 s.
+  - The legacy pipeline on the same build, reset lab, the handoff's generic command line:
+    crawl 1995 s + auto 315 s; **reached 7/15, confirmed 5/15** (333 requests).
+  - Gaps left (general, not fixed here): framework-only validation keeps submit buttons
+    disabled while `checkValidity()` passes; forms submitted by Enter (no button); the
+    state budget runs out before most routes (29 states route-capped); CAPTCHA forms are
+    refused (an open owner decision); `auto` cannot read a disco inventory, so the new
+    tool has no candidate or confirmed stage yet.
+  - `verify_change --base 8b1f361` on 0b0ba90: 54 files, 2326 passed, 0 failed,
+    1 skipped, 10 xfailed.
 
 ### CC-CRAWL-0031 — Behavioural black-box discovery: capture proxy, state-graph explorer, schema synthesizer; the legacy spider deprecated (D70) (2026-10-17)
 - Change:
