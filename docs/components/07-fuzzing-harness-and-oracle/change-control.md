@@ -16,7 +16,25 @@ Newest first.
   - [x] code, tests (`tests/test_disco_import.py::test_auto_refuses_a_disco_run_without_a_capture`,
     `::test_auto_builds_crawl_points_from_the_imported_run`) — done
   - [x] FR-FUZZ-53, CHANGELOG — done
-- Effectiveness: BRIDGE_PENDING
+  - [x] `verify_change --base 2c519dd` on 2258d82: 74 files, 3145 passed, 0 failed,
+    1 skipped, 14 xfailed — done
+- Effectiveness (assessed 2026-10-18, Juice Shop v20.3.0 reset via `lab/labctl.sh`, the
+  lab identity; a fresh `disco capture` (811 s: 43 states, 167 actions, 19 submissions
+  sent) then the handoff's generic `auto` command line with `--disco-run` in place of
+  `--spider-db` (516 s, 573 requests), scored by `scripts/funnel_report.py`):
+  - **disco through `auto`: reached 6/15, candidate 6/15, confirmed 4/15** (an open
+    redirect, the search SQLi, the `#/search` DOM XSS -- a `fragment` point only the
+    explorer's log holds -- and the profile SSTI).
+  - The legacy pipeline on the same build (CC-CRAWL-0032): reached 7/15, confirmed
+    5/15, in 2310 s.
+  - Import: 180 captured requests seen, 21 imported (17 JSON, 4 form-encoded), 159
+    refused, 145 of them socket.io polling; the others by FR-AUD-22's existing rules
+    (a transaction URL, settings words `country` and `role`, multipart, PUT without
+    `--fuzz-json-writes`).
+  - Not counted although imported: the feedback `comment` leaf. The app posts to
+    `/api/Feedbacks/` and the answer key names `/api/Feedbacks`; `funnel_report.py`
+    matches paths exactly, so it reads "not reached" for any tool. Left as is: how
+    the metric treats a trailing slash is the owner's call.
 
 ### CC-FUZZ-0089 — The execution contract and its runner (D70, FR-FUZZ-51/52) (2026-10-17)
 - Change:
