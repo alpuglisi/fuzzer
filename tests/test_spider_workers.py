@@ -22,12 +22,18 @@ FANOUT, DEPTH, DELAY = 3, 3, 0.05
 
 class _Tree:
     """``/`` and ``/n/<path>`` pages, each linking to its ``FANOUT`` children down to
-    ``DEPTH``; records every GET and the most requests it served at once."""
+    ``DEPTH``; records every GET and the most requests it served at once.
+
+    With `gate` set, the first child page is held until a second child is requested
+    at the same time (or 30 s pass), once: overlap is then observed whatever the
+    machine's load -- a second worker's browser may take seconds to launch, and the
+    tree must not be crawled out before it does."""
 
     def __init__(self):
         self.hits: list[str] = []
         self.active = 0
         self.max_active = 0
+        self.gate: threading.Barrier | None = None
         lock = threading.Lock()
         tree = self
 
@@ -44,6 +50,13 @@ class _Tree:
                     time.sleep(DELAY)
                     path = self.path.split("?", 1)[0].rstrip("/")
                     level = 0 if path in ("", "/") else path.count("/") - 1
+                    gate = tree.gate
+                    if gate is not None and level == 1:
+                        try:
+                            gate.wait(timeout=30)
+                        except threading.BrokenBarrierError:
+                            pass
+                        tree.gate = None
                     base = "/n" if path in ("", "/") else path
                     links = "".join(f'<a href="{base}/{i}">{i}</a>' for i in range(FANOUT)) \
                         if level < DEPTH else ""
@@ -96,6 +109,7 @@ def test_workers_visit_the_same_pages_once_and_overlap_their_loads(tree, tmp_pat
     assert len(one) == EXPECTED
     tree.hits.clear()
     tree.max_active = 0
+    tree.gate = threading.Barrier(2)
     four = _crawl(tree, tmp_path, "four", workers=4)
     assert sorted(four) == sorted(one)
     pages = [h for h in tree.hits if h.startswith("/n") or h == "/"]
@@ -120,6 +134,7 @@ def test_the_write_capable_phase_runs_one_worker_at_a_time(tree, tmp_path, monke
                 inside[0] -= 1
 
     monkeypatch.setattr(sp.LocalSpider, "_after_fetch", after_fetch)
+    tree.gate = threading.Barrier(2)
     pages = _crawl(tree, tmp_path, "w", workers=4)
     assert len(pages) == EXPECTED and peak[0] == 1
     assert tree.max_active >= 2                    # while loads still overlapped
@@ -176,6 +191,7 @@ def test_two_browser_workers_crawl_the_tree(tree, tmp_path, monkeypatch):
     from tests._spa_fixture import chromium_or_skip
     chromium_or_skip(monkeypatch)
     db = tmp_path / "pw.db"
+    tree.gate = threading.Barrier(2)
     s = sp.LocalSpider(tree.url, max_depth=2, db_name=str(db), engine="playwright",
                        workers=2, reveal=False)
     s.crawl()
