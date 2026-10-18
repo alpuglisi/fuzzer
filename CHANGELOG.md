@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-18 (secDevLabs: the first app as a lab)
+- **What:** secDevLabs (globocom) apps become external labs, one per app, built offline from a pinned checkout with host-verified dependencies; CopyNPaste API (Go + MariaDB, SQLi) is the first, with a live-checked ground truth (CC-LAB-0303, FR-LAB-306).
+- **Why:** the owner named secDevLabs as the next lab; its builds cannot reach registries from inside containers here.
+
 ## 2026-10-18 (excessive data exposure by response mutation)
 - **What:** `fuzzlab disco ede` replays a disco run's JSON answers with one field removed per load and reports the fields whose removal leaves the page unchanged (CC-CRAWL-0042, FR-CRAWL-25).
 - **Why:** the owner's EDEFuzz review: mutating the response, not the request, finds data the server exposes and the client never shows (OWASP API3), a class no tool here covered.

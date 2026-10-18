@@ -37,7 +37,8 @@ from fuzzlab.procutil import run_bounded
 REPO = Path(__file__).resolve().parent.parent
 LAB = REPO / "lab"
 EXTERNAL = LAB / "external"
-GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop"}
+GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-truth-juice-shop",
+           "secdevlabs-copy-n-paste": LAB / "ground-truth-secdevlabs-copy-n-paste"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -1165,3 +1166,84 @@ def test_the_crawl_maze_wheels_are_verified_and_a_mismatch_is_refused(tmp_path):
         ext.fetch_crawl_maze_wheels(dest=good.parent, wheels={good.name: digest},
                                     timeout=60)
     assert not good.exists()
+
+
+# --- secDevLabs (CC-LAB-0303) -----------------------------------------------------------
+def test_every_secdevlabs_app_is_a_registered_lab_with_its_own_dir():
+    labs = ext.discover_labs()
+    for lab, app in ext.SECDEVLABS_APPS.items():
+        assert lab in labs and lab in ext.LAB_META, lab
+        assert app.startswith("owasp-top10-2021-apps/") and ".." not in app
+
+
+def test_the_secdevlabs_builds_use_only_pinned_bases_and_the_cached_app():
+    for lab in ext.SECDEVLABS_APPS:
+        text = (EXTERNAL / lab / "Dockerfile").read_text("utf-8")
+        froms = [ln.split()[1] for ln in text.splitlines() if ln.startswith("FROM ")]
+        assert froms and all("@sha256:" in f for f in froms), lab
+        assert all(ln.split()[1].startswith(".cache/app/")
+                   for ln in text.splitlines() if ln.startswith("COPY ")), lab
+        assert "GOPROXY=off" in text and "-mod=vendor" in text, lab   # never the network
+        assert "go mod download" not in text, lab
+
+
+def test_a_secdevlabs_app_is_copied_from_the_pinned_checkout_only(tmp_path, monkeypatch):
+    """The app comes from a checkout verified at the pinned commit; a Go module is
+    vendored only after `go mod verify` passes (here: stubbed, a failing verify raises
+    and nothing is left half-done)."""
+    upstream = tmp_path / "upstream"
+    app = upstream / "owasp-top10-2021-apps" / "a3" / "x"
+    app.mkdir(parents=True)
+    (app / "server.go").write_text("package main\n")
+    run_bounded(["git", "-C", str(upstream), "init", "-q"], timeout=30)
+    run_bounded(["git", "-C", str(upstream), "add", "."], timeout=30)
+    run_bounded(["git", "-C", str(upstream), "-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-qm", "x"], timeout=30)
+    pinned = run_bounded(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                         timeout=30).stdout.strip()
+    root = tmp_path / "external"
+    monkeypatch.setitem(ext.SECDEVLABS_APPS, "secdevlabs-x", "owasp-top10-2021-apps/a3/x")
+    got = ext.fetch_secdevlabs_app("secdevlabs-x", root=root, repo=str(upstream),
+                                   commit=pinned)
+    assert (got / "server.go").is_file() and got == root / "secdevlabs-x" / ".cache" / "app"
+    with pytest.raises(ext.ExternalLabError):
+        ext.fetch_secdevlabs_app("secdevlabs-x", root=tmp_path / "other",
+                                 repo=str(upstream), commit="0" * 40)
+    with pytest.raises(ext.ExternalLabError, match="not a secDevLabs app"):
+        ext.fetch_secdevlabs_app("juice-shop", root=root)
+    (app / "go.mod").write_text("module x\n")
+    run_bounded(["git", "-C", str(upstream), "add", "."], timeout=30)
+    run_bounded(["git", "-C", str(upstream), "-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-qm", "y"], timeout=30)
+    pinned2 = run_bounded(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                          timeout=30).stdout.strip()
+    calls = []
+
+    def fake_vendor(moddir, timeout):
+        calls.append(moddir)
+        raise ext.ExternalLabError("go mod verify did not verify every module")
+    monkeypatch.setattr(ext, "go_vendor", fake_vendor)
+    with pytest.raises(ext.ExternalLabError, match="verify"):
+        ext.fetch_secdevlabs_app("secdevlabs-x", root=root, repo=str(upstream),
+                                 commit=pinned2)
+    assert calls == [root / "secdevlabs-x" / ".cache" / "app"]
+
+
+def test_go_vendor_refuses_a_module_that_fails_verification(tmp_path, monkeypatch):
+    calls = []
+
+    class Res:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def fake_run(argv, timeout, cwd=None, env=None):
+        calls.append(argv[1:])
+        if argv[1:] == ["mod", "verify"]:
+            return Res(0, "github.com/x/y v1.0.0: dir has been modified\n")
+        return Res()
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/go")
+    monkeypatch.setattr("fuzzlab.procutil.run_bounded", fake_run)
+    with pytest.raises(ext.ExternalLabError, match="verify"):
+        ext.go_vendor(tmp_path)
+    assert calls == [["mod", "download"], ["mod", "verify"]]          # never vendored
+

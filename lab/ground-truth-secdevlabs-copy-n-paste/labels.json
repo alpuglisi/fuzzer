@@ -1,0 +1,45 @@
+{
+ "version": 1,
+ "target": "secdevlabs_copy_n_paste_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLCNP-0001",
+   "url": "/login",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "go_echo_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] app/util/db.go:49 concatenates `user` into `select * from Users where username = '...'`; a quote returns MariaDB error 1064 in the JSON answer (checked live at bring-up). The login form on / posts it as JSON."
+  },
+  {
+   "case_id": "SDLCNP-0002",
+   "url": "/register",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "go_echo_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] app/util/db.go:91,111 concatenate `user` into the lookup and the insert; a quote returns error 1064 (checked live). The register form on / posts it as JSON."
+  },
+  {
+   "case_id": "SDLCNP-0003",
+   "url": "/login",
+   "method": "POST",
+   "param": "pass",
+   "location": "body",
+   "vuln_class": "sqli",
+   "sink_context": "sql",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "go_echo_secdevlabs",
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] `pass` is never in a query: it is compared with the stored bcrypt hash (app/util/db.go AuthenticateUser); a quote answers 400 'User not found or wrong password!' (checked live)."
+  }
+ ]
+}

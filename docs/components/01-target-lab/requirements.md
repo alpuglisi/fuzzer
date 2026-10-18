@@ -6371,6 +6371,18 @@ lane) can submit a payload as
   targets (D10); bWAPP's page names carry class words, so NFR-LAB-no-leak does not hold
   for them and a model trained on runs against them would learn from the URL (recorded as
   not enforced under NFR-ML-no-leak; the training question is the operator's).
+- **FR-LAB-306** *(secDevLabs apps, one external lab each; `CC-LAB-0303`, 2026-10-18).*
+  `fuzzlab/lab_fixtures/external.py` checks globocom/secDevLabs out at commit `10be438`
+  once (`secdevlabs_checkout`, gitignored, HEAD verified by the shared
+  `checkout_pinned`), copies each registered app (`SECDEVLABS_APPS`) into its lab's
+  `.cache/app`, and fetches its dependencies on the host, verified before use (Go:
+  `go mod download` + `go mod verify` against the app's own `go.sum`, then vendored);
+  the image builds offline from pinned bases. Built: `secdevlabs-copy-n-paste` (A3, Go
+  echo + MariaDB) on 127.0.0.1:3071 (`SDL_CNP_PORT`), its database unpublished on an
+  internal network with tmpfs storage; no identity. Ground truth
+  `lab/ground-truth-secdevlabs-copy-n-paste/`: SQLi in `user` on `/login` and
+  `/register` (positives), `pass` on `/login` (negative), each checked live at
+  bring-up. Not yet in the gated live test (FR-LAB-304).
 - **FR-LAB-305** *(Security Crawl Maze, a coverage lab; `CC-LAB-0302`, 2026-10-18).*
   `lab/external/security-crawl-maze` serves Google's Security Crawl Maze at upstream
   commit `2a0dd0a` on 127.0.0.1:3061 (`CRAWLMAZE_PORT`), built offline from the pinned

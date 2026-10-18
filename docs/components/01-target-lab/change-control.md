@@ -3,6 +3,30 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0303 — secDevLabs as external labs, one per app; CopyNPaste API first (2026-10-18)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_*` pins, `checkout_pinned`
+  factored out of `fetch_crawl_maze` and shared, `secdevlabs_checkout`, `go_vendor`,
+  `fetch_secdevlabs_app`, the `fetch` command, `LAB_META`); `lab/external/
+  secdevlabs-copy-n-paste/{compose.yaml,Dockerfile}`; `lab/ground-truth-secdevlabs-
+  copy-n-paste/`; `.gitignore` exception for its CSV; `tests/test_external_labs_static.py`.
+- Reason: the owner named globocom/secDevLabs as the lab after Google's maze. Its 20
+  apps each build from a registry their containers cannot reach here (TLS-intercepting
+  proxy), so dependencies are fetched and verified on the host and images build
+  offline; injection (A3) apps first, CopyNPaste (SQLi) the first of them.
+- Impact: a new loopback lab (127.0.0.1:3071); nothing else changes.
+- Risk: low. Upstream code is never committed (BSD-3-Clause, fetched at a pinned
+  commit); the database is never published.
+- Deliverables:
+  - [x] fixture, ground truth (2 positives, 1 negative, checked live: a quote in `user`
+    returns MariaDB error 1064 on both routes; `pass` answers 400), static tests (the
+    pinned checkout only, `go mod verify` gating the vendor step, offline build,
+    registry, pins) — done
+  - [x] FR-LAB-306, ARCHITECTURE, CHANGELOG — done
+  - [ ] the other A3 apps (gossip-world, sstype, mongection, comment-killer, streaming);
+    the gated live test — next
+- Brought up with `labctl.sh up secdevlabs-copy-n-paste` (docker 29.8.2): built
+  offline, `/healthcheck` answers. No tool was run against it (owner's direction).
+
 ### CC-LAB-0302 — Google's Security Crawl Maze as a loopback lab fixture, with a coverage scorer (2026-10-18)
 - Change:
   - `lab/external/security-crawl-maze/` (compose.yaml, Dockerfile): the maze at upstream

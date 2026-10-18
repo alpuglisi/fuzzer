@@ -66,6 +66,7 @@ on_host_results*.txt
 # CC-LAB-0300: the external lab fixtures' ground truth is tracked, same BUG-0036 trap
 !lab/ground-truth-bwapp/*.csv
 !lab/ground-truth-juice-shop/*.csv
+!lab/ground-truth-secdevlabs-copy-n-paste/*.csv
 # CC-LAB-0300: bWAPP is CC BY-NC-ND and is never committed -- its downloaded zip lives
 # in a local cache, and no extracted tree or archive may enter the repo
 lab/external/**/.cache/

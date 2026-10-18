@@ -1,0 +1,27 @@
+{
+ "version": 1,
+ "target": "secdevlabs_copy_n_paste_10be4384",
+ "points": [
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/register",
+   "method": "POST",
+   "param": "user",
+   "location": "body",
+   "rendering": "server-json"
+  },
+  {
+   "url": "/login",
+   "method": "POST",
+   "param": "pass",
+   "location": "body",
+   "rendering": "server-json"
+  }
+ ]
+}

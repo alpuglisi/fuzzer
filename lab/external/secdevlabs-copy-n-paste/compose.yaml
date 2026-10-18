@@ -1,0 +1,57 @@
+# secDevLabs "CopyNPaste API" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0303).
+# Lab-only. A Go (echo) login/register API over MariaDB whose `user` field is
+# concatenated into SQL on both routes (OWASP 2021 A3, injection).
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-copy-n-paste` copies into the gitignored .cache/app with its
+# Go modules downloaded, verified against the app's go.sum and vendored on the host
+# (fuzzlab.lab_fixtures.external.fetch_secdevlabs_app); the image builds offline.
+#
+# Safety: the app is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped. The database
+# credentials are upstream's lab defaults for this throwaway, unpublished database.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-copy-n-paste
+name: fuzzlab-secdevlabs-copy-n-paste
+
+x-podman:
+  in_pod: false
+
+services:
+  api:
+    build:
+      context: .
+    networks: [cnp-front, cnp-db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_CNP_PORT:-3071}:10001"
+    environment:
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+      MYSQL_DATABASE: a1db
+    depends_on: [mysqldb]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 256m
+
+  mysqldb:
+    image: docker.io/library/mariadb:10.6.3@sha256:3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d
+    networks: [cnp-db]
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+      MYSQL_DATABASE: a1db
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/var/lib/mysql]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  cnp-front: {}
+  cnp-db:
+    internal: true

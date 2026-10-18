@@ -1,0 +1,7 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs CopyNPaste API at 10be4384 (external
+# lab fixture lab/external/secdevlabs-copy-n-paste), CC-LAB-0303. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLCNP-0001,/login,POST,user,body,sqli,true,/login,sink,,direct
+SDLCNP-0002,/register,POST,user,body,sqli,true,/register,sink,,direct
+SDLCNP-0003,/login,POST,pass,body,sqli,false,/login,sink,,direct

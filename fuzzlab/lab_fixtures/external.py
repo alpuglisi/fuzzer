@@ -58,8 +58,13 @@ JUICE_SHOP_IMAGE = ("docker.io/bkimminich/juice-shop:v20.3.0@sha256:"
                     "cea5a4af4aacee498c491491af0408934ec81d004035c0a02ef3e54395e3bf27")
 CRAWL_MAZE_PYTHON_IMAGE = ("docker.io/library/python:3.9-slim@sha256:"
                            "2d97f6910b16bd338d3060f261f53f144965f755599aab1acda1e13cf1731b1b")
+SECDEVLABS_GOLANG_IMAGE = ("docker.io/library/golang:1.14@sha256:"
+                           "1a7173b5b9a3af3e29a5837e0b2027e1c438fd1b83bbee8f221355087ad416d6")
+SECDEVLABS_MARIADB_IMAGE = ("docker.io/library/mariadb:10.6.3@sha256:"
+                            "3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
-                           CRAWL_MAZE_PYTHON_IMAGE})
+                           CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
+                           SECDEVLABS_MARIADB_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -94,6 +99,19 @@ LAB_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 PROJECT_LABEL = "com.docker.compose.project"
 
 
+#: secDevLabs (globocom, BSD-3-Clause), CC-LAB-0303: a suite of small deliberately
+#: vulnerable apps, one external lab per app. The source is checked out at this commit
+#: on the host and each app's dependencies are fetched and verified there (the build
+#: containers sit behind a TLS-intercepting proxy they do not trust); images build
+#: offline.
+SECDEVLABS_REPO = "https://github.com/globocom/secDevLabs"
+SECDEVLABS_COMMIT = "10be438496e928c66567749f0aaf0bb976052bc9"
+#: lab name -> the app's directory in the pinned checkout.
+SECDEVLABS_APPS = {
+    "secdevlabs-copy-n-paste": "owasp-top10-2021-apps/a3/copy-n-paste",
+}
+
+
 class ExternalLabError(RuntimeError):
     """A fixture operation failed; the message never carries a secret."""
 
@@ -126,6 +144,8 @@ LAB_META: dict[str, LabMeta] = {
                           "juice-user@fuzzlab.lab", True),
     "security-crawl-maze": LabMeta("security-crawl-maze", "app", "CRAWLMAZE_PORT", 3061,
                                    8080, "/", "/", None, "", False),
+    "secdevlabs-copy-n-paste": LabMeta("secdevlabs-copy-n-paste", "api", "SDL_CNP_PORT",
+                                       3071, 10001, "/", "/healthcheck", None, "", False),
 }
 
 
@@ -258,16 +278,15 @@ def fetch_crawl_maze_wheels(*, dest: Path | None = None, timeout: float = 600.0,
     return dest
 
 
-def fetch_crawl_maze(*, dest: Path | None = None, repo: str = CRAWL_MAZE_REPO,
-                     commit: str = CRAWL_MAZE_COMMIT, timeout: float = 600.0) -> Path:
-    """Check the Crawl Maze's source out at ``commit`` into the gitignored cache (its
-    compose file builds from there). A checkout already at ``commit`` is kept; anything
-    else there is replaced. The checkout's HEAD is verified -- never a substitute."""
+def checkout_pinned(dest: Path, repo: str, commit: str, *, timeout: float = 600.0,
+                    label: str = "checkout") -> Path:
+    """Check ``repo`` out at ``commit`` into ``dest`` (gitignored cache). A checkout
+    already at ``commit`` is kept; anything else there is replaced. The checkout's HEAD
+    is verified -- never a substitute."""
     import shutil
     import subprocess
 
     from fuzzlab.procutil import run_bounded
-    dest = crawl_maze_source() if dest is None else dest
 
     def git(*args: str) -> str:
         res = run_bounded(["git", "-C", str(dest), *args], timeout=timeout)
@@ -295,7 +314,60 @@ def fetch_crawl_maze(*, dest: Path | None = None, repo: str = CRAWL_MAZE_REPO,
         raise
     if head != commit:
         shutil.rmtree(dest, ignore_errors=True)
-        raise ExternalLabError(f"crawl maze checkout is {head}, not {commit}")
+        raise ExternalLabError(f"{label} checkout is {head}, not {commit}")
+    return dest
+
+
+def fetch_crawl_maze(*, dest: Path | None = None, repo: str = CRAWL_MAZE_REPO,
+                     commit: str = CRAWL_MAZE_COMMIT, timeout: float = 600.0) -> Path:
+    """Check the Crawl Maze's source out at ``commit`` into the gitignored cache (its
+    compose file builds from there; `checkout_pinned`)."""
+    return checkout_pinned(crawl_maze_source() if dest is None else dest, repo, commit,
+                           timeout=timeout, label="crawl maze")
+
+
+def secdevlabs_checkout(root: Path = EXTERNAL_DIR) -> Path:
+    """The one pinned secDevLabs checkout every app lab copies from (gitignored)."""
+    return root / ".cache" / "secdevlabs" / "src"
+
+
+def go_vendor(moddir: Path, *, timeout: float = 900.0) -> None:
+    """Fetch a Go module's dependencies with the host's Go, verify every one against
+    the module's own ``go.sum`` (``go mod verify``), and vendor them, so its image
+    builds offline. Raises when Go is missing or any module fails verification."""
+    import shutil
+
+    from fuzzlab.procutil import run_bounded
+    go = shutil.which("go")
+    if go is None:
+        raise ExternalLabError("Go is not installed on this host: needed to vendor the "
+                               "app's modules (they are verified against its go.sum)")
+    env = {**os.environ, "GOFLAGS": "-mod=mod", "GOTOOLCHAIN": "local"}
+    for args in (["mod", "download"], ["mod", "verify"], ["mod", "vendor"]):
+        res = run_bounded([go, *args], timeout=timeout, cwd=str(moddir), env=env)
+        if res.returncode != 0:
+            raise ExternalLabError(f"go {' '.join(args)} failed: "
+                                   f"{(res.stderr or res.stdout or '').strip()[-200:]}")
+        if args[1] == "verify" and "all modules verified" not in (res.stdout or ""):
+            raise ExternalLabError("go mod verify did not verify every module")
+
+
+def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SECDEVLABS_REPO,
+                         commit: str = SECDEVLABS_COMMIT, timeout: float = 900.0) -> Path:
+    """The app of secDevLabs lab ``lab``, copied from the pinned checkout into
+    ``<lab>/.cache/app`` with its dependencies fetched and verified on the host (Go:
+    `go_vendor`). The image builds from there with no network."""
+    import shutil
+    if lab not in SECDEVLABS_APPS:
+        raise ExternalLabError(f"{lab!r} is not a secDevLabs app lab")
+    src = checkout_pinned(secdevlabs_checkout(root), repo, commit, timeout=timeout,
+                          label="secDevLabs")
+    dest = root / lab / ".cache" / "app"
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(src / SECDEVLABS_APPS[lab], dest, symlinks=True)
+    for gomod in sorted(dest.rglob("go.mod")):
+        go_vendor(gomod.parent, timeout=timeout)
     return dest
 
 
@@ -970,6 +1042,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{project} {lab_port(meta)} {base_url(meta)}{meta.app_path}")
             return 0
         if args.cmd == "fetch":
+            if meta.name in SECDEVLABS_APPS:
+                print(f"secDevLabs at {SECDEVLABS_COMMIT[:12]}, {meta.name}'s app and its "
+                      f"verified dependencies: {fetch_secdevlabs_app(meta.name)}")
+                return 0
             if meta.name == "security-crawl-maze":
                 print(f"crawl maze source at {CRAWL_MAZE_COMMIT[:12]}: {fetch_crawl_maze()}")
                 print(f"crawl maze wheels verified: {fetch_crawl_maze_wheels()}")
