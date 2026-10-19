@@ -707,7 +707,8 @@ the ranker's nDCG@k and precision@k baselines are computed by the trainer's
       `end` and a missing callback are notes.
     - The finding's note and `finding_links` cite `steps`.
     - *Executed* counts a test's `store` and `navigate` steps that are not `not_sent`.
-    - `M6_BROWSER` is in both boundaries and the finding filter.
+    - `M6_BROWSER` is in both boundaries; the finding filter keeps it as the source of
+      a flow into the finding's interface (FR-UI-513's relation-based keep-set).
     - `status()["unsupported"]` names the limits FR-FUZZ-62 leaves.
     - Only the existing step types are used.
 - **FR-UI-512** *(added CC-UI-0059)* **The proxy sequence scope.** `report.diagram.scopes`

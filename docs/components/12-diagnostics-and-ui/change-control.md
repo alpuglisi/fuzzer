@@ -16,8 +16,10 @@ Newest first.
   - The finding note's evidence and `finding_links` gain `steps`.
   - `interface_coverage` counts as *executed* a test's `store` and `navigate` steps that
     are not `not_sent`. Page counts are not counted.
-  - `M6_BROWSER` is added to every actor-id list at `56ede12`: the finding keep-set and
-    the client-server and testing boundaries.
+  - `M6_BROWSER` is added to the actor-id lists that remain after CC-UI-0063: the
+    client-server and testing boundaries. The finding filter has no list since
+    CC-UI-0063: its relation-based keep-set keeps `M6_BROWSER` as the source of a flow
+    into the finding's interface (checked on the rebase; D1 asserts it).
   - `status()["unsupported"]` replaces the false M6 line with the limits that remain.
   - Only the existing step types are used, so `mermaid_sequence` and `diagrams.js` are
     unchanged.
@@ -26,9 +28,10 @@ Newest first.
 - Impact:
   - Export shapes are unchanged; sequences, `finding_links` and the boundaries gain
     content.
-  - Merges after CC-UI-0063 (DG-FINDLINK), which replaces the finding keep-set with a
-    relation-based one. On rebase, `M6_BROWSER`'s entry there is dropped if CC-UI-0063
-    needs no list.
+  - Merged after CC-UI-0063 (DG-FINDLINK) and CC-UI-0065, rebased onto `a8b81df`. The
+    one conflict in `diagram.py`, the finding keep-set, was resolved to CC-UI-0063's
+    relation-based version with no `M6_BROWSER` entry. `diagrams.js` is unchanged; it
+    counts no capped attribute.
 - Risk: low to medium (a merge with CC-UI-0063 in the same functions); implemented
   after it.
 - Review: covered by the CC-FUZZ-0102 gate (3/3 on revision 3).
@@ -41,7 +44,7 @@ Newest first.
     - `tests/test_diagram_e2e.py::test_confirmation_steps_export_to_mermaid_and_status_names_only_the_remaining_limits`
     - `tests/test_trace_model.py::test_executed_counts_an_m6_visits_store_and_observe_loads`
   - [x] the FR-UI-511 edit — done
-  - [ ] rebase onto CC-UI-0063 — todo
+  - [x] rebase onto CC-UI-0063 (`a8b81df`) — done
 - Effectiveness (assessed 2026-10-19): each test fails on `56ede12`: D1, the 12 D2 fixtures, D3 and
   `test_executed_counts_an_m6_visits_store_and_observe_loads` fail on the old code.
   Mutations: *executed* without the M6 branch gives `assert 0 == 3`; a `no_status` store
