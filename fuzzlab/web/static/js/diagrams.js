@@ -36,6 +36,10 @@ function svg(tag, attrs = {}, text) {
   return node;
 }
 
+// whether a capped attribute holds any value: presence is exact, a count is not
+// (attributes keep at most 40 values; counts come from the coverage, BUG-0519)
+const present = (v) => Array.isArray(v) && v.length > 0;
+
 function clip(text, n) {
   const s = String(text ?? "");
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
@@ -192,7 +196,8 @@ function initDiagrams() {
           const row = svg("g", { class: "dg-hit" });
           const rect = svg("rect", { x: xA + 22, y: ry, width: wA - 44, height: ROW - 3,
             rx: 3, class: `dg-box k-${k.knowledge}` });
-          const finds = (k.attrs.finding || []).length;
+          // the exact count (coverage), never the capped attribute's length (BUG-0519)
+          const finds = (k.coverage && k.coverage.finding) || 0;
           const label = `${clip(k.label, 34)}${finds ? `  ⚑${finds}` : ""}`
             + `  [${cov.executed || 0} sent / ${cov.evaluated || 0} eval]`;
           row.append(rect, svg("text", { x: xA + 28, y: ry + 14, class: "dg-text" }, label));
@@ -266,7 +271,7 @@ function initDiagrams() {
       const x1 = fromRight ? m.a.l : m.a.r, x2 = fromRight ? m.b.r : m.b.l;
       const mid = (x1 + x2) / 2;
       const d = `M${x1},${m.a.y} C${mid},${m.a.y} ${mid},${m.b.y} ${x2},${m.b.y}`;
-      const refused = m.flows.some((f) => (f.attrs.refused || []).length);
+      const refused = m.flows.some((f) => present(f.attrs.refused));
       const cls = `dg-flow ${m.view === "test" ? "test" : ""} k-${f0.knowledge}`
         + (refused ? " refused" : "");
       const line = svg("path", { d, class: cls, "marker-end": "url(#dg-arrow)" });

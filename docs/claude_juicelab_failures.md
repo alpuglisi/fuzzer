@@ -921,3 +921,9 @@ Juice Shop lab is complete.
 - **Impact:** on a busy interface the newest findings' data flow was empty.
 - **Status:** open: fixed by CC-UI-0063 (gate passed 3/3; implementation in progress). This entry also updates F-080's status to the same.
 
+### F-085 — Status update for F-080 and F-084 (BUG-0519)
+- **What:** the two halves of BUG-0519 recorded in F-080 (the actor list) and F-084 (the capped attribute) are fixed.
+- **Evidence:** CC-UI-0063 (gate 3/3), merged with its tests; the ⚑ count, the same class, fixed by CC-UI-0065.
+- **Impact:** none further.
+- **Status:** fixed.
+

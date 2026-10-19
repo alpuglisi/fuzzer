@@ -321,3 +321,16 @@ def test_a_finding_link_opens_exactly_its_run_sequence_and_data_flow(tmp_path):
     finally:
         server.stop()
     assert errors == []
+
+
+def _capped_reads(text: str) -> list[str]:
+    """Reads of a model attribute's length in page script: the attributes keep at most
+    `MAX_ATTR_VALUES` values, so a count must come from the coverage (BUG-0519 sweep)."""
+    import re
+    return re.findall(r"attrs\.\w+(?:\s*\|\|\s*\[\])?\)?\.length", text)
+
+
+def test_the_page_never_counts_a_capped_attribute():
+    assert _capped_reads((STATIC / "diagrams.js").read_text()) == []
+    assert _capped_reads("const finds = (k.attrs.finding || []).length;") != []
+

@@ -3,6 +3,21 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0065 — The ⚑ count on an interface reads the exact coverage (BUG-0519 sweep) (2026-10-19)
+- Change (`fuzzlab/web/static/js/diagrams.js`): an interface's ⚑ count is
+  `coverage.finding` (counted in SQL), not the length of the capped `attrs.finding`; a
+  presence test of a capped attribute goes through `present()`.
+- Reason: DG-FINDLINK's PA-0002 sweep for BUG-0519: 45 findings on one interface showed
+  as ⚑40.
+- Impact: the label shows the exact number of findings.
+- Risk: low.
+- Review: a sweep fix of a gate-reviewed bug (CC-UI-0063), made at the merge.
+- Deliverables:
+  - [x] code; `tests/test_web_diagrams.py::test_the_page_never_counts_a_capped_attribute`
+    (proven on the old line as its synthetic offender) — done
+  - [x] PA-0519(1) names counts; ERROR_LOG; CHANGELOG — done
+- Effectiveness: verified offline.
+
 ### CC-UI-0063 — A finding opens its own sequence and data flow; the Diagrams page takes a validated deep link; the finding filter follows the finding's own relation (FR-UI-513, FR-UI-510, FR-UI-13, BUG-0519) (2026-10-19)
 - Change:
   - `fuzzlab/report/diagram.py`:

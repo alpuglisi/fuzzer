@@ -22,6 +22,17 @@ fuzzlab proxy --record --authorized     # browser traffic through the proxy, liv
 
 The web proxy records the same way when it has a store.
 
+- **From a finding:** on the **Findings** page, each finding's **Diagram** link opens
+  `/diagrams?run=<run>&finding=<id>`: that run, the finding's own sequence, and the data
+  flow filtered to it, with the testing overlay on (a finding's own flow is the tool's).
+  The run stays selected while the run writes, even when it is older than the 200 runs
+  the list shows, until you choose another run; the scope and the finding filter stay
+  until you choose another run, scope or finding. A finding without a diagram says why:
+  its run has no trace (recorded before diagrams, or with `--no-trace`), its trace event
+  was not recorded, or the event names no test or no interface. The page refuses a
+  malformed link with 400, and names a link that does not hold (another run's finding,
+  an unknown one) without applying it.
+
 Then:
 
 - **Web:** `fuzzlab web`, then **Diagrams**. The page refreshes while a run writes,

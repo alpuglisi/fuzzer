@@ -1832,8 +1832,9 @@ tracked in the requirements files, not here.
 - **Diagrams** `[built]` (FR-UI-510/511, `report/diagram.py`, `web/diagram_routes.py`,
   `fuzzlab diagram`): a run's data flow (actors | application → origin → interface |
   the testing overlay, coverage per interface) and its sequences (a test, a captured
-  workflow, the spider's trace, a finding), drawn from the trace model only, with
-  evidence drill-down, live refresh while a run writes, and JSON / Mermaid exports
+  workflow, the spider's trace, the proxy's traffic, a finding), drawn from the trace
+  model only, with evidence drill-down, a finding's deep link from the Findings page
+  (FR-UI-513, SP-52), live refresh while a run writes, and JSON / Mermaid exports
   (labels through `mermaid_text`, SP-50). User guide: `docs/DIAGRAMS.md`.
 - **Project files** `[built — back end, start screen and pages laid out from the UI
   research; three code-review rounds; merged 2026-10-15]` (CC-UI-0450): `web/projects.py`

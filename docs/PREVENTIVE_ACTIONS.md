@@ -2582,6 +2582,22 @@ prose PA already applied. The test prints the share of PAs enforced by `none`.
      with 400.** (from BUG-0518)
   - Enforced by: tests/test_web_diagrams.py::test_the_page_renders_labels_as_text_navigates_evidence_and_updates_live, tests/test_web_diagrams.py::test_exports_download_and_bad_requests_are_refused
 
+- **PA-0519** — Strengthens `PA-0510(1)` and `PA-0512` from evidence producers and ids to
+  every view reading the model, and widens `PA-0515`'s sweep, after BUG-0519: the data
+  flow's finding filter re-derived "what finding F cites" from the capped `attrs.finding`
+  and a fixed actor list, and disagreed with `finding_links` (the spider's flows after
+  BUG-0515 split its actor; every finding past the 40th on an interface).
+  1. **A view or filter takes a relation from the record that defines it** (the
+     producer's event, or the model's links), never from a capped or summary attribute
+     and never from an enumerated list of kinds or ids; a count shown to the operator
+     comes from an exact source, never a capped attribute's length.
+  2. **Two functions that derive one relation are held equal by a test on every record**
+     of a real run and of a fixture past every cap (`PA-0516(1)`).
+  3. **A change that adds or splits an entity kind or actor sweeps every enumeration of
+     kinds or ids** in `report/diagram.py` and `static/js/diagrams.js`, filters and
+     keep-sets included, not only drawn output. (from BUG-0519)
+  - Enforced by: tests/test_diagram_e2e.py::test_the_finding_filter_draws_exactly_the_flows_finding_links_names, tests/test_diagram_e2e.py::test_a_finding_past_the_attribute_cap_keeps_its_interface_and_flows, tests/test_web_diagrams.py::test_the_page_never_counts_a_capped_attribute
+
 - **PA-0521** — Strengthens `PA-0514(2)`, after BUG-0521: the trace's URL redactor judged a
   path segment whole, so a canary token followed by `)` or a backtick in a payload's
   preview was kept.

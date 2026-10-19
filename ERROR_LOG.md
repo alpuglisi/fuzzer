@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — diagrams (the finding filter lost the spider's flows and findings past the 40th; BUG-0519)
+- **Symptom:** `dataflow(finding=F)` showed F's interface with no spider flow into it, and for the 41st and later finding on one interface no interface and no flow, while `finding_links(F)` listed them; the interface's ⚑ count stopped at 40.
+- **Root cause:** the filter re-derived F's relation from the capped `attrs.finding` (40 values) and a fixed actor list `{APP, TOOL, BROWSER}` that BUG-0515's `actor:spider` split did not update, instead of F's own trace event (BUG-0519).
+- **Remediation:** the filter takes F's interface from its event (as `finding_links` and the sequence do); tests hold the two equal on every finding of a real run and of a 45-finding interface; the ⚑ count reads the exact coverage (CC-UI-0063, CC-UI-0065, PA-0519).
+- **Status:** Fixed
+
 ## 2026-10-19 — diagrams (an out-of-band canary token kept in a payload preview; BUG-0521)
 - **Symptom:** a command-injection payload's preview (`$(curl …/cb/<tok>)`) kept its canary token in the trace and exports.
 - **Root cause:** `safe_ref` judged a path segment whole; the payload's `)` made the segment non-identifier-shaped (BUG-0521).
