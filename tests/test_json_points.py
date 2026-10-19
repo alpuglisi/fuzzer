@@ -597,9 +597,9 @@ def test_greybox_refuses_a_json_point_and_never_gets_one_from_the_store(tmp_path
 def test_the_m6_executor_refuses_a_json_point_before_any_browser():
     from fuzzlab.oracle.browser import ExecRequest
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-    obs = PlaywrightBrowserExecutor().run(ExecRequest(url=BASE + "api/x", param="q",
-                                                      value="v", location="json"), "t")
-    assert not obs.executed and "unplaceable" in obs.detail
+    with pytest.raises(UnplaceableLocation, match="unplaceable location 'json'"):  # BUG-0523
+        PlaywrightBrowserExecutor().run(ExecRequest(url=BASE + "api/x", param="q",
+                                                    value="v", location="json"), "t")
 
 
 def test_the_location_feature_treats_json_as_body():

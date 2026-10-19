@@ -195,10 +195,11 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
         "json_extract(body,'$.url') u, json_extract(body,'$.test') test, "
         "json_extract(body,'$.src') src, json_extract(body,'$.status') status, "
         "json_extract(body,'$.outcome') outcome, json_extract(body,'$.role') role, "
-        "json_extract(body,'$.step') step, COUNT(*) n FROM trace_event "
+        "json_extract(body,'$.step') step, json_extract(body,'$.decides') decides, "
+        "COUNT(*) n FROM trace_event "
         "WHERE run_id=? AND kind IN ('observe.exchange','observe.page','test.start',"
         "'exchange','test.strategy','finding','browser.step') GROUP BY kind, o, m, u, "
-        "test, src, status IS NULL, outcome, role, step", (run_id,)).fetchall()
+        "test, src, status IS NULL, outcome, role, step, decides", (run_id,)).fetchall()
     tests: dict[str, str] = {}
     for r in rows:
         if r["kind"] == "test.start" and r["o"]:
@@ -222,7 +223,10 @@ def interface_coverage(conn, run_id: int) -> dict[str, dict]:
             # FR-FUZZ-62: an M6 visit's store and observe loads; page counts are not
             bump(tests[r["test"]], "executed", n)
         elif kind == "test.strategy" and r["test"] in tests and \
-                r["outcome"] in ("confirmed", "not_confirmed", "inconclusive"):
+                r["outcome"] in ("confirmed", "not_confirmed", "inconclusive") and \
+                not (r["outcome"] == "not_confirmed" and r["decides"] == 0):
+            # a run that does not decide its candidate reached no verdict on it
+            # (CC-UI-0066, BUG-0523); an older event has no `decides`
             bump(tests[r["test"]], "evaluated", n)
         elif kind == "finding" and r["o"]:
             bump(trace.interface_id(r["o"], r["m"], r["u"] or ""), "finding", n)
@@ -650,7 +654,8 @@ def _test_sequence(conn, run_id, test_id, scope, only_strategy=None) -> dict:
         elif row["kind"] == "test.strategy":
             seq.step(type="note", over=[ev], kind="evaluation",
                      label=f"{b.get('strategy')}: {b.get('outcome')}"
-                           f"{(' — ' + b['detail']) if b.get('detail') else ''}",
+                           f"{(' — ' + b['detail']) if b.get('detail') else ''}"
+                           f"{' (does not decide this candidate)' if b.get('decides') is False else ''}",
                      evidence=[row["key"]] + list(b.get("exchanges") or [])
                      + list(b.get("steps") or []))
         elif row["kind"] == "finding":

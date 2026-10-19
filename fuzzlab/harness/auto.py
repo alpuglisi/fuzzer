@@ -21,6 +21,22 @@ from fuzzlab.core.redaction import is_credential_name
 from fuzzlab.core.runmode import (RunModeError, RunPlan, categories_from_vuln_classes,
                                    resolve_run)
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
+from fuzzlab.oracle.strategies import DomXssStrategy, StoredXssStrategy
+
+
+def _decider(cls) -> tuple[str, str]:
+    """``(category, arm)`` of the one strategy that decides a point (FR-AUD-30), taken
+    from the strategy's own attributes, never spelled again here (PA-0001)."""
+    return cls.category, f"{cls.vuln_class}:{cls.mechanism}"
+
+
+#: The mechanism that alone decides a stored case's observe point, and a ground-truth
+#: DOM point (BUG-0523): the browser executes the payload, or nothing observes it.
+STORED_DECIDER = _decider(StoredXssStrategy)
+DOM_DECIDER = _decider(DomXssStrategy)
+#: Every deciding mechanism a point builder writes (checked against the default arms by
+#: `tests/test_unplaceable_confirmation.py`).
+DECIDERS = (STORED_DECIDER, DOM_DECIDER)
 
 
 def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False,
@@ -156,7 +172,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=(gp.origin or base) + path, param=gp.param,
                                          method="GET", location=loc,
-                                         origin="ground-truth"))
+                                         origin="ground-truth",
+                                         decided_by=DOM_DECIDER))    # FR-AUD-30
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))
@@ -194,7 +211,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 url=(case.origin or base) + opath, param=case.param, method=case.method,
                 location=case.location, store_url=store_url, store_param=case.param,
                 store_method=store_method, store_location=store_location,
-                store_entries=store_entries, origin="ground-truth"))
+                store_entries=store_entries, origin="ground-truth",
+                decided_by=STORED_DECIDER))                              # FR-AUD-30
         else:
             skipped.append((opath, case.method, case.param,
                             "stored XSS (needs browser execution, M6)"))

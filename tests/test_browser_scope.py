@@ -855,7 +855,8 @@ def test_a_browser_that_cannot_start_is_no_verdict_never_a_crash_or_negative(mon
     """BUG-0126: `fuzzlab auto --browser` aborted the whole run when Chromium could not
     launch. Now the browser mechanisms give no verdict -- after one retry remembered for
     the run (reviewer A: a single transient failure does not silence M6) -- and the
-    point is decided by the others or left inconclusive."""
+    point is decided by the others, or left inconclusive when only the browser mechanism
+    decides it (`decided_by`, FR-AUD-30, BUG-0523)."""
     import sys
     import types
 

@@ -254,6 +254,11 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             stopped_keys.add(key)
             return
         candidate = _candidate_of(ev)
+        # FR-AUD-30 (BUG-0523): the deciding mechanism only when every row of the key
+        # names the same one -- dropped when they disagree, never composed (PA-0512)
+        arms = {e.get("decided_by") for _cid, e in keyed.get(key, ())} or \
+            {ev.get("decided_by")}
+        candidate.decided_by = next(iter(arms)) if len(arms) == 1 else None
         # FR-FUZZ-60: one test per confirmation key; its sends, strategy outcomes and
         # finding carry its id (explicit correlation, never a time window)
         tests["n"] += 1

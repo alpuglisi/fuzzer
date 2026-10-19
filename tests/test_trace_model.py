@@ -448,3 +448,37 @@ def test_browser_steps_reduce_independently_of_order(tmp_path):
     flows = snaps[0][1]
     assert flows[f"flow:test:{trace.M6_BROWSER}->iface:{O}|POST|/s:http"][3]["outcome"] \
         == ["error"]
+
+
+def test_a_run_that_does_not_decide_its_candidate_is_not_evaluated(tmp_path):
+    """CC-UI-0066 (BUG-0523): *evaluated* counts the runs that reached a verdict on the
+    test's candidate. A stored-XSS interface whose only candidate is inconclusive
+    (its store unplaceable) shows no evaluation from the non-deciding reflected run; a
+    confirmation counts whoever made it (recorded ``decides`` true); an older event
+    without ``decides`` counts as before."""
+    from fuzzlab.report.diagram import interface_coverage
+
+    def strategy(test, name, outcome, key, **extra):
+        return ("test.strategy", {"test": test, "strategy": name, "outcome": outcome}
+                | extra, key, 2.0)
+    events = [
+        ("test.start", {"test": "t1", "url": O + "/board", "origin": O, "method": "POST"},
+         "s1", 1.0),
+        strategy("t1", "xss-reflected:reflected-context", "not_confirmed", "a",
+                 decides=False),
+        strategy("t1", "xss-stored:browser-execution", "unplaceable", "b", decides=True),
+        ("test.start", {"test": "t2", "url": O + "/c", "origin": O, "method": "GET"},
+         "s2", 1.0),
+        strategy("t2", "xss-reflected:reflected-context", "confirmed", "c", decides=True),
+        strategy("t2", "sqli:error-signature", "not_confirmed", "d"),        # older event
+        ("test.start", {"test": "t3", "url": O + "/d", "origin": O, "method": "GET"},
+         "s3", 1.0),
+        strategy("t3", "xss-stored:browser-execution", "not_confirmed", "e",
+                 decides=True)]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        _record(store, run, events)
+        cov = interface_coverage(store.conn, run)
+    assert cov[f"iface:{O}|POST|/board"]["evaluated"] == 0
+    assert cov[f"iface:{O}|GET|/c"]["evaluated"] == 2
+    assert cov[f"iface:{O}|GET|/d"]["evaluated"] == 1

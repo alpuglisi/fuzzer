@@ -141,10 +141,11 @@ def test_the_store_request_reaches_the_candidate(tmp_path):
 ])
 def test_the_executor_refuses_an_unplaceable_store_request_before_any_browser(store):
     from fuzzlab.oracle.browser import ExecRequest, StoreStep
+    from fuzzlab.oracle.probe import UnplaceableLocation
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
-    obs = PlaywrightBrowserExecutor().run(ExecRequest(url="http://h/a", store=StoreStep(
-        url="http://h/s", param="content", value="v", **store)), "t")
-    assert not obs.executed and "unplaceable store" in obs.detail
+    with pytest.raises(UnplaceableLocation, match="unplaceable store"):    # BUG-0523
+        PlaywrightBrowserExecutor().run(ExecRequest(url="http://h/a", store=StoreStep(
+            url="http://h/s", param="content", value="v", **store)), "t")
 
 
 # --- real browser: a chat that only takes a JSON PUT ----------------------------------

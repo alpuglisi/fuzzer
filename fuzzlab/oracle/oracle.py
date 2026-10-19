@@ -38,17 +38,30 @@ def finding_url(candidate: Candidate) -> str:
     return to_path(candidate.url)
 
 
+def _decides(strategy, candidate: Candidate) -> bool:
+    """Does ``strategy`` decide ``candidate`` (FR-AUD-30, BUG-0523)? Every strategy
+    decides a candidate that names no deciding mechanism; one that names it is decided
+    only by the strategy with that arm. A strategy with no ``arm`` (a duck-typed plugin
+    confirmer) decides no candidate that names one. The one predicate (PA-0003): read
+    with ``getattr``, as the oracle reads ``prg`` and ``arm``."""
+    return candidate.decided_by is None or \
+        getattr(strategy, "arm", None) == candidate.decided_by
+
+
 def _trace_strategy(outcome: str, verdict: Verdict | None = None,
-                    detail: str | None = None) -> None:
+                    detail: str | None = None, decides: bool = True) -> None:
     """FR-FUZZ-60: one strategy run's outcome, with the exchanges it made and (FR-FUZZ-62)
     the browser and out-of-band steps it recorded. A run that does not confirm is
-    ``not_confirmed`` -- never "secure"."""
+    ``not_confirmed`` -- never "secure". ``decides`` (BUG-0523): whether this run decides
+    the candidate (`_decides`); a confirmation always counts, so it is recorded true on
+    one."""
     test, strategy, _role = trace.current()
     trace.emit("test.strategy", {
         "test": test, "strategy": strategy, "outcome": outcome,
         "mechanism": verdict.mechanism if verdict is not None else None,
         "detail": detail, "exchanges": trace.collected(),
-        "steps": trace.collected_steps()},                # FR-FUZZ-62
+        "steps": trace.collected_steps(),                 # FR-FUZZ-62
+        "decides": decides or outcome == "confirmed"},     # BUG-0523
         scope=f"test:{test}" if test else "run")
 
 
@@ -355,6 +368,13 @@ class Oracle:
 
         inconclusive: Verdict | None = None
         placed, unplaceable = False, None
+        # FR-AUD-30 (BUG-0523): a candidate naming its deciding mechanism is placed only
+        # by that mechanism; its own refusal is the reason given, and its absence is one
+        decider_reason: str | None = None
+        missing = (f"deciding mechanism {candidate.decided_by} did not run"
+                   if candidate.decided_by is not None and not any(
+                       getattr(s, "arm", None) == candidate.decided_by for s in ordered)
+                   else None)
         for strategy in ordered:
             # the sends of this strategy run, and its verdict, are one scope of the
             # trace (FR-FUZZ-60): explicit, never inferred from timestamps
@@ -375,7 +395,10 @@ class Oracle:
                     # this mechanism cannot place the point (PA-0115): no verdict from it,
                     # and no reward or cost for its arm; the others still run
                     unplaceable = unplaceable or str(exc)
-                    _trace_strategy("unplaceable", detail=str(exc)[:120])
+                    if candidate.decided_by is not None and _decides(strategy, candidate):
+                        decider_reason = decider_reason or str(exc)
+                    _trace_strategy("unplaceable", detail=str(exc)[:120],
+                                    decides=_decides(strategy, candidate))
                     continue
                 except ProbeUnobserved as exc:
                     # a probe got no response (BUG-0147, PA-0137(1), PA-0153): no verdict
@@ -386,7 +409,7 @@ class Oracle:
                     # The sender has already retried an idempotent probe once. Reward 0 and
                     # the probes it sent, as for any inconclusive arm. Logged with the host
                     # and the error class only.
-                    placed = True
+                    placed = placed or _decides(strategy, candidate)
                     if self.scheduler is not None:
                         self.scheduler.update(ctx, strategy.arm, 0.0, cost=max(1, probe.count))
                     if inconclusive is None:
@@ -402,9 +425,10 @@ class Oracle:
                         "probe got no response",
                         extra={"host": urlsplit(candidate.url).hostname or "",
                                "error": type(exc.__cause__ or exc).__name__})
-                    _trace_strategy("unobserved", detail=type(exc.__cause__ or exc).__name__)
+                    _trace_strategy("unobserved", detail=type(exc.__cause__ or exc).__name__,
+                                    decides=_decides(strategy, candidate))
                     continue
-                placed = True
+                placed = placed or _decides(strategy, candidate)
                 if verdict is not None and notes.notes:
                     # the probes went without the run's session (FR-SESS-20, O2)
                     verdict.evidence["session"] = "; ".join(sorted(notes.notes))
@@ -414,7 +438,8 @@ class Oracle:
                     inconclusive = verdict
                 _trace_strategy("confirmed" if confirmed else
                                 "inconclusive" if verdict is not None
-                                and verdict.inconclusive else "not_confirmed", verdict)
+                                and verdict.inconclusive else "not_confirmed", verdict,
+                                decides=_decides(strategy, candidate))
                 if self.scheduler is not None:               # reward+cost only the tried arms
                     self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
                                           cost=max(1, probe.count))
@@ -427,11 +452,13 @@ class Oracle:
                             "mechanism": verdict.mechanism})
                     return verdict, None
 
-        if not placed and unplaceable is not None:
-            # no mechanism could place it: unlabelled, never a negative (PA-0108)
+        if not placed and (unplaceable is not None or missing is not None):
+            # no deciding mechanism could place it: unlabelled, never a negative
+            # (FR-FUZZ-47; BUG-0523: the decider's own reason first)
+            reason = decider_reason or missing or unplaceable or ""
             return None, Verdict(False, candidate.vuln_class or "", UNPLACEABLE,
                                  {"unplaceable": candidate.location,
-                                  "reason": unplaceable[:200]}, inconclusive=True)
+                                  "reason": reason[:200]}, inconclusive=True)
         return None, inconclusive
 
     def _write_finding(self, candidate: Candidate, verdict: Verdict) -> None:

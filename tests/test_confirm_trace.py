@@ -478,10 +478,9 @@ def test_a_launch_failure_is_one_failed_launch_step(monkeypatch, tmp_path):
 
 
 def test_a_placement_refusal_ends_unplaceable_at_the_refusal(monkeypatch, tmp_path):
-    """The executor's refusals before any browser starts return
-    ``ExecObservation(False, …)`` as before; their visit records the request as not
-    sent and ends ``unplaceable`` at the refusal, never "not executed" (which would be
-    drawn "did not fire")."""
+    """The executor's refusals before any browser starts raise `UnplaceableLocation`
+    (BUG-0523); their visit records the request as not sent and ends ``unplaceable`` at
+    the refusal, never "not executed" (which would be drawn "did not fire")."""
     from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
     _fake_pw(monkeypatch)
     url = "http://127.0.0.1:3000/a"
@@ -494,12 +493,13 @@ def test_a_placement_refusal_ends_unplaceable_at_the_refusal(monkeypatch, tmp_pa
             rec = trace.TraceRecorder(store, run)
             with trace.recording(rec), trace.test_scope("t1"), \
                     trace.strategy_scope(STRATEGY):
-                obs = PlaywrightBrowserExecutor().run(req, "tok")
+                with pytest.raises(UnplaceableLocation, match="unplaceable") as refused:
+                    PlaywrightBrowserExecutor().run(req, "tok")
             rec.close()
             events = [b for *_x, b in _bodies(store, run)]
             labels = [s["label"] for s in diagram.sequence(store.conn, run,
                                                            "test:t1")["steps"]]
-        assert obs.executed is False and "unplaceable" in obs.detail     # unchanged
+        assert "unplaceable" in str(refused.value)        # raised, no verdict (BUG-0523)
         assert [(b["step"], b["outcome"]) for b in events] == \
             [(step, "not_sent"), ("end", "unplaceable")]
         assert not any("did not fire" in lb for lb in labels)

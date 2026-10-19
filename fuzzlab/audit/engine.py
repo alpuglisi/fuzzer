@@ -55,6 +55,10 @@ class InjectionPoint:
     # A crawled URL-shaped example's `value_shape.redirect_seed` (BUG-0124): written to
     # an open-redirect candidate's evidence only (the stated FR-AUD-20 exception).
     redirect_seed: str | None = None
+    # The one mechanism that decides this point (FR-AUD-30, BUG-0523): ``(category,
+    # arm)``, written by the point builder (a stored case's observe point, a
+    # ground-truth DOM point); its arm reaches that category's evidence only.
+    decided_by: tuple[str, str] | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -114,6 +118,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                     evidence["base_value"] = point.base_value
                 if point.redirect_seed is not None and rule.category == "open-redirect":
                     evidence["redirect_seed"] = point.redirect_seed     # FR-AUD-21
+                if point.decided_by is not None and rule.category == point.decided_by[0]:
+                    evidence["decided_by"] = point.decided_by[1]        # FR-AUD-30
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",

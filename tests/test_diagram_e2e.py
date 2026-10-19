@@ -657,3 +657,29 @@ def test_confirmation_steps_export_to_mermaid_and_status_names_only_the_remainin
         assert "callback after its window" in unsupported
     finally:
         store.close()
+
+
+def test_a_non_deciding_strategy_is_drawn_as_not_deciding(tmp_path):
+    """CC-UI-0066 (BUG-0523): a strategy run that does not decide its candidate is drawn
+    "(does not decide this candidate)"; a confirmation is recorded as deciding (it
+    counts whoever made it) and an older event without ``decides`` reads as deciding,
+    so neither gets the note."""
+    runs = [("xss-reflected:reflected-context", "not_confirmed", False, "a"),
+            ("xss-stored:browser-execution", "unplaceable", True, "b"),
+            ("xss-reflected:reflected-context", "confirmed", True, "c"),
+            ("sqli:error-signature", "not_confirmed", None, "d")]
+    with Store(tmp_path / "s.db") as store:
+        run = store.start_run("auto", "h")
+        rec = trace.TraceRecorder(store, run)
+        for name, outcome, decides, key in runs:
+            body = {"test": "t1", "strategy": name, "outcome": outcome}
+            if decides is not None:
+                body["decides"] = decides
+            rec.emit("test.strategy", body, key=key, scope="test:t1")
+        rec.close()
+        steps = diagram.sequence(store.conn, run, "test:t1")["steps"]
+    labels = {s["evidence"][0]: s["label"] for s in steps}
+    assert labels["a"] == ("xss-reflected:reflected-context: not_confirmed "
+                           "(does not decide this candidate)")
+    for key in ("b", "c", "d"):
+        assert "does not decide" not in labels[key], labels[key]
