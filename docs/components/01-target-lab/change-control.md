@@ -3,6 +3,29 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0312 — secDevLabs answer keys checked against upstream's own fixes (2026-10-19)
+- Change: every `lab/ground-truth-secdevlabs-*/labels.json` case that an upstream
+  "mitigation solution 🔒" pull request fixes now cites it in `[prov: ...]`;
+  gossip-world gains SDLGW-0006; mongection's SDLMG-0003 records why upstream's
+  defence-in-depth fix does not make it a positive.
+- Reason: the owner asked for a published answer key (2026-10-19). secDevLabs publishes
+  none (searched: the repository, its READMEs, OWASP VWAD, the authors' GTS 33
+  tutorial). Its READMEs link, per app, the pull requests labelled "mitigation
+  solution 🔒": the maintainers' accepted fixes, whose diffs name the vulnerable code.
+  Those were read for every built app: CopyNPaste #411/#349, Gossip World #349, SSType
+  #454/#413/#393, Mongection #412, Comment Killer #568, ViniJr Blog #207/#417, Amarelo
+  Designs #422/#210.
+- Findings: every positive in the keys matches an upstream fix. Upstream's #349 also
+  escapes `newgossip.html`'s `value="{{text | safe}}"`: a reflected XSS when
+  `/newgossip` is posted with a field missing, absent from the key -- now SDLGW-0006
+  (checked live: `"><u ...>` breaks out of the attribute; the title stays escaped).
+  Upstream's #412 also stringifies `/register`'s email: still a negative here, since
+  the email regex refuses any object or operator and an array of strings carries none
+  (checked live). Cases beyond upstream's fixes (CopyNPaste's DOM XSS, ViniJr's
+  reflected XSS, SSType's XSS) stay, tagged as found in the source.
+- Deliverables:
+  - [x] keys updated; the static tests pass — done
+
 ### CC-LAB-0311 — Labs with two origins; secDevLabs Comment Killer (FR-LAB-308) (2026-10-19)
 - Change: `fuzzlab/labels/schemas/{labels,injection-points}.schema.json` and
   `fuzzlab/labels/contract.py` (`origin` on cases and points; `_check_origins`:

@@ -13,7 +13,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_flask_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossip.html:78 renders the stored text with `| safe` on GET /gossip/<id> (checked live at bring-up with a marker tag: raw). Needs the lab session and the form's _csrf_token."
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README; upstream mitigation PR #349] templates/gossip.html:78 renders the stored text with `| safe` on GET /gossip/<id> (checked live at bring-up with a marker tag: raw). Needs the lab session and the form's _csrf_token."
   },
   {
    "case_id": "SDLGW-0002",
@@ -26,7 +26,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_flask_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossip.html:116 renders each stored comment with `| safe` on the same page (checked live at bring-up with a marker tag: raw). /gossip/1 exists because the bootstrap seeds one gossip."
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README; upstream mitigation PR #349] templates/gossip.html:116 renders each stored comment with `| safe` on the same page (checked live at bring-up with a marker tag: raw). /gossip/1 exists because the bootstrap seeds one gossip."
   },
   {
    "case_id": "SDLGW-0003",
@@ -39,7 +39,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_flask_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] templates/gossips.html:58 echoes `search` with `| safe` (checked live at bring-up with a marker tag: raw). Needs the lab session."
+   "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README; upstream mitigation PR #349] templates/gossips.html:58 echoes `search` with `| safe` (checked live at bring-up with a marker tag: raw). Needs the lab session."
   },
   {
    "case_id": "SDLGW-0004",
@@ -66,6 +66,19 @@
    "rendering": "server",
    "stack": "python_flask_secdevlabs",
    "notes": "[reach: gt] [prov: secDevLabs a3/gossip-world README] the subtitle is autoescaped on /gossip and /gossip/<id> (checked live at bring-up with a marker tag: escaped)."
+  },
+  {
+   "case_id": "SDLGW-0006",
+   "url": "/newgossip",
+   "method": "POST",
+   "param": "text",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html-attribute",
+   "expected_vulnerable": true,
+   "rendering": "server",
+   "stack": "python_flask_secdevlabs",
+   "notes": "[reach: gt] [prov: upstream mitigation PR #349 (newgossip.html value=\"{{text | safe}}\"); found reading that fix, not in the README] a /newgossip POST missing a field re-renders the form with `text` unescaped inside the textarea's value attribute: `\"><u ...>` breaks out into markup (checked live, 200); the title is escaped there."
   }
  ]
 }

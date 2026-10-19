@@ -13,7 +13,7 @@
    "expected_vulnerable": true,
    "rendering": "server-json",
    "stack": "go_echo_secdevlabs",
-   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] app/util/db.go:49 concatenates `user` into `select * from Users where username = '...'`; a quote returns MariaDB error 1064 in the JSON answer (checked live at bring-up). The login form on / posts it as JSON."
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README; upstream mitigation PR #411] app/util/db.go:49 concatenates `user` into `select * from Users where username = '...'`; a quote returns MariaDB error 1064 in the JSON answer (checked live at bring-up). The login form on / posts it as JSON."
   },
   {
    "case_id": "SDLCNP-0002",
@@ -26,7 +26,7 @@
    "expected_vulnerable": true,
    "rendering": "server-json",
    "stack": "go_echo_secdevlabs",
-   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README] app/util/db.go:91,111 concatenate `user` into the lookup and the insert; a quote returns error 1064 (checked live). The register form on / posts it as JSON."
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/copy-n-paste README; upstream mitigation PR #411] app/util/db.go:91,111 concatenate `user` into the lookup and the insert; a quote returns error 1064 (checked live). The register form on / posts it as JSON."
   },
   {
    "case_id": "SDLCNP-0003",

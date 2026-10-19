@@ -14,7 +14,7 @@
    "expected_vulnerable": true,
    "rendering": "js",
    "stack": "react_go_echo_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/comment-killer README] the API stores the JSON body's `comment`; the page at the lab base (`/`) passes every stored comment to app/src/Comment.js Parse, which evals the text between its first 8 characters and its last `<`: `<script>...</script>` runs for every visitor (checked live in Chromium: the dialog fired). Stored on the API's origin, rendered on the page's (two origins, FR-LAB-308)."
+   "notes": "[reach: gt] [prov: secDevLabs a3/comment-killer README; upstream mitigation PR #568] the API stores the JSON body's `comment`; the page at the lab base (`/`) passes every stored comment to app/src/Comment.js Parse, which evals the text between its first 8 characters and its last `<`: `<script>...</script>` runs for every visitor (checked live in Chromium: the dialog fired). Stored on the API's origin, rendered on the page's (two origins, FR-LAB-308)."
   },
   {
    "case_id": "SDLCK-0002",

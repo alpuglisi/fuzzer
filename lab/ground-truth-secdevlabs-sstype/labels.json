@@ -13,7 +13,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_tornado_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] src/server.py:16-18 splices `name` into the template source, then compiles it: `{{7*7}}` renders 49 (checked live). The page has no form: `name` is known from upstream's README only."
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README; upstream mitigation PRs #454, #413, #393] src/server.py:16-18 splices `name` into the template source, then compiles it: `{{7*7}}` renders 49 (checked live). The page has no form: `name` is known from upstream's README only."
   },
   {
    "case_id": "SDLSST-0002",
@@ -26,7 +26,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_tornado_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README] the same splice puts `name` into the HTML unescaped (a marker tag comes back raw, text/html; checked live)."
+   "notes": "[reach: gt] [prov: secDevLabs a3/sstype README; upstream mitigation PR #454] the same splice puts `name` into the HTML unescaped (a marker tag comes back raw, text/html; checked live)."
   },
   {
    "case_id": "SDLSST-0003",

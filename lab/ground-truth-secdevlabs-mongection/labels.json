@@ -13,7 +13,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "node_express_mongoose_secdevlabs",
-   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] src/db.js: User.find({$and: [{email}, {password}]}) with the JSON body's values as sent; {\"$ne\": null} in both logs in and lists every user's email (checked live at bring-up). The login page posts this JSON body."
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README; upstream mitigation PR #412] src/db.js: User.find({$and: [{email}, {password}]}) with the JSON body's values as sent; {\"$ne\": null} in both logs in and lists every user's email (checked live at bring-up). The login page posts this JSON body."
   },
   {
    "case_id": "SDLMG-0002",
@@ -26,7 +26,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "node_express_mongoose_secdevlabs",
-   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] the same query: a known email with password {\"$ne\": \"x\"} logs in (checked live at bring-up)."
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README; upstream mitigation PR #412] the same query: a known email with password {\"$ne\": \"x\"} logs in (checked live at bring-up)."
   },
   {
    "case_id": "SDLMG-0003",
@@ -39,7 +39,7 @@
    "expected_vulnerable": false,
    "rendering": "server",
    "stack": "node_express_mongoose_secdevlabs",
-   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] an email is regex-tested before findOne: an object fails ('Bad Email') and never reaches the query (checked live at bring-up)."
+   "notes": "[reach: crawl,gt] [prov: secDevLabs a3/mongection README] an email is regex-tested before findOne: an object fails ('Bad Email') and never reaches the query (checked live at bring-up). Upstream's mitigation PR #412 also stringifies this lookup (defence in depth); an object or operator never passes the regex here, and an array of plain strings carries no operator (both checked live)."
   },
   {
    "case_id": "SDLMG-0004",

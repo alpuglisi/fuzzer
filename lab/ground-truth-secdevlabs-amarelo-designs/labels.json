@@ -13,7 +13,7 @@
    "expected_vulnerable": true,
    "rendering": "server",
    "stack": "python_flask_secdevlabs",
-   "notes": "[reach: gt] [prov: secDevLabs a8/amarelo-designs README] app/app.py:40 pickle.loads(base64.b64decode(cookie)); a pickled time.sleep(2.5) delays the answer by 2.5 s (checked live). The cookie is set by a successful /admin login (admin/admin), which a crawl does not perform."
+   "notes": "[reach: gt] [prov: secDevLabs a8/amarelo-designs README; upstream mitigation PRs #422, #210] app/app.py:40 pickle.loads(base64.b64decode(cookie)); a pickled time.sleep(2.5) delays the answer by 2.5 s (checked live). The cookie is set by a successful /admin login (admin/admin), which a crawl does not perform."
   },
   {
    "case_id": "SDLAD-0002",

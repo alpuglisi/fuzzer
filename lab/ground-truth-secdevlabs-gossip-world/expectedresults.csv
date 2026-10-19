@@ -7,3 +7,4 @@ SDLGW-0002,/gossip/1,POST,comment,body,xss-stored,true,/gossip/1,sink,,direct
 SDLGW-0003,/gossip,GET,search,query,xss-reflected,true,/gossip,sink,,direct
 SDLGW-0004,/newgossip,POST,title,body,xss-stored,false,/newgossip,sink,,direct
 SDLGW-0005,/newgossip,POST,subtitle,body,xss-stored,false,/newgossip,sink,,direct
+SDLGW-0006,/newgossip,POST,text,body,xss-reflected,true,/newgossip,sink,,direct

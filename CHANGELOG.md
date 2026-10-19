@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (secDevLabs answer keys checked against upstream's fixes)
+- **What:** each secDevLabs answer-key case now cites the upstream "mitigation solution" pull request that fixes it; gossip-world gains a reflected XSS those fixes revealed (CC-LAB-0312).
+- **Why:** the owner asked for a published answer key; secDevLabs has none, and its maintainers' accepted fixes are the closest published source.
+
 ## 2026-10-19 (labs with two origins; secDevLabs Comment Killer)
 - **What:** answer keys can place a case or point on another loopback origin of the lab (refused if off-machine, or if a path appears on two origins); labs may publish fixed ports their code dictates; Comment Killer (page + API on localhost:10017, stored XSS through eval) is a lab (CC-LAB-0311, FR-LAB-308).
 - **Why:** the owner approved multi-origin labs; Comment Killer had been withdrawn for exactly this.
