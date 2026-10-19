@@ -104,8 +104,8 @@ Newest first.
   - [x] FR-UI-513 added; FR-UI-510 and FR-UI-13 edited in place; BUG-0519 — done
   - [x] text for CHANGELOG, ERROR_LOG, PA-0519, SHARED_PRIMITIVES, `docs/DIAGRAMS.md`
     supplied to the orchestrator, who holds those files — done
-  - [ ] `scripts/verify_change.py --base 56ede12` with `FUZZLAB_REQUIRE_BROWSER=1` —
-    see Effectiveness
+  - [x] `scripts/verify_change.py --base 56ede12` with `FUZZLAB_REQUIRE_BROWSER=1` —
+    done (Effectiveness)
 - Effectiveness (assessed 2026-10-19):
   - Each new test fails with its own part reverted (scripted revert, then restore):
     - (a) the old filter: `AssertionError: assert 'actor:spider' in set()`;
@@ -130,7 +130,14 @@ Newest first.
     links 1.8 ms), and FastAPI's encoding of the added field about 21 ms (a flat field
     measured 15 ms; not worth a contract change). The draft's +21 ms estimate counted
     the query alone.
-  - Harness: pending (filled by the verification commit).
+  - Harness: `FUZZLAB_REQUIRE_BROWSER=1 scripts/verify_change.py --base 56ede12` on
+    fbf5f4d: 109 test files, one parallel pass, 0 serial; 3540 passed, 0 failed, 0
+    errors, 1 skipped (`test_packaging::test_the_wheel_ships_every_tracked_file`:
+    bdist_wheel unavailable on this host, Debian setuptools), 16 xfailed. No browser
+    test skipped; the web browser modules passed in full (`test_web_pages_browser` 10,
+    `test_web_sitetree_browser` 15, `test_web_projects_browser` 2,
+    `test_web_launcher_browser` 1, `test_web_repeater_browser` 1, and
+    `test_web_diagrams` 7, two of them in real Chromium).
 
 ### CC-UI-0062 — Diagram views honest; origin list, application evidence, scope validation (BUG-0515, BUG-0518) (2026-10-19)
 - Change:
