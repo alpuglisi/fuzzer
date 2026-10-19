@@ -1,0 +1,62 @@
+{
+ "version": 1,
+ "target": "secdevlabs_streaming_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLST-0001",
+   "url": "/play/matthewpets",
+   "method": "GET",
+   "param": "content",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "js",
+   "stack": "angular_spring_mariadb_secdevlabs",
+   "source_url": "http://localhost:8080/live/1/messages",
+   "notes": "[reach: gt] [prov: secDevLabs a3/streaming README; upstream mitigation PRs #538/#523/#513] the API stores the JSON body's `content` (PUT /live/1/messages, the chat of matthewpets' live); the watch page /play/matthewpets renders every message's content through `innerHTML` (play.component.ts buildLiveHTMLMessage; #538 makes it textContent). An <img onerror> in content ran in Chromium (checked live 2026-10-19). Stored on the API's origin, rendered on the page's (FR-LAB-308); planted with the app's own JSON PUT (FR-FUZZ-56): a form POST draws 405."
+  },
+  {
+   "case_id": "SDLST-0002",
+   "url": "/play/matthewpets",
+   "method": "GET",
+   "param": "username",
+   "location": "body",
+   "vuln_class": "xss-stored",
+   "sink_context": "html",
+   "expected_vulnerable": true,
+   "rendering": "js",
+   "stack": "angular_spring_mariadb_secdevlabs",
+   "source_url": "http://localhost:8080/live/1/messages",
+   "notes": "[reach: gt] [prov: secDevLabs a3/streaming README; upstream mitigation PRs #538/#523/#513] the same PUT's `username` becomes a new user's username (AddMessageOnLiveService), and the watch page renders `message.user.username` through `innerHTML` too; an <img onerror> there ran in Chromium (checked live 2026-10-19). #538 fixes only content; this sink stays in upstream's fix."
+  },
+  {
+   "case_id": "SDLST-0003",
+   "url": "/live/1/messages",
+   "origin": "http://localhost:8080",
+   "method": "PUT",
+   "param": "content",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "angular_spring_mariadb_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/streaming README; upstream mitigation PRs #538/#523/#513] the PUT answers the stored message as `Content-Type: application/json` (checked live): its `content` echo is never rendered as HTML by the response itself; it executes only on the watch page (SDLST-0001/0002). Spring Data JPA stores it parameterized: a quote is stored verbatim, 200, no SQL error (checked live)."
+  },
+  {
+   "case_id": "SDLST-0004",
+   "url": "/live/1/messages",
+   "origin": "http://localhost:8080",
+   "method": "PUT",
+   "param": "username",
+   "location": "body",
+   "vuln_class": "xss-reflected",
+   "sink_context": "html",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "angular_spring_mariadb_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a3/streaming README; upstream mitigation PRs #538/#523/#513] the PUT answers the stored message as `Content-Type: application/json` (checked live): its `username` echo is never rendered as HTML by the response itself; it executes only on the watch page (SDLST-0001/0002). Spring Data JPA stores it parameterized: a quote is stored verbatim, 200, no SQL error (checked live)."
+  }
+ ]
+}

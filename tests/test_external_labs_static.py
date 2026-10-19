@@ -44,7 +44,8 @@ GT_DIRS = {"bwapp": LAB / "ground-truth-bwapp", "juice-shop": LAB / "ground-trut
            "secdevlabs-vinijr-blog": LAB / "ground-truth-secdevlabs-vinijr-blog",
            "secdevlabs-amarelo-designs": LAB / "ground-truth-secdevlabs-amarelo-designs",
            "secdevlabs-mongection": LAB / "ground-truth-secdevlabs-mongection",
-           "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer"}
+           "secdevlabs-comment-killer": LAB / "ground-truth-secdevlabs-comment-killer",
+           "secdevlabs-streaming": LAB / "ground-truth-secdevlabs-streaming"}
 #: Labs scored by URL coverage, not an injection answer key: the lab serves its own
 #: expected set (the Crawl Maze: /fetch-expected-results, CC-LAB-0302).
 COVERAGE_LABS = {"security-crawl-maze"}
@@ -420,7 +421,9 @@ def test_every_reachable_case_has_its_point(lab):
         if not reach_of(case):
             continue        # [reach: none] (B-r2.6)
         if case.vuln_class == "xss-stored" and case.source_url:
-            assert any(k[0] == case.source_url for k in points), case.case_id
+            # an absolute source_url names the store on another origin (FR-LAB-308)
+            assert any(case.source_url in (p.url, (p.origin or "") + p.url)
+                       for p in gt.points), case.case_id
         else:
             assert (case.url, case.method, case.param) in points, case.case_id
 
@@ -1215,8 +1218,10 @@ def test_the_secdevlabs_builds_use_only_pinned_bases_and_the_cached_app():
         text = path.read_text("utf-8")
         froms = [ln.split()[1] for ln in text.splitlines() if ln.startswith("FROM ")]
         assert froms and all("@sha256:" in f for f in froms), lab
-        assert all(ln.split()[1].startswith((".cache/app/", ".cache/dists"))
+        assert all(ln.split()[1].startswith((".cache/app/", ".cache/dists", ".cache/m2"))
                    for ln in text.splitlines() if ln.startswith("COPY ")), lab
+        if "mvn" in text or ".cache/m2" in text:   # the host-resolved repository, offline
+            assert "mvn -o" in text and "-Dmaven.repo.local=/m2" in text, lab
         if "golang" in text:
             assert "GOPROXY=off" in text and "-mod=vendor" in text, lab   # never the network
             assert "go mod download" not in text, lab
@@ -1269,6 +1274,50 @@ def test_a_secdevlabs_app_is_copied_from_the_pinned_checkout_only(tmp_path, monk
         ext.fetch_secdevlabs_app("secdevlabs-x", root=root, repo=str(upstream),
                                  commit=pinned2)
     assert calls == [root / "secdevlabs-x" / ".cache" / "app"]
+
+
+def test_a_maven_app_resolves_on_the_host_and_a_prebuilt_page_skips_npm(tmp_path,
+                                                                        monkeypatch):
+    """CC-LAB-0314: a pom.xml is resolved by `maven_offline` into the lab's .cache/m2;
+    a lab in SECDEVLABS_PREBUILT never runs npm on its shipped bundle's lockfile."""
+    upstream = tmp_path / "upstream"
+    app = upstream / "owasp-top10-2021-apps" / "a3" / "y"
+    (app / "backend").mkdir(parents=True)
+    (app / "frontend").mkdir()
+    (app / "backend" / "pom.xml").write_text("<project/>\n")
+    (app / "frontend" / "package-lock.json").write_text("{}\n")
+    run_bounded(["git", "-C", str(upstream), "init", "-q"], timeout=30)
+    run_bounded(["git", "-C", str(upstream), "add", "."], timeout=30)
+    run_bounded(["git", "-C", str(upstream), "-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-qm", "x"], timeout=30)
+    pinned = run_bounded(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                         timeout=30).stdout.strip()
+    root = tmp_path / "external"
+    calls = []
+    monkeypatch.setitem(ext.SECDEVLABS_APPS, "secdevlabs-y", "owasp-top10-2021-apps/a3/y")
+    monkeypatch.setitem(ext.SECDEVLABS_PREBUILT, "secdevlabs-y", "ships its bundle")
+    monkeypatch.setattr(ext, "npm_install", lambda d, timeout: calls.append(("npm", d)))
+    monkeypatch.setattr(ext, "maven_offline",
+                        lambda d, repo, timeout: calls.append(("mvn", d, repo)))
+    got = ext.fetch_secdevlabs_app("secdevlabs-y", root=root, repo=str(upstream),
+                                   commit=pinned)
+    assert calls == [("mvn", got / "backend", root / "secdevlabs-y" / ".cache" / "m2")]
+
+
+def test_maven_offline_checks_checksums_and_removes_its_build(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, timeout, cwd):
+        seen["cmd"] = cmd
+        (tmp_path / "target").mkdir()
+        return subprocess.CompletedProcess(cmd, 1, "", "Checksum validation failed")
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("fuzzlab.procutil.run_bounded", fake_run)
+    with pytest.raises(ext.ExternalLabError, match="Checksum"):
+        ext.maven_offline(tmp_path, tmp_path / "m2")
+    assert "--strict-checksums" in seen["cmd"] and f"-Dmaven.repo.local={tmp_path / 'm2'}" \
+        in seen["cmd"]
+    assert not (tmp_path / "target").exists()
 
 
 def test_go_vendor_refuses_a_module_that_fails_verification(tmp_path, monkeypatch):

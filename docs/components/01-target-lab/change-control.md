@@ -3,6 +3,33 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0314 — secDevLabs Streaming: a PUT-planted stored XSS on two origins (2026-10-19)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_APPS` streaming;
+  `SECDEVLABS_PREBUILT`: no npm for a lab serving its shipped bundle; `maven_offline`,
+  called for every `pom.xml`; `SECDEVLABS_MAVEN_IMAGE`, `SECDEVLABS_NGINX_IMAGE`;
+  `LAB_META` streaming with fixed port 8080); `lab/external/secdevlabs-streaming/`
+  (page `Dockerfile`, `backend/Dockerfile`, `compose.yaml`); `lab/
+  ground-truth-secdevlabs-streaming/`; `.gitignore` (its CSV tracked); the static tests
+  (the GT dir registered; a stored case's absolute `source_url` matched against its
+  point's origin, a gap left by FR-LAB-308; `.cache/m2` copied only with `mvn -o`; the
+  Maven fetch and the prebuilt skip).
+- Reason: the owner approved PUT and PATCH (2026-10-19) for this lab (FR-FUZZ-56).
+- Measurements (live, 2026-10-19): an `<img onerror>` PUT into `content` and into
+  `username` both ran in Chromium on `/play/matthewpets`; a form POST to the store draws
+  405; quotes are stored verbatim (200, no SQL error); the PUT answers
+  `application/json`. Upstream's fix PRs: #538 (content → `textContent`), #523, #513;
+  #538 leaves the `username` sink.
+- Effectiveness: `fuzzlab auto --points ground-truth --browser --fuzz-json-writes
+  --score`: tp=2 fp=0 fn=0 tn=2 (3 requests). With `--mode manual --categories
+  xss,sql-injection,nosql-injection`: 93 requests, the same two findings only.
+- Ground truth: first written with SQL injection negatives on the PUT points; the
+  static guard refused them (no positive selects SQL injection, so an automatic run
+  never tests them), replaced with reflected-XSS negatives on the JSON echo.
+- Risk: low; loopback only, database unpublished on an internal network.
+- Deliverables:
+  - [x] fixture, lab, ground truth, static tests; lab brought up and measured — done
+  - [x] FR-LAB-306, CHANGELOG, ERROR_LOG (dockerd) — done
+
 ### CC-LAB-0313 — Comment Killer's store point is `server-json` (2026-10-19)
 - Change: `lab/ground-truth-secdevlabs-comment-killer/injection-points.json`: the API's
   `POST /comments` point (a JSON leaf) is `rendering: "server-json"`, not `"js"`.

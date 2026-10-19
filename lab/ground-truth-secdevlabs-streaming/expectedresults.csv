@@ -1,0 +1,8 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Streaming at 10be4384 (external
+# lab fixture lab/external/secdevlabs-streaming), CC-LAB-0313. Derived from labels.json; the
+# loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLST-0001,/play/matthewpets,GET,content,body,xss-stored,true,/play/matthewpets,sink,,direct
+SDLST-0002,/play/matthewpets,GET,username,body,xss-stored,true,/play/matthewpets,sink,,direct
+SDLST-0003,/live/1/messages,PUT,content,body,xss-reflected,false,/live/1/messages,sink,,direct
+SDLST-0004,/live/1/messages,PUT,username,body,xss-reflected,false,/live/1/messages,sink,,direct

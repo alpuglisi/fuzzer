@@ -80,12 +80,20 @@ SECDEVLABS_NODE13_IMAGE = ("docker.io/library/node:13.12.0-alpine@sha256:"
                            "cc85e728fab3827ada20a181ba280cae1f8b625f256e2c86b9094d9bfe834766")
 SECDEVLABS_MONGO_IMAGE = ("mirror.gcr.io/library/mongo:4.4@sha256:"
                           "4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef")
+#: streaming's upstream bases: `maven:3.6.0-jdk-11-slim` builds the backend (and, here,
+#: runs it: upstream's `openjdk:8-jdk-alpine` is not on Google's mirror; Spring Boot
+#: 2.3 runs on Java 11) and `nginx:1.17.1-alpine` serves the page, both from the mirror.
+SECDEVLABS_MAVEN_IMAGE = ("mirror.gcr.io/library/maven:3.6.0-jdk-11-slim@sha256:"
+                          "4f0face24d2f79439a8fa394555b09be99c9ad537b9b19983fb8cc358818a42d")
+SECDEVLABS_NGINX_IMAGE = ("mirror.gcr.io/library/nginx:1.17.1-alpine@sha256:"
+                          "17bd1698318e9c0f9ba2c5ed49f53d690684dab7fe3e8019b855c352528d57be")
 PINNED_IMAGES = frozenset({BUSYBOX_IMAGE, PHP_IMAGE, MYSQL_IMAGE, JUICE_SHOP_IMAGE,
                            CRAWL_MAZE_PYTHON_IMAGE, SECDEVLABS_GOLANG_IMAGE,
                            SECDEVLABS_MARIADB_IMAGE, SECDEVLABS_PYTHON38_IMAGE,
                            SECDEVLABS_PYTHON312_IMAGE, SECDEVLABS_PHP_IMAGE,
                            SECDEVLABS_NODE20_IMAGE, SECDEVLABS_MONGO_IMAGE,
-                           SECDEVLABS_NODE13_IMAGE})
+                           SECDEVLABS_NODE13_IMAGE, SECDEVLABS_MAVEN_IMAGE,
+                           SECDEVLABS_NGINX_IMAGE})
 
 BWAPP_ZIP_URL = "https://sourceforge.net/projects/bwapp/files/bWAPP/bWAPP_latest.zip/download"
 BWAPP_ZIP_NAME = "bWAPP_latest.zip"
@@ -136,6 +144,13 @@ SECDEVLABS_APPS = {
     "secdevlabs-amarelo-designs": "owasp-top10-2021-apps/a8/amarelo-designs",
     "secdevlabs-mongection": "owasp-top10-2021-apps/a3/mongection",
     "secdevlabs-comment-killer": "owasp-top10-2021-apps/a3/comment-killer",
+    "secdevlabs-streaming": "owasp-top10-2021-apps/a3/streaming",
+}
+#: lab name -> why its npm lockfiles are not installed: the image serves the bundle the
+#: repository ships, checked against the source it was built from (CC-LAB-0314).
+SECDEVLABS_PREBUILT = {
+    "secdevlabs-streaming": "serves app/frontend/dist (the repo's Angular build; its "
+                            "chat sinks and API calls match src/app/lives)",
 }
 #: lab name -> the Python distributions its image installs offline (`fetch_pypi_dists`):
 #: the app's own requirements.txt pins, each file's sha256 as PyPI publishes it.
@@ -246,6 +261,10 @@ LAB_META: dict[str, LabMeta] = {
     "secdevlabs-comment-killer": LabMeta("secdevlabs-comment-killer", "app", "SDL_CK_PORT",
                                          3074, 3000, "/", "/", None, "", False,
                                          fixed_ports=((10017, 10017),)),
+    # its bundle calls the backend at a hard-coded http://localhost:8080
+    "secdevlabs-streaming": LabMeta("secdevlabs-streaming", "frontend", "SDL_STREAMING_PORT",
+                                    3078, 80, "/", "/", None, "", False,
+                                    fixed_ports=((8080, 8080),)),
     "secdevlabs-mongection": LabMeta("secdevlabs-mongection", "server", "SDL_MONGECTION_PORT",
                                      3077, 10001, "/", "/", None, "", False),
     "secdevlabs-amarelo-designs": LabMeta("secdevlabs-amarelo-designs", "app",
@@ -500,6 +519,28 @@ def go_vendor(moddir: Path, *, timeout: float = 900.0) -> None:
             raise ExternalLabError("go mod verify did not verify every module")
 
 
+def maven_offline(pomdir: Path, repo: Path, *, timeout: float = 900.0) -> None:
+    """Resolve a Maven project's dependencies and build plugins into ``repo`` with the
+    host's Maven, each artifact checked against the checksum its repository publishes
+    (``--strict-checksums``), by building it once here; the build output is removed.
+    The image then builds offline from ``repo`` (``mvn -o``). Raises when Maven is
+    missing or the build fails (a checksum mismatch fails it)."""
+    import shutil
+
+    from fuzzlab.procutil import run_bounded
+    mvn = shutil.which("mvn")
+    if mvn is None:
+        raise ExternalLabError("Maven is not installed on this host: needed to resolve "
+                               "the app's dependencies (checked against their checksums)")
+    res = run_bounded([mvn, "-B", "-q", "--strict-checksums", f"-Dmaven.repo.local={repo}",
+                       "-Dmaven.test.skip=true", "package"], timeout=timeout,
+                      cwd=str(pomdir))
+    shutil.rmtree(pomdir / "target", ignore_errors=True)
+    if res.returncode != 0:
+        raise ExternalLabError(f"mvn package failed: "
+                               f"{(res.stderr or res.stdout or '').strip()[-200:]}")
+
+
 def npm_install(pkgdir: Path, *, timeout: float = 900.0) -> None:
     """Install a Node package's locked dependencies with the host's npm (``npm ci``:
     exactly the lockfile, each package checked against its ``integrity`` hash; no
@@ -535,8 +576,10 @@ def fetch_secdevlabs_app(lab: str, *, root: Path = EXTERNAL_DIR, repo: str = SEC
     for gomod in sorted(dest.rglob("go.mod")):
         go_vendor(gomod.parent, timeout=timeout)
     for lock in sorted(dest.rglob("package-lock.json")):
-        if "node_modules" not in lock.parts:
+        if "node_modules" not in lock.parts and lab not in SECDEVLABS_PREBUILT:
             npm_install(lock.parent, timeout=timeout)
+    for pom in sorted(dest.rglob("pom.xml")):
+        maven_offline(pom.parent, root / lab / ".cache" / "m2", timeout=timeout)
     if lab in SECDEVLABS_PYPI:
         fetch_pypi_dists(SECDEVLABS_PYPI[lab], root / lab / ".cache" / "dists",
                          timeout=timeout)

@@ -4,6 +4,10 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-10-19 (secDevLabs: Streaming)
+- **What:** secDevLabs' Streaming (Angular page + Spring API on two origins) is a lab; its stored XSS is planted with the app's own JSON PUT and scored live tp=2 fp=0 fn=0 tn=2 (CC-LAB-0314).
+- **Why:** the owner approved PUT/PATCH for this lab; the last buildable secDevLabs A3 app.
+
 ## 2026-10-19 (PUT and PATCH)
 - **What:** answer keys may name PUT and PATCH (never DELETE); `auto` probes them only with `--fuzz-json-writes`, as it already did for crawled PUT/PATCH requests; a stored-XSS case plants through the store request its answer key enumerates (method and JSON body), confirmed on a real browser (CC-FUZZ-0095, CC-AUD-0045, FR-FUZZ-56).
 - **Why:** the owner approved PUT and PATCH, not DELETE, for secDevLabs streaming, whose chat is a JSON PUT.

@@ -1,0 +1,30 @@
+{
+ "version": 1,
+ "target": "secdevlabs_streaming_10be4384",
+ "points": [
+  {
+   "url": "/live/1/messages",
+   "origin": "http://localhost:8080",
+   "method": "PUT",
+   "param": "content",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "fuzzlab",
+    "content": "hello"
+   }
+  },
+  {
+   "url": "/live/1/messages",
+   "origin": "http://localhost:8080",
+   "method": "PUT",
+   "param": "username",
+   "location": "body",
+   "rendering": "server-json",
+   "json_body": {
+    "username": "fuzzlab",
+    "content": "hello"
+   }
+  }
+ ]
+}

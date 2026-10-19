@@ -1,0 +1,79 @@
+# secDevLabs "Streaming" (globocom, BSD-3-Clause; external lab fixture, CC-LAB-0314).
+# Lab-only. An Angular page (served by nginx) over a Spring Boot API on MariaDB. A chat
+# message is added with `PUT /live/{id}/messages` (JSON `{username, content}`), and the
+# watch page `/play/<username>` renders each message's `content` and `user.username`
+# through `innerHTML`: stored XSS for every viewer (OWASP 2021 A3).
+#
+# Two origins (FR-LAB-308): the page on the configurable port, and the API on
+# 127.0.0.1:8080, fixed because the page's bundle calls http://localhost:8080.
+#
+# Built by ./Dockerfile (the page: the repository's own prebuilt bundle) and
+# ./backend/Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-streaming` copies into the gitignored .cache/app; the API's
+# Maven dependencies are resolved on the host into .cache/m2 (each checked against its
+# published checksum) and the image builds offline. The database resets to upstream's
+# seed (data.sql) at every API start.
+#
+# Safety: both are published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped. The database
+# credentials are upstream's lab defaults for this throwaway lab.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-streaming
+name: fuzzlab-secdevlabs-streaming
+
+x-podman:
+  in_pod: false
+
+services:
+  frontend:
+    build:
+      context: .
+    networks: [streaming-front]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_STREAMING_PORT:-3078}:80"
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE, SETUID, SETGID, CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 128m
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    networks: [streaming-front, streaming-db]
+    ports:
+      # Loopback only, and this exact port: the page's bundle hard-codes it.
+      - "127.0.0.1:8080:8080"
+    environment:
+      spring.profiles.active: prod
+      A7_STREAMING_DATABASE_URL: "jdbc:mysql://db:3306/streaming?useSSL=false&useTimezone=true&serverTimezone=UTC&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true"
+      A7_STREAMING_DATABASE_USERNAME: root
+      A7_STREAMING_DATABASE_PASSWORD: streaming
+    depends_on: [db]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 768m
+
+  db:
+    image: docker.io/library/mariadb:10.6.3@sha256:3b6f9fa1d406e168998d62501b2ee4f27d53138bebfcdac03540758996c5ff1d
+    networks: [streaming-db]
+    environment:
+      MYSQL_ROOT_PASSWORD: streaming
+      MYSQL_DATABASE: streaming
+      MYSQL_ROOT_HOST: "%"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/var/lib/mysql]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  streaming-front: {}
+  streaming-db:
+    internal: true

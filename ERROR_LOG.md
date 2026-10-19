@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — Docker daemon down again after a container restart (environment; recurrence)
+- **Symptom:** `docker info`: "Cannot connect to the Docker daemon" while bringing up secdevlabs-streaming; a stale `/var/run/docker.pid` and no `dockerd` process.
+- **Root cause:** the session container restarted and nothing restarts `dockerd` (same as the 2026-10-19 secDevLabs bring-up entry).
+- **Remediation:** removed the stale pid file and started `dockerd`. Lasting fix, outside the repo: the environment's setup script should start the daemon.
+- **Status:** Environment (fixed in the session; recurs on a container restart)
+
 ## 2026-10-19 — answer key / web launcher (two omissions in the unpushed secDevLabs commits; caught by existing guards)
 - **Symptom:** `verify_change --base 259c190` on e587d8e: 3751 passed, 2 failed.
   `test_no_ground_truth_dom_point_has_another_location` flagged Comment Killer's

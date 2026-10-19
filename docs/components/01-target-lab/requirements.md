@@ -6432,12 +6432,21 @@ lane) can submit a payload as
   turns into a crash). Ground truth with `json_body` points: NoSQL injection in
   `/login`'s `email` and `password` (positives), `/register`'s `email` and `name`
   (negatives).
+  `secdevlabs-streaming` (A3, Angular + Spring Boot + MariaDB, CC-LAB-0314): the page
+  on 127.0.0.1:3078 (`SDL_STREAMING_PORT`; nginx serving the bundle the repository
+  ships, `SECDEVLABS_PREBUILT`, its sinks and API calls checked against the source), the
+  API on 127.0.0.1:8080 (fixed: the bundle calls `http://localhost:8080`; FR-LAB-308).
+  Its Maven dependencies are resolved on the host into `.cache/m2` (`maven_offline`:
+  `mvn --strict-checksums package`, build output removed) and the image builds with
+  `mvn -o`; it runs on the build image's Java 11 (upstream's `openjdk:8-jdk-alpine` is
+  not on Google's mirror). The database resets to upstream's seed at each API start.
+  Ground truth (PUT, FR-FUZZ-56): stored XSS in `/play/matthewpets` through the chat's
+  `content` and `username`, planted with `PUT /live/1/messages` (JSON) on the API's
+  origin (positives, both fired in Chromium); the PUT's JSON echo of each as reflected
+  XSS (negatives: `application/json`). Scored live by `fuzzlab auto --browser
+  --fuzz-json-writes`: tp=2 fp=0 fn=0 tn=2; with SQL and NoSQL injection also probed on
+  the PUT points (93 requests), no other finding.
   **Not built, and why** (2026-10-18):
-  - `streaming` (Spring Boot + Angular + MariaDB): its second origin is expressible now
-    (FR-LAB-308; the backend builds offline from a host-resolved Maven repository and
-    the repo's prebuilt bundle matches its source); its chat messages are added with
-    `PUT /live/{id}/messages`, which a ground truth admits since FR-FUZZ-56 (2026-10-19;
-    the lab itself is the next change).
   - The other categories (screened 2026-10-18): `tictactoe`, `ecommerce-api` and
     `snake-pro` hard-code `localhost:<their upstream port>` in their pages; the A1/A7
     apps (access control, authentication) need several identities per lab; A4
