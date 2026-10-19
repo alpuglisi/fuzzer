@@ -42,7 +42,11 @@ Newest first.
     - `tests/test_trace_model.py::test_executed_counts_an_m6_visits_store_and_observe_loads`
   - [x] the FR-UI-511 edit — done
   - [ ] rebase onto CC-UI-0063 — todo
-- Effectiveness (assessed 2026-10-19): each test fails on `56ede12`: UI_PROOFS
+- Effectiveness (assessed 2026-10-19): each test fails on `56ede12`: D1, the 12 D2 fixtures, D3 and
+  `test_executed_counts_an_m6_visits_store_and_observe_loads` fail on the old code.
+  Mutations: *executed* without the M6 branch gives `assert 0 == 3`; a `no_status` store
+  drawn as a reply gives `assert not True` (D2).
+
 ### CC-UI-0065 — The ⚑ count on an interface reads the exact coverage (BUG-0519 sweep) (2026-10-19)
 - Change (`fuzzlab/web/static/js/diagrams.js`): an interface's ⚑ count is
   `coverage.finding` (counted in SQL), not the length of the capped `attrs.finding`; a

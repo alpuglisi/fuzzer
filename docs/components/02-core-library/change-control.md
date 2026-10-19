@@ -34,7 +34,11 @@ Newest first.
   - `tests/test_trace_model.py::test_the_m6_browsers_overlay_flow_is_keyed_apart_from_the_tools_exchanges`;
   - `tests/test_trace_model.py::test_browser_steps_reduce_independently_of_order`;
   - the FR-CORE-505 edit.
-- Effectiveness (assessed 2026-10-19): both tests fail on `56ede12`: CORE_PROOFS
+- Effectiveness (assessed 2026-10-19): both tests fail on `56ede12`: on the old code
+  `test_the_m6_browsers_overlay_flow_is_keyed_apart_from_the_tools_exchanges` and
+  `test_browser_steps_reduce_independently_of_order` fail (no M6 flow). With the M6
+  flow given the tool's id, the first fails: `assert {'flow:test:a...|GET|/a:http'} <=
+  {'flow:test:a...|GET|/a:http'}`.
 
 ### CC-CORE-0066 — `safe_ref` blanks a token inside a path segment (BUG-0521) (2026-10-19)
 - Change (`fuzzlab/core/trace.py::_blank_identifiers`): besides a whole identifier-like

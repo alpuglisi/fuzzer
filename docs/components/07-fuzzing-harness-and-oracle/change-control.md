@@ -103,8 +103,49 @@ Newest first.
     (the orchestrator's files; the text is handed over) — todo
 - Effectiveness (assessed 2026-10-19, before the rebase):
   - Each new test was shown to fail on `56ede12` (the old code) or with its own part
-    reverted. The failing lines are quoted below. EFFECTIVENESS_PROOFS
-  - Measured wall time per visit, 20 visits each, with and without a recorder: R3_TIMING
+    reverted. The failing lines are quoted below.
+    - **On `56ede12`.** 39 of the new tests fail there; P2 and P3 pass, because they
+      guard code that exists, and are proven by mutation below.
+      - P1: `AssertionError: assert 53 == ((39 + 0) + 0)`. The app received 53
+        requests; the trace held 39 exchanges and no browser step (BUG-0520).
+      - T7: `AttributeError: module 'fuzzlab.core.trace' has no attribute
+        'collected_steps'`.
+      - T1–T6, T8, T9 (all 7 doubles), the launch-failure and placement-refusal tests,
+        T11, T12, T14 and T15 fail: no `browser.step` or `oob.wait` is recorded, e.g.
+        `assert [] == [('failed', 'RuntimeError'), …]`.
+    - **Mutations.** Each part of the change was reverted alone (scratchpad
+      `prove.py`), and each made its test fail:
+      - the visit emit not contained → T7 `RuntimeError: the trace failed`;
+      - the OOB emit not contained → T7 `RuntimeError: the trace failed`;
+      - `UnplaceableLocation` checked before `NotObserved` → T4
+        `assert ('unplaceable' == 'not_observed'`;
+      - a placement refusal's `end` taken from the returned observation → `assert
+        [('navigate', 'not_sent')] == [('navigate',...unplaceable')]`;
+      - a launch failure's detail with the exception text → `AssertionError: launch`;
+      - a sensitive parameter's value previewed → T8 fails;
+      - the raw canary kept under `path` → T14 `AssertionError: ssrf`;
+      - a refusal counted as a failed request → T6 `('early', …, {'answered': 1,
+        'failed': 1, …})`;
+      - no page listener → T6 `('sub', [3 requests], {'answered': 0, …})`;
+      - the sentinel not stamped in its callback → T1 `assert -1792431826216.6 >= 800`;
+      - the OOB `t` not the handler's stamp → T11 `assert 1792431827.5765402 ==
+        1792431827.5763152`;
+      - `received_at` read without `getattr` → T15 `assert 0 == 3`;
+      - a listener on the context → T9 `AttributeError: 'Page' object has no
+        attribute 'context'`;
+      - the peer passed on as `peer.sender or TracingSender(…)` → P2 `assert ['peer:
+        peer....racingSender'] == []`. P2's first version checked only that the wrap
+        was present and passed this mutation; it now checks every branch.
+    - **On the touched suites.** The 87 test files importing a changed module, plus the
+      guards (`-n 3 --dist loadfile`, `FUZZLAB_REQUIRE_BROWSER=1`): 2391 passed, 4
+      skipped, 4 xfailed.
+  - Measured wall time per visit, 20 visits each, with and without a recorder: 20 visits each, interleaved, `SETTLE_MS`
+      1000, loopback.
+      - Escaped page (the whole window): p50 1946 ms without a recorder, 2010 ms with
+        one; p95 2134 / 2171 ms; mean 1989 / 2011 ms.
+      - Slow sink (900 ms after `load`): p50 1908 / 1885 ms; p95 2238 / 2186 ms.
+      - The sink fired in all 40 slow visits. The difference is inside the launch's
+        own variance.
   - The on-host Juice Shop check is pending.
 
 ### CC-FUZZ-0101 — Peer and unauthenticated replays traced; the redirect target keeps its own key (BUG-0513, BUG-0517) (2026-10-19)
