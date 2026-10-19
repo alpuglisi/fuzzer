@@ -337,13 +337,32 @@ budget where a vulnerability is plausible.
   - each explorer action (`observe.action`, scope `workflow:<its action id>`: the
     `action_id` the explorer logs (`act-`, `nav-`, `harvest-`; one counter), or, in a
     log from before it, the id a capture record with the same number carries;
-    BUG-0512) and each host the capture proxy refused (`observe.external`, with its
-    count).
+    BUG-0512; for an old log no record matches, the explorer's own `act-`/`harvest-`
+    naming, kept and documented) and each host refused, with its count
+    (`observe.external`): by the capture proxy (its stats, key `<tag>:external:<host>`,
+    `src` `capture`) and by the browser's own guard (`explore.json`
+    `explore.out_of_scope`, key `<tag>:guard:<host>`, `src` `browser-guard`; BUG-0524,
+    `CC-AUD-0054`). Both layers count by hostname (another port of an in-scope host
+    is drawn as that host), and a host refused by both carries both counts as a set,
+    never their sum. A capture that crashed writes no `explore.json`: its guard
+    refusals are not traced.
 
   Only parameter **names** and locations are kept (query, form, top-level JSON keys),
   never a value or a header. Keys are `<source tag>:<table>:<row>` (the tag a digest of
   the source's resolved path; an action's `<tag>:action:line<n>`, its line in the
   append-only log), so importing the same crawl twice into a run adds nothing.
+- **FR-AUD-29** *(one builder of disco observation events; `CC-AUD-0054`, 2026-10-19).*
+  The events FR-AUD-28 records for a disco run are built only by `tools/observe.py`:
+  `emit_capture_record` and `emit_disco_action` (with `disco_tag`), and the refused
+  hosts inside `observe_disco`. Both the import (`observe_disco`) and the live trace
+  of a capture (FR-CRAWL-30) call them. A record's index is its position among the
+  well-formed records of `capture.jsonl` (`disco.capture.CaptureTail`; `read_capture`
+  is the same reader read to the end). An action's number is its physical line in
+  `actions.jsonl` (`observe.DiscoActionLines`): lines are split on `\n` bytes only,
+  never by universal newlines or `splitlines` (a raw `\r`, U+2028 and U+0085 stay
+  inside their line), and each complete line is decoded alone, never a partial read.
+  A line that is not UTF-8 or not JSON is skipped and still numbered. For one run
+  directory both paths give identical `(key, kind, scope, t, body)` and the same model.
 - **FR-AUD-26** *(path parameters from crawls; `CC-AUD-0047`, 2026-10-19).*
   `import_spider` and `import_disco` each pass the run's answered URLs (status below
   400 or unknown; a spider's write seeds excluded; a disco run's API GETs included,

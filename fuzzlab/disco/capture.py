@@ -23,6 +23,14 @@ marked so no schema is inferred from half a document.
 **Reading (PA-0108, PA-0454).** `read_capture` types every line before use: a line over
 `MAX_LINE_BYTES`, JSON that does not parse (deep nesting included) or a field of the
 wrong type is quarantined and counted, never repaired into a record that was not seen.
+
+**Reading while it is written (FR-CRAWL-30).** `read_capture` is `CaptureTail` read to
+the end: one loop. A `CaptureTail` reads only what was appended since its last read and
+returns only complete lines, holding a partial one until its newline arrives (measured:
+a reader can see half a line); its records are numbered as `read_capture` numbers them
+(well-formed records only). Lines are split on ``\n`` bytes only (`JsonlTail`, never
+``splitlines``: ``ensure_ascii=False`` lets U+2028 and U+0085 into a record), and each
+complete line is decoded alone, never a chunk (a cut can fall inside a character).
 """
 
 from __future__ import annotations
@@ -180,6 +188,81 @@ def _typed(doc) -> CaptureRecord | None:
     return CaptureRecord(**{k: v for k, v in doc.items() if k in known})
 
 
+#: Bytes a `JsonlTail` reads at once.
+READ_CHUNK = 1 << 20
+
+
+class JsonlTail:
+    """The complete lines appended to ``path`` since the last `read`, as bytes with their
+    ``\n`` (the lines binary iteration gives). A line whose newline has not arrived is
+    held; ``read(final=True)`` also returns it (the writer is done). Shared with the
+    explorer's action log (`tools.observe.DiscoActionLines`). A missing file raises
+    ``FileNotFoundError``."""
+
+    def __init__(self, path: str | os.PathLike):
+        self.path = Path(path)
+        self.offset = 0
+        self._rest = b""
+
+    def read(self, final: bool = False) -> list[bytes]:
+        return list(self.lines(final))
+
+    def lines(self, final: bool = False):
+        """`read`, one line at a time (a large file is never held whole)."""
+        with open(self.path, "rb") as fh:
+            fh.seek(self.offset)
+            while True:
+                data = fh.read(READ_CHUNK)
+                if not data:
+                    break
+                self.offset += len(data)
+                buf = self._rest + data
+                cut = buf.rfind(b"\n") + 1
+                self._rest = buf[cut:]
+                if cut:
+                    for ln in buf[:cut - 1].split(b"\n"):
+                        yield ln + b"\n"
+        if final and self._rest:
+            rest, self._rest = self._rest, b""
+            yield rest
+
+
+def _parse_line(raw: bytes) -> CaptureRecord | None:
+    """One complete line as a record, or None (quarantined): over `MAX_LINE_BYTES`, not
+    UTF-8, not JSON (deep nesting included), or a field of the wrong type."""
+    if len(raw) > MAX_LINE_BYTES:
+        return None
+    try:
+        return _typed(json.loads(raw.decode("utf-8")))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None
+
+
+class CaptureTail:
+    """``capture.jsonl`` read as it grows: `read` returns ``(index, record)`` for each
+    well-formed record completed since the last read; ``index`` is its position among the
+    file's well-formed records, the number `read_capture` gives it. ``quarantined``
+    counts malformed lines."""
+
+    def __init__(self, path: str | os.PathLike):
+        self._lines = JsonlTail(path)
+        self.count = 0
+        self.quarantined = 0
+
+    def read(self, final: bool = False) -> list[tuple[int, CaptureRecord]]:
+        out = []
+        for raw in self._lines.lines(final):
+            if not raw.strip():
+                continue
+            rec = _parse_line(raw)
+            if rec is None:
+                self.quarantined += 1
+                continue
+            out.append((self.count, rec))
+            self.count += 1
+        return out
+
+
 @dataclass
 class CaptureRead:
     records: list[CaptureRecord]
@@ -189,23 +272,7 @@ class CaptureRead:
 def read_capture(path: str | os.PathLike) -> CaptureRead:
     """Every well-formed record of ``path``, in order; malformed lines are counted in
     ``quarantined``. A missing file raises ``FileNotFoundError`` (no capture is not an
-    empty capture)."""
-    out = CaptureRead(records=[])
-    with open(Path(path), "rb") as fh:
-        for raw in fh:
-            if not raw.strip():
-                continue
-            if len(raw) > MAX_LINE_BYTES:
-                out.quarantined += 1
-                continue
-            try:
-                doc = json.loads(raw.decode("utf-8"))
-            except (ValueError, UnicodeDecodeError, RecursionError):
-                out.quarantined += 1
-                continue
-            rec = _typed(doc)
-            if rec is None:
-                out.quarantined += 1
-            else:
-                out.records.append(rec)
-    return out
+    empty capture). The whole file through `CaptureTail`: one reader."""
+    tail = CaptureTail(path)
+    records = [rec for _i, rec in tail.read(final=True)]
+    return CaptureRead(records=records, quarantined=tail.quarantined)

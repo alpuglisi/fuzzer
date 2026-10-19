@@ -3,6 +3,149 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0050 — `fuzzlab disco capture --store` records the capture's trace live; a capture refuses a directory holding an earlier run's files (FR-CRAWL-30, BUG-0525) (2026-10-19)
+- Change:
+  - **`fuzzlab/disco/livetrace.py` (new): `LiveTrace(run_dir, store_path, run_id)`.**
+    One thread, `disco-trace`, in the capture command's process, with its own `Store`
+    connection and the run's one `TraceRecorder` (SP-48). Its steps are `open`, `poll`
+    (every `POLL_S` = 0.25 s) and `finish`.
+    - A live pass emits the complete records (`capture.CaptureTail`) and the action
+      lines carrying an `action_id` (`observe.DiscoActionLines`) added since the last
+      pass, through `observe.emit_capture_record` / `emit_disco_action`, then flushes
+      once. Each item is guarded: one that cannot be built is counted `dropped` and
+      logged.
+    - The final pass (`stop(status)`, after the capture proxy stopped and `explore.json`
+      was written) is `observe_disco(run_dir, read_capture(...).records)` on the same
+      recorder, then `run.end` (scope `run`) and `close`. It writes whatever the live
+      passes did not, so the run's events equal the import's.
+    - `stop` never raises. A failure that stops the trace is printed to stderr at once;
+      the thread writes `run.end` `aborted: trace <class>` and marks the run row
+      (`LiveTraceFailed`). `stop` returns the reason, or a timeout after
+      `join_bound(events)` = max(60 s, 20 s × (⌈(events+1)/512⌉ + 1) + 20 s).
+  - **`fuzzlab/disco/capture.py` (SP-35):** `JsonlTail`, which returns complete lines
+    split on `\n` bytes only, holds a partial line, and decodes nothing; `CaptureTail`
+    on it (well-formed records numbered as `read_capture` numbers them); `_parse_line`.
+    `read_capture` is now `CaptureTail(path).read(final=True)`: one loop, same result.
+  - **`fuzzlab/disco/cli.py`:**
+    - `capture --store PATH` / `--record` (opt-in, `core.storepath`, as `fuzzlab proxy`);
+    - `RUN_FILES` and the BUG-0525 refusal;
+    - usage order: scope → run files → storage state → store → `--dry-run` (which
+      prints `trace: <path> (live, a new run)` / `trace: off`) → `--authorized` →
+      workers;
+    - with a store: `start_run("disco", <start netloc>)`, then `proxy.start()`, then
+      `LiveTrace.start()`, then explore. `proxy.stop()` runs in the inner `finally`,
+      then `explore.json`; `live.stop(status)` runs in the outer `finally`, so a
+      `ServerLost` from the proxy still ends the trace. An exception marks the run
+      aborted (`Store.mark_aborted`) and is re-raised;
+    - the summary prints `trace: run <id> …`; a timeout exits 1. Without `--store`
+      the capture runs as before.
+  - **`fuzzlab/cli_taxonomy.py`:** `capture:store`, `capture:record`.
+  - `recorder.py`, `mitm.py`, `proxyproc.py` and `explore.py` are not touched.
+- Reason: gap 4 of the owner's diagrams goal. A capture reached the trace only when
+  `fuzzlab auto --disco-run` imported it. BUG-0525 was found by this change's
+  pre-change review.
+- Impact (other components / project):
+  - **AUD:** `tools/observe.py` builders, plus BUG-0524 (CC-AUD-0054).
+  - **CORE:**
+    - No code change. A new `run.tool` `disco`, holding trace events and
+      `run_metrics` `trace_*` only.
+    - `trace_duplicates` of such a run counts the final pass's re-emitted events
+      (expected).
+    - The one-recorder rule is now enforced:
+      `tests/test_trace_writers.py::test_trace_recorders_are_made_only_at_the_listed_sites`.
+  - **UI:** no code change. The Diagrams page lists the run while it writes, when the
+    store is the one it has open. `--record` adds the newest run, so
+    `report`/`diagram --run latest` pick it.
+  - **Operators:**
+    - A capture into a directory holding a stale `actions.jsonl`,
+      `capture.jsonl.stats.json`, `explore.json` or `script_segments.json` now exits 2,
+      `--dry-run` included.
+    - `script_segments.json` is beyond the coordinator's list of three: the importer
+      reads it (`store_adapter._disco_code_segments`), and a crashed single-worker
+      explore leaves an old one in place.
+- Risk (level; mitigation or accepted-risk justification): low–medium.
+  1. *Capture timing:* measured below. Mitigation: opt-in; a reader only, outside the
+     capture path.
+  2. *A wrong live event under a right key* would survive `INSERT OR IGNORE`.
+     Mitigation: one line reader per file shared with the import, and T1 checks the
+     live rows alone, before the final pass, at 187 cuts.
+  3. *A failed trace failing the capture:* per-item guard, thread catch, `stop()` never
+     raises, `live.stop` in the outer `finally`.
+  4. *Contention:* a write lock held elsewhere for more than 10 s drops a batch, which
+     the final pass heals. Held throughout, a flush takes 20.1 s and `close` 10.0 s, so
+     the join bound is 60 s or more; past it, exit 1.
+  5. *Refused hosts at the end, not live:* their keys carry final counts.
+  6. *Provenance:* `RUN_FILES` refused before anything runs (BUG-0525, PA-0525).
+  7. *Ends that skip `finally`:* SIGTERM and SIGKILL leave the run without `run.end`
+     (partial). Worker threads appending after an interrupt are not traced. Both are
+     stated in FR-CRAWL-30.
+- Review: pre-change gate on DRAFT-LIVEDISCO (rev 1, then rev 2). reviewer 2 confirmed
+  both reviewers' findings in round 2; reviewer 1's re-check was stopped by the review
+  cap. Rev 2's one blocking point is folded in: T1's second live pass, with the live
+  rows checked before the final import.
+- Deliverables:
+  - [x] `fuzzlab/disco/livetrace.py`; `capture.py` `JsonlTail`/`CaptureTail`;
+        `cli.py`; `cli_taxonomy.py` — done
+  - [x] `tests/test_disco_livetrace.py`:
+        `::test_the_live_trace_equals_the_import_wherever_the_files_are_cut` (T1),
+        `::test_a_dropped_batch_is_healed_by_the_final_import`,
+        `::test_a_capture_with_a_store_records_its_trace_and_its_end`,
+        `::test_a_failed_live_trace_leaves_the_capture_and_marks_the_run`,
+        `::test_a_proxy_that_cannot_stop_still_ends_the_trace`,
+        `::test_a_failed_explorer_marks_the_run_aborted`,
+        `::test_a_trace_that_does_not_finish_is_reported_and_exits_1`,
+        `::test_the_join_bound_grows_with_the_flushes_the_final_pass_needs`,
+        `::test_a_host_the_proxy_refuses_reaches_the_trace_with_its_final_count`
+        (mitmdump), `::test_a_real_capture_is_in_the_store_while_it_runs_and_unchanged`
+        (Chromium + mitmdump) — done
+  - [x] `tests/test_disco_cli.py`:
+        `::test_capture_refuses_a_directory_holding_any_file_the_trace_reads` (×8),
+        `::test_every_file_the_import_and_the_trace_read_is_refused_when_stale`,
+        `::test_capture_with_an_unusable_store_exits_2_naming_it_before_any_side_effect`,
+        `::test_capture_dry_run_reports_the_live_trace_and_creates_no_store` — done
+  - [x] `tests/test_trace_writers.py` (the one-recorder guard and its synthetic
+        offender) — done
+  - [x] FR-CRAWL-30; BUG-0525 — done
+  - [ ] CHANGELOG, ERROR_LOG, PA-0525, SHARED_PRIMITIVES, DIAGRAMS.md, ARCHITECTURE.md:
+        the text was given to the orchestrator, who owns those files — todo
+        (orchestrator)
+- Effectiveness (assessed 2026-10-19, before the harness run):
+  - **Measured on the implementation** (the e2e fixture, 1 worker, 2 runs):
+    - capture counters identical to the 5 earlier runs (104 records, 104 app hits, 11
+      states, 26 actions, 5 submissions / 3 sent, 0 unrestorable);
+    - explore 63.8 / 65.1 s, against baseline 63.3 / 64.4 s;
+    - visible in the store to an independent reader (50 ms sampling) p50 0.15 s,
+      p95 0.26–0.28 s, max 0.31 s after the response;
+    - `stop` 50 ms; 0 dropped; a same-run re-import wrote 0.
+  - **The prototype runs** (DRAFT §M3): tail thread CPU 0.19 s per 64 s capture, flush
+    p50 1.2 ms.
+  - **T1** runs 187 cuts in 5.5 s.
+  - **On the old code** (`685259e`, the new tests copied in):
+    - `test_disco_livetrace.py`: "ModuleNotFoundError: No module named
+      'fuzzlab.disco.livetrace'";
+    - the BUG-0525 test: "assert 0 == 2" (dry run, ×4), "Failed: a proxy was started"
+      (×4);
+    - the store tests: "SystemExit: 2" (argparse);
+    - the guard: "Extra items in the right set: ('disco/livetrace.py', 'open')".
+  - **Mutants of T1** (all fail):
+
+    | Mutant | Failure |
+    | --- | --- |
+    | consume a partial line | `AssertionError: ('capture', 237)` at the live-only check |
+    | decode each read chunk | `('actions', 349)` |
+    | `str.splitlines` | `assert [] == ['…:rec:4']` |
+    | text-mode / universal newlines for actions | the action scopes differ |
+    | number records by physical line | `('capture', 237)` |
+    | final pass without `observe_disco` | T1 and T8 fail |
+
+  - **Mutants of the CLI tests:**
+
+    | Mutant | Failure |
+    | --- | --- |
+    | the thread re-raising | T6: "assert 'the live trace stopped (RuntimeError: boom)' in ''" |
+    | `live.stop` in the inner `finally` after `proxy.stop()` | T7: "assert {} == {'status': '…: ServerLost'}" |
+    | `live.stop('complete')` before the outer handler | the explorer-failure test: "{'status': 'complete'} == {'status': 'a…RuntimeError'}" |
+
 ### CC-CRAWL-0048 — Disco logs each action's own id (BUG-0512) (2026-10-19)
 - Change (`fuzzlab/disco/explore.py`): `_log_action` and `_log_load` write
   `action_id`, the id the action's requests carry (`act-`, `nav-`, `harvest-`).

@@ -48,6 +48,66 @@ def test_capture_dry_run_plans_and_sends_nothing(tmp_path, capsys, monkeypatch):
     assert "sends nothing" in capsys.readouterr().out and not (tmp_path / "x").exists()
 
 
+@pytest.mark.parametrize("name", cli.RUN_FILES[1:])
+@pytest.mark.parametrize("dry", [False, True])
+def test_capture_refuses_a_directory_holding_any_file_the_trace_reads(tmp_path, monkeypatch,
+                                                                      capsys, name, dry):
+    """BUG-0525: an earlier run's action log, stats, report or script segments would be
+    read as this run's (the explorer appends to its log); refused before anything runs,
+    a dry run too."""
+    monkeypatch.setattr("fuzzlab.disco.proxyproc.CaptureProxy.start",
+                        lambda self: pytest.fail("a proxy was started"))
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / name).write_text("{}\n")
+    argv = ["capture", "--start", "http://127.0.0.1:9/", "--out", str(out), "--authorized"]
+    assert cli.main(argv + (["--dry-run"] if dry else [])) == 2
+    assert name in capsys.readouterr().err
+    assert sorted(p.name for p in out.iterdir()) == [name]
+
+
+def test_every_file_the_import_and_the_trace_read_is_refused_when_stale():
+    """PA-0525: the refusal list holds every run file a consumer reads (a literal file
+    name in the importer, the observer or the live trace)."""
+    import ast
+    from pathlib import Path
+
+    import fuzzlab
+    root = Path(fuzzlab.__file__).parent
+    names = set()
+    for rel in ("tools/observe.py", "tools/store_adapter.py", "disco/livetrace.py"):
+        for node in ast.walk(ast.parse((root / rel).read_text())):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and \
+                    node.value.endswith((".jsonl", ".json")) and "/" not in node.value \
+                    and " " not in node.value:
+                names.add(node.value)
+    assert names and names <= set(cli.RUN_FILES), names - set(cli.RUN_FILES)
+
+
+def test_capture_with_an_unusable_store_exits_2_naming_it_before_any_side_effect(tmp_path,
+                                                                                monkeypatch,
+                                                                                capsys):
+    monkeypatch.setattr("fuzzlab.disco.proxyproc.CaptureProxy.start",
+                        lambda self: pytest.fail("a proxy was started"))
+    db = tmp_path / "missing-dir" / "s.db"
+    out = tmp_path / "run"
+    assert cli.main(["capture", "--start", "http://127.0.0.1:9/", "--out", str(out),
+                     "--store", str(db), "--authorized"]) == 2
+    assert "--store: cannot create store" in capsys.readouterr().err
+    assert not out.exists() and not db.parent.exists()
+
+
+def test_capture_dry_run_reports_the_live_trace_and_creates_no_store(tmp_path, monkeypatch,
+                                                                     capsys):
+    monkeypatch.setattr("fuzzlab.disco.proxyproc.CaptureProxy.start",
+                        lambda self: pytest.fail("a proxy was started"))
+    db = tmp_path / "s.db"
+    assert cli.main(["capture", "--start", "http://127.0.0.1:9/", "--out",
+                     str(tmp_path / "x"), "--store", str(db), "--dry-run"]) == 0
+    assert f"trace: {db} (live, a new run)" in capsys.readouterr().out
+    assert not db.exists() and not (tmp_path / "x").exists()
+
+
 def test_synth_then_generate_without_llm_sends_nothing_and_makes_a_valid_contract(capture_file, tmp_path,
                                                                     monkeypatch):
     monkeypatch.setattr("fuzzlab.disco.generate.AnthropicProvider.__init__",

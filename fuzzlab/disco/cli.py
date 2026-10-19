@@ -57,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--authorized", action="store_true",
                    help="confirm the target is yours to test (required: sends traffic)")
     c.add_argument("--dry-run", action="store_true", help="print the plan; send nothing")
+    from fuzzlab.core.storepath import store_help
+    c.add_argument("--store", default=None,
+                   help=store_help("record the capture's trace live into this store, as "
+                                   "a new run (FR-CRAWL-30); off unless given"))
+    c.add_argument("--record", action="store_true",
+                   help="record the trace live into the default store (see --store)")
 
     s = sub.add_parser("synth", help="captures -> an OpenAPI-shaped inventory")
     s.add_argument("--capture", action="append", required=True, metavar="FILE")
@@ -124,7 +130,17 @@ def parse_auth_profile(spec: str) -> dict:
     return prof
 
 
+#: What a capture run writes into ``--out`` that its consumers read back as this run's:
+#: the import (`store_adapter.import_disco`, `observe.observe_disco`) and the live trace
+#: (`disco.livetrace`). A directory holding any of them is refused before anything runs
+#: (PA-0450, BUG-0525): the explorer appends to its log, so an earlier run's lines would
+#: be attributed to this one. ``capture.jsonl`` is first: its own message.
+RUN_FILES = ("capture.jsonl", "actions.jsonl", "capture.jsonl.stats.json", "explore.json",
+             "script_segments.json")
+
+
 def _capture(ns) -> int:
+    from fuzzlab.core import storepath
     from fuzzlab.core.urls import canonical_origin
     out = Path(ns.out)
     scope = [ns.start, *ns.scope]
@@ -132,6 +148,10 @@ def _capture(ns) -> int:
         return _fail("--start and --scope take absolute http(s) URLs")
     if (out / "capture.jsonl").exists():
         return _fail(f"{out} already holds a capture: use a new directory (PA-0450)")
+    stale = [name for name in RUN_FILES[1:] if (out / name).exists()]
+    if stale:
+        return _fail(f"{out} already holds {', '.join(stale)} from an earlier run: use a "
+                     f"new directory (PA-0450, BUG-0525)")
     state = None
     if ns.storage_state:
         try:
@@ -140,11 +160,20 @@ def _capture(ns) -> int:
             return _fail(f"--storage-state: {type(exc).__name__}")
         if not isinstance(state, dict):
             return _fail("--storage-state is not a storage-state object")
+    recording = None
+    if ns.store is not None or ns.record:
+        try:
+            recording = storepath.resolve(ns.store)
+            storepath.check_writable(recording)
+        except storepath.StorePathError as exc:
+            return _fail(f"--store: {exc}")
     if ns.dry_run:
         print("DRY RUN -- disco capture: plans the action, sends nothing.")
         print(f"  start: {ns.start}\n  scope: {sorted({canonical_origin(u) for u in scope})}")
         print(f"  out: {out / 'capture.jsonl'}\n  sends_traffic: True\n"
               f"  needs_authorized: True\n  would_execute: {bool(ns.authorized)}")
+        print(f"  trace: {recording.path} (live, a new run)" if recording is not None
+              else "  trace: off (--store / --record to record it live)")
         return 0
     if not ns.authorized:
         return _fail("capture sends traffic: pass --authorized (lab-only, D11)")
@@ -155,12 +184,46 @@ def _capture(ns) -> int:
     opts = ExploreOptions(max_states=ns.max_states, max_actions=ns.max_actions,
                           workers=ns.workers, max_harvest=ns.max_harvest,
                           deadline_s=ns.deadline, deny=tuple(ns.deny))
-    with CaptureProxy(scope, out=out / "capture.jsonl", keep_tag=ns.keep_tag,
-                      upstream_insecure=ns.upstream_insecure, profile=ns.profile) as proxy:
-        report = Explorer(ns.start, scope_urls=scope, proxy=proxy.endpoint, options=opts,
-                          storage_state=state, actions_log=out / "actions.jsonl").run()
-    doc = {"explore": report.__dict__, "proxy": proxy.stats()}
-    (out / "explore.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
+    store = run_id = live = None
+    if recording is not None:
+        from urllib.parse import urlsplit
+
+        from fuzzlab.core.store import Store
+        store = Store(recording.path)
+        run_id = store.start_run("disco", urlsplit(ns.start).netloc or ns.start)
+    proxy = CaptureProxy(scope, out=out / "capture.jsonl", keep_tag=ns.keep_tag,
+                         upstream_insecure=ns.upstream_insecure, profile=ns.profile)
+    status, problem = "aborted", None
+    try:
+        try:
+            proxy.start()
+            try:
+                if store is not None:
+                    from fuzzlab.disco.livetrace import LiveTrace
+                    live = LiveTrace(out, recording.path, run_id).start()
+                report = Explorer(ns.start, scope_urls=scope, proxy=proxy.endpoint,
+                                  options=opts, storage_state=state,
+                                  actions_log=out / "actions.jsonl").run()
+            finally:
+                proxy.stop()
+            doc = {"explore": report.__dict__, "proxy": proxy.stats()}
+            (out / "explore.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
+            status = "complete"
+        except BaseException as exc:
+            status = f"aborted: {type(exc).__name__}"
+            if store is not None:
+                store.mark_aborted(run_id, exc)
+            raise
+        finally:
+            # after the proxy stopped (its last records and stats are written) and after
+            # explore.json; never raises (FR-CRAWL-30)
+            if live is not None:
+                problem = live.stop(status)
+                if problem:
+                    print(f"fuzzlab disco: live trace: {problem}", file=sys.stderr)
+    finally:
+        if store is not None:
+            store.close()
     print(f"disco capture: {report.states} states, {report.actions} actions "
           f"({report.submissions} submissions, {report.submissions_sent} of them sent "
           f"the form's values; {report.perturbations} perturbations), "
@@ -188,6 +251,13 @@ def _capture(ns) -> int:
         print(f"  never acted on: {dict(sorted(report.refused.items()))}")
     if report.budget_hit:
         print(f"  stopped by budget: {report.budget_hit}")
+    if live is not None:
+        st = live.stats
+        print(f"  trace: run {run_id} in {recording.path}: {int(st.get('written', 0))} "
+              f"events written, {int(st.get('dropped', 0))} dropped"
+              + (f" -- {problem}" if problem else ""))
+        if problem and problem.startswith("timeout"):
+            return 1
     return 0
 
 

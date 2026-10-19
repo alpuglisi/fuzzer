@@ -12,6 +12,12 @@ Keys are stable per source (``<source tag>:<table>:<row>``, the tag a digest of 
 source file's resolved path), so importing the same crawl into the same run twice adds
 nothing. Without an active recorder (`trace.active`) nothing is done.
 
+A disco run's events are built by `emit_capture_record` and `emit_disco_action` (with
+`disco_tag` and `DiscoActionLines`, the one reader of ``actions.jsonl``) for both the
+import (`observe_disco`) and the live trace of a capture (`disco.livetrace`, FR-CRAWL-30):
+the same keys and bodies (FR-AUD-29). Refused hosts come from both layers that refuse:
+the capture proxy's stats and the browser guard's count in ``explore.json`` (BUG-0524).
+
 When the spider DB records it (FR-CRAWL-29), a page's event carries the time its load
 began (``seen_at``) as ``t`` and the page whose load queued it (``found_from``, path only)
 as ``referer``; a captured request's event carries the time it was captured. A DB from
@@ -139,65 +145,130 @@ def observe_spider(spider_db) -> int:
     return n
 
 
+def disco_tag(run_dir) -> str:
+    """The key prefix of a disco run directory's events (its resolved path's digest)."""
+    return f"disco:{_tag(run_dir)}"
+
+
+def emit_capture_record(tag: str, i: int, rec) -> None:
+    """The event for capture record ``i`` (its position among the well-formed records,
+    `capture.CaptureTail`), with the active recorder. FR-AUD-29: the import and the live
+    trace (`disco.livetrace`) both build it here."""
+    origin = canonical_origin(rec.url)
+    headers = {k.lower(): v for k, v in (rec.req_headers or {}).items()}
+    res = {k.lower(): v for k, v in (rec.res_headers or {}).items()}
+    params = _query_params(rec.url) + _body_params(rec.req_ctype, rec.req_body)
+    status = rec.status
+    trace.emit("observe.exchange", {
+        "src": "capture", "ref": f"capture.jsonl record {i}",
+        "method": (rec.method or "GET").upper(), "url": trace.safe_ref(rec.url),
+        "origin": origin, "status": status, "error": rec.error,
+        "outcome": ("response" if status is not None else
+                    f"no response ({rec.error or 'unknown'})"),
+        "ws": rec.ws_direction if rec.kind == "ws" else None,
+        "redirect": trace.safe_ref(res.get("location", "")) or None,
+        "referer": _path(headers.get("referer")), "profile": rec.profile,
+        "action": rec.action_id, "ctype": rec.req_ctype,
+        "latency_ms": rec.latency_ms, "params": params},
+        key=f"{tag}:rec:{i}", scope=f"workflow:{rec.action_id}" if rec.action_id
+        else "capture", t=rec.t)
+
+
+def _action_doc(raw: bytes) -> dict | None:
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return None
+    return doc if isinstance(doc, dict) and "seq" in doc else None
+
+
+class DiscoActionLines:
+    """``actions.jsonl`` as ``(line number, action or None)``: the one reader of the
+    explorer's log for the import and the live trace (FR-AUD-29). Every physical line is
+    numbered -- blank and malformed ones too, as None -- lines split on ``\\n`` bytes only
+    and each complete line decoded alone (`capture.JsonlTail`). ``read`` returns what was
+    completed since the last read; a missing log reads as nothing."""
+
+    def __init__(self, path):
+        from fuzzlab.disco.capture import JsonlTail
+        self._lines = JsonlTail(path)
+        self.lineno = 0
+
+    def read(self, final: bool = False) -> list[tuple[int, dict | None]]:
+        try:
+            lines = self._lines.read(final)
+        except FileNotFoundError:
+            return []
+        out = []
+        for raw in lines:
+            self.lineno += 1
+            out.append((self.lineno, _action_doc(raw)))
+        return out
+
+
+def emit_disco_action(tag: str, lineno: int, doc: dict, ids: dict) -> None:
+    """The event for the action on line ``lineno`` of ``actions.jsonl``. Its workflow is
+    the id its requests carry (BUG-0512): the log's own ``action_id``; in a log from
+    before it, the id a record with the same number carries (``ids``,
+    `_disco_action_ids`); last, for an old log no record matches, the explorer's own
+    naming (kept and documented, FR-AUD-28)."""
+    seq = doc.get("seq")
+    action_id = doc.get("action_id") or (ids.get(seq) if isinstance(seq, int) else None) \
+        or f"{'harvest' if doc.get('kind') == 'load' else 'act'}-{seq}"
+    trace.emit("observe.action", {
+        "seq": seq, "kind": doc.get("kind"),
+        "label": str(doc.get("label") or "")[:60],
+        "route": trace.safe_ref(doc.get("route") or ""),
+        "url": trace.safe_ref(doc.get("url") or ""),
+        "fields": [f[0] for f in doc.get("fields") or [] if f]},
+        key=f"{tag}:action:line{lineno}",     # stable: the log is appended
+        scope=f"workflow:{action_id}", t=None)
+
+
+def _disco_action_ids(records) -> dict[int, str]:
+    """``act-``/``nav-``/``harvest-`` share one counter: number -> the id records carry."""
+    ids = {}
+    for rec in records:
+        prefix, _d, num = (rec.action_id or "").rpartition("-")
+        if prefix and num.isdigit():
+            ids[int(num)] = rec.action_id
+    return ids
+
+
+def _guard_hosts(run_dir: Path) -> dict:
+    """``explore.json``'s ``explore.out_of_scope``: the hosts the browser's own guard
+    refused (navguard, counted by hostname), or nothing when absent or malformed."""
+    try:
+        doc = json.loads((run_dir / "explore.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return {}
+    explore = doc.get("explore") if isinstance(doc, dict) else None
+    hosts = explore.get("out_of_scope") if isinstance(explore, dict) else None
+    if not isinstance(hosts, dict):
+        return {}
+    return {str(h): n for h, n in hosts.items()
+            if isinstance(n, int) and not isinstance(n, bool)}
+
+
 def observe_disco(run_dir, records) -> int:
     """Events for a disco run: each capture record (``records``, as `read_capture`
-    returned them, in file order), each explorer action, and each host the browser
-    asked for that the scope refused. Returns how many."""
+    returned them, in file order), each explorer action, and each host the browser asked
+    for that was refused -- by the capture proxy (its stats, ``<tag>:external:<host>``)
+    or by the browser's own guard (``explore.json``, ``<tag>:guard:<host>``, BUG-0524).
+    Returns how many."""
     if trace.active() is None:
         return 0
     run_dir = Path(run_dir)
-    tag = f"disco:{_tag(run_dir)}"
+    tag = disco_tag(run_dir)
     n = 0
     for i, rec in enumerate(records):
-        origin = canonical_origin(rec.url)
-        headers = {k.lower(): v for k, v in (rec.req_headers or {}).items()}
-        res = {k.lower(): v for k, v in (rec.res_headers or {}).items()}
-        params = _query_params(rec.url) + _body_params(rec.req_ctype, rec.req_body)
-        status = rec.status
-        trace.emit("observe.exchange", {
-            "src": "capture", "ref": f"capture.jsonl record {i}",
-            "method": (rec.method or "GET").upper(), "url": trace.safe_ref(rec.url),
-            "origin": origin, "status": status, "error": rec.error,
-            "outcome": ("response" if status is not None else
-                        f"no response ({rec.error or 'unknown'})"),
-            "ws": rec.ws_direction if rec.kind == "ws" else None,
-            "redirect": trace.safe_ref(res.get("location", "")) or None,
-            "referer": _path(headers.get("referer")), "profile": rec.profile,
-            "action": rec.action_id, "ctype": rec.req_ctype,
-            "latency_ms": rec.latency_ms, "params": params},
-            key=f"{tag}:rec:{i}", scope=f"workflow:{rec.action_id}" if rec.action_id
-            else "capture", t=rec.t)
+        emit_capture_record(tag, i, rec)
         n += 1
-    actions = run_dir / "actions.jsonl"
-    if actions.exists():
-        # an action's workflow is the id its requests carry (BUG-0512): the log's own
-        # ``action_id``, or, in a log from before it, the id a record carries with the
-        # same number (``act-``/``nav-``/``harvest-`` share one counter)
-        ids = {}
-        for rec in records:
-            prefix, _d, num = (rec.action_id or "").rpartition("-")
-            if prefix and num.isdigit():
-                ids[int(num)] = rec.action_id
-        with open(actions, encoding="utf-8") as fh:
-            for lineno, line in enumerate(fh, 1):
-                try:
-                    doc = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(doc, dict) or "seq" not in doc:
-                    continue
-                seq = doc.get("seq")
-                action_id = doc.get("action_id") or ids.get(seq) or \
-                    f"{'harvest' if doc.get('kind') == 'load' else 'act'}-{seq}"
-                trace.emit("observe.action", {
-                    "seq": doc.get("seq"), "kind": doc.get("kind"),
-                    "label": str(doc.get("label") or "")[:60],
-                    "route": trace.safe_ref(doc.get("route") or ""),
-                    "url": trace.safe_ref(doc.get("url") or ""),
-                    "fields": [f[0] for f in doc.get("fields") or [] if f]},
-                    key=f"{tag}:action:line{lineno}",     # stable: the log is appended
-                    scope=f"workflow:{action_id}", t=None)
-                n += 1
+    ids = _disco_action_ids(records)
+    for lineno, doc in DiscoActionLines(run_dir / "actions.jsonl").read(final=True):
+        if doc is not None:
+            emit_disco_action(tag, lineno, doc, ids)
+            n += 1
     stats = run_dir / "capture.jsonl.stats.json"
     if stats.exists():
         try:
@@ -209,4 +280,11 @@ def observe_disco(run_dir, records) -> int:
                                             "count": count},
                        key=f"{tag}:external:{host}", scope="capture", t=None)
             n += 1
+    # its own key: one host refused by both layers is two events, never one dropped by
+    # INSERT OR IGNORE; the reducer keeps both counts as a set, never their sum
+    for host, count in sorted(_guard_hosts(run_dir).items()):
+        trace.emit("observe.external", {"src": "browser-guard", "host": host[:200],
+                                        "count": count},
+                   key=f"{tag}:guard:{host}", scope="capture", t=None)
+        n += 1
     return n

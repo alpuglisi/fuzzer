@@ -873,6 +873,46 @@ fuzzer.
   and the requests sent are unchanged. With `--workers N` each worker's page events
   reach that worker only (BUG-0509): a fetch is filed under the page that made it,
   whichever worker loaded it.
+- **FR-CRAWL-30 (a disco capture's trace, live, CC-CRAWL-0050)**
+  `fuzzlab disco capture --store PATH` (or `--record`: the store by `core.storepath`)
+  records the capture into a new store run (`run.tool` `disco`) **while it runs**: each
+  capture record and each explorer action carrying an `action_id`, as the events
+  FR-AUD-28 defines, with the same keys and bodies (FR-AUD-29).
+  - **Who writes:** one thread of the capture command (`disco-trace`,
+    `disco/livetrace.py::LiveTrace`), on its own store connection, through the run's
+    one `TraceRecorder` (SP-48). It reads the files the capture writes
+    (`capture.jsonl` through SP-35's `CaptureTail`, `actions.jsonl` through
+    `observe.DiscoActionLines`) every 0.25 s; a line is read only once its newline has
+    arrived. mitmdump and the explorer are not changed.
+  - **At the end** (after the capture proxy stopped and `explore.json` was written) the
+    same thread imports the directory into the run (`observe_disco`), adding what the
+    live passes did not write: a batch the store refused, the last unterminated line,
+    old-log actions, and the hosts the capture proxy and the browser guard refused,
+    with final counts. Then `run.end`: `complete`, or `aborted: <class>` with the run
+    row marked. Importing the directory into that run again adds nothing;
+    `fuzzlab auto --disco-run` imports it into its own run.
+  - **A failed trace never fails the capture.** An item that cannot be built is counted
+    `dropped`; a failure that stops the trace is printed to stderr when it happens and
+    again at the end, the run ends `aborted: trace <class>` and its row is marked, and
+    the exit code is unchanged. The command waits for the trace at most `join_bound`
+    (60 s, more when the final pass needs more than one flush: each can take ~20 s
+    under a write lock held elsewhere); past it the timeout is reported and the command
+    exits 1. A batch once dropped stays counted (`trace_dropped`), so a healed run
+    still reads partial.
+  - **Measured (CC-CRAWL-0050):** a record is visible in the store p95 0.28 s after its
+    response; the capture's counters are unchanged.
+  - **Off by default.** Without `--store` / `--record` nothing is written outside the
+    run directory. The Diagrams page shows the capture when the store is the one it has
+    open. `--record` adds the newest run that `report`/`diagram --run latest` pick.
+  - **Not recorded:** after SIGTERM or SIGKILL (no handler: no end import and no
+    `run.end`; the run reads partial); action lines worker threads append after an
+    interrupt; a crashed capture's browser-guard refusals (no `explore.json`).
+  - **Stale directories (BUG-0525):** `capture` refuses an `--out` that holds any file a
+    consumer reads as the run's (`disco.cli.RUN_FILES`: `capture.jsonl`,
+    `actions.jsonl`, `capture.jsonl.stats.json`, `explore.json`,
+    `script_segments.json`), before any side effect and with `--dry-run` too. Order:
+    scope URLs, run files, storage state, store, `--dry-run` (which names the trace),
+    `--authorized`, workers.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

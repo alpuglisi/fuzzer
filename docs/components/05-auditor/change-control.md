@@ -3,6 +3,56 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0054 — One set of disco event builders for the import and the live trace; the hosts the browser guard refused are traced (FR-AUD-29, BUG-0524) (2026-10-19)
+- Change (`fuzzlab/tools/observe.py`):
+  - **Builders.** `observe_disco`'s body is split into `disco_tag`,
+    `emit_capture_record`, `emit_disco_action`, `DiscoActionLines` (the one reader of
+    `actions.jsonl`, built on `disco.capture.JsonlTail`), `_disco_action_ids` and
+    `_guard_hosts`. `observe_disco` keeps its signature, its keys and bodies, its
+    redaction (`trace.safe_ref`, parameter names only, `scrub_event` at the write) and
+    the old-log fallback (documented in FR-AUD-28).
+  - **BUG-0524.** One `observe.external` per host in `explore.json`
+    `explore.out_of_scope`:
+    - key `<tag>:guard:<host>`, never the proxy's `…:external:<host>`, which
+      `INSERT OR IGNORE` would collapse;
+    - body `{"src": "browser-guard", "host", "count"}`; scope `capture`; `t` None;
+    - a malformed or missing file gives nothing.
+  - **`actions.jsonl` line numbering.** Lines are numbered by `\n` alone, no longer by
+    text-mode universal newlines. A line that is not UTF-8 or not JSON is skipped and
+    still numbered; it no longer raises. Logs the explorer wrote are ASCII with no raw
+    `\r`, so their keys are unchanged.
+- Reason: FR-CRAWL-30 needs the import's events from a second caller, built by the same
+  code (PA-0003). BUG-0524: the browser guard refused 22–41 requests per measured
+  capture, and the trace showed none.
+- Impact (other components / project):
+  - `import_disco` is unchanged in code. Its trace now holds guard hosts for every
+    directory that has an `explore.json`.
+  - `disco/livetrace.py` (CC-CRAWL-0050) is the second caller.
+  - The reducer and `report/diagram.py` are unchanged. They draw a refused, never-sent
+    flow from the browser to `ext:<host>`; a host refused by both layers shows both
+    counts (`[3, 22]`).
+- Risk (level; mitigation or accepted-risk justification): low.
+  - The refactor is covered by the existing capture tests (`tests/test_diagram_e2e.py`,
+    `tests/test_disco_e2e.py`).
+  - The new events have their own keys.
+  - Hostname granularity and set-merged counts are documented in FR-AUD-28.
+- Review: as CC-CRAWL-0050. reviewer 2 confirmed both reviewers' findings in round 2;
+  reviewer 1's re-check was stopped by the review cap.
+- Deliverables:
+  - [x] code — done
+  - [x] `tests/test_disco_livetrace.py::test_both_refusal_layers_are_traced_under_their_own_keys`
+        (BUG-0524, offline), the guard-host assertion in
+        `::test_a_real_capture_is_in_the_store_while_it_runs_and_unchanged` (real), and
+        T1's absolute and equality checks over `DiscoActionLines` — done
+  - [x] FR-AUD-28 amended in place; FR-AUD-29; BUG-0524 — done
+  - [ ] PA-0524 and ERROR_LOG (orchestrator-owned files; text given) — todo (orchestrator)
+- Effectiveness (assessed 2026-10-19, before the harness run):
+  - **On the old `observe.py`:** the BUG-0524 test fails with
+    "KeyError: 'disco:8053220071:guard:cdn.example'".
+  - **Real capture:** `…:guard:127.0.0.1` carries `explore.json`'s count.
+  - **Mutant:** universal-newline splitting of actions fails T1's absolute action-scope
+    check.
+
 ### CC-AUD-0052 — Disco actions in their own workflow, stable keys; spider failures and loads honest (BUG-0512, BUG-0515, BUG-0517) (2026-10-19)
 - Change (`fuzzlab/tools/observe.py`):
   - an explorer action's scope is the id disco logs (`action_id`); an older log falls

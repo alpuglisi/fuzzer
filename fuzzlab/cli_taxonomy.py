@@ -212,7 +212,8 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     "disco": {
         **_all("B", [f"capture:{d}" for d in (
             "start", "scope", "out", "profile", "storage_state", "max_states", "max_actions", "workers", "max_harvest",
-            "deadline", "deny", "keep_tag", "upstream_insecure", "authorized", "dry_run")]),
+            "deadline", "deny", "keep_tag", "upstream_insecure", "authorized", "dry_run",
+            "store", "record")]),
         **_all("B", ["synth:capture", "synth:out"]),
         **_all("B", [f"generate:{d}" for d in (
             "inventory", "out", "run_id", "base_url", "scope", "auth_profile", "max_cases",
