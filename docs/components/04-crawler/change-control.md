@@ -74,7 +74,15 @@ Newest first.
     catch-all, route table and `#/` link — done
   - [x] BUG-0505, PA-0505, SP-47, D70 amendment, ERROR_LOG, F-072, F-073, FR-CRAWL-27,
     ARCHITECTURE, CHANGELOG — done
-- Effectiveness: pending (the Juice Shop disco run and its scored `auto` run are measuring it).
+- Effectiveness (Juice Shop v20.3.0, 2026-10-19; anonymous, 4 workers, 600 s): 39
+  script routes and 3 route-query seeds queued, 1 alias (`/sitemap.xml`) not explored;
+  96 states, 216 actions. Disco-fed `auto`: **tp=5 fp=0 fn=10** (CC-LAB-0317: tp=4
+  fp=1): `#/track-result` `id` (xss-dom) gained, the `/sitemap.xml#/search` duplicate
+  gone; `/rest/user/login` `email` (sqli) found. `/profile` (ssti) is still missed: it
+  answers only with a session, and an anonymous run has none (open; see the report to
+  the owner). The first attempt stopped when the lab crashed under a probe of the
+  crawled reviews template (ERROR_LOG); the repeat completed, and the lab exited again at
+  its end.
 
 ### CC-CRAWL-0043 — The crawler's store import names the crawl's start as the main origin (2026-10-19)
 - Change: `fuzzlab/tools/spider.py` (`--store`: `import_spider(..., base_url=args.start)`).
