@@ -7,8 +7,9 @@
 >   §5.1 and the defect-14 parts of §7–§10 below. Its M6 design differs: there is no
 >   oracle-side executor wrapper.
 > - **Reserved numbers.** BUG-0530, PA-0530, CC-AUD-0056, FR-AUD-31 and SP-57 stay
->   reserved for AU-REQID8. CC-FUZZ-0106, CC-CORE-0068, BUG-0531, PA-0531 and FR-FUZZ-64's
->   defect-14 parts went to AU-REQID14, so AU-REQID8 needs its own FUZZ and CORE numbers.
+>   reserved for AU-REQID8. CC-FUZZ-0106, CC-CORE-0068, BUG-0531, PA-0531 and all of
+>   FR-FUZZ-64 went to AU-REQID14, so AU-REQID8 needs its own FUZZ and CORE numbers and a
+>   new FR ID (coordinator, revision 2 of AU-REQID14).
 > - **Measurement tests.** The defect-8 tests (`tests/test_request_contexts.py`: 9 strict
 >   xfails, 2 controls, 2 upstream crawler measurements) were removed from the AU-REQID14
 >   branch and are parked at commit `9ac56f8`. AU-REQID8 restores them with
