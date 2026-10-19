@@ -72,6 +72,13 @@
       "reference": "access-control"
     },
     {
+      "id": "R-ACCESS-CONTROL-PATH",
+      "category": "access-control",
+      "transaction_type": "Broken Object-Level Authorization",
+      "when": { "method_in": ["GET"], "location_in": ["path"], "name_regex": "^(id|uuid|guid)$|[_-](id|uuid|guid)$|(?-i:[a-z](Id|ID|Uuid|UUID))$" },
+      "reference": "access-control"
+    },
+    {
       "id": "R-INSECURE-DESERIALIZATION",
       "category": "insecure-deserialization",
       "transaction_type": "Insecure Deserialization",

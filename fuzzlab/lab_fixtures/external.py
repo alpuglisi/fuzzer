@@ -145,6 +145,7 @@ SECDEVLABS_APPS = {
     "secdevlabs-mongection": "owasp-top10-2021-apps/a3/mongection",
     "secdevlabs-comment-killer": "owasp-top10-2021-apps/a3/comment-killer",
     "secdevlabs-streaming": "owasp-top10-2021-apps/a3/streaming",
+    "secdevlabs-ecommerce-api": "owasp-top10-2021-apps/a1/ecommerce-api",
 }
 #: lab name -> why its npm lockfiles are not installed: the image serves the bundle the
 #: repository ships, checked against the source it was built from (CC-LAB-0314).
@@ -261,6 +262,12 @@ LAB_META: dict[str, LabMeta] = {
     "secdevlabs-comment-killer": LabMeta("secdevlabs-comment-killer", "app", "SDL_CK_PORT",
                                          3074, 3000, "/", "/", None, "", False,
                                          fixed_ports=((10017, 10017),)),
+    # two accounts: `/ticket/:id` hands any caller the ticket of the account whose
+    # userID is in the path (FR-LAB-309)
+    "secdevlabs-ecommerce-api": LabMeta("secdevlabs-ecommerce-api", "api",
+                                        "SDL_ECOMMERCE_PORT", 3079, 10005, "/",
+                                        "/healthcheck", "sdl-ecommerce-user", "fuzzlab_user",
+                                        True, (("sdl-ecommerce-peer", "fuzzlab_peer"),)),
     # its bundle calls the backend at a hard-coded http://localhost:8080
     "secdevlabs-streaming": LabMeta("secdevlabs-streaming", "frontend", "SDL_STREAMING_PORT",
                                     3078, 80, "/", "/", None, "", False,
@@ -1238,8 +1245,66 @@ def bootstrap_secdevlabs_gossip_world(client: _LabClient, cred: ResolvedCredenti
     return notes
 
 
+def _ecommerce_login(client: _LabClient, username: str, password: str) -> Any:
+    return client.request("POST", "/login", params={"format": "json"},
+                          json={"username": username, "password": password})
+
+
+def bootstrap_secdevlabs_ecommerce_api(client: _LabClient, cred: ResolvedCredential, *,
+                                       deadline: float = 180.0,
+                                       clock: Callable[[], float] = time.monotonic,
+                                       sleep: Callable[[float], None] = time.sleep
+                                       ) -> list[str]:
+    """Log in through the API's JSON ``/login``, registering the account through
+    ``/register`` when the login fails, and verify it by a positive differential: the
+    password logs in with the account's ``user_id``, a wrong one is refused."""
+    meta = LAB_META["secdevlabs-ecommerce-api"]
+    wait_ready(client, meta.ready_path, deadline=deadline, clock=clock, sleep=sleep)
+    notes: list[str] = []
+    if _ecommerce_login(client, cred.username, cred.password).status_code != 200:
+        reg = client.request("POST", "/register",
+                             json={"username": cred.username, "password": cred.password})
+        if reg.status_code != 201:
+            raise ExternalLabError(
+                f"ecommerce-api registration failed: HTTP {reg.status_code} (an account of "
+                f"that name with another password? run `./labctl.sh reset "
+                f"secdevlabs-ecommerce-api --authorized`)")
+        notes.append("account registered")
+    good = _ecommerce_login(client, cred.username, cred.password)
+    bad = _ecommerce_login(client, cred.username, cred.password + "-wrong")
+    if good.status_code != 200 or bad.status_code != 400 or \
+            not _ecommerce_user_id(good):
+        raise ExternalLabError(
+            f"ecommerce-api login: {good.status_code} with the password, {bad.status_code} "
+            f"without (want 200 with a user_id / 400; an account of that name with another "
+            f"password? run `./labctl.sh reset secdevlabs-ecommerce-api --authorized`)")
+    notes.append("login verified")
+    return notes
+
+
+def _ecommerce_user_id(resp: Any) -> str | None:
+    try:
+        value = resp.json().get("user_id")
+    except (ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def ecommerce_account_attributes(client: _LabClient, cred: ResolvedCredential
+                                 ) -> dict[str, str]:
+    """The account's ``user_id``, which its login names (FR-LAB-309)."""
+    user_id = _ecommerce_user_id(_ecommerce_login(client, cred.username, cred.password))
+    if user_id is None:
+        raise ExternalLabError("ecommerce-api login named no user_id")
+    return {"user_id": user_id}
+
+
 _BOOTSTRAPS = {"bwapp": bootstrap_bwapp, "juice-shop": bootstrap_juice_shop,
-               "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world}
+               "secdevlabs-gossip-world": bootstrap_secdevlabs_gossip_world,
+               "secdevlabs-ecommerce-api": bootstrap_secdevlabs_ecommerce_api}
+#: Labs whose accounts have values of their own a ground truth names (`account_value`,
+#: FR-LAB-309): read after the verified login, stored with the credential.
+_ACCOUNT_ATTRIBUTES = {"secdevlabs-ecommerce-api": ecommerce_account_attributes}
 
 
 def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
@@ -1277,6 +1342,10 @@ def bootstrap(name: str, *, environ: Mapping[str, str] | None = None,
         if cred.source != "keyring":
             keyring_store.set(host, account.identity, cred.username, cred.password)
             stored = True
+        if name in _ACCOUNT_ATTRIBUTES:          # after `set`, which drops old ones
+            attrs = _ACCOUNT_ATTRIBUTES[name](client, cred)
+            keyring_store.set_attributes(host, account.identity, attrs)
+            notes.append(f"account values stored: {', '.join(sorted(attrs))}")
         results.append(BootstrapResult(name, account.identity, cred.source, stored, notes))
     first, *peers = results
     first.peers = peers

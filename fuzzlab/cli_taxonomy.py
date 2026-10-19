@@ -187,7 +187,8 @@ FLAG_CLASSES: dict[str, dict[str, str]] = {
     "auto": {
         "base_url": "B", "spider_db": "B", "disco_run": "B", "store": "B",
         "ground_truth": "T", "mode": "T", "points": "T",
-        "categories": "B", "identity": "B", "peer_identity": "B", "browser": "B", "oob": "B",
+        "categories": "B", "identity": "B", "peer_identity": "B", "no_login": "B",
+        "browser": "B", "oob": "B",
         "greybox_coverage_file": "L", "greybox_dbfault_file": "L",
         "bandit": "B", "score": "W*", "rank": "W*",
         "rank_objective": "T", "train_on": "T",

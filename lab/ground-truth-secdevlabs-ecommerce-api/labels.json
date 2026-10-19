@@ -1,0 +1,32 @@
+{
+ "version": 1,
+ "target": "secdevlabs_ecommerce_api_10be4384",
+ "cases": [
+  {
+   "case_id": "SDLEC-0001",
+   "url": "/ticket/{id}",
+   "method": "GET",
+   "param": "id",
+   "location": "path",
+   "vuln_class": "access_control",
+   "sink_context": "none",
+   "expected_vulnerable": true,
+   "rendering": "server-json",
+   "stack": "go_echo_mongo_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a1/ecommerce-api README; upstream mitigation PRs #383/#208] handlers.GetTicket looks the ticket up by the userID in the path and never reads the session: GET /ticket/<A's userID> answers A's username and ticket to another account and to no session at all (checked live 2026-10-19); a userID that is no account's answers 400. Each account learns its own userID from its login (`user_id`), which the bootstrap stores (account_value, FR-LAB-309)."
+  },
+  {
+   "case_id": "SDLEC-0002",
+   "url": "/ticket/{id}",
+   "method": "GET",
+   "param": "format",
+   "location": "query",
+   "vuln_class": "access_control",
+   "sink_context": "none",
+   "expected_vulnerable": false,
+   "rendering": "server-json",
+   "stack": "go_echo_mongo_secdevlabs",
+   "notes": "[reach: gt] [prov: secDevLabs a1/ecommerce-api README] `format` only picks JSON or text for the same ticket (handlers.GetTicket); it names no object."
+  }
+ ]
+}

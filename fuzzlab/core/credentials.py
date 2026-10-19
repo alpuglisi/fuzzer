@@ -38,6 +38,8 @@ except ImportError:  # pragma: no cover - platform dependent
     fcntl = None
 
 SERVICE = "fuzzlab"
+#: An account attribute's name (`CredentialStore.set_attributes`).
+_ATTRIBUTE_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class CredentialError(RuntimeError):
@@ -118,6 +120,33 @@ class CredentialStore:
             return None
         data = json.loads(raw)
         return Credential(username=data["username"], password=data["password"])
+
+    def set_attributes(self, host: str, identity: str,
+                       attributes: Mapping[str, str]) -> None:
+        """Store an account's own values next to its credential (FR-LAB-309): what the
+        lab's bootstrap learned about the account (its ``user_id``), which a ground
+        truth names with ``account_value``. They are identifiers, not secrets, but
+        an object id can be the only thing guarding the object, so they stay in the
+        keyring. Replaces any earlier set; a `set` of the credential drops them."""
+        for name, value in attributes.items():
+            if not _ATTRIBUTE_NAME.match(name) or not isinstance(value, str) or not value:
+                raise CredentialError(f"account attribute {name!r}: a lowercase name and "
+                                      f"a non-empty string value are required")
+        account = self._account(host, identity)
+        raw = self._backend.get_password(SERVICE, account)
+        if not raw:
+            raise CredentialError(f"no credential for {identity!r} on "
+                                  f"{_norm_host(host)!r} to attach attributes to")
+        data = json.loads(raw)
+        data["attributes"] = dict(attributes)
+        self._backend.set_password(SERVICE, account, json.dumps(data))
+
+    def attributes(self, host: str, identity: str) -> dict[str, str]:
+        """The account's stored values (`set_attributes`); empty when there are none."""
+        raw = self._backend.get_password(SERVICE, self._account(host, identity))
+        if not raw:
+            return {}
+        return dict(json.loads(raw).get("attributes") or {})
 
     def require(self, host: str, identity: str) -> Credential:
         cred = self.get(host, identity)

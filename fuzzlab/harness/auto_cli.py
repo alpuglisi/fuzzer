@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "request is replayed as this account and unauthenticated, and "
                         "the run's own account's data reaching either is broken access "
                         "control (FR-FUZZ-55). Both accounts' usernames must be stored.")
+    p.add_argument("--no-login", action="store_true",
+                   help="Log no account in: --identity (and --peer-identity) only name the "
+                        "accounts whose stored usernames and account values the run uses, "
+                        "and every probe goes without a session; the cross-account check "
+                        "makes only its unauthenticated replay (FR-FUZZ-58). For an app "
+                        "whose login fuzzlab cannot perform and whose objects need none.")
     from fuzzlab.session.manager import AUTH_ORIGIN_HELP
     p.add_argument("--auth-origin", action="append", default=[], metavar="ORIGIN",
                    help=AUTH_ORIGIN_HELP)
@@ -283,11 +289,14 @@ def _precheck_peer(p, args) -> None:
     Refused before the store is opened. Sets ``args.peer_names``."""
     args.peer_names = None
     peer = getattr(args, "peer_identity", None)
-    if not peer:
+    no_login = getattr(args, "no_login", False)
+    if no_login and not args.identity:
+        p.error("--no-login needs --identity (the account whose values the run uses)")
+    if not peer and not no_login:
         return
     if not args.identity:
         p.error("--peer-identity needs --identity (the run's own account)")
-    if peer == args.identity:
+    if peer and peer == args.identity:
         p.error("--peer-identity must name another account than --identity")
     from urllib.parse import urlsplit
 
@@ -296,15 +305,27 @@ def _precheck_peer(p, args) -> None:
     host = urlsplit(args.base_url).hostname or ""
     store = CredentialStore.open(load_config())
     names = []
-    for ident in (args.identity, peer):
+    for ident in (args.identity, peer) if peer else (args.identity,):
         cred = store.get(host, ident)
         if cred is None or not cred.username:
             p.error(f"no stored credential for identity {ident!r} on {host} (its username "
                     f"marks whose data a response holds)")
         names.append(cred.username)
-    if names[0] == names[1] or names[0] in names[1] or names[1] in names[0]:
+    if len(names) == 2 and (names[0] == names[1] or names[0] in names[1]
+                            or names[1] in names[0]):
         p.error("the two accounts' usernames must differ and not contain each other")
-    args.peer_names = tuple(names)
+    args.peer_names = (names[0], names[1] if peer else "")
+
+
+def _account_values(args) -> dict[str, str]:
+    """The run's own account's stored values (FR-LAB-309: a lab's bootstrap stores
+    them with the credential), which ground-truth points name with ``account_value``."""
+    from urllib.parse import urlsplit
+
+    from fuzzlab.core.config import load_config
+    from fuzzlab.core.credentials import CredentialStore
+    host = urlsplit(args.base_url).hostname or ""
+    return CredentialStore.open(load_config()).attributes(host, args.identity)
 
 
 def _precheck_environment(p, args) -> None:
@@ -333,13 +354,19 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
     # --auth-origin (FR-SESS-20, R5): passed only when given
     extra = {"auth_origins": args.auth_origin} if getattr(args, "auth_origin", None) \
         else {}
-    sender = make_probe_sender(args.base_url, args.identity, **extra)
+    no_login = getattr(args, "no_login", False)
+    from fuzzlab.tools.probesender import RequestsProbeSender
+    # --no-login (FR-FUZZ-58): the accounts give values and markers, never a session
+    sender = RequestsProbeSender() if no_login else \
+        make_probe_sender(args.base_url, args.identity, **extra)
+    account_values = _account_values(args) if args.identity else None
     peer = None
     if getattr(args, "peer_names", None):
         from fuzzlab.oracle.strategies import PeerAccounts
-        from fuzzlab.tools.probesender import RequestsProbeSender
-        peer = PeerAccounts(sender=make_probe_sender(args.base_url, args.peer_identity,
-                                                     **extra),
+        peer_sender = None
+        if args.peer_identity and not no_login:
+            peer_sender = make_probe_sender(args.base_url, args.peer_identity, **extra)
+        peer = PeerAccounts(sender=peer_sender,
                             owner=args.peer_names[0], peer_name=args.peer_names[1],
                             anonymous=RequestsProbeSender())
     browser = None
@@ -376,7 +403,8 @@ def _run(p, args, store, run_id: int, plugins, selected, ground_truth) -> int:
                           scheduler=scheduler, plugins=plugins,
                           confirm_budget=args.confirm_budget,
                           header_names=args.header_names, peer=peer,
-                          writes=bool(getattr(args, "fuzz_json_writes", False)))
+                          writes=bool(getattr(args, "fuzz_json_writes", False)),
+                          account_values=account_values)
     except RunModeError as exc:
         p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
     finally:

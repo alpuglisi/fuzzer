@@ -110,6 +110,9 @@ class InjectionPoint:
     json_body: dict | None = None
     #: Another origin of the lab this point lives on (FR-LAB-308); None: the lab's base.
     origin: str | None = None
+    #: The point's value is this value of the run's own account (FR-LAB-309): stored by
+    #: the lab's bootstrap with the credential, read by `fuzzlab auto --identity`.
+    account_value: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -155,7 +158,22 @@ def load_labels(ground_truth_dir: str | Path) -> list[Case]:
     ids = [c.case_id for c in cases]
     if len(ids) != len(set(ids)):
         raise ContractError("duplicate case_id in labels.json")
+    for case in cases:
+        _check_path_template(path, case)
     return cases
+
+
+def _check_path_template(path, item) -> None:
+    """A ``path`` point or case names its parameter as one whole segment of its URL
+    (``/ticket/{id}``, FR-FUZZ-57); scoring matches findings by that template path."""
+    if item.location != "path":
+        return
+    from fuzzlab.core.urls import PathPlacementError, place_path_param
+    try:
+        place_path_param(item.url, item.param, "x")
+    except PathPlacementError as exc:
+        raise ContractError(f"{path}: {item.method} {item.url} {item.param!r}: a path "
+                            f"parameter must be one segment of its url: {exc}") from exc
 
 
 def load_injection_points(ground_truth_dir: str | Path) -> list[InjectionPoint]:
@@ -167,11 +185,13 @@ def load_injection_points(ground_truth_dir: str | Path) -> list[InjectionPoint]:
             url=p["url"], method=p["method"], param=p["param"], location=p["location"],
             rendering=p.get("rendering"), client_only=bool(p.get("client_only", False)),
             json_body=p.get("json_body"), origin=p.get("origin"),
+            account_value=p.get("account_value"),
         )
         for p in data["points"]
     ]
     from fuzzlab.core import jsonbody
     for pt in points:
+        _check_path_template(path, pt)
         if pt.json_body is None:
             continue
         leaves = jsonbody.leaves(pt.json_body)

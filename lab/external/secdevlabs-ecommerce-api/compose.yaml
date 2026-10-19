@@ -1,0 +1,60 @@
+# secDevLabs "Vulnerable eCommerce API" (globocom, BSD-3-Clause; external lab fixture,
+# CC-LAB-0315). Lab-only. A Go (echo) API over MongoDB with broken object-level
+# authorization (OWASP 2021 A1): `GET /ticket/:id` answers the ticket of the account
+# whose userID is in the path, to anyone; each account learns its own userID at login.
+#
+# Built by ./Dockerfile from the app at the pinned secDevLabs commit, which
+# `labctl.sh up secdevlabs-ecommerce-api` copies into the gitignored .cache/app with its
+# Go modules verified against go.sum and vendored; the image builds offline. The
+# database user comes from ./mongo-init.js (upstream generates one per install).
+#
+# Safety: the API is published on LOOPBACK ONLY (127.0.0.1); the database is never
+# published and sits on an internal network. Capabilities dropped. The database
+# credentials are this throwaway lab's fixed defaults.
+#
+# Run through lab/labctl.sh:  ./labctl.sh up secdevlabs-ecommerce-api
+name: fuzzlab-secdevlabs-ecommerce-api
+
+x-podman:
+  in_pod: false
+
+services:
+  api:
+    build:
+      context: .
+    networks: [ecommerce-front, ecommerce-db]
+    ports:
+      # Loopback only. Never bind 0.0.0.0.
+      - "127.0.0.1:${SDL_ECOMMERCE_PORT:-3079}:10005"
+    environment:
+      API_PORT: "10005"
+      MONGO_HOST: mongodb
+      MONGO_PORT: "27017"
+      MONGO_DATABASE_NAME: DB
+      MONGO_DATABASE_USERNAME: ecommerce
+      MONGO_DATABASE_PASSWORD: ecommerce
+      MONGO_TIMEOUT: "60"
+    depends_on: [mongodb]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 128
+    mem_limit: 256m
+
+  mongodb:
+    image: mirror.gcr.io/library/mongo:4.4@sha256:4be76f674fc4b27859816811b8baa3c51830eb1dbf4ca81a51e26b79edd662ef
+    networks: [ecommerce-db]
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    tmpfs: [/data/db, /data/configdb]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+
+networks:
+  ecommerce-front: {}
+  ecommerce-db:
+    internal: true

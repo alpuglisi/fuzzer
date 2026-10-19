@@ -24,7 +24,7 @@ from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 
 
 def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False,
-                             writes: bool = False):
+                             writes: bool = False, account_values=None):
     """Injection points from the enumerated ground-truth contract (detection benchmark).
 
     Returns ``(points, skipped)``. Server-rendered **GET query**, **POST body**,
@@ -44,6 +44,11 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     each probe updates what the request targets); without it, it is skipped. A DOM
     point is a GET page; a DOM point with another method is skipped, never rewritten
     into a GET (BUG-0115). DELETE is not in the contract.
+
+    A **path** point (``/ticket/{id}``, FR-FUZZ-57) keeps its template as its URL; the
+    senders place each value in that segment. A point naming an ``account_value``
+    (FR-LAB-309) carries that value of the run's own account (``account_values``, from
+    the credential store) as its own; without it the point is skipped.
     """
     from fuzzlab.tools.store_adapter import WRITE_METHODS   # the one opt-in set
     base = base_url.rstrip("/")
@@ -98,8 +103,16 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             skipped.append((path, gp.method, gp.param,
                             f"{method} probed only with --fuzz-json-writes"))
             continue
+        own = None
+        if gp.account_value is not None:
+            own = (account_values or {}).get(gp.account_value)
+            if not own:
+                skipped.append((path, gp.method, gp.param,
+                                f"needs the run's own account's {gp.account_value!r} "
+                                "(--identity; stored by the lab's bootstrap)"))
+                continue
         if not is_dom and method in ("GET", "POST", *WRITE_METHODS) \
-                and gp.location in ("query", "body", "header"):
+                and gp.location in ("query", "body", "header", "path"):
             # A whole-body point (`param="body"`) whose ground truth marks it
             # `rendering="server-json"` declares its real content type, so the
             # sender can send the raw body correctly instead of assuming JSON
@@ -120,9 +133,12 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             if gp.json_body is not None and gp.location == "body":
                 from fuzzlab.core import jsonbody
                 location = jsonbody.LOCATION
-                entries = tuple((p, _send_value(v))
+                entries = tuple((p, own if own and jsonbody.display_name(p) == gp.param
+                                 else _send_value(v))
                                 for p, v in jsonbody.leaves(gp.json_body) or ())
                 body_content_type = None
+            elif own:                          # the account's own value (FR-LAB-309)
+                entries = ((gp.param, own),)
             for sink_context in sorted(sink_contexts, key=lambda s: s or ""):
                 points.append(InjectionPoint(url=(gp.origin or base) + path,
                                              param=gp.param,
@@ -595,7 +611,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
              coverage=None, dbfault=None,
              scheduler=None, plugins=None, confirm_budget: int | None = None,
              prioritizer=None, header_names=None, peer=None,
-             writes: bool = False) -> PipelineResult:
+             writes: bool = False, account_values=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``plugins`` (a `PluginManager`) is recorded on the run, may contribute the budget
@@ -612,7 +628,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     of blind command injection. ``coverage``/``dbfault`` (a `CoverageSource`/
     `DbFaultSource`) enable M10 grey-box confirmation of sql-injection/xss; both
     default to ``None`` (no-op) same as ``browser``/``oob``. ``writes``
-    (``--fuzz-json-writes``) admits the ground truth's PUT/PATCH points (FR-FUZZ-56).
+    (``--fuzz-json-writes``) admits the ground truth's PUT/PATCH points (FR-FUZZ-56);
+    ``account_values`` are the run's own account's stored values (FR-LAB-309).
     """
     source, plan = plan_run(mode=mode, ground_truth=ground_truth,
                             selected_categories=selected_categories,
@@ -623,7 +640,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     isolated: set[str] = set()
     if source == "ground-truth":
         points, skipped = points_from_ground_truth(
-            ground_truth, base_url, browser_available=browser is not None, writes=writes)
+            ground_truth, base_url, browser_available=browser is not None, writes=writes,
+            account_values=account_values)
         # The operator enumerated these: they may be probed even if they look
         # destructive (NFR-FUZZ-safe's send-time gate, BUG-0112).
         if hasattr(sender, "allow_explicit"):

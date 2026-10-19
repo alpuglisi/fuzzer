@@ -14,12 +14,17 @@ from fuzzlab.core.http import check_send_header
 from fuzzlab.core.jsonbody import ENCTYPE as JSON_ENCTYPE
 from fuzzlab.core.jsonbody import LOCATION as JSON_LOCATION
 from fuzzlab.core.jsonbody import JsonPlacementError, body_for
-from fuzzlab.core.urls import (DestructiveUrlRefused, canonical_origin, check_send_url,
-                               to_path, transaction_reason, url_key)
+from fuzzlab.core.urls import (DestructiveUrlRefused, PathPlacementError, canonical_origin,
+                               check_send_url, place_path_param, to_path,
+                               transaction_reason, url_key)
 from fuzzlab.oracle.probe import (PRG_ANY_METHOD, PRG_GET_ONLY, PRG_OBSERVED,
                                   PRG_UNOBSERVED, REDIRECT_STATUSES, HeaderPointsStopped,
                                   Probe, ProbeUnobserved, UnplaceableLocation)
 from fuzzlab.tools.authhttp import with_query, with_query_param
+
+#: A path-segment point's location (FR-FUZZ-57): ``param`` names the URL template's
+#: ``{param}`` segment.
+PATH_LOCATION = "path"
 
 
 def _json_body(param: str, value: str, entries, content_type=None) -> bytes:
@@ -33,6 +38,15 @@ def _json_body(param: str, value: str, entries, content_type=None) -> bytes:
         return body_for(param, value, entries)
     except JsonPlacementError as exc:
         raise UnplaceableLocation(f"cannot place JSON leaf {param!r}: {exc}") from exc
+
+
+def _path_url(url: str, param: str, value: str) -> str:
+    """A ``path`` send's URL (`core.urls.place_path_param`), or `UnplaceableLocation`
+    when its template does not hold the parameter as one segment (PA-0115)."""
+    try:
+        return place_path_param(url, param, value)
+    except PathPlacementError as exc:
+        raise UnplaceableLocation(f"cannot place path parameter {param!r}: {exc}") from exc
 
 
 def _skipped(reason: str) -> str:
@@ -576,8 +590,11 @@ class SeamProbeSender(_ExplicitAllowance):
         # an isolated copy login (reviewers A/B, forms phase 2 merge)
         if location == "header" and self.header_stop_reason is not None:
             raise HeaderPointsStopped(self.header_stop_reason)
-        # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
+        # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47). A path
+        # point is judged on its template, never on the payload in its segment
         check_send_url(url, self._explicit, method=method)
+        if location == PATH_LOCATION:                    # placed here, or refused
+            url = _path_url(url, param, value)
         if location == JSON_LOCATION:                    # placeable, or refused here
             _json_body(param, value, entries, content_type)
         if location == "header":
@@ -711,6 +728,9 @@ class SeamProbeSender(_ExplicitAllowance):
         elif location == "header":
             req = Request(method.upper(), url, headers={param: value},
                           identity=identity, timing=timing, component="oracle")
+        elif location == PATH_LOCATION:                  # already placed by `send`
+            req = Request(method.upper(), url, identity=identity, timing=timing,
+                          component="oracle")
         elif location == "body" and content_type:
             # A whole-body point (`param="body"`, no single named field): send
             # `value` as the raw body at the ground truth's own declared
@@ -824,6 +844,8 @@ class RequestsProbeSender(_ExplicitAllowance):
         # the two `Sender` implementations, not a deliberate difference.
         # NFR-FUZZ-safe (BUG-0112); a crawl-sourced DELETE too (FR-FUZZ-47)
         check_send_url(url, self._explicit, method=method)
+        if location == PATH_LOCATION:                    # FR-FUZZ-57: placed, or refused
+            url = _path_url(url, param, value)
         body = (_json_body(param, value, entries, content_type)
                 if location == JSON_LOCATION else None)
         if url_key(url) in self._isolated_keys:
@@ -844,6 +866,8 @@ class RequestsProbeSender(_ExplicitAllowance):
         elif location == "header":
             check_send_header(param, url, self._explicit)   # FR-FUZZ-43 (PA-0083(1))
             kwargs["headers"] = {param: value}
+        elif location == PATH_LOCATION:
+            pass                                     # the value is in the URL already
         elif location == "body" and content_type:
             # Whole-body point at its own declared content type -- never
             # assume JSON for every body point (CC-FUZZ-0032/FR-FUZZ-19). A

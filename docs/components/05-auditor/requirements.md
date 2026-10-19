@@ -305,6 +305,10 @@ budget where a vulnerability is plausible.
     user field (`username`, `login`) of a JSON login is pinned, so it is not fuzzed;
     an identifier-like value blanked by the crawler before import reads as an empty
     example; other query parameters of an SPA route are not sent with a fragment probe.
+- **FR-AUD-25** *(an id-shaped path segment; `CC-AUD-0046`, 2026-10-19, FR-FUZZ-57).*
+  `R-ACCESS-CONTROL-PATH` fires on a GET `path` point whose name is `id`, `uuid` or
+  `guid`, ends in `_id`/`-id` (or `_uuid`/`-guid`…), or is camelCase `…Id`/`…Uuid`
+  (matched case-sensitively, so `paid` and `userid` do not).
 - **FR-AUD-24** *(the store request on a stored-XSS candidate; `CC-AUD-0045`,
   2026-10-19, FR-FUZZ-56).* An `InjectionPoint` with a `store_url` also carries
   `store_method` (default `POST`), `store_location` (`body`, `query` or `json`) and,

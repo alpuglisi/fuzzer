@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from urllib.parse import unquote_plus, urlparse, urlsplit
+from urllib.parse import unquote_plus, urlparse, urlsplit, urlunsplit
 
 
 def to_path(url: str) -> str:
@@ -236,6 +236,32 @@ def in_origin_scope(url: str, origins: frozenset[str]) -> bool:
         return False                                  # no network origin at all
     origin = canonical_origin(text)
     return origin is not None and origin in origins
+
+
+class PathPlacementError(ValueError):
+    """A ``path`` point's value cannot be placed in its URL."""
+
+
+def path_placeholder(param: str) -> str:
+    """How a URL template names a path segment parameter: ``/ticket/{id}``."""
+    return "{" + param + "}"
+
+
+def place_path_param(url: str, param: str, value: str) -> str:
+    """A ``path`` point's URL with its one placeholder segment (``{param}``, a whole
+    segment of the path) replaced by ``value``, percent-encoded as one segment (a ``/``
+    in the value stays inside it). The one placement every sender uses (FR-FUZZ-57).
+    Raises `PathPlacementError` when the path does not hold the placeholder exactly
+    once as a whole segment: refused, never sent elsewhere (PA-0115)."""
+    from urllib.parse import quote
+    parts = urlsplit(url or "")
+    segments = parts.path.split("/")
+    hits = [i for i, seg in enumerate(segments) if seg == path_placeholder(param)]
+    if len(hits) != 1:
+        raise PathPlacementError(f"{path_placeholder(param)!r} is not exactly one segment "
+                                 f"of {parts.path!r}")
+    segments[hits[0]] = quote(str(value), safe="")
+    return urlunsplit(parts._replace(path="/".join(segments)))
 
 
 def url_key(url: str) -> str:

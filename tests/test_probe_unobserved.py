@@ -363,6 +363,8 @@ def _candidates(strategy) -> list[Candidate]:
     base = "http://127.0.0.1:9/p"
     return [Candidate(base, "q", vuln_class=vc, category=cat),
             Candidate(base, "q", vuln_class=vc, category=cat, base_entries=(("q", "7"),)),
+            Candidate(base + "/{q}", "q", location="path", vuln_class=vc, category=cat,
+                      base_entries=(("q", "7"),)),
             Candidate(base, "q", method="POST", location="body", vuln_class=vc, category=cat),
             Candidate(base, "body", method="POST", location="body", vuln_class=vc,
                       category=cat, content_type="application/xml"),

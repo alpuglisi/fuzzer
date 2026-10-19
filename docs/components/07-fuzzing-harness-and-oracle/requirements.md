@@ -1563,6 +1563,25 @@ rewards) derives from it.
     method outside POST/PUT/PATCH, a non-GET query store, or a JSON leaf the body lacks.
     Checked on a real browser: a chat that accepts only a JSON PUT is confirmed, and the
     old form POST to it gives no verdict.
+- **FR-FUZZ-57 (path-segment parameters, `CC-FUZZ-0096`, 2026-10-19)** A ground-truth
+  point or case at `location: "path"` names its parameter as one whole segment of its
+  URL template (`/ticket/{id}`; refused at load otherwise). `auto` keeps the template as
+  the point's URL, so findings and scoring use the template path; every probe sender
+  places the value with `core.urls.place_path_param` (the segment replaced,
+  percent-encoded as one segment; the send-time safety check judges the template, never
+  the payload) or refuses (`UnplaceableLocation`), never relocating it to the query
+  (BUG-0115); greybox and the M6 executor refuse a path point. `R-ACCESS-CONTROL-PATH`
+  draws the access-control strategies onto a GET path segment with an id-shaped name
+  (`id`, `uuid`, `guid`, `*_id`, `*Id`); `CrossAccountReplayStrategy` takes path
+  points as query points.
+- **FR-FUZZ-58 (runs that log no account in, `CC-FUZZ-0096`, 2026-10-19)** `fuzzlab auto
+  --no-login` (needs `--identity`): `--identity` and `--peer-identity` only name the
+  accounts whose stored usernames (the cross-account markers) and account values
+  (FR-LAB-309) the run uses; every probe is sent without a session, and
+  `CrossAccountReplayStrategy` makes only its unauthenticated replay (its evidence says
+  `anonymous`). For an app whose login fuzzlab cannot perform and whose objects need
+  none (secDevLabs ecommerce-api: a JavaScript login to a hard-coded origin). Without
+  it, a login that fails stops the run.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

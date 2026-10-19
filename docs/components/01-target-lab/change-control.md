@@ -3,6 +3,34 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0315 — secDevLabs ecommerce-api: per-account values and a path-segment IDOR (FR-LAB-309) (2026-10-19)
+- Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_APPS` and `LAB_META` entry
+  with a peer account; `bootstrap_secdevlabs_ecommerce_api`,
+  `ecommerce_account_attributes`, `_ACCOUNT_ATTRIBUTES`; `bootstrap` stores each
+  account's values after its credential); `lab/external/secdevlabs-ecommerce-api/`
+  (`Dockerfile`, `compose.yaml`, `mongo-init.js`); `lab/
+  ground-truth-secdevlabs-ecommerce-api/`; `.gitignore` (its CSV tracked); the static
+  tests (GT dir registered).
+- Reason: the owner asked for path-segment parameters and per-account values for this
+  app (2026-10-19).
+- Measurements (live, 2026-10-19): with two accounts registered, an anonymous `GET
+  /ticket/<A's userID>?format=json` answered A's username and ticket; an unknown
+  userID 400; a JSON operator in the segment 400; a form-encoded `POST /login` also
+  logs in (echo binds by field name), but the page's form has no action and its script
+  posts to `//localhost:10005`; fuzzlab's session manager posted to `/` and got 405.
+- Effectiveness: `fuzzlab auto --points ground-truth --identity sdl-ecommerce-user
+  --peer-identity sdl-ecommerce-peer --no-login --score`: tp=1 fp=0 fn=0 tn=1 (the
+  finding at `/ticket/{id}`, evidence `who: anonymous`, no userID in it). Without
+  `--no-login` the run stops at the failed login (a traceback; unchanged behaviour).
+- Upstream's fix PRs (24 labelled "mitigation solution 🔒", all closed): #383 reads the
+  userID from the session's JWT and drops `/:id` from the route; #208 "ensure a user
+  can only get their own tickets"; the rest validate the JWT likewise. Every one fixes
+  `GetTicket`'s path-taken userID: the positive.
+- Risk: low; loopback only, database unpublished.
+- Deliverables:
+  - [x] fixture, lab, bootstrap, ground truth, static tests; lab measured — done
+  - [x] FR-LAB-309, CHANGELOG, ERROR_LOG (dockerd) — done
+
 ### CC-LAB-0314 — secDevLabs Streaming: a PUT-planted stored XSS on two origins (2026-10-19)
 - Change: `fuzzlab/lab_fixtures/external.py` (`SECDEVLABS_APPS` streaming;
   `SECDEVLABS_PREBUILT`: no npm for a lab serving its shipped bundle; `maven_offline`,

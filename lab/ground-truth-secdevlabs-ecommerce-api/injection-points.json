@@ -1,0 +1,21 @@
+{
+ "version": 1,
+ "target": "secdevlabs_ecommerce_api_10be4384",
+ "points": [
+  {
+   "url": "/ticket/{id}",
+   "method": "GET",
+   "param": "id",
+   "location": "path",
+   "rendering": "server-json",
+   "account_value": "user_id"
+  },
+  {
+   "url": "/ticket/{id}",
+   "method": "GET",
+   "param": "format",
+   "location": "query",
+   "rendering": "server-json"
+  }
+ ]
+}

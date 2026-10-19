@@ -3,6 +3,18 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0046 — `R-ACCESS-CONTROL-PATH`: an id-shaped path segment (FR-AUD-25) (2026-10-19)
+- Change: `fuzzlab/audit/rules_data/default_rules.json` gains `R-ACCESS-CONTROL-PATH`
+  (GET, `location_in: ["path"]`, a name `id`/`uuid`/`guid`, `*_id`, `*-id`, or
+  camelCase `*Id`; `paid`, `video`, `userid` do not match).
+- Reason: FR-FUZZ-57 (CC-FUZZ-0096): `/ticket/{id}` must draw the access-control
+  strategies; `R-ACCESS-CONTROL`'s query names (`record_id`, …) do not include `id`.
+- Impact: only path points draw it; none existed before.
+- Risk: low; the strategies need a peer or `--no-login` to confirm cross-account.
+- Deliverables:
+  - [x] rule; `tests/test_path_params.py::test_an_id_shaped_path_segment_draws_the_access_control_rule`;
+    FR-AUD-25 — done
+
 ### CC-AUD-0045 — The store request rides on a stored-XSS candidate (FR-AUD-24) (2026-10-19)
 - Change: `fuzzlab/audit/engine.py`: `InjectionPoint.store_method`, `store_location`,
   `store_entries`; a fired candidate's evidence records them with `store_url`.

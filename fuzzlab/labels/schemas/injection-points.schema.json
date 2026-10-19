@@ -29,6 +29,11 @@
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },
         "rendering": { "enum": ["server", "js", "server-json"] },
+        "account_value": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "description": "the point's value is this value of the run's own account (`fuzzlab auto --identity`): what the lab's bootstrap stored for it (e.g. user_id), which exists only once the account does (FR-LAB-309)."
+        },
         "json_body": {
           "type": "object",
           "description": "a JSON body the app sends to this endpoint; param names one of its leaves (core.jsonbody naming). The point is then fuzzed as a JSON leaf with the other leaves sent too (FR-FUZZ-54)."

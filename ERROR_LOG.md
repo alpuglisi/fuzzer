@@ -18,6 +18,12 @@ Format per entry:
 
 ---
 
+## 2026-10-19 — Docker daemon down a third time (environment; recurrence)
+- **Symptom:** `labctl.sh up secdevlabs-ecommerce-api`: "Cannot connect to the Docker daemon".
+- **Root cause:** the container restarted again; nothing starts `dockerd` (the two entries below).
+- **Remediation:** removed the stale pid file, started `dockerd`. Lasting fix outside the repo: start it from the environment's setup script.
+- **Status:** Environment (recurs on each container restart)
+
 ## 2026-10-19 — Docker daemon down again after a container restart (environment; recurrence)
 - **Symptom:** `docker info`: "Cannot connect to the Docker daemon" while bringing up secdevlabs-streaming; a stale `/var/run/docker.pid` and no `dockerd` process.
 - **Root cause:** the session container restarted and nothing restarts `dockerd` (same as the 2026-10-19 secDevLabs bring-up entry).

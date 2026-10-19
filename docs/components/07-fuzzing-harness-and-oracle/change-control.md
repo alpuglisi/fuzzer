@@ -3,6 +3,43 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0096 — Path-segment parameters, account values in auto, `--no-login` (FR-FUZZ-57, FR-FUZZ-58) (2026-10-19)
+- Change: `fuzzlab/tools/probesender.py` (`PATH_LOCATION`, `_path_url`; both senders
+  place a path value with `core.urls.place_path_param` after the send check on the
+  template); `fuzzlab/labels/schemas/injection-points.schema.json` (`account_value`) and
+  `fuzzlab/labels/contract.py` (`InjectionPoint.account_value`;
+  `_check_path_template` on points and cases); `fuzzlab/harness/auto.py`
+  (`points_from_ground_truth(account_values=)`: path points kept as templates, a point's
+  `account_value` carried as its own entry or JSON leaf, skipped without it;
+  `run_auto(account_values=)`); `fuzzlab/harness/auto_cli.py` (`--no-login`,
+  `_account_values` from the credential store, the peer check with no peer session);
+  `fuzzlab/oracle/strategies.py` (`PeerAccounts.sender` may be None;
+  `CrossAccountReplayStrategy` on path points); `fuzzlab/cli_taxonomy.py`.
+- Reason: the owner asked for path-segment parameters and per-account values for
+  secDevLabs ecommerce-api (2026-10-19). Measured on the lab: `/ticket/:id` answers the
+  account whose userID is in the path to any caller; the userID exists only after
+  registration; fuzzlab's session manager cannot perform the page's JavaScript login
+  (POST `/` answers 405), and a failed login stops a run.
+- Impact: a ground truth without path points or account values, and every run without
+  `--no-login`, behave as before. A path point previously fell to "client-only/DOM"
+  and was skipped; a sender given one would have put it in the query.
+- Risk: medium-low. `--no-login` sends nothing more than an anonymous run; path
+  probes reach a segment where query probes reached a parameter, under the same rules.
+- Deliverables:
+  - [x] code; `tests/test_path_params.py` (placement and its refusals; the contract's
+    template check and `account_value`; auto's template URL and the account's value on
+    a path point and a JSON leaf; the no-login cross-account check confirming an
+    anonymous read and no verdict for an owner check; the path rule's names; account
+    values in the credential store; `--no-login` prechecks; the lab's bootstrap and its
+    stored values); `tests/test_sender_conformance.py` (every sender places a path
+    value in its segment and refuses a template without it; greybox refuses; the check
+    catches a sender that queries it); a path shape in `tests/test_probe_unobserved.py`
+    — done
+  - [x] FR-FUZZ-57/58, SHARED_PRIMITIVES (SP-42, SP-43), CHANGELOG — done
+- Effectiveness: live on secdevlabs-ecommerce-api (CC-LAB-0315): tp=1 fp=0 fn=0 tn=1.
+- Not yet: path parameters from a crawl (a crawler sees concrete URLs, not templates);
+  a JSON-API login in the session manager.
+
 ### CC-FUZZ-0095 — PUT and PATCH in a ground truth; stored XSS through the app's own store request (FR-FUZZ-56) (2026-10-19)
 - Change: `fuzzlab/labels/schemas/{labels,injection-points}.schema.json` (method enum
   adds `PUT`, `PATCH`); `fuzzlab/harness/auto.py` (`points_from_ground_truth(writes=)`:

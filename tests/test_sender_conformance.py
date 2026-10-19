@@ -266,7 +266,7 @@ class _Wire:
         body = dict(data) if isinstance(data, (dict, list)) else {}
         headers = dict(kw.get("headers") or {})
         self.sent.append({"query": query, "body": body, "headers": headers,
-                          "json": self._json(headers, data)})
+                          "json": self._json(headers, data), "path": urlsplit(url).path})
 
         class R:
             status_code, text, headers = 200, "ok", {}
@@ -278,7 +278,8 @@ class _Wire:
         json_body = self._json(headers, body)
         self.sent.append({"query": dict(parse_qsl(urlsplit(url).query)),
                           "body": {} if json_body else dict(parse_qsl((body or b"").decode())),
-                          "headers": dict(headers), "json": json_body})
+                          "headers": dict(headers), "json": json_body,
+                          "path": urlsplit(url).path})
         return 200, {}, b"ok"
 
 
@@ -350,8 +351,9 @@ def test_the_greybox_sender_places_a_probe_where_the_point_says():
         RequestsCorrelatingSender(session=wire, id_factory=lambda: "c").send_correlated(
             "http://h/a.php", "X-Probe", "zqmark", location=location)
     assert placement_problems(send, ("query", "body", "header")) == []
-    # greybox does not rebuild JSON bodies: it refuses (FR-FUZZ-47), never relocates
-    for location in ("fragment", "json"):
+    # greybox does not rebuild JSON bodies nor place path segments: it refuses
+    # (FR-FUZZ-47, FR-FUZZ-57), never relocates
+    for location in ("fragment", "json", "path"):
         wire = _Wire()
         with pytest.raises(UnplaceableLocation):
             send(wire, location)
@@ -377,6 +379,43 @@ def test_the_placement_check_catches_a_relocating_sender():
                 return self._wire.request(method, url, data={param: value})
             return super().send(url, param, value, method=method, location=location)
     assert "json: landed in ['body']" in placement_problems(_via(FormEncodesJson))
+
+
+# --- path (FR-FUZZ-57): the value is the template's one segment, nowhere else ----------
+def path_placement_problems(send) -> list[str]:
+    """``/ticket/{id}`` with a value holding ``/`` and a quote: it arrives as that one
+    segment, percent-encoded, and nowhere else; a template without the placeholder is
+    refused with nothing sent."""
+    out = []
+    wire = _Wire()
+    send(wire, "http://h/ticket/{id}/view")
+    got = wire.sent[-1]
+    if got["path"] != "/ticket/zq%2Fmark%27/view":
+        out.append(f"path {got['path']!r}")
+    if got["query"] or got["body"] or got["json"] or "id" in got["headers"]:
+        out.append("the value also went elsewhere")
+    for bad in ("http://h/ticket/view", "http://h/{id}/{id}", "http://h/t{id}"):
+        wire = _Wire()
+        try:
+            send(wire, bad)
+            out.append(f"{bad}: sent")
+        except UnplaceableLocation:
+            if wire.sent:
+                out.append(f"{bad}: refused after a send")
+    return out
+
+
+@pytest.mark.parametrize("key", sorted(PLACEMENT_FACTORIES))
+def test_every_sender_places_a_path_value_in_its_segment(key):
+    def send(wire, url):
+        PLACEMENT_FACTORIES[key](wire).send(url, "id", "zq/mark'", location="path")
+    assert path_placement_problems(send) == []
+
+
+def test_the_path_check_catches_a_sender_that_queries_it():
+    def send(wire, url):
+        wire.request("GET", url, params={"id": "zq/mark'"})
+    assert path_placement_problems(send)[0] == "path '/ticket/{id}/view'"
 
 
 # --- json (forms phase 3, FR-CORE-36 / FR-FUZZ-47): one leaf of the whole body ----------

@@ -587,6 +587,17 @@ plugin registry. It is the layer that makes the store the integration bus.
   store at the last version that completed (`migrate_with_backup` names it and the
   backup).
 
+- **FR-CORE-501** *(path-segment placement; `CC-CORE-0059`, 2026-10-19).*
+  `core.urls.place_path_param(url, param, value)` replaces the URL path's one segment
+  equal to `{param}` with `value` percent-encoded as one segment (`/` and quotes
+  encoded), keeping the query; a path without that segment exactly once raises
+  `PathPlacementError`. The one placement (SP-42).
+- **FR-CORE-502** *(account values; `CC-CORE-0059`, 2026-10-19).*
+  `CredentialStore.set_attributes(host, identity, {name: value})` stores an account's
+  own values (lowercase names, non-empty strings) in its credential's keyring entry
+  (refused when there is no credential); `attributes(host, identity)` reads them
+  (empty when none). A new `set` of the credential drops them (SP-43).
+
 - **FR-CORE-500** *(one reader for a run's target; one method key; `CC-CORE-0500`,
   2026-10-15).*
   - `fuzzlab/core/runtarget.py` is the one reader of the `target` table (PA-0063(1)): a

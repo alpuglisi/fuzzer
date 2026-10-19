@@ -1644,8 +1644,10 @@ class PeerAccounts:
     """A second account for cross-account access checks (FR-FUZZ-55): its sender
     (``sender``), the run's own account's username (``owner``) and the peer's
     (``peer_name``) -- the markers that tell whose data a response holds -- and an
-    unauthenticated sender (``anonymous``) as the control."""
-    sender: Sender
+    unauthenticated sender (``anonymous``) as the control. ``sender`` is None in a
+    `--no-login` run (FR-FUZZ-58): no account has a session, so only the
+    unauthenticated replay is made."""
+    sender: Sender | None
     owner: str
     peer_name: str
     anonymous: Sender | None = None
@@ -1663,11 +1665,13 @@ class CrossAccountReplayStrategy(ConfirmationStrategy):
     and B -- or the unauthenticated control -- gets A's view twice. Evidence names who
     got it and the statuses, never the data.
 
-    Runs only when a peer account is given (`fuzzlab auto --peer-identity`); without
-    it, no-ops. Known false positive, not swept under the rug: a resource that is meant
-    to be shared and shows its owner's name to others (a public post and its author)
-    looks the same; the finding names the URL for a person to judge. Scoped by
-    `R-ACCESS-CONTROL` to GET query parameters with id-shaped names."""
+    Runs only when a peer account is given (`fuzzlab auto --peer-identity`), or with
+    `--no-login` (only the unauthenticated replay); otherwise no-ops. Known false
+    positive, not swept under the rug: a resource that is meant to be shared and shows
+    its owner's name to others (a public post and its author) looks the same; the
+    finding names the URL for a person to judge. Scoped by `R-ACCESS-CONTROL` (GET
+    query parameters with id-shaped names) and `R-ACCESS-CONTROL-PATH` (an id-shaped
+    path segment, FR-FUZZ-57)."""
     vuln_class = "access_control"
     mechanism = "cross-account-replay"
     category = "access-control"
@@ -1678,7 +1682,7 @@ class CrossAccountReplayStrategy(ConfirmationStrategy):
     def confirm(self, candidate, sender):
         peer = self._peer
         if peer is None or not peer.owner or candidate.method != "GET" \
-                or candidate.location != "query":
+                or candidate.location not in ("query", "path"):
             return None
         value = dict(candidate.base_entries or ()).get(candidate.param)
         if not value:

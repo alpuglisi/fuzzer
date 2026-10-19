@@ -1,0 +1,6 @@
+# fuzzlab expected results (Benchmark-style) for secDevLabs Vulnerable eCommerce API at 10be4384
+# (external lab fixture lab/external/secdevlabs-ecommerce-api), CC-LAB-0315. Derived from
+# labels.json; the loader cross-checks the two. Single-location cases.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+SDLEC-0001,/ticket/{id},GET,id,path,access_control,true,/ticket/{id},sink,,direct
+SDLEC-0002,/ticket/{id},GET,format,query,access_control,false,/ticket/{id},sink,,direct

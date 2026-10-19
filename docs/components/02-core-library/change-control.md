@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0059 — Path-segment placement; account values with a credential (FR-CORE-501, FR-CORE-502) (2026-10-19)
+- Change: `fuzzlab/core/urls.py` (`place_path_param`, `path_placeholder`,
+  `PathPlacementError`); `fuzzlab/core/credentials.py`
+  (`CredentialStore.set_attributes` / `attributes`: per-account values stored in the
+  same keyring entry as the credential; a new `set` drops them).
+- Reason: FR-FUZZ-57 and FR-LAB-309 (CC-FUZZ-0096, CC-LAB-0315).
+- Impact: new functions only; existing credentials read as before.
+- Risk: low. The values are identifiers, kept in the keyring because an object id can
+  be the only thing guarding the object.
+- Deliverables:
+  - [x] code; `tests/test_path_params.py` (placement and refusals; attributes round
+    trip, refusals, dropped on a new credential) — done
+  - [x] FR-CORE-501/502, SP-42/43 — done
+
 ### CC-CORE-0058 — Integration: the project listing reads run targets through `core.runtarget` (2026-10-15)
 - Change: `core/project.py`'s run listing drops its own `SELECT base_url FROM target`
   subquery. It reads `runtarget.run_target_rows()` once per listing, the one reader the
