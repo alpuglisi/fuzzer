@@ -1,5 +1,23 @@
 # DRAFT AU-REQID: request contexts never merge, and every sender places a query value at one exact occurrence
 
+> **PARKED (2026-10-19).** The coordinator accepted the split. This file keeps the
+> defect-8 material for the later item **AU-REQID8**, unchanged below this note.
+> - **Superseded parts.** Defect 14 is now its own item, AU-REQID14
+>   (`DRAFT-AU-REQID14.md`). That file supersedes, for defect 14, §1.2, §1.3, §4,
+>   §5.1 and the defect-14 parts of §7–§10 below. Its M6 design differs: there is no
+>   oracle-side executor wrapper.
+> - **Reserved numbers.** BUG-0530, PA-0530, CC-AUD-0056, FR-AUD-31 and SP-57 stay
+>   reserved for AU-REQID8. CC-FUZZ-0106, CC-CORE-0068, BUG-0531, PA-0531 and FR-FUZZ-64's
+>   defect-14 parts went to AU-REQID14, so AU-REQID8 needs its own FUZZ and CORE numbers.
+> - **Measurement tests.** The defect-8 tests (`tests/test_request_contexts.py`: 9 strict
+>   xfails, 2 controls, 2 upstream crawler measurements) were removed from the AU-REQID14
+>   branch and are parked at commit `9ac56f8`. AU-REQID8 restores them with
+>   `git show 9ac56f8:tests/test_request_contexts.py`. Its pin reasons still name
+>   CC-FUZZ-0106 and need their numbers updated on restore.
+> - **Open measurement.** The typical-crawl count (§1.4) is to be put to the owner when
+>   AU-REQID8 starts.
+> - **Split item.** POST-action query points are a separate later item.
+
 - Item: `AU-REQID` (audit defects 8 and 14, owner-supplied audit at 6552276; F-096)
 - Status: **draft for the pre-change review gate** (`docs/components/README.md`). Nothing
   here is implemented. The two measurement test files are committed with strict xfails.

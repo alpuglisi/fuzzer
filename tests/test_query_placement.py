@@ -1,17 +1,17 @@
-"""AU-REQID measurement, audit defect 14 (BUG-0531): a query payload is placed
+"""AU-REQID14 measurement, audit defect 14 (BUG-0531): a query payload is placed
 differently by each sender.
 
 Every sender sends to a loopback echo server started here (`require_loopback`,
 PA-0130), which records the exact request target it received, byte for byte. The
-contract the draft (docs/components/07-fuzzing-harness-and-oracle/DRAFT-AU-REQID.md)
+contract the draft (docs/components/07-fuzzing-harness-and-oracle/DRAFT-AU-REQID14.md)
 states: the payload replaces the value of exactly the addressed occurrence of the
 parameter, in place; every other pair keeps its position, its ``=`` (or its absence)
 and its bytes, up to the rewriting the HTTP clients themselves apply, measured by
 `test_platform_clients_rewrite_only_escapes_without_query_meaning` (requests decodes
 ``%7E``; Chromium encodes a raw ``'``). `canonical_pairs` is that equivalence.
 
-Tests that fail on 8100959 are pinned with a strict xfail until CC-FUZZ-0106 lands
-(PA-0054(3)); the parameter combinations that already hold are not pinned.
+Tests that fail on 8100959 are pinned with a strict xfail until CC-FUZZ-0106 (AU-REQID14)
+lands (PA-0054(3)); the parameter combinations that already hold are not pinned.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import pytest
 from fuzzlab.core.net import require_loopback
 
 pin14 = pytest.mark.xfail(strict=True, reason="BUG-0531 (audit defect 14), measured on "
-                          "8100959; fixed by CC-FUZZ-0106 (AU-REQID)")
+                          "8100959; fixed by CC-FUZZ-0106 (AU-REQID14)")
 
 MARK = "zqmark"
 
