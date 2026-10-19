@@ -3,7 +3,7 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
-### CC-CRAWL-0047 — The spider records which page queued each page, and when it saw pages and captured requests (FR-CRAWL-29) (2026-10-19)
+### CC-CRAWL-0047 — The spider records which page queued each page, and when it saw pages and captured requests (FR-CRAWL-29); a copied crawl worker no longer keeps the first worker's browser listeners (BUG-0509) (2026-10-19)
 - Change (`fuzzlab/tools/spider.py`):
   - Spider DB: `discovered_pages` gains `found_from TEXT` and `seen_at REAL`,
     `discovered_requests` gains `seen_at REAL`, in `CREATE TABLE` and through the
@@ -30,6 +30,17 @@ Newest first.
     redacts the landing) and the load's `seen_at`.
   - `StorageManager.record_request(..., seen_at=None)` stores when the request was
     captured; `_observe` and `_record_dry` pass `time.time()` at capture.
+  - BUG-0509: `_clone` copies every attribute but Playwright's cached listener
+    wrappers (`_PW_HANDLER_CACHE`, Playwright's `IMPL_ATTR`): a worker copied after the
+    first worker's browser started had registered the first worker's `_on_request`,
+    `_on_request_failed`, `_on_request_finished` and `_dry_request` on its own page.
+  - Deliberate contract change: `discovered_requests` is now `(id, page_url, method,
+    url, content_type, body_json, source, signature, seen_at)`; the two tests pinning
+    the exact columns (`tests/test_spa_capture.py::test_the_discovered_requests_table_is_exactly_the_contract`,
+    `tests/test_json_points.py::test_the_crawlers_table_is_the_contract_the_importer_reads`)
+    name it. The importer reads it in `tools/observe.py` (CC-AUD-0051: the event time);
+    the point import (`store_adapter`, `captured_request`) reads named keys and does
+    not need it.
 - Reason: the diagrams (FR-CORE-505, FR-AUD-28) said "the spider records no
   timestamps, and a page's initiator is not recorded": the spider's events had no
   time and a page no initiator. Both are known at the execution point -- the queue
@@ -41,10 +52,11 @@ Newest first.
   which reads named keys), `tools/observe.py` (`SELECT *`, now reads the new columns:
   CC-AUD-0051), `harness/auto.py` (named columns), `tools/fetcher.py` (named columns),
   `scripts/crawl_maze_score.py` (`url` only), `scripts/measure_diagrams.py` (builds its
-  own old-schema DB). None breaks on an extra column. The contract test
-  `tests/test_spa_capture.py::test_the_discovered_requests_table_is_exactly_the_contract`
-  pins the exact column list and must gain `seen_at` (outside this lane's files: see
-  Deliverables). No traffic change: the same requests in the same order.
+  own old-schema DB). None breaks on an extra column; the two contract tests pinning
+  the exact `discovered_requests` columns now include `seen_at`. No traffic change: the
+  same requests in the same order. BUG-0509: a `--workers N` Playwright crawl now
+  files each worker's fetch/XHR endpoints under that worker's own page (previously lost
+  or filed under the first worker's page).
 - Risk: low. A missed queue insertion would fail on unpacking (four fields) rather than
   silently store a wrong parent; every insertion is covered by the new tests on both
   engines. Thread safety unchanged: `found_from` travels in the entry,
@@ -59,12 +71,17 @@ Newest first.
     window, never before the parent's, non-decreasing with one worker; a captured
     request timed after its page began; an old DB upgraded with its rows NULL. Proven
     to fail with the link parent dropped (5 tests fail) — done
-  - [x] FR-CRAWL-29, §5 contract — done
-  - [ ] `tests/test_spa_capture.py::test_the_discovered_requests_table_is_exactly_the_contract`:
-    add `"seen_at"` to the expected columns — todo (orchestrator; file outside this
-    lane)
-  - [ ] CHANGELOG, ARCHITECTURE, DIAGRAMS.md, `report/diagram.py` spider note — todo
-    (orchestrator; files outside this lane)
+  - [x] BUG-0509: `_clone` fix;
+    `tests/test_spider_trace.py::test_a_cloned_worker_never_inherits_playwrights_cached_listeners`,
+    `::test_each_workers_page_events_reach_that_worker` (two real browsers, judged by
+    what each worker recorded, PA-0511); both fail with the old copy; the BUG-0509
+    report — done
+  - [x] FR-CRAWL-29, §5 contract; the two contract tests name `seen_at` — done
+  - [ ] ERROR_LOG, PA-0509, CHANGELOG, ARCHITECTURE, DIAGRAMS.md, `report/diagram.py`
+    spider note, the agent failure record — todo (orchestrator; files outside this lane)
+  - [ ] The separate defect BUG-0509 records (the failed-load teardown to `about:blank`
+    interrupting the next load, `tools/spider.py` and `tools/fetcher.py`) — todo (needs
+    its own number and lane)
 - Effectiveness (pending): to be assessed on a real crawl's diagram (initiators and
   first/last seen present on spider flows).
 

@@ -220,8 +220,9 @@ def test_the_discovered_requests_table_is_exactly_the_contract(tmp_path):
     sm.close()
     cols = [r[1] for r in db_rows(str(tmp_path / "s.db"),
                                   "PRAGMA table_info(discovered_requests)")]
+    # FR-CRAWL-29 (CC-CRAWL-0047): `seen_at`, when the request was captured
     assert cols == ["id", "page_url", "method", "url", "content_type", "body_json",
-                    "source", "signature"]
+                    "source", "signature", "seen_at"]
     (sql,) = db_rows(str(tmp_path / "s.db"), "SELECT sql FROM sqlite_master WHERE "
                      "name='discovered_requests'")[0]
     assert "signature TEXT UNIQUE" in sql

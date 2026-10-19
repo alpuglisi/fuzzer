@@ -52,6 +52,13 @@ except ImportError:
     class PlaywrightError(Exception):
         """Stand-in so ``except PlaywrightError`` is valid without Playwright."""
 
+try:
+    # where Playwright caches a bound-method listener's wrapper on the method's object
+    # (`ImplToApiMapping.wrap_handler`); `LocalSpider._clone` never copies one (BUG-0509)
+    from playwright._impl._impl_to_api_mapping import IMPL_ATTR as _PW_HANDLER_CACHE
+except ImportError:
+    _PW_HANDLER_CACHE = "_pw_impl_instance_"
+
 
 def _locked(method):
     """`StorageManager` methods hold its lock: one connection, several crawl workers."""
@@ -2970,9 +2977,17 @@ class LocalSpider:
 
     def _clone(self):
         """Another crawl worker: the crawl's containers, counts, flags, store and locks
-        shared (a shallow copy), its own browser, HTTP session and per-page state."""
+        shared (a shallow copy), its own browser, HTTP session and per-page state.
+
+        BUG-0509: Playwright caches the wrapper of a bound-method listener on the
+        method's own object (`_PW_HANDLER_CACHE` + the method's name). Copied, the
+        first worker's cached wrappers made every other worker's ``page.on(...,
+        self._on_request)`` register the **first** worker's handler: another worker's
+        page events (its fetch/XHR URLs, failures, finishes) reached the first
+        worker's per-page state. They are never copied."""
         other = object.__new__(type(self))
-        other.__dict__.update(self.__dict__)
+        other.__dict__.update({k: v for k, v in self.__dict__.items()
+                               if not k.startswith(_PW_HANDLER_CACHE)})
         other._pw = other._browser = other._context = other._page = None
         other._isolated_requests = []
         other._browser_session = None

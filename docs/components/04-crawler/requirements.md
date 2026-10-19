@@ -870,7 +870,9 @@ fuzzer.
   - **`discovered_requests.seen_at`**: when the request was captured.
 
   An older spider DB is upgraded in place; its rows keep NULL (unknown). Crawl order
-  and the requests sent are unchanged.
+  and the requests sent are unchanged. With `--workers N` each worker's page events
+  reach that worker only (BUG-0509): a fetch is filed under the page that made it,
+  whichever worker loaded it.
 
 ## 4. Non-functional requirements
 - **NFR-CRAWL-safe** Deny-list destructive actions (delete/logout/reset); default

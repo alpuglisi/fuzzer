@@ -73,7 +73,13 @@ class _Site:
                 if path in _PAGES:
                     return self._send(200, f"<!doctype html><html><body>{_PAGES[path]}"
                                            f"</body></html>".encode())
-                return self._send(404)                    # robots.txt, sitemap.xml
+                # robots.txt, sitemap.xml, GET /api/save. A body, so Chromium shows it:
+                # an empty error answer makes the browser commit its own error page,
+                # and the spider's teardown of a failed load (``about:blank``, BUG-0136
+                # X1) then interrupts the next load (measured 29 of 40; reported with
+                # BUG-0509 as a separate open defect) -- a page rendered or not by
+                # chance would make this module's exact expectations depend on it
+                return self._send(404, b"<!doctype html><html><body>none</body></html>")
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
@@ -312,3 +318,61 @@ def test_the_spider_upgrades_an_old_db_and_its_old_rows_stay_unknown(tmp_path):
                            ).fetchall() == [(None,), (13.0,)]
     finally:
         con.close()
+
+
+# --- BUG-0509: a crawl worker copied from another kept its Playwright listeners --------
+def test_a_cloned_worker_never_inherits_playwrights_cached_listeners(tmp_path):
+    """Playwright caches a bound-method listener's wrapper on the method's object; a
+    worker copied after the first worker's browser started must not carry those."""
+    pytest.importorskip("playwright")
+    from playwright._impl._impl_to_api_mapping import ImplToApiMapping
+    s = sp.LocalSpider("http://127.0.0.1:9/", db_name=str(tmp_path / "c.db"),
+                       engine="requests", workers=2)
+    try:
+        wrapper = ImplToApiMapping().wrap_handler(s._on_request)   # what `page.on` does
+        cached = [k for k in vars(s) if k.startswith(sp._PW_HANDLER_CACHE)]
+        assert cached and vars(s)[cached[0]] is wrapper           # the mechanism holds
+        other = s._clone()
+        assert not [k for k in vars(other) if k.startswith(sp._PW_HANDLER_CACHE)]
+        assert ImplToApiMapping().wrap_handler(other._on_request) is not wrapper
+    finally:
+        s.storage.close()
+
+
+def test_each_workers_page_events_reach_that_worker(site, tmp_path, monkeypatch):
+    """Real browsers, judged by what each worker recorded itself (PA-0511): the second
+    worker loads the page whose script fetches, the first worker loads a page that
+    fetches nothing. Before BUG-0509's fix the second worker's page events reached the
+    first worker's handler: its fetches were filed under the first worker's page."""
+    from tests._browser import skip_or_fail
+    from tests._spa_fixture import chromium_or_skip
+    chromium_or_skip(monkeypatch)
+    first = sp.LocalSpider(site.url, db_name=str(tmp_path / "w.db"), engine="playwright",
+                           workers=2, reveal=False, timeout_ms=10000)
+    try:
+        first._start_browser()
+    except Exception as exc:  # noqa: BLE001 - a launch failure is no verdict
+        first.storage.close()
+        skip_or_fail(f"chromium could not launch: {exc}")
+    got: dict = {}
+    try:
+        second = first._clone()                 # as `_crawl_parallel` does: after start
+
+        def run():
+            second._start_browser()
+            try:
+                got["second"] = second._fetch_rendered(site.url + "b")[5]
+            finally:
+                second._stop_browser()
+
+        t = threading.Thread(target=run, name="second-worker")
+        t.start()
+        t.join(60)
+        assert not t.is_alive()
+        got["first_before"] = list(first._xhr_urls)    # nothing of the second's page
+        got["first"] = first._fetch_rendered(site.url + "c")[5]
+    finally:
+        first._stop_browser()
+        first.storage.close()
+    assert sorted(_rel(u) for u in got["second"]) == ["/api/items", "/api/save"]
+    assert got["first_before"] == [] and got["first"] == []
